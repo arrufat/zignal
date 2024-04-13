@@ -1,0 +1,57 @@
+name: CI - Zignal
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "**.zig"
+      - "**.zon"
+  pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "**.zig"
+      - "**.zon"
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - zig-version: master
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Grab Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ matrix.zig-version }}
+
+      - name: Native modules
+        run: |
+          make native
+
+      - name: Linux modules
+        run: |
+          make linux
+
+      - name: macOS modules
+        run: |
+          make macos
+
+      - name: Windows modules
+        run: |
+          make windows
+
+      - name: WebAssembly modules
+        run: |
+          make wasm
+
+      - name: Tests master
+        run: |
+          make test

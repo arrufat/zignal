@@ -64,7 +64,7 @@ fn buildModule(
             ).step,
         );
         b.installDirectory(.{
-            .source_dir = .{ .path = "lib" },
+            .source_dir = .{ .path = "examples" },
             .install_dir = .prefix,
             .install_subdir = "",
         });
