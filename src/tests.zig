@@ -5,3 +5,7 @@ test "color unit tests" {
 test "matrix unit tests" {
     _ = @import("matrix.zig");
 }
+
+test "svd unit tests" {
+    _ = @import("svd.zig");
+}
