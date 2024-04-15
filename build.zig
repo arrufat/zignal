@@ -12,14 +12,29 @@ pub fn build(b: *std.Build) void {
 
     _ = buildModule(b, "zignal", target, optimize);
 
-    const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/tests.zig" },
-        .target = target,
-        .optimize = optimize,
+    const test_step = b.step("test", "Run library tests");
+    for ([_][]const u8{
+        "color",
+        "matrix",
+        "svd",
+    }) |module| {
+        const module_test = b.addTest(.{
+            .name = module,
+            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{module}) },
+            .target = target,
+            .optimize = optimize,
+        });
+        const module_test_run = b.addRunArtifact(module_test);
+        test_step.dependOn(&module_test_run.step);
+    }
+
+    const fmt_step = b.step("fmt", "Run zig fmt");
+    const fmt = b.addFmt(.{
+        .paths = &.{ "src", "build.zig" },
+        .check = true,
     });
-    const run_unit_tests = b.addRunArtifact(unit_tests);
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step);
+    fmt_step.dependOn(&fmt.step);
+    b.default_step.dependOn(fmt_step);
 }
 
 fn buildModule(
