@@ -14,7 +14,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         items: [rows][cols]T = undefined,
 
         /// Sets all elements to value.
-        pub fn setAll(value: T) Self {
+        pub fn initAll(value: T) Self {
             var self = Self{};
             for (&self.items) |*row| {
                 for (row) |*col| {
@@ -236,7 +236,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         /// Performs the dot (or internal product) of two matrices.
         pub fn dot(self: Self, other: anytype) Matrix(T, self.rows, other.cols) {
             comptime assert(self.cols == other.rows);
-            var result = Matrix(T, self.rows, other.cols).setAll(0);
+            var result = Matrix(T, self.rows, other.cols).initAll(0);
             for (0..self.rows) |r| {
                 for (0..other.cols) |c| {
                     for (0..self.cols) |k| {
@@ -291,10 +291,10 @@ test "identity" {
     }
 }
 
-test "setAll" {
-    const zeros = Matrix(f32, 3, 3).setAll(0);
+test "initAll" {
+    const zeros = Matrix(f32, 3, 3).initAll(0);
     try expectEqual(zeros.sum(), 0);
-    const ones = Matrix(f32, 3, 3).setAll(1);
+    const ones = Matrix(f32, 3, 3).initAll(1);
     const shape = ones.shape();
     try expectEqual(ones.sum(), @as(f32, @floatFromInt(shape[0] * shape[1])));
 }

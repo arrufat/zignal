@@ -372,7 +372,7 @@ test "svd" {
     const u: *const Matrix(f64, m, m) = &res[0];
     const q: *const Matrix(f64, n, 1) = &res[1];
     const v: *const Matrix(f64, n, n) = &res[2];
-    var w = Matrix(f64, m, n).setAll(0);
+    var w = Matrix(f64, m, n).initAll(0);
     // build the diagonal matrix from q.
     for (0..q.rows) |i| {
         w.items[i][i] = q.at(i, 0);
