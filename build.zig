@@ -30,7 +30,7 @@ pub fn build(b: *std.Build) void {
 
     const fmt_step = b.step("fmt", "Run zig fmt");
     const fmt = b.addFmt(.{
-        .paths = &.{ "src", "build.zig" },
+        .paths = &.{ "src", "build.zig", "build.zig.zon" },
         .check = true,
     });
     fmt_step.dependOn(&fmt.step);
