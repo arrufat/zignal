@@ -199,7 +199,7 @@ pub fn SimilarityTransform(comptime T: type) type {
     return struct {
         const Self = @This();
         matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
-        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).setAll(0),
+        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
 
         /// Finds the best similarity transforms that maps between the two given sets of points.
         pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
@@ -224,7 +224,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
             var sigma_from: T = 0;
             var sigma_to: T = 0;
-            var cov = Matrix(T, 2, 2).setAll(0);
+            var cov = Matrix(T, 2, 2).initAll(0);
             self.matrix = cov;
             for (0..from_points.len) |i| {
                 mean_from.x += from_points[i].x;
