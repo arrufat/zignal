@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
-const as = @import("utils.zig").as;
+const as = @import("meta.zig").as;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
