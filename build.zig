@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run library tests");
     for ([_][]const u8{
         "color",
+        "geometry",
         "matrix",
         "svd",
     }) |module| {

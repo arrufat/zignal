@@ -12,4 +12,12 @@ pub const Point3d = @import("point.zig").Point3d;
 
 pub const Matrix = @import("matrix.zig").Matrix;
 
+pub const Image = @import("image.zig").Image;
+
 pub const svd = @import("svd.zig").svd;
+
+const geometry = @import("geometry.zig");
+pub const Rectangle = geometry.Rectangle;
+pub const ProjectiveTransform = geometry.ProjectiveTransform;
+pub const SimilarityTransform = geometry.SimilarityTransform;
+pub const ConvexHull = geometry.ConvexHull;
