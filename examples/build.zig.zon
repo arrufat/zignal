@@ -1,0 +1,18 @@
+.{
+    .name = "zignal-examples",
+    .version = "0.0.0",
+
+    .dependencies = .{
+        .zignal = .{
+            .url = "https://github.com/bfactory-ai/zignal/archive/7cd7e70415dec093eb1b096218d2286d9f829360.tar.gz",
+            .hash = "1220140e8744befa3cfe2c844d73e62376425eb6dd54140787218b4a480001219433",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "lib",
+    },
+}

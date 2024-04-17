@@ -1,0 +1,39 @@
+#image-container {
+  display: flex;
+  margin: 20px;
+  position: relative;
+  align-items: center;
+}
+
+#settings-container {
+  margin: 20px;
+  position: relative;
+}
+
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-gap: 20px;
+}
+
+#form {
+  width: 300px;
+  margin: 10px;
+}
+
+#canvas1 {
+  border: 1px dashed black;
+  vertical-align: center;
+  width: 640px;
+  height: auto;
+  left: 0px;
+  top: 0px;
+}
+
+#video {
+  position: absolute;
+}
+
+#toggle-button {
+  margin: 20px;
+}

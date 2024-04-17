@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>
+    Face Alignment
+  </title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div id="image-container">
+    <video id="video" width="1" height="1"></video>
+    <canvas id="canvas1" width="640" height="480"></canvas>
+    <fieldset class="settings-container">
+      <legend style="color:black;font-weight:bold;font-family:sans-serif;">Click start or drop an image</legend>
+      <div id="form">
+        <canvas id="canvas2" width="256" height="256"></canvas>
+        <div id="buttons-container">
+          <button id="toggle-button">Start</button>
+          <button id="align-button">Align</button>
+          <div class="padding-slider">
+            <label for="padding-range">padding:</label>
+            <input type="range" min="0" max="100" value="25" class="slider" name="padding-range">
+            <label for="padding-range"><code><span name="padding"></span></code></label>
+          </div>
+        </div>
+        <p id="size"></p>
+        <p id="time"></p>
+      </div>
+    </fieldset>
+    <script src="./face-alignment.js"></script>
+  </div>
+</body>
+
+</html>
