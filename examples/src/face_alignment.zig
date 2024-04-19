@@ -43,10 +43,10 @@ pub fn extractAlignedFace(
     assert(from_points.len == to_points.len);
     assert(out.cols == out.rows);
     assert(out.cols > 0);
-    const size: f32 = @floatFromInt(out.cols);
+    const side: f32 = @floatFromInt(out.cols);
     for (&from_points) |*p| {
-        p.x = (padding + p.x) / (2 * padding + 1) * size;
-        p.y = (padding + p.y) / (2 * padding + 1) * size;
+        p.x = (padding + p.x) / (2 * padding + 1) * side;
+        p.y = (padding + p.y) / (2 * padding + 1) * side;
     }
     const transform = SimilarityTransform.find(&from_points, &to_points);
     var p = transform.project(.{ .x = 1, .y = 0 });
@@ -54,27 +54,13 @@ pub fn extractAlignedFace(
     p.y -= transform.bias.at(1, 0);
     const angle = std.math.atan2(p.y, p.x);
     const scale = @sqrt(p.x * p.x + p.y * p.y);
-    const center = transform.project(.{ .x = size / 2, .y = size / 2 });
+    const center = transform.project(.{ .x = side / 2, .y = side / 2 });
     var rotated = try image.rotateFrom(allocator, center.x, center.y, angle);
     defer rotated.deinit(allocator);
 
-    const rect = Rectangle.initCenter(center.x, center.y, size * scale, size * scale);
-    const crop_top: isize = @intFromFloat(@round(rect.t));
-    const crop_left: isize = @intFromFloat(@round(rect.l));
-    const crop_rows: usize = @intFromFloat(@round(rect.height()));
-    const crop_cols: usize = @intFromFloat(@round(rect.width()));
-    var crop = try Image(T).initAlloc(allocator, crop_rows, crop_cols);
+    const rect = Rectangle.initCenter(center.x, center.y, side * scale, side * scale);
+    var crop = try rotated.crop(allocator, rect);
     defer crop.deinit(allocator);
-    for (0..crop_rows) |r| {
-        const ir: isize = @intCast(r);
-        for (0..crop_cols) |c| {
-            const ic: isize = @intCast(c);
-            crop.data[r * crop_cols + c] = if (rotated.at(@intCast(ir + crop_top), @intCast(ic + crop_left))) |val|
-                val.*
-            else
-                .{ .r = 0, .g = 0, .b = 0, .a = 0 };
-        }
-    }
     crop.resize(out);
 }
 
