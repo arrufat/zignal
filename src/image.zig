@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
 const as = @import("meta.zig").as;
+const Rectangle = @import("geometry.zig").Rectangle(f32);
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -127,6 +128,28 @@ pub fn Image(comptime T: type) type {
         /// Rotates the image by angle (in radians) from the center.  It must be freed on the caller side.
         pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
             return try self.rotateFrom(allocator, @floatFromInt(self.cols / 2), @floatFromInt(self.rows / 2), angle);
+        }
+
+        /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the image, that area
+        /// is filled with black/transparent pixels.
+        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle) !Self {
+            const chip_top: isize = @intFromFloat(@round(rectangle.t));
+            const chip_left: isize = @intFromFloat(@round(rectangle.l));
+            const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
+            const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
+            var chip = try Image(T).initAlloc(allocator, chip_rows, chip_cols);
+            defer chip.deinit(allocator);
+            for (0..chip_rows) |r| {
+                const ir: isize = @intCast(r);
+                for (0..chip_cols) |c| {
+                    const ic: isize = @intCast(c);
+                    chip.data[r * chip_cols + c] = if (self.at(@intCast(ir + chip_top), @intCast(ic + chip_left))) |val|
+                        val.*
+                    else
+                        std.mem.zeroes(T);
+                }
+            }
+            return chip;
         }
     };
 }
