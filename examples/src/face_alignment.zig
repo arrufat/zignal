@@ -14,6 +14,8 @@ pub const std_options: std.Options = .{
 };
 
 /// These landmarks correspond to the closest to dlib's 5 alignment landmarks.
+/// For more information check dlib's blog.
+/// https://blog.dlib.net/2017/09/fast-multiclass-object-detection-in.html
 pub const alignment: []const usize = &.{ 263, 398, 33, 173, 2 };
 
 /// Extracts the aligned face contained in image using landmarks.
@@ -25,6 +27,8 @@ pub fn extractAlignedFace(
     padding: f32,
     out: *Image(T),
 ) !void {
+    // This are the normalized coordinates of the aligned landmarks
+    // taken from dlib.
     var from_points: [5]Point2d = .{
         .{ .x = 0.8595674595992, .y = 0.2134981538014 },
         .{ .x = 0.6460604764104, .y = 0.2289674387677 },
@@ -92,15 +96,20 @@ pub export fn extract_aligned_face(
         .cols = cols,
         .data = rgba_ptr[0 .. rows * cols],
     };
-    std.log.debug("rows: {}, cols: {}", .{ rows, cols });
 
     const landmarks: []Point2d = blk: {
         var array = std.ArrayList(Point2d).init(allocator);
-        array.resize(landmarks_len) catch @panic("OOM");
+        array.resize(landmarks_len) catch {
+            std.log.err("Ran out of memory while resizing landmarks ArrayList", .{});
+            @panic("OOM");
+        };
         for (array.items, 0..) |*l, i| {
             l.* = landmarks_ptr[i];
         }
-        break :blk array.toOwnedSlice() catch @panic("OOM");
+        break :blk array.toOwnedSlice() catch {
+            std.log.err("Ran out of memory while taking ownership of the landmarks ArrayList", .{});
+            @panic("OOM");
+        };
     };
     defer allocator.free(landmarks);
 
@@ -109,5 +118,8 @@ pub export fn extract_aligned_face(
         .cols = out_cols,
         .data = out_ptr[0 .. out_rows * out_cols],
     };
-    extractAlignedFace(Rgba, allocator, image, landmarks, padding, &aligned) catch @panic("OOM");
+    extractAlignedFace(Rgba, allocator, image, landmarks, padding, &aligned) catch {
+        std.log.err("Ran out of memory while extracting the aligned face", .{});
+        @panic("OOM");
+    };
 }
