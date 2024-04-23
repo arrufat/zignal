@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Matrix = @import("matrix.zig").Matrix;
 const Point2d = @import("point.zig").Point2d;
 const svd = @import("svd.zig").svd;
@@ -80,7 +81,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
 
         /// Finds the best projective transforms that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
-            std.debug.assert(from_points.len == to_points.len);
+            assert(from_points.len >= 4);
+            assert(from_points.len == to_points.len);
             var accum = Matrix(T, 9, 9).initAll(0);
             var b = Matrix(T, 2, 9).initAll(0);
             for (0..from_points.len) |i| {
@@ -217,8 +219,8 @@ pub fn SimilarityTransform(comptime T: type) type {
 
         /// Finds the best similarity transforms that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
-            std.debug.assert(from_points.len == to_points.len);
-            std.debug.assert(from_points.len >= 2);
+            assert(from_points.len >= 2);
+            assert(from_points.len == to_points.len);
             const num_points: T = @floatFromInt(from_points.len);
             var mean_from: Point2d(T) = .{ .x = 0, .y = 0 };
             var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
