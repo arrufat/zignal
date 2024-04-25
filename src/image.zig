@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
 const as = @import("meta.zig").as;
 const Rectangle = @import("geometry.zig").Rectangle(f32);
+const Point2d = @import("point.zig").Point2d(f32);
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -107,7 +108,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Rotates the image by angle (in radians) from the given center.  It must be freed on the caller side.
-        pub fn rotateFrom(self: Self, allocator: Allocator, cx: f32, cy: f32, angle: f32) !Self {
+        pub fn rotateFrom(self: Self, allocator: Allocator, p: Point2d, angle: f32) !Self {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(self.rows * self.cols);
             var rotated = Self.init(self.rows, self.cols, try array.toOwnedSlice());
@@ -117,8 +118,8 @@ pub fn Image(comptime T: type) type {
                 const y: f32 = @floatFromInt(r);
                 for (0..self.cols) |c| {
                     const x: f32 = @floatFromInt(c);
-                    const rx = cos * (x - cx) - sin * (y - cy) + cx;
-                    const ry = sin * (x - cx) + cos * (y - cy) + cy;
+                    const rx = cos * (x - p.x) - sin * (y - p.y) + p.x;
+                    const ry = sin * (x - p.x) + cos * (y - p.y) + p.y;
                     rotated.data[r * rotated.cols + c] = if (self.interpolateBilinear(rx, ry)) |val| val else std.mem.zeroes(T);
                 }
             }
