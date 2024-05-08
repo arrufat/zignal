@@ -342,6 +342,55 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             }
             return result;
         }
+
+        /// Computes the determinant of self if it's a square matrix, otherwise it fails to compile.
+        pub fn determinant(self: Self) T {
+            comptime assert(self.rows == self.cols);
+            return switch (self.rows) {
+                1 => self.item(),
+                2 => self.at(0, 0) * self.at(1, 1) - self.at(0, 1) * self.at(1, 0),
+                3 => self.at(0, 0) * self.at(1, 1) * self.at(2, 2) +
+                    self.at(0, 1) * self.at(1, 2) * self.at(2, 0) +
+                    self.at(0, 2) * self.at(1, 0) * self.at(2, 1) -
+                    self.at(0, 2) * self.at(1, 1) * self.at(2, 0) -
+                    self.at(0, 1) * self.at(1, 0) * self.at(2, 2) -
+                    self.at(0, 0) * self.at(1, 2) * self.at(2, 1),
+                else => @compileError("Matrix(T).determinant() is not implemented for sizes above 3"),
+            };
+        }
+
+        /// Computes the inverse of self if it's a square matrix, otherwise it fails to compile.
+        /// Returns null if the matrix is not invertible.
+        pub fn inverse(self: Self) ?Self {
+            comptime assert(self.rows == self.cols);
+            const det = self.determinant();
+            if (det == 0) {
+                return null;
+            }
+            var inv = Self{};
+            switch (self.rows) {
+                1 => inv.items[0][0] = 1 / det,
+                2 => {
+                    inv.items[0][0] = self.at(1, 1) / det;
+                    inv.items[0][1] = -self.at(0, 1) / det;
+                    inv.items[1][0] = -self.at(1, 0) / det;
+                    inv.items[1][1] = self.at(0, 0) / det;
+                },
+                3 => {
+                    inv.items[0][0] = (self.at(1, 1) * self.at(2, 2) - self.at(1, 2) * self.at(2, 1)) / det;
+                    inv.items[0][1] = (self.at(0, 2) * self.at(2, 1) - self.at(0, 1) * self.at(2, 2)) / det;
+                    inv.items[0][2] = (self.at(0, 1) * self.at(1, 2) - self.at(0, 2) * self.at(1, 1)) / det;
+                    inv.items[1][0] = (self.at(1, 2) * self.at(2, 0) - self.at(1, 0) * self.at(2, 2)) / det;
+                    inv.items[1][1] = (self.at(0, 0) * self.at(2, 2) - self.at(0, 2) * self.at(2, 0)) / det;
+                    inv.items[1][2] = (self.at(0, 2) * self.at(1, 0) - self.at(0, 0) * self.at(1, 2)) / det;
+                    inv.items[2][0] = (self.at(1, 0) * self.at(2, 1) - self.at(1, 1) * self.at(2, 0)) / det;
+                    inv.items[2][1] = (self.at(0, 1) * self.at(2, 0) - self.at(0, 0) * self.at(2, 1)) / det;
+                    inv.items[2][2] = (self.at(0, 0) * self.at(1, 1) - self.at(0, 1) * self.at(1, 0)) / det;
+                },
+                else => @compileError("Matrix(T).inverse() is not implemented for sizes above 3"),
+            }
+            return inv;
+        }
     };
 }
 
@@ -430,4 +479,19 @@ test "sum" {
     try expectEqual(matrix.sumRows(), matrixSumRows);
     try expectEqual(matrix.sumCols(), matrixSumCols);
     try expectEqual(matrix.sumCols().sumRows().item(), matrix.sum());
+}
+
+test "inverse" {
+    const a = Matrix(f32, 2, 2){ .items = .{ .{ -1, 1.5 }, .{ 1, -1 } } };
+    try expectEqual(a.determinant(), -0.5);
+    const a_i = Matrix(f32, 2, 2){ .items = .{ .{ 2, 3 }, .{ 2, 2 } } };
+    try expectEqualDeep(a.inverse(), a_i);
+    const b = Matrix(f32, 3, 3){ .items = .{ .{ 1, 2, 3 }, .{ 4, 5, 6 }, .{ 7, 2, 9 } } };
+    try expectEqual(b.determinant(), -36);
+    const b_i = Matrix(f32, 3, 3){ .items = .{
+        .{ -11.0 / 12.0, 1.0 / 3.0, 1.0 / 12.0 },
+        .{ -1.0 / 6.0, 1.0 / 3.0, -1.0 / 6.0 },
+        .{ 3.0 / 4.0, -1.0 / 3.0, 1.0 / 12.0 },
+    } };
+    try expectEqualDeep(b.inverse().?, b_i);
 }
