@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
 const as = @import("meta.zig").as;
+const isScalar = @import("meta.zig").isScalar;
+const isStruct = @import("meta.zig").isStruct;
 const Rectangle = @import("geometry.zig").Rectangle(f32);
 const Point2d = @import("point.zig").Point2d(f32);
 
@@ -25,9 +27,11 @@ pub fn Image(comptime T: type) type {
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice() };
         }
 
-        /// Frees the memory from the image.  It should only be called
-        /// if the image owns the memory.
+        /// Sets the image rows and cols to zero and frees the memory from the image.
+        /// It should only be called if the image owns the memory.
         pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.rows = 0;
+            self.cols = 0;
             allocator.free(self.data);
         }
 
@@ -108,38 +112,36 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Rotates the image by angle (in radians) from the given center.  It must be freed on the caller side.
-        pub fn rotateFrom(self: Self, allocator: Allocator, p: Point2d, angle: f32) !Self {
+        pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d, angle: f32, rotated: *Self) !void {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(self.rows * self.cols);
-            var rotated = Self.init(self.rows, self.cols, try array.toOwnedSlice());
+            rotated.* = Self.init(self.rows, self.cols, try array.toOwnedSlice());
             const cos = @cos(angle);
             const sin = @sin(angle);
             for (0..self.rows) |r| {
                 const y: f32 = @floatFromInt(r);
                 for (0..self.cols) |c| {
                     const x: f32 = @floatFromInt(c);
-                    const rx = cos * (x - p.x) - sin * (y - p.y) + p.x;
-                    const ry = sin * (x - p.x) + cos * (y - p.y) + p.y;
+                    const rx = cos * (x - center.x) - sin * (y - center.y) + center.x;
+                    const ry = sin * (x - center.x) + cos * (y - center.y) + center.y;
                     rotated.data[r * rotated.cols + c] = if (self.interpolateBilinear(rx, ry)) |val| val else std.mem.zeroes(T);
                 }
             }
-            return rotated;
         }
 
         /// Rotates the image by angle (in radians) from the center.  It must be freed on the caller side.
         pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
-            return try self.rotateFrom(allocator, @floatFromInt(self.cols / 2), @floatFromInt(self.rows / 2), angle);
+            return try self.rotateFrom(allocator, .{ .x = self.cols / 2, .y = self.rows / 2 }, angle);
         }
 
         /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the image, that area
         /// is filled with black/transparent pixels.
-        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle) !Self {
+        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle, chip: *Self) !void {
             const chip_top: isize = @intFromFloat(@round(rectangle.t));
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
             const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
-            var chip = try Image(T).initAlloc(allocator, chip_rows, chip_cols);
-            defer chip.deinit(allocator);
+            chip.* = try Image(T).initAlloc(allocator, chip_rows, chip_cols);
             for (0..chip_rows) |r| {
                 const ir: isize = @intCast(r);
                 for (0..chip_cols) |c| {
@@ -150,7 +152,6 @@ pub fn Image(comptime T: type) type {
                         std.mem.zeroes(T);
                 }
             }
-            return chip;
         }
     };
 }
