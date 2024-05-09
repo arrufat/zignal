@@ -59,13 +59,15 @@ pub fn extractAlignedFace(
     const angle = std.math.atan2(p.y, p.x);
     const scale = @sqrt(p.x * p.x + p.y * p.y);
     const center = transform.project(.{ .x = side / 2, .y = side / 2 });
-    var rotated = try image.rotateFrom(allocator, center.x, center.y, angle);
+    var rotated: Image(Rgba) = undefined;
+    try image.rotateFrom(allocator, center, angle, &rotated);
     defer rotated.deinit(allocator);
 
     const rect = Rectangle.initCenter(center.x, center.y, side * scale, side * scale);
-    var crop = try rotated.crop(allocator, rect);
-    defer crop.deinit(allocator);
-    crop.resize(out);
+    var chip: Image(Rgba) = undefined;
+    try rotated.crop(allocator, rect, &chip);
+    defer chip.deinit(allocator);
+    chip.resize(out);
 }
 
 pub export fn extract_aligned_face(

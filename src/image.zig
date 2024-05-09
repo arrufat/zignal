@@ -2,8 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
 const as = @import("meta.zig").as;
-const isScalar = @import("meta.zig").isScalar;
-const isStruct = @import("meta.zig").isStruct;
 const Rectangle = @import("geometry.zig").Rectangle(f32);
 const Point2d = @import("point.zig").Point2d(f32);
 
