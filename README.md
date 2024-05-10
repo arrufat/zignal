@@ -1,6 +1,9 @@
 # Zignal
 
+<img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400> 
+
 Zignal is an image processing library heavily inspired by the amazing [dlib](http://dlib.net).
+
 
 ## Reason of being
 
