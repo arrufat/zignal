@@ -57,7 +57,7 @@ pub fn extractAlignedFace(
     p.x -= transform.bias.at(0, 0);
     p.y -= transform.bias.at(1, 0);
     const angle = std.math.atan2(p.y, p.x);
-    const scale = @sqrt(p.x * p.x + p.y * p.y);
+    const scale = p.norm();
     const center = transform.project(.{ .x = side / 2, .y = side / 2 });
     var rotated: Image(Rgba) = undefined;
     try image.rotateFrom(allocator, center, angle, &rotated);
