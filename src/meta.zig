@@ -25,3 +25,16 @@ pub inline fn as(comptime T: type, from: anytype) T {
         else => @compileError(@typeName(@TypeOf(from) ++ " is not supported.")),
     }
 }
+
+/// Returns true if and only if T represents a scalar type.
+pub inline fn isScalar(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .ComptimeInt, .Int, .ComptimeFloat, .Float => true,
+        else => false,
+    };
+}
+
+/// Returns true if and only if T represents a struct type.
+pub inline fn isStruct(comptime T: type) bool {
+    return @typeInfo(T) == .Struct;
+}

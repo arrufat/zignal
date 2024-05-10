@@ -4,8 +4,7 @@
 
     .dependencies = .{
         .zignal = .{
-            .url = "https://github.com/bfactory-ai/zignal/archive/c784809c4c0eb914694998b5434c25d9efd379b9.tar.gz",
-            .hash = "1220a6447aee50bedc4ecea70a562ef2833267011878db344661627485cdce756b80",
+            .path = "../",
         },
     },
 
