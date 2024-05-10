@@ -35,11 +35,17 @@
   let image = undefined;
   let original = undefined;
   let padding = 25;
+  let blurring = 0;
 
   document.getElementsByName("padding")[0].innerHTML = padding + '%';
   document.getElementsByName("padding-range")[0].oninput = function () {
     padding = this.value;
     document.getElementsByName("padding")[0].innerHTML = padding + '%';
+  };
+  document.getElementsByName("blurring")[0].innerHTML = blurring + ' px';
+  document.getElementsByName("blurring-range")[0].oninput = function () {
+    blurring = this.value;
+    document.getElementsByName("blurring")[0].innerHTML = blurring + ' px';
   };
 
   function displayImageSize() {
@@ -243,6 +249,7 @@
           outRows,
           outCols,
           padding / 100,
+          blurring,
           landmarksPtr,
           numLandmarks,
           extraPtr,

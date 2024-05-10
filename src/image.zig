@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const Allocator = std.mem.Allocator;
 const Rgba = @import("color.zig").Rgba;
@@ -16,8 +17,8 @@ pub fn Image(comptime T: type) type {
         data: []T,
 
         const Self = @This();
-        /// Constructs an image of rows and cols size.  If the slice
-        /// is owned by this image, deinit should also be called.
+        /// Constructs an image of rows and cols size.  If the slice is owned by this image,
+        /// deinit should also be called.
         pub fn init(rows: usize, cols: usize, data: []T) Self {
             return .{ .rows = rows, .cols = cols, .data = data };
         }
@@ -28,12 +29,18 @@ pub fn Image(comptime T: type) type {
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice() };
         }
 
-        /// Sets the image rows and cols to zero and frees the memory from the image.
-        /// It should only be called if the image owns the memory.
+        /// Sets the image rows and cols to zero and frees the memory from the image.  It should
+        /// only be called if the image owns the memory.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.rows = 0;
             self.cols = 0;
             allocator.free(self.data);
+        }
+
+        /// Returns true if and only if self and other have the same number of rows, columns and
+        /// data size.
+        pub fn hasSameShape(self: Self, other: anytype) bool {
+            return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
         }
 
         /// Returns the optional value at row, col in the image.
@@ -59,6 +66,7 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Performs bilinear interpolation at position x, y.
         pub fn interpolateBilinear(self: Self, x: f32, y: f32) ?T {
             const left: isize = @intFromFloat(@floor(x));
             const top: isize = @intFromFloat(@floor(y));
@@ -112,6 +120,7 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Rotates the image by angle (in radians) from center.  It must be freed on the caller side.
         pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d, angle: f32, rotated: *Self) !void {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(self.rows * self.cols);
@@ -129,13 +138,14 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Rotates the image by angle (in radians) from the center.  It must be freed on the caller side.
+        /// Rotates the image by angle (in radians) from the center.  It must be freed on the
+        /// caller side.
         pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
             return try self.rotateFrom(allocator, .{ .x = self.cols / 2, .y = self.rows / 2 }, angle);
         }
 
-        /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the image, that area
-        /// is filled with black/transparent pixels.
+        /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the
+        /// image, that area is filled with black/transparent pixels.
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle, chip: *Self) !void {
             const chip_top: isize = @intFromFloat(@round(rectangle.t));
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
@@ -162,7 +172,9 @@ pub fn Image(comptime T: type) type {
         ) !void {
             switch (@typeInfo(T)) {
                 .ComptimeInt, .Int, .ComptimeFloat, .Float => {
-                    integral.* = try Image(f32).initAlloc(allocator, self.rows, self.cols);
+                    if (!self.hasSameShape(integral.*)) {
+                        integral.* = try Image(f32).initAlloc(allocator, self.rows, self.cols);
+                    }
                     var tmp: f32 = 0;
                     for (0..self.cols) |c| {
                         tmp += as(f32, (self.data[c]));
@@ -180,13 +192,12 @@ pub fn Image(comptime T: type) type {
                 },
                 .Struct => {
                     const num_fields = std.meta.fields(T).len;
-                    integral.* = try Image([num_fields]f32).initAlloc(allocator, self.rows, self.cols);
+                    if (!self.hasSameShape(integral.*)) {
+                        integral.* = try Image([num_fields]f32).initAlloc(allocator, self.rows, self.cols);
+                    }
                     var tmp = [_]f32{0} ** num_fields;
                     for (0..self.cols) |c| {
                         inline for (std.meta.fields(T), 0..) |f, i| {
-                            if (c < 1) {
-                                std.log.debug("{s}: {d}", .{ f.name, @field(self.data[c], f.name) });
-                            }
                             tmp[i] += as(f32, @field(self.data[c], f.name));
                             integral.data[c][i] = tmp[i];
                         }
@@ -204,6 +215,103 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Computes a blurred version of self efficiently by using an integral image.
+        pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
+            if (!self.hasSameShape(blurred.*)) {
+                blurred.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
+            }
+            if (radius == 0) {
+                for (self.data, blurred.data) |s, *b| b.* = s;
+                return;
+            }
+
+            switch (@typeInfo(T)) {
+                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                    var integral: Image(f32) = undefined;
+                    defer integral.deinit(allocator);
+                    try self.integralImage(allocator, &integral);
+                    const size = self.rows * self.cols;
+                    var pos: usize = 0;
+                    var rem: usize = size;
+                    const simd_len = std.simd.suggestVectorLength(T) orelse 1;
+                    const box_areas: @Vector(simd_len, f32) = @splat(2 * radius * 2 * radius);
+                    while (pos < size) {
+                        const r = pos / self.cols;
+                        const c = pos % self.cols;
+                        const r1 = r -| radius;
+                        const r2 = @min(r + radius, self.rows - 1);
+                        const r1_offset = r1 * self.cols;
+                        const r2_offset = r2 * self.cols;
+                        if (r1 >= radius and r2 <= self.rows - 1 - radius and
+                            c >= radius and c <= self.cols - 1 - radius - simd_len and
+                            rem >= simd_len)
+                        {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len];
+                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len];
+                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len];
+                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len];
+                            const sums = int22s - int21s - int12s + int11s;
+                            const vals: [simd_len]f32 = @round(sums / box_areas);
+                            for (vals, 0..) |val, i| {
+                                blurred.data[pos + i] = as(T, val);
+                            }
+                            pos += simd_len;
+                            rem -= simd_len;
+                        } else {
+                            const c1 = c -| radius;
+                            const c2 = @min(c + radius, self.cols - 1);
+                            const pos11 = r1_offset + c1;
+                            const pos12 = r1_offset + c2;
+                            const pos21 = r2_offset + c1;
+                            const pos22 = r2_offset + c2;
+                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                            const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
+                            blurred.data[pos] = as(T, @round(sum / area));
+                            pos += 1;
+                            rem -= 1;
+                        }
+                    }
+                },
+                .Struct => {
+                    const num_fields = std.meta.fields(T).len;
+                    var integral: Image([num_fields]f32) = undefined;
+                    defer integral.deinit(allocator);
+                    try self.integralImage(allocator, &integral);
+                    const size = self.rows * self.cols;
+                    var pos: usize = 0;
+                    var rem: usize = size;
+                    while (pos < size) {
+                        const r = pos / self.cols;
+                        const c = pos % self.cols;
+                        const r1 = r -| radius;
+                        const c1 = c -| radius;
+                        const r2 = @min(r + radius, self.rows - 1);
+                        const c2 = @min(c + radius, self.cols - 1);
+                        const r1_offset = r1 * self.cols;
+                        const r2_offset = r2 * self.cols;
+                        const pos11 = r1_offset + c1;
+                        const pos12 = r1_offset + c2;
+                        const pos21 = r2_offset + c1;
+                        const pos22 = r2_offset + c2;
+                        const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                        inline for (std.meta.fields(T), 0..) |f, i| {
+                            const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
+                            @field(blurred.data[pos], f.name) = switch (@typeInfo(f.type)) {
+                                .Int, .ComptimeInt => as(f.type, @round(sum / area)),
+                                .Float, .ComptimeFloat => as(f.type, sum / area),
+                                else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
+                            };
+                        }
+                        pos += 1;
+                        rem -= 1;
+                    }
+                },
+                else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
             }
         }
     };
