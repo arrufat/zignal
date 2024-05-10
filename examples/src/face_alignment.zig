@@ -25,6 +25,7 @@ pub fn extractAlignedFace(
     image: Image(T),
     landmarks: []const Point2d,
     padding: f32,
+    blurring: usize,
     out: *Image(T),
 ) !void {
     // This are the normalized coordinates of the aligned landmarks
@@ -67,7 +68,19 @@ pub fn extractAlignedFace(
     var chip: Image(Rgba) = undefined;
     try rotated.crop(allocator, rect, &chip);
     defer chip.deinit(allocator);
-    chip.resize(out);
+
+    var resized = try Image(Rgba).initAlloc(allocator, out.rows, out.cols);
+    defer resized.deinit(allocator);
+    chip.resize(&resized);
+    for (out.data, resized.data) |*c, b| {
+        c.* = b;
+    }
+
+    var integral: Image([4]f32) = undefined;
+    try out.integralImage(allocator, &integral);
+    defer integral.deinit(allocator);
+
+    try out.boxBlur(allocator, out, blurring);
 }
 
 pub export fn extract_aligned_face(
@@ -78,6 +91,7 @@ pub export fn extract_aligned_face(
     out_rows: usize,
     out_cols: usize,
     padding: f32,
+    blurring: usize,
     landmarks_ptr: [*]const Point2d,
     landmarks_len: usize,
     extra_ptr: [*]u8,
@@ -120,7 +134,7 @@ pub export fn extract_aligned_face(
         .cols = out_cols,
         .data = out_ptr[0 .. out_rows * out_cols],
     };
-    extractAlignedFace(Rgba, allocator, image, landmarks, padding, &aligned) catch {
+    extractAlignedFace(Rgba, allocator, image, landmarks, padding, blurring, &aligned) catch {
         std.log.err("Ran out of memory while extracting the aligned face", .{});
         @panic("OOM");
     };
