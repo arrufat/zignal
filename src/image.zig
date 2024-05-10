@@ -271,7 +271,10 @@ pub fn Image(comptime T: type) type {
                             const pos22 = r2_offset + c2;
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
-                            blurred.data[pos] = as(T, @round(sum / area));
+                            blurred.data[pos] = switch (@typeInfo(T)) {
+                                .Int, .ComptimeInt => as(T, @round(sum / area)),
+                                .Float, .ComptimeFloat => as(T, sum / area),
+                            };
                             pos += 1;
                             rem -= 1;
                         }
