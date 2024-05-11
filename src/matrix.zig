@@ -41,13 +41,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Returns a matrix filled with random numbers.
         pub fn random(seed: ?u64) Self {
-            const s: u64 = blk: {
-                if (seed) |value| {
-                    break :blk value;
-                } else {
-                    break :blk @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-                }
-            };
+            const s: u64 = seed orelse @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
             var prng = std.rand.DefaultPrng.init(s);
             var rand = prng.random();
             var self = Self{};
@@ -112,7 +106,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Computes the trace (i.e. sum of the diagonal elements).
         pub fn trace(self: Self) T {
-            assert(self.cols == self.rows);
+            comptime assert(self.cols == self.rows);
             var val: T = 0;
             for (0..self.cols) |i| {
                 val += self.items[i][i];
