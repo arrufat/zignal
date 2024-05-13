@@ -66,6 +66,18 @@ pub fn Rectangle(comptime T: type) type {
     };
 }
 
+test "Rectangle" {
+    const irect = Rectangle(isize){ .l = 0, .t = 0, .r = 639, .b = 479 };
+    try expectEqual(irect.width(), 640);
+    try expectEqual(irect.height(), 480);
+    const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 639, .b = 479 };
+    try expectEqual(frect.width(), 640);
+    try expectEqual(frect.height(), 480);
+    try expectEqual(frect.contains(640 / 2, 480 / 2), true);
+    try expectEqual(irect.contains(640, 480), false);
+    try expectEqualDeep(frect.cast(isize), irect);
+}
+
 /// Applies a projective transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
 pub fn ProjectiveTransform(comptime T: type) type {
