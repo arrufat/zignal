@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const as = @import("meta.zig").as;
 const Matrix = @import("matrix.zig").Matrix;
 const Point2d = @import("point.zig").Point2d;
 const svd = @import("svd.zig").svd;
@@ -35,6 +36,16 @@ pub fn Rectangle(comptime T: type) type {
 
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             }
+        }
+
+        /// Cast self's underlying type to U.
+        pub fn cast(self: Self, comptime U: type) Rectangle(U) {
+            return .{
+                .l = as(U, self.l),
+                .t = as(U, self.t),
+                .r = as(U, self.r),
+                .b = as(U, self.b),
+            };
         }
 
         pub fn width(self: Self) T {
