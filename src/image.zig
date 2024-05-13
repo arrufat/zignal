@@ -66,6 +66,17 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Flips an image from top to bottom (upside down effect).
+        pub fn flipTopBottom(self: Self) void {
+            for (0..self.rows / 2) |r| {
+                for (0..self.cols) |c| {
+                    const top = r * self.cols + c;
+                    const bottom = (self.rows - r - 1) * self.cols + c;
+                    std.mem.swap(T, &self.data[top], &self.data[bottom]);
+                }
+            }
+        }
+
         /// Performs bilinear interpolation at position x, y.
         pub fn interpolateBilinear(self: Self, x: f32, y: f32) ?T {
             const left: isize = @intFromFloat(@floor(x));
