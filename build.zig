@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Export module.
-    _ = b.addModule("zignal", .{ .root_source_file = .{ .path = "src/zignal.zig" } });
+    _ = b.addModule("zignal", .{ .root_source_file = b.path("src/zignal.zig") });
 
     _ = buildModule(b, "zignal", target, optimize);
 
@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
-            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{module}) },
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{module})),
             .target = target,
             .optimize = optimize,
         });
@@ -50,7 +50,7 @@ fn buildModule(
     if (target.result.isWasm()) {
         module = b.addExecutable(.{
             .name = name,
-            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{name}) },
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
             .optimize = optimize,
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .wasm32,
@@ -81,14 +81,14 @@ fn buildModule(
             ).step,
         );
         b.installDirectory(.{
-            .source_dir = .{ .path = "examples" },
+            .source_dir = b.path("examples"),
             .install_dir = .prefix,
             .install_subdir = "",
         });
     } else {
         module = b.addSharedLibrary(.{
             .name = name,
-            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{name}) },
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
             .target = target,
             .optimize = optimize,
         });
