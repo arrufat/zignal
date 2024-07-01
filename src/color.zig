@@ -536,7 +536,7 @@ test "vivid colors" {
 test "100 random colors" {
     for (0..100) |_| {
         const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-        var prng = std.rand.DefaultPrng.init(seed);
+        var prng = std.Random.DefaultPrng.init(seed);
         var random = prng.random();
         const rgb: Rgb = .{
             .r = random.int(u8),
@@ -619,7 +619,7 @@ test "brightness" {
     var img = [_]u8{1} ** size;
     try std.testing.expectEqual(computeBrightnessRgba(@alignCast(@ptrCast(img[0..].ptr)), rows, cols), 1);
     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     var random = prng.random();
     for (&img) |*p| {
         p.* = random.int(u8);
