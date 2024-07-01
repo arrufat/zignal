@@ -17,6 +17,7 @@ jobs:
     strategy:
       matrix:
         include:
+          - zig-version: 0.13.0
           - zig-version: master
 
     runs-on: ubuntu-latest
@@ -28,7 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Grab Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: mlugg/setup-zig@v1
         with:
           version: ${{ matrix.zig-version }}
 
