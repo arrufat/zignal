@@ -26,7 +26,7 @@ fn buildModule(
     if (target.result.isWasm()) {
         module = b.addExecutable(.{
             .name = name,
-            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{name}) },
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
             .optimize = optimize,
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .wasm32,
@@ -57,14 +57,14 @@ fn buildModule(
             ).step,
         );
         b.installDirectory(.{
-            .source_dir = .{ .path = "lib" },
+            .source_dir = b.path("lib"),
             .install_dir = .prefix,
             .install_subdir = "",
         });
     } else {
         module = b.addSharedLibrary(.{
             .name = name,
-            .root_source_file = .{ .path = b.fmt("src/{s}.zig", .{name}) },
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
             .target = target,
             .optimize = optimize,
         });
