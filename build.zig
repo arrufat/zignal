@@ -12,6 +12,15 @@ pub fn build(b: *std.Build) void {
 
     _ = buildModule(b, "zignal", target, optimize);
 
+    const lib_check = b.addStaticLibrary(.{
+        .name = "zignal",
+        .root_source_file = b.path("src/zignal.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const check = b.step("check", "Check if zignal compiles");
+    check.dependOn(&lib_check.step);
+
     const test_step = b.step("test", "Run library tests");
     for ([_][]const u8{
         "color",
