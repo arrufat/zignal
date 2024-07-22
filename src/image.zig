@@ -294,8 +294,8 @@ pub fn Image(comptime T: type) type {
                 .Struct => {
                     const num_fields = std.meta.fields(T).len;
                     var integral: Image([num_fields]f32) = undefined;
-                    defer integral.deinit(allocator);
                     try self.integralImage(allocator, &integral);
+                    defer integral.deinit(allocator);
                     const size = self.rows * self.cols;
                     var pos: usize = 0;
                     var rem: usize = size;
@@ -326,6 +326,113 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Computes a sharpened version of self efficiently by using an integral image.
+        /// The code is almost exactly the same as in blurBox, except that we compute the
+        /// sharpened version as: sharpened = 2 * self - blurred.
+        pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
+            if (!self.hasSameShape(sharpened.*)) {
+                sharpened.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
+            }
+            if (radius == 0) {
+                for (self.data, sharpened.data) |s, *b| b.* = s;
+                return;
+            }
+
+            switch (@typeInfo(T)) {
+                .Int, .Float => {
+                    var integral: Image(f32) = undefined;
+                    defer integral.deinit(allocator);
+                    try self.integralImage(allocator, &integral);
+                    const size = self.rows * self.cols;
+                    var pos: usize = 0;
+                    var rem: usize = size;
+                    const simd_len = std.simd.suggestVectorLength(T) orelse 1;
+                    const box_areas: @Vector(simd_len, f32) = @splat(2 * radius * 2 * radius);
+                    while (pos < size) {
+                        const r = pos / self.cols;
+                        const c = pos % self.cols;
+                        const r1 = r -| radius;
+                        const r2 = @min(r + radius, self.rows - 1);
+                        const r1_offset = r1 * self.cols;
+                        const r2_offset = r2 * self.cols;
+                        if (r1 >= radius and r2 <= self.rows - 1 - radius and
+                            c >= radius and c <= self.cols - 1 - radius - simd_len and
+                            rem >= simd_len)
+                        {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len];
+                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len];
+                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len];
+                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len];
+                            const sums = int22s - int21s - int12s + int11s;
+                            const vals: [simd_len]f32 = @round(sums / box_areas);
+                            for (vals, 0..) |val, i| {
+                                if (@typeInfo(T) == .ComptimeInt or @typeInfo(T) == .Int) {
+                                    const temp = @max(0, @min(std.math.maxInt(T), as(isize, self.data[pos]) * 2 - @as(isize, val)));
+                                    sharpened.data[pos + i] = as(T, temp);
+                                } else {
+                                    sharpened.data[pos + i] = 2 * self.data[pos] - val;
+                                }
+                            }
+                            pos += simd_len;
+                            rem -= simd_len;
+                        } else {
+                            const c1 = c -| radius;
+                            const c2 = @min(c + radius, self.cols - 1);
+                            const pos11 = r1_offset + c1;
+                            const pos12 = r1_offset + c2;
+                            const pos21 = r2_offset + c1;
+                            const pos22 = r2_offset + c2;
+                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                            const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
+                            sharpened.data[pos] = switch (@typeInfo(T)) {
+                                .Int, .ComptimeInt => as(T, @round(sum / area)),
+                                .Float, .ComptimeFloat => as(T, sum / area),
+                            };
+                            pos += 1;
+                            rem -= 1;
+                        }
+                    }
+                },
+                .Struct => {
+                    const num_fields = std.meta.fields(T).len;
+                    var integral: Image([num_fields]f32) = undefined;
+                    try self.integralImage(allocator, &integral);
+                    defer integral.deinit(allocator);
+                    const size = self.rows * self.cols;
+                    var pos: usize = 0;
+                    var rem: usize = size;
+                    while (pos < size) {
+                        const r = pos / self.cols;
+                        const c = pos % self.cols;
+                        const r1 = r -| radius;
+                        const c1 = c -| radius;
+                        const r2 = @min(r + radius, self.rows - 1);
+                        const c2 = @min(c + radius, self.cols - 1);
+                        const r1_offset = r1 * self.cols;
+                        const r2_offset = r2 * self.cols;
+                        const pos11 = r1_offset + c1;
+                        const pos12 = r1_offset + c2;
+                        const pos21 = r2_offset + c1;
+                        const pos22 = r2_offset + c2;
+                        const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                        inline for (std.meta.fields(T), 0..) |f, i| {
+                            const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
+                            @field(sharpened.data[pos], f.name) = switch (@typeInfo(f.type)) {
+                                .Int => as(f.type, @max(0, @min(std.math.maxInt(f.type), as(isize, @field(self.data[pos], f.name)) * 2 - as(isize, @round(sum / area))))),
+                                .Float => as(f.type, 2 * @field(self.data[pos], f.name) - sum / area),
+                                else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
+                            };
+                        }
+                        pos += 1;
+                        rem -= 1;
+                    }
+                },
+                else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
             }
         }
     };
