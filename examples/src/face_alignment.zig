@@ -25,7 +25,7 @@ pub fn extractAlignedFace(
     image: Image(T),
     landmarks: []const Point2d,
     padding: f32,
-    blurring: usize,
+    blurring: i32,
     out: *Image(T),
 ) !void {
     // This are the normalized coordinates of the aligned landmarks
@@ -76,11 +76,11 @@ pub fn extractAlignedFace(
         c.* = b;
     }
 
-    var integral: Image([4]f32) = undefined;
-    try out.integralImage(allocator, &integral);
-    defer integral.deinit(allocator);
-
-    try out.boxBlur(allocator, out, blurring);
+    if (blurring > 0) {
+        try out.boxBlur(allocator, out, @intCast(blurring));
+    } else if (blurring < 0) {
+        try out.sharpen(allocator, out, @intCast(-blurring));
+    }
 }
 
 pub export fn extract_aligned_face(
@@ -91,7 +91,7 @@ pub export fn extract_aligned_face(
     out_rows: usize,
     out_cols: usize,
     padding: f32,
-    blurring: usize,
+    blurring: i32,
     landmarks_ptr: [*]const Point2d,
     landmarks_len: usize,
     extra_ptr: [*]u8,
