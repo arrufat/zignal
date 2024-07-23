@@ -13,6 +13,13 @@ pub const std_options: std.Options = .{
     .log_level = std.log.default_level,
 };
 
+pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+    _ = st;
+    _ = addr;
+    std.log.err("panic: {s}", .{msg});
+    @trap();
+}
+
 /// These landmarks correspond to the closest to dlib's 5 alignment landmarks.
 /// For more information check dlib's blog.
 /// https://blog.dlib.net/2017/09/fast-multiclass-object-detection-in.html
@@ -94,18 +101,25 @@ pub export fn extract_aligned_face(
     blurring: i32,
     landmarks_ptr: [*]const Point2d,
     landmarks_len: usize,
-    extra_ptr: [*]u8,
-    extra_size: usize,
+    extra_ptr: ?[*]u8,
+    extra_len: usize,
 ) void {
-    const allocator = blk: {
-        if (builtin.cpu.arch == .wasm32) {
-            var fba = std.heap.FixedBufferAllocator.init(extra_ptr[0..extra_size]);
-            break :blk fba.allocator();
+    var arena = std.heap.ArenaAllocator.init(blk: {
+        if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
+            // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
+            assert(extra_len >= 8 * rows * cols);
+            if (extra_ptr) |ptr| {
+                var fba = std.heap.FixedBufferAllocator.init(ptr[0..extra_len]);
+                break :blk fba.allocator();
+            } else {
+                @panic("ERROR: extra_ptr can't be null when running in WebAssembly.");
+            }
         } else {
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-            break :blk gpa.allocator();
+            break :blk std.heap.page_allocator;
         }
-    };
+    });
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     const image: Image(Rgba) = .{
         .rows = rows,
