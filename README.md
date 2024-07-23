@@ -23,8 +23,12 @@ Current features include:
   - points and rectangles
   - projective and similarity transforms
   - convex hull
-- simple image struct with common operations (resize, rotate)
-  - more features will be added soon, like cropping and blurring
+- simple image struct with common operations
+  - resize
+  - rotate
+  - crop
+  - blur
+  - sharpen
 
 ## Examples
 
