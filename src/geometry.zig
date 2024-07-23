@@ -9,6 +9,10 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 
 /// A generic rectangle object with some convenience functionality.
 pub fn Rectangle(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .Int, .Float => {},
+        else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+    }
     return struct {
         const Self = @This();
         l: T,
@@ -64,25 +68,25 @@ pub fn Rectangle(comptime T: type) type {
         }
 
         /// Returns the width of the rectangle.
-        pub fn width(self: Self) T {
+        pub fn width(self: Self) if (@typeInfo(T) == .Int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .Int => self.r - self.l + 1,
+                .Int => @intCast(self.r - self.l + 1),
                 .Float => self.r - self.t,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Returns the height of the rectangle.
-        pub fn height(self: Self) T {
+        pub fn height(self: Self) if (@typeInfo(T) == .Int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .Int => self.b - self.t + 1,
+                .Int => @intCast(self.b - self.t + 1),
                 .Float => self.b - self.t,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Returns the area of the rectangle
-        pub fn area(self: Self) T {
+        pub fn area(self: Self) if (@typeInfo(T) == .Int) usize else T {
             return self.height() * self.width();
         }
 
