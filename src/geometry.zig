@@ -16,29 +16,35 @@ pub fn Rectangle(comptime T: type) type {
         r: T,
         b: T,
 
+        /// Initialize a rectangle by giving its four sides.
+        pub fn init(l: T, t: T, r: T, b: T) Self {
+            assert(r > l and b > t);
+            return .{ .l = l, .t = t, .r = r, .b = b };
+        }
+
         /// Initialize a rectangle at center x, y with the specified width and height.
         pub fn initCenter(x: T, y: T, w: T, h: T) Self {
+            assert(w > 0 and h > 0);
             switch (@typeInfo(T)) {
                 .Int => {
                     const l = x - @divFloor(w, 2);
                     const t = y - @divFloor(h, 2);
                     const r = l + w - 1;
                     const b = t + h - 1;
-                    return Self{ .l = l, .t = t, .r = r, .b = b };
+                    return Self.init{ .l = l, .t = t, .r = r, .b = b };
                 },
                 .Float => {
                     const l = x - w / 2;
                     const t = y - h / 2;
                     const r = l + w - 1;
                     const b = t + h - 1;
-                    return Self{ .l = l, .t = t, .r = r, .b = b };
+                    return Self.init{ .l = l, .t = t, .r = r, .b = b };
                 },
-
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             }
         }
 
-        /// Cast self's underlying type to U.
+        /// Casts self's underlying type to U.
         pub fn cast(self: Self, comptime U: type) Rectangle(U) {
             return .{
                 .l = as(U, self.l),
@@ -48,12 +54,36 @@ pub fn Rectangle(comptime T: type) type {
             };
         }
 
-        pub fn width(self: Self) T {
-            return self.r - self.l + 1;
+        /// Checks if a rectangle is ill-formed.
+        pub fn isEmpty(self: Self) bool {
+            return switch (@typeInfo(T)) {
+                .Int => self.t > self.b or self.l > self.r,
+                .Float => self.t >= self.b or self.l >= self.r,
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
         }
 
+        /// Returns the width of the rectangle.
+        pub fn width(self: Self) T {
+            return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
+                .Int => self.r - self.l + 1,
+                .Float => self.r - self.t,
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+        }
+
+        /// Returns the height of the rectangle.
         pub fn height(self: Self) T {
-            return self.b - self.t + 1;
+            return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
+                .Int => self.b - self.t + 1,
+                .Float => self.b - self.t,
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+        }
+
+        /// Returns the area of the rectangle
+        pub fn area(self: Self) T {
+            return self.height() * self.width();
         }
 
         /// Returns true if the point at x, y is inside the rectangle.
@@ -71,8 +101,8 @@ test "Rectangle" {
     try expectEqual(irect.width(), 640);
     try expectEqual(irect.height(), 480);
     const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 639, .b = 479 };
-    try expectEqual(frect.width(), 640);
-    try expectEqual(frect.height(), 480);
+    try expectEqual(frect.width(), 639);
+    try expectEqual(frect.height(), 479);
     try expectEqual(frect.contains(640 / 2, 480 / 2), true);
     try expectEqual(irect.contains(640, 480), false);
     try expectEqualDeep(frect.cast(isize), irect);
