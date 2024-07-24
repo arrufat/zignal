@@ -4,6 +4,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const expectApproxEqRel = std.testing.expectApproxEqRel;
+const lerp = std.math.lerp;
 const pow = std.math.pow;
 
 pub const Color = union(enum) {
@@ -81,7 +82,8 @@ test "Rgb compatibility" {
 }
 
 /// Alpha-blends c2 into c1.
-fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
+/// Alpha-blends c2 into c1.
+inline fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
     if (comptime !isRgbCompatible(T)) {
         @compileError(@typeName(T) ++ " is not Rgb compatible");
     }
@@ -89,11 +91,10 @@ fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
         return;
     }
     const a = @as(f32, @floatFromInt(c2.a)) / 255;
-    c1.r = @intFromFloat((1 - a) * @as(f32, @floatFromInt(c1.r)) + @max(0, @min(255, @round(a * @as(f32, @floatFromInt(c2.r))))));
-    c1.g = @intFromFloat((1 - a) * @as(f32, @floatFromInt(c1.g)) + @max(0, @min(255, @round(a * @as(f32, @floatFromInt(c2.g))))));
-    c1.b = @intFromFloat((1 - a) * @as(f32, @floatFromInt(c1.b)) + @max(0, @min(255, @round(a * @as(f32, @floatFromInt(c2.b))))));
+    c1.r = @intFromFloat(lerp(@as(f32, @floatFromInt(c1.r)), @as(f32, @floatFromInt(c2.r)), a));
+    c1.g = @intFromFloat(lerp(@as(f32, @floatFromInt(c1.g)), @as(f32, @floatFromInt(c2.g)), a));
+    c1.b = @intFromFloat(lerp(@as(f32, @floatFromInt(c1.b)), @as(f32, @floatFromInt(c2.b)), a));
 }
-
 test "alphaBlend" {
     const white = Rgb{ .r = 255, .g = 255, .b = 255 };
     var output = Rgb{ .r = 0, .g = 0, .b = 0 };
@@ -116,10 +117,10 @@ pub const Rgba = packed struct {
     /// Constructs a RGBA pixel from a hex value.
     pub fn fromHex(hex_code: u32) Rgb {
         return .{
-            .r = @intCast((hex_code >> 24) & 0x0000ff),
-            .g = @intCast((hex_code >> 16) & 0x0000ff),
-            .b = @intCast((hex_code >> 8) & 0x0000ff),
-            .a = @intCast(hex_code & 0x0000ff),
+            .r = @intCast((hex_code >> (8 * 3)) & 0x0000ff),
+            .g = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
+            .b = @intCast((hex_code >> (8 * 1)) & 0x0000ff),
+            .a = @intCast((hex_code >> (8 * 0)) & 0x0000ff),
         };
     }
 
@@ -130,7 +131,7 @@ pub const Rgba = packed struct {
 
     /// Converts the RGBA color into a hex value.
     pub fn toHex(self: Rgba) u32 {
-        return self.r << 24 + self.g << 16 + self.g << 8 + self.a;
+        return self.r << (8 * 3) + self.g << (8 * 2) + self.g << (8 * 1) + self.a << (8 * 0);
     }
 
     /// Converts the RGBA color into an RGB color by removing the alpha channel.
@@ -168,9 +169,9 @@ pub const Rgb = struct {
     /// Constructs a RGB pixel from a hex value.
     pub fn fromHex(hex_code: u24) Rgb {
         return .{
-            .r = @intCast((hex_code >> 16) & 0x0000ff),
-            .g = @intCast((hex_code >> 8) & 0x0000ff),
-            .b = @intCast(hex_code & 0x0000ff),
+            .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
+            .g = @intCast((hex_code >> (8 * 1)) & 0x0000ff),
+            .b = @intCast((hex_code >> (8 * 0)) & 0x0000ff),
         };
     }
 
