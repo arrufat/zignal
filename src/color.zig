@@ -1,34 +1,55 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const expectApproxEqRel = std.testing.expectApproxEqRel;
 const pow = std.math.pow;
 
-const Color = union(enum) {
+pub const Color = union(enum) {
+    Gray: u8,
     Rgb: Rgb,
     Rgba: Rgba,
     Hsv: Hsv,
     Lab: Lab,
 
-    /// Converts color into a different colorspace T.
-    pub fn convert(comptime T: type, color: Color) T {
+    /// Returns true if and only if T can be treated as a color.
+    fn isColor(comptime T: type) bool {
         return switch (T) {
-            Rgb => switch (color) {
-                .Rgb => |val| val,
-                else => |val| val.toRgb(),
+            u8, Rgb, Rgba, Hsv, Lab => true,
+            else => false,
+        };
+    }
+
+    /// Converts color into a the T colorspace.
+    pub fn convert(comptime T: type, color: anytype) T {
+        comptime assert(isColor(T));
+        comptime assert(isColor(@TypeOf(color)));
+        return switch (T) {
+            u8 => switch (@TypeOf(color)) {
+                u8 => color,
+                inline Rgb, Rgba => @intFromFloat(color.toHsv().v / 100 * 255),
+                else => @compileError("Unsupported color " ++ @typeName(@TypeOf(color))),
             },
-            Rgba => switch (color) {
-                .Rgba => |val| val,
-                else => |val| val.toRgba(255),
+            Rgb => switch (@TypeOf(color)) {
+                Rgb => color,
+                u8 => .{ .r = color, .g = color, .b = color },
+                inline else => color.toRgb(),
             },
-            Hsv => switch (color) {
-                .Hsv => |val| val,
-                else => |val| val.toHsv(),
+            Rgba => switch (@TypeOf(color)) {
+                Rgba => color,
+                u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
+                inline else => color.toRgba(255),
             },
-            Lab => switch (color) {
-                .Lab => |val| val,
-                else => |val| val.toLab(),
+            Hsv => switch (@TypeOf(color)) {
+                Hsv => color,
+                u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
+                inline else => color.toHsv(),
+            },
+            Lab => switch (@TypeOf(color)) {
+                Lab => color,
+                u8 => .{ .l = @as(f32, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
+                inline else => color.toLab(),
             },
             else => @compileError("Unsupported color " ++ @typeName(T)),
         };
