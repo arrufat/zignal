@@ -35,14 +35,14 @@ pub fn Rectangle(comptime T: type) type {
                     const t = y - @divFloor(h, 2);
                     const r = l + w - 1;
                     const b = t + h - 1;
-                    return Self.init{ .l = l, .t = t, .r = r, .b = b };
+                    return Self.init(l, t, r, b);
                 },
                 .Float => {
                     const l = x - w / 2;
                     const t = y - h / 2;
                     const r = l + w - 1;
                     const b = t + h - 1;
-                    return Self.init{ .l = l, .t = t, .r = r, .b = b };
+                    return Self.init(l, t, r, b);
                 },
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             }
