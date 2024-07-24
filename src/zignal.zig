@@ -21,3 +21,12 @@ pub const Rectangle = geometry.Rectangle;
 pub const ProjectiveTransform = geometry.ProjectiveTransform;
 pub const SimilarityTransform = geometry.SimilarityTransform;
 pub const ConvexHull = geometry.ConvexHull;
+
+const draw = @import("draw.zig");
+pub const drawCircle = draw.drawCircle;
+pub const drawCircleFast = draw.drawCircleFast;
+pub const drawCross = draw.drawCross;
+pub const drawLine = draw.drawLine;
+pub const drawLineFast = draw.drawLineFast;
+pub const drawPolygon = draw.drawPolygon;
+pub const fillPolygon = draw.fillPolygon;
