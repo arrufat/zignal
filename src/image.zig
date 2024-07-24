@@ -248,7 +248,6 @@ pub fn Image(comptime T: type) type {
                     var pos: usize = 0;
                     var rem: usize = size;
                     const simd_len = std.simd.suggestVectorLength(T) orelse 1;
-                    const box_areas: @Vector(simd_len, f32) = @splat(2 * radius * 2 * radius);
                     while (pos < size) {
                         const r = pos / self.cols;
                         const c = pos % self.cols;
@@ -256,18 +255,20 @@ pub fn Image(comptime T: type) type {
                         const r2 = @min(r + radius, self.rows - 1);
                         const r1_offset = r1 * self.cols;
                         const r2_offset = r2 * self.cols;
+                        const r2_r1 = r2 - r1;
                         if (r1 >= radius and r2 <= self.rows - 1 - radius and
                             c >= radius and c <= self.cols - 1 - radius - simd_len and
                             rem >= simd_len)
                         {
                             const c1 = c - radius;
                             const c2 = c + radius;
-                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len];
-                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len];
-                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len];
-                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len];
+                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len].*;
+                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len].*;
+                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len].*;
+                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len].*;
+                            const areas: @Vector(simd_len, f32) = @splat(@as(f32, @floatFromInt(r2_r1 * 2 * radius)));
                             const sums = int22s - int21s - int12s + int11s;
-                            const vals: [simd_len]f32 = @round(sums / box_areas);
+                            const vals: [simd_len]f32 = @round(sums / areas);
                             for (vals, 0..) |val, i| {
                                 blurred.data[pos + i] = as(T, val);
                             }
@@ -285,6 +286,7 @@ pub fn Image(comptime T: type) type {
                             blurred.data[pos] = switch (@typeInfo(T)) {
                                 .Int, .ComptimeInt => as(T, @round(sum / area)),
                                 .Float, .ComptimeFloat => as(T, sum / area),
+                                else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(T) ++ "."),
                             };
                             pos += 1;
                             rem -= 1;
