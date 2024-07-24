@@ -29,6 +29,10 @@ Current features include:
   - crop
   - blur
   - sharpen
+- drawing functions
+  - lines
+  - circles
+  - polygons
 
 ## Examples
 
