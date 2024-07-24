@@ -242,8 +242,8 @@ pub fn Image(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .ComptimeInt, .Int, .ComptimeFloat, .Float => {
                     var integral: Image(f32) = undefined;
-                    defer integral.deinit(allocator);
                     try self.integralImage(allocator, &integral);
+                    defer integral.deinit(allocator);
                     const size = self.rows * self.cols;
                     var pos: usize = 0;
                     var rem: usize = size;
