@@ -38,7 +38,7 @@ clean:
 	rm -rf zig-out .zig-cache
 
 serve: wasm
-	python -m http.server 8000 -b localhost -d zig-out
+	python -m http.server 8000 -b 127.0.0.1 -d zig-out
 
 serve-debug: wasm-debug
-	python -m http.server 8000 -b localhost -d zig-out
+	python -m http.server 8000 -b 127.0.0.1 -d zig-out
