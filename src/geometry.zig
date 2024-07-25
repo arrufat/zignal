@@ -40,8 +40,8 @@ pub fn Rectangle(comptime T: type) type {
                 .Float => {
                     const l = x - w / 2;
                     const t = y - h / 2;
-                    const r = l + w - 1;
-                    const b = t + h - 1;
+                    const r = l + w;
+                    const b = t + h;
                     return Self.init(l, t, r, b);
                 },
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
@@ -71,7 +71,7 @@ pub fn Rectangle(comptime T: type) type {
         pub fn width(self: Self) if (@typeInfo(T) == .Int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
                 .Int => @intCast(self.r - self.l + 1),
-                .Float => self.r - self.t,
+                .Float => self.b - self.t,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
