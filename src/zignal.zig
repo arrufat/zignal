@@ -28,5 +28,6 @@ pub const drawCircleFast = draw.drawCircleFast;
 pub const drawCross = draw.drawCross;
 pub const drawLine = draw.drawLine;
 pub const drawLineFast = draw.drawLineFast;
+pub const drawRectangle = draw.drawRectangle;
 pub const drawPolygon = draw.drawPolygon;
 pub const fillPolygon = draw.fillPolygon;
