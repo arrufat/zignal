@@ -71,7 +71,7 @@ pub fn Rectangle(comptime T: type) type {
         pub fn width(self: Self) if (@typeInfo(T) == .Int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
                 .Int => @intCast(self.r - self.l + 1),
-                .Float => self.b - self.t,
+                .Float => self.r - self.l,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
