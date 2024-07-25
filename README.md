@@ -4,6 +4,11 @@
 
 Zignal is an image processing library heavily inspired by the amazing [dlib](http://dlib.net).
 
+## Disclaimer
+
+This library is in early stages of development and being used internally.
+As a result, the API might change often.
+
 
 ## Reason of being
 
