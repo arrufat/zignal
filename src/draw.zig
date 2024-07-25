@@ -4,6 +4,7 @@ const Color = @import("color.zig").Color;
 const Rgba = @import("color.zig").Rgba;
 const Image = @import("image.zig").Image;
 const Point2d = @import("point.zig").Point2d(f32);
+const Rectangle = @import("geometry.zig").Rectangle(f32);
 
 /// Draws a colored straight of a custom width between p1 and p2 on image.  Moreover, it alpha-blends
 /// pixels along diagonal lines.
@@ -186,6 +187,16 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
             y1 += sy;
         }
     }
+}
+
+pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: T) void {
+    const points: []const Point2d = &.{
+        .{ .x = rect.l, .y = rect.t },
+        .{ .x = rect.r, .y = rect.t },
+        .{ .x = rect.r, .y = rect.b },
+        .{ .x = rect.l, .y = rect.b },
+    };
+    drawPolygon(T, image, points, width, color);
 }
 
 /// Draws a cross where each side is of length size

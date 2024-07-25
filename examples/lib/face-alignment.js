@@ -266,6 +266,8 @@
           outPtr,
           outSize,
         );
+        image.data.set(rgba);
+        ctx1.putImageData(image, 0, 0);
         const out = ctx2.getImageData(0, 0, outCols, outRows);
         out.data.set(outImg);
         ctx2.putImageData(out, 0, 0);

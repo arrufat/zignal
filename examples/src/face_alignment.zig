@@ -7,6 +7,7 @@ const Image = zignal.Image;
 const SimilarityTransform = zignal.SimilarityTransform(f32);
 const Rectangle = zignal.Rectangle(f32);
 const Rgba = zignal.Rgba;
+const drawRectangle = zignal.drawRectangle;
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -72,6 +73,7 @@ pub fn extractAlignedFace(
     defer rotated.deinit(allocator);
 
     const rect = Rectangle.initCenter(center.x, center.y, side * scale, side * scale);
+    drawRectangle(Rgba, image, rect, 1, .{ .r = 0, .g = 0, .b = 0, .a = 255 });
     var chip: Image(Rgba) = undefined;
     try rotated.crop(allocator, rect, &chip);
     defer chip.deinit(allocator);
