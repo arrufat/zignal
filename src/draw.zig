@@ -8,6 +8,7 @@ const Point2d = @import("point.zig").Point2d(f32);
 /// Draws a colored straight of a custom width between p1 and p2 on image.  Moreover, it alpha-blends
 /// pixels along diagonal lines.
 pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: T) void {
+    if (width == 0) return;
     // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
     const Float = @TypeOf(p1.x);
     var x1 = @round(p1.x);
@@ -151,6 +152,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
 }
 /// Draws a colored straight line of a custom width between p1 and p2 on image, using Bresenham's line algorithm.
 pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: T) void {
+    if (width == 0) return;
     var x1: isize = @intFromFloat(p1.x);
     var y1: isize = @intFromFloat(p1.y);
     const x2: isize = @intFromFloat(p2.x);
@@ -188,6 +190,7 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
 
 /// Draws a cross where each side is of length size
 pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize, color: T) void {
+    if (size == 0) return;
     const x: usize = @intFromFloat(@round(@max(0, @min(as(f32, image.cols - 1), center.x))));
     const y: usize = @intFromFloat(@round(@max(0, @min(as(f32, image.rows - 1), center.y))));
     for (0..size) |i| {
@@ -200,6 +203,7 @@ pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize
 
 /// Draws the given polygon defined as an array of points.
 pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, width: usize, color: T) void {
+    if (width == 0) return;
     for (0..polygon.len) |i| {
         drawLine(T, image, polygon[i], polygon[@mod(i + 1, polygon.len)], width, color);
     }
@@ -207,6 +211,7 @@ pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, 
 
 /// Draws the circle defined by its center and radius.
 pub fn drawCircle(comptime T: type, image: Image(T), center: Point2d, radius: f32, color: T) void {
+    if (radius <= 0) return;
     const frows: f32 = @floatFromInt(image.rows);
     const fcols: f32 = @floatFromInt(image.cols);
     if (center.x - radius < 0 or
@@ -263,6 +268,7 @@ pub fn drawCircle(comptime T: type, image: Image(T), center: Point2d, radius: f3
 
 /// Draws the circle defined by its center and radius using a fast, but less accurate algorithm.
 pub fn drawCircleFast(comptime T: type, image: Image(T), center: Point2d, radius: f32, color: T) void {
+    if (radius <= 0) return;
     const frows: f32 = @floatFromInt(image.rows);
     const fcols: f32 = @floatFromInt(image.cols);
     const left: usize = @intFromFloat(@round(@max(0, center.x - radius)));
@@ -281,6 +287,7 @@ pub fn drawCircleFast(comptime T: type, image: Image(T), center: Point2d, radius
 }
 
 export fn draw_circle(rgba_ptr: [*]Rgba, rows: usize, cols: usize, x: f32, y: f32, radius: f32, r: u8, g: u8, b: u8, a: u8) void {
+    if (radius <= 0) return;
     const image = Image(Rgba).init(rows, cols, rgba_ptr[0 .. rows * cols]);
     if (@import("builtin").os.tag == .freestanding) {
         drawCircle(Rgba, image, .{ .x = x, .y = y }, radius, .{ .r = r, .g = g, .b = b, .a = a });
