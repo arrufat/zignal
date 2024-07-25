@@ -35,7 +35,7 @@ test: zig-version
 	$(zig) build test --summary all
 
 clean:
-	rm -rf zig-out zig-cache
+	rm -rf zig-out .zig-cache
 
 serve: wasm
 	python -m http.server 8000 -b 127.0.0.1 -d zig-out
