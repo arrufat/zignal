@@ -22,7 +22,29 @@ pub const Color = union(enum) {
         };
     }
 
-    /// Converts color into a the T colorspace.
+    /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
+    fn isRgbCompatible(comptime T: type) bool {
+        return switch (T) {
+            Rgb, Rgba => true,
+            else => blk: {
+                comptime var checks: usize = 0;
+                for (std.meta.fields(T)) |field| {
+                    if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
+                        checks += 1;
+                    }
+                    if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
+                        checks += 1;
+                    }
+                    if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
+                        checks += 1;
+                    }
+                }
+                break :blk checks == 3;
+            },
+        };
+    }
+
+    /// Converts color into the T colorspace.
     pub fn convert(comptime T: type, color: anytype) T {
         comptime assert(isColor(T));
         comptime assert(isColor(@TypeOf(color)));
@@ -57,34 +79,17 @@ pub const Color = union(enum) {
     }
 };
 
-/// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
-fn isRgbCompatible(comptime T: type) bool {
-    comptime var checks: usize = 0;
-    for (std.meta.fields(T)) |field| {
-        if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
-            checks += 1;
-        }
-        if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
-            checks += 1;
-        }
-        if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
-            checks += 1;
-        }
-    }
-    return checks == 3;
-}
-
 test "Rgb compatibility" {
-    try comptime expectEqual(isRgbCompatible(Rgb), true);
-    try comptime expectEqual(isRgbCompatible(Rgba), true);
-    try comptime expectEqual(isRgbCompatible(Hsv), false);
-    try comptime expectEqual(isRgbCompatible(Lab), false);
+    try comptime expectEqual(Color.isRgbCompatible(Rgb), true);
+    try comptime expectEqual(Color.isRgbCompatible(Rgba), true);
+    try comptime expectEqual(Color.isRgbCompatible(Hsv), false);
+    try comptime expectEqual(Color.isRgbCompatible(Lab), false);
 }
 
 /// Alpha-blends c2 into c1.
 /// Alpha-blends c2 into c1.
 inline fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
-    if (comptime !isRgbCompatible(T)) {
+    if (comptime !Color.isRgbCompatible(T)) {
         @compileError(@typeName(T) ++ " is not Rgb compatible");
     }
     if (c2.a == 0) {
