@@ -6,8 +6,9 @@ const Image = @import("image.zig").Image;
 const Point2d = @import("point.zig").Point2d(f32);
 const Rectangle = @import("geometry.zig").Rectangle(f32);
 
-/// Draws a colored straight of a custom width between p1 and p2 on image.  Moreover, it alpha-blends
-/// pixels along diagonal lines.
+/// Draws a colored straight of a custom width between p1 and p2 on image.  It uses Xialin
+/// Wu's line algorithm to perform antialiasing along the diagonal.  Moreover, if color is of
+/// Rgba type, it alpha-blends it on top of the image.
 pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: T) void {
     if (width == 0) return;
     // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
@@ -19,7 +20,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
     const rows: Float = @floatFromInt(image.rows);
     const cols: Float = @floatFromInt(image.cols);
     const half_width: Float = @floatFromInt(width / 2);
-    const rgba = Color.convert(Rgba, color);
+    var c2 = Color.convert(Rgba, color);
 
     if (x1 == x2) {
         if (y1 > y2) std.mem.swap(Float, &y1, &y2);
@@ -32,7 +33,9 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const px = x1 + i;
                 if (px >= 0 and px < cols) {
                     const pos = as(usize, y) * image.cols + as(usize, px);
-                    image.data[pos] = color;
+                    var c1 = Color.convert(Rgba, image.data[pos]);
+                    c1.blend(c2);
+                    image.data[pos] = Color.convert(T, c1);
                 }
             }
         }
@@ -47,15 +50,16 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const py = y1 + i;
                 if (py >= 0 and py < rows) {
                     const pos = as(usize, py) * image.cols + as(usize, x);
-                    image.data[pos] = color;
+                    var c1 = Color.convert(Rgba, image.data[pos]);
+                    c1.blend(c2);
+                    image.data[pos] = Color.convert(T, c1);
                 }
             }
         }
     } else {
         // This part is a little more complicated because we are going to perform alpha blending
         // so the diagonal lines look nice.
-        var c2 = Color.convert(Rgba, color);
-        const max_alpha: Float = @floatFromInt(rgba.a);
+        const max_alpha: Float = @floatFromInt(c2.a);
         const rise = y2 - y1;
         const run = x2 - x1;
         if (@abs(rise) < @abs(run)) {
