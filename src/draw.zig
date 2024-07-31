@@ -73,35 +73,37 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const y = @floor(dy);
                 const x = @floor(dx);
                 if (y >= 0 and y <= rows - 1) {
-                    c2.a = @intFromFloat((1 - (dy - y)) * max_alpha);
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
                         const py = y + j;
                         const pos = as(usize, py) * image.cols + as(usize, x);
                         if (py >= 0 and py < rows) {
+                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
-                                var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                                c2.a = @intFromFloat((1 - (dy - y)) * max_alpha);
                                 c1.blend(c2);
                                 image.data[pos] = Color.convert(T, c1);
                             } else {
-                                image.data[pos] = color;
+                                c1.blend(c2);
+                                image.data[pos] = Color.convert(T, c1);
                             }
                         }
                     }
                 }
                 if (y + 1 >= 0 and y + 1 <= rows - 1) {
-                    c2.a = @intFromFloat((dy - y) * max_alpha);
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
                         const py = y + 1 + j;
                         if (py >= 0 and py < rows) {
                             const pos = as(usize, py) * image.cols + as(usize, x);
+                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
-                                var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                                c2.a = @intFromFloat((dy - y) * max_alpha);
                                 c1.blend(c2);
                                 image.data[pos] = Color.convert(T, c1);
                             } else {
-                                image.data[pos] = color;
+                                c1.blend(c2);
+                                image.data[pos] = Color.convert(T, c1);
                             }
                         }
                     }
@@ -118,18 +120,19 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const y = @floor(dy);
                 const x = @floor(dx);
                 if (x >= 0 and x <= cols - 1) {
-                    c2.a = @intFromFloat((1 - (dx - x)) * max_alpha);
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
                         const px = x + j;
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
+                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
-                                var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                                c2.a = @intFromFloat((1 - (dx - x)) * max_alpha);
                                 c1.blend(c2);
                                 image.data[pos] = Color.convert(T, c1);
                             } else {
-                                image.data[pos] = color;
+                                c1.blend(c2);
+                                image.data[pos] = Color.convert(T, c1);
                             }
                         }
                     }
@@ -141,12 +144,13 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                         const px = x + 1 + j;
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
+                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
-                                var c1: Rgba = Color.convert(Rgba, image.data[pos]);
                                 c1.blend(c2);
                                 image.data[pos] = Color.convert(T, c1);
                             } else {
-                                image.data[pos] = color;
+                                c1.blend(c2);
+                                image.data[pos] = Color.convert(T, c1);
                             }
                         }
                     }
