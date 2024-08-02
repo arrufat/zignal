@@ -10,7 +10,16 @@ pub fn build(b: *std.Build) void {
     // Export module.
     _ = b.addModule("zignal", .{ .root_source_file = b.path("src/zignal.zig") });
 
-    _ = buildModule(b, "zignal", target, optimize);
+    // Build zignal.
+    const zignal = buildModule(b, "zignal", target, optimize);
+
+    // Build docs.
+    const docs = b.addInstallDirectory(.{
+        .source_dir = zignal.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    b.getInstallStep().dependOn(&docs.step);
 
     const lib_check = b.addStaticLibrary(.{
         .name = "zignal",
