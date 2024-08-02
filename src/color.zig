@@ -15,7 +15,7 @@ pub const Color = union(enum) {
     Lab: Lab,
 
     /// Returns true if and only if T can be treated as a color.
-    fn isColor(comptime T: type) bool {
+    pub fn isColor(comptime T: type) bool {
         return switch (T) {
             u8, Rgb, Rgba, Hsv, Lab => true,
             else => false,

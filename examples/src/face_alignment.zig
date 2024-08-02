@@ -7,6 +7,7 @@ const Image = zignal.Image;
 const SimilarityTransform = zignal.SimilarityTransform(f32);
 const Rectangle = zignal.Rectangle(f32);
 const Rgba = zignal.Rgba;
+const Hsv = zignal.Hsv;
 const drawRectangle = zignal.drawRectangle;
 
 pub const std_options: std.Options = .{
@@ -36,7 +37,7 @@ pub fn extractAlignedFace(
     blurring: i32,
     out: *Image(T),
 ) !void {
-    // This are the normalized coordinates of the aligned landmarks
+    // These are the normalized coordinates of the aligned landmarks
     // taken from dlib.
     var from_points: [5]Point2d = .{
         .{ .x = 0.8595674595992, .y = 0.2134981538014 },
@@ -46,6 +47,7 @@ pub fn extractAlignedFace(
         .{ .x = 0.4901123135679, .y = 0.6277975316475 },
     };
 
+    // These are the detected points from MediaPipe.
     const to_points: [5]Point2d = .{
         landmarks[alignment[0]].scale(image.cols, image.rows),
         landmarks[alignment[1]].scale(image.cols, image.rows),
@@ -61,6 +63,9 @@ pub fn extractAlignedFace(
         p.x = (padding + p.x) / (2 * padding + 1) * side;
         p.y = (padding + p.y) / (2 * padding + 1) * side;
     }
+
+    // Find the transforms that maps the points between the canonical landmarks
+    // and the detected landmarks.
     const transform = SimilarityTransform.find(&from_points, &to_points);
     var p = transform.project(.{ .x = 1, .y = 0 });
     p.x -= transform.bias.at(0, 0);
@@ -68,16 +73,25 @@ pub fn extractAlignedFace(
     const angle = std.math.atan2(p.y, p.x);
     const scale = p.norm();
     const center = transform.project(.{ .x = side / 2, .y = side / 2 });
+
+    // Align the face: rotate the image so that the face is aligned.
     var rotated: Image(Rgba) = undefined;
     try image.rotateFrom(allocator, center, angle, &rotated);
     defer rotated.deinit(allocator);
 
+    // Get the rectangle around the face.
     const rect = Rectangle.initCenter(center.x, center.y, side * scale, side * scale);
-    drawRectangle(Rgba, image, rect, 1, .{ .r = 0, .g = 0, .b = 0, .a = 255 });
+    // Draw a rectangle around the detected face.  Note that the color can be any Zignal
+    // supported color, and the appropriate conversion will be performed.  In this case,
+    // the image is in Rgba format, and the color is in Hsv.  Zignal will handle that.
+    drawRectangle(Rgba, image, rect, 1, Hsv{ .h = 0, .s = 100, .v = 100 });
+
+    // Crop out the detected face.
     var chip: Image(Rgba) = undefined;
     try rotated.crop(allocator, rect, &chip);
     defer chip.deinit(allocator);
 
+    // Resize it to the desired size.
     var resized = try Image(Rgba).initAlloc(allocator, out.rows, out.cols);
     defer resized.deinit(allocator);
     chip.resize(&resized);
@@ -85,6 +99,7 @@ pub fn extractAlignedFace(
         c.* = b;
     }
 
+    // Perform blurring or sharpening to the aligned face.
     if (blurring > 0) {
         try out.boxBlur(allocator, out, @intCast(blurring));
     } else if (blurring < 0) {
