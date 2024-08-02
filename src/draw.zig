@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const as = @import("meta.zig").as;
 const Color = @import("color.zig").Color;
 const Rgba = @import("color.zig").Rgba;
@@ -9,7 +10,8 @@ const Rectangle = @import("geometry.zig").Rectangle(f32);
 /// Draws a colored straight of a custom width between p1 and p2 on image.  It uses Xialin
 /// Wu's line algorithm to perform antialiasing along the diagonal.  Moreover, if color is of
 /// Rgba type, it alpha-blends it on top of the image.
-pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: T) void {
+pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: anytype) void {
+    comptime assert(Color.isColor(@TypeOf(color)));
     if (width == 0) return;
     // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
     const Float = @TypeOf(p1.x);
@@ -197,7 +199,8 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
     }
 }
 
-pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: T) void {
+pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: anytype) void {
+    comptime assert(Color.isColor(@TypeOf(color)));
     const points: []const Point2d = &.{
         .{ .x = rect.l, .y = rect.t },
         .{ .x = rect.r, .y = rect.t },
@@ -221,7 +224,8 @@ pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize
 }
 
 /// Draws the given polygon defined as an array of points.
-pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, width: usize, color: T) void {
+pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, width: usize, color: anytype) void {
+    comptime assert(Color.isColor(@TypeOf(color)));
     if (width == 0) return;
     for (0..polygon.len) |i| {
         drawLine(T, image, polygon[i], polygon[@mod(i + 1, polygon.len)], width, color);
