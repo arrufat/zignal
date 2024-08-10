@@ -94,7 +94,7 @@ pub fn extractAlignedFace(
     // Resize it to the desired size.
     var resized = try Image(Rgba).initAlloc(allocator, out.rows, out.cols);
     defer resized.deinit(allocator);
-    chip.resize(&resized);
+    chip.resize(resized);
     for (out.data, resized.data) |*c, b| {
         c.* = b;
     }

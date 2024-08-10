@@ -19,11 +19,11 @@ pub fn Image(comptime T: type) type {
         const Self = @This();
         /// Constructs an image of rows and cols size.  If the slice is owned by this image,
         /// deinit should also be called.
-        pub fn init(rows: usize, cols: usize, data: []T) Self {
+        pub fn init(rows: usize, cols: usize, data: []T) Image(T) {
             return .{ .rows = rows, .cols = cols, .data = data };
         }
 
-        pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
+        pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(rows * cols);
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice() };
@@ -117,7 +117,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Resizes an image to fit in out, using bilinear interpolation.
-        pub fn resize(self: Self, out: *Self) void {
+        pub fn resize(self: Self, out: Self) void {
             const x_scale: f32 = as(f32, self.cols - 1) / as(f32, @max(out.cols - 1, 1));
             const y_scale: f32 = as(f32, self.rows - 1) / as(f32, @max(out.rows - 1, 1));
             var sy: f32 = -y_scale;
