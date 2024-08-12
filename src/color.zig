@@ -51,8 +51,7 @@ pub const Color = union(enum) {
         return switch (T) {
             u8 => switch (@TypeOf(color)) {
                 u8 => color,
-                inline Rgb, Rgba => @intFromFloat(color.toHsv().v / 100 * 255),
-                else => @compileError("Unsupported color " ++ @typeName(@TypeOf(color))),
+                inline else => color.toGray(),
             },
             Rgb => switch (@TypeOf(color)) {
                 Rgb => color,
@@ -79,14 +78,19 @@ pub const Color = union(enum) {
     }
 };
 
-test "Rgb compatibility" {
+test "Color.isRgbCompatible" {
     try comptime expectEqual(Color.isRgbCompatible(Rgb), true);
     try comptime expectEqual(Color.isRgbCompatible(Rgba), true);
     try comptime expectEqual(Color.isRgbCompatible(Hsv), false);
     try comptime expectEqual(Color.isRgbCompatible(Lab), false);
 }
 
-/// Alpha-blends c2 into c1.
+test "Color.convert" {
+    try expectEqual(Color.convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
+    try expectEqual(Color.convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
+    try expectEqual(Color.convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
+}
+
 /// Alpha-blends c2 into c1.
 inline fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
     if (comptime !Color.isRgbCompatible(T)) {
@@ -134,6 +138,16 @@ pub const Rgba = packed struct {
         alphaBlend(Rgba, self, color);
     }
 
+    /// Checks if the pixel is a shade of gray.
+    pub fn isGray(self: Rgba) bool {
+        return self.r == self.g and self.g == self.b;
+    }
+
+    /// Converts the RGBA color into grayscale.
+    pub fn toGray(self: Rgba) u8 {
+        return @intFromFloat(@round(self.toHsv().v / 100 * 255));
+    }
+
     /// Converts the RGBA color into a hex value.
     pub fn toHex(self: Rgba) u32 {
         return self.r << (8 * 3) + self.g << (8 * 2) + self.g << (8 * 1) + self.a << (8 * 0);
@@ -152,11 +166,6 @@ pub const Rgba = packed struct {
     /// Converts the RGBA color into an Lab color, ignoring the alpha channel.
     pub fn toLab(self: Rgba) Lab {
         return self.toRgb().toLab();
-    }
-
-    /// Checks if the pixel is a shade of gray.
-    pub fn isGray(self: Rgba) bool {
-        return self.r == self.g and self.g == self.b;
     }
 };
 
@@ -185,6 +194,16 @@ pub const Rgb = struct {
         alphaBlend(Rgb, self, color);
     }
 
+    /// Checks if the pixel is a shade of gray.
+    pub fn isGray(self: Rgb) bool {
+        return self.r == self.g and self.g == self.b;
+    }
+
+    /// Converts the RGB color into grayscale.
+    pub fn toGray(self: Rgb) u8 {
+        return @intFromFloat(@round(self.toHsv().v / 100 * 255));
+    }
+
     /// Converts the RGB color into a hex value.
     pub fn toHex(self: Rgb) u24 {
         return self.r << 16 + self.g << 8 + self.g;
@@ -193,11 +212,6 @@ pub const Rgb = struct {
     /// Converts the RGB color into an RGBA color with the specified alpha.
     pub fn toRgba(self: Rgb, alpha: u8) Rgba {
         return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
-    }
-
-    /// Checks if the pixel is a shade of gray.
-    pub fn isGray(self: Rgb) bool {
-        return self.r == self.g and self.g == self.b;
     }
 
     /// Converts the RGB color into an HSV color.
@@ -313,6 +327,11 @@ pub const Hsv = struct {
         return self.s == 0;
     }
 
+    /// Converts the HSV color into grayscale.
+    pub fn toGray(self: Hsv) u8 {
+        return @intFromFloat(@round(self.v / 100 * 255));
+    }
+
     /// Converts the HSV color into an RGB color.
     pub fn toRgb(self: Hsv) Rgb {
         var r: f32 = undefined;
@@ -390,6 +409,16 @@ pub const Lab = struct {
     l: f64 = 0,
     a: f64 = 0,
     b: f64 = 0,
+
+    /// Checks if the pixel is a shade of gray.
+    pub fn isGray(self: Lab) bool {
+        return self.a == 0 and self.b == 0;
+    }
+
+    /// Converts the Lab color into grayscale.
+    pub fn toGray(self: Lab) u8 {
+        return @intFromFloat(@round(self.l / 100 * 255));
+    }
 
     /// Converts the CIELAB color into a RGB color.
     pub fn toRgb(self: Lab) Rgb {
