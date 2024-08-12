@@ -387,9 +387,9 @@ pub const Hsv = struct {
             }
         }
         return .{
-            .r = @intFromFloat(@max(0, @min(255, @round(r * 255)))),
-            .g = @intFromFloat(@max(0, @min(255, @round(g * 255)))),
-            .b = @intFromFloat(@max(0, @min(255, @round(b * 255)))),
+            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
+            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
+            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
         };
     }
 
