@@ -77,7 +77,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 if (y >= 0 and y <= rows - 1) {
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
-                        const py = y + j;
+                        const py = @max(0, y + j);
                         const pos = as(usize, py) * image.cols + as(usize, x);
                         if (py >= 0 and py < rows) {
                             var c1: Rgba = Color.convert(Rgba, image.data[pos]);
@@ -95,7 +95,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 if (y + 1 >= 0 and y + 1 <= rows - 1) {
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
-                        const py = y + 1 + j;
+                        const py = @max(0, y + 1 + j);
                         if (py >= 0 and py < rows) {
                             const pos = as(usize, py) * image.cols + as(usize, x);
                             var c1: Rgba = Color.convert(Rgba, image.data[pos]);
@@ -124,7 +124,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 if (x >= 0 and x <= cols - 1) {
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
-                        const px = x + j;
+                        const px = @max(0, x + j);
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
                             var c1: Rgba = Color.convert(Rgba, image.data[pos]);
@@ -143,7 +143,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                     c2.a = @intFromFloat((dx - x) * max_alpha);
                     var j = -half_width;
                     while (j <= half_width) : (j += 1) {
-                        const px = x + 1 + j;
+                        const px = @max(0, x + 1 + j);
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
                             var c1: Rgba = Color.convert(Rgba, image.data[pos]);
