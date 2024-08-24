@@ -33,6 +33,12 @@ jobs:
       - name: Build Docs
         run: zig build
 
+      - name: Build Examples
+        run: |
+          cd examples
+          make wasm
+          mv zig-out ../zig-out/docs/examples
+
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v1
         with:
