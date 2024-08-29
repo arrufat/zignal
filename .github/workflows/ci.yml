@@ -17,7 +17,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - zig-version: 0.13.0
           - zig-version: master
 
     runs-on: ubuntu-latest
