@@ -8,7 +8,7 @@ fn scaleDimension(val: f32, dim: usize) f32 {
 
 /// A simple 2D point with floating point coordinates.
 pub fn Point2d(comptime T: type) type {
-    assert(@typeInfo(T) == .Float);
+    assert(@typeInfo(T) == .float);
     return packed struct {
         x: T,
         y: T,

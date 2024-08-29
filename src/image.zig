@@ -94,13 +94,13 @@ pub fn Image(comptime T: type) type {
             const br: T = self.data[as(usize, bottom) * self.cols + as(usize, right)];
             var temp: T = undefined;
             switch (@typeInfo(T)) {
-                .Int, .Float => {
+                .int, .float => {
                     temp = as(T, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) +
                         lr_frac * as(f32, tr)) +
                         tb_frac * ((1 - lr_frac) * as(f32, bl) +
                         lr_frac * as(f32, br)));
                 },
-                .Struct => {
+                .@"struct" => {
                     inline for (std.meta.fields(T)) |f| {
                         @field(temp, f.name) = as(
                             f.type,
@@ -182,7 +182,7 @@ pub fn Image(comptime T: type) type {
             integral: *Image(if (isScalar(T)) f32 else if (isStruct(T)) [std.meta.fields(T).len]f32 else @compileError("Can't compute the integral image of " ++ @typeName(T) ++ ".")),
         ) !void {
             switch (@typeInfo(T)) {
-                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                .comptime_int, .int, .comptime_float, .float => {
                     if (!self.hasSameShape(integral.*)) {
                         integral.* = try Image(f32).initAlloc(allocator, self.rows, self.cols);
                     }
@@ -201,7 +201,7 @@ pub fn Image(comptime T: type) type {
                         }
                     }
                 },
-                .Struct => {
+                .@"struct" => {
                     const num_fields = std.meta.fields(T).len;
                     if (!self.hasSameShape(integral.*)) {
                         integral.* = try Image([num_fields]f32).initAlloc(allocator, self.rows, self.cols);
@@ -240,7 +240,7 @@ pub fn Image(comptime T: type) type {
             }
 
             switch (@typeInfo(T)) {
-                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                .comptime_int, .int, .comptime_float, .float => {
                     var integral: Image(f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
@@ -284,8 +284,8 @@ pub fn Image(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             blurred.data[pos] = switch (@typeInfo(T)) {
-                                .Int, .ComptimeInt => as(T, @round(sum / area)),
-                                .Float, .ComptimeFloat => as(T, sum / area),
+                                .int, .comtime_int => as(T, @round(sum / area)),
+                                .float, .comptime_float => as(T, sum / area),
                                 else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(T) ++ "."),
                             };
                             pos += 1;
@@ -293,7 +293,7 @@ pub fn Image(comptime T: type) type {
                         }
                     }
                 },
-                .Struct => {
+                .@"struct" => {
                     const num_fields = std.meta.fields(T).len;
                     var integral: Image([num_fields]f32) = undefined;
                     try self.integralImage(allocator, &integral);
@@ -318,8 +318,8 @@ pub fn Image(comptime T: type) type {
                         inline for (std.meta.fields(T), 0..) |f, i| {
                             const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
                             @field(blurred.data[pos], f.name) = switch (@typeInfo(f.type)) {
-                                .Int, .ComptimeInt => as(f.type, @round(sum / area)),
-                                .Float, .ComptimeFloat => as(f.type, sum / area),
+                                .int, .comptime_int => as(f.type, @round(sum / area)),
+                                .float, .comptime_float => as(f.type, sum / area),
                                 else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
                             };
                         }
@@ -344,7 +344,7 @@ pub fn Image(comptime T: type) type {
             }
 
             switch (@typeInfo(T)) {
-                .Int, .Float => {
+                .int, .float => {
                     var integral: Image(f32) = undefined;
                     defer integral.deinit(allocator);
                     try self.integralImage(allocator, &integral);
@@ -373,7 +373,7 @@ pub fn Image(comptime T: type) type {
                             const sums = int22s - int21s - int12s + int11s;
                             const vals: [simd_len]f32 = @round(sums / box_areas);
                             for (vals, 0..) |val, i| {
-                                if (@typeInfo(T) == .ComptimeInt or @typeInfo(T) == .Int) {
+                                if (@typeInfo(T) == .comptime_int or @typeInfo(T) == .int) {
                                     const temp = @max(0, @min(std.math.maxInt(T), as(isize, self.data[pos]) * 2 - @as(isize, val)));
                                     sharpened.data[pos + i] = as(T, temp);
                                 } else {
@@ -392,15 +392,15 @@ pub fn Image(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             sharpened.data[pos] = switch (@typeInfo(T)) {
-                                .Int, .ComptimeInt => as(T, @round(sum / area)),
-                                .Float, .ComptimeFloat => as(T, sum / area),
+                                .int, .comptime_int => as(T, @round(sum / area)),
+                                .float, .comptime_float => as(T, sum / area),
                             };
                             pos += 1;
                             rem -= 1;
                         }
                     }
                 },
-                .Struct => {
+                .@"struct" => {
                     const num_fields = std.meta.fields(T).len;
                     var integral: Image([num_fields]f32) = undefined;
                     try self.integralImage(allocator, &integral);
@@ -425,8 +425,8 @@ pub fn Image(comptime T: type) type {
                         inline for (std.meta.fields(T), 0..) |f, i| {
                             const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
                             @field(sharpened.data[pos], f.name) = switch (@typeInfo(f.type)) {
-                                .Int => as(f.type, @max(0, @min(std.math.maxInt(f.type), as(isize, @field(self.data[pos], f.name)) * 2 - as(isize, @round(sum / area))))),
-                                .Float => as(f.type, 2 * @field(self.data[pos], f.name) - sum / area),
+                                .int => as(f.type, @max(0, @min(std.math.maxInt(f.type), as(isize, @field(self.data[pos], f.name)) * 2 - as(isize, @round(sum / area))))),
+                                .float => as(f.type, 2 * @field(self.data[pos], f.name) - sum / area),
                                 else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
                             };
                         }

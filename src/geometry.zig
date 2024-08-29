@@ -10,7 +10,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 /// A generic rectangle object with some convenience functionality.
 pub fn Rectangle(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .Int, .Float => {},
+        .int, .float => {},
         else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
     }
     return struct {
@@ -30,14 +30,14 @@ pub fn Rectangle(comptime T: type) type {
         pub fn initCenter(x: T, y: T, w: T, h: T) Self {
             assert(w > 0 and h > 0);
             switch (@typeInfo(T)) {
-                .Int => {
+                .int => {
                     const l = x - @divFloor(w, 2);
                     const t = y - @divFloor(h, 2);
                     const r = l + w - 1;
                     const b = t + h - 1;
                     return Self.init(l, t, r, b);
                 },
-                .Float => {
+                .float => {
                     const l = x - w / 2;
                     const t = y - h / 2;
                     const r = l + w;
@@ -61,32 +61,32 @@ pub fn Rectangle(comptime T: type) type {
         /// Checks if a rectangle is ill-formed.
         pub fn isEmpty(self: Self) bool {
             return switch (@typeInfo(T)) {
-                .Int => self.t > self.b or self.l > self.r,
-                .Float => self.t >= self.b or self.l >= self.r,
+                .int => self.t > self.b or self.l > self.r,
+                .float => self.t >= self.b or self.l >= self.r,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Returns the width of the rectangle.
-        pub fn width(self: Self) if (@typeInfo(T) == .Int) usize else T {
+        pub fn width(self: Self) if (@typeInfo(T) == .int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .Int => @intCast(self.r - self.l + 1),
-                .Float => self.r - self.l,
+                .int => @intCast(self.r - self.l + 1),
+                .float => self.r - self.l,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Returns the height of the rectangle.
-        pub fn height(self: Self) if (@typeInfo(T) == .Int) usize else T {
+        pub fn height(self: Self) if (@typeInfo(T) == .int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .Int => @intCast(self.b - self.t + 1),
-                .Float => self.b - self.t,
+                .int => @intCast(self.b - self.t + 1),
+                .float => self.b - self.t,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Returns the area of the rectangle
-        pub fn area(self: Self) if (@typeInfo(T) == .Int) usize else T {
+        pub fn area(self: Self) if (@typeInfo(T) == .int) usize else T {
             return self.height() * self.width();
         }
 

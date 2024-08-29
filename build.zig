@@ -2,8 +2,10 @@
 // License: Boost Software License
 
 const std = @import("std");
+const builtin = @import("builtin");
+const min_zig_version = std.SemanticVersion.parse("0.14.0-dev.1349+6a21875dd") catch unreachable;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -116,3 +118,16 @@ fn buildModule(
     module.rdynamic = true;
     return module;
 }
+
+const Build = blk: {
+    if (builtin.zig_version.order(min_zig_version) == .lt) {
+        const message = std.fmt.comptimePrint(
+            \\Zig version is too old:
+            \\  current Zig version: {}
+            \\  minimum Zig version: {}
+        , .{ builtin.zig_version, min_zig_version });
+        @compileError(message);
+    } else {
+        break :blk std.Build;
+    }
+};
