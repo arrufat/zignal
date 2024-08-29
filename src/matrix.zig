@@ -6,7 +6,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 
 /// Creates a Matrix with elements of type T and size rows times cols.
 pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
-    assert(@typeInfo(T) == .Float);
+    assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
         comptime rows: usize = rows,

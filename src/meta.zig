@@ -1,24 +1,24 @@
-/// Converts between numeric types: .Enum, .Int and .Float.
+/// Converts between numeric types: .@"enum", .int and .float.
 pub inline fn as(comptime T: type, from: anytype) T {
     switch (@typeInfo(@TypeOf(from))) {
-        .Enum => {
+        .@"enum" => {
             switch (@typeInfo(T)) {
-                .Int => return @intFromEnum(from),
+                .int => return @intFromEnum(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
-        .Int => {
+        .int => {
             switch (@typeInfo(T)) {
-                .Enum => return @enumFromInt(from),
-                .Int => return @intCast(from),
-                .Float => return @floatFromInt(from),
+                .@"enum" => return @enumFromInt(from),
+                .int => return @intCast(from),
+                .float => return @floatFromInt(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
-        .Float => {
+        .float => {
             switch (@typeInfo(T)) {
-                .Float => return @floatCast(from),
-                .Int => return @intFromFloat(from),
+                .float => return @floatCast(from),
+                .int => return @intFromFloat(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
@@ -29,12 +29,12 @@ pub inline fn as(comptime T: type, from: anytype) T {
 /// Returns true if and only if T represents a scalar type.
 pub inline fn isScalar(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        .ComptimeInt, .Int, .ComptimeFloat, .Float => true,
+        .comptime_int, .int, .comptime_float, .float => true,
         else => false,
     };
 }
 
 /// Returns true if and only if T represents a struct type.
 pub inline fn isStruct(comptime T: type) bool {
-    return @typeInfo(T) == .Struct;
+    return @typeInfo(T) == .@"struct";
 }
