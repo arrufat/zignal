@@ -1,3 +1,5 @@
+//! Zignal is an image processing library inspired by dlib.
+
 const std = @import("std");
 
 const color = @import("color.zig");
