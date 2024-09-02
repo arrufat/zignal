@@ -65,7 +65,7 @@ pub fn Point2d(comptime T: type) type {
 
 /// A simple 3D point with floating point coordinates.
 pub fn Point3d(comptime T: type) type {
-    assert(@typeInfo(T) == .Float);
+    assert(@typeInfo(T) == .float);
     return struct {
         x: T,
         y: T,
