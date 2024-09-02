@@ -284,7 +284,7 @@ pub fn Image(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             blurred.data[pos] = switch (@typeInfo(T)) {
-                                .int, .comtime_int => as(T, @round(sum / area)),
+                                .int, .comptime_int => as(T, @round(sum / area)),
                                 .float, .comptime_float => as(T, sum / area),
                                 else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(T) ++ "."),
                             };
