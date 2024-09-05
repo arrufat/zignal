@@ -15,13 +15,15 @@ pub fn build(b: *Build) void {
     // Build zignal.
     const zignal = buildModule(b, "zignal", target, optimize);
 
-    // Build docs.
-    const docs = b.addInstallDirectory(.{
+    // Emit docs.
+    const docs_step = b.step("docs", "Emit docs");
+    const docs_install = b.addInstallDirectory(.{
         .source_dir = zignal.getEmittedDocs(),
         .install_dir = .prefix,
         .install_subdir = "docs",
     });
-    b.getInstallStep().dependOn(&docs.step);
+    docs_step.dependOn(&docs_install.step);
+    b.default_step.dependOn(docs_step);
 
     const lib_check = b.addStaticLibrary(.{
         .name = "zignal",

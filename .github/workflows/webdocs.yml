@@ -33,7 +33,7 @@ jobs:
           version: master
 
       - name: Build Docs
-        run: zig build
+        run: zig build docs
 
       - name: Build Examples
         run: |
