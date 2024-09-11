@@ -1,5 +1,4 @@
 // Copyright (C) 2024 B*Factory
-// License: Boost Software License
 
 const std = @import("std");
 const builtin = @import("builtin");
