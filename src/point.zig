@@ -1,11 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-/// Denormalize the coordinate to be in the range [0, dim-1].
-fn scaleDimension(val: f32, dim: usize) f32 {
-    return @max(0, @min(@as(f32, @floatFromInt(dim)) - 1, val * @as(f32, @floatFromInt(dim)) - 1));
-}
-
 /// A simple 2D point with floating point coordinates.
 pub fn Point2d(comptime T: type) type {
     assert(@typeInfo(T) == .float);
@@ -13,13 +8,9 @@ pub fn Point2d(comptime T: type) type {
         x: T,
         y: T,
 
-        /// Assumes the point's coordinates are normalized between 0 and 1.  Then it denormalizes
-        /// them by rescaling with the appropriate dims.
-        pub fn scale(self: Point2d(T), x_dim: usize, y_dim: usize) Point2d(T) {
-            return .{
-                .x = scaleDimension(self.x, x_dim),
-                .y = scaleDimension(self.y, y_dim),
-            };
+        /// Scales self x and y coordinates with x_scale and y_scale, respectively.
+        pub fn scale(self: Point2d(T), x_scale: T, y_scale: T) Point2d(T) {
+            return .{ .x = self.x * x_scale, .y = self.y * y_scale };
         }
 
         /// Adds self and other.
@@ -81,14 +72,9 @@ pub fn Point3d(comptime T: type) type {
         y: T,
         z: T,
 
-        /// Assumes the point's coordinates are normalized between 0 and 1.  Then it denormalizes
-        /// them by rescaling with the appropriate dims.
-        pub fn scale(self: Point3d(T), x_dim: usize, y_dim: usize, z_dim: usize) Point3d(T) {
-            return .{
-                .x = scaleDimension(self.x, x_dim),
-                .y = scaleDimension(self.y, y_dim),
-                .z = scaleDimension(self.z, z_dim),
-            };
+        /// Scales self x, y and z coordinates with x_scale, y_scale and z_scale, respectively.
+        pub fn scale(self: Point2d(T), x_scale: T, y_scale: T, z_scale: T) Point2d(T) {
+            return .{ .x = self.x * x_scale, .y = self.y * y_scale, .z = self.z * z_scale };
         }
 
         /// Adds self and other.
