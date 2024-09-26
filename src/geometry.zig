@@ -382,7 +382,7 @@ pub fn ConvexHull(comptime T: type) type {
             return switch (computeOrientation(p, a, b)) {
                 .clockwise => true,
                 .counter_clockwise => false,
-                .collinear => p.distance_squared(a) < p.distance_squared(b),
+                .collinear => p.distanceSquared(a) < p.distanceSquared(b),
             };
         }
 
