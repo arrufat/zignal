@@ -22,13 +22,23 @@ pub fn Point2d(comptime T: type) type {
             };
         }
 
+        /// Adds self and other.
+        pub fn add(self: Point2d(T), other: Point2d(T)) Point2d(T) {
+            return .{ .x = self.x + other.x, .y = self.y + other.y };
+        }
+
+        /// Subtracts other from self.
+        pub fn sub(self: Point2d(T), other: Point2d(T)) Point2d(T) {
+            return .{ .x = self.x - other.x, .y = self.y - other.y };
+        }
+
         /// Computes the norm of self.
         pub fn norm(self: Point2d(T)) T {
             return @sqrt(self.x * self.x + self.y * self.y);
         }
 
         /// Computes the squared distance between self and other, useful to avoid the call to sqrt.
-        pub fn distance_squared(self: Point2d(T), other: Point2d(T)) T {
+        pub fn distanceSquared(self: Point2d(T), other: Point2d(T)) T {
             return
             // zig fmt: off
                 (self.x - other.x) * (self.x - other.x) +
@@ -38,7 +48,7 @@ pub fn Point2d(comptime T: type) type {
 
         /// Computes the distance between self and other.
         pub fn distance(self: Point2d(T), other: Point2d(T)) T {
-            return @sqrt(self.distance_squared(other));
+            return @sqrt(self.distanceSquared(other));
         }
 
         /// Rotates the point by angle with regards to center.
@@ -81,13 +91,23 @@ pub fn Point3d(comptime T: type) type {
             };
         }
 
+        /// Adds self and other.
+        pub fn add(self: Point3d(T), other: Point3d(T)) Point3d(T) {
+            return .{ .x = self.x + other.x, .y = self.y + other.y, .z = self.z + other.z };
+        }
+
+        /// Subtracts other from self.
+        pub fn sub(self: Point3d(T), other: Point3d(T)) Point3d(T) {
+            return .{ .x = self.x - other.x, .y = self.y - other.y, .z = self.z - other.z };
+        }
+
         /// Computes the norm of self.
         pub fn norm(self: Point3d(T)) T {
             return @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
         }
 
         /// Computes the squared distance between self and other, useful to avoid the call to sqrt.
-        pub fn distance_squared(self: Point3d(T), other: Point3d(T)) T {
+        pub fn distanceSquared(self: Point3d(T), other: Point3d(T)) T {
             return
             // zig fmt: off
                 (self.x - other.x) * (self.x - other.x) +
@@ -98,7 +118,7 @@ pub fn Point3d(comptime T: type) type {
 
         /// Computes the distance between self and other.
         pub fn distance(self: Point3d(T), other: Point3d(T)) T {
-            return @sqrt(self.distance_squared(other));
+            return @sqrt(self.distanceSquared(other));
         }
 
         /// Casts the underlying 3d point type T to U.
