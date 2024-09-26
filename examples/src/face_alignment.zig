@@ -46,14 +46,16 @@ pub fn extractAlignedFace(
         .{ .x = 0.3340850613712, .y = 0.2290642403242 },
         .{ .x = 0.4901123135679, .y = 0.6277975316475 },
     };
+    const scale_cols: f32 = @floatFromInt(image.cols - 1);
+    const scale_rows: f32 = @floatFromInt(image.rows - 1);
 
     // These are the detected points from MediaPipe.
     const to_points: [5]Point2d = .{
-        landmarks[alignment[0]].scale(image.cols, image.rows),
-        landmarks[alignment[1]].scale(image.cols, image.rows),
-        landmarks[alignment[2]].scale(image.cols, image.rows),
-        landmarks[alignment[3]].scale(image.cols, image.rows),
-        landmarks[alignment[4]].scale(image.cols, image.rows),
+        landmarks[alignment[0]].scale(scale_cols, scale_rows),
+        landmarks[alignment[1]].scale(scale_cols, scale_rows),
+        landmarks[alignment[2]].scale(scale_cols, scale_rows),
+        landmarks[alignment[3]].scale(scale_cols, scale_rows),
+        landmarks[alignment[4]].scale(scale_cols, scale_rows),
     };
     assert(from_points.len == to_points.len);
     assert(out.cols == out.rows);
