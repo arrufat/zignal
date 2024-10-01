@@ -11,6 +11,7 @@ pub const Color = union(enum) {
     Gray: u8,
     Rgb: Rgb,
     Rgba: Rgba,
+    Hsl: Hsl,
     Hsv: Hsv,
     Lab: Lab,
 
@@ -63,6 +64,11 @@ pub const Color = union(enum) {
                 u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
                 inline else => color.toRgba(255),
             },
+            Hsl => switch (@TypeOf(color)) {
+                Hsv => color,
+                u8 => .{ .h = 0, .s = 0, .l = @as(f32, @floatFromInt(color)) / 255 * 100 },
+                inline else => color.toHsl(),
+            },
             Hsv => switch (@TypeOf(color)) {
                 Hsv => color,
                 u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
@@ -111,19 +117,19 @@ test "alphaBlend" {
     try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
 }
 
-/// A Red-Green-Blue-Alpha pixel.
+/// A Red-Green-Blue-Alpha color.
 pub const Rgba = packed struct {
     r: u8 = 0,
     g: u8 = 0,
     b: u8 = 0,
     a: u8 = 0,
 
-    /// Constructs a RGBA pixel from a gray and alpha values.
+    /// Constructs a RGBA color from a gray and alpha values.
     pub fn fromGray(gray: u8, alpha: u8) Rgba {
         return Rgb.fromGray(gray).toRgba(alpha);
     }
 
-    /// Constructs a RGBA pixel from a hex value.
+    /// Constructs a RGBA color from a hex value.
     pub fn fromHex(hex_code: u32) Rgb {
         return .{
             .r = @intCast((hex_code >> (8 * 3)) & 0x0000ff),
@@ -138,7 +144,7 @@ pub const Rgba = packed struct {
         alphaBlend(Rgba, self, color);
     }
 
-    /// Checks if the pixel is a shade of gray.
+    /// Checks if the color is a shade of gray.
     pub fn isGray(self: Rgba) bool {
         return self.r == self.g and self.g == self.b;
     }
@@ -158,6 +164,11 @@ pub const Rgba = packed struct {
         return .{ .r = self.r, .g = self.g, .b = self.b };
     }
 
+    /// Converts the RGBA color into an HSL color, ignoring the alpha channel.
+    pub fn toHsl(self: Rgba) Hsl {
+        return self.toRgb().toHsl();
+    }
+
     /// Converts the RGBA color into an HSV color, ignoring the alpha channel.
     pub fn toHsv(self: Rgba) Hsv {
         return self.toRgb().toHsv();
@@ -175,12 +186,12 @@ pub const Rgb = struct {
     g: u8 = 0,
     b: u8 = 0,
 
-    /// Constructs a RGB pixel from a gray value.
+    /// Constructs a RGB color from a gray value.
     pub fn fromGray(gray: u8) Rgb {
         return .{ .r = gray, .g = gray, .b = gray };
     }
 
-    /// Constructs a RGB pixel from a hex value.
+    /// Constructs a RGB color from a hex value.
     pub fn fromHex(hex_code: u24) Rgb {
         return .{
             .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
@@ -194,7 +205,7 @@ pub const Rgb = struct {
         alphaBlend(Rgb, self, color);
     }
 
-    /// Checks if the pixel is a shade of gray.
+    /// Checks if the color is a shade of gray.
     pub fn isGray(self: Rgb) bool {
         return self.r == self.g and self.g == self.b;
     }
@@ -212,6 +223,38 @@ pub const Rgb = struct {
     /// Converts the RGB color into an RGBA color with the specified alpha.
     pub fn toRgba(self: Rgb, alpha: u8) Rgba {
         return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
+    }
+
+    /// Converts the RGB color into an HSL color.
+    pub fn toHsl(self: Rgb) Hsl {
+        const r: f32 = @as(f32, @floatFromInt(self.r)) / 255;
+        const g: f32 = @as(f32, @floatFromInt(self.g)) / 255;
+        const b: f32 = @as(f32, @floatFromInt(self.b)) / 255;
+        const min = @min(r, @min(g, b));
+        const max = @max(r, @max(g, b));
+        const delta = max - min;
+        var hsl = Hsl{ .h = 0, .s = 0, .l = 0 };
+        hsl.l = (max + min) / 2;
+        if (hsl.l > 0 and hsl.l < 1) {
+            hsl.s = delta / if (hsl.l < 0.5) 2 * hsl.l else 2 - 2 * hsl.l;
+        }
+        if (delta > 0) {
+            if (max == r and max != g) {
+                hsl.h += (g - b) / delta;
+            }
+            if (max == g and max != b) {
+                hsl.h += 2 + (b - r) / delta;
+            }
+            if (max == b and max != r) {
+                hsl.h += 4 + (r - g) / delta;
+            }
+            hsl.h *= 60;
+        }
+        if (hsl.h < 0) hsl.h += 360;
+        hsl.h = if (hsl.h == 360) 0 else hsl.h;
+        hsl.s = @max(0, @min(1, hsl.s)) * 100;
+        hsl.l = @max(0, @min(1, hsl.l)) * 100;
+        return hsl;
     }
 
     /// Converts the RGB color into an HSV color.
@@ -310,6 +353,83 @@ pub const Rgb = struct {
     }
 };
 
+/// A color in the HSL colorspace: h in degrees (0-359), s and l between 0-100.
+pub const Hsl = struct {
+    h: f32 = 0,
+    s: f32 = 0,
+    l: f32 = 0,
+
+    /// Alpha-blends color into self.
+    pub fn blend(self: *Hsl, color: Rgba) void {
+        var rgb = self.toRgb();
+        rgb.blend(color);
+        self = rgb.toHsl();
+    }
+
+    /// Checks if the color is a shade of gray.
+    pub fn isGray(self: Hsl) bool {
+        return self.s == 0;
+    }
+
+    /// Converts the HSL color into grayscale.
+    pub fn toGray(self: Hsl) u8 {
+        return @intFromFloat(@round(self.l / 100 * 255));
+    }
+    /// Converts the HSL color into an RGB color.
+    pub fn toRgb(self: Hsl) Rgb {
+        var r: f32 = undefined;
+        var g: f32 = undefined;
+        var b: f32 = undefined;
+        const s = self.s / 100;
+        const l = self.l / 100;
+        if (self.h < 120) {
+            r = (120 - self.h) / 60;
+            g = self.h / 60;
+            b = 0;
+        } else if (self.h < 240) {
+            r = 0;
+            g = (240 - self.h) / 60;
+            b = (self.h - 120) / 60;
+        } else {
+            r = (self.h - 240) / 60;
+            g = 0;
+            b = (360 - self.h) / 60;
+        }
+        r = @min(r, 1);
+        g = @min(g, 1);
+        b = @min(b, 1);
+
+        r = 2 * s * r + (1 - s);
+        g = 2 * s * g + (1 - s);
+        b = 2 * s * b + (1 - s);
+
+        if (l < 0.5) {
+            r = l * r;
+            g = l * g;
+            b = l * b;
+        } else {
+            r = (1 - l) * r + 2 * l - 1;
+            g = (1 - l) * g + 2 * l - 1;
+            b = (1 - l) * b + 2 * l - 1;
+        }
+        return .{
+            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
+            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
+            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
+        };
+    }
+
+    /// Converts the HSL color into an RGBA color with the specified alpha.
+    pub fn toRgba(self: Hsl, alpha: u8) Rgba {
+        return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the HSL color into a CIELAB color.
+    pub fn toLab(self: Hsl) Lab {
+        return self.toRgb().toLab();
+    }
+};
+
 /// A color in the HSV colorspace: h in degrees (0-359), s and v between 0-100.
 pub const Hsv = struct {
     h: f32 = 0,
@@ -318,11 +438,12 @@ pub const Hsv = struct {
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsv, color: Rgba) void {
-        const rgb = self.toRgb().blend(color);
+        var rgb = self.toRgb();
+        rgb.blend(color);
         self = rgb.toHsv();
     }
 
-    /// Checks if the pixel is a shade of gray.
+    /// Checks if the color is a shade of gray.
     pub fn isGray(self: Hsv) bool {
         return self.s == 0;
     }
@@ -393,14 +514,19 @@ pub const Hsv = struct {
         };
     }
 
-    /// Converts the HSV color into a CIELAB color.
-    pub fn toLab(self: Hsv) Lab {
-        return self.toRgb().toLab();
-    }
-
     /// Converts the HSV color into an RGBA color with the specified alpha.
     pub fn toRgba(self: Hsv, alpha: u8) Rgba {
         return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the HSV color into an HSL color, ignoring the alpha channel.
+    pub fn toHsl(self: Hsv) Hsl {
+        return self.toRgb().toHsl();
+    }
+
+    /// Converts the HSV color into a CIELAB color.
+    pub fn toLab(self: Hsv) Lab {
+        return self.toRgb().toLab();
     }
 };
 
@@ -410,7 +536,7 @@ pub const Lab = struct {
     a: f64 = 0,
     b: f64 = 0,
 
-    /// Checks if the pixel is a shade of gray.
+    /// Checks if the color is a shade of gray.
     pub fn isGray(self: Lab) bool {
         return self.a == 0 and self.b == 0;
     }
@@ -485,6 +611,11 @@ pub const Lab = struct {
         return self.toRgb().toRgba(alpha);
     }
 
+    /// Converts the CIELAB color into a HSL color.
+    pub fn toHsl(self: Lab) Hsl {
+        return self.toRgb().toHsl();
+    }
+
     /// Converts the CIELAB color into a HSV color.
     pub fn toHsv(self: Lab) Hsv {
         return self.toRgb().toHsv();
@@ -492,7 +623,8 @@ pub const Lab = struct {
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Lab, color: Rgba) void {
-        const rgb = self.toRgb().blend(color);
+        var rgb = self.toRgb();
+        rgb.blend(color);
         self = rgb.toLab();
     }
 };
@@ -510,6 +642,13 @@ fn testHsvColorConversion(from: Rgb, to: Hsv) !void {
     try expectEqualDeep(rgb, from);
 }
 
+fn testHslColorConversion(from: Rgb, to: Hsl) !void {
+    const hsl = from.toHsl();
+    try expectEqualDeep(hsl, to);
+    const rgb = hsl.toRgb();
+    try expectEqualDeep(rgb, from);
+}
+
 fn testLabColorConversion(from: Rgb, to: Lab) !void {
     const lab = from.toLab();
     const tol = @sqrt(std.math.floatEps(f64));
@@ -522,69 +661,86 @@ fn testLabColorConversion(from: Rgb, to: Lab) !void {
 
 test "primary colors" {
     // red
+    try testHslColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .h = 0, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .h = 0, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .l = 53.23288178584245, .a = 80.10930952982204, .b = 67.22006831026425 });
     // green
+    try testHslColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .h = 120, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .h = 120, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .l = 87.73703347354422, .a = -86.18463649762525, .b = 83.18116474777854 });
     // blue
+    try testHslColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .h = 240, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .h = 240, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .l = 32.302586667249486, .a = 79.19666178930935, .b = -107.86368104495168 });
 }
 
 test "secondary colors" {
     // cyan
+    try testHslColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .h = 180, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .h = 180, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .l = 91.11652110946342, .a = -48.079618466228716, .b = -14.138127754846131 });
     // magenta
+    try testHslColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .h = 300, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .h = 300, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .l = 60.319933664076004, .a = 98.25421868616114, .b = -60.84298422386232 });
     // yellow
+    try testHslColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .h = 60, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .h = 60, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .l = 97.13824698129729, .a = -21.555908334832285, .b = 94.48248544644461 });
 }
 
 test "complimetary colors" {
     // orange
+    try testHslColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .h = 32, .s = 100, .l = 50 });
     try testHsvColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .h = 32, .s = 100, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .l = 68.65577208167872, .a = 38.85052375564024, .b = 74.99022544139405 });
     // purple
+    try testHslColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .h = 300, .s = 100, .l = 25.098042 });
     try testHsvColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .h = 300, .s = 100, .v = 50 });
     try testLabColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .l = 29.782100092098077, .a = 58.93983731904206, .b = -36.49792996282386 });
 }
 
 test "neutral colors" {
     // white
+    try testHslColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .h = 0, .s = 0, .l = 100 });
     try testHsvColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .h = 0, .s = 0, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .l = 100, .a = 0.00526049995830391, .b = -0.010408184525267927 });
     // gray
+    try testHslColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .h = 0, .s = 0, .l = 50.196083 });
     try testHsvColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .h = 0, .s = 0, .v = 50 });
     try testLabColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .l = 53.585013452169036, .a = 0.003155620347972121, .b = -0.006243566036245873 });
     // black
+    try testHslColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .h = 0, .s = 0, .l = 0 });
     try testHsvColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .h = 0, .s = 0, .v = 0 });
     try testLabColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .l = 0, .a = 0, .b = 0 });
 }
 
 test "pastel colors" {
     // pale_pink
+    try testHslColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .h = 21.73913, .s = 100, .l = 86.47059 });
     try testHsvColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .h = 22, .s = 27, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .l = 87.67593388241974, .a = 11.843797404960165, .b = 18.162369178544814 });
     // mint_green
+    try testHslColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .h = 120, .s = 90.909096, .l = 78.43137 });
     try testHsvColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .h = 120, .s = 40, .v = 98 });
     try testLabColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .l = 90.34795996024553, .a = -48.75545372512652, .b = 38.96689290268498 });
     // sky_blue
+    try testHslColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .h = 196.9697, .s = 73.33332, .l = 73.52941 });
     try testHsvColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .h = 197, .s = 42, .v = 93 });
     try testLabColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .l = 80.24627015828005, .a = -15.11865203941365, .b = -20.767024460106587 });
 }
 
 test "vivid colors" {
     // hot_pink
+    try testHslColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .h = 329.80392, .s = 100, .l = 70 });
     try testHsvColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .h = 330, .s = 60, .v = 100 });
     try testLabColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .l = 64.9763931162809, .a = 65.4066927837365, .b = -10.847761988977656 });
     // lime_green
+    try testHslColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .h = 120, .s = 61.264824, .l = 49.60784 });
     try testHsvColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .h = 120, .s = 76, .v = 80 });
     try testLabColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .l = 72.26888334336961, .a = -67.03378336285304, .b = 61.425460443480894 });
     // electric_blue
+    try testHslColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .h = 195.1181, .s = 99.999985, .l = 7.509804e1 });
     try testHsvColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .h = 195, .s = 50, .v = 100 });
     try testLabColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .l = 84.26919487615706, .a = -19.77368831613657, .b = -24.252061008370763 });
 }
@@ -599,9 +755,11 @@ test "100 random colors" {
             .g = random.int(u8),
             .b = random.int(u8),
         };
+        const rgb_from_hsl = rgb.toHsl().toRgb();
         const rgb_from_hsv = rgb.toHsv().toRgb();
         const rgb_from_lab = rgb.toLab().toRgb();
         // Because of rounding errors and range differences, allow colors to differ a little bit.
+        try expectEqualDeep(rgb, rgb_from_hsl);
         try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.r)), @as(f32, @floatFromInt(rgb_from_hsv.r)), 3);
         try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.g)), @as(f32, @floatFromInt(rgb_from_hsv.g)), 3);
         try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.b)), @as(f32, @floatFromInt(rgb_from_hsv.b)), 3);
