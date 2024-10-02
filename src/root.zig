@@ -2,13 +2,12 @@
 
 const std = @import("std");
 
-const color = @import("color.zig");
-pub const Color = color.Color;
-pub const Rgb = color.Rgb;
-pub const Rgba = color.Rgba;
-pub const Hsl = color.Hsl;
-pub const Hsv = color.Hsv;
-pub const Lab = color.Lab;
+pub const colorspace = @import("colorspace.zig");
+pub const Rgb = colorspace.Rgb;
+pub const Rgba = colorspace.Rgba;
+pub const Hsl = colorspace.Hsl;
+pub const Hsv = colorspace.Hsv;
+pub const Lab = colorspace.Lab;
 
 pub const Point2d = @import("point.zig").Point2d;
 pub const Point3d = @import("point.zig").Point3d;
