@@ -1,8 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const as = @import("meta.zig").as;
-const Color = @import("color.zig").Color;
-const Rgba = @import("color.zig").Rgba;
+const colorspace = @import("colorspace.zig");
+const Rgba = @import("colorspace.zig").Rgba;
 const Image = @import("image.zig").Image;
 const Point2d = @import("point.zig").Point2d(f32);
 const Rectangle = @import("geometry.zig").Rectangle(f32);
@@ -11,7 +11,7 @@ const Rectangle = @import("geometry.zig").Rectangle(f32);
 /// Wu's line algorithm to perform antialiasing along the diagonal.  Moreover, if color is of
 /// Rgba type, it alpha-blends it on top of the image.
 pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: anytype) void {
-    comptime assert(Color.isColor(@TypeOf(color)));
+    comptime assert(colorspace.isColor(@TypeOf(color)));
     if (width == 0) return;
     // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
     const Float = @TypeOf(p1.x);
@@ -22,7 +22,7 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
     const rows: Float = @floatFromInt(image.rows);
     const cols: Float = @floatFromInt(image.cols);
     const half_width: Float = @floatFromInt(width / 2);
-    var c2 = Color.convert(Rgba, color);
+    var c2 = colorspace.convert(Rgba, color);
 
     if (x1 == x2) {
         if (y1 > y2) std.mem.swap(Float, &y1, &y2);
@@ -35,9 +35,9 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const px = x1 + i;
                 if (px >= 0 and px < cols) {
                     const pos = as(usize, y) * image.cols + as(usize, px);
-                    var c1 = Color.convert(Rgba, image.data[pos]);
+                    var c1 = colorspace.convert(Rgba, image.data[pos]);
                     c1.blend(c2);
-                    image.data[pos] = Color.convert(T, c1);
+                    image.data[pos] = colorspace.convert(T, c1);
                 }
             }
         }
@@ -52,9 +52,9 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                 const py = y1 + i;
                 if (py >= 0 and py < rows) {
                     const pos = as(usize, py) * image.cols + as(usize, x);
-                    var c1 = Color.convert(Rgba, image.data[pos]);
+                    var c1 = colorspace.convert(Rgba, image.data[pos]);
                     c1.blend(c2);
-                    image.data[pos] = Color.convert(T, c1);
+                    image.data[pos] = colorspace.convert(T, c1);
                 }
             }
         }
@@ -80,14 +80,14 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                         const py = @max(0, y + j);
                         const pos = as(usize, py) * image.cols + as(usize, x);
                         if (py >= 0 and py < rows) {
-                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                            var c1: Rgba = colorspace.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
                                 c2.a = @intFromFloat((1 - (dy - y)) * max_alpha);
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             } else {
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             }
                         }
                     }
@@ -98,14 +98,14 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                         const py = @max(0, y + 1 + j);
                         if (py >= 0 and py < rows) {
                             const pos = as(usize, py) * image.cols + as(usize, x);
-                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                            var c1: Rgba = colorspace.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
                                 c2.a = @intFromFloat((dy - y) * max_alpha);
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             } else {
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             }
                         }
                     }
@@ -127,14 +127,14 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                         const px = @max(0, x + j);
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
-                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                            var c1: Rgba = colorspace.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
                                 c2.a = @intFromFloat((1 - (dx - x)) * max_alpha);
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             } else {
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             }
                         }
                     }
@@ -146,13 +146,13 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
                         const px = @max(0, x + 1 + j);
                         const pos = as(usize, y) * image.cols + as(usize, px);
                         if (px >= 0 and px < cols) {
-                            var c1: Rgba = Color.convert(Rgba, image.data[pos]);
+                            var c1: Rgba = colorspace.convert(Rgba, image.data[pos]);
                             if (j == -half_width or j == half_width) {
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             } else {
                                 c1.blend(c2);
-                                image.data[pos] = Color.convert(T, c1);
+                                image.data[pos] = colorspace.convert(T, c1);
                             }
                         }
                     }
@@ -200,7 +200,7 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
 }
 
 pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: anytype) void {
-    comptime assert(Color.isColor(@TypeOf(color)));
+    comptime assert(colorspace.isColor(@TypeOf(color)));
     const points: []const Point2d = &.{
         .{ .x = rect.l, .y = rect.t },
         .{ .x = rect.r, .y = rect.t },
@@ -225,7 +225,7 @@ pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize
 
 /// Draws the given polygon defined as an array of points.
 pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, width: usize, color: anytype) void {
-    comptime assert(Color.isColor(@TypeOf(color)));
+    comptime assert(colorspace.isColor(@TypeOf(color)));
     if (width == 0) return;
     for (0..polygon.len) |i| {
         drawLine(T, image, polygon[i], polygon[@mod(i + 1, polygon.len)], width, color);

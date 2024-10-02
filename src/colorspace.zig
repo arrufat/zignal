@@ -7,99 +7,90 @@ const expectApproxEqRel = std.testing.expectApproxEqRel;
 const lerp = std.math.lerp;
 const pow = std.math.pow;
 
-pub const Color = union(enum) {
-    Gray: u8,
-    Rgb: Rgb,
-    Rgba: Rgba,
-    Hsl: Hsl,
-    Hsv: Hsv,
-    Lab: Lab,
-
-    /// Returns true if and only if T can be treated as a color.
-    pub fn isColor(comptime T: type) bool {
-        return switch (T) {
-            u8, Rgb, Rgba, Hsv, Lab => true,
-            else => false,
-        };
-    }
-
-    /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
-    fn isRgbCompatible(comptime T: type) bool {
-        return switch (T) {
-            Rgb, Rgba => true,
-            else => blk: {
-                comptime var checks: usize = 0;
-                for (std.meta.fields(T)) |field| {
-                    if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
-                        checks += 1;
-                    }
-                    if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
-                        checks += 1;
-                    }
-                    if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
-                        checks += 1;
-                    }
-                }
-                break :blk checks == 3;
-            },
-        };
-    }
-
-    /// Converts color into the T colorspace.
-    pub fn convert(comptime T: type, color: anytype) T {
-        comptime assert(isColor(T));
-        comptime assert(isColor(@TypeOf(color)));
-        return switch (T) {
-            u8 => switch (@TypeOf(color)) {
-                u8 => color,
-                inline else => color.toGray(),
-            },
-            Rgb => switch (@TypeOf(color)) {
-                Rgb => color,
-                u8 => .{ .r = color, .g = color, .b = color },
-                inline else => color.toRgb(),
-            },
-            Rgba => switch (@TypeOf(color)) {
-                Rgba => color,
-                u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
-                inline else => color.toRgba(255),
-            },
-            Hsl => switch (@TypeOf(color)) {
-                Hsv => color,
-                u8 => .{ .h = 0, .s = 0, .l = @as(f32, @floatFromInt(color)) / 255 * 100 },
-                inline else => color.toHsl(),
-            },
-            Hsv => switch (@TypeOf(color)) {
-                Hsv => color,
-                u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
-                inline else => color.toHsv(),
-            },
-            Lab => switch (@TypeOf(color)) {
-                Lab => color,
-                u8 => .{ .l = @as(f32, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
-                inline else => color.toLab(),
-            },
-            else => @compileError("Unsupported color " ++ @typeName(T)),
-        };
-    }
-};
-
-test "Color.isRgbCompatible" {
-    try comptime expectEqual(Color.isRgbCompatible(Rgb), true);
-    try comptime expectEqual(Color.isRgbCompatible(Rgba), true);
-    try comptime expectEqual(Color.isRgbCompatible(Hsv), false);
-    try comptime expectEqual(Color.isRgbCompatible(Lab), false);
+/// Returns true if and only if T can be treated as a color.
+pub fn isColor(comptime T: type) bool {
+    return switch (T) {
+        u8, Rgb, Rgba, Hsl, Hsv, Lab => true,
+        else => false,
+    };
 }
 
-test "Color.convert" {
-    try expectEqual(Color.convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
-    try expectEqual(Color.convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
-    try expectEqual(Color.convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
+/// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
+fn isRgbCompatible(comptime T: type) bool {
+    return switch (T) {
+        Rgb, Rgba => true,
+        else => blk: {
+            comptime var checks: usize = 0;
+            for (std.meta.fields(T)) |field| {
+                if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
+                    checks += 1;
+                }
+                if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
+                    checks += 1;
+                }
+                if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
+                    checks += 1;
+                }
+            }
+            break :blk checks == 3;
+        },
+    };
+}
+
+/// Converts color into the T colorspace.
+pub fn convert(comptime T: type, color: anytype) T {
+    comptime assert(isColor(T));
+    comptime assert(isColor(@TypeOf(color)));
+    return switch (T) {
+        u8 => switch (@TypeOf(color)) {
+            u8 => color,
+            inline else => color.toGray(),
+        },
+        Rgb => switch (@TypeOf(color)) {
+            Rgb => color,
+            u8 => .{ .r = color, .g = color, .b = color },
+            inline else => color.toRgb(),
+        },
+        Rgba => switch (@TypeOf(color)) {
+            Rgba => color,
+            u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
+            inline else => color.toRgba(255),
+        },
+        Hsl => switch (@TypeOf(color)) {
+            Hsv => color,
+            u8 => .{ .h = 0, .s = 0, .l = @as(f32, @floatFromInt(color)) / 255 * 100 },
+            inline else => color.toHsl(),
+        },
+        Hsv => switch (@TypeOf(color)) {
+            Hsv => color,
+            u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
+            inline else => color.toHsv(),
+        },
+        Lab => switch (@TypeOf(color)) {
+            Lab => color,
+            u8 => .{ .l = @as(f32, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
+            inline else => color.toLab(),
+        },
+        else => @compileError("Unsupported color " ++ @typeName(T)),
+    };
+}
+
+test "isRgbCompatible" {
+    try comptime expectEqual(isRgbCompatible(Rgb), true);
+    try comptime expectEqual(isRgbCompatible(Rgba), true);
+    try comptime expectEqual(isRgbCompatible(Hsv), false);
+    try comptime expectEqual(isRgbCompatible(Lab), false);
+}
+
+test "convert" {
+    try expectEqual(convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
+    try expectEqual(convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
+    try expectEqual(convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
 }
 
 /// Alpha-blends c2 into c1.
 inline fn alphaBlend(comptime T: type, c1: *T, c2: Rgba) void {
-    if (comptime !Color.isRgbCompatible(T)) {
+    if (comptime !isRgbCompatible(T)) {
         @compileError(@typeName(T) ++ " is not Rgb compatible");
     }
     if (c2.a == 0) {

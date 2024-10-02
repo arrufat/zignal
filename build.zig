@@ -9,10 +9,10 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Export module.
-    _ = b.addModule("zignal", .{ .root_source_file = b.path("src/zignal.zig") });
+    _ = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig") });
 
     // Build zignal.
-    const zignal = buildModule(b, "zignal", target, optimize);
+    const zignal = buildModule(b, "root", target, optimize);
 
     // Emit docs.
     const docs_step = b.step("docs", "Emit docs");
@@ -26,7 +26,7 @@ pub fn build(b: *Build) void {
 
     const lib_check = b.addStaticLibrary(.{
         .name = "zignal",
-        .root_source_file = b.path("src/zignal.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -35,7 +35,7 @@ pub fn build(b: *Build) void {
 
     const test_step = b.step("test", "Run library tests");
     for ([_][]const u8{
-        "color",
+        "colorspace",
         "image",
         "geometry",
         "matrix",
