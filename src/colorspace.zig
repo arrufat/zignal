@@ -57,7 +57,7 @@ pub fn convert(comptime T: type, color: anytype) T {
             inline else => color.toRgba(255),
         },
         Hsl => switch (@TypeOf(color)) {
-            Hsv => color,
+            Hsl => color,
             u8 => .{ .h = 0, .s = 0, .l = @as(f32, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsl(),
         },
