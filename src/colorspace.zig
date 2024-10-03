@@ -84,8 +84,9 @@ test "isRgbCompatible" {
 
 test "convert" {
     try expectEqual(convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
-    try expectEqual(convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
+    try expectEqual(convert(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
     try expectEqual(convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
+    try expectEqual(convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
 }
 
 /// Alpha-blends c2 into c1.
@@ -142,7 +143,7 @@ pub const Rgba = packed struct {
 
     /// Converts the RGBA color into grayscale.
     pub fn toGray(self: Rgba) u8 {
-        return @intFromFloat(@round(self.toHsv().v / 100 * 255));
+        return @intFromFloat(@round(self.toHsl().l / 100 * 255));
     }
 
     /// Converts the RGBA color into a hex value.
@@ -203,7 +204,7 @@ pub const Rgb = struct {
 
     /// Converts the RGB color into grayscale.
     pub fn toGray(self: Rgb) u8 {
-        return @intFromFloat(@round(self.toHsv().v / 100 * 255));
+        return @intFromFloat(@round(self.toHsl().l / 100 * 255));
     }
 
     /// Converts the RGB color into a hex value.
