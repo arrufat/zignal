@@ -7,6 +7,7 @@ pub const Rgb = colorspace.Rgb;
 pub const Rgba = colorspace.Rgba;
 pub const Hsl = colorspace.Hsl;
 pub const Hsv = colorspace.Hsv;
+pub const Xyz = colorspace.Xyz;
 pub const Lab = colorspace.Lab;
 
 pub const Point2d = @import("point.zig").Point2d;
