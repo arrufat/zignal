@@ -537,7 +537,7 @@ pub const Xyz = struct {
     z: f64 = 0,
 
     /// Checks if the CIE 1931 XYZ color is a shade of gray.
-    pub fn isGray(self: Lab) bool {
+    pub fn isGray(self: Xyz) bool {
         return self.toRgb().isGray();
     }
 
