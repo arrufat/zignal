@@ -10,7 +10,7 @@ const pow = std.math.pow;
 /// Returns true if and only if T can be treated as a color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, Rgb, Rgba, Hsl, Hsv, Lab => true,
+        u8, Rgb, Rgba, Hsl, Hsv, Xyz, Lab => true,
         else => false,
     };
 }
@@ -65,6 +65,11 @@ pub fn convert(comptime T: type, color: anytype) T {
             Hsv => color,
             u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsv(),
+        },
+        Xyz => switch (@TypeOf(color)) {
+            Xyz => color,
+            u8 => color.toLab().l,
+            inline else => color.toXyz(),
         },
         Lab => switch (@TypeOf(color)) {
             Lab => color,
@@ -164,6 +169,11 @@ pub const Rgba = packed struct {
     /// Converts the RGBA color into an HSV color, ignoring the alpha channel.
     pub fn toHsv(self: Rgba) Hsv {
         return self.toRgb().toHsv();
+    }
+
+    /// Converts the RGBA color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Rgba) Xyz {
+        self.toRgb().toXyz();
     }
 
     /// Converts the RGBA color into an Lab color, ignoring the alpha channel.
@@ -284,8 +294,8 @@ pub const Rgb = struct {
         return hsv;
     }
 
-    /// Converts the RGB color into a CIELAB color.
-    pub fn toLab(self: Rgb) Lab {
+    /// Converts the RGB color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Rgb) Xyz {
         var r: f64 = @as(f64, @floatFromInt(self.r)) / 255;
         var g: f64 = @as(f64, @floatFromInt(self.g)) / 255;
         var b: f64 = @as(f64, @floatFromInt(self.b)) / 255;
@@ -312,34 +322,16 @@ pub const Rgb = struct {
         g *= 100;
         b *= 100;
 
-        // Observer. = 2°, illuminant = D65.
-        var x: f64 = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 95.047;
-        var y: f64 = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 100.000;
-        var z: f64 = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 108.883;
-
-        if (x > 0.008856) {
-            x = pow(f64, x, 1.0 / 3.0);
-        } else {
-            x = (7.787 * x) + (16.0 / 116.0);
-        }
-
-        if (y > 0.008856) {
-            y = pow(f64, y, 1.0 / 3.0);
-        } else {
-            y = (7.787 * y) + (16.0 / 116.0);
-        }
-
-        if (z > 0.008856) {
-            z = pow(f64, z, 1.0 / 3.0);
-        } else {
-            z = (7.787 * z) + (16.0 / 116.0);
-        }
-
         return .{
-            .l = @max(0, @min(100, (116.0 * y) - 16.0)),
-            .a = @max(-128, @min(127, 500.0 * (x - y))),
-            .b = @max(-128, @min(127, 200.0 * (y - z))),
+            .x = r * 0.4124 + g * 0.3576 + b * 0.1805,
+            .y = r * 0.2126 + g * 0.7152 + b * 0.0722,
+            .z = r * 0.0193 + g * 0.1192 + b * 0.9505,
         };
+    }
+
+    /// Converts the RGB color into a CIELAB color.
+    pub fn toLab(self: Rgb) Lab {
+        return self.toXyz().toLab();
     }
 };
 
@@ -412,6 +404,11 @@ pub const Hsl = struct {
     /// Converts the HSL color into an RGBA color with the specified alpha.
     pub fn toRgba(self: Hsl, alpha: u8) Rgba {
         return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the Hsl color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Hsl) Xyz {
+        self.toRgb().toXyz();
     }
 
     /// Converts the HSL color into a CIELAB color.
@@ -514,9 +511,98 @@ pub const Hsv = struct {
         return self.toRgb().toHsl();
     }
 
+    /// Converts the HSV color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Hsv) Xyz {
+        self.toRgb().toXyz();
+    }
+
     /// Converts the HSV color into a CIELAB color.
     pub fn toLab(self: Hsv) Lab {
         return self.toRgb().toLab();
+    }
+};
+
+pub const Xyz = struct {
+    x: f64 = 0,
+    y: f64 = 0,
+    z: f64 = 0,
+
+    /// Converts the CIE 1931 XYZ color into a RGB color.
+    pub fn toRgb(self: Xyz) Rgb {
+        var r = self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986;
+        var g = self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415;
+        var b = self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570;
+
+        if (r > 0.0031308) {
+            r = 1.055 * pow(f64, r, (1.0 / 2.4)) - 0.055;
+        } else {
+            r *= 12.92;
+        }
+
+        if (g > 0.0031308) {
+            g = 1.055 * pow(f64, g, (1.0 / 2.4)) - 0.055;
+        } else {
+            g *= 12.92;
+        }
+
+        if (b > 0.0031308) {
+            b = 1.055 * pow(f64, b, (1.0 / 2.4)) - 0.055;
+        } else {
+            b *= 12.92;
+        }
+
+        return .{
+            .r = @intFromFloat(@max(0, @min(255, @round(r * 255)))),
+            .g = @intFromFloat(@max(0, @min(255, @round(g * 255)))),
+            .b = @intFromFloat(@max(0, @min(255, @round(b * 255)))),
+        };
+    }
+
+    /// Converts the CIE 1931 XYZ color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Xyz, alpha: u8) Rgba {
+        self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the CIE 1931 XYZ color into a HSL color.
+    pub fn toHsl(self: Xyz) Hsl {
+        self.toRgb().toHsl();
+    }
+
+    /// Converts the CIE 1931 XYZ color into a HSV color.
+    pub fn toHsv(self: Xyz) Hsv {
+        return self.toRgb().toHsv();
+    }
+
+    /// Converts the CIE 1931 XYZ color into a CIELAB color.
+    pub fn toLab(self: Xyz) Lab {
+        // Observer. = 2°, illuminant = D65.
+        var x = self.x / 95.047;
+        var y = self.y / 100.000;
+        var z = self.z / 108.883;
+
+        if (x > 0.008856) {
+            x = pow(f64, x, 1.0 / 3.0);
+        } else {
+            x = (7.787 * x) + (16.0 / 116.0);
+        }
+
+        if (y > 0.008856) {
+            y = pow(f64, y, 1.0 / 3.0);
+        } else {
+            y = (7.787 * y) + (16.0 / 116.0);
+        }
+
+        if (z > 0.008856) {
+            z = pow(f64, z, 1.0 / 3.0);
+        } else {
+            z = (7.787 * z) + (16.0 / 116.0);
+        }
+
+        return .{
+            .l = @max(0, @min(100, (116.0 * y) - 16.0)),
+            .a = @max(-128, @min(127, 500.0 * (x - y))),
+            .b = @max(-128, @min(127, 200.0 * (y - z))),
+        };
     }
 };
 
@@ -538,6 +624,26 @@ pub const Lab = struct {
 
     /// Converts the CIELAB color into a RGB color.
     pub fn toRgb(self: Lab) Rgb {
+        return self.toXyz().toRgb();
+    }
+
+    /// Converts the CIELAB color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Lab, alpha: u8) Rgba {
+        return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the CIELAB color into a HSL color.
+    pub fn toHsl(self: Lab) Hsl {
+        return self.toRgb().toHsl();
+    }
+
+    /// Converts the CIELAB color into a HSV color.
+    pub fn toHsv(self: Lab) Hsv {
+        return self.toRgb().toHsv();
+    }
+
+    /// Converts the CIELAB color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Lab) Xyz {
         var y: f64 = (@max(0, @min(100, self.l)) + 16.0) / 116.0;
         var x: f64 = (@max(-128, @min(127, self.a)) / 500.0) + y;
         var z: f64 = y - (@max(-128, @min(127, self.b)) / 200.0);
@@ -560,55 +666,16 @@ pub const Lab = struct {
             z = (z - 16.0 / 116.0) / 7.787;
         }
 
+        // Observer. = 2°, illuminant = D65.
         x *= 95.047;
         y *= 100.000;
         z *= 108.883;
 
-        x = x / 100.0;
-        y = y / 100.0;
-        z = z / 100.0;
-
-        var r = x * 3.2406 + y * -1.5372 + z * -0.4986;
-        var g = x * -0.9689 + y * 1.8758 + z * 0.0415;
-        var b = x * 0.0557 + y * -0.2040 + z * 1.0570;
-
-        if (r > 0.0031308) {
-            r = 1.055 * pow(f64, r, (1.0 / 2.4)) - 0.055;
-        } else {
-            r = 12.92 * r;
-        }
-
-        if (g > 0.0031308) {
-            g = 1.055 * pow(f64, g, (1.0 / 2.4)) - 0.055;
-        } else {
-            g = 12.92 * g;
-        }
-
-        if (b > 0.0031308) {
-            b = 1.055 * pow(f64, b, (1.0 / 2.4)) - 0.055;
-        } else {
-            b = 12.92 * b;
-        }
-
         return .{
-            .r = @intFromFloat(@max(0, @min(255, @round(r * 255)))),
-            .g = @intFromFloat(@max(0, @min(255, @round(g * 255)))),
-            .b = @intFromFloat(@max(0, @min(255, @round(b * 255)))),
+            .x = x / 100.0,
+            .y = y / 100.0,
+            .z = z / 100.0,
         };
-    }
-    /// Converts the CIELAB color into a RGBA color with the specified alpha.
-    pub fn toRgba(self: Lab, alpha: u8) Rgba {
-        return self.toRgb().toRgba(alpha);
-    }
-
-    /// Converts the CIELAB color into a HSL color.
-    pub fn toHsl(self: Lab) Hsl {
-        return self.toRgb().toHsl();
-    }
-
-    /// Converts the CIELAB color into a HSV color.
-    pub fn toHsv(self: Lab) Hsv {
-        return self.toRgb().toHsv();
     }
 
     /// Alpha-blends color into self.
@@ -748,4 +815,9 @@ test "100 random colors" {
         const rgb_from_lab = rgb.toLab().toRgb();
         try expectEqualDeep(rgb, rgb_from_lab);
     }
+}
+
+pub fn main() void {
+    const rgb = Rgb{ .r = 123, .g = 12, .b = 1 };
+    _ = rgb.toXyz();
 }
