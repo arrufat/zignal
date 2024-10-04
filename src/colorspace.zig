@@ -68,7 +68,10 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         Xyz => switch (@TypeOf(color)) {
             Xyz => color,
-            u8 => color.toLab().l,
+            u8 => blk: {
+                const rgb = Rgb{ .r = color, .g = color, .b = color };
+                break :blk rgb.toXyz();
+            },
             inline else => color.toXyz(),
         },
         Lab => switch (@TypeOf(color)) {
@@ -522,10 +525,22 @@ pub const Hsv = struct {
     }
 };
 
+/// The CIE 1931 color space, a device independent space also known as XYZ which covers the
+/// full gamut of human-perceptible colors visible to the CIE 2° standard observer.
 pub const Xyz = struct {
     x: f64 = 0,
     y: f64 = 0,
     z: f64 = 0,
+
+    /// Checks if the CIE 1931 XYZ color is a shade of gray.
+    pub fn isGray(self: Lab) bool {
+        return self.toRgb().isGray();
+    }
+
+    /// Converts the CIE 1931 XYZ color into grayscale using CIELAB.
+    pub fn toGray(self: Xyz) u8 {
+        return self.toLab().toGray();
+    }
 
     /// Converts the CIE 1931 XYZ color into a RGB color.
     pub fn toRgb(self: Xyz) Rgb {
