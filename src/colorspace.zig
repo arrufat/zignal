@@ -816,8 +816,3 @@ test "100 random colors" {
         try expectEqualDeep(rgb, rgb_from_lab);
     }
 }
-
-pub fn main() void {
-    const rgb = Rgb{ .r = 123, .g = 12, .b = 1 };
-    _ = rgb.toXyz();
-}
