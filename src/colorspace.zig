@@ -17,6 +17,7 @@ pub fn isColor(comptime T: type) bool {
 
 /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
 fn isRgbCompatible(comptime T: type) bool {
+    if (@typeInfo(T) != .@"struct") return false;
     return switch (T) {
         Rgb, Rgba => true,
         else => blk: {
@@ -84,9 +85,12 @@ pub fn convert(comptime T: type, color: anytype) T {
 }
 
 test "isRgbCompatible" {
+    try comptime expectEqual(isRgbCompatible(u8), false);
     try comptime expectEqual(isRgbCompatible(Rgb), true);
     try comptime expectEqual(isRgbCompatible(Rgba), true);
+    try comptime expectEqual(isRgbCompatible(Hsl), false);
     try comptime expectEqual(isRgbCompatible(Hsv), false);
+    try comptime expectEqual(isRgbCompatible(Xyz), false);
     try comptime expectEqual(isRgbCompatible(Lab), false);
 }
 
