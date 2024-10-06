@@ -17,25 +17,21 @@ pub fn isColor(comptime T: type) bool {
 
 /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
 fn isRgbCompatible(comptime T: type) bool {
+    if (T == Rgb or T == Rgba) return true;
     if (@typeInfo(T) != .@"struct") return false;
-    return switch (T) {
-        Rgb, Rgba => true,
-        else => blk: {
-            comptime var checks: usize = 0;
-            for (std.meta.fields(T)) |field| {
-                if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
-                    checks += 1;
-                }
-                if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
-                    checks += 1;
-                }
-                if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
-                    checks += 1;
-                }
-            }
-            break :blk checks == 3;
-        },
-    };
+    comptime var checks: usize = 0;
+    for (std.meta.fields(T)) |field| {
+        if (std.mem.eql(u8, field.name, "r") and field.type == u8) {
+            checks += 1;
+        }
+        if (std.mem.eql(u8, field.name, "g") and field.type == u8) {
+            checks += 1;
+        }
+        if (std.mem.eql(u8, field.name, "b") and field.type == u8) {
+            checks += 1;
+        }
+    }
+    return checks == 3;
 }
 
 /// Converts color into the T colorspace.
