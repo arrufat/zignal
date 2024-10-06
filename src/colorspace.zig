@@ -386,9 +386,9 @@ pub const Hsl = struct {
         b = 2 * s * b + (1 - s);
 
         if (l < 0.5) {
-            r = l * r;
-            g = l * g;
-            b = l * b;
+            r *= l;
+            g *= l;
+            b *= l;
         } else {
             r = (1 - l) * r + 2 * l - 1;
             g = (1 - l) * g + 2 * l - 1;
@@ -564,9 +564,9 @@ pub const Xyz = struct {
         }
 
         return .{
-            .r = @intFromFloat(@max(0, @min(255, @round(r * 255)))),
-            .g = @intFromFloat(@max(0, @min(255, @round(g * 255)))),
-            .b = @intFromFloat(@max(0, @min(255, @round(b * 255)))),
+            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
+            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
+            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
         };
     }
 
