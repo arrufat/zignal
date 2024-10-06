@@ -65,10 +65,7 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         Xyz => switch (@TypeOf(color)) {
             Xyz => color,
-            u8 => blk: {
-                const rgb = Rgb{ .r = color, .g = color, .b = color };
-                break :blk rgb.toXyz();
-            },
+            u8 => Rgb.fromGray(color).toXyz(),
             inline else => color.toXyz(),
         },
         Lab => switch (@TypeOf(color)) {
