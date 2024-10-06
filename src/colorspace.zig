@@ -2,7 +2,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const expectApproxEqRel = std.testing.expectApproxEqRel;
 const lerp = std.math.lerp;
 const pow = std.math.pow;
