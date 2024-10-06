@@ -318,14 +318,10 @@ pub const Rgb = struct {
             b /= 12.92;
         }
 
-        r *= 100;
-        g *= 100;
-        b *= 100;
-
         return .{
-            .x = r * 0.4124 + g * 0.3576 + b * 0.1805,
-            .y = r * 0.2126 + g * 0.7152 + b * 0.0722,
-            .z = r * 0.0193 + g * 0.1192 + b * 0.9505,
+            .x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100,
+            .y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100,
+            .z = (r * 0.0193 + g * 0.1192 + b * 0.9505) * 100,
         };
     }
 
@@ -541,9 +537,9 @@ pub const Xyz = struct {
 
     /// Converts the CIE 1931 XYZ color into a RGB color.
     pub fn toRgb(self: Xyz) Rgb {
-        var r = self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986;
-        var g = self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415;
-        var b = self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570;
+        var r = (self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986) / 100;
+        var g = (self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415) / 100;
+        var b = (self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570) / 100;
 
         if (r > 0.0031308) {
             r = 1.055 * pow(f64, r, (1.0 / 2.4)) - 0.055;
@@ -679,14 +675,10 @@ pub const Lab = struct {
         }
 
         // Observer. = 2°, illuminant = D65.
-        x *= 95.047;
-        y *= 100.000;
-        z *= 108.883;
-
         return .{
-            .x = x / 100.0,
-            .y = y / 100.0,
-            .z = z / 100.0,
+            .x = x * 95.047,
+            .y = y * 100.000,
+            .z = z * 108.883,
         };
     }
 
@@ -824,6 +816,8 @@ test "100 random colors" {
         try expectEqualDeep(rgb, rgb_from_hsl);
         const rgb_from_hsv = rgb.toHsv().toRgb();
         try expectEqualDeep(rgb, rgb_from_hsv);
+        const rgb_from_xyz = rgb.toXyz().toRgb();
+        try expectEqualDeep(rgb, rgb_from_xyz);
         const rgb_from_lab = rgb.toLab().toRgb();
         try expectEqualDeep(rgb, rgb_from_lab);
     }
