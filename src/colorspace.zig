@@ -2,7 +2,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
-const expectApproxEqRel = std.testing.expectApproxEqRel;
 const lerp = std.math.lerp;
 const pow = std.math.pow;
 
@@ -695,114 +694,97 @@ test "hex to RGB/A" {
     try std.testing.expectEqualDeep(Rgb.fromHex(0xffffff), Rgb{ .r = 255, .g = 255, .b = 255 });
 }
 
-fn testHsvColorConversion(from: Rgb, to: Hsv) !void {
-    const hsv = from.toHsv();
-    try expectEqualDeep(hsv, to);
-    const rgb = hsv.toRgb();
-    try expectEqualDeep(rgb, from);
-}
-
-fn testHslColorConversion(from: Rgb, to: Hsl) !void {
-    const hsl = from.toHsl();
-    try expectEqualDeep(hsl, to);
-    const rgb = hsl.toRgb();
-    try expectEqualDeep(rgb, from);
-}
-
-fn testLabColorConversion(from: Rgb, to: Lab) !void {
-    const lab = from.toLab();
-    const tol = @sqrt(std.math.floatEps(f64));
-    try expectApproxEqRel(lab.l, to.l, tol);
-    try expectApproxEqRel(lab.a, to.a, tol);
-    try expectApproxEqRel(lab.b, to.b, tol);
-    const rgb = lab.toRgb();
-    try expectEqualDeep(rgb, from);
+fn testColorConversion(from: Rgb, to: anytype) !void {
+    const converted = convert(@TypeOf(to), from);
+    try expectEqualDeep(converted, to);
+    const recovered = convert(Rgb, converted);
+    try expectEqualDeep(recovered, from);
 }
 
 test "primary colors" {
     // red
-    try testHslColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .h = 0, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .h = 0, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 0, .b = 0 }, .{ .l = 53.23288178584245, .a = 80.10930952982204, .b = 67.22006831026425 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 0 }, Hsl{ .h = 0, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 0 }, Hsv{ .h = 0, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 0 }, Lab{ .l = 53.23288178584245, .a = 80.10930952982204, .b = 67.22006831026425 });
     // green
-    try testHslColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .h = 120, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .h = 120, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 0, .g = 255, .b = 0 }, .{ .l = 87.73703347354422, .a = -86.18463649762525, .b = 83.18116474777854 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 0 }, Hsl{ .h = 120, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 0 }, Hsv{ .h = 120, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 0 }, Lab{ .l = 87.73703347354422, .a = -86.1846364976253, .b = 83.18116474777855 });
     // blue
-    try testHslColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .h = 240, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .h = 240, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 0, .g = 0, .b = 255 }, .{ .l = 32.302586667249486, .a = 79.19666178930935, .b = -107.86368104495168 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 255 }, Hsl{ .h = 240, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 255 }, Hsv{ .h = 240, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 255 }, Lab{ .l = 32.302586667249486, .a = 79.19666178930935, .b = -107.86368104495168 });
 }
 
 test "secondary colors" {
     // cyan
-    try testHslColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .h = 180, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .h = 180, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 0, .g = 255, .b = 255 }, .{ .l = 91.11652110946342, .a = -48.079618466228716, .b = -14.138127754846131 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 255 }, Hsl{ .h = 180, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 255 }, Hsv{ .h = 180, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 0, .g = 255, .b = 255 }, Lab{ .l = 91.11652110946342, .a = -48.079618466228716, .b = -14.138127754846131 });
     // magenta
-    try testHslColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .h = 300, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .h = 300, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 0, .b = 255 }, .{ .l = 60.319933664076004, .a = 98.25421868616114, .b = -60.84298422386232 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 255 }, Hsl{ .h = 300, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 255 }, Hsv{ .h = 300, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 0, .b = 255 }, Lab{ .l = 60.319933664076004, .a = 98.25421868616108, .b = -60.84298422386232 });
     // yellow
-    try testHslColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .h = 60, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .h = 60, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 255, .b = 0 }, .{ .l = 97.13824698129729, .a = -21.555908334832285, .b = 94.48248544644461 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 0 }, Hsl{ .h = 60, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 0 }, Hsv{ .h = 60, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 0 }, Lab{ .l = 97.13824698129729, .a = -21.555908334832285, .b = 94.48248544644461 });
 }
 
 test "complimetary colors" {
     // orange
-    try testHslColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .h = 32, .s = 100, .l = 50 });
-    try testHsvColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .h = 32, .s = 100, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 136, .b = 0 }, .{ .l = 68.65577208167872, .a = 38.85052375564024, .b = 74.99022544139405 });
+    try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsl{ .h = 32, .s = 100, .l = 50 });
+    try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsv{ .h = 32, .s = 100, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Lab{ .l = 68.65577208167872, .a = 38.85052375564019, .b = 74.99022544139406 });
     // purple
-    try testHslColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .h = 300, .s = 100, .l = 25.098042 });
-    try testHsvColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .h = 300, .s = 100, .v = 50.196083 });
-    try testLabColorConversion(.{ .r = 128, .g = 0, .b = 128 }, .{ .l = 29.782100092098077, .a = 58.93983731904206, .b = -36.49792996282386 });
+    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsl{ .h = 300, .s = 100, .l = 25.098042 });
+    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsv{ .h = 300, .s = 100, .v = 50.196083 });
+    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Lab{ .l = 29.782100092098077, .a = 58.93983731904206, .b = -36.49792996282386 });
 }
 
 test "neutral colors" {
     // white
-    try testHslColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .h = 0, .s = 0, .l = 100 });
-    try testHsvColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .h = 0, .s = 0, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 255, .b = 255 }, .{ .l = 100, .a = 0.00526049995830391, .b = -0.010408184525267927 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 255 }, Hsl{ .h = 0, .s = 0, .l = 100 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 255 }, Hsv{ .h = 0, .s = 0, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 255, .b = 255 }, Lab{ .l = 100, .a = 0.00526049995830391, .b = -0.010408184525267927 });
     // gray
-    try testHslColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .h = 0, .s = 0, .l = 50.196083 });
-    try testHsvColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .h = 0, .s = 0, .v = 50.196083 });
-    try testLabColorConversion(.{ .r = 128, .g = 128, .b = 128 }, .{ .l = 53.585013452169036, .a = 0.003155620347972121, .b = -0.006243566036245873 });
+    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsl{ .h = 0, .s = 0, .l = 50.196083 });
+    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsv{ .h = 0, .s = 0, .v = 50.196083 });
+    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Lab{ .l = 53.58501345216902, .a = 0.003155620347972121, .b = -0.006243566036268078 });
     // black
-    try testHslColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .h = 0, .s = 0, .l = 0 });
-    try testHsvColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .h = 0, .s = 0, .v = 0 });
-    try testLabColorConversion(.{ .r = 0, .g = 0, .b = 0 }, .{ .l = 0, .a = 0, .b = 0 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 0 }, Hsl{ .h = 0, .s = 0, .l = 0 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 0 }, Hsv{ .h = 0, .s = 0, .v = 0 });
+    try testColorConversion(.{ .r = 0, .g = 0, .b = 0 }, Lab{ .l = 0, .a = 0, .b = 0 });
 }
 
 test "pastel colors" {
     // pale_pink
-    try testHslColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .h = 21.73913, .s = 100, .l = 86.47059 });
-    try testHsvColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .h = 21.73913, .s = 27.058823, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 211, .b = 186 }, .{ .l = 87.67593388241974, .a = 11.843797404960165, .b = 18.162369178544814 });
+    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsl{ .h = 21.73913, .s = 100, .l = 86.47059 });
+    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsv{ .h = 21.73913, .s = 27.058823, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Lab{ .l = 87.67593388241974, .a = 11.843797404960165, .b = 18.16236917854479 });
     // mint_green
-    try testHslColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .h = 120, .s = 90.909096, .l = 78.43137 });
-    try testHsvColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .h = 120, .s = 39.999996, .v = 98.039215 });
-    try testLabColorConversion(.{ .r = 150, .g = 250, .b = 150 }, .{ .l = 90.34795996024553, .a = -48.75545372512652, .b = 38.96689290268498 });
+    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsl{ .h = 120, .s = 90.909096, .l = 78.43137 });
+    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsv{ .h = 120, .s = 39.999996, .v = 98.039215 });
+    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Lab{ .l = 90.34795996024553, .a = -48.75545372512652, .b = 38.96689290268498 });
     // sky_blue
-    try testHslColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .h = 196.9697, .s = 73.33332, .l = 73.52941 });
-    try testHsvColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .h = 196.9697, .s = 41.77215, .v = 92.94118 });
-    try testLabColorConversion(.{ .r = 138, .g = 209, .b = 237 }, .{ .l = 80.24627015828005, .a = -15.11865203941365, .b = -20.767024460106587 });
+    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsl{ .h = 196.9697, .s = 73.33332, .l = 73.52941 });
+    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsv{ .h = 196.9697, .s = 41.77215, .v = 92.94118 });
+    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Lab{ .l = 80.24627015828005, .a = -15.11865203941365, .b = -20.767024460106565 });
 }
 
 test "vivid colors" {
     // hot_pink
-    try testHslColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .h = 329.80392, .s = 100, .l = 70 });
-    try testHsvColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .h = 329.80392, .s = 60.000004, .v = 100 });
-    try testLabColorConversion(.{ .r = 255, .g = 102, .b = 179 }, .{ .l = 64.9763931162809, .a = 65.4066927837365, .b = -10.847761988977656 });
+    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsl{ .h = 329.80392, .s = 100, .l = 70 });
+    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsv{ .h = 329.80392, .s = 60.000004, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Lab{ .l = 64.9763931162809, .a = 65.40669278373645, .b = -10.847761988977656 });
     // lime_green
-    try testHslColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .h = 120, .s = 61.264824, .l = 49.60784 });
-    try testHsvColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .h = 120, .s = 75.98039, .v = 80 });
-    try testLabColorConversion(.{ .r = 49, .g = 204, .b = 49 }, .{ .l = 72.26888334336961, .a = -67.03378336285304, .b = 61.425460443480894 });
+    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsl{ .h = 120, .s = 61.264824, .l = 49.60784 });
+    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsv{ .h = 120, .s = 75.98039, .v = 80 });
+    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Lab{ .l = 72.26888334336961, .a = -67.03378336285304, .b = 61.425460443480894 });
     // electric_blue
-    try testHslColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .h = 195.1181, .s = 99.999985, .l = 7.509804e1 });
-    try testHsvColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .h = 195.1181, .s = 49.803917, .v = 100 });
-    try testLabColorConversion(.{ .r = 128, .g = 223, .b = 255 }, .{ .l = 84.26919487615706, .a = -19.77368831613657, .b = -24.252061008370763 });
+    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsl{ .h = 195.1181, .s = 99.999985, .l = 7.509804e1 });
+    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsv{ .h = 195.1181, .s = 49.803917, .v = 100 });
+    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Lab{ .l = 84.26919487615707, .a = -19.773688316136685, .b = -24.252061008370738 });
 }
 
 test "100 random colors" {
