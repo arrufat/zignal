@@ -37,6 +37,16 @@ pub fn Image(comptime T: type) type {
             allocator.free(self.data);
         }
 
+        /// Returns the number of channels or depth of this image type.
+        pub fn channels() usize {
+            return switch (@typeInfo(T)) {
+                .comptime_int, .int, .comptime_float, .float => 1,
+                .@"struct" => std.meta.fields(T).len,
+                .array => |info| info.len,
+                else => @compileError("Image(" ++ @typeName(T) ++ " is unsupported."),
+            };
+        }
+
         /// Returns true if and only if self and other have the same number of rows, columns and
         /// data size.
         pub fn hasSameShape(self: Self, other: anytype) bool {
@@ -179,7 +189,7 @@ pub fn Image(comptime T: type) type {
         pub fn integralImage(
             self: Self,
             allocator: Allocator,
-            integral: *Image(if (isScalar(T)) f32 else if (isStruct(T)) [std.meta.fields(T).len]f32 else @compileError("Can't compute the integral image of " ++ @typeName(T) ++ ".")),
+            integral: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
             switch (@typeInfo(T)) {
                 .comptime_int, .int, .comptime_float, .float => {
@@ -202,11 +212,10 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const num_fields = std.meta.fields(T).len;
                     if (!self.hasSameShape(integral.*)) {
-                        integral.* = try Image([num_fields]f32).initAlloc(allocator, self.rows, self.cols);
+                        integral.* = try Image([Self.channels()]f32).initAlloc(allocator, self.rows, self.cols);
                     }
-                    var tmp = [_]f32{0} ** num_fields;
+                    var tmp = [_]f32{0} ** Self.channels();
                     for (0..self.cols) |c| {
                         inline for (std.meta.fields(T), 0..) |f, i| {
                             tmp[i] += as(f32, @field(self.data[c], f.name));
@@ -214,7 +223,7 @@ pub fn Image(comptime T: type) type {
                         }
                     }
                     for (1..self.rows) |r| {
-                        tmp = [_]f32{0} ** num_fields;
+                        tmp = [_]f32{0} ** Self.channels();
                         for (0..self.cols) |c| {
                             const curr_pos = r * self.cols + c;
                             const prev_pos = (r - 1) * self.cols + c;
@@ -294,8 +303,7 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const num_fields = std.meta.fields(T).len;
-                    var integral: Image([num_fields]f32) = undefined;
+                    var integral: Image([Self.channels()]f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
                     const size = self.rows * self.cols;
@@ -401,8 +409,7 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const num_fields = std.meta.fields(T).len;
-                    var integral: Image([num_fields]f32) = undefined;
+                    var integral: Image([Self.channels()]f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
                     const size = self.rows * self.cols;
@@ -465,6 +472,7 @@ test "integral image struct" {
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
     var integral: Image([4]f32) = undefined;
     try image.integralImage(std.testing.allocator, &integral);
+
     defer integral.deinit(std.testing.allocator);
     try expectEqual(image.rows, integral.rows);
     try expectEqual(image.cols, integral.cols);
