@@ -201,8 +201,8 @@
         displayImageSize();
         const rows = canvas1.height;
         const cols = canvas1.width;
-        const numLandmarks = 478; // MediaPipe's landmarks
-        const landmarksSize = numLandmarks * 2 * 4; // x, y, f32
+        const landmarksCount = 478; // MediaPipe's landmarks
+        const landmarksSize = landmarksCount * 2 * 4; // x, y, f32
         const rgbaSize = rows * cols * 4; // RGBA
         const extraSize = rgbaSize * 8; // For extra WASM
         const outRows = canvas2.height;
@@ -223,7 +223,7 @@
         let landmarks = new Float32Array(
           wasm_exports.memory.buffer,
           landmarksPtr,
-          numLandmarks * 2,
+          landmarksCount * 2,
         );
         image = ctx1.getImageData(0, 0, cols, rows);
         rgba.set(image.data);
@@ -251,7 +251,7 @@
           padding / 100,
           blurring,
           landmarksPtr,
-          numLandmarks,
+          landmarksCount,
           extraPtr,
           extraSize,
         );

@@ -126,7 +126,7 @@ pub export fn extract_aligned_face(
     var arena = std.heap.ArenaAllocator.init(blk: {
         if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
             // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
-            assert(extra_len >= 8 * rows * cols);
+            assert(extra_len >= 9 * rows * cols);
             if (extra_ptr) |ptr| {
                 var fba = std.heap.FixedBufferAllocator.init(ptr[0..extra_len]);
                 break :blk fba.allocator();
