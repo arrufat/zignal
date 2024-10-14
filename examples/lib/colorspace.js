@@ -72,9 +72,7 @@
 
     function updateHex() {
       const hex = document.getElementById('hex-str').value;
-      console.log(hex)
       const rgb = hex2rgb(hex);
-      console.log(rgb);
       if (rgb) {
         document.getElementById('rgb-r').value = rgb.r;
         document.getElementById('rgb-g').value = rgb.g;
@@ -319,7 +317,7 @@
     function lab2xyz(l, a, b) {
       const xyzPtr = wasm_exports.alloc(3 * 4)
       const xyz = new Float32Array(wasm_exports.memory.buffer, xyzPtr, 3);
-      wasm_exports.lab2lab(l, a, b, xyzPtr);
+      wasm_exports.lab2xyz(l, a, b, xyzPtr);
       document.getElementById('lab-l').value = xyz[0];
       document.getElementById('lab-a').value = xyz[1];
       document.getElementById('lab-b').value = xyz[2];

@@ -112,3 +112,71 @@ export fn hsv2lab(h: f32, s: f32, v: f32, out: [*]f32) void {
     out[1] = @floatCast(res.a);
     out[2] = @floatCast(res.b);
 }
+
+// --- XYZ ---
+
+export fn xyz2rgb(x: f32, y: f32, z: f32, out: [*]u8) void {
+    const res = convert(Rgb, Xyz{ .x = x, .y = y, .z = z });
+    std.log.debug("RGB: {[r]d} {[g]d} {[b]d}", res);
+    out[0] = res.r;
+    out[1] = res.g;
+    out[2] = res.b;
+}
+
+export fn xyz2hsl(x: f32, y: f32, z: f32, out: [*]f32) void {
+    const res = convert(Hsl, Xyz{ .x = x, .y = y, .z = z });
+    std.log.debug("HSL: {[h]d} {[s]d} {[l]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.l;
+}
+
+export fn xyz2hsv(x: f32, y: f32, z: f32, out: [*]f32) void {
+    const res = convert(Hsv, Xyz{ .x = x, .y = y, .z = z });
+    std.log.debug("HSV: {[h]d} {[s]d} {[v]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.v;
+}
+
+export fn xyz2lab(x: f32, y: f32, z: f32, out: [*]f32) void {
+    const res = convert(Lab, Xyz{ .x = x, .y = y, .z = z });
+    std.log.debug("LAB: {[l]d} {[a]d} {[b]d}", res);
+    out[0] = @floatCast(res.l);
+    out[1] = @floatCast(res.a);
+    out[2] = @floatCast(res.b);
+}
+
+// --- LAB ---
+
+export fn lab2rgb(l: f32, a: f32, b: f32, out: [*]u8) void {
+    const res = convert(Rgb, Lab{ .l = l, .a = a, .b = b });
+    std.log.debug("RGB: {[r]d} {[g]d} {[b]d}", res);
+    out[0] = res.r;
+    out[1] = res.g;
+    out[2] = res.b;
+}
+
+export fn lab2hsl(l: f32, a: f32, b: f32, out: [*]f32) void {
+    const res = convert(Hsl, Lab{ .l = l, .a = a, .b = b });
+    std.log.debug("HSL: {[h]d} {[s]d} {[l]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.l;
+}
+
+export fn lab2hsv(l: f32, a: f32, b: f32, out: [*]f32) void {
+    const res = convert(Hsv, Lab{ .l = l, .a = a, .b = b });
+    std.log.debug("HSV: {[h]d} {[s]d} {[v]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.v;
+}
+
+export fn lab2xyz(l: f32, a: f32, b: f32, out: [*]f32) void {
+    const res = convert(Xyz, Lab{ .l = l, .a = a, .b = b });
+    std.log.debug("XYZ: {[x]d} {[y]d} {[z]d}", res);
+    out[0] = @floatCast(res.x);
+    out[1] = @floatCast(res.y);
+    out[2] = @floatCast(res.z);
+}
