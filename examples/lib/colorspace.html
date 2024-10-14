@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Color Space Converter</title>
+  </head>
+  <body>
+    <h1>Color Space Converter</h1>
+    <div id="hex">
+      <label><code>HEX:</code></label>
+      <input type="text" id="hex-str">
+    </div>
+    <div id="rgb">
+      <label><code>RGB:</code></label>
+      <input type="number" id="rgb-r" min="0" max="255" value="0">
+      <input type="number" id="rgb-g" min="0" max="255" value="0">
+      <input type="number" id="rgb-b" min="0" max="255" value="0">
+    </div>
+    <div id="hsl">
+      <label><code>HSL:</code></label>
+      <input type="number" id="hsl-h" min="0" max="360" value="0">
+      <input type="number" id="hsl-s" min="0" max="100" value="0">
+      <input type="number" id="hsl-l" min="0" max="100" value="0">
+    </div>
+    <div id="hsv">
+      <label><code>HSV:</code></label>
+      <input type="number" id="hsv-h" min="0" max="360" value="0">
+      <input type="number" id="hsv-s" min="0" max="100" value="0">
+      <input type="number" id="hsv-v" min="0" max="100" value="0">
+    </div>
+    <div id="xyz">
+      <label><code>XYZ:</code></label>
+      <input type="number" id="xyz-x" min="0" max="360" value="0">
+      <input type="number" id="xyz-y" min="0" max="100" value="0">
+      <input type="number" id="xyz-z" min="0" max="100" value="0">
+    </div>
+    <div id="lab">
+      <label><code>LAB:</code></label>
+      <input type="number" id="lab-l" min="0" max="100" value="0">
+      <input type="number" id="lab-a" min="-128" max="127" value="0">
+      <input type="number" id="lab-b" min="-128" max="127" value="0">
+    </div>
+    <script src="colorspace.js"></script>
+  </body>
+</html>

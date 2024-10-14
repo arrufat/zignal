@@ -4,6 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     _ = buildModule(b, "face_alignment", target, optimize);
+    _ = buildModule(b, "colorspace", target, optimize);
 
     const fmt_step = b.step("fmt", "Run zig fmt");
     const fmt = b.addFmt(.{
