@@ -386,6 +386,11 @@ pub const Hsl = struct {
         return self.toRgb().toRgba(alpha);
     }
 
+    /// Converts the HSL color into a HSV color.
+    pub fn toHsv(self: Hsl) Hsv {
+        return self.toRgb().toHsv();
+    }
+
     /// Converts the Hsl color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Hsl) Xyz {
         self.toRgb().toXyz();
