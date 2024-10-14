@@ -543,12 +543,12 @@ pub const Xyz = struct {
 
     /// Converts the CIE 1931 XYZ color into a RGBA color with the specified alpha.
     pub fn toRgba(self: Xyz, alpha: u8) Rgba {
-        self.toRgb().toRgba(alpha);
+        return self.toRgb().toRgba(alpha);
     }
 
     /// Converts the CIE 1931 XYZ color into a HSL color.
     pub fn toHsl(self: Xyz) Hsl {
-        self.toRgb().toHsl();
+        return self.toRgb().toHsl();
     }
 
     /// Converts the CIE 1931 XYZ color into a HSV color.
