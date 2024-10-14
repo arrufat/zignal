@@ -393,7 +393,7 @@ pub const Hsl = struct {
 
     /// Converts the Hsl color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Hsl) Xyz {
-        self.toRgb().toXyz();
+        return self.toRgb().toXyz();
     }
 
     /// Converts the HSL color into a CIELAB color.
@@ -498,7 +498,7 @@ pub const Hsv = struct {
 
     /// Converts the HSV color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Hsv) Xyz {
-        self.toRgb().toXyz();
+        return self.toRgb().toXyz();
     }
 
     /// Converts the HSV color into a CIELAB color.
