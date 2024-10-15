@@ -169,7 +169,7 @@ pub const Rgba = packed struct {
         return self.toRgb().toHsv();
     }
 
-    /// Converts the RGBA color into a CIE 1931 XYZ color.
+    /// Converts the RGBA color into a CIE 1931 XYZ color, ignoring the alpha channel.
     pub fn toXyz(self: Rgba) Xyz {
         self.toRgb().toXyz();
     }
