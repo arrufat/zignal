@@ -1,0 +1,23 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+tab_width = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = false
+max_line_length = off
+
+[*.{cpp,h,py,zig}]
+indent_size = 4
+tab_width = 4
+
+[*.{css,html,js,json,jsx,ts,tsx,yml}]
+indent_size = 2
+insert_final_newline = true
+tab_width = 2
+
+[Makefile]
+indent_style = tab
