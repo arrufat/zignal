@@ -53,12 +53,12 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         Hsl => switch (@TypeOf(color)) {
             Hsl => color,
-            u8 => .{ .h = 0, .s = 0, .l = @as(f32, @floatFromInt(color)) / 255 * 100 },
+            u8 => .{ .h = 0, .s = 0, .l = @as(f64, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsl(),
         },
         Hsv => switch (@TypeOf(color)) {
             Hsv => color,
-            u8 => .{ .h = 0, .s = 0, .v = @as(f32, @floatFromInt(color)) / 255 * 100 },
+            u8 => .{ .h = 0, .s = 0, .v = @as(f64, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsv(),
         },
         Xyz => switch (@TypeOf(color)) {
@@ -68,7 +68,7 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         Lab => switch (@TypeOf(color)) {
             Lab => color,
-            u8 => .{ .l = @as(f32, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
+            u8 => .{ .l = @as(f64, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
             inline else => color.toLab(),
         },
         else => @compileError("Unsupported color " ++ @typeName(T)),
@@ -77,6 +77,7 @@ pub fn convert(comptime T: type, color: anytype) T {
 
 test "isRgbCompatible" {
     try comptime expectEqual(isRgbCompatible(u8), false);
+    try comptime expectEqual(isRgbCompatible(RgbFloat), false);
     try comptime expectEqual(isRgbCompatible(Rgb), true);
     try comptime expectEqual(isRgbCompatible(Rgba), true);
     try comptime expectEqual(isRgbCompatible(Hsl), false);
@@ -111,6 +112,108 @@ test "alphaBlend" {
     output.blend(white.toRgba(128));
     try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
 }
+
+/// Helper RGB color in floating point, with each channel ranging from 0 to 1.
+/// Used to perform lossless conversions between colorspaces.
+const RgbFloat = struct {
+    r: f64,
+    g: f64,
+    b: f64,
+
+    fn fromRgb(r: u8, g: u8, b: u8) RgbFloat {
+        return .{
+            .r = @as(f64, @floatFromInt(r)) / 255,
+            .g = @as(f64, @floatFromInt(g)) / 255,
+            .b = @as(f64, @floatFromInt(b)) / 255,
+        };
+    }
+
+    fn toRgb(self: RgbFloat) Rgb {
+        return .{
+            .r = @intFromFloat(@round(255 * @max(0, @min(1, self.r)))),
+            .g = @intFromFloat(@round(255 * @max(0, @min(1, self.g)))),
+            .b = @intFromFloat(@round(255 * @max(0, @min(1, self.b)))),
+        };
+    }
+
+    /// Converts the RGB color into an HSL color.
+    fn toHsl(self: RgbFloat) Hsl {
+        const min = @min(self.r, @min(self.g, self.b));
+        const max = @max(self.r, @max(self.g, self.b));
+        const delta = max - min;
+        var hsl = Hsl{ .h = 0, .s = 0, .l = 0 };
+        hsl.l = (max + min) / 2;
+        if (hsl.l > 0 and hsl.l < 1) {
+            hsl.s = delta / if (hsl.l < 0.5) 2 * hsl.l else 2 - 2 * hsl.l;
+        }
+        if (delta > 0) {
+            if (max == self.r and max != self.g) {
+                hsl.h += (self.g - self.b) / delta;
+            }
+            if (max == self.g and max != self.b) {
+                hsl.h += 2 + (self.b - self.r) / delta;
+            }
+            if (max == self.b and max != self.r) {
+                hsl.h += 4 + (self.r - self.g) / delta;
+            }
+            hsl.h *= 60;
+        }
+        if (hsl.h < 0) hsl.h += 360;
+        hsl.h = if (hsl.h == 360) 0 else hsl.h;
+        hsl.s = @max(0, @min(1, hsl.s)) * 100;
+        hsl.l = @max(0, @min(1, hsl.l)) * 100;
+        return hsl;
+    }
+
+    /// Converts the RGB color into an HSV color.
+    fn toHsv(self: RgbFloat) Hsv {
+        var hsv = Hsv{};
+        const min = @min(self.r, @min(self.g, self.b));
+        const max = @max(self.r, @max(self.g, self.b));
+        const delta = max - min;
+
+        // hue
+        if (delta == 0) {
+            hsv.h = 0;
+        } else if (max == self.r) {
+            hsv.h = (self.g - self.b) / delta * 60;
+        } else if (max == self.g) {
+            hsv.h = 120 + (self.b - self.r) / delta * 60;
+        } else {
+            hsv.h = 240 + (self.r - self.g) / delta * 60;
+        }
+        if (hsv.h < 0) hsv.h += 360;
+        hsv.h = if (hsv.h == 360) 0 else hsv.h;
+
+        // saturation
+        if (max == 0) {
+            hsv.s = 0;
+        } else {
+            hsv.s = delta / max * 100;
+        }
+
+        // value
+        hsv.v = max * 100;
+        return hsv;
+    }
+
+    /// Converts the RGB color into a CIE 1931 XYZ color.
+    fn toXyz(self: RgbFloat) Xyz {
+        const r = if (self.r > 0.04045) pow(f64, (self.r + 0.055) / 1.055, 2.4) else self.r / 12.92;
+        const g = if (self.g > 0.04045) pow(f64, (self.g + 0.055) / 1.055, 2.4) else self.g / 12.92;
+        const b = if (self.b > 0.04045) pow(f64, (self.b + 0.055) / 1.055, 2.4) else self.b / 12.92;
+        return .{
+            .x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100,
+            .y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100,
+            .z = (r * 0.0193 + g * 0.1192 + b * 0.9505) * 100,
+        };
+    }
+
+    /// Converts the RGB color into a Lab color.
+    fn toLab(self: RgbFloat) Lab {
+        return self.toXyz().toLab();
+    }
+};
 
 /// A Red-Green-Blue-Alpha color.
 pub const Rgba = packed struct {
@@ -154,29 +257,38 @@ pub const Rgba = packed struct {
         return self.r << (8 * 3) + self.g << (8 * 2) + self.g << (8 * 1) + self.a << (8 * 0);
     }
 
-    /// Converts the RGBA color into an RGB color by removing the alpha channel.
+    /// Converts the RGBA color into a RGB color by removing the alpha channel.
     pub fn toRgb(self: Rgba) Rgb {
         return .{ .r = self.r, .g = self.g, .b = self.b };
     }
 
-    /// Converts the RGBA color into an HSL color, ignoring the alpha channel.
-    pub fn toHsl(self: Rgba) Hsl {
-        return self.toRgb().toHsl();
+    /// Converts the RGBA color into a floating point RGB, ignoring the alpha channel.
+    fn toRgbFloat(self: Rgba) RgbFloat {
+        return .{
+            .r = @as(f64, @floatFromInt(self.r)) / 255,
+            .g = @as(f64, @floatFromInt(self.g)) / 255,
+            .b = @as(f64, @floatFromInt(self.b)) / 255,
+        };
     }
 
-    /// Converts the RGBA color into an HSV color, ignoring the alpha channel.
+    /// Converts the RGBA color into a HSL color, ignoring the alpha channel.
+    pub fn toHsl(self: Rgba) Hsl {
+        return self.toRgbFloat().toHsl();
+    }
+
+    /// Converts the RGBA color into a HSV color, ignoring the alpha channel.
     pub fn toHsv(self: Rgba) Hsv {
-        return self.toRgb().toHsv();
+        return self.toRgbFloat().toHsv();
     }
 
     /// Converts the RGBA color into a CIE 1931 XYZ color, ignoring the alpha channel.
     pub fn toXyz(self: Rgba) Xyz {
-        self.toRgb().toXyz();
+        self.toRgbFloat().toXyz();
     }
 
-    /// Converts the RGBA color into an Lab color, ignoring the alpha channel.
+    /// Converts the RGBA color into a Lab color, ignoring the alpha channel.
     pub fn toLab(self: Rgba) Lab {
-        return self.toRgb().toLab();
+        return self.toRgbFloat().toLab();
     }
 };
 
@@ -185,6 +297,15 @@ pub const Rgb = struct {
     r: u8 = 0,
     g: u8 = 0,
     b: u8 = 0,
+
+    /// Returns the normalized RGB color in floating point.
+    fn toRgbFloat(self: Rgb) RgbFloat {
+        return .{
+            .r = @as(f64, @floatFromInt(self.r)) / 255,
+            .g = @as(f64, @floatFromInt(self.g)) / 255,
+            .b = @as(f64, @floatFromInt(self.b)) / 255,
+        };
+    }
 
     /// Constructs a RGB color from a gray value.
     pub fn fromGray(gray: u8) Rgb {
@@ -220,93 +341,24 @@ pub const Rgb = struct {
         return self.r << 16 + self.g << 8 + self.g;
     }
 
-    /// Converts the RGB color into an RGBA color with the specified alpha.
+    /// Converts the RGB color into a RGBA color with the specified alpha.
     pub fn toRgba(self: Rgb, alpha: u8) Rgba {
         return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
     }
 
-    /// Converts the RGB color into an HSL color.
+    /// Converts the RGB color into a HSL color.
     pub fn toHsl(self: Rgb) Hsl {
-        const r: f32 = @as(f32, @floatFromInt(self.r)) / 255;
-        const g: f32 = @as(f32, @floatFromInt(self.g)) / 255;
-        const b: f32 = @as(f32, @floatFromInt(self.b)) / 255;
-        const min = @min(r, @min(g, b));
-        const max = @max(r, @max(g, b));
-        const delta = max - min;
-        var hsl = Hsl{ .h = 0, .s = 0, .l = 0 };
-        hsl.l = (max + min) / 2;
-        if (hsl.l > 0 and hsl.l < 1) {
-            hsl.s = delta / if (hsl.l < 0.5) 2 * hsl.l else 2 - 2 * hsl.l;
-        }
-        if (delta > 0) {
-            if (max == r and max != g) {
-                hsl.h += (g - b) / delta;
-            }
-            if (max == g and max != b) {
-                hsl.h += 2 + (b - r) / delta;
-            }
-            if (max == b and max != r) {
-                hsl.h += 4 + (r - g) / delta;
-            }
-            hsl.h *= 60;
-        }
-        if (hsl.h < 0) hsl.h += 360;
-        hsl.h = if (hsl.h == 360) 0 else hsl.h;
-        hsl.s = @max(0, @min(1, hsl.s)) * 100;
-        hsl.l = @max(0, @min(1, hsl.l)) * 100;
-        return hsl;
+        return self.toRgbFloat().toHsl();
     }
 
-    /// Converts the RGB color into an HSV color.
+    /// Converts the RGB color into a HSV color.
     pub fn toHsv(self: Rgb) Hsv {
-        const r: f32 = @as(f32, @floatFromInt(self.r)) / 255;
-        const g: f32 = @as(f32, @floatFromInt(self.g)) / 255;
-        const b: f32 = @as(f32, @floatFromInt(self.b)) / 255;
-        var hsv = Hsv{};
-        const min = @min(r, @min(g, b));
-        const max = @max(r, @max(g, b));
-        const delta = max - min;
-
-        // hue
-        if (delta == 0) {
-            hsv.h = 0;
-        } else if (max == r) {
-            hsv.h = (g - b) / delta * 60;
-        } else if (max == g) {
-            hsv.h = 120 + (b - r) / delta * 60;
-        } else {
-            hsv.h = 240 + (r - g) / delta * 60;
-        }
-        if (hsv.h < 0) hsv.h += 360;
-        hsv.h = if (hsv.h == 360) 0 else hsv.h;
-
-        // saturation
-        if (max == 0) {
-            hsv.s = 0;
-        } else {
-            hsv.s = delta / max * 100;
-        }
-
-        // value
-        hsv.v = max * 100;
-        return hsv;
+        return self.toRgbFloat().toHsv();
     }
 
     /// Converts the RGB color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Rgb) Xyz {
-        var r: f64 = @as(f64, @floatFromInt(self.r)) / 255;
-        var g: f64 = @as(f64, @floatFromInt(self.g)) / 255;
-        var b: f64 = @as(f64, @floatFromInt(self.b)) / 255;
-
-        r = if (r > 0.04045) pow(f64, (r + 0.055) / 1.055, 2.4) else r / 12.92;
-        g = if (g > 0.04045) pow(f64, (g + 0.055) / 1.055, 2.4) else g / 12.92;
-        b = if (b > 0.04045) pow(f64, (b + 0.055) / 1.055, 2.4) else b / 12.92;
-
-        return .{
-            .x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100,
-            .y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100,
-            .z = (r * 0.0193 + g * 0.1192 + b * 0.9505) * 100,
-        };
+        return self.toRgbFloat().toXyz();
     }
 
     /// Converts the RGB color into a CIELAB color.
@@ -317,9 +369,9 @@ pub const Rgb = struct {
 
 /// A color in the HSL colorspace: h in degrees (0-359), s and l between 0-100.
 pub const Hsl = struct {
-    h: f32 = 0,
-    s: f32 = 0,
-    l: f32 = 0,
+    h: f64 = 0,
+    s: f64 = 0,
+    l: f64 = 0,
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsl, color: Rgba) void {
@@ -337,11 +389,11 @@ pub const Hsl = struct {
     pub fn toGray(self: Hsl) u8 {
         return @intFromFloat(@round(self.l / 100 * 255));
     }
-    /// Converts the HSL color into an RGB color.
-    pub fn toRgb(self: Hsl) Rgb {
-        var r: f32 = undefined;
-        var g: f32 = undefined;
-        var b: f32 = undefined;
+    /// Converts the HSL color into an RGB color, where each channel ranges from 0 to 1.
+    fn toRgbFloat(self: Hsl) RgbFloat {
+        var r: f64 = undefined;
+        var g: f64 = undefined;
+        var b: f64 = undefined;
         const s = self.s / 100;
         const l = self.l / 100;
         if (self.h < 120) {
@@ -375,9 +427,19 @@ pub const Hsl = struct {
             b = (1 - l) * b + 2 * l - 1;
         }
         return .{
-            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
-            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
-            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
+            .r = @max(0, @min(1, r)),
+            .g = @max(0, @min(1, g)),
+            .b = @max(0, @min(1, b)),
+        };
+    }
+
+    /// Converts the HSL color into an RGB color.
+    pub fn toRgb(self: Hsl) Rgb {
+        const rgb = self.toRgbFloat();
+        return .{
+            .r = @intFromFloat(@round(255 * rgb.r)),
+            .g = @intFromFloat(@round(255 * rgb.g)),
+            .b = @intFromFloat(@round(255 * rgb.b)),
         };
     }
 
@@ -388,25 +450,25 @@ pub const Hsl = struct {
 
     /// Converts the HSL color into a HSV color.
     pub fn toHsv(self: Hsl) Hsv {
-        return self.toRgb().toHsv();
+        return self.toRgbFloat().toHsv();
     }
 
     /// Converts the Hsl color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Hsl) Xyz {
-        return self.toRgb().toXyz();
+        return self.toRgbFloat().toXyz();
     }
 
     /// Converts the HSL color into a CIELAB color.
     pub fn toLab(self: Hsl) Lab {
-        return self.toRgb().toLab();
+        return self.toRgbFloat().toLab();
     }
 };
 
 /// A color in the HSV colorspace: h in degrees (0-359), s and v between 0-100.
 pub const Hsv = struct {
-    h: f32 = 0,
-    s: f32 = 0,
-    v: f32 = 0,
+    h: f64 = 0,
+    s: f64 = 0,
+    v: f64 = 0,
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsv, color: Rgba) void {
@@ -426,10 +488,10 @@ pub const Hsv = struct {
     }
 
     /// Converts the HSV color into an RGB color.
-    pub fn toRgb(self: Hsv) Rgb {
-        var r: f32 = undefined;
-        var g: f32 = undefined;
-        var b: f32 = undefined;
+    pub fn toRgbFloat(self: Hsv) RgbFloat {
+        var r: f64 = undefined;
+        var g: f64 = undefined;
+        var b: f64 = undefined;
         const hue = @max(0, @min(1, self.h / 360));
         const sat = @max(0, @min(1, self.s / 100));
         const val = @max(0, @min(1, self.v / 100));
@@ -441,7 +503,7 @@ pub const Hsv = struct {
         } else {
             const sector = hue * 6;
             const index: i32 = @intFromFloat(sector);
-            const fractional = sector - @as(f32, @floatFromInt(index));
+            const fractional = sector - @as(f64, @floatFromInt(index));
             const p = val * (1 - sat);
             const q = val * (1 - (sat * fractional));
             const t = val * (1 - sat * (1 - fractional));
@@ -480,9 +542,19 @@ pub const Hsv = struct {
             }
         }
         return .{
-            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
-            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
-            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
+            .r = @max(0, @min(1, r)),
+            .g = @max(0, @min(1, g)),
+            .b = @max(0, @min(1, b)),
+        };
+    }
+
+    /// Converts the HSV color into an RGB color.
+    pub fn toRgb(self: Hsv) Rgb {
+        const rgb = self.toRgbFloat();
+        return .{
+            .r = @intFromFloat(@round(255 * rgb.r)),
+            .g = @intFromFloat(@round(255 * rgb.g)),
+            .b = @intFromFloat(@round(255 * rgb.b)),
         };
     }
 
@@ -493,17 +565,17 @@ pub const Hsv = struct {
 
     /// Converts the HSV color into an HSL color, ignoring the alpha channel.
     pub fn toHsl(self: Hsv) Hsl {
-        return self.toRgb().toHsl();
+        return self.toRgbFloat().toHsl();
     }
 
     /// Converts the HSV color into a CIE 1931 XYZ color.
     pub fn toXyz(self: Hsv) Xyz {
-        return self.toRgb().toXyz();
+        return self.toRgbFloat().toXyz();
     }
 
     /// Converts the HSV color into a CIELAB color.
     pub fn toLab(self: Hsv) Lab {
-        return self.toRgb().toLab();
+        return self.toRgbFloat().toLab();
     }
 };
 
@@ -525,7 +597,7 @@ pub const Xyz = struct {
     }
 
     /// Converts the CIE 1931 XYZ color into a RGB color.
-    pub fn toRgb(self: Xyz) Rgb {
+    pub fn toRgbFloat(self: Xyz) RgbFloat {
         var r = (self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986) / 100;
         var g = (self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415) / 100;
         var b = (self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570) / 100;
@@ -535,9 +607,19 @@ pub const Xyz = struct {
         b = if (b > 0.0031308) 1.055 * pow(f64, b, (1.0 / 2.4)) - 0.055 else b * 12.92;
 
         return .{
-            .r = @intFromFloat(@round(255 * @max(0, @min(1, r)))),
-            .g = @intFromFloat(@round(255 * @max(0, @min(1, g)))),
-            .b = @intFromFloat(@round(255 * @max(0, @min(1, b)))),
+            .r = @max(0, @min(1, r)),
+            .g = @max(0, @min(1, g)),
+            .b = @max(0, @min(1, b)),
+        };
+    }
+
+    /// Converts the CIE 1931 XYZ color into a RGB color.
+    pub fn toRgb(self: Xyz) Rgb {
+        const rgb = self.toRgbFloat();
+        return .{
+            .r = @intFromFloat(@round(255 * rgb.r)),
+            .g = @intFromFloat(@round(255 * rgb.g)),
+            .b = @intFromFloat(@round(255 * rgb.b)),
         };
     }
 
@@ -548,12 +630,12 @@ pub const Xyz = struct {
 
     /// Converts the CIE 1931 XYZ color into a HSL color.
     pub fn toHsl(self: Xyz) Hsl {
-        return self.toRgb().toHsl();
+        return self.toRgbFloat().toHsl();
     }
 
     /// Converts the CIE 1931 XYZ color into a HSV color.
     pub fn toHsv(self: Xyz) Hsv {
-        return self.toRgb().toHsv();
+        return self.toRgbFloat().toHsv();
     }
 
     /// Converts the CIE 1931 XYZ color into a CIELAB color.
@@ -606,8 +688,13 @@ pub const Lab = struct {
     }
 
     /// Converts the CIELAB color into a RGB color.
+    pub fn toRgbFloat(self: Lab) RgbFloat {
+        return self.toXyz().toRgbFloat();
+    }
+
+    /// Converts the CIELAB color into a RGB color.
     pub fn toRgb(self: Lab) Rgb {
-        return self.toXyz().toRgb();
+        return self.toRgbFloat().toRgb();
     }
 
     /// Converts the CIELAB color into a RGBA color with the specified alpha.
@@ -617,12 +704,12 @@ pub const Lab = struct {
 
     /// Converts the CIELAB color into a HSL color.
     pub fn toHsl(self: Lab) Hsl {
-        return self.toRgb().toHsl();
+        return self.toRgbFloat().toHsl();
     }
 
     /// Converts the CIELAB color into a HSV color.
     pub fn toHsv(self: Lab) Hsv {
-        return self.toRgb().toHsv();
+        return self.toRgbFloat().toHsv();
     }
 
     /// Converts the CIELAB color into a CIE 1931 XYZ color.
@@ -714,8 +801,8 @@ test "complimetary colors" {
     try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsv{ .h = 32, .s = 100, .v = 100 });
     try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Lab{ .l = 68.65577208167872, .a = 38.85052375564019, .b = 74.99022544139406 });
     // purple: 0x800080
-    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsl{ .h = 300, .s = 100, .l = 25.098042 });
-    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsv{ .h = 300, .s = 100, .v = 50.196083 });
+    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsl{ .h = 300, .s = 100, .l = 25.098039215686274 });
+    try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Hsv{ .h = 300, .s = 100, .v = 50.19607843137255 });
     try testColorConversion(.{ .r = 128, .g = 0, .b = 128 }, Lab{ .l = 29.782100092098077, .a = 58.93983731904206, .b = -36.49792996282386 });
 }
 
@@ -725,8 +812,8 @@ test "neutral colors" {
     try testColorConversion(.{ .r = 255, .g = 255, .b = 255 }, Hsv{ .h = 0, .s = 0, .v = 100 });
     try testColorConversion(.{ .r = 255, .g = 255, .b = 255 }, Lab{ .l = 100, .a = 0.00526049995830391, .b = -0.010408184525267927 });
     // gray: 0x808080
-    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsl{ .h = 0, .s = 0, .l = 50.196083 });
-    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsv{ .h = 0, .s = 0, .v = 50.196083 });
+    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsl{ .h = 0, .s = 0, .l = 50.19607843137255 });
+    try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Hsv{ .h = 0, .s = 0, .v = 50.19607843137255 });
     try testColorConversion(.{ .r = 128, .g = 128, .b = 128 }, Lab{ .l = 53.58501345216902, .a = 0.003155620347972121, .b = -0.006243566036268078 });
     // black: 0x000000
     try testColorConversion(.{ .r = 0, .g = 0, .b = 0 }, Hsl{ .h = 0, .s = 0, .l = 0 });
@@ -736,31 +823,31 @@ test "neutral colors" {
 
 test "pastel colors" {
     // pale_pink: 0xffd3ba
-    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsl{ .h = 21.73913, .s = 100, .l = 86.47059 });
-    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsv{ .h = 21.73913, .s = 27.058823, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsl{ .h = 21.739130434782602, .s = 100, .l = 86.47058823529412 });
+    try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsv{ .h = 21.739130434782602, .s = 27.058823529411768, .v = 100 });
     try testColorConversion(.{ .r = 255, .g = 211, .b = 186 }, Lab{ .l = 87.67593388241974, .a = 11.843797404960165, .b = 18.16236917854479 });
     // mint_green: 0x96fa96
-    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsl{ .h = 120, .s = 90.909096, .l = 78.43137 });
-    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsv{ .h = 120, .s = 39.999996, .v = 98.039215 });
+    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsl{ .h = 120, .s = 90.90909090909089, .l = 78.43137254901961 });
+    try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Hsv{ .h = 120, .s = 40, .v = 98.0392156862745 });
     try testColorConversion(.{ .r = 150, .g = 250, .b = 150 }, Lab{ .l = 90.34795996024553, .a = -48.75545372512652, .b = 38.96689290268498 });
     // sky_blue: #8ad1ed
-    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsl{ .h = 196.9697, .s = 73.33332, .l = 73.52941 });
-    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsv{ .h = 196.9697, .s = 41.77215, .v = 92.94118 });
+    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsl{ .h = 196.96969696969697, .s = 73.33333333333336, .l = 73.52941176470588 });
+    try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Hsv{ .h = 196.96969696969697, .s = 41.77215189873419, .v = 92.94117647058823 });
     try testColorConversion(.{ .r = 138, .g = 209, .b = 237 }, Lab{ .l = 80.24627015828005, .a = -15.11865203941365, .b = -20.767024460106565 });
 }
 
 test "vivid colors" {
     // hot_pink: #ff66b3
-    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsl{ .h = 329.80392, .s = 100, .l = 70 });
-    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsv{ .h = 329.80392, .s = 60.000004, .v = 100 });
+    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsl{ .h = 329.80392156862746, .s = 99.99999999999997, .l = 70 });
+    try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsv{ .h = 329.80392156862746, .s = 60, .v = 100 });
     try testColorConversion(.{ .r = 255, .g = 102, .b = 179 }, Lab{ .l = 64.9763931162809, .a = 65.40669278373645, .b = -10.847761988977656 });
     // lime_green:#31cc31
-    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsl{ .h = 120, .s = 61.264824, .l = 49.60784 });
-    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsv{ .h = 120, .s = 75.98039, .v = 80 });
+    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsl{ .h = 120, .s = 61.26482213438735, .l = 49.6078431372549 });
+    try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Hsv{ .h = 120, .s = 75.98039215686275, .v = 80 });
     try testColorConversion(.{ .r = 49, .g = 204, .b = 49 }, Lab{ .l = 72.26888334336961, .a = -67.03378336285304, .b = 61.425460443480894 });
     // electric_blue: #80dfff
-    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsl{ .h = 195.1181, .s = 99.999985, .l = 7.509804e1 });
-    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsv{ .h = 195.1181, .s = 49.803917, .v = 100 });
+    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsl{ .h = 195.11811023622047, .s = 100, .l = 75.09803921568627 });
+    try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Hsv{ .h = 195.11811023622047, .s = 49.80392156862745, .v = 100 });
     try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Lab{ .l = 84.26919487615707, .a = -19.773688316136685, .b = -24.252061008370738 });
 }
 
