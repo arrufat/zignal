@@ -190,10 +190,7 @@
       hsl2hsv(h, s, l);
       hsl2xyz(h, s, l);
       hsl2lab(h, s, l);
-      const red = parseInt(document.getElementById("rgb-r").value);
-      const green = parseInt(document.getElementById("rgb-g").value);
-      const blue = parseInt(document.getElementById("rgb-b").value);
-      document.getElementById("hex-#").value = rgb2hex(red, green, blue);
+      updateHex();
     }
 
     // --- HSV ---
