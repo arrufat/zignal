@@ -37,3 +37,12 @@
 #toggle-button {
   margin: 20px;
 }
+
+input {
+  font-size: 20px;
+  width: 150px;
+}
+
+#color{
+  width: 320px;
+}
