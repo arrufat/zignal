@@ -30,6 +30,7 @@ export fn rgb2hsv(red: u8, green: u8, blue: u8, out: [*]f64) void {
     out[1] = res.s;
     out[2] = res.v;
 }
+
 export fn rgb2xyz(red: u8, green: u8, blue: u8, out: [*]f64) void {
     const res = convert(Xyz, Rgb{ .r = red, .g = green, .b = blue });
     std.log.debug("XYZ: {[x]d} {[y]d} {[z]d}", res);
@@ -37,6 +38,7 @@ export fn rgb2xyz(red: u8, green: u8, blue: u8, out: [*]f64) void {
     out[1] = @floatCast(res.y);
     out[2] = @floatCast(res.z);
 }
+
 export fn rgb2lab(red: u8, green: u8, blue: u8, out: [*]f64) void {
     const res = convert(Lab, Rgb{ .r = red, .g = green, .b = blue });
     std.log.debug("LAB: {[l]d} {[a]d} {[b]d}", res);
