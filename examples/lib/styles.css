@@ -43,6 +43,10 @@ input {
   width: 150px;
 }
 
+#validation-message {
+  color: #bf616a;
+}
+
 #color{
-  width: 320px;
+  width: 158px;
 }
