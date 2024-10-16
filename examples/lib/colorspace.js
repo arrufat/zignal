@@ -69,11 +69,14 @@
       const hex = document.getElementById("hex-#").value;
       const rgb = hex2rgb(hex);
       if (rgb) {
+        document.getElementById('validation-message').textContent = '';
         document.getElementById("rgb-r").value = rgb.r;
         document.getElementById("rgb-g").value = rgb.g;
         document.getElementById("rgb-b").value = rgb.b;
         updateColor();
         updateFromRgb();
+      } else {
+        document.getElementById('validation-message').textContent = '⚠️ Invalid HEX value.';
       }
     }
 
@@ -137,6 +140,12 @@
       const r = parseInt(document.getElementById("rgb-r").value);
       const g = parseInt(document.getElementById("rgb-g").value);
       const b = parseInt(document.getElementById("rgb-b").value);
+      if (r < 0) document.getElementById("rgb-r").value = 0;
+      if (g < 0) document.getElementById("rgb-r").value = 0;
+      if (b < 0) document.getElementById("rgb-r").value = 0;
+      if (r > 255) document.getElementById("rgb-r").value = 255;
+      if (g > 255) document.getElementById("rgb-r").value = 255;
+      if (b > 255) document.getElementById("rgb-r").value = 255;
       rgb2hsl(r, g, b);
       rgb2hsv(r, g, b);
       rgb2xyz(r, g, b);
@@ -186,6 +195,12 @@
       const h = parseFloat(document.getElementById("hsl-h").value);
       const s = parseFloat(document.getElementById("hsl-s").value);
       const l = parseFloat(document.getElementById("hsl-l").value);
+      if (h < 0) document.getElementById("hsl-h").value = 0;
+      if (s < 0) document.getElementById("hsl-s").value = 0;
+      if (l < 0) document.getElementById("hsl-l").value = 0;
+      if (h >= 360) document.getElementById("hsl-h").value = 0;
+      if (s > 100) document.getElementById("hsl-s").value = 100;
+      if (l > 100) document.getElementById("hsl-l").value = 100;
       hsl2rgb(h, s, l);
       hsl2hsv(h, s, l);
       hsl2xyz(h, s, l);
@@ -235,6 +250,12 @@
       const h = parseFloat(document.getElementById("hsv-h").value);
       const s = parseFloat(document.getElementById("hsv-s").value);
       const v = parseFloat(document.getElementById("hsv-v").value);
+      if (h < 0) document.getElementById("hsv-h").value = 0;
+      if (s < 0) document.getElementById("hsv-s").value = 0;
+      if (v < 0) document.getElementById("hsv-v").value = 0;
+      if (h >= 360) document.getElementById("hsv-h").value = 0;
+      if (s > 100) document.getElementById("hsv-s").value = 100;
+      if (v > 100) document.getElementById("hsv-v").value = 100;
       hsv2rgb(h, s, v);
       hsv2hsl(h, s, v);
       hsv2xyz(h, s, v);
@@ -284,6 +305,12 @@
       const x = parseFloat(document.getElementById("xyz-x").value);
       const y = parseFloat(document.getElementById("xyz-y").value);
       const z = parseFloat(document.getElementById("xyz-z").value);
+      if (x < 0) document.getElementById("xyz-x").value = 0;
+      if (y < 0) document.getElementById("xyz-y").value = 0;
+      if (z < 0) document.getElementById("xyz-z").value = 0;
+      if (x > 95.050) document.getElementById("xyz-x").value = 95.050;
+      if (y > 100) document.getElementById("xyz-y").value = 100;
+      if (z > 108.900) document.getElementById("xyz-z").value = 108.900;
       xyz2rgb(x, y, z);
       xyz2hsl(x, y, z);
       xyz2hsv(x, y, z);
@@ -333,6 +360,12 @@
       const l = parseFloat(document.getElementById("lab-l").value);
       const a = parseFloat(document.getElementById("lab-a").value);
       const b = parseFloat(document.getElementById("lab-b").value);
+      if (l < 0) document.getElementById("lab-l").value = 0;
+      if (a < -128) document.getElementById("lab-a").value = -128;
+      if (b < -128) document.getElementById("lab-b").value = -128;
+      if (l > 100) document.getElementById("lab-l").value = 100;
+      if (a > 127) document.getElementById("lab-a").value = 127;
+      if (b > 127) document.getElementById("lab-b").value = 127;
       lab2rgb(l, a, b);
       lab2hsl(l, a, b);
       lab2hsv(l, a, b);
