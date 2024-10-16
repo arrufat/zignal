@@ -141,16 +141,16 @@
       const g = parseInt(document.getElementById("rgb-g").value);
       const b = parseInt(document.getElementById("rgb-b").value);
       if (r < 0) document.getElementById("rgb-r").value = 0;
-      if (g < 0) document.getElementById("rgb-r").value = 0;
-      if (b < 0) document.getElementById("rgb-r").value = 0;
+      if (g < 0) document.getElementById("rgb-g").value = 0;
+      if (b < 0) document.getElementById("rgb-b").value = 0;
       if (r > 255) document.getElementById("rgb-r").value = 255;
-      if (g > 255) document.getElementById("rgb-r").value = 255;
-      if (b > 255) document.getElementById("rgb-r").value = 255;
+      if (g > 255) document.getElementById("rgb-g").value = 255;
+      if (b > 255) document.getElementById("rgb-b").value = 255;
       rgb2hsl(r, g, b);
       rgb2hsv(r, g, b);
       rgb2xyz(r, g, b);
       rgb2lab(r, g, b);
-      document.getElementById("hex-#").value = rgb2hex(r, g, b);
+      updateHex();
     }
 
     // --- HSL ---
