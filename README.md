@@ -45,6 +45,10 @@ I plan to add examples for most of the features of this library as simple HTML/J
 is the large amount of examples illustrating how to use many of that library features.
 They can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/).
 
+Currently, there are examples for:
+- [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspace.html)
+- [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html)
+
 ## Acknowledgements
 
 First of all, this project would not have been possible without the existance of [dlib](http://dlib.net).
