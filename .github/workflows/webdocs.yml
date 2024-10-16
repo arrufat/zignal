@@ -40,8 +40,6 @@ jobs:
           cd examples
           make wasm
           mv zig-out ../zig-out/docs/examples
-          cd -
-          mv zig-out/docs/examples/favicon.ico zig-out/docs/favicon.ico
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v1
