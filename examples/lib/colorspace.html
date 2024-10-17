@@ -9,41 +9,75 @@
   <body>
     <h1>Color Space Converter</h1>
     <div id="hex">
-      <label><code>HEX:</code></label>
+      <label onClick="copyToClipboard('hex')"><code>HEX:</code></label>
       <input type="text" id="hex-#" value="#000000">
       <input type="color" name="color" id="color" value="#000000">
       <label id="validation-message"></label>
     </div>
     <div id="rgb">
-      <label><code>RGB:</code></label>
+      <label onclick="copyToClipboard('rgb')"><code>RGB:</code></label>
       <input type="number" id="rgb-r" min="0" max="255" value="0">
       <input type="number" id="rgb-g" min="0" max="255" value="0">
       <input type="number" id="rgb-b" min="0" max="255" value="0">
     </div>
     <div id="hsl">
-      <label><code>HSL:</code></label>
+      <label onclick="copyToClipboard('hsl')"><code>HSL:</code></label>
       <input type="number" id="hsl-h" min="0" max="360" value="0">
       <input type="number" id="hsl-s" min="0" max="100" value="0">
       <input type="number" id="hsl-l" min="0" max="100" value="0">
     </div>
     <div id="hsv">
-      <label><code>HSV:</code></label>
+      <label onclick="copyToClipboard('hsv')"><code>HSV:</code></label>
       <input type="number" id="hsv-h" min="0" max="360" value="0">
       <input type="number" id="hsv-s" min="0" max="100" value="0">
       <input type="number" id="hsv-v" min="0" max="100" value="0">
     </div>
     <div id="xyz">
-      <label><code>XYZ:</code></label>
+      <label onclick="copyToClipboard('xyz')"><code>XYZ:</code></label>
       <input type="number" id="xyz-x" min="0" max="95.050" step="0.1" value="0">
       <input type="number" id="xyz-y" min="0" max="100" step="0.1" value="0">
       <input type="number" id="xyz-z" min="0" max="108.900" step="0.1" value="0">
     </div>
     <div id="lab">
-      <label><code>LAB:</code></label>
+      <label onclick="copyToClipboard('lab')"><code>LAB:</code></label>
       <input type="number" id="lab-l" min="0" max="100" step="0.1" value="0">
       <input type="number" id="lab-a" min="-128" max="127" step="0.1" value="0">
       <input type="number" id="lab-b" min="-128" max="127" step="0.1" value="0">
     </div>
     <script src="colorspace.js"></script>
+    <script>
+      function copyToClipboard(colorSpace) {
+        let inputs;
+        switch(colorSpace) {
+          case 'hex':
+            inputs = [document.getElementById('hex-#')];
+            break;
+          case 'rgb':
+            inputs = ['rgb-r', 'rgb-g', 'rgb-b'].map(id => document.getElementById(id));
+            break;
+          case 'hsl':
+            inputs = ['hsl-h', 'hsl-s', 'hsl-l'].map(id => document.getElementById(id));
+            break;
+          case 'hsv':
+            inputs = ['hsv-h', 'hsv-s', 'hsv-v'].map(id => document.getElementById(id));
+            break;
+          case 'xyz':
+            inputs = ['xyz-x', 'xyz-y', 'xyz-z'].map(id => document.getElementById(id));
+            break;
+          case 'lab':
+            inputs = ['lab-l', 'lab-a', 'lab-b'].map(id => document.getElementById(id));
+            break;
+        }
+
+        let textToCopy = inputs.map(input => input.value).join(', ');
+        if (colorSpace === 'hex') textToCopy = inputs[0].value; // For hex, just the hex value
+
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          alert('Copied to clipboard: ' + textToCopy);
+        }).catch(err => {
+          console.error('Failed to copy: ', err);
+        });
+      }
+    </script>
   </body>
 </html>
