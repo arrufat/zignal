@@ -1,14 +1,12 @@
-(function () {
+(function() {
   async function setupMediaPipeLandmarks(mode, delegate) {
-    const mediapipeVersion = "0.10.11";
+    const mediapipeVersion = "0.10.15";
     const visionBundle = await import(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@" + mediapipeVersion
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${mediapipeVersion}`
     );
     const { FaceLandmarker, FilesetResolver } = visionBundle;
     const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@" +
-        mediapipeVersion +
-        "/wasm",
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${mediapipeVersion}/wasm`,
     );
     return await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
@@ -38,12 +36,12 @@
   let blurring = 0;
 
   document.getElementsByName("padding")[0].innerHTML = padding + '%';
-  document.getElementsByName("padding-range")[0].oninput = function () {
+  document.getElementsByName("padding-range")[0].oninput = function() {
     padding = this.value;
     document.getElementsByName("padding")[0].innerHTML = padding + '%';
   };
   document.getElementsByName("blurring")[0].innerHTML = blurring + ' px';
-  document.getElementsByName("blurring-range")[0].oninput = function () {
+  document.getElementsByName("blurring-range")[0].oninput = function() {
     blurring = this.value;
     document.getElementsByName("blurring")[0].innerHTML = blurring + ' px';
   };
@@ -68,14 +66,14 @@
     processFn();
   });
 
-  canvas1.ondragover = function (event) {
+  canvas1.ondragover = function(event) {
     event.preventDefault();
   };
 
-  canvas1.ondrop = function (event) {
+  canvas1.ondrop = function(event) {
     event.preventDefault();
     let img = new Image();
-    img.onload = function () {
+    img.onload = function() {
       canvas1.width = img.width;
       canvas1.height = img.height;
       ctx1.drawImage(img, 0, 0);
@@ -90,11 +88,11 @@
 
   function displayImage(file) {
     const reader = new FileReader();
-    reader.onload = function (e) {
+    reader.onload = function(e) {
       const imageData = e.target.result;
       const img = document.createElement("img");
       img.src = imageData;
-      img.onload = function () {
+      img.onload = function() {
         canvas1.width = img.width;
         canvas1.height = img.height;
         ctx1.drawImage(img, 0, 0);
@@ -110,13 +108,13 @@
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.style.display = "none";
-  fileInput.addEventListener("change", function (e) {
+  fileInput.addEventListener("change", function(e) {
     const file = e.target.files[0];
     displayImage(file);
     alignButton.disabled = false;
   });
 
-  canvas1.addEventListener("click", function () {
+  canvas1.addEventListener("click", function() {
     fileInput.click();
   });
 
@@ -182,22 +180,22 @@
 
   WebAssembly.instantiateStreaming(wasm_promise, {
     js: {
-      log: function (ptr, len) {
+      log: function(ptr, len) {
         const msg = decodeString(ptr, len);
         console.log(msg);
       },
-      now: function () {
+      now: function() {
         return performance.now();
       },
     },
-  }).then(function (obj) {
+  }).then(function(obj) {
     wasm_exports = obj.instance.exports;
     window.wasm = obj;
-    setupMediaPipeLandmarks("IMAGE", "GPU").then(function (landmarker) {
+    setupMediaPipeLandmarks("IMAGE", "GPU").then(function(landmarker) {
       faceLandmarker = landmarker;
       toggleButton.disabled = false;
 
-      let align = function () {
+      let align = function() {
         displayImageSize();
         const rows = canvas1.height;
         const cols = canvas1.width;
