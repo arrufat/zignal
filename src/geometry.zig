@@ -347,10 +347,10 @@ pub fn SimilarityTransform(comptime T: type) type {
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
     return struct {
-        const Self = @This();
         points: std.ArrayList(Point2d(T)),
         hull: std.ArrayList(Point2d(T)),
 
+        const Self = @This();
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .points = std.ArrayList(Point2d(T)).init(allocator),
@@ -372,6 +372,10 @@ pub fn ConvexHull(comptime T: type) type {
         /// Returns the orientation of the three points.
         fn computeOrientation(a: Point2d(T), b: Point2d(T), c: Point2d(T)) Orientation {
             const v: T = a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y);
+            // Due to floating point precision errors, compute the reverse orientation, and
+            // if any of those is collinear, then return collinear.
+            const w: T = a.x * (c.y - b.y) + c.x * (b.y - a.y) + b.x * (a.y - c.y);
+            if (v * w == 0) return .collinear;
             if (v < 0) return .clockwise;
             if (v > 0) return .counter_clockwise;
             return .collinear;
@@ -457,4 +461,17 @@ test "convex hull" {
     // check passing aligned points
     empty = convex_hull.find(points[0..3]);
     try expectEqual(empty, null);
+}
+
+test "computeOrientation" {
+    var convex_hull = ConvexHull(f32).init(std.testing.allocator);
+    defer convex_hull.deinit();
+    const computeOrientation = ConvexHull(f32).computeOrientation;
+    // These three points can have different orientations due to floating point precision.
+    const a: Point2d(f32) = .{ .x = 4.9171928e-1, .y = 6.473901e-1 };
+    const b: Point2d(f32) = .{ .x = 3.6271343e-1, .y = 9.712454e-1 };
+    const c: Point2d(f32) = .{ .x = 3.9276862e-1, .y = 8.9579517e-1 };
+    const orientation_abc = computeOrientation(a, b, c);
+    const orientation_acb = computeOrientation(a, c, b);
+    try std.testing.expectEqual(orientation_abc, orientation_acb);
 }
