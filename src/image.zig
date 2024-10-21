@@ -40,7 +40,7 @@ pub fn Image(comptime T: type) type {
         /// Returns the number of channels or depth of this image type.
         pub fn channels() usize {
             return switch (@typeInfo(T)) {
-                .comptime_int, .int, .comptime_float, .float => 1,
+                .int, .float => 1,
                 .@"struct" => std.meta.fields(T).len,
                 .array => |info| info.len,
                 else => @compileError("Image(" ++ @typeName(T) ++ " is unsupported."),
@@ -243,13 +243,13 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0) {
+            if (radius == 0 and &self != blurred) {
                 for (self.data, blurred.data) |s, *b| b.* = s;
                 return;
             }
 
             switch (@typeInfo(T)) {
-                .comptime_int, .int, .comptime_float, .float => {
+                .int, .float => {
                     var integral: Image(f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
@@ -279,7 +279,11 @@ pub fn Image(comptime T: type) type {
                             const sums = int22s - int21s - int12s + int11s;
                             const vals: [simd_len]f32 = @round(sums / areas);
                             for (vals, 0..) |val, i| {
-                                blurred.data[pos + i] = as(T, val);
+                                if (@typeInfo(T) == .int) {
+                                    blurred.data[pos + i] = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), val)));
+                                } else {
+                                    blurred.data[pos + i] = val;
+                                }
                             }
                             pos += simd_len;
                             rem -= simd_len;
@@ -293,8 +297,8 @@ pub fn Image(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             blurred.data[pos] = switch (@typeInfo(T)) {
-                                .int, .comptime_int => as(T, @round(sum / area)),
-                                .float, .comptime_float => as(T, sum / area),
+                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), (@round(sum / area))))),
+                                .float => as(T, sum / area),
                                 else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(T) ++ "."),
                             };
                             pos += 1;
@@ -326,8 +330,8 @@ pub fn Image(comptime T: type) type {
                         inline for (std.meta.fields(T), 0..) |f, i| {
                             const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
                             @field(blurred.data[pos], f.name) = switch (@typeInfo(f.type)) {
-                                .int, .comptime_int => as(f.type, @round(sum / area)),
-                                .float, .comptime_float => as(f.type, sum / area),
+                                .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
+                                .float => as(f.type, sum / area),
                                 else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
                             };
                         }
@@ -381,7 +385,7 @@ pub fn Image(comptime T: type) type {
                             const sums = int22s - int21s - int12s + int11s;
                             const vals: [simd_len]f32 = @round(sums / box_areas);
                             for (vals, 0..) |val, i| {
-                                if (@typeInfo(T) == .comptime_int or @typeInfo(T) == .int) {
+                                if (@typeInfo(T) == .int) {
                                     const temp = @max(0, @min(std.math.maxInt(T), as(isize, self.data[pos]) * 2 - @as(isize, val)));
                                     sharpened.data[pos + i] = as(T, temp);
                                 } else {
@@ -400,8 +404,8 @@ pub fn Image(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             sharpened.data[pos] = switch (@typeInfo(T)) {
-                                .int, .comptime_int => as(T, @round(sum / area)),
-                                .float, .comptime_float => as(T, sum / area),
+                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area)))),
+                                .float => as(T, sum / area),
                             };
                             pos += 1;
                             rem -= 1;
