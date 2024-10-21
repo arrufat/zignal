@@ -28,7 +28,6 @@
   const alignButton = document.getElementById("align-button");
   let mediaStream = undefined;
   let faceLandmarker = undefined;
-  let makeup = undefined;
   let processFn = undefined;
   let image = undefined;
   let original = undefined;
