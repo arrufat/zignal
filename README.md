@@ -1,6 +1,6 @@
 # Zignal
 
-<img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400> 
+<img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400>
 
 Zignal is an image processing library heavily inspired by the amazing [dlib](http://dlib.net).
 
@@ -48,6 +48,7 @@ They can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/)
 Currently, there are examples for:
 - [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspace.html)
 - [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html)
+- [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin.html)
 
 ## Acknowledgements
 
