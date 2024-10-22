@@ -10,12 +10,6 @@
   position: relative;
 }
 
-.grid-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  grid-gap: 20px;
-}
-
 #form {
   width: 300px;
   margin: 10px;
@@ -28,6 +22,10 @@
   height: auto;
   left: 0px;
   top: 0px;
+}
+
+#canvas {
+  border: 1px solid black;
 }
 
 #video {

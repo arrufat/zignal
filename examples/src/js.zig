@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const gpa = std.heap.wasm_allocator;
 
 pub const js = struct {
     extern "js" fn log(ptr: [*]const u8, len: usize) void;
@@ -29,10 +28,10 @@ pub fn logFn(
 }
 
 export fn alloc(len: usize) [*]u8 {
-    const slice = gpa.alloc(u8, len) catch @panic("OOM");
+    const slice = std.heap.wasm_allocator.alloc(u8, len) catch @panic("OOM");
     return slice.ptr;
 }
 
 export fn free(ptr: [*]const u8, len: usize) void {
-    gpa.free(ptr[0..len]);
+    std.heap.wasm_allocator.free(ptr[0..len]);
 }
