@@ -35,3 +35,4 @@ pub const drawRectangle = draw.drawRectangle;
 pub const drawPolygon = draw.drawPolygon;
 pub const fillPolygon = draw.fillPolygon;
 pub const meta = @import("meta.zig");
+pub const perlin = @import("perlin.zig");
