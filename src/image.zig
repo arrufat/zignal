@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const Allocator = std.mem.Allocator;
 const Rgba = @import("colorspace.zig").Rgba;
+const convert = @import("colorspace.zig").convert;
 const as = @import("meta.zig").as;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
@@ -446,6 +447,44 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Applies the sobel filter to self to perform edge detection.
+        pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
+            if (!self.hasSameShape(out.*)) {
+                out.* = try Image(u8).initAlloc(allocator, self.rows, self.cols);
+            }
+            const vert_filter = [3][3]i32{
+                .{ -1, -2, -1 },
+                .{ 0, 0, 0 },
+                .{ 1, 2, 1 },
+            };
+            const horz_filter = [3][3]i32{
+                .{ -1, 0, 1 },
+                .{ -2, 0, 2 },
+                .{ -1, 0, 1 },
+            };
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const pos = r * self.cols + c;
+                    const ir: isize = @intCast(r);
+                    const ic: isize = @intCast(c);
+                    var horz_temp: i32 = 0;
+                    var vert_temp: i32 = 0;
+                    for (0..vert_filter.len) |m| {
+                        const py: isize = ir - 1 + @as(isize, @intCast(m));
+                        for (0..vert_filter[0].len) |n| {
+                            const px: isize = ic - 1 + @as(isize, @intCast(n));
+                            if (self.at(py, px)) |val| {
+                                const p: i32 = @intCast(convert(u8, val.*));
+                                horz_temp += p * horz_filter[m][n];
+                                vert_temp += p * vert_filter[m][n];
+                            }
+                        }
+                    }
+                    out.data[pos] = @intFromFloat(@max(0, @min(255, @sqrt(@as(f32, @floatFromInt(horz_temp * horz_temp + vert_temp * vert_temp))))));
+                }
             }
         }
     };
