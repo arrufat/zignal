@@ -1,5 +1,5 @@
 (function() {
-  let wasm_promise = fetch("perlin.wasm");
+  let wasm_promise = fetch("perlin_noise.wasm");
   var wasm_exports = null;
   const text_decoder = new TextDecoder();
 
