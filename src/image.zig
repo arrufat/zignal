@@ -24,10 +24,25 @@ pub fn Image(comptime T: type) type {
             return .{ .rows = rows, .cols = cols, .data = data };
         }
 
+        /// Constructs an image of rows and cols size allocating its own memory.
         pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(rows * cols);
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice() };
+        }
+
+        /// Contructs an image of rows and cols size reinterpreting the slice of bytes as a slice of T.
+        pub fn initFromBytes(rows: usize, cols: usize, bytes: []u8) Image(T) {
+            return .{
+                .rows = rows,
+                .cols = cols,
+                .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
+            };
+        }
+
+        /// Returns the image data reinterpreted as a slice of bytes
+        pub fn toBytes(self: Self) []u8 {
+            return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
         /// Sets the image rows and cols to zero and frees the memory from the image.  It should
