@@ -33,6 +33,7 @@ pub fn Image(comptime T: type) type {
 
         /// Contructs an image of rows and cols size reinterpreting the slice of bytes as a slice of T.
         pub fn initFromBytes(rows: usize, cols: usize, bytes: []u8) Image(T) {
+            assert(rows * cols * @sizeOf(T) == bytes.len);
             return .{
                 .rows = rows,
                 .cols = cols,
