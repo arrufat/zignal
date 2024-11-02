@@ -42,7 +42,8 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns the image data reinterpreted as a slice of bytes
-        pub fn toBytes(self: Self) []u8 {
+        pub fn asBytes(self: Self) []u8 {
+            assert(self.rows * self.cols == self.data.len);
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
@@ -56,7 +57,7 @@ pub fn Image(comptime T: type) type {
 
         /// Returns the number of channels or depth of this image type.
         pub fn channels() usize {
-            return switch (@typeInfo(T)) {
+            return comptime switch (@typeInfo(T)) {
                 .int, .float => 1,
                 .@"struct" => std.meta.fields(T).len,
                 .array => |info| info.len,
