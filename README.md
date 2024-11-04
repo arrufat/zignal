@@ -48,7 +48,7 @@ They can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/)
 Currently, there are examples for:
 - [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspace.html)
 - [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html)
-- [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin.html)
+- [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin-noise.html)
 
 ## Acknowledgements
 
