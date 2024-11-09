@@ -112,6 +112,174 @@ test "Rectangle" {
     try expectEqualDeep(frect.cast(isize), irect);
 }
 
+/// Applies a similarity transform to a point.  By default, it will be initialized to the identity
+/// function.  Use the fit method to update the transform to map between two sets of points.
+pub fn SimilarityTransform(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
+        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
+
+        /// Finds the best similarity transforms that maps between the two given sets of points.
+        pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+            var transfrom = SimilarityTransform(T){};
+            transfrom.fit(from_points, to_points);
+            return transfrom;
+        }
+
+        /// Projects the given point using the similarity transform.
+        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
+            var dst = self.matrix.dot(src);
+            return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
+        }
+
+        /// Finds the best similarity transforms that maps between the two given sets of points.
+        pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+            assert(from_points.len >= 2);
+            assert(from_points.len == to_points.len);
+            const num_points: T = @floatFromInt(from_points.len);
+            var mean_from: Point2d(T) = .{ .x = 0, .y = 0 };
+            var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
+            var sigma_from: T = 0;
+            var sigma_to: T = 0;
+            var cov = Matrix(T, 2, 2).initAll(0);
+            self.matrix = cov;
+            for (0..from_points.len) |i| {
+                mean_from.x += from_points[i].x;
+                mean_from.y += from_points[i].y;
+                mean_to.x += to_points[i].x;
+                mean_to.y += to_points[i].y;
+            }
+            mean_from.x /= num_points;
+            mean_from.y /= num_points;
+            mean_to.x /= num_points;
+            mean_to.y /= num_points;
+
+            for (0..from_points.len) |i| {
+                const from = Point2d(T){ .x = from_points[i].x - mean_from.x, .y = from_points[i].y - mean_from.y };
+                const to = Point2d(T){ .x = to_points[i].x - mean_to.x, .y = to_points[i].y - mean_to.y };
+
+                sigma_from += from.x * from.x + from.y * from.y;
+                sigma_to += to.x * to.x + to.y * to.y;
+
+                const from_mat = Matrix(T, 1, 2){ .items = .{.{ from.x, from.y }} };
+                const to_mat = Matrix(T, 2, 1){ .items = .{ .{to.x}, .{to.y} } };
+                cov = cov.add(to_mat.dot(from_mat));
+            }
+            sigma_from /= num_points;
+            sigma_to /= num_points;
+            cov = cov.scale(1.0 / num_points);
+            const det_cov = cov.at(0, 0) * cov.at(1, 1) - cov.at(0, 1) * cov.at(1, 0);
+            const result = svd(
+                T,
+                cov.rows,
+                cov.cols,
+                cov,
+                .{ .with_u = true, .with_v = true, .mode = .skinny_u },
+            );
+            const u: *const Matrix(T, 2, 2) = &result[0];
+            const d = Matrix(T, 2, 2){ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
+            const v: *const Matrix(T, 2, 2) = &result[2];
+            const det_u = u.at(0, 0) * u.at(1, 1) - u.at(0, 1) * u.at(1, 0);
+            const det_v = v.at(0, 0) * v.at(1, 1) - v.at(0, 1) * v.at(1, 0);
+            var s = Matrix(T, cov.rows, cov.cols).identity();
+            if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
+                if (d.at(1, 1) < d.at(0, 0)) {
+                    s.set(1, 1, -1);
+                } else {
+                    s.set(0, 0, -1);
+                }
+            }
+            const r = u.dot(s.dot(v.transpose()));
+            var c: T = 1;
+            if (sigma_from != 0) {
+                c = 1.0 / sigma_from * d.dot(s).trace();
+            }
+            const m_from = Matrix(T, 2, 1){ .items = .{ .{mean_from.x}, .{mean_from.y} } };
+            const m_to = Matrix(T, 2, 1){ .items = .{ .{mean_to.x}, .{mean_to.y} } };
+            self.matrix = r.scale(c);
+            self.bias = m_to.add(r.dot(m_from).scale(-c));
+        }
+    };
+}
+
+/// Applies an affine transform to a point.  By default, it will be initialized to the identity
+/// function.  Use the fit method to update the transform to map between two sets of points.
+pub fn AffineTransform(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
+        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
+
+        /// Finds the best similarity transforms that maps between the two given sets of points.
+        pub fn find(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
+            var transfrom = AffineTransform(T){};
+            transfrom.fit(from_points, to_points);
+            return transfrom;
+        }
+
+        /// Projects the given point using the similarity transform.
+        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
+            var dst = self.matrix.dot(src);
+            return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
+        }
+
+        /// Finds the best similarity transforms that maps between the two given sets of points.
+        pub fn fit(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
+            assert(from_points.len >= 2);
+            assert(from_points.len == to_points.len);
+            var p = Matrix(T, 3, from_points.len){};
+            var q = Matrix(T, 2, to_points.len){};
+            for (0..from_points.len) |i| {
+                p.set(0, i, from_points[i].x);
+                p.set(1, i, from_points[i].y);
+                p.set(2, i, 1);
+
+                q.set(0, i, to_points[i].x);
+                q.set(1, i, to_points[i].y);
+            }
+            const m = q.dot(p.inverse().?);
+            self.matrix = m.getSubMatrix(0, 0, 2, 2);
+            self.bias = m.getCol(2);
+        }
+    };
+}
+
+test "affine3" {
+    const T = f64;
+    const from_points: []const Point2d(T) = &.{
+        .{ .x = 0, .y = 0 },
+        .{ .x = 0, .y = 1 },
+        .{ .x = 1, .y = 1 },
+    };
+    const to_points: []const Point2d(T) = &.{
+        .{ .x = 0, .y = 1 },
+        .{ .x = 1, .y = 1 },
+        .{ .x = 1, .y = 0 },
+    };
+    const tf = AffineTransform(f64).find(from_points[0..3].*, to_points[0..3].*);
+    const matrix = Matrix(T, 2, 2){
+        .items = .{
+            .{ 0, 1 },
+            .{ -1, 0 },
+        },
+    };
+    const bias = Matrix(T, 2, 1){ .items = .{
+        .{0},
+        .{1},
+    } };
+    try std.testing.expectEqualDeep(tf.matrix, matrix);
+    try std.testing.expectEqualDeep(tf.bias, bias);
+
+    const itf = AffineTransform(f64).find(to_points[0..3].*, from_points[0..3].*);
+    for (from_points, to_points) |f, t| {
+        try std.testing.expectEqualDeep(tf.project(f), t);
+        try std.testing.expectEqualDeep(itf.project(t), f);
+    }
+}
+
 /// Applies a projective transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
 pub fn ProjectiveTransform(comptime T: type) type {
@@ -250,98 +418,6 @@ test "projection8" {
         try std.testing.expectApproxEqRel(p.x, to_points[i].x, 1e-2);
         try std.testing.expectApproxEqRel(p.y, to_points[i].y, 1e-2);
     }
-}
-
-/// Applies a similarity transform to a point.  By default, it will be initialized to the identity
-/// function.  Use the fit method to update the transform to map between two sets of points.
-pub fn SimilarityTransform(comptime T: type) type {
-    return struct {
-        const Self = @This();
-        matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
-        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
-
-        /// Finds the best similarity transforms that maps between the two given sets of points.
-        pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
-            var transfrom = SimilarityTransform(T){};
-            transfrom.fit(from_points, to_points);
-            return transfrom;
-        }
-
-        /// Projects the given point using the projective transform
-        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
-            var dst = self.matrix.dot(src);
-            return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
-        }
-
-        /// Finds the best similarity transforms that maps between the two given sets of points.
-        pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
-            assert(from_points.len >= 2);
-            assert(from_points.len == to_points.len);
-            const num_points: T = @floatFromInt(from_points.len);
-            var mean_from: Point2d(T) = .{ .x = 0, .y = 0 };
-            var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
-            var sigma_from: T = 0;
-            var sigma_to: T = 0;
-            var cov = Matrix(T, 2, 2).initAll(0);
-            self.matrix = cov;
-            for (0..from_points.len) |i| {
-                mean_from.x += from_points[i].x;
-                mean_from.y += from_points[i].y;
-                mean_to.x += to_points[i].x;
-                mean_to.y += to_points[i].y;
-            }
-            mean_from.x /= num_points;
-            mean_from.y /= num_points;
-            mean_to.x /= num_points;
-            mean_to.y /= num_points;
-
-            for (0..from_points.len) |i| {
-                const from = Point2d(T){ .x = from_points[i].x - mean_from.x, .y = from_points[i].y - mean_from.y };
-                const to = Point2d(T){ .x = to_points[i].x - mean_to.x, .y = to_points[i].y - mean_to.y };
-
-                sigma_from += from.x * from.x + from.y * from.y;
-                sigma_to += to.x * to.x + to.y * to.y;
-
-                const from_mat = Matrix(T, 1, 2){ .items = .{.{ from.x, from.y }} };
-                const to_mat = Matrix(T, 2, 1){ .items = .{ .{to.x}, .{to.y} } };
-                cov = cov.add(to_mat.dot(from_mat));
-            }
-            sigma_from /= num_points;
-            sigma_to /= num_points;
-            cov = cov.scale(1.0 / num_points);
-            const det_cov = cov.at(0, 0) * cov.at(1, 1) - cov.at(0, 1) * cov.at(1, 0);
-            const result = svd(
-                T,
-                cov.rows,
-                cov.cols,
-                cov,
-                .{ .with_u = true, .with_v = true, .mode = .skinny_u },
-            );
-            const u: *const Matrix(T, 2, 2) = &result[0];
-            const d = Matrix(T, 2, 2){ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
-            const v: *const Matrix(T, 2, 2) = &result[2];
-            const det_u = u.at(0, 0) * u.at(1, 1) - u.at(0, 1) * u.at(1, 0);
-            const det_v = v.at(0, 0) * v.at(1, 1) - v.at(0, 1) * v.at(1, 0);
-            var s = Matrix(T, cov.rows, cov.cols).identity();
-            if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
-                if (d.at(1, 1) < d.at(0, 0)) {
-                    s.set(1, 1, -1);
-                } else {
-                    s.set(0, 0, -1);
-                }
-            }
-            const r = u.dot(s.dot(v.transpose()));
-            var c: T = 1;
-            if (sigma_from != 0) {
-                c = 1.0 / sigma_from * d.dot(s).trace();
-            }
-            const m_from = Matrix(T, 2, 1){ .items = .{ .{mean_from.x}, .{mean_from.y} } };
-            const m_to = Matrix(T, 2, 1){ .items = .{ .{mean_to.x}, .{mean_to.y} } };
-            self.matrix = r.scale(c);
-            self.bias = m_to.add(r.dot(m_from).scale(-c));
-        }
-    };
 }
 
 /// Struct that encapsulates all logic for a Convex Hull computation.

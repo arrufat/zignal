@@ -174,6 +174,27 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             }
         }
 
+        /// Returns the sub-matrix at positon row, col.
+        pub fn getSubMatrix(
+            self: Self,
+            comptime row_begin: usize,
+            comptime col_begin: usize,
+            comptime row_end: usize,
+            comptime col_end: usize,
+        ) Matrix(T, row_end - row_begin, col_end - col_begin) {
+            comptime assert(row_begin < row_end);
+            comptime assert(col_begin < col_end);
+            comptime assert(row_end <= self.rows);
+            comptime assert(col_end <= self.cols);
+            var matrix: Matrix(T, row_end - row_begin, col_end - col_begin) = undefined;
+            for (row_begin..row_end) |r| {
+                for (col_begin..col_end) |c| {
+                    matrix.items[r - row_begin][c - col_begin] = self.items[r][c];
+                }
+            }
+            return matrix;
+        }
+
         /// Returns the elements in the row as a row Matrix.
         pub fn getRow(self: Self, row: usize) Matrix(T, 1, cols) {
             assert(row < self.rows);
