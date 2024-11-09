@@ -121,7 +121,7 @@ pub fn SimilarityTransform(comptime T: type) type {
         matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
         bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
 
-        /// Finds the best similarity transforms that maps between the two given sets of points.
+        /// Finds the best similarity transform that maps between the two given sets of points.
         pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
             var transfrom = SimilarityTransform(T){};
             transfrom.fit(from_points, to_points);
@@ -135,7 +135,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
         }
 
-        /// Finds the best similarity transforms that maps between the two given sets of points.
+        /// Finds the best similarity transform that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
@@ -213,14 +213,14 @@ pub fn AffineTransform(comptime T: type) type {
         matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
         bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
 
-        /// Finds the best similarity transforms that maps between the two given sets of points.
+        /// Finds the best affine transform that maps between the two given sets of points.
         pub fn find(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
             var transfrom = AffineTransform(T){};
             transfrom.fit(from_points, to_points);
             return transfrom;
         }
 
-        /// Projects the given point using the similarity transform.
+        /// Projects the given point using the affine transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
             const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
             var dst = self.matrix.dot(src);
@@ -288,7 +288,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
         const Self = @This();
         matrix: Matrix(T, 3, 3) = Matrix(T, 3, 3).identity(),
 
-        /// Finds the best projective transforms that maps between the two given sets of points.
+        /// Finds the best projective transform that maps between the two given sets of points.
         pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
             var transfrom = ProjectiveTransform(T){};
             transfrom.fit(from_points, to_points);
@@ -305,7 +305,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
             return .{ .x = dst.at(0, 0), .y = dst.at(1, 0) };
         }
 
-        /// Finds the best projective transforms that maps between the two given sets of points.
+        /// Finds the best projective transform that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
