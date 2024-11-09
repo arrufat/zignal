@@ -228,7 +228,7 @@ pub const Rgba = packed struct {
     }
 
     /// Constructs a RGBA color from a hex value.
-    pub fn fromHex(hex_code: u32) Rgb {
+    pub fn fromHex(hex_code: u32) Rgba {
         return .{
             .r = @intCast((hex_code >> (8 * 3)) & 0x0000ff),
             .g = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
