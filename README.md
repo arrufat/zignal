@@ -1,4 +1,6 @@
 # Zignal
+[![test](https://github.com/bfactory-ai/zignal/actions/workflows/test.yml/badge.svg)](https://github.com/bfactory-ai/zignal/actions/workflows/test.yml)
+[![documentation](https://github.com/bfactory-ai/zignal/actions/workflows/documentation.yml/badge.svg)](https://github.com/bfactory-ai/zignal/actions/workflows/documentation.yml)
 
 <img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400>
 
