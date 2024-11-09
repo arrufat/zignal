@@ -2,11 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const Allocator = std.mem.Allocator;
-const Rgba = @import("colorspace.zig").Rgba;
-const convert = @import("colorspace.zig").convert;
+
 const as = @import("meta.zig").as;
+const convert = @import("colorspace.zig").convert;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
+const Rgba = @import("colorspace.zig").Rgba;
+
 const Rectangle = @import("geometry.zig").Rectangle(f32);
 const Point2d = @import("point.zig").Point2d(f32);
 

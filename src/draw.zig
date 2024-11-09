@@ -1,9 +1,11 @@
 const std = @import("std");
 const assert = std.debug.assert;
+
 const as = @import("meta.zig").as;
 const colorspace = @import("colorspace.zig");
-const Rgba = @import("colorspace.zig").Rgba;
 const Image = @import("image.zig").Image;
+const Rgba = @import("colorspace.zig").Rgba;
+
 const Point2d = @import("point.zig").Point2d(f32);
 const Rectangle = @import("geometry.zig").Rectangle(f32);
 

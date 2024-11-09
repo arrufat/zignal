@@ -1,11 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const expectEqual = std.testing.expectEqual;
+const expectEqualDeep = std.testing.expectEqualDeep;
+
 const as = @import("meta.zig").as;
 const Matrix = @import("matrix.zig").Matrix;
 const Point2d = @import("point.zig").Point2d;
 const svd = @import("svd.zig").svd;
-const expectEqual = std.testing.expectEqual;
-const expectEqualDeep = std.testing.expectEqualDeep;
 
 /// A generic rectangle object with some convenience functionality.
 pub fn Rectangle(comptime T: type) type {
