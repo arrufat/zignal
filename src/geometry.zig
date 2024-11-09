@@ -227,7 +227,7 @@ pub fn AffineTransform(comptime T: type) type {
             return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
         }
 
-        /// Finds the best similarity transforms that maps between the two given sets of points.
+        /// Finds the best affine transform that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
