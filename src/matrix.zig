@@ -1,8 +1,8 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
+const builtin = @import("builtin");
 
 /// Creates a Matrix with elements of type T and size rows times cols.
 pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
