@@ -205,7 +205,8 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
 ///
 /// - **T**: The type of color used in the image, must be a color type.
 /// - **image**: The `Image` object where the curve will be drawn.
-/// - **points**: An array of 4 `Point2d` representing the control points.
+/// - **points**: An array of 4 `Point2d` representing the control points of the Bézier curve.
+///   The order is [start, first control, second control, end].
 /// - **step**: The step size for t in the range [0, 1] for drawing the curve.
 /// - **color**: The color to use for drawing the curve, of type `T`.
 ///
@@ -238,6 +239,106 @@ fn drawBezierCurve(
         const col: usize = @intFromFloat(@round(b.x));
         image.data[row * image.cols + col] = color;
     }
+}
+
+/// Tessellates a cubic Bézier curve into a series of points.
+///
+/// - **allocator**: An allocator for memory management.
+/// - **points**: An array of 4 `Point2d` representing the control points of the Bézier curve.
+///   The order is [start, first control, second control, end].
+/// - **segments**: Number of segments to divide the curve into, affecting the resolution of the tessellation.
+///
+/// The caller owns the resulting slice.
+fn tessellateCurve(
+    allocator: std.mem.Allocator,
+    p: [4]Point2d,
+    segments: usize,
+) error.OutOfMemory![]const Point2d(f32) {
+    var polygon = std.ArrayList(Point2d(f32)).init(allocator);
+    for (0..segments) |i| {
+        const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments));
+        const u: f32 = 1 - t;
+        const tt: f32 = t * t;
+        const uu: f32 = u * u;
+        const uuu: f32 = uu * u;
+        const ttt: f32 = tt * t;
+        try polygon.append(.{
+            .x = uuu * p[0].x + 3 * uu * t * p[1].x + 3 * u * tt * p[2].x + ttt * p[3].x,
+            .y = uuu * p[0].y + 3 * uu * t * p[1].y + 3 * u * tt * p[2].y + ttt * p[3].y,
+        });
+    }
+    return try polygon.toOwnedSlice();
+}
+
+/// Draws a smooth polygon on the given image, using Bézier curves to connect points for a curved effect.
+///
+/// - **T**: The pixel type used in the image, must be a color type.
+/// - **image**: The `Image` object where the polygon will be drawn.
+/// - **polygon**: A slice of `Point2d` representing the vertices of the polygon.
+/// - **color**: The color to use for drawing the polygon's edges, of type `T`.
+/// - **tension**: A float value [0, 1] that controls how much the curve 'tenses' or straightens between vertices.
+///   - 0 results in straight lines between points.
+///   - 1 results in the maximum curve smoothness.
+pub fn drawSmoothPolygon(
+    comptime T: type,
+    image: Image(T),
+    polygon: []const Point2d,
+    color: T,
+    tension: f32,
+) void {
+    assert(tension >= 0);
+    assert(tension <= 1);
+    for (0..polygon.len) |i| {
+        const p0 = polygon[i];
+        const p1 = polygon[(i + 1) % polygon.len];
+        const p2 = polygon[(i + 2) % polygon.len];
+        const cp1 = Point2d{
+            .x = p0.x + (p1.x - p0.x) * (1 - tension),
+            .y = p0.y + (p1.y - p0.y) * (1 - tension),
+        };
+        const cp2 = Point2d{
+            .x = p1.x - (p2.x - p1.x) * (1 - tension),
+            .y = p1.y - (p2.y - p1.y) * (1 - tension),
+        };
+        drawBezierCurve(T, image, .{ p0, cp1, cp2, p1 }, 0.01, color);
+    }
+}
+
+/// Fills a smooth polygon on the given image, using tessellated Bézier curves to create a curved outline before filling.
+///
+/// - **allocator**: An allocator for memory management.
+/// - **T**: The pixel type used in the image, must be a color type.
+/// - **image**: The `Image` object where the polygon will be filled.
+/// - **polygon**: A slice of `Point2d` representing the vertices of the polygon to be filled.
+/// - **color**: The color to use for filling the polygon, of type `T`.
+/// - **tension**: A float value [0, 1] that controls the curvature of the polygon's edges:
+///   - 0 results in straight lines between points.
+///   - 1 results in the maximum curve smoothness.
+pub fn fillSmoothPolygon(
+    allocator: std.mem.Allocator,
+    comptime T: type,
+    image: Image(T),
+    polygon: []const Point2d,
+    color: T,
+    tension: f32,
+) !void {
+    var points = std.ArrayList(Point2d).init(allocator);
+    for (0..polygon.len) |i| {
+        const p0 = polygon[i];
+        const p1 = polygon[(i + 1) % polygon.len];
+        const p2 = polygon[(i + 2) % polygon.len];
+        const cp1 = Point2d{
+            .x = p0.x + (p1.x - p0.x) * (1 - tension),
+            .y = p0.y + (p1.y - p0.y) * (1 - tension),
+        };
+        const cp2 = Point2d{
+            .x = p1.x - (p2.x - p1.x) * (1 - tension),
+            .y = p1.y - (p2.y - p1.y) * (1 - tension),
+        };
+        const segment = try tessellateCurve(allocator, .{ p0, cp1, cp2, p1 }, 10);
+        try points.appendSlice(segment);
+    }
+    fillPolygon(T, image, points.items, color);
 }
 
 /// Draws the given rectangle with the specified width and color.
