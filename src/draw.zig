@@ -6,13 +6,20 @@ const colorspace = @import("colorspace.zig");
 const Image = @import("image.zig").Image;
 const Rgba = @import("colorspace.zig").Rgba;
 
-const Point2d = @import("point.zig").Point2d(f32);
-const Rectangle = @import("geometry.zig").Rectangle(f32);
+const Point2d = @import("point.zig").Point2d;
+const Rectangle = @import("geometry.zig").Rectangle;
 
 /// Draws a colored straight of a custom width between p1 and p2 on image.  It uses Xialin
 /// Wu's line algorithm to perform antialiasing along the diagonal.  Moreover, if color is of
 /// Rgba type, it alpha-blends it on top of the image.
-pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: anytype) void {
+pub fn drawLine(
+    comptime T: type,
+    image: Image(T),
+    p1: Point2d(f32),
+    p2: Point2d(f32),
+    width: usize,
+    color: anytype,
+) void {
     comptime assert(colorspace.isColor(@TypeOf(color)));
     if (width == 0) return;
     // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
@@ -164,7 +171,14 @@ pub fn drawLine(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, wid
     }
 }
 /// Draws a colored straight line of a custom width between p1 and p2 on image, using Bresenham's line algorithm.
-pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d, width: usize, color: T) void {
+pub fn drawLineFast(
+    comptime T: type,
+    image: Image(T),
+    p1: Point2d(f32),
+    p2: Point2d(f32),
+    width: usize,
+    color: T,
+) void {
     if (width == 0) return;
     var x1: isize = @intFromFloat(p1.x);
     var y1: isize = @intFromFloat(p1.y);
@@ -216,7 +230,7 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
 fn drawBezierCurve(
     comptime T: type,
     image: Image(T),
-    points: [4]Point2d,
+    points: [4]Point2d(f32),
     step: f32,
     color: T,
 ) void {
@@ -225,7 +239,7 @@ fn drawBezierCurve(
     assert(step <= 1);
     var t: f32 = 0;
     while (t <= 1) : (t += step) {
-        const b: Point2d = .{
+        const b: Point2d(f32) = .{
             .x = (1 - t) * (1 - t) * (1 - t) * points[0].x +
                 3 * (1 - t) * (1 - t) * t * points[1].x +
                 3 * (1 - t) * t * t * points[2].x +
@@ -251,7 +265,7 @@ fn drawBezierCurve(
 /// The caller owns the resulting slice.
 fn tessellateCurve(
     allocator: std.mem.Allocator,
-    p: [4]Point2d,
+    p: [4]Point2d(f32),
     segments: usize,
 ) error.OutOfMemory![]const Point2d(f32) {
     var polygon = std.ArrayList(Point2d(f32)).init(allocator);
@@ -282,7 +296,7 @@ fn tessellateCurve(
 pub fn drawSmoothPolygon(
     comptime T: type,
     image: Image(T),
-    polygon: []const Point2d,
+    polygon: []const Point2d(f32),
     color: T,
     tension: f32,
 ) void {
@@ -292,11 +306,11 @@ pub fn drawSmoothPolygon(
         const p0 = polygon[i];
         const p1 = polygon[(i + 1) % polygon.len];
         const p2 = polygon[(i + 2) % polygon.len];
-        const cp1 = Point2d{
+        const cp1 = Point2d(f32){
             .x = p0.x + (p1.x - p0.x) * (1 - tension),
             .y = p0.y + (p1.y - p0.y) * (1 - tension),
         };
-        const cp2 = Point2d{
+        const cp2 = Point2d(f32){
             .x = p1.x - (p2.x - p1.x) * (1 - tension),
             .y = p1.y - (p2.y - p1.y) * (1 - tension),
         };
@@ -318,20 +332,20 @@ pub fn fillSmoothPolygon(
     allocator: std.mem.Allocator,
     comptime T: type,
     image: Image(T),
-    polygon: []const Point2d,
+    polygon: []const Point2d(f32),
     color: T,
     tension: f32,
 ) !void {
-    var points = std.ArrayList(Point2d).init(allocator);
+    var points = std.ArrayList(Point2d(f32)).init(allocator);
     for (0..polygon.len) |i| {
         const p0 = polygon[i];
         const p1 = polygon[(i + 1) % polygon.len];
         const p2 = polygon[(i + 2) % polygon.len];
-        const cp1 = Point2d{
+        const cp1 = Point2d(f32){
             .x = p0.x + (p1.x - p0.x) * (1 - tension),
             .y = p0.y + (p1.y - p0.y) * (1 - tension),
         };
-        const cp2 = Point2d{
+        const cp2 = Point2d(f32){
             .x = p1.x - (p2.x - p1.x) * (1 - tension),
             .y = p1.y - (p2.y - p1.y) * (1 - tension),
         };
@@ -342,9 +356,15 @@ pub fn fillSmoothPolygon(
 }
 
 /// Draws the given rectangle with the specified width and color.
-pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: anytype) void {
+pub fn drawRectangle(
+    comptime T: type,
+    image: Image(T),
+    rect: Rectangle(f32),
+    width: usize,
+    color: anytype,
+) void {
     comptime assert(colorspace.isColor(@TypeOf(color)));
-    const points: []const Point2d = &.{
+    const points: []const Point2d(f32) = &.{
         .{ .x = rect.l, .y = rect.t },
         .{ .x = rect.r, .y = rect.t },
         .{ .x = rect.r, .y = rect.b },
@@ -353,8 +373,21 @@ pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: 
     drawPolygon(T, image, points, width, color);
 }
 
-/// Draws a cross where each side is of length size
-pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize, color: T) void {
+/// Draws a cross shape on the given image at a specified center point.
+///
+/// - **T**: The pixel type used in the image, must be a color type.
+/// - **image**: The `Image` object where the cross will be drawn.
+/// - **center**: A `Point2d` which defines the center of the cross.
+/// - **size**: The length of each arm of the cross measured in pixels.
+/// - **color**: The color to use for drawing the cross.
+pub fn drawCross(
+    comptime T: type,
+    image: Image(T),
+    center: Point2d(f32),
+    size: usize,
+    color: T,
+) void {
+    comptime assert(colorspace.isColor(T));
     if (size == 0) return;
     const x: usize = @intFromFloat(@round(@max(0, @min(as(f32, image.cols - 1), center.x))));
     const y: usize = @intFromFloat(@round(@max(0, @min(as(f32, image.rows - 1), center.y))));
@@ -367,7 +400,13 @@ pub fn drawCross(comptime T: type, image: Image(T), center: Point2d, size: usize
 }
 
 /// Draws the given polygon defined as an array of points.
-pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, width: usize, color: anytype) void {
+pub fn drawPolygon(
+    comptime T: type,
+    image: Image(T),
+    polygon: []const Point2d(f32),
+    width: usize,
+    color: anytype,
+) void {
     comptime assert(colorspace.isColor(@TypeOf(color)));
     if (width == 0) return;
     for (0..polygon.len) |i| {
@@ -376,7 +415,13 @@ pub fn drawPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, 
 }
 
 /// Draws the circle defined by its center and radius.
-pub fn drawCircle(comptime T: type, image: Image(T), center: Point2d, radius: f32, color: T) void {
+pub fn drawCircle(
+    comptime T: type,
+    image: Image(T),
+    center: Point2d(f32),
+    radius: f32,
+    color: T,
+) void {
     if (radius <= 0) return;
     const frows: f32 = @floatFromInt(image.rows);
     const fcols: f32 = @floatFromInt(image.cols);
@@ -433,7 +478,13 @@ pub fn drawCircle(comptime T: type, image: Image(T), center: Point2d, radius: f3
 }
 
 /// Draws the circle defined by its center and radius using a fast, but less accurate algorithm.
-pub fn drawCircleFast(comptime T: type, image: Image(T), center: Point2d, radius: f32, color: T) void {
+pub fn drawCircleFast(
+    comptime T: type,
+    image: Image(T),
+    center: Point2d(f32),
+    radius: f32,
+    color: T,
+) void {
     if (radius <= 0) return;
     const frows: f32 = @floatFromInt(image.rows);
     const fcols: f32 = @floatFromInt(image.cols);
@@ -453,7 +504,12 @@ pub fn drawCircleFast(comptime T: type, image: Image(T), center: Point2d, radius
 }
 
 /// Fills the given polygon defined as an array of points on image using the scanline algorithm.
-pub fn fillPolygon(comptime T: type, image: Image(T), polygon: []const Point2d, color: T) void {
+pub fn fillPolygon(
+    comptime T: type,
+    image: Image(T),
+    polygon: []const Point2d(f32),
+    color: T,
+) void {
     const rows = image.rows;
     const cols = image.cols;
     var inters: [16]f32 = undefined;
