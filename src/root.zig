@@ -15,6 +15,7 @@ pub const drawLineFast = draw.drawLineFast;
 pub const drawRectangle = draw.drawRectangle;
 pub const drawPolygon = draw.drawPolygon;
 pub const fillPolygon = draw.fillPolygon;
+pub const drawBezierCurve = draw.drawBezierCurve;
 const geometry = @import("geometry.zig");
 pub const Rectangle = geometry.Rectangle;
 pub const AffineTransform = geometry.AffineTransform;
