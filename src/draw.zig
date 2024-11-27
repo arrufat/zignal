@@ -201,6 +201,46 @@ pub fn drawLineFast(comptime T: type, image: Image(T), p1: Point2d, p2: Point2d,
     }
 }
 
+/// Draws a cubic Bézier curve on the given image.
+///
+/// - **T**: The type of color used in the image, must be a color type.
+/// - **image**: The `Image` object where the curve will be drawn.
+/// - **points**: An array of 4 `Point2d` representing the control points.
+/// - **step**: The step size for t in the range [0, 1] for drawing the curve.
+/// - **color**: The color to use for drawing the curve, of type `T`.
+///
+/// The function calculates points along the Bézier curve using the given control points and
+/// draws them on the image. The curve's resolution is determined by the `step` parameter,
+/// where smaller steps result in a smoother but more computationally intensive curve.
+fn drawBezierCurve(
+    comptime T: type,
+    image: Image(T),
+    points: [4]Point2d,
+    step: f32,
+    color: T,
+) void {
+    comptime assert(colorspace.isColor(T));
+    assert(step >= 0);
+    assert(step <= 1);
+    var t: f32 = 0;
+    while (t <= 1) : (t += step) {
+        const b: Point2d = .{
+            .x = (1 - t) * (1 - t) * (1 - t) * points[0].x +
+                3 * (1 - t) * (1 - t) * t * points[1].x +
+                3 * (1 - t) * t * t * points[2].x +
+                t * t * t * points[3].x,
+            .y = (1 - t) * (1 - t) * (1 - t) * points[0].y +
+                3 * (1 - t) * (1 - t) * t * points[1].y +
+                3 * (1 - t) * t * t * points[2].y +
+                t * t * t * points[3].y,
+        };
+        const row: usize = @intFromFloat(@round(b.y));
+        const col: usize = @intFromFloat(@round(b.x));
+        image.data[row * image.cols + col] = color;
+    }
+}
+
+/// Draws the given rectangle with the specified width and color.
 pub fn drawRectangle(comptime T: type, image: Image(T), rect: Rectangle, width: usize, color: anytype) void {
     comptime assert(colorspace.isColor(@TypeOf(color)));
     const points: []const Point2d = &.{
@@ -308,20 +348,6 @@ pub fn drawCircleFast(comptime T: type, image: Image(T), center: Point2d, radius
                 image.data[r * image.cols + c] = color;
             }
         }
-    }
-}
-
-export fn draw_circle(rgba_ptr: [*]Rgba, rows: usize, cols: usize, x: f32, y: f32, radius: f32, r: u8, g: u8, b: u8, a: u8) void {
-    if (radius <= 0) return;
-    const image = Image(Rgba).init(rows, cols, rgba_ptr[0 .. rows * cols]);
-    if (@import("builtin").os.tag == .freestanding) {
-        drawCircle(Rgba, image, .{ .x = x, .y = y }, radius, .{ .r = r, .g = g, .b = b, .a = a });
-    } else {
-        var timer = std.time.Timer.start() catch unreachable;
-        const t_0 = timer.read();
-        drawCircle(Rgba, image, .{ .x = x, .y = y }, radius, .{ .r = r, .g = g, .b = b, .a = a });
-        const t_1 = timer.read();
-        std.log.debug("time: {d} ms\n", .{@as(f32, @floatFromInt(t_1 - t_0)) * 1e-6});
     }
 }
 
