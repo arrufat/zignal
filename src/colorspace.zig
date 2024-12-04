@@ -113,6 +113,14 @@ test "alphaBlend" {
     try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
 }
 
+inline fn gammaToLinear(x: f64) f64 {
+    return if (x > 0.04045) pow(f64, (x + 0.055) / 1.055, 2.4) else x / 12.92;
+}
+
+inline fn linearToGamma(x: f64) f64 {
+    return if (x > 0.0031308) 1.055 * pow(f64, x, (1.0 / 2.4)) - 0.055 else x * 12.92;
+}
+
 /// Helper RGB color in floating point, with each channel ranging from 0 to 1.
 /// Used to perform lossless conversions between colorspaces.
 const RgbFloat = struct {
@@ -199,9 +207,9 @@ const RgbFloat = struct {
 
     /// Converts the RGB color into a CIE 1931 XYZ color.
     fn toXyz(self: RgbFloat) Xyz {
-        const r = if (self.r > 0.04045) pow(f64, (self.r + 0.055) / 1.055, 2.4) else self.r / 12.92;
-        const g = if (self.g > 0.04045) pow(f64, (self.g + 0.055) / 1.055, 2.4) else self.g / 12.92;
-        const b = if (self.b > 0.04045) pow(f64, (self.b + 0.055) / 1.055, 2.4) else self.b / 12.92;
+        const r = gammaToLinear(self.r);
+        const g = gammaToLinear(self.g);
+        const b = gammaToLinear(self.b);
         return .{
             .x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100,
             .y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100,
@@ -598,18 +606,14 @@ pub const Xyz = struct {
 
     /// Converts the CIE 1931 XYZ color into a RGB color.
     pub fn toRgbFloat(self: Xyz) RgbFloat {
-        var r = (self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986) / 100;
-        var g = (self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415) / 100;
-        var b = (self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570) / 100;
-
-        r = if (r > 0.0031308) 1.055 * pow(f64, r, (1.0 / 2.4)) - 0.055 else r * 12.92;
-        g = if (g > 0.0031308) 1.055 * pow(f64, g, (1.0 / 2.4)) - 0.055 else g * 12.92;
-        b = if (b > 0.0031308) 1.055 * pow(f64, b, (1.0 / 2.4)) - 0.055 else b * 12.92;
+        const r = (self.x * 3.2406 + self.y * -1.5372 + self.z * -0.4986) / 100;
+        const g = (self.x * -0.9689 + self.y * 1.8758 + self.z * 0.0415) / 100;
+        const b = (self.x * 0.0557 + self.y * -0.2040 + self.z * 1.0570) / 100;
 
         return .{
-            .r = @max(0, @min(1, r)),
-            .g = @max(0, @min(1, g)),
-            .b = @max(0, @min(1, b)),
+            .r = @max(0, @min(1, linearToGamma(r))),
+            .g = @max(0, @min(1, linearToGamma(g))),
+            .b = @max(0, @min(1, linearToGamma(b))),
         };
     }
 
