@@ -227,7 +227,7 @@ pub fn drawLineFast(
 /// The function calculates points along the Bézier curve using the given control points and
 /// draws them on the image. The curve's resolution is determined by the `step` parameter,
 /// where smaller steps result in a smoother but more computationally intensive curve.
-fn drawBezierCurve(
+pub fn drawBezierCurve(
     comptime T: type,
     image: Image(T),
     points: [4]Point2d(f32),
