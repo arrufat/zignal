@@ -24,12 +24,14 @@
   top: 0px;
 }
 
-#canvas {
+#canvas-perlin {
   border: 1px solid black;
 }
 
-#video {
-  position: absolute;
+#canvas-seam{
+  border: 1px solid black;
+  width: 640px;
+  height: auto;
 }
 
 #toggle-button {
