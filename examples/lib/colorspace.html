@@ -5,47 +5,105 @@
     <title>Color Space Converter</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="data:image/png;base64,AAABAAEAICAAAAEAIACoEAAAFgAAACgAAAAgAAAAQAAAAAEAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//////////////////////////////////////////8AAD//AAAf/wAAD/8AAA4xB/4OMQf8DgEAAA8DAAAfAQAAGAAAABgAB/wMCAf8D4cAAB+HAAAfzwAAP/8AAH////////////////////////////////////////////8=">
+    <style>
+      * {
+            box-sizing: border-box;
+        }
+        @keyframes fadeInOut {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        #toast {
+          animation: fadeInOut 0.5s;
+        }
+        .copy-button {
+            display: inline-block;
+            width: 50px; /* Default width for larger screens */
+            text-align: center;
+            margin-right: 10px; /* Space between button and inputs */
+            padding: 5px 0;
+            border: 1px solid #ccc;
+            background-color: #f8f8f8;
+            cursor: pointer;
+        }
+        .copy-button:hover {
+            background-color: #e0e0e0;
+        }
+        .color-space {
+            margin-bottom: 10px;
+        }
+        input {
+            margin-right: 5px;
+        }
+    </style>
   </head>
   <body>
     <h1>Color Space Converter</h1>
-    <div id="hex">
-      <label onClick="copyToClipboard('hex')"><code>HEX:</code></label>
+    <div id="hex" class="color-space">
+      <button class="copy-button" onClick="copyToClipboard('hex')">HEX</button>
       <input type="text" id="hex-#" value="#000000">
       <input type="color" name="color" id="color" value="#000000">
       <label id="validation-message"></label>
     </div>
-    <div id="rgb">
-      <label onclick="copyToClipboard('rgb')"><code>RGB:</code></label>
+    <div id="rgb" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('rgb')">RGB</button>
       <input type="number" id="rgb-r" min="0" max="255" value="0">
       <input type="number" id="rgb-g" min="0" max="255" value="0">
       <input type="number" id="rgb-b" min="0" max="255" value="0">
     </div>
-    <div id="hsl">
-      <label onclick="copyToClipboard('hsl')"><code>HSL:</code></label>
+    <div id="hsl" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('hsl')">HSL</button>
       <input type="number" id="hsl-h" min="0" max="360" value="0">
       <input type="number" id="hsl-s" min="0" max="100" value="0">
       <input type="number" id="hsl-l" min="0" max="100" value="0">
     </div>
-    <div id="hsv">
-      <label onclick="copyToClipboard('hsv')"><code>HSV:</code></label>
+    <div id="hsv" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('hsv')">HSV</button>
       <input type="number" id="hsv-h" min="0" max="360" value="0">
       <input type="number" id="hsv-s" min="0" max="100" value="0">
       <input type="number" id="hsv-v" min="0" max="100" value="0">
     </div>
-    <div id="xyz">
-      <label onclick="copyToClipboard('xyz')"><code>XYZ:</code></label>
+    <div id="xyz" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('xyz')">XYZ</button>
       <input type="number" id="xyz-x" min="0" max="95.050" step="0.1" value="0">
       <input type="number" id="xyz-y" min="0" max="100" step="0.1" value="0">
       <input type="number" id="xyz-z" min="0" max="108.900" step="0.1" value="0">
     </div>
-    <div id="lab">
-      <label onclick="copyToClipboard('lab')"><code>LAB:</code></label>
+    <div id="lab" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('lab')">Lab</button>
       <input type="number" id="lab-l" min="0" max="100" step="0.1" value="0">
       <input type="number" id="lab-a" min="-128" max="127" step="0.1" value="0">
       <input type="number" id="lab-b" min="-128" max="127" step="0.1" value="0">
     </div>
+    <div id="lms" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('lms')">LMS</button>
+      <input type="number" id="lms-l" min="0" step="0.001" value="0">
+      <input type="number" id="lms-m" min="0" step="0.001" value="0">
+      <input type="number" id="lms-s" min="0" step="0.001" value="0">
+    </div>
+    <div id="oklab" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('oklab')">Oklab</button>
+      <input type="number" id="oklab-l" min="0" max="1" step="0.01" value="0">
+      <input type="number" id="oklab-a" min="-0.5" max="0.5" step="0.01" value="0">
+      <input type="number" id="oklab-b" min="-0.5" max="0.5" step="0.01" value="0">
+    </div>
+    <div id="xyb" class="color-space">
+      <button class="copy-button" onclick="copyToClipboard('xyb')">XYB</button>
+      <input type="number" id="xyb-x" step="0.1" value="0">
+      <input type="number" id="xyb-y" step="0.1" value="0">
+      <input type="number" id="xyb-b" min="0" step="0.1" value="0">
+    </div>
     <script src="colorspace.js"></script>
     <script>
+      function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.style.visibility = 'visible'; // Make toast visible
+        setTimeout(() => {
+          toast.style.visibility = 'hidden';
+        }, 3000);
+      }
+
       function copyToClipboard(colorSpace) {
         let inputs;
         switch(colorSpace) {
@@ -67,17 +125,29 @@
           case 'lab':
             inputs = ['lab-l', 'lab-a', 'lab-b'].map(id => document.getElementById(id));
             break;
+          case 'lms':
+            inputs = ['lms-l', 'lms-m', 'lms-s'].map(id => document.getElementById(id));
+            break;
+          case 'oklab':
+            inputs = ['oklab-l', 'oklab-a', 'oklab-b'].map(id => document.getElementById(id));
+            break;
+          case 'xyb':
+            inputs = ['xyb-x', 'xyb-y', 'xyb-b'].map(id => document.getElementById(id));
+            break;
         }
 
         let textToCopy = inputs.map(input => input.value).join(', ');
         if (colorSpace === 'hex') textToCopy = inputs[0].value; // For hex, just the hex value
 
         navigator.clipboard.writeText(textToCopy).then(() => {
-          alert('Copied to clipboard: ' + textToCopy);
+          showToast(`${colorSpace.toUpperCase()} copied to clipboard: ${textToCopy}`);
         }).catch(err => {
           console.error('Failed to copy: ', err);
         });
       }
     </script>
+    <div id="toast" style="visibility: hidden; min-width: 250px; margin-left: -125px; background-color: #333; color: #fff; text-align: center; border-radius: 2px; padding: 16px; position: fixed; z-index: 1; left: 50%; bottom: 30px; font-size: 17px;">
+      Copied to clipboard!
+    </div>
   </body>
 </html>

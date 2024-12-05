@@ -8,9 +8,16 @@ const pow = std.math.pow;
 /// Returns true if and only if T can be treated as a color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, Rgb, Rgba, Hsl, Hsv, Xyz, Lab => true,
+        u8, Rgb, Rgba, Hsl, Hsv, Xyz, Lab, Lms, Oklab, Xyb => true,
         else => false,
     };
+}
+
+fn assertAllFieldTypesAreSame(comptime T: type) void {
+    comptime assert(isColor(T));
+    return for (std.meta.fields(T)) |field| {
+        if (std.meta.fields(T)[0].type != field.type) break false;
+    } else true;
 }
 
 /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
@@ -71,6 +78,21 @@ pub fn convert(comptime T: type, color: anytype) T {
             u8 => .{ .l = @as(f64, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
             inline else => color.toLab(),
         },
+        Lms => switch (@TypeOf(color)) {
+            Lms => color,
+            u8 => .{},
+            inline else => color.toLms(),
+        },
+        Oklab => switch (@TypeOf(color)) {
+            Oklab => color,
+            u8 => .{},
+            inline else => color.toOklab(),
+        },
+        Xyb => switch (@TypeOf(color)) {
+            Xyb => color,
+            u8 => .{},
+            inline else => color.toXyb(),
+        },
         else => @compileError("Unsupported color " ++ @typeName(T)),
     };
 }
@@ -84,9 +106,12 @@ test "isRgbCompatible" {
     try comptime expectEqual(isRgbCompatible(Hsv), false);
     try comptime expectEqual(isRgbCompatible(Xyz), false);
     try comptime expectEqual(isRgbCompatible(Lab), false);
+    try comptime expectEqual(isRgbCompatible(Lms), false);
+    try comptime expectEqual(isRgbCompatible(Oklab), false);
+    try comptime expectEqual(isRgbCompatible(Xyb), false);
 }
 
-test "convert" {
+test "convert grayscale" {
     try expectEqual(convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
     try expectEqual(convert(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
     try expectEqual(convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
@@ -113,15 +138,15 @@ test "alphaBlend" {
     try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
 }
 
-inline fn gammaToLinear(x: f64) f64 {
-    return if (x > 0.04045) pow(f64, (x + 0.055) / 1.055, 2.4) else x / 12.92;
-}
-
 inline fn linearToGamma(x: f64) f64 {
     return if (x > 0.0031308) 1.055 * pow(f64, x, (1.0 / 2.4)) - 0.055 else x * 12.92;
 }
 
-/// Helper RGB color in floating point, with each channel ranging from 0 to 1.
+inline fn gammaToLinear(x: f64) f64 {
+    return if (x > 0.04045) pow(f64, (x + 0.055) / 1.055, 2.4) else x / 12.92;
+}
+
+/// Helper sRGB color in floating point, with each channel ranging from 0 to 1.
 /// Used to perform lossless conversions between colorspaces.
 const RgbFloat = struct {
     r: f64,
@@ -221,9 +246,116 @@ const RgbFloat = struct {
     fn toLab(self: RgbFloat) Lab {
         return self.toXyz().toLab();
     }
+
+    /// Converts the RGB color into an LMS color.
+    fn toLms(self: RgbFloat) Lms {
+        return self.toXyz().toLms();
+    }
+
+    /// Converts the RGB color into an Oklab color.
+    fn toOklab(self: RgbFloat) Oklab {
+        return self.toLms().toOklab();
+    }
+
+    /// Converts the RGB color into an XYB color.
+    fn toXyb(self: RgbFloat) Xyb {
+        return self.toLms().toXyb();
+    }
 };
 
-/// A Red-Green-Blue-Alpha color.
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace, with all components
+/// within the range 0-255.
+pub const Rgb = struct {
+    r: u8 = 0,
+    g: u8 = 0,
+    b: u8 = 0,
+
+    /// Returns the normalized RGB color in floating point.
+    fn toRgbFloat(self: Rgb) RgbFloat {
+        return .{
+            .r = @as(f64, @floatFromInt(self.r)) / 255,
+            .g = @as(f64, @floatFromInt(self.g)) / 255,
+            .b = @as(f64, @floatFromInt(self.b)) / 255,
+        };
+    }
+
+    /// Constructs a RGB color from a gray value.
+    pub fn fromGray(gray: u8) Rgb {
+        return .{ .r = gray, .g = gray, .b = gray };
+    }
+
+    /// Constructs a RGB color from a hex value.
+    pub fn fromHex(hex_code: u24) Rgb {
+        return .{
+            .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
+            .g = @intCast((hex_code >> (8 * 1)) & 0x0000ff),
+            .b = @intCast((hex_code >> (8 * 0)) & 0x0000ff),
+        };
+    }
+
+    /// Alpha-blends color into self.
+    pub fn blend(self: *Rgb, color: Rgba) void {
+        alphaBlend(Rgb, self, color);
+    }
+
+    /// Checks if the color is a shade of gray.
+    pub fn isGray(self: Rgb) bool {
+        return self.r == self.g and self.g == self.b;
+    }
+
+    /// Converts the RGB color into grayscale.
+    pub fn toGray(self: Rgb) u8 {
+        return @intFromFloat(@round(self.toHsl().l / 100 * 255));
+    }
+
+    /// Converts the RGB color into a hex value.
+    pub fn toHex(self: Rgb) u24 {
+        return self.r << 16 + self.g << 8 + self.g;
+    }
+
+    /// Converts the RGB color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Rgb, alpha: u8) Rgba {
+        return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
+    }
+
+    /// Converts the RGB color into a HSL color.
+    pub fn toHsl(self: Rgb) Hsl {
+        return self.toRgbFloat().toHsl();
+    }
+
+    /// Converts the RGB color into a HSV color.
+    pub fn toHsv(self: Rgb) Hsv {
+        return self.toRgbFloat().toHsv();
+    }
+
+    /// Converts the RGB color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Rgb) Xyz {
+        return self.toRgbFloat().toXyz();
+    }
+
+    /// Converts the RGB color into a CIELAB color.
+    pub fn toLab(self: Rgb) Lab {
+        return self.toXyz().toLab();
+    }
+
+    /// Converts the RGB color into an LMS color.
+    fn toLms(self: Rgb) Lms {
+        return self.toRgbFloat().toLms();
+    }
+
+    /// Converts the RGB color into an Oklab color.
+    fn toOklab(self: Rgb) Oklab {
+        return self.toRgbFloat().toOklab();
+    }
+
+    /// Converts the RGB color into an XYB color.
+    fn toXyb(self: Rgb) Xyb {
+        return self.toLms().toXyb();
+    }
+};
+
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with alpha channel,
+/// with all components within the range 0-255.
 pub const Rgba = packed struct {
     r: u8 = 0,
     g: u8 = 0,
@@ -298,84 +430,25 @@ pub const Rgba = packed struct {
     pub fn toLab(self: Rgba) Lab {
         return self.toRgbFloat().toLab();
     }
-};
 
-/// A color in the RGB colorspace, with all components within the range 0-255.
-pub const Rgb = struct {
-    r: u8 = 0,
-    g: u8 = 0,
-    b: u8 = 0,
-
-    /// Returns the normalized RGB color in floating point.
-    fn toRgbFloat(self: Rgb) RgbFloat {
-        return .{
-            .r = @as(f64, @floatFromInt(self.r)) / 255,
-            .g = @as(f64, @floatFromInt(self.g)) / 255,
-            .b = @as(f64, @floatFromInt(self.b)) / 255,
-        };
+    /// Converts the RGBA color into an LMS color.
+    fn toLms(self: Rgba) Lms {
+        return self.toXyz().toLms();
     }
 
-    /// Constructs a RGB color from a gray value.
-    pub fn fromGray(gray: u8) Rgb {
-        return .{ .r = gray, .g = gray, .b = gray };
+    /// Converts the RGBA color into an Oklab color.
+    fn toOklab(self: Rgba) Oklab {
+        return self.toLms().toOklab();
     }
 
-    /// Constructs a RGB color from a hex value.
-    pub fn fromHex(hex_code: u24) Rgb {
-        return .{
-            .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
-            .g = @intCast((hex_code >> (8 * 1)) & 0x0000ff),
-            .b = @intCast((hex_code >> (8 * 0)) & 0x0000ff),
-        };
-    }
-
-    /// Alpha-blends color into self.
-    pub fn blend(self: *Rgb, color: Rgba) void {
-        alphaBlend(Rgb, self, color);
-    }
-
-    /// Checks if the color is a shade of gray.
-    pub fn isGray(self: Rgb) bool {
-        return self.r == self.g and self.g == self.b;
-    }
-
-    /// Converts the RGB color into grayscale.
-    pub fn toGray(self: Rgb) u8 {
-        return @intFromFloat(@round(self.toHsl().l / 100 * 255));
-    }
-
-    /// Converts the RGB color into a hex value.
-    pub fn toHex(self: Rgb) u24 {
-        return self.r << 16 + self.g << 8 + self.g;
-    }
-
-    /// Converts the RGB color into a RGBA color with the specified alpha.
-    pub fn toRgba(self: Rgb, alpha: u8) Rgba {
-        return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
-    }
-
-    /// Converts the RGB color into a HSL color.
-    pub fn toHsl(self: Rgb) Hsl {
-        return self.toRgbFloat().toHsl();
-    }
-
-    /// Converts the RGB color into a HSV color.
-    pub fn toHsv(self: Rgb) Hsv {
-        return self.toRgbFloat().toHsv();
-    }
-
-    /// Converts the RGB color into a CIE 1931 XYZ color.
-    pub fn toXyz(self: Rgb) Xyz {
-        return self.toRgbFloat().toXyz();
-    }
-
-    /// Converts the RGB color into a CIELAB color.
-    pub fn toLab(self: Rgb) Lab {
-        return self.toXyz().toLab();
+    /// Converts the RGBA color into an XYB color.
+    fn toXyb(self: Rgba) Xyb {
+        return self.toLms().toXyb();
     }
 };
 
-/// A color in the HSL colorspace: h in degrees (0-359), s and l between 0-100.
+/// A color in the [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
+/// (0-359), s and l between 0-100.
 pub const Hsl = struct {
     h: f64 = 0,
     s: f64 = 0,
@@ -470,9 +543,25 @@ pub const Hsl = struct {
     pub fn toLab(self: Hsl) Lab {
         return self.toRgbFloat().toLab();
     }
+
+    /// Converts the HSL color into an LMS color.
+    fn toLms(self: Hsl) Lms {
+        return self.toRgb().toLms();
+    }
+
+    /// Converts the HSL color into an Oklab color.
+    fn toOklab(self: Hsl) Oklab {
+        return self.toRgb().toOklab();
+    }
+
+    /// Converts the HSL color into an XYB color.
+    fn toXyb(self: Hsl) Xyb {
+        return self.toLms().toXyb();
+    }
 };
 
-/// A color in the HSV colorspace: h in degrees (0-359), s and v between 0-100.
+/// A color in the [HSV](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
+/// (0-359), s and v between 0-100.
 pub const Hsv = struct {
     h: f64 = 0,
     s: f64 = 0,
@@ -558,12 +647,7 @@ pub const Hsv = struct {
 
     /// Converts the HSV color into an RGB color.
     pub fn toRgb(self: Hsv) Rgb {
-        const rgb = self.toRgbFloat();
-        return .{
-            .r = @intFromFloat(@round(255 * rgb.r)),
-            .g = @intFromFloat(@round(255 * rgb.g)),
-            .b = @intFromFloat(@round(255 * rgb.b)),
-        };
+        return self.toRgbFloat().toRgb();
     }
 
     /// Converts the HSV color into an RGBA color with the specified alpha.
@@ -585,10 +669,26 @@ pub const Hsv = struct {
     pub fn toLab(self: Hsv) Lab {
         return self.toRgbFloat().toLab();
     }
+
+    /// Converts the HSV color into an LMS color.
+    fn toLms(self: Hsv) Lms {
+        return self.toRgbFloat().toLms();
+    }
+
+    /// Converts the HSV color into an Oklab color.
+    fn toOklab(self: Hsv) Oklab {
+        return self.toRgbFloat().toOklab();
+    }
+
+    /// Converts the HSV color into an XYB color.
+    fn toXyb(self: Hsv) Xyb {
+        return self.toLms().toXyb();
+    }
 };
 
-/// The CIE 1931 color space, a device independent space also known as XYZ which covers the
-/// full gamut of human-perceptible colors visible to the CIE 2° standard observer.
+/// The [CIE 1931 color space](https://en.wikipedia.org/wiki/CIE_1931_color_space), a device
+/// independent space also known as XYZ which covers the full gamut of human-perceptible colors
+/// visible to the CIE 2° standard observer.
 pub const Xyz = struct {
     x: f64 = 0,
     y: f64 = 0,
@@ -673,13 +773,40 @@ pub const Xyz = struct {
             .b = @max(-128, @min(127, 200.0 * (y - z))),
         };
     }
+
+    /// Converts the CIE 1931 XYZ color into an LMS color using the Bradford method.
+    pub fn toLms(self: Xyz) Lms {
+        return .{
+            .l = (0.8951 * self.x + 0.2664 * self.y - 0.1614 * self.z) / 100,
+            .m = (-0.7502 * self.x + 1.7135 * self.y + 0.0367 * self.z) / 100,
+            .s = (0.0389 * self.x - 0.0685 * self.y + 1.0296 * self.z) / 100,
+        };
+    }
+
+    /// Converts the CIE 1931 XYZ color into an Oklab color.
+    fn toOklab(self: Xyz) Oklab {
+        return self.toLms().toOklab();
+    }
+
+    /// Converts the CIE 1931 XYZ color into an XYB color.
+    fn toXyb(self: Xyz) Xyb {
+        return self.toLms().toXyb();
+    }
 };
 
-/// A color in the CIELAB colorspace: L: 0 to 100, a: -128 to 127, b: -128 to 127.
+/// A color in the [CIELAB colorspace](https://en.wikipedia.org/wiki/CIELAB_color_space).  L:
+/// 0 to 100, a: -128 to 127, b: -128 to 127.
 pub const Lab = struct {
     l: f64 = 0,
     a: f64 = 0,
     b: f64 = 0,
+
+    /// Alpha-blends color into self.
+    pub fn blend(self: *Lab, color: Rgba) void {
+        var rgb = self.toRgb();
+        rgb.blend(color);
+        self = rgb.toLab();
+    }
 
     /// Checks if the color is a shade of gray.
     pub fn isGray(self: Lab) bool {
@@ -748,11 +875,247 @@ pub const Lab = struct {
         };
     }
 
+    /// Converts the CIELAB color into an LMS color.
+    pub fn toLms(self: Lab) Lms {
+        return self.toXyz().toLms();
+    }
+
+    /// Converts the CIELAB color into an Oklab color.
+    fn toOklab(self: Lab) Oklab {
+        return self.toLms().toOklab();
+    }
+
+    /// Converts the CIELAB color into an XYB color.
+    fn toXyb(self: Lab) Xyb {
+        return self.toLms().toXyb();
+    }
+};
+
+/// A color in the [Oklab](https://en.wikipedia.org/wiki/Oklab_color_space) colorspace.  L:
+/// 0 to 1 a: -0.5 to 0.5, b: -0.5to 0.5.
+pub const Oklab = struct {
+    l: f64 = 0,
+    a: f64 = 0,
+    b: f64 = 0,
+
     /// Alpha-blends color into self.
-    pub fn blend(self: *Lab, color: Rgba) void {
+    pub fn blend(self: *Oklab, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
         self = rgb.toLab();
+    }
+
+    /// Checks if the color is a shade of gray.
+    pub fn isGray(self: Oklab) bool {
+        return self.a == 0 and self.b == 0;
+    }
+
+    /// Converts the Oklab color into grayscale.
+    pub fn toGray(self: Oklab) u8 {
+        return @intFromFloat(@round(@max(0, @min(1, self.l)) * 255));
+    }
+
+    /// Converts the Oklab color into a RGB color.
+    fn toRgbFloat(self: Oklab) RgbFloat {
+        return self.toXyz().toRgbFloat();
+    }
+
+    /// Converts the Oklab color into a RGB color.
+    pub fn toRgb(self: Oklab) Rgb {
+        return self.toRgbFloat().toRgb();
+    }
+
+    /// Converts the Oklab color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Oklab, alpha: u8) Rgba {
+        return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the Oklab color into a HSL color.
+    pub fn toHsl(self: Oklab) Hsl {
+        return self.toRgbFloat().toHsl();
+    }
+
+    /// Converts the Oklab color into a HSV color.
+    pub fn toHsv(self: Oklab) Hsv {
+        return self.toRgbFloat().toHsv();
+    }
+
+    /// Converts the Oklab color into an LMS color.
+    pub fn toLms(self: Oklab) Lms {
+        return .{
+            .l = std.math.pow(f64, 0.9999999985 * self.l + 0.3963377922 * self.a + 0.2158037581 * self.b, 3),
+            .m = std.math.pow(f64, 1.000000009 * self.l - 0.1055613423 * self.a - 0.06385417477 * self.b, 3),
+            .s = std.math.pow(f64, 1.000000055 * self.l - 0.08948418209 * self.a - 1.291485538 * self.b, 3),
+        };
+    }
+
+    /// Converts the Oklab color into a CIE 1931 XYZ color.
+    pub fn toXyz(self: Oklab) Xyz {
+        return self.toLms().toXyz();
+    }
+
+    /// Converts the Oklab color into a CIE Lab color.
+    pub fn toLab(self: Oklab) Lab {
+        return self.toXyz().toLab();
+    }
+
+    /// Converts the Oklab color into an XYB color.
+    pub fn toXyb(self: Oklab) Xyb {
+        return self.toLms().toXyb();
+    }
+};
+
+/// A color in the [LMS colorspace](https://en.wikipedia.org/wiki/LMS_color_space), representing
+/// the response of the three types of cones of the human eye.
+pub const Lms = struct {
+    l: f64 = 0,
+    m: f64 = 0,
+    s: f64 = 0,
+
+    /// Alpha-blends color into self.
+    pub fn blend(self: *Lms, color: Rgba) void {
+        var rgb = self.toRgb();
+        rgb.blend(color);
+        self = rgb.toLms();
+    }
+
+    /// Checks if the color is a shade of gray.
+    pub fn isGray(self: Lms) bool {
+        const lab = self.toOklab();
+        return lab.a == 0 and lab.b == 0;
+    }
+
+    /// Converts the LMS color into grayscale.
+    pub fn toGray(self: Lms) u8 {
+        return @intFromFloat(@round(@max(0, @min(1, self.toOklab().l)) * 255));
+    }
+
+    /// Converts the LMS color into a RGB color.
+    fn toRgbFloat(self: Lms) RgbFloat {
+        return self.toXyz().toRgbFloat();
+    }
+
+    /// Converts the LMS color into a RGB color.
+    pub fn toRgb(self: Lms) Rgb {
+        return self.toRgbFloat().toRgb();
+    }
+
+    /// Converts the LMS color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Lms, alpha: u8) Rgba {
+        return self.toRgb().toRgba(alpha);
+    }
+
+    /// Converts the LMS color into a HSL color.
+    pub fn toHsl(self: Lms) Hsl {
+        return self.toRgbFloat().toHsl();
+    }
+
+    /// Converts the LMS color into a HSV color.
+    pub fn toHsv(self: Lms) Hsv {
+        return self.toRgbFloat().toHsv();
+    }
+
+    /// Converts the LMS color into a CIE 1931 XYZ color using the Bradford method.
+    pub fn toXyz(self: Lms) Xyz {
+        return .{
+            .x = 100 * (0.9869929 * self.l - 0.1470543 * self.m + 0.1599627 * self.s),
+            .y = 100 * (0.4323053 * self.l + 0.5183603 * self.m + 0.0492912 * self.s),
+            .z = 100 * (-0.0085287 * self.l + 0.0400428 * self.m + 0.9684867 * self.s),
+        };
+    }
+
+    /// Converts the LMS color into an Oklab color.
+    pub fn toOklab(self: Lms) Oklab {
+        const lp = std.math.cbrt(self.l);
+        const mp = std.math.cbrt(self.m);
+        const sp = std.math.cbrt(self.s);
+        return .{
+            .l = 0.2104542553 * lp + 0.7936177850 * mp - 0.0040720468 * sp,
+            .a = 1.9779984951 * lp - 2.4285922050 * mp + 0.4505937099 * sp,
+            .b = 0.0259040371 * lp + 0.7827717662 * mp - 0.8086757660 * sp,
+        };
+    }
+
+    /// Converts the LMS color into an XYB color.
+    pub fn toXyb(self: Lms) Xyb {
+        return .{ .x = self.l - self.m, .y = self.l + self.m, .b = self.s };
+    }
+};
+
+/// A color in the [XYB colorspace](https://en.wikipedia.org/wiki/LMS_color_space#Image_processing)
+/// used in JPEG XL, which can be interpreted as a hybrid color theory where L and M are
+/// opponents but S is handled in a tricromatic way. In practical terms, this allows for using
+/// less data for storing blue signals without losing much perceived quality.
+pub const Xyb = struct {
+    x: f64 = 0,
+    y: f64 = 0,
+    b: f64 = 0,
+
+    /// Alpha-blends color into self.
+    pub fn blend(self: *Xyb, color: Rgba) void {
+        var rgb = self.toRgb();
+        rgb.blend(color);
+        self = rgb.toXyb();
+    }
+
+    /// Checks if the color is a shade of gray.
+    pub fn isGray(self: Xyb) bool {
+        const lab = self.toOklab();
+        return lab.a == 0 and lab.b == 0;
+    }
+
+    /// Converts the XYB color into grayscale.
+    pub fn toGray(self: Xyb) u8 {
+        return @intFromFloat(@round(@max(0, @min(1, self.toOklab().l)) * 255));
+    }
+
+    /// Converts the XYB color into a RGB color.
+    fn toRgbFloat(self: Xyb) RgbFloat {
+        return self.toLms().toRgbFloat();
+    }
+
+    /// Converts the XYB color into a RGB color.
+    pub fn toRgb(self: Xyb) Rgb {
+        return self.toLms().toRgb();
+    }
+
+    /// Converts the XYB color into a RGBA color with the specified alpha.
+    pub fn toRgba(self: Xyb, alpha: u8) Rgba {
+        return self.toLms().toRgba(alpha);
+    }
+
+    /// Converts the XYB color into a HSL color.
+    pub fn toHsl(self: Xyb) Hsl {
+        return self.toLms().toHsl();
+    }
+
+    /// Converts the XYB color into a HSV color.
+    pub fn toHsv(self: Xyb) Hsv {
+        return self.toLms().toHsv();
+    }
+
+    /// Converts the XYB color into an XYZ color.
+    pub fn toXyz(self: Xyb) Xyz {
+        return self.toLms().toXyz();
+    }
+
+    /// Converts the XYB color into a CIE LAB color.
+    pub fn toLab(self: Xyb) Lab {
+        return self.toXyz().toLab();
+    }
+
+    /// Converts the XYB into an LMS color.
+    pub fn toLms(self: Xyb) Lms {
+        return .{
+            .l = 0.5 * (self.x + self.y),
+            .m = 0.5 * (self.y - self.x),
+            .s = self.b,
+        };
+    }
+
+    /// Converts the XYB color into an LMS color.
+    pub fn toOklab(self: Xyb) Oklab {
+        return self.toLms().toOklab();
     }
 };
 
