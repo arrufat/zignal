@@ -15,6 +15,10 @@
   margin: 10px;
 }
 
+#video {
+  position: absolute;
+}
+
 #canvas1 {
   border: 1px dashed black;
   vertical-align: center;
@@ -30,8 +34,8 @@
 
 #canvas-seam{
   border: 1px solid black;
-  width: 640px;
-  height: auto;
+  width: auto;
+  height: 640px;
 }
 
 #toggle-button {

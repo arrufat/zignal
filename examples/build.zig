@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
     _ = buildModule(b, "colorspace", target, optimize);
     _ = buildModule(b, "face_alignment", target, optimize);
     _ = buildModule(b, "perlin_noise", target, optimize);
+    _ = buildModule(b, "seam_carving", target, optimize);
 
     const fmt_step = b.step("fmt", "Run zig fmt");
     const fmt = b.addFmt(.{

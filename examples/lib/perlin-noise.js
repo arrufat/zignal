@@ -22,7 +22,7 @@
     wasm_exports = obj.instance.exports;
     window.wasm = obj;
     console.log("wasm loaded");
-    const canvas = document.getElementById("canvas");
+    const canvas = document.getElementById("canvas-perlin");
     const ctx = canvas.getContext("2d");
     const rows = 512;
     const cols = 512;
