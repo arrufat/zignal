@@ -318,7 +318,7 @@ pub fn Image(comptime T: type) type {
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             blurred.data[pos] = switch (@typeInfo(T)) {
                                 .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), (@round(sum / area))))),
-                                .float => as(T, sum / area),
+                                else => as(T, sum / area),
                             };
                             pos += 1;
                             rem -= 1;
@@ -424,7 +424,7 @@ pub fn Image(comptime T: type) type {
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
                             sharpened.data[pos] = switch (@typeInfo(T)) {
                                 .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area)))),
-                                .float => as(T, sum / area),
+                                else => as(T, sum / area),
                             };
                             pos += 1;
                             rem -= 1;
