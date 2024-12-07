@@ -297,7 +297,7 @@ pub fn Image(comptime T: type) type {
                             const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len].*;
                             const areas: @Vector(simd_len, f32) = @splat(@as(f32, @floatFromInt(r2_r1 * 2 * radius)));
                             const sums = int22s - int21s - int12s + int11s;
-                            const vals: [simd_len]f32 = @round(sums / areas);
+                            const vals: [simd_len]f32 = if (@typeInfo(T) == .int) @round(sums / areas) else sums / areas;
                             for (vals, 0..) |val, i| {
                                 if (@typeInfo(T) == .int) {
                                     blurred.data[pos + i] = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), val)));
@@ -319,7 +319,6 @@ pub fn Image(comptime T: type) type {
                             blurred.data[pos] = switch (@typeInfo(T)) {
                                 .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), (@round(sum / area))))),
                                 .float => as(T, sum / area),
-                                else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(T) ++ "."),
                             };
                             pos += 1;
                             rem -= 1;
