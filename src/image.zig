@@ -9,8 +9,8 @@ const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
 const Rgba = @import("colorspace.zig").Rgba;
 
-const Rectangle = @import("geometry.zig").Rectangle(f32);
-const Point2d = @import("point.zig").Point2d(f32);
+const Rectangle = @import("geometry.zig").Rectangle;
+const Point2d = @import("point.zig").Point2d;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -18,19 +18,20 @@ pub fn Image(comptime T: type) type {
         rows: usize,
         cols: usize,
         data: []T,
+        stride: usize,
 
         const Self = @This();
         /// Constructs an image of rows and cols size.  If the slice is owned by this image,
         /// deinit should also be called.
         pub fn init(rows: usize, cols: usize, data: []T) Image(T) {
-            return .{ .rows = rows, .cols = cols, .data = data };
+            return .{ .rows = rows, .cols = cols, .data = data, .stride = cols };
         }
 
         /// Constructs an image of rows and cols size allocating its own memory.
         pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(rows * cols);
-            return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice() };
+            return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice(), .stride = cols };
         }
 
         /// Contructs an image of rows and cols size reinterpreting the slice of bytes as a slice of T.
@@ -40,6 +41,7 @@ pub fn Image(comptime T: type) type {
                 .rows = rows,
                 .cols = cols,
                 .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
+                .stride = cols,
             };
         }
 
@@ -73,12 +75,23 @@ pub fn Image(comptime T: type) type {
             return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
         }
 
+        pub fn view(self: Self, rect: Rectangle(usize)) Image(T) {
+            assert(rect.r < self.cols);
+            assert(rect.b < self.rows);
+            return .{
+                .rows = rect.height(),
+                .cols = rect.width(),
+                .data = self.data[rect.t * self.cols + rect.l ..],
+                .stride = self.cols,
+            };
+        }
+
         /// Returns the value at position row, col.  It assumes the coordinates are in bounds and
         /// triggers safety-checked undefined behavior when they aren't.
         pub inline fn at(self: Self, row: usize, col: usize) *T {
             assert(row < self.rows);
             assert(col < self.cols);
-            return &self.data[row * self.cols + col];
+            return &self.data[row * self.stride + col];
         }
 
         /// Returns the optional value at row, col in the image.
@@ -88,8 +101,7 @@ pub fn Image(comptime T: type) type {
             if (row < 0 or col < 0 or row >= irows or col >= icols) {
                 return null;
             } else {
-                const pos: usize = @intCast(row * icols + col);
-                return &self.data[pos];
+                return self.at(@intCast(row), @intCast(col));
             }
         }
 
@@ -97,9 +109,7 @@ pub fn Image(comptime T: type) type {
         pub fn flipLeftRight(self: Self) void {
             for (0..self.rows) |r| {
                 for (0..self.cols / 2) |c| {
-                    const left = r * self.cols + c;
-                    const right = r * self.cols + self.cols - c - 1;
-                    std.mem.swap(T, &self.data[left], &self.data[right]);
+                    std.mem.swap(T, self.at(r, c), self.at(r, self.cols - c - 1));
                 }
             }
         }
@@ -108,9 +118,7 @@ pub fn Image(comptime T: type) type {
         pub fn flipTopBottom(self: Self) void {
             for (0..self.rows / 2) |r| {
                 for (0..self.cols) |c| {
-                    const top = r * self.cols + c;
-                    const bottom = (self.rows - r - 1) * self.cols + c;
-                    std.mem.swap(T, &self.data[top], &self.data[bottom]);
+                    std.mem.swap(T, self.at(r, c), self.at(self.rows - r - 1, c));
                 }
             }
         }
@@ -126,10 +134,10 @@ pub fn Image(comptime T: type) type {
             }
             const lr_frac: f32 = x - as(f32, left);
             const tb_frac: f32 = y - as(f32, top);
-            const tl: T = self.data[as(usize, top) * self.cols + as(usize, left)];
-            const tr: T = self.data[as(usize, top) * self.cols + as(usize, right)];
-            const bl: T = self.data[as(usize, bottom) * self.cols + as(usize, left)];
-            const br: T = self.data[as(usize, bottom) * self.cols + as(usize, right)];
+            const tl: T = self.at(@intCast(top), @intCast(left)).*;
+            const tr: T = self.at(@intCast(top), @intCast(right)).*;
+            const bl: T = self.at(@intCast(bottom), @intCast(left)).*;
+            const br: T = self.at(@intCast(bottom), @intCast(right)).*;
             var temp: T = undefined;
             switch (@typeInfo(T)) {
                 .int, .float => {
@@ -164,13 +172,13 @@ pub fn Image(comptime T: type) type {
                 var sx: f32 = -x_scale;
                 for (0..out.cols) |c| {
                     sx += x_scale;
-                    out.data[r * out.cols + c] = if (self.interpolateBilinear(sx, sy)) |val| val else std.mem.zeroes(T);
+                    out.at(r, c).* = if (self.interpolateBilinear(sx, sy)) |val| val else std.mem.zeroes(T);
                 }
             }
         }
 
         /// Rotates the image by angle (in radians) from center.  It must be freed on the caller side.
-        pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d, angle: f32, rotated: *Self) !void {
+        pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
             var array = std.ArrayList(T).init(allocator);
             try array.resize(self.rows * self.cols);
             rotated.* = Self.init(self.rows, self.cols, try array.toOwnedSlice());
@@ -182,7 +190,7 @@ pub fn Image(comptime T: type) type {
                     const x: f32 = @floatFromInt(c);
                     const rx = cos * (x - center.x) - sin * (y - center.y) + center.x;
                     const ry = sin * (x - center.x) + cos * (y - center.y) + center.y;
-                    rotated.data[r * rotated.cols + c] = if (self.interpolateBilinear(rx, ry)) |val| val else std.mem.zeroes(T);
+                    rotated.at(r, c).* = if (self.interpolateBilinear(rx, ry)) |val| val else std.mem.zeroes(T);
                 }
             }
         }
@@ -195,7 +203,7 @@ pub fn Image(comptime T: type) type {
 
         /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the
         /// image, that area is filled with black/transparent pixels.
-        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle, chip: *Self) !void {
+        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32), chip: *Self) !void {
             const chip_top: isize = @intFromFloat(@round(rectangle.t));
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
@@ -205,10 +213,7 @@ pub fn Image(comptime T: type) type {
                 const ir: isize = @intCast(r);
                 for (0..chip_cols) |c| {
                     const ic: isize = @intCast(c);
-                    chip.data[r * chip_cols + c] = if (self.atOrNull(@intCast(ir + chip_top), @intCast(ic + chip_left))) |val|
-                        val.*
-                    else
-                        std.mem.zeroes(T);
+                    chip.at(r, c).* = if (self.atOrNull(ir + chip_top, ic + chip_left)) |val| val.* else std.mem.zeroes(T);
                 }
             }
         }
@@ -232,10 +237,8 @@ pub fn Image(comptime T: type) type {
                     for (1..self.rows) |r| {
                         tmp = 0;
                         for (0..self.cols) |c| {
-                            const curr_pos = r * self.cols + c;
-                            const prev_pos = (r - 1) * self.cols + c;
-                            tmp += as(f32, self.data[curr_pos]);
-                            integral.data[curr_pos] = tmp + integral.data[prev_pos];
+                            tmp += as(f32, self.at(r, c).*);
+                            integral.at(r, c).* = tmp + integral.at(r - 1, c).*;
                         }
                     }
                 },
@@ -253,11 +256,9 @@ pub fn Image(comptime T: type) type {
                     for (1..self.rows) |r| {
                         tmp = [_]f32{0} ** Self.channels();
                         for (0..self.cols) |c| {
-                            const curr_pos = r * self.cols + c;
-                            const prev_pos = (r - 1) * self.cols + c;
                             inline for (std.meta.fields(T), 0..) |f, i| {
-                                tmp[i] += as(f32, @field(self.data[curr_pos], f.name));
-                                integral.data[curr_pos][i] = tmp[i] + integral.data[prev_pos][i];
+                                tmp[i] += as(f32, @field(self.at(r, c).*, f.name));
+                                integral.at(r, c)[i] = tmp[i] + integral.at(r - 1, c)[i];
                             }
                         }
                     }
@@ -493,7 +494,6 @@ pub fn Image(comptime T: type) type {
             };
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
-                    const pos = r * self.cols + c;
                     const ir: isize = @intCast(r);
                     const ic: isize = @intCast(c);
                     var horz_temp: i32 = 0;
@@ -509,7 +509,7 @@ pub fn Image(comptime T: type) type {
                             }
                         }
                     }
-                    out.data[pos] = @intFromFloat(@max(0, @min(255, @sqrt(@as(f32, @floatFromInt(horz_temp * horz_temp + vert_temp * vert_temp))))));
+                    out.at(r, c).* = @intFromFloat(@max(0, @min(255, @sqrt(@as(f32, @floatFromInt(horz_temp * horz_temp + vert_temp * vert_temp))))));
                 }
             }
         }
@@ -528,9 +528,8 @@ test "integral image scalar" {
     try expectEqual(image.data.len, integral.data.len);
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
-            const pos = r * image.cols + c;
             const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
-            try expectEqual(area_at_pos, integral.data[pos]);
+            try expectEqual(area_at_pos, integral.at(r, c).*);
         }
     }
 }
