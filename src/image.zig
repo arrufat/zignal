@@ -73,8 +73,16 @@ pub fn Image(comptime T: type) type {
             return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
         }
 
+        /// Returns the value at position row, col.  It assumes the coordinates are in bounds and
+        /// triggers safety-checked undefined behavior when they aren't.
+        pub inline fn at(self: Self, row: usize, col: usize) *T {
+            assert(row < self.rows);
+            assert(col < self.cols);
+            return &self.data[row * self.cols + col];
+        }
+
         /// Returns the optional value at row, col in the image.
-        pub fn at(self: Self, row: isize, col: isize) ?*T {
+        pub fn atOrNull(self: Self, row: isize, col: isize) ?*T {
             const irows: isize = @intCast(self.rows);
             const icols: isize = @intCast(self.cols);
             if (row < 0 or col < 0 or row >= irows or col >= icols) {
@@ -197,7 +205,7 @@ pub fn Image(comptime T: type) type {
                 const ir: isize = @intCast(r);
                 for (0..chip_cols) |c| {
                     const ic: isize = @intCast(c);
-                    chip.data[r * chip_cols + c] = if (self.at(@intCast(ir + chip_top), @intCast(ic + chip_left))) |val|
+                    chip.data[r * chip_cols + c] = if (self.atOrNull(@intCast(ir + chip_top), @intCast(ic + chip_left))) |val|
                         val.*
                     else
                         std.mem.zeroes(T);
@@ -494,7 +502,7 @@ pub fn Image(comptime T: type) type {
                         const py: isize = ir - 1 + @as(isize, @intCast(m));
                         for (0..vert_filter[0].len) |n| {
                             const px: isize = ic - 1 + @as(isize, @intCast(n));
-                            if (self.at(py, px)) |val| {
+                            if (self.atOrNull(py, px)) |val| {
                                 const p: i32 = @intCast(convert(u8, val.*));
                                 horz_temp += p * horz_filter[m][n];
                                 vert_temp += p * vert_filter[m][n];

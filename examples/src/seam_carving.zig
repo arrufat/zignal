@@ -28,12 +28,11 @@ pub fn computeEnergy(
                 var x: isize = @as(isize, @intCast(c)) + i;
                 if (x == energy.cols) x = @intCast(energy.cols - 1);
                 const y: isize = @as(isize, @intCast(r)) - 1;
-                if (energy.at(y, x)) |val| {
+                if (energy.atOrNull(y, x)) |val| {
                     min = @min(val.*, min);
                 }
             }
-            const pos = r * edges.cols + c;
-            energy.data[pos] = edges.data[pos] + min;
+            energy.at(r, c).* = edges.at(r, c).* + min;
         }
     }
 }
@@ -43,9 +42,7 @@ pub fn computeSeam(energy: Image(u32), seam: []usize) void {
     const row: usize = energy.rows - 1;
     seam[row] = 0;
     for (0..energy.cols) |c| {
-        const pos1 = row * energy.cols + c;
-        const pos2 = row * energy.cols + seam[row];
-        if (energy.data[pos1] < energy.data[pos2]) {
+        if (energy.at(row, c).* < energy.at(row, seam[row]).*) {
             seam[row] = c;
         }
     }
@@ -58,8 +55,8 @@ pub fn computeSeam(energy: Image(u32), seam: []usize) void {
         while (i <= 1) : (i += 1) {
             var x: isize = @as(isize, @intCast(seam[r + 1])) + i;
             if (x == energy.cols) x = @intCast(energy.cols - 1);
-            if (energy.at(y, x)) |curr| {
-                if (energy.at(y, @intCast(seam[r]))) |prev| {
+            if (energy.atOrNull(y, x)) |curr| {
+                if (energy.atOrNull(y, @intCast(seam[r]))) |prev| {
                     if (curr.* < prev.*) {
                         seam[r] = @intCast(x);
                     }
@@ -76,7 +73,7 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             if (c == seam[r]) continue;
-            image.data[pos] = image.data[r * image.cols + c];
+            image.data[pos] = image.at(r, c).*;
             pos += 1;
         }
     }
