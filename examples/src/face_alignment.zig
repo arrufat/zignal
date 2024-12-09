@@ -140,11 +140,7 @@ pub export fn extract_aligned_face(
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const image: Image(Rgba) = .{
-        .rows = rows,
-        .cols = cols,
-        .data = rgba_ptr[0 .. rows * cols],
-    };
+    const image = Image(Rgba).init(rows, cols, rgba_ptr[0 .. rows * cols]);
 
     const landmarks: []Point2d = blk: {
         var array = std.ArrayList(Point2d).init(allocator);
@@ -162,11 +158,7 @@ pub export fn extract_aligned_face(
     };
     defer allocator.free(landmarks);
 
-    var aligned: Image(Rgba) = .{
-        .rows = out_rows,
-        .cols = out_cols,
-        .data = out_ptr[0 .. out_rows * out_cols],
-    };
+    var aligned = Image(Rgba).init(out_rows, out_cols, out_ptr[0 .. out_rows * out_cols]);
     extractAlignedFace(Rgba, allocator, image, landmarks, padding, blurring, &aligned) catch {
         std.log.err("Ran out of memory while extracting the aligned face", .{});
         @panic("OOM");
