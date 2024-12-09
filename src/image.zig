@@ -81,7 +81,7 @@ pub fn Image(comptime T: type) type {
             return .{
                 .rows = rect.height(),
                 .cols = rect.width(),
-                .data = self.data[rect.t * self.cols + rect.l ..],
+                .data = self.data[rect.t * self.stride + rect.l ..],
                 .stride = self.cols,
             };
         }
@@ -547,10 +547,9 @@ test "integral image struct" {
     try expectEqual(image.data.len, integral.data.len);
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
-            const pos = r * image.cols + c;
             const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
             for (0..4) |i| {
-                try expectEqual(area_at_pos, integral.data[pos][i]);
+                try expectEqual(area_at_pos, integral.at(r, c)[i]);
             }
         }
     }
