@@ -47,14 +47,13 @@ pub export fn generate(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
     for (0..image.rows) |r| {
         const y: f32 = @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(image.rows));
         for (0..image.cols) |c| {
-            const pos = r * image.cols + c;
             const x: f32 = @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(image.cols));
             const val: u8 = @intFromFloat(
                 @max(0, @min(255, @round(
                     255 * (opts.amplitude / 2 * (perlin.generate(f32, x, y, 0, opts) + opts.amplitude)),
                 ))),
             );
-            image.data[pos] = Rgba.fromGray(val, 255);
+            image.at(r, c).* = Rgba.fromGray(val, 255);
         }
     }
 }
