@@ -212,7 +212,7 @@ pub fn Image(comptime T: type) type {
             integral: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
             switch (@typeInfo(T)) {
-                .comptime_int, .int, .comptime_float, .float => {
+                .int, .float => {
                     if (!self.hasSameShape(integral.*)) {
                         integral.* = try Image(f32).initAlloc(allocator, self.rows, self.cols);
                     }
