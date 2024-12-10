@@ -83,7 +83,7 @@ pub fn Image(comptime T: type) type {
             return .{
                 .rows = rect.height(),
                 .cols = rect.width(),
-                .data = self.data[rect.t * self.stride + rect.l .. rect.b * self.stride + rect.b],
+                .data = self.data[rect.t * self.stride + rect.l .. rect.b * self.stride + rect.r + 1],
                 .stride = self.cols,
             };
         }
@@ -297,6 +297,7 @@ pub fn Image(comptime T: type) type {
                         const r2_offset = r2 * self.cols;
                         const r2_r1 = r2 - r1;
                         if (r1 >= radius and r2 <= self.rows - 1 - radius and
+                            self.cols >= 1 + radius + simd_len and
                             c >= radius and c <= self.cols - 1 - radius - simd_len and
                             rem >= simd_len)
                         {
