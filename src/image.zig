@@ -83,7 +83,7 @@ pub fn Image(comptime T: type) type {
             return .{
                 .rows = rect.height(),
                 .cols = rect.width(),
-                .data = self.data[rect.t * self.stride + rect.l ..],
+                .data = self.data[rect.t * self.stride + rect.l .. rect.b * self.stride + rect.b],
                 .stride = self.cols,
             };
         }
@@ -233,8 +233,8 @@ pub fn Image(comptime T: type) type {
                     }
                     var tmp: f32 = 0;
                     for (0..self.cols) |c| {
-                        tmp += as(f32, (self.data[c]));
-                        integral.data[c] = tmp;
+                        tmp += as(f32, (self.at(0, c).*));
+                        integral.at(0, c).* = tmp;
                     }
                     for (1..self.rows) |r| {
                         tmp = 0;
@@ -251,8 +251,8 @@ pub fn Image(comptime T: type) type {
                     var tmp = [_]f32{0} ** Self.channels();
                     for (0..self.cols) |c| {
                         inline for (std.meta.fields(T), 0..) |f, i| {
-                            tmp[i] += as(f32, @field(self.data[c], f.name));
-                            integral.data[c][i] = tmp[i];
+                            tmp[i] += as(f32, @field(self.at(0, c).*, f.name));
+                            integral.at(0, c)[i] = tmp[i];
                         }
                     }
                     for (1..self.rows) |r| {
@@ -311,9 +311,9 @@ pub fn Image(comptime T: type) type {
                             const vals: [simd_len]f32 = if (@typeInfo(T) == .int) @round(sums / areas) else sums / areas;
                             for (vals, 0..) |val, i| {
                                 if (@typeInfo(T) == .int) {
-                                    blurred.data[pos + i] = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), val)));
+                                    blurred.at(r, c + i).* = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), val)));
                                 } else {
-                                    blurred.data[pos + i] = val;
+                                    blurred.at(r, c + i).* = val;
                                 }
                             }
                             pos += simd_len;
@@ -327,7 +327,7 @@ pub fn Image(comptime T: type) type {
                             const pos22 = r2_offset + c2;
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
-                            blurred.data[pos] = switch (@typeInfo(T)) {
+                            blurred.at(r, c).* = switch (@typeInfo(T)) {
                                 .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), (@round(sum / area))))),
                                 else => as(T, sum / area),
                             };
@@ -380,7 +380,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0) {
+            if (radius == 0 and &self != sharpened) {
                 for (self.data, sharpened.data) |s, *b| b.* = s;
                 return;
             }
@@ -417,9 +417,9 @@ pub fn Image(comptime T: type) type {
                             for (vals, 0..) |val, i| {
                                 if (@typeInfo(T) == .int) {
                                     const temp = @max(0, @min(std.math.maxInt(T), as(isize, self.data[pos]) * 2 - @as(isize, val)));
-                                    sharpened.data[pos + i] = as(T, temp);
+                                    sharpened.at(r, c + i).* = as(T, temp);
                                 } else {
-                                    sharpened.data[pos + i] = 2 * self.data[pos] - val;
+                                    sharpened.at(r, c + i).* = 2 * self.data[pos] - val;
                                 }
                             }
                             pos += simd_len;
@@ -433,7 +433,7 @@ pub fn Image(comptime T: type) type {
                             const pos22 = r2_offset + c2;
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
                             const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
-                            sharpened.data[pos] = switch (@typeInfo(T)) {
+                            sharpened.at(r, c).* = switch (@typeInfo(T)) {
                                 .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area)))),
                                 else => as(T, sum / area),
                             };
@@ -530,6 +530,24 @@ test "integral image scalar" {
     try expectEqual(image.data.len, integral.data.len);
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
+            const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
+            try expectEqual(area_at_pos, integral.at(r, c).*);
+        }
+    }
+}
+
+test "integral image view scalar" {
+    var image = try Image(u8).initAlloc(std.testing.allocator, 21, 13);
+    defer image.deinit(std.testing.allocator);
+    for (image.data) |*i| i.* = 1;
+    const view = image.view(.{ .l = 2, .t = 3, .r = 8, .b = 10 });
+    var integral: Image(f32) = undefined;
+    try view.integralImage(std.testing.allocator, &integral);
+    defer integral.deinit(std.testing.allocator);
+    try expectEqual(view.rows, integral.rows);
+    try expectEqual(view.cols, integral.cols);
+    for (0..view.rows) |r| {
+        for (0..view.cols) |c| {
             const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
             try expectEqual(area_at_pos, integral.at(r, c).*);
         }
