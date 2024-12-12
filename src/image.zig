@@ -75,15 +75,20 @@ pub fn Image(comptime T: type) type {
             return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
         }
 
-        /// Returns an image view with boundaries defined by `rect`.  The returned image
-        /// references the memory of `self`, so there are no allocations or copies.
+        /// Returns an image view with boundaries defined by `rect` within the image boundaries.
+        /// The returned image references the memory of `self`, so there are no allocations
+        /// or copies.
         pub fn view(self: Self, rect: Rectangle(usize)) Image(T) {
-            assert(rect.r < self.cols);
-            assert(rect.b < self.rows);
+            const bounded = Rectangle(usize){
+                .l = rect.l,
+                .t = rect.t,
+                .r = @min(rect.r, self.cols - 1),
+                .b = @min(rect.b, self.rows - 1),
+            };
             return .{
-                .rows = rect.height(),
-                .cols = rect.width(),
-                .data = self.data[rect.t * self.stride + rect.l .. rect.b * self.stride + rect.r + 1],
+                .rows = bounded.height(),
+                .cols = bounded.width(),
+                .data = self.data[bounded.t * self.stride + bounded.l .. bounded.b * self.stride + bounded.r + 1],
                 .stride = self.cols,
             };
         }
