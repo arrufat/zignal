@@ -98,6 +98,22 @@ pub fn Rectangle(comptime T: type) type {
             }
             return true;
         }
+
+        /// Grows the given rectangle by expaning its borders by `amount`.
+        pub fn grow(self: *Self, amount: T) void {
+            self.l -|= amount;
+            self.t -|= amount;
+            self.r += amount;
+            self.b += amount;
+        }
+
+        /// Shrinks the given rectangle by shrinking its borders by `amount`.
+        pub fn shrink(self: *Self, amount: T) void {
+            self.l += amount;
+            self.t += amount;
+            self.r -|= amount;
+            self.b -|= amount;
+        }
     };
 }
 
@@ -111,6 +127,18 @@ test "Rectangle" {
     try expectEqual(frect.contains(640 / 2, 480 / 2), true);
     try expectEqual(irect.contains(640, 480), false);
     try expectEqualDeep(frect.cast(isize), irect);
+}
+
+test "Rectangle grow and shrink" {
+    const rect = Rectangle(i32){ .l = 50, .t = 25, .r = 100, .b = 100 };
+    var rect2 = rect;
+    const amount: i32 = 10;
+    rect2.grow(amount);
+    try expectEqual(rect.width() + 2 * amount, rect2.width());
+    try expectEqual(rect.height() + 2 * amount, rect2.height());
+    try expectEqualDeep(rect2, Rectangle(i32){ .l = 40, .t = 15, .r = 110, .b = 110 });
+    rect2.shrink(10);
+    try expectEqualDeep(rect, rect2);
 }
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
