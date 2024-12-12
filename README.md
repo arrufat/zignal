@@ -28,7 +28,7 @@ Current features include:
 - singular value decomposition (SVD) ported from dlib
 - geometry
   - points and rectangles
-  - projective and similarity transforms
+  - projective, affine and similarity transforms
   - convex hull
 - simple image struct with common operations
   - resize
@@ -36,6 +36,7 @@ Current features include:
   - crop
   - blur
   - sharpen
+  - views (called `sub_image` in dlib or `roi` in OpenCV.)
 - drawing functions
   - lines
   - circles
