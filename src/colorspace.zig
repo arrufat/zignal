@@ -191,8 +191,7 @@ const RgbFloat = struct {
             }
             hsl.h *= 60;
         }
-        if (hsl.h < 0) hsl.h += 360;
-        hsl.h = if (hsl.h == 360) 0 else hsl.h;
+        hsl.h = @mod(hsl.h, 360);
         hsl.s = @max(0, @min(1, hsl.s)) * 100;
         hsl.l = @max(0, @min(1, hsl.l)) * 100;
         return hsl;
@@ -215,8 +214,7 @@ const RgbFloat = struct {
         } else {
             hsv.h = 240 + (self.r - self.g) / delta * 60;
         }
-        if (hsv.h < 0) hsv.h += 360;
-        hsv.h = if (hsv.h == 360) 0 else hsv.h;
+        hsv.h = @mod(hsv.h, 360);
 
         // saturation
         if (max == 0) {
