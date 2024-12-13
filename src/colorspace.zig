@@ -174,58 +174,42 @@ const RgbFloat = struct {
         const min = @min(self.r, @min(self.g, self.b));
         const max = @max(self.r, @max(self.g, self.b));
         const delta = max - min;
-        var hsl = Hsl{ .h = 0, .s = 0, .l = 0 };
-        hsl.l = (max + min) / 2;
-        if (hsl.l > 0 and hsl.l < 1) {
-            hsl.s = delta / if (hsl.l < 0.5) 2 * hsl.l else 2 - 2 * hsl.l;
-        }
-        if (delta > 0) {
-            if (max == self.r and max != self.g) {
-                hsl.h += (self.g - self.b) / delta;
+        const hue = if (delta == 0) 0 else blk: {
+            if (max == self.r) {
+                break :blk (self.g - self.b) / delta;
+            } else if (max == self.g) {
+                break :blk 2 + (self.b - self.r) / delta;
+            } else {
+                break :blk 4 + (self.r - self.g) / delta;
             }
-            if (max == self.g and max != self.b) {
-                hsl.h += 2 + (self.b - self.r) / delta;
-            }
-            if (max == self.b and max != self.r) {
-                hsl.h += 4 + (self.r - self.g) / delta;
-            }
-            hsl.h *= 60;
-        }
-        hsl.h = @mod(hsl.h, 360);
-        hsl.s = @max(0, @min(1, hsl.s)) * 100;
-        hsl.l = @max(0, @min(1, hsl.l)) * 100;
-        return hsl;
+        };
+        const l = (max + min) / 2.0;
+        const s = if (delta == 0) 0 else if (l < 0.5) delta / (2 * l) else delta / (2 - 2 * l);
+        return .{
+            .h = @mod(hue * 60.0, 360.0),
+            .s = @max(0, @min(1, s)) * 100.0,
+            .l = @max(0, @min(1, l)) * 100.0,
+        };
     }
 
     /// Converts the RGB color into an HSV color.
     fn toHsv(self: RgbFloat) Hsv {
-        var hsv = Hsv{};
         const min = @min(self.r, @min(self.g, self.b));
         const max = @max(self.r, @max(self.g, self.b));
         const delta = max - min;
-
-        // hue
-        if (delta == 0) {
-            hsv.h = 0;
-        } else if (max == self.r) {
-            hsv.h = (self.g - self.b) / delta * 60;
-        } else if (max == self.g) {
-            hsv.h = 120 + (self.b - self.r) / delta * 60;
-        } else {
-            hsv.h = 240 + (self.r - self.g) / delta * 60;
-        }
-        hsv.h = @mod(hsv.h, 360);
-
-        // saturation
-        if (max == 0) {
-            hsv.s = 0;
-        } else {
-            hsv.s = delta / max * 100;
-        }
-
-        // value
-        hsv.v = max * 100;
-        return hsv;
+        return .{
+            .h = if (delta == 0) 0 else blk: {
+                if (max == self.r) {
+                    break :blk @mod((self.g - self.b) / delta * 60, 360);
+                } else if (max == self.g) {
+                    break :blk @mod(120 + (self.b - self.r) / delta * 60, 360);
+                } else {
+                    break :blk @mod(240 + (self.r - self.g) / delta * 60, 360);
+                }
+            },
+            .s = if (max == 0) 0 else (delta / max) * 100,
+            .v = max * 100,
+        };
     }
 
     /// Converts the RGB color into a CIE 1931 XYZ color.
@@ -470,46 +454,36 @@ pub const Hsl = struct {
     }
     /// Converts the HSL color into an RGB color, where each channel ranges from 0 to 1.
     fn toRgbFloat(self: Hsl) RgbFloat {
-        var r: f64 = undefined;
-        var g: f64 = undefined;
-        var b: f64 = undefined;
-        const s = self.s / 100;
-        const l = self.l / 100;
-        if (self.h < 120) {
-            r = (120 - self.h) / 60;
-            g = self.h / 60;
-            b = 0;
-        } else if (self.h < 240) {
-            r = 0;
-            g = (240 - self.h) / 60;
-            b = (self.h - 120) / 60;
-        } else {
-            r = (self.h - 240) / 60;
-            g = 0;
-            b = (360 - self.h) / 60;
-        }
-        r = @min(r, 1);
-        g = @min(g, 1);
-        b = @min(b, 1);
-
-        r = 2 * s * r + (1 - s);
-        g = 2 * s * g + (1 - s);
-        b = 2 * s * b + (1 - s);
-
-        if (l < 0.5) {
-            r *= l;
-            g *= l;
-            b *= l;
-        } else {
-            r = (1 - l) * r + 2 * l - 1;
-            g = (1 - l) * g + 2 * l - 1;
-            b = (1 - l) * b + 2 * l - 1;
-        }
-        return .{
-            .r = @max(0, @min(1, r)),
-            .g = @max(0, @min(1, g)),
-            .b = @max(0, @min(1, b)),
+        const h = @max(0, @min(360, self.h));
+        const s = @max(0, @min(1, self.s / 100));
+        const l = @max(0, @min(1, self.l / 100));
+        const hue_sector = h / 60.0;
+        const sector: usize = @intFromFloat(hue_sector);
+        const fractional = hue_sector - @as(f64, @floatFromInt(sector));
+        const hue_factors = [_][3]f64{
+            .{ 1, fractional, 0 },
+            .{ 1 - fractional, 1, 0 },
+            .{ 0, 1, fractional },
+            .{ 0, 1 - fractional, 1 },
+            .{ fractional, 0, 1 },
+            .{ 1, 0, 1 - fractional },
         };
+        const index = @mod(sector, 6);
+        const r = lerp(1, 2 * hue_factors[index][0], s);
+        const g = lerp(1, 2 * hue_factors[index][1], s);
+        const b = lerp(1, 2 * hue_factors[index][2], s);
+        return if (l < 0.5)
+            .{
+                .r = r * l,
+                .g = g * l,
+                .b = b * l,
+            }
+        else
+            .{
+                .r = lerp(r, 2, l) - 1,
+                .g = lerp(g, 2, l) - 1,
+                .b = lerp(b, 2, l) - 1,
+            };
     }
 
     /// Converts the HSL color into an RGB color.
@@ -584,62 +558,30 @@ pub const Hsv = struct {
 
     /// Converts the HSV color into an RGB color.
     pub fn toRgbFloat(self: Hsv) RgbFloat {
-        var r: f64 = undefined;
-        var g: f64 = undefined;
-        var b: f64 = undefined;
         const hue = @max(0, @min(1, self.h / 360));
         const sat = @max(0, @min(1, self.s / 100));
         const val = @max(0, @min(1, self.v / 100));
 
-        if (sat == 0.0) {
-            r = val;
-            g = val;
-            b = val;
-        } else {
-            const sector = hue * 6;
-            const index: i32 = @intFromFloat(sector);
-            const fractional = sector - @as(f64, @floatFromInt(index));
-            const p = val * (1 - sat);
-            const q = val * (1 - (sat * fractional));
-            const t = val * (1 - sat * (1 - fractional));
-
-            switch (index) {
-                0 => {
-                    r = val;
-                    g = t;
-                    b = p;
-                },
-                1 => {
-                    r = q;
-                    g = val;
-                    b = p;
-                },
-                2 => {
-                    r = p;
-                    g = val;
-                    b = t;
-                },
-                3 => {
-                    r = p;
-                    g = q;
-                    b = val;
-                },
-                4 => {
-                    r = t;
-                    g = p;
-                    b = val;
-                },
-                else => {
-                    r = val;
-                    g = p;
-                    b = q;
-                },
-            }
-        }
+        if (sat == 0.0) return .{ .r = val, .g = val, .b = val };
+        const sector = hue * 6;
+        const index: i32 = @intFromFloat(sector);
+        const fractional = sector - @as(f64, @floatFromInt(index));
+        const p = val * (1 - sat);
+        const q = val * (1 - (sat * fractional));
+        const t = val * (1 - sat * (1 - fractional));
+        const colors = [_][3]f64{
+            .{ val, t, p },
+            .{ q, val, p },
+            .{ p, val, t },
+            .{ p, q, val },
+            .{ t, p, val },
+            .{ val, p, q },
+        };
+        const idx: usize = @intCast(@mod(index, 6));
         return .{
-            .r = @max(0, @min(1, r)),
-            .g = @max(0, @min(1, g)),
-            .b = @max(0, @min(1, b)),
+            .r = colors[idx][0],
+            .g = colors[idx][1],
+            .b = colors[idx][2],
         };
     }
 
