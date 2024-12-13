@@ -40,7 +40,7 @@ pub fn Options(T: type) type {
     };
 }
 
-/// Generates perlin noise at a certain frequency, using the specified options.
+/// Generates perlin noise using the specified options.
 pub fn generate(T: type, x: T, y: T, z: T, opts: Options(T)) T {
     var total_noise: T = 0;
     var max_amplitude: T = 0.0;
