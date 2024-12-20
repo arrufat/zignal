@@ -12,13 +12,13 @@ This library is in early stages of development and being used internally.
 As a result, the API might change often.
 
 
-## Reason of being
+## Motivation
 
-This library is used by [Ameli](https://ameli.co.kr/) for its makeup virtual try on.
+This library is used by [Ameli](https://ameli.co.kr/) for their makeup virtual try on.
 
 ## Features
 
-Initially, the features in this library are the ones required to get the virtual makeup try on working.
+Initially, the features in this library are the ones required to get the virtual try on for makeup working.
 However, we hope that it can be a foundation from which we can build a high quality image processing library, collaboratively.
 
 Current features include:
@@ -37,16 +37,15 @@ Current features include:
   - blur
   - sharpen
   - views (called `sub_image` in dlib or `roi` in OpenCV.)
-- drawing functions
+- drawing and filling functions
   - lines
   - circles
   - polygons
 
 ## Examples
 
-I plan to add examples for most of the features of this library as simple HTML/JS + Wasm. One of the greatest things about dlib
-is the large amount of examples illustrating how to use many of that library features.
-They can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/).
+One of the greatest things about dlib is the large amount of examples illustrating how to use many of that library features.
+I plan to showcase most of the features of this library as simple HTML/JS + Wasm examples, which can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/).
 
 Currently, there are examples for:
 - [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspace.html)
