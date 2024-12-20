@@ -75,6 +75,11 @@ pub fn Image(comptime T: type) type {
             return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
         }
 
+        /// Returns the bounding rectangle for the current image.
+        pub fn getRectangle(self: Self) Rectangle(usize) {
+            return .{ .l = 0, .t = 0, .r = self.cols - 1, .b = self.rows - 1 };
+        }
+
         /// Returns an image view with boundaries defined by `rect` within the image boundaries.
         /// The returned image references the memory of `self`, so there are no allocations
         /// or copies.
@@ -579,4 +584,12 @@ test "integral image struct" {
             }
         }
     }
+}
+
+test "getRectangle" {
+    var image = try Image(Rgba).initAlloc(std.testing.allocator, 21, 13);
+    defer image.deinit(std.testing.allocator);
+    const rect = image.getRectangle();
+    try expectEqual(rect.width(), image.cols);
+    try expectEqual(rect.height(), image.rows);
 }
