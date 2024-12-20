@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const expectEqual = std.testing.expectEqual;
+const expectEqual = std.testing.expectEqualDeep;
+const expectEqualDeep = std.testing.expectEqualDeep;
 const Allocator = std.mem.Allocator;
 
 const as = @import("meta.zig").as;
@@ -56,6 +57,7 @@ pub fn Image(comptime T: type) type {
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.rows = 0;
             self.cols = 0;
+            self.stride = 0;
             allocator.free(self.data);
         }
 
@@ -96,6 +98,12 @@ pub fn Image(comptime T: type) type {
                 .data = self.data[bounded.t * self.stride + bounded.l .. bounded.b * self.stride + bounded.r + 1],
                 .stride = self.cols,
             };
+        }
+
+        /// Returns true if, and only if, self is not a view of another image.  This is computed
+        /// by comparing the `rows` and `stride` fields.
+        pub fn isView(self: Self) bool {
+            return self.cols != self.stride;
         }
 
         /// Returns the value at position row, col.  It assumes the coordinates are in bounds and
@@ -592,4 +600,14 @@ test "getRectangle" {
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
     try expectEqual(rect.height(), image.rows);
+}
+
+test "view" {
+    var image = try Image(Rgba).initAlloc(std.testing.allocator, 21, 13);
+    defer image.deinit(std.testing.allocator);
+    const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
+    const view = image.view(rect);
+    try expectEqual(view.isView(), true);
+    try expectEqual(image.isView(), false);
+    try expectEqualDeep(rect, view.getRectangle());
 }
