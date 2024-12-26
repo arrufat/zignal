@@ -49,6 +49,7 @@ pub fn Image(comptime T: type) type {
         /// Returns the image data reinterpreted as a slice of bytes
         pub fn asBytes(self: Self) []u8 {
             assert(self.rows * self.cols == self.data.len);
+            assert(!self.isView());
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
@@ -74,7 +75,7 @@ pub fn Image(comptime T: type) type {
         /// Returns true if and only if self and other have the same number of rows, columns and
         /// data size.
         pub fn hasSameShape(self: Self, other: anytype) bool {
-            return self.rows == other.rows and self.cols == other.cols and self.data.len == other.data.len;
+            return self.rows == other.rows and self.cols == other.cols;
         }
 
         /// Returns the bounding rectangle for the current image.
