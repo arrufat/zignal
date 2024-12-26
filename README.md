@@ -55,7 +55,7 @@ Currently, there are examples for:
 
 ## Acknowledgements
 
-First of all, this project would not have been possible without the existance of [dlib](http://dlib.net).
+First of all, this project would not have been possible without the existence of [dlib](http://dlib.net).
 In fact, the first version of the virtual makeup try on was written in C++ with dlib and Emscripten.
 However, we decided to give Zig a go, even if that meant rewriting the world, but we have no dependencies now.
 
