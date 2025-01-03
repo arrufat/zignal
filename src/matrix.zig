@@ -303,7 +303,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Computes the "element-wise" matrix norm of the matrix.
         pub fn norm(self: Self, p: T) T {
-            assert(p >= 1);
+            assert(p >= 0);
             if (p == std.math.inf(T)) {
                 return self.maxNorm();
             } else if (p == -std.math.inf(T)) {
@@ -312,12 +312,16 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
                 var result: T = 0;
                 for (self.items) |row| {
                     for (row) |col| {
-                        result += std.math.pow(T, @abs(col), p);
+                        result += if (col == 0) 0 else std.math.pow(T, @abs(col), p);
                     }
                 }
-                result = std.math.pow(T, result, (1 / p));
-                return result;
+                return if (p != 0) std.math.pow(T, result, (1 / p)) else result;
             }
+        }
+
+        /// Computes the L0 norm, also know as the sparse norm of the matrix.
+        pub fn sparseNorm(self: Self) T {
+            return self.norm(0);
         }
 
         /// Computes the Frobenius norm of the matrix as the square root of the sum of its squared values.
@@ -485,6 +489,9 @@ test "norm" {
     matrix = matrix.offset(10);
     matrix.set(2, 3, -5);
     try expectEqual(matrix.minNorm(), 5);
+
+    matrix.set(2, 3, 0);
+    try expectEqual(matrix.sparseNorm(), 11);
 }
 
 test "sum" {
