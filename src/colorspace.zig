@@ -371,6 +371,12 @@ pub const Rgba = packed struct {
         };
     }
 
+    /// Luma is the weighted average of gamma-corrected R, G, and B, based on their contribution
+    /// to perceived lightness.  This implementation uses the the Rec. 709 for sRGB.
+    pub fn luma(self: Rgba) f64 {
+        return self.toRgbFloat().luma();
+    }
+
     /// Alpha-blends color into self.
     pub fn blend(self: *Rgba, color: Rgba) void {
         alphaBlend(Rgba, self, color);
@@ -381,9 +387,9 @@ pub const Rgba = packed struct {
         return self.r == self.g and self.g == self.b;
     }
 
-    /// Converts the RGBA color into grayscale.
+    /// Converts the RGB color into grayscale using luma.
     pub fn toGray(self: Rgba) u8 {
-        return @intFromFloat(@round(self.toHsl().l / 100 * 255));
+        return @intFromFloat(self.luma() * 255);
     }
 
     /// Converts the RGBA color into a hex value.
