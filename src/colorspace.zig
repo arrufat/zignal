@@ -41,54 +41,55 @@ fn isRgbCompatible(comptime T: type) bool {
 
 /// Converts color into the T colorspace.
 pub fn convert(comptime T: type, color: anytype) T {
+    const ColorType: type = @TypeOf(color);
     comptime assert(isColor(T));
-    comptime assert(isColor(@TypeOf(color)));
+    comptime assert(isColor(ColorType));
     return switch (T) {
-        u8 => switch (@TypeOf(color)) {
+        u8 => switch (ColorType) {
             u8 => color,
             inline else => color.toGray(),
         },
-        Rgb => switch (@TypeOf(color)) {
+        Rgb => switch (ColorType) {
             Rgb => color,
             u8 => .{ .r = color, .g = color, .b = color },
             inline else => color.toRgb(),
         },
-        Rgba => switch (@TypeOf(color)) {
+        Rgba => switch (ColorType) {
             Rgba => color,
             u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
             inline else => color.toRgba(255),
         },
-        Hsl => switch (@TypeOf(color)) {
+        Hsl => switch (ColorType) {
             Hsl => color,
             u8 => .{ .h = 0, .s = 0, .l = @as(f64, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsl(),
         },
-        Hsv => switch (@TypeOf(color)) {
+        Hsv => switch (ColorType) {
             Hsv => color,
             u8 => .{ .h = 0, .s = 0, .v = @as(f64, @floatFromInt(color)) / 255 * 100 },
             inline else => color.toHsv(),
         },
-        Xyz => switch (@TypeOf(color)) {
+        Xyz => switch (ColorType) {
             Xyz => color,
             u8 => Rgb.fromGray(color).toXyz(),
             inline else => color.toXyz(),
         },
-        Lab => switch (@TypeOf(color)) {
+        Lab => switch (ColorType) {
             Lab => color,
             u8 => .{ .l = @as(f64, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
             inline else => color.toLab(),
         },
-        Lms => switch (@TypeOf(color)) {
+        Lms => switch (ColorType) {
             Lms => color,
             u8 => .{},
             inline else => color.toLms(),
         },
-        Oklab => switch (@TypeOf(color)) {
+        Oklab => switch (ColorType) {
             Oklab => color,
             u8 => .{},
             inline else => color.toOklab(),
         },
-        Xyb => switch (@TypeOf(color)) {
+        Xyb => switch (ColorType) {
             Xyb => color,
             u8 => .{},
             inline else => color.toXyb(),
