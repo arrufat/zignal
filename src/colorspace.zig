@@ -154,7 +154,7 @@ const RgbFloat = struct {
     g: f64,
     b: f64,
 
-    fn fromRgb(r: u8, g: u8, b: u8) RgbFloat {
+    pub fn fromRgb(r: u8, g: u8, b: u8) RgbFloat {
         return .{
             .r = @as(f64, @floatFromInt(r)) / 255,
             .g = @as(f64, @floatFromInt(g)) / 255,
@@ -162,7 +162,7 @@ const RgbFloat = struct {
         };
     }
 
-    fn toRgb(self: RgbFloat) Rgb {
+    pub fn toRgb(self: RgbFloat) Rgb {
         return .{
             .r = @intFromFloat(@round(255 * @max(0, @min(1, self.r)))),
             .g = @intFromFloat(@round(255 * @max(0, @min(1, self.g)))),
@@ -172,12 +172,12 @@ const RgbFloat = struct {
 
     /// Luma is the weighted average of gamma-corrected R, G, and B, based on their contribution
     /// to perceived lightness.  This implementation uses the the Rec. 709 for sRGB.
-    fn luma(self: RgbFloat) f64 {
+    pub fn luma(self: RgbFloat) f64 {
         return 0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b;
     }
 
     /// Converts the RGB color into an HSL color.
-    fn toHsl(self: RgbFloat) Hsl {
+    pub fn toHsl(self: RgbFloat) Hsl {
         const min = @min(self.r, @min(self.g, self.b));
         const max = @max(self.r, @max(self.g, self.b));
         const delta = max - min;
@@ -200,7 +200,7 @@ const RgbFloat = struct {
     }
 
     /// Converts the RGB color into an HSV color.
-    fn toHsv(self: RgbFloat) Hsv {
+    pub fn toHsv(self: RgbFloat) Hsv {
         const min = @min(self.r, @min(self.g, self.b));
         const max = @max(self.r, @max(self.g, self.b));
         const delta = max - min;
@@ -220,7 +220,7 @@ const RgbFloat = struct {
     }
 
     /// Converts the RGB color into a CIE 1931 XYZ color.
-    fn toXyz(self: RgbFloat) Xyz {
+    pub fn toXyz(self: RgbFloat) Xyz {
         const r = gammaToLinear(self.r);
         const g = gammaToLinear(self.g);
         const b = gammaToLinear(self.b);
@@ -232,22 +232,22 @@ const RgbFloat = struct {
     }
 
     /// Converts the RGB color into a Lab color.
-    fn toLab(self: RgbFloat) Lab {
+    pub fn toLab(self: RgbFloat) Lab {
         return self.toXyz().toLab();
     }
 
     /// Converts the RGB color into an LMS color.
-    fn toLms(self: RgbFloat) Lms {
+    pub fn toLms(self: RgbFloat) Lms {
         return self.toXyz().toLms();
     }
 
     /// Converts the RGB color into an Oklab color.
-    fn toOklab(self: RgbFloat) Oklab {
+    pub fn toOklab(self: RgbFloat) Oklab {
         return self.toLms().toOklab();
     }
 
     /// Converts the RGB color into an XYB color.
-    fn toXyb(self: RgbFloat) Xyb {
+    pub fn toXyb(self: RgbFloat) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -260,7 +260,7 @@ pub const Rgb = struct {
     b: u8 = 0,
 
     /// Returns the normalized RGB color in floating point.
-    fn toRgbFloat(self: Rgb) RgbFloat {
+    pub fn toRgbFloat(self: Rgb) RgbFloat {
         return .{
             .r = @as(f64, @floatFromInt(self.r)) / 255,
             .g = @as(f64, @floatFromInt(self.g)) / 255,
@@ -334,17 +334,17 @@ pub const Rgb = struct {
     }
 
     /// Converts the RGB color into an LMS color.
-    fn toLms(self: Rgb) Lms {
+    pub fn toLms(self: Rgb) Lms {
         return self.toRgbFloat().toLms();
     }
 
     /// Converts the RGB color into an Oklab color.
-    fn toOklab(self: Rgb) Oklab {
+    pub fn toOklab(self: Rgb) Oklab {
         return self.toRgbFloat().toOklab();
     }
 
     /// Converts the RGB color into an XYB color.
-    fn toXyb(self: Rgb) Xyb {
+    pub fn toXyb(self: Rgb) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -404,7 +404,7 @@ pub const Rgba = packed struct {
     }
 
     /// Converts the RGBA color into a floating point RGB, ignoring the alpha channel.
-    fn toRgbFloat(self: Rgba) RgbFloat {
+    pub fn toRgbFloat(self: Rgba) RgbFloat {
         return .{
             .r = @as(f64, @floatFromInt(self.r)) / 255,
             .g = @as(f64, @floatFromInt(self.g)) / 255,
@@ -433,17 +433,17 @@ pub const Rgba = packed struct {
     }
 
     /// Converts the RGBA color into an LMS color.
-    fn toLms(self: Rgba) Lms {
+    pub fn toLms(self: Rgba) Lms {
         return self.toXyz().toLms();
     }
 
     /// Converts the RGBA color into an Oklab color.
-    fn toOklab(self: Rgba) Oklab {
+    pub fn toOklab(self: Rgba) Oklab {
         return self.toLms().toOklab();
     }
 
     /// Converts the RGBA color into an XYB color.
-    fn toXyb(self: Rgba) Xyb {
+    pub fn toXyb(self: Rgba) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -472,7 +472,7 @@ pub const Hsl = struct {
         return @intFromFloat(@round(self.l / 100 * 255));
     }
     /// Converts the HSL color into an RGB color, where each channel ranges from 0 to 1.
-    fn toRgbFloat(self: Hsl) RgbFloat {
+    pub fn toRgbFloat(self: Hsl) RgbFloat {
         const h = @max(0, @min(360, self.h));
         const s = @max(0, @min(1, self.s / 100));
         const l = @max(0, @min(1, self.l / 100));
@@ -536,17 +536,17 @@ pub const Hsl = struct {
     }
 
     /// Converts the HSL color into an LMS color.
-    fn toLms(self: Hsl) Lms {
+    pub fn toLms(self: Hsl) Lms {
         return self.toRgb().toLms();
     }
 
     /// Converts the HSL color into an Oklab color.
-    fn toOklab(self: Hsl) Oklab {
+    pub fn toOklab(self: Hsl) Oklab {
         return self.toRgb().toOklab();
     }
 
     /// Converts the HSL color into an XYB color.
-    fn toXyb(self: Hsl) Xyb {
+    pub fn toXyb(self: Hsl) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -630,17 +630,17 @@ pub const Hsv = struct {
     }
 
     /// Converts the HSV color into an LMS color.
-    fn toLms(self: Hsv) Lms {
+    pub fn toLms(self: Hsv) Lms {
         return self.toRgbFloat().toLms();
     }
 
     /// Converts the HSV color into an Oklab color.
-    fn toOklab(self: Hsv) Oklab {
+    pub fn toOklab(self: Hsv) Oklab {
         return self.toRgbFloat().toOklab();
     }
 
     /// Converts the HSV color into an XYB color.
-    fn toXyb(self: Hsv) Xyb {
+    pub fn toXyb(self: Hsv) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -743,12 +743,12 @@ pub const Xyz = struct {
     }
 
     /// Converts the CIE 1931 XYZ color into an Oklab color.
-    fn toOklab(self: Xyz) Oklab {
+    pub fn toOklab(self: Xyz) Oklab {
         return self.toLms().toOklab();
     }
 
     /// Converts the CIE 1931 XYZ color into an XYB color.
-    fn toXyb(self: Xyz) Xyb {
+    pub fn toXyb(self: Xyz) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -840,12 +840,12 @@ pub const Lab = struct {
     }
 
     /// Converts the CIELAB color into an Oklab color.
-    fn toOklab(self: Lab) Oklab {
+    pub fn toOklab(self: Lab) Oklab {
         return self.toLms().toOklab();
     }
 
     /// Converts the CIELAB color into an XYB color.
-    fn toXyb(self: Lab) Xyb {
+    pub fn toXyb(self: Lab) Xyb {
         return self.toLms().toXyb();
     }
 };
@@ -875,7 +875,7 @@ pub const Oklab = struct {
     }
 
     /// Converts the Oklab color into a RGB color.
-    fn toRgbFloat(self: Oklab) RgbFloat {
+    pub fn toRgbFloat(self: Oklab) RgbFloat {
         return self.toXyz().toRgbFloat();
     }
 
@@ -950,7 +950,7 @@ pub const Lms = struct {
     }
 
     /// Converts the LMS color into a RGB color.
-    fn toRgbFloat(self: Lms) RgbFloat {
+    pub fn toRgbFloat(self: Lms) RgbFloat {
         return self.toXyz().toRgbFloat();
     }
 
@@ -1029,7 +1029,7 @@ pub const Xyb = struct {
     }
 
     /// Converts the XYB color into a RGB color.
-    fn toRgbFloat(self: Xyb) RgbFloat {
+    pub fn toRgbFloat(self: Xyb) RgbFloat {
         return self.toLms().toRgbFloat();
     }
 
