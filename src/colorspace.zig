@@ -305,12 +305,7 @@ pub const Rgb = struct {
 
     /// Converts the RGB color into a hex value.
     pub fn toHex(self: Rgb) u24 {
-        return
-        // zig fmt: off
-            (@as(u24, @intCast(self.r)) << @as(u5, @truncate(8 * 2))) +
-            (@as(u24, @intCast(self.g)) << @as(u5, @truncate(8 * 1))) +
-            (@as(u24, @intCast(self.g)) << @as(u5, @truncate(8 * 0)));
-        // zig fmt: on
+        return std.mem.bigToNative(u24, @bitCast(self));
     }
 
     /// Converts the RGB color into a RGBA color with the specified alpha.
@@ -400,13 +395,7 @@ pub const Rgba = packed struct {
 
     /// Converts the RGBA color into a hex value.
     pub fn toHex(self: Rgba) u32 {
-        return
-        // zig fmt: off
-            (@as(u32, @intCast(self.r)) << @as(u5, @truncate(8 * 3))) +
-            (@as(u32, @intCast(self.g)) << @as(u5, @truncate(8 * 2))) +
-            (@as(u32, @intCast(self.g)) << @as(u5, @truncate(8 * 1))) +
-            (@as(u32, @intCast(self.a)) << @as(u5, @truncate(8 * 0)));
-        // zig fmt: on
+        return std.mem.bigToNative(u32, @bitCast(self));
     }
 
     /// Converts the RGBA color into a RGB color by removing the alpha channel.
