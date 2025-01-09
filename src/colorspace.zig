@@ -424,7 +424,7 @@ pub const Rgba = packed struct {
 
     /// Converts the RGBA color into a CIE 1931 XYZ color, ignoring the alpha channel.
     pub fn toXyz(self: Rgba) Xyz {
-        self.toRgbFloat().toXyz();
+        return self.toRgbFloat().toXyz();
     }
 
     /// Converts the RGBA color into a Lab color, ignoring the alpha channel.
