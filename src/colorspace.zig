@@ -1072,7 +1072,7 @@ pub const Xyb = struct {
         };
     }
 
-    /// Converts the XYB color into an LMS color.
+    /// Converts the XYB color into an Oklab color.
     pub fn toOklab(self: Xyb) Oklab {
         return self.toLms().toOklab();
     }
