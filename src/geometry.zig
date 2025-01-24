@@ -146,7 +146,7 @@ test "Rectangle grow and shrink" {
 }
 
 /// Returns true if, and only if, p is inside the triangle `tri`.
-fn pointInTriangle(comptime T: type, p: Point2d(T), tri: [3]Point2d(T)) bool {
+pub fn pointInTriangle(comptime T: type, p: Point2d(T), tri: [3]Point2d(T)) bool {
     const s = (tri[0].x - tri[2].x) * (p.y - tri[2].y) - (tri[0].y - tri[2].y) * (p.x - tri[2].x);
     const t = (tri[1].x - tri[0].x) * (p.y - tri[0].y) - (tri[1].y - tri[0].y) * (p.x - tri[0].x);
 
@@ -181,7 +181,7 @@ test "pointInTriangle" {
 }
 
 /// Returns the baricenter of the triangle.
-fn findBaricenter(comptime T: type, triangle: [3]Point2d(T)) Point2d(T) {
+pub fn findBaricenter(comptime T: type, triangle: [3]Point2d(T)) Point2d(T) {
     return .{
         .x = (triangle[0].x + triangle[1].x + triangle[2].x) / 3,
         .y = (triangle[0].y + triangle[1].y + triangle[2].y) / 3,
