@@ -23,9 +23,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Zig
         uses: mlugg/setup-zig@v1
@@ -42,9 +41,9 @@ jobs:
           mv zig-out ../zig-out/docs/examples
 
       - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v3
         with:
           path: 'zig-out/docs'
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v1
+        uses: actions/deploy-pages@v4
