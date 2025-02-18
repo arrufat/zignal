@@ -26,7 +26,7 @@ fn buildModule(
     const zignal = b.dependency("zignal", .{ .target = target, .optimize = optimize });
     var module: *std.Build.Step.Compile = undefined;
 
-    if (target.result.isWasm()) {
+    if (target.result.cpu.arch.isWasm()) {
         module = b.addExecutable(.{
             .name = name,
             .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
