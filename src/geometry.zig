@@ -102,21 +102,39 @@ pub fn Rectangle(comptime T: type) type {
 
         /// Grows the given rectangle by expaning its borders by `amount`.
         pub fn grow(self: Self, amount: T) Self {
-            return .{
-                .l = self.l -| amount,
-                .t = self.t -| amount,
-                .r = self.r + amount,
-                .b = self.b + amount,
+            return switch (@typeInfo(T)) {
+                .int => .{
+                    .l = self.l -| amount,
+                    .t = self.t -| amount,
+                    .r = self.r +| amount,
+                    .b = self.b +| amount,
+                },
+                .float => .{
+                    .l = self.l - amount,
+                    .t = self.t - amount,
+                    .r = self.r + amount,
+                    .b = self.b + amount,
+                },
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
 
         /// Shrinks the given rectangle by shrinking its borders by `amount`.
         pub fn shrink(self: Self, amount: T) Self {
-            return .{
-                .l = self.l + amount,
-                .t = self.t + amount,
-                .r = self.r -| amount,
-                .b = self.b -| amount,
+            return switch (@typeInfo(T)) {
+                .int => .{
+                    .l = self.l +| amount,
+                    .t = self.t +| amount,
+                    .r = self.r -| amount,
+                    .b = self.b -| amount,
+                },
+                .float => .{
+                    .l = self.l + amount,
+                    .t = self.t + amount,
+                    .r = self.r - amount,
+                    .b = self.b - amount,
+                },
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
     };
