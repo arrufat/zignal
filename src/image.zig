@@ -165,7 +165,7 @@ pub fn Image(comptime T: type) type {
                     temp = as(T, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) +
                         lr_frac * as(f32, tr)) +
                         tb_frac * ((1 - lr_frac) * as(f32, bl) +
-                        lr_frac * as(f32, br)));
+                            lr_frac * as(f32, br)));
                 },
                 .@"struct" => {
                     inline for (std.meta.fields(T)) |f| {
@@ -174,7 +174,7 @@ pub fn Image(comptime T: type) type {
                             (1 - tb_frac) * ((1 - lr_frac) * as(f32, @field(tl, f.name)) +
                                 lr_frac * as(f32, @field(tr, f.name))) +
                                 tb_frac * ((1 - lr_frac) * as(f32, @field(bl, f.name)) +
-                                lr_frac * as(f32, @field(br, f.name))),
+                                    lr_frac * as(f32, @field(br, f.name))),
                         );
                     }
                 },
