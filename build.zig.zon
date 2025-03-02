@@ -1,8 +1,9 @@
 .{
-    .name = "zignal",
+    .name = .zignal,
     .version = "0.0.0",
+    .fingerprint = 0x5303c43db377b63a,
 
-    .minimum_zig_version = "0.12.0-dev.3124+9e402704e",
+    .minimum_zig_version = "0.14.0-dev.3445+6c3cbb0c8",
 
     .dependencies = .{},
 

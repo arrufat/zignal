@@ -1,6 +1,7 @@
 .{
-    .name = "zignal-examples",
+    .name = .zignal_examples,
     .version = "0.0.0",
+    .fingerprint = 0xcf70e6a9b7002db6,
 
     .dependencies = .{
         .zignal = .{
