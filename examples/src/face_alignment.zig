@@ -1,14 +1,16 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
+
 const zignal = @import("zignal");
-const Point2d = zignal.Point2d(f32);
 const Image = zignal.Image;
-const SimilarityTransform = zignal.SimilarityTransform(f32);
-const Rectangle = zignal.Rectangle(f32);
 const Rgba = zignal.Rgba;
 const Hsv = zignal.Hsv;
 const drawRectangle = zignal.drawRectangle;
+
+const Point2d = zignal.Point2d(f32);
+const SimilarityTransform = zignal.SimilarityTransform(f32);
+const Rectangle = zignal.Rectangle(f32);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -69,9 +71,7 @@ pub fn extractAlignedFace(
     // Find the transforms that maps the points between the canonical landmarks
     // and the detected landmarks.
     const transform = SimilarityTransform.find(&from_points, &to_points);
-    var p = transform.project(.{ .x = 1, .y = 0 });
-    p.x -= transform.bias.at(0, 0);
-    p.y -= transform.bias.at(1, 0);
+    const p = transform.project(.{ .x = 1, .y = 0 }).sub(transform.bias.toPoint2d());
     const angle = std.math.atan2(p.y, p.x);
     const scale = p.norm();
     const center = transform.project(.{ .x = side / 2, .y = side / 2 });

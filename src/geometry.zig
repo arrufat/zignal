@@ -244,8 +244,7 @@ pub fn SimilarityTransform(comptime T: type) type {
         /// Projects the given point using the similarity transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
             const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
-            var dst = self.matrix.dot(src);
-            return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
+            return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
         /// Finds the best similarity transform that maps between the two given sets of points.
@@ -336,8 +335,7 @@ pub fn AffineTransform(comptime T: type) type {
         /// Projects the given point using the affine transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
             const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
-            var dst = self.matrix.dot(src);
-            return .{ .x = dst.at(0, 0) + self.bias.at(0, 0), .y = dst.at(1, 0) + self.bias.at(1, 0) };
+            return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
         /// Finds the best affine transform that maps between the two given sets of points.
@@ -415,7 +413,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
             if (dst.at(2, 0) != 0) {
                 dst = dst.scale(1 / dst.at(2, 0));
             }
-            return .{ .x = dst.at(0, 0), .y = dst.at(1, 0) };
+            return dst.toPoint2d();
         }
 
         /// Finds the best projective transform that maps between the two given sets of points.

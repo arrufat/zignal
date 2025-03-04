@@ -4,6 +4,9 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const builtin = @import("builtin");
 
+const Point2d = @import("point.zig").Point2d;
+const Point3d = @import("point.zig").Point3d;
+
 /// Creates a Matrix with elements of type T and size rows times cols.
 pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
     assert(@typeInfo(T) == .float);
@@ -88,6 +91,18 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
                 printed += written.len;
             }
             return print_buffer;
+        }
+
+        /// Converts a 2D+ column matrix into a Point2d.
+        pub fn toPoint2d(self: Self) Point2d(T) {
+            comptime assert(rows >= 2 and cols == 1);
+            return .{ .x = self.at(0, 0), .y = self.at(1, 0) };
+        }
+
+        /// Converts a 3D+ column matrix into a Point3d.
+        pub fn toPoint3d(self: Self) Point3d(T) {
+            comptime assert(rows >= 3 and cols == 1);
+            return .{ .x = self.at(0, 0), .y = self.at(1, 0), .z = self.at(2, 0) };
         }
 
         /// Retrieves the element at position row, col in the matrix.
