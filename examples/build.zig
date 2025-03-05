@@ -60,7 +60,7 @@ fn buildModule(
             ).step,
         );
         b.installDirectory(.{
-            .source_dir = b.path("lib"),
+            .source_dir = b.path("web"),
             .install_dir = .prefix,
             .install_subdir = "",
         });
