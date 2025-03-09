@@ -101,7 +101,7 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Returns true if, and only if, self is not a view of another image.  This is computed
+        /// Returns true if, and only if, self is a view of another image.  This is computed
         /// by comparing the `rows` and `stride` fields.
         pub fn isView(self: Self) bool {
             return self.cols != self.stride;
