@@ -153,7 +153,7 @@ test "grad perlin" {
             return (if ((h & 1) == 0) u else -u) + (if ((h & 2) == 0) v else -v);
         }
     }.lambda;
-    var prng = std.Random.DefaultPrng.init(0);
+    var prng: std.Random.DefaultPrng = .init(0);
     const random = prng.random();
     for (0..100) |_| {
         const hash = random.int(u8);

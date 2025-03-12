@@ -268,7 +268,7 @@ fn tessellateCurve(
     p: [4]Point2d(f32),
     segments: usize,
 ) error.OutOfMemory![]const Point2d(f32) {
-    var polygon = std.ArrayList(Point2d(f32)).init(allocator);
+    var polygon: std.ArrayList(Point2d(f32)) = .init(allocator);
     for (0..segments) |i| {
         const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments));
         const u: f32 = 1 - t;
@@ -336,7 +336,7 @@ pub fn fillSmoothPolygon(
     color: T,
     tension: f32,
 ) !void {
-    var points = std.ArrayList(Point2d(f32)).init(allocator);
+    var points: std.ArrayList(Point2d(f32)) = .init(allocator);
     for (0..polygon.len) |i| {
         const p0 = polygon[i];
         const p1 = polygon[(i + 1) % polygon.len];

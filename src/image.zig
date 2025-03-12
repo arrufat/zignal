@@ -30,7 +30,7 @@ pub fn Image(comptime T: type) type {
 
         /// Constructs an image of rows and cols size allocating its own memory.
         pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
-            var array = std.ArrayList(T).init(allocator);
+            var array: std.ArrayList(T) = .init(allocator);
             try array.resize(rows * cols);
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice(), .stride = cols };
         }
@@ -200,9 +200,9 @@ pub fn Image(comptime T: type) type {
 
         /// Rotates the image by angle (in radians) from center.  It must be freed on the caller side.
         pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
-            var array = std.ArrayList(T).init(allocator);
+            var array: std.ArrayList(T) = .init(allocator);
             try array.resize(self.rows * self.cols);
-            rotated.* = Self.init(self.rows, self.cols, try array.toOwnedSlice());
+            rotated.* = .init(self.rows, self.cols, try array.toOwnedSlice());
             const cos = @cos(angle);
             const sin = @sin(angle);
             for (0..self.rows) |r| {
@@ -229,7 +229,7 @@ pub fn Image(comptime T: type) type {
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
             const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
-            chip.* = try Image(T).initAlloc(allocator, chip_rows, chip_cols);
+            chip.* = try .initAlloc(allocator, chip_rows, chip_cols);
             for (0..chip_rows) |r| {
                 const ir: isize = @intCast(r);
                 for (0..chip_cols) |c| {
@@ -245,11 +245,11 @@ pub fn Image(comptime T: type) type {
             allocator: Allocator,
             integral: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
+            if (!self.hasSameShape(integral.*)) {
+                integral.* = try .initAlloc(allocator, self.rows, self.cols);
+            }
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    if (!self.hasSameShape(integral.*)) {
-                        integral.* = try Image(f32).initAlloc(allocator, self.rows, self.cols);
-                    }
                     var tmp: f32 = 0;
                     for (0..self.cols) |c| {
                         tmp += as(f32, (self.at(0, c).*));
@@ -264,9 +264,6 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    if (!self.hasSameShape(integral.*)) {
-                        integral.* = try Image([Self.channels()]f32).initAlloc(allocator, self.rows, self.cols);
-                    }
                     var tmp = [_]f32{0} ** Self.channels();
                     for (0..self.cols) |c| {
                         inline for (std.meta.fields(T), 0..) |f, i| {
@@ -291,7 +288,7 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of self efficiently by using an integral image.
         pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
             if (!self.hasSameShape(blurred.*)) {
-                blurred.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
+                blurred.* = try .initAlloc(allocator, self.rows, self.cols);
             }
             if (radius == 0 and &self != blurred) {
                 for (self.data, blurred.data) |s, *b| b.* = s;
@@ -398,7 +395,7 @@ pub fn Image(comptime T: type) type {
         /// sharpened version as: sharpened = 2 * self - blurred.
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
             if (!self.hasSameShape(sharpened.*)) {
-                sharpened.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
+                sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
             }
             if (radius == 0 and &self != sharpened) {
                 for (self.data, sharpened.data) |s, *b| b.* = s;
@@ -502,7 +499,7 @@ pub fn Image(comptime T: type) type {
         /// Applies the sobel filter to self to perform edge detection.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
             if (!self.hasSameShape(out.*)) {
-                out.* = try Image(u8).initAlloc(allocator, self.rows, self.cols);
+                out.* = try .initAlloc(allocator, self.rows, self.cols);
             }
             const vert_filter = [3][3]i32{
                 .{ -1, -2, -1 },
@@ -539,7 +536,7 @@ pub fn Image(comptime T: type) type {
 }
 
 test "integral image scalar" {
-    var image = try Image(u8).initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     var integral: Image(f32) = undefined;
@@ -557,7 +554,7 @@ test "integral image scalar" {
 }
 
 test "integral image view scalar" {
-    var image = try Image(u8).initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     const view = image.view(.{ .l = 2, .t = 3, .r = 8, .b = 10 });
@@ -575,7 +572,7 @@ test "integral image view scalar" {
 }
 
 test "integral image struct" {
-    var image = try Image(Rgba).initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
     var integral: Image([4]f32) = undefined;
@@ -596,7 +593,7 @@ test "integral image struct" {
 }
 
 test "getRectangle" {
-    var image = try Image(Rgba).initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
@@ -604,7 +601,7 @@ test "getRectangle" {
 }
 
 test "view" {
-    var image = try Image(Rgba).initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
