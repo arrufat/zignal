@@ -45,7 +45,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         /// Returns a matrix filled with random numbers.
         pub fn random(seed: ?u64) Self {
             const s: u64 = seed orelse @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-            var prng = std.Random.DefaultPrng.init(s);
+            var prng: std.Random.DefaultPrng = .init(s);
             var rand = prng.random();
             var self = Self{};
             for (0..self.rows) |r| {
@@ -266,7 +266,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         /// Performs the dot (or internal product) of two matrices.
         pub fn dot(self: Self, other: anytype) Matrix(T, self.rows, other.cols) {
             comptime assert(self.cols == other.rows);
-            var result = Matrix(T, self.rows, other.cols).initAll(0);
+            var result: Matrix(T, self.rows, other.cols) = .initAll(0);
             for (0..self.rows) |r| {
                 for (0..other.cols) |c| {
                     for (0..self.cols) |k| {
@@ -296,7 +296,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Sums all the elements in columns.
         pub fn sumCols(self: Self) Matrix(T, rows, 1) {
-            var result = Matrix(T, rows, 1).initAll(0);
+            var result: Matrix(T, rows, 1) = .initAll(0);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.items[r][0] += self.items[r][c];
@@ -307,7 +307,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Sums all the elements in rows.
         pub fn sumRows(self: Self) Matrix(T, 1, cols) {
-            var result = Matrix(T, 1, cols).initAll(0);
+            var result: Matrix(T, 1, cols) = .initAll(0);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.items[0][c] += self.items[r][c];
@@ -429,7 +429,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 }
 
 test "identity" {
-    const eye = Matrix(f32, 3, 3).identity();
+    const eye: Matrix(f32, 3, 3) = .identity();
     try expectEqual(eye.sum(), 3);
     for (0..eye.rows) |r| {
         for (0..eye.cols) |c| {
@@ -443,15 +443,15 @@ test "identity" {
 }
 
 test "initAll" {
-    const zeros = Matrix(f32, 3, 3).initAll(0);
+    const zeros: Matrix(f32, 3, 3) = .initAll(0);
     try expectEqual(zeros.sum(), 0);
-    const ones = Matrix(f32, 3, 3).initAll(1);
+    const ones: Matrix(f32, 3, 3) = .initAll(1);
     const shape = ones.shape();
     try expectEqual(ones.sum(), @as(f32, @floatFromInt(shape[0] * shape[1])));
 }
 
 test "shape" {
-    const matrix = Matrix(f32, 4, 5){};
+    const matrix: Matrix(f32, 4, 5) = .{};
     const shape = matrix.shape();
     try expectEqual(shape[0], 4);
     try expectEqual(shape[1], 5);
@@ -459,7 +459,7 @@ test "shape" {
 
 test "scale" {
     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-    const a = Matrix(f32, 4, 3).random(seed);
+    const a: Matrix(f32, 4, 3) = .random(seed);
     const b = Matrix(f32, 4, 3).random(seed).scale(std.math.pi);
     try expectEqualDeep(a.shape(), b.shape());
     for (0..a.rows) |r| {
@@ -470,7 +470,7 @@ test "scale" {
 }
 
 test "apply" {
-    var a = Matrix(f32, 3, 4).random(null);
+    var a: Matrix(f32, 3, 4) = .random(null);
 
     const f = struct {
         fn f(x: f32) f32 {
@@ -488,7 +488,7 @@ test "apply" {
 }
 
 test "norm" {
-    var matrix = Matrix(f32, 3, 4).random(null);
+    var matrix: Matrix(f32, 3, 4) = .random(null);
     try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.times(matrix).sum()));
 
     const f = struct {
@@ -510,22 +510,22 @@ test "norm" {
 }
 
 test "sum" {
-    var matrix = Matrix(f32, 3, 4).initAll(1);
-    const matrixSumCols = Matrix(f32, 3, 1).initAll(4);
-    const matrixSumRows = Matrix(f32, 1, 4).initAll(3);
+    var matrix: Matrix(f32, 3, 4) = .initAll(1);
+    const matrixSumCols: Matrix(f32, 3, 1) = .initAll(4);
+    const matrixSumRows: Matrix(f32, 1, 4) = .initAll(3);
     try expectEqual(matrix.sumRows(), matrixSumRows);
     try expectEqual(matrix.sumCols(), matrixSumCols);
     try expectEqual(matrix.sumCols().sumRows().item(), matrix.sum());
 }
 
 test "inverse" {
-    const a = Matrix(f32, 2, 2){ .items = .{ .{ -1, 1.5 }, .{ 1, -1 } } };
+    const a: Matrix(f32, 2, 2) = .{ .items = .{ .{ -1, 1.5 }, .{ 1, -1 } } };
     try expectEqual(a.determinant(), -0.5);
-    const a_i = Matrix(f32, 2, 2){ .items = .{ .{ 2, 3 }, .{ 2, 2 } } };
+    const a_i: Matrix(f32, 2, 2) = .{ .items = .{ .{ 2, 3 }, .{ 2, 2 } } };
     try expectEqualDeep(a.inverse(), a_i);
-    const b = Matrix(f32, 3, 3){ .items = .{ .{ 1, 2, 3 }, .{ 4, 5, 6 }, .{ 7, 2, 9 } } };
+    const b: Matrix(f32, 3, 3) = .{ .items = .{ .{ 1, 2, 3 }, .{ 4, 5, 6 }, .{ 7, 2, 9 } } };
     try expectEqual(b.determinant(), -36);
-    const b_i = Matrix(f32, 3, 3){ .items = .{
+    const b_i: Matrix(f32, 3, 3) = .{ .items = .{
         .{ -11.0 / 12.0, 1.0 / 3.0, 1.0 / 12.0 },
         .{ -1.0 / 6.0, 1.0 / 3.0, -1.0 / 6.0 },
         .{ 3.0 / 4.0, -1.0 / 3.0, 1.0 / 12.0 },

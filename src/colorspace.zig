@@ -1179,7 +1179,7 @@ test "vivid colors" {
 
 test "100 random colors" {
     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
-    var prng = std.Random.DefaultPrng.init(seed);
+    var prng: std.Random.DefaultPrng = .init(seed);
     var random = prng.random();
     for (0..100) |_| {
         const rgb: Rgb = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) };

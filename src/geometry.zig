@@ -37,14 +37,14 @@ pub fn Rectangle(comptime T: type) type {
                     const t = y - @divFloor(h, 2);
                     const r = l + w - 1;
                     const b = t + h - 1;
-                    return Self.init(l, t, r, b);
+                    return .init(l, t, r, b);
                 },
                 .float => {
                     const l = x - w / 2;
                     const t = y - h / 2;
                     const r = l + w;
                     const b = t + h;
-                    return Self.init(l, t, r, b);
+                    return .init(l, t, r, b);
                 },
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             }
@@ -231,8 +231,8 @@ test "findBaricenter" {
 pub fn SimilarityTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
-        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
+        matrix: Matrix(T, 2, 2) = .identity(),
+        bias: Matrix(T, 2, 1) = .initAll(0),
 
         /// Finds the best similarity transform that maps between the two given sets of points.
         pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
@@ -256,7 +256,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
             var sigma_from: T = 0;
             var sigma_to: T = 0;
-            var cov = Matrix(T, 2, 2).initAll(0);
+            var cov: Matrix(T, 2, 2) = .initAll(0);
             self.matrix = cov;
             for (0..from_points.len) |i| {
                 mean_from.x += from_points[i].x;
@@ -276,8 +276,8 @@ pub fn SimilarityTransform(comptime T: type) type {
                 sigma_from += from.x * from.x + from.y * from.y;
                 sigma_to += to.x * to.x + to.y * to.y;
 
-                const from_mat = Matrix(T, 1, 2){ .items = .{.{ from.x, from.y }} };
-                const to_mat = Matrix(T, 2, 1){ .items = .{ .{to.x}, .{to.y} } };
+                const from_mat: Matrix(T, 1, 2) = .{ .items = .{.{ from.x, from.y }} };
+                const to_mat: Matrix(T, 2, 1) = .{ .items = .{ .{to.x}, .{to.y} } };
                 cov = cov.add(to_mat.dot(from_mat));
             }
             sigma_from /= num_points;
@@ -292,11 +292,11 @@ pub fn SimilarityTransform(comptime T: type) type {
                 .{ .with_u = true, .with_v = true, .mode = .skinny_u },
             );
             const u: *const Matrix(T, 2, 2) = &result[0];
-            const d = Matrix(T, 2, 2){ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
+            const d: Matrix(T, 2, 2) = .{ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
             const v: *const Matrix(T, 2, 2) = &result[2];
             const det_u = u.at(0, 0) * u.at(1, 1) - u.at(0, 1) * u.at(1, 0);
             const det_v = v.at(0, 0) * v.at(1, 1) - v.at(0, 1) * v.at(1, 0);
-            var s = Matrix(T, cov.rows, cov.cols).identity();
+            var s: Matrix(T, cov.rows, cov.cols) = .identity();
             if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
                 if (d.at(1, 1) < d.at(0, 0)) {
                     s.set(1, 1, -1);
@@ -309,8 +309,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             if (sigma_from != 0) {
                 c = 1.0 / sigma_from * d.dot(s).trace();
             }
-            const m_from = Matrix(T, 2, 1){ .items = .{ .{mean_from.x}, .{mean_from.y} } };
-            const m_to = Matrix(T, 2, 1){ .items = .{ .{mean_to.x}, .{mean_to.y} } };
+            const m_from: Matrix(T, 2, 1) = .{ .items = .{ .{mean_from.x}, .{mean_from.y} } };
+            const m_to: Matrix(T, 2, 1) = .{ .items = .{ .{mean_to.x}, .{mean_to.y} } };
             self.matrix = r.scale(c);
             self.bias = m_to.add(r.dot(m_from).scale(-c));
         }
@@ -322,8 +322,8 @@ pub fn SimilarityTransform(comptime T: type) type {
 pub fn AffineTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2) = Matrix(T, 2, 2).identity(),
-        bias: Matrix(T, 2, 1) = Matrix(T, 2, 1).initAll(0),
+        matrix: Matrix(T, 2, 2) = .identity(),
+        bias: Matrix(T, 2, 1) = .initAll(0),
 
         /// Finds the best affine transform that maps between the two given sets of points.
         pub fn find(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
@@ -334,7 +334,7 @@ pub fn AffineTransform(comptime T: type) type {
 
         /// Projects the given point using the affine transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
+            const src: Matrix(T, 2, 1) = .{ .items = .{ .{point.x}, .{point.y} } };
             return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
@@ -342,8 +342,8 @@ pub fn AffineTransform(comptime T: type) type {
         pub fn fit(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
-            var p = Matrix(T, 3, from_points.len){};
-            var q = Matrix(T, 2, to_points.len){};
+            var p: Matrix(T, 3, from_points.len) = .{};
+            var q: Matrix(T, 2, to_points.len) = .{};
             for (0..from_points.len) |i| {
                 p.set(0, i, from_points[i].x);
                 p.set(1, i, from_points[i].y);
@@ -372,16 +372,8 @@ test "affine3" {
         .{ .x = 1, .y = 0 },
     };
     const tf = AffineTransform(f64).find(from_points[0..3].*, to_points[0..3].*);
-    const matrix = Matrix(T, 2, 2){
-        .items = .{
-            .{ 0, 1 },
-            .{ -1, 0 },
-        },
-    };
-    const bias = Matrix(T, 2, 1){ .items = .{
-        .{0},
-        .{1},
-    } };
+    const matrix: Matrix(T, 2, 2) = .{ .items = .{ .{ 0, 1 }, .{ -1, 0 } } };
+    const bias: Matrix(T, 2, 1) = .{ .items = .{ .{0}, .{1} } };
     try std.testing.expectEqualDeep(tf.matrix, matrix);
     try std.testing.expectEqualDeep(tf.bias, bias);
 
@@ -397,7 +389,7 @@ test "affine3" {
 pub fn ProjectiveTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 3, 3) = Matrix(T, 3, 3).identity(),
+        matrix: Matrix(T, 3, 3) = .identity(),
 
         /// Finds the best projective transform that maps between the two given sets of points.
         pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
@@ -425,8 +417,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
-            var accum = Matrix(T, 9, 9).initAll(0);
-            var b = Matrix(T, 2, 9).initAll(0);
+            var accum: Matrix(T, 9, 9) = .initAll(0);
+            var b: Matrix(T, 2, 9) = .initAll(0);
             for (0..from_points.len) |i| {
                 const f = Matrix(T, 1, 3){ .items = .{.{ from_points[i].x, from_points[i].y, 1 }} };
                 const t = Matrix(T, 1, 3){ .items = .{.{ to_points[i].x, to_points[i].y, 1 }} };
@@ -559,8 +551,8 @@ pub fn ConvexHull(comptime T: type) type {
         const Self = @This();
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .points = std.ArrayList(Point2d(T)).init(allocator),
-                .hull = std.ArrayList(Point2d(T)).init(allocator),
+                .points = .init(allocator),
+                .hull = .init(allocator),
             };
         }
 
@@ -649,7 +641,7 @@ test "convex hull" {
         .{ .x = 2.0, .y = 4.0 },
         .{ .x = 1.0, .y = 3.0 },
     };
-    var convex_hull = ConvexHull(f32).init(std.testing.allocator);
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
     defer convex_hull.deinit();
     const hull = (try convex_hull.find(points)).?;
     try expectEqual(hull.len, 4);
@@ -670,7 +662,7 @@ test "convex hull" {
 }
 
 test "computeOrientation" {
-    var convex_hull = ConvexHull(f32).init(std.testing.allocator);
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
     defer convex_hull.deinit();
     const computeOrientation = ConvexHull(f32).computeOrientation;
     // These three points can have different orientations due to floating point precision.

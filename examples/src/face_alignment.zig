@@ -70,7 +70,7 @@ pub fn extractAlignedFace(
 
     // Find the transforms that maps the points between the canonical landmarks
     // and the detected landmarks.
-    const transform = SimilarityTransform.find(&from_points, &to_points);
+    const transform: SimilarityTransform = .find(&from_points, &to_points);
     const p = transform.project(.{ .x = 1, .y = 0 }).sub(transform.bias.toPoint2d());
     const angle = std.math.atan2(p.y, p.x);
     const scale = p.norm();
@@ -82,7 +82,7 @@ pub fn extractAlignedFace(
     defer rotated.deinit(allocator);
 
     // Get the rectangle around the face.
-    const rect = Rectangle.initCenter(center.x, center.y, side * scale, side * scale);
+    const rect: Rectangle = .initCenter(center.x, center.y, side * scale, side * scale);
     // Draw a rectangle around the detected face.  Note that the color can be any Zignal
     // supported color, and the appropriate conversion will be performed.  In this case,
     // the image is in Rgba format, and the color is in Hsv.  Zignal will handle that.
@@ -94,7 +94,7 @@ pub fn extractAlignedFace(
     defer chip.deinit(allocator);
 
     // Resize it to the desired size.
-    var resized = try Image(Rgba).initAlloc(allocator, out.rows, out.cols);
+    var resized: Image(Rgba) = try .initAlloc(allocator, out.rows, out.cols);
     defer resized.deinit(allocator);
     chip.resize(resized);
     for (out.data, resized.data) |*c, b| {
@@ -123,7 +123,7 @@ pub export fn extract_aligned_face(
     extra_ptr: ?[*]u8,
     extra_len: usize,
 ) void {
-    var arena = std.heap.ArenaAllocator.init(blk: {
+    var arena: std.heap.ArenaAllocator = .init(blk: {
         if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
             // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
             assert(extra_len >= 9 * rows * cols);
@@ -140,10 +140,10 @@ pub export fn extract_aligned_face(
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const image = Image(Rgba).init(rows, cols, rgba_ptr[0 .. rows * cols]);
+    const image: Image(Rgba) = .init(rows, cols, rgba_ptr[0 .. rows * cols]);
 
     const landmarks: []Point2d = blk: {
-        var array = std.ArrayList(Point2d).init(allocator);
+        var array: std.ArrayList(Point2d) = .init(allocator);
         array.resize(landmarks_len) catch {
             std.log.err("Ran out of memory while resizing landmarks ArrayList", .{});
             @panic("OOM");

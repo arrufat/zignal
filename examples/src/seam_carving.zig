@@ -85,13 +85,13 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
 pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr: ?[*]u8, extra_len: usize, seam_ptr: [*]usize, seam_size: usize) void {
     assert(seam_size == rows);
     const size = rows * cols;
-    var image = Image(Rgba).init(rows, cols, rgba_ptr[0..size]);
+    var image: Image(Rgba) = .init(rows, cols, rgba_ptr[0..size]);
 
     const allocator: std.mem.Allocator = blk: {
         if (extra_ptr) |ptr| {
             @setRuntimeSafety(true);
             assert(extra_len > size * 9);
-            var fba = std.heap.FixedBufferAllocator.init(ptr[0..extra_len]);
+            var fba: std.heap.FixedBufferAllocator = .init(ptr[0..extra_len]);
             break :blk fba.allocator();
         } else if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
             @panic("ERROR: extra_ptr can't be null when running in WebAssembly.");

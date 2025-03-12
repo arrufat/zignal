@@ -45,9 +45,9 @@ pub fn svd(
     const m = rows;
     const n = cols;
     var u = comptime if (options.mode == .full_u) Matrix(T, m, m){} else Matrix(T, m, n){};
-    var v = Matrix(T, n, n){};
-    var q = Matrix(T, n, 1){};
-    var e = Matrix(T, n, 1){};
+    var v: Matrix(T, n, n) = .{};
+    var q: Matrix(T, n, 1) = .{};
+    var e: Matrix(T, n, 1) = .{};
     var l: usize = 0;
     var retval: usize = 0;
     var c: T = undefined;
@@ -373,7 +373,7 @@ test "svd" {
     const u: *const Matrix(f64, m, m) = &res[0];
     const q: *const Matrix(f64, n, 1) = &res[1];
     const v: *const Matrix(f64, n, n) = &res[2];
-    var w = Matrix(f64, m, n).initAll(0);
+    var w: Matrix(f64, m, n) = .initAll(0);
     // build the diagonal matrix from q.
     for (0..q.rows) |i| {
         w.items[i][i] = q.at(i, 0);
@@ -387,7 +387,7 @@ test "svd" {
         }
     }
     // check for orhonormality of u and v
-    const id_m = Matrix(f64, m, m).identity();
+    const id_m: Matrix(f64, m, m) = .identity();
     const uut = u.dot(u.transpose());
     for (u.items) |row| {
         const vec: @Vector(m, f64) = row;
@@ -399,7 +399,7 @@ test "svd" {
             try std.testing.expectApproxEqAbs(uut.at(i, j), id_m.at(i, j), 1e-15);
         }
     }
-    const id_n = Matrix(f64, n, n).identity();
+    const id_n: Matrix(f64, n, n) = .identity();
     const vvt = v.dot(v.transpose());
     for (v.items) |row| {
         const vec: @Vector(n, f64) = row;
