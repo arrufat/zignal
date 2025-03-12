@@ -371,13 +371,13 @@ test "affine3" {
         .{ .x = 1, .y = 1 },
         .{ .x = 1, .y = 0 },
     };
-    const tf = AffineTransform(f64).find(from_points[0..3].*, to_points[0..3].*);
+    const tf: AffineTransform(f64) = .find(from_points[0..3].*, to_points[0..3].*);
     const matrix: Matrix(T, 2, 2) = .{ .items = .{ .{ 0, 1 }, .{ -1, 0 } } };
     const bias: Matrix(T, 2, 1) = .{ .items = .{ .{0}, .{1} } };
     try std.testing.expectEqualDeep(tf.matrix, matrix);
     try std.testing.expectEqualDeep(tf.bias, bias);
 
-    const itf = AffineTransform(f64).find(to_points[0..3].*, from_points[0..3].*);
+    const itf: AffineTransform(f64) = .find(to_points[0..3].*, from_points[0..3].*);
     for (from_points, to_points) |f, t| {
         try std.testing.expectEqualDeep(tf.project(f), t);
         try std.testing.expectEqualDeep(itf.project(t), f);
@@ -468,8 +468,8 @@ test "projection4" {
         .{ .x = 484.23328400, .y = 279.44332123 },
         .{ .x = 488.08315277, .y = 272.79547691 },
     };
-    const transform = ProjectiveTransform(T).find(from_points, to_points);
-    const matrix = Matrix(T, 3, 3){
+    const transform: ProjectiveTransform(T) = .find(from_points, to_points);
+    const matrix: Matrix(T, 3, 3) = .{
         .items = .{
             .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
             .{ -2.8361695646354147e-03, 2.9060176209597761e-03, -4.3735741833190661e-01 },
@@ -488,7 +488,7 @@ test "projection4" {
     }
 
     const m_inv = transform.inverse().?;
-    const t_inv = ProjectiveTransform(T).find(to_points, from_points);
+    const t_inv: ProjectiveTransform(T) = .find(to_points, from_points);
     for (from_points) |f| {
         var fp = t_inv.project(transform.project(f));
         try std.testing.expectApproxEqRel(f.x, fp.x, tol);
@@ -523,7 +523,7 @@ test "projection8" {
         .{ .x = 398.66107178, .y = 413.83139420 },
         .{ .x = 395.29974365, .y = 401.73685455 },
     };
-    const transform = ProjectiveTransform(T).find(from_points, to_points);
+    const transform: ProjectiveTransform(T) = .find(from_points, to_points);
     const matrix = Matrix(T, 3, 3){ .items = .{
         .{ 7.9497770144471079e-05, 8.6315632819330035e-04, -6.3240797603906806e-01 },
         .{ 3.9739851020393160e-04, 6.4356336568222570e-04, -7.7463154396817901e-01 },
