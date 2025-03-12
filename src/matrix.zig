@@ -16,20 +16,14 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         comptime cols: usize = cols,
         items: [rows][cols]T = undefined,
 
-        /// Sets all elements to value.
+        /// Returns a matrix with all elements set to value.
         pub fn initAll(value: T) Self {
-            var self = Self{};
-            for (&self.items) |*row| {
-                for (row) |*col| {
-                    col.* = value;
-                }
-            }
-            return self;
+            return .{ .items = @splat(@splat(value)) };
         }
 
         /// Returns an identity matrix of the matrix size.
         pub fn identity() Self {
-            var self = Self{};
+            var self: Self = .{};
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     if (r == c) {
@@ -67,7 +61,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         /// Reshapes the matrix to a new shape.
         pub fn reshape(self: Self, comptime new_rows: usize, comptime new_cols: usize) Matrix(T, new_rows, new_cols) {
             comptime assert(rows * cols == new_rows * new_cols);
-            var matrix = Matrix(T, new_rows, new_cols){};
+            var matrix: Matrix(T, new_rows, new_cols) = .{};
             for (0..new_rows) |r| {
                 for (0..new_cols) |c| {
                     const idx = r * new_cols + c;
@@ -243,7 +237,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Adds a matrix.
         pub fn add(self: Self, other: Self) Self {
-            var result: @TypeOf(self) = undefined;
+            var result: Self = undefined;
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.items[r][c] = self.items[r][c] + other.items[r][c];
@@ -252,7 +246,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return result;
         }
 
-        /// Performs pointwise multiplication
+        /// Performs pointwise multiplication.
         pub fn times(self: Self, other: Self) Self {
             var result: @TypeOf(self) = undefined;
             for (0..self.rows) |r| {
