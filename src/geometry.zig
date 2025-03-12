@@ -416,6 +416,11 @@ pub fn ProjectiveTransform(comptime T: type) type {
             return dst.toPoint2d();
         }
 
+        /// Returns the inverse of the current projective transform.
+        pub fn inverse(self: Self) ?Self {
+            return if (self.matrix.inverse()) |inv| .{ .matrix = inv } else null;
+        }
+
         /// Finds the best projective transform that maps between the two given sets of points.
         pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 4);
@@ -458,6 +463,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
 
 test "projection4" {
     const T = f64;
+    const tol = 1e-5;
     const from_points: []const Point2d(T) = &.{
         .{ .x = 199.67754364, .y = 200.17905235 },
         .{ .x = 167.90229797, .y = 175.55920601 },
@@ -470,7 +476,7 @@ test "projection4" {
         .{ .x = 484.23328400, .y = 279.44332123 },
         .{ .x = 488.08315277, .y = 272.79547691 },
     };
-    const transform = ProjectiveTransform(f64).find(from_points, to_points);
+    const transform = ProjectiveTransform(T).find(from_points, to_points);
     const matrix = Matrix(T, 3, 3){
         .items = .{
             .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
@@ -483,10 +489,22 @@ test "projection4" {
             try std.testing.expectApproxEqAbs(transform.matrix.at(r, c), matrix.at(r, c), 1e-3);
         }
     }
-    for (0..from_points.len) |i| {
-        const p = transform.project(from_points[i]);
-        try std.testing.expectApproxEqRel(p.x, to_points[i].x, 1e-5);
-        try std.testing.expectApproxEqRel(p.y, to_points[i].y, 1e-5);
+    for (from_points, to_points) |f, t| {
+        const p = transform.project(f);
+        try std.testing.expectApproxEqRel(p.x, t.x, tol);
+        try std.testing.expectApproxEqRel(p.y, t.y, tol);
+    }
+
+    const m_inv = transform.inverse().?;
+    const t_inv = ProjectiveTransform(T).find(to_points, from_points);
+    for (from_points) |f| {
+        var fp = t_inv.project(transform.project(f));
+        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
+        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
+
+        fp = m_inv.project(transform.project(f));
+        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
+        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
     }
 }
 
