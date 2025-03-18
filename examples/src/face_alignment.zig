@@ -70,7 +70,7 @@ pub fn extractAlignedFace(
 
     // Find the transforms that maps the points between the canonical landmarks
     // and the detected landmarks.
-    const transform: SimilarityTransform = .find(&from_points, &to_points);
+    const transform: SimilarityTransform = .init(&from_points, &to_points);
     const p = transform.project(.{ .x = 1, .y = 0 }).sub(transform.bias.toPoint2d());
     const angle = std.math.atan2(p.y, p.x);
     const scale = p.norm();

@@ -231,14 +231,15 @@ test "findBaricenter" {
 pub fn SimilarityTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2) = .identity(),
-        bias: Matrix(T, 2, 1) = .initAll(0),
+        matrix: Matrix(T, 2, 2),
+        bias: Matrix(T, 2, 1),
+        pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best similarity transform that maps between the two given sets of points.
-        pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
-            var transfrom = SimilarityTransform(T){};
-            transfrom.fit(from_points, to_points);
-            return transfrom;
+        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+            var transform: SimilarityTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
         }
 
         /// Projects the given point using the similarity transform.
@@ -248,7 +249,7 @@ pub fn SimilarityTransform(comptime T: type) type {
         }
 
         /// Finds the best similarity transform that maps between the two given sets of points.
-        pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
             const num_points: T = @floatFromInt(from_points.len);
@@ -322,14 +323,15 @@ pub fn SimilarityTransform(comptime T: type) type {
 pub fn AffineTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2) = .identity(),
-        bias: Matrix(T, 2, 1) = .initAll(0),
+        matrix: Matrix(T, 2, 2),
+        bias: Matrix(T, 2, 1),
+        pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best affine transform that maps between the two given sets of points.
-        pub fn find(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
-            var transfrom = AffineTransform(T){};
-            transfrom.fit(from_points, to_points);
-            return transfrom;
+        pub fn init(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
+            var transform: AffineTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
         }
 
         /// Projects the given point using the affine transform.
@@ -339,7 +341,7 @@ pub fn AffineTransform(comptime T: type) type {
         }
 
         /// Finds the best affine transform that maps between the two given sets of points.
-        pub fn fit(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
+        pub fn find(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
             var p: Matrix(T, 3, from_points.len) = .{};
@@ -371,13 +373,13 @@ test "affine3" {
         .{ .x = 1, .y = 1 },
         .{ .x = 1, .y = 0 },
     };
-    const tf: AffineTransform(f64) = .find(from_points[0..3].*, to_points[0..3].*);
+    const tf: AffineTransform(f64) = .init(from_points[0..3].*, to_points[0..3].*);
     const matrix: Matrix(T, 2, 2) = .{ .items = .{ .{ 0, 1 }, .{ -1, 0 } } };
     const bias: Matrix(T, 2, 1) = .{ .items = .{ .{0}, .{1} } };
     try std.testing.expectEqualDeep(tf.matrix, matrix);
     try std.testing.expectEqualDeep(tf.bias, bias);
 
-    const itf: AffineTransform(f64) = .find(to_points[0..3].*, from_points[0..3].*);
+    const itf: AffineTransform(f64) = .init(to_points[0..3].*, from_points[0..3].*);
     for (from_points, to_points) |f, t| {
         try std.testing.expectEqualDeep(tf.project(f), t);
         try std.testing.expectEqualDeep(itf.project(t), f);
@@ -389,13 +391,14 @@ test "affine3" {
 pub fn ProjectiveTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 3, 3) = .identity(),
+        matrix: Matrix(T, 3, 3),
+        pub const identity: Self = .{ .matrix = .identity() };
 
         /// Finds the best projective transform that maps between the two given sets of points.
-        pub fn find(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
-            var transfrom = ProjectiveTransform(T){};
-            transfrom.fit(from_points, to_points);
-            return transfrom;
+        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+            var transform: ProjectiveTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
         }
 
         /// Projects the given point using the projective transform
@@ -414,7 +417,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
         }
 
         /// Finds the best projective transform that maps between the two given sets of points.
-        pub fn fit(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
             var accum: Matrix(T, 9, 9) = .initAll(0);
@@ -428,15 +431,13 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 b.setSubMatrix(1, 6, f.scale(-t.at(0, 0)));
                 accum = accum.add(b.transpose().dot(b));
             }
-            const result = svd(
+            const u, const q, _, _ = svd(
                 T,
                 accum.rows,
                 accum.cols,
                 accum,
                 .{ .with_u = true, .with_v = false, .mode = .full_u },
             );
-            const u: *const Matrix(T, 9, 9) = &result[0];
-            const q: *const Matrix(T, 9, 1) = &result[1];
             self.matrix = blk: {
                 var min: T = q.at(0, 0);
                 var idx: usize = 0;
@@ -468,7 +469,7 @@ test "projection4" {
         .{ .x = 484.23328400, .y = 279.44332123 },
         .{ .x = 488.08315277, .y = 272.79547691 },
     };
-    const transform: ProjectiveTransform(T) = .find(from_points, to_points);
+    const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix: Matrix(T, 3, 3) = .{
         .items = .{
             .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
@@ -488,7 +489,7 @@ test "projection4" {
     }
 
     const m_inv = transform.inverse().?;
-    const t_inv: ProjectiveTransform(T) = .find(to_points, from_points);
+    const t_inv: ProjectiveTransform(T) = .init(to_points, from_points);
     for (from_points) |f| {
         var fp = t_inv.project(transform.project(f));
         try std.testing.expectApproxEqRel(f.x, fp.x, tol);
@@ -523,7 +524,7 @@ test "projection8" {
         .{ .x = 398.66107178, .y = 413.83139420 },
         .{ .x = 395.29974365, .y = 401.73685455 },
     };
-    const transform: ProjectiveTransform(T) = .find(from_points, to_points);
+    const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix = Matrix(T, 3, 3){ .items = .{
         .{ 7.9497770144471079e-05, 8.6315632819330035e-04, -6.3240797603906806e-01 },
         .{ 3.9739851020393160e-04, 6.4356336568222570e-04, -7.7463154396817901e-01 },
