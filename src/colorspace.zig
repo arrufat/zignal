@@ -153,6 +153,7 @@ const RgbFloat = struct {
     r: f64,
     g: f64,
     b: f64,
+    pub const black: RgbFloat = .{ .r = 0, .g = 0, .b = 0 };
 
     pub fn fromRgb(r: u8, g: u8, b: u8) RgbFloat {
         return .{
@@ -255,9 +256,10 @@ const RgbFloat = struct {
 /// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace, with all components
 /// within the range 0-255.
 pub const Rgb = struct {
-    r: u8 = 0,
-    g: u8 = 0,
-    b: u8 = 0,
+    r: u8,
+    g: u8,
+    b: u8,
+    pub const black: Rgb = .{ .r = 0, .g = 0, .b = 0 };
 
     /// Returns the normalized RGB color in floating point.
     pub fn toRgbFloat(self: Rgb) RgbFloat {
@@ -352,10 +354,11 @@ pub const Rgb = struct {
 /// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with alpha channel,
 /// with all components within the range 0-255.
 pub const Rgba = packed struct {
-    r: u8 = 0,
-    g: u8 = 0,
-    b: u8 = 0,
-    a: u8 = 0,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+    pub const black: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     /// Constructs a RGBA color from a gray and alpha values.
     pub fn fromGray(gray: u8, alpha: u8) Rgba {
@@ -451,9 +454,10 @@ pub const Rgba = packed struct {
 /// A color in the [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
 /// (0-359), s and l between 0-100.
 pub const Hsl = struct {
-    h: f64 = 0,
-    s: f64 = 0,
-    l: f64 = 0,
+    h: f64,
+    s: f64,
+    l: f64,
+    pub const black: Hsl = .{ .h = 0, .s = 0, .l = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsl, color: Rgba) void {
@@ -554,9 +558,10 @@ pub const Hsl = struct {
 /// A color in the [HSV](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
 /// (0-359), s and v between 0-100.
 pub const Hsv = struct {
-    h: f64 = 0,
-    s: f64 = 0,
-    v: f64 = 0,
+    h: f64,
+    s: f64,
+    v: f64,
+    pub const black: Hsv = .{ .h = 0, .s = 0, .v = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsv, color: Rgba) void {
@@ -649,9 +654,10 @@ pub const Hsv = struct {
 /// independent space also known as XYZ which covers the full gamut of human-perceptible colors
 /// visible to the CIE 2° standard observer.
 pub const Xyz = struct {
-    x: f64 = 0,
-    y: f64 = 0,
-    z: f64 = 0,
+    x: f64,
+    y: f64,
+    z: f64,
+    pub const black: Xyz = .{ .x = 0, .y = 0, .z = 0 };
 
     /// Checks if the CIE 1931 XYZ color is a shade of gray.
     pub fn isGray(self: Xyz) bool {
@@ -756,9 +762,10 @@ pub const Xyz = struct {
 /// A color in the [CIELAB colorspace](https://en.wikipedia.org/wiki/CIELAB_color_space).  L:
 /// 0 to 100, a: -128 to 127, b: -128 to 127.
 pub const Lab = struct {
-    l: f64 = 0,
-    a: f64 = 0,
-    b: f64 = 0,
+    l: f64,
+    a: f64,
+    b: f64,
+    pub const black: Lab = .{ .l = 0, .a = 0, .b = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Lab, color: Rgba) void {
@@ -853,9 +860,10 @@ pub const Lab = struct {
 /// A color in the [Oklab](https://en.wikipedia.org/wiki/Oklab_color_space) colorspace.  L:
 /// 0 to 1 a: -0.5 to 0.5, b: -0.5to 0.5.
 pub const Oklab = struct {
-    l: f64 = 0,
-    a: f64 = 0,
-    b: f64 = 0,
+    l: f64,
+    a: f64,
+    b: f64,
+    pub const black: Oklab = .{ .l = 0, .a = 0, .b = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Oklab, color: Rgba) void {
@@ -927,9 +935,10 @@ pub const Oklab = struct {
 /// A color in the [LMS colorspace](https://en.wikipedia.org/wiki/LMS_color_space), representing
 /// the response of the three types of cones of the human eye.
 pub const Lms = struct {
-    l: f64 = 0,
-    m: f64 = 0,
-    s: f64 = 0,
+    l: f64,
+    m: f64,
+    s: f64,
+    pub const black: Lms = .{ .l = 0, .m = 0, .s = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Lms, color: Rgba) void {
@@ -1006,9 +1015,10 @@ pub const Lms = struct {
 /// opponents but S is handled in a tricromatic way. In practical terms, this allows for using
 /// less data for storing blue signals without losing much perceived quality.
 pub const Xyb = struct {
-    x: f64 = 0,
-    y: f64 = 0,
-    b: f64 = 0,
+    x: f64,
+    y: f64,
+    b: f64,
+    pub const black: Xyb = .{ .x = 0, .y = 0, .b = 0 };
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Xyb, color: Rgba) void {
