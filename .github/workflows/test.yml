@@ -32,26 +32,22 @@ jobs:
         with:
           version: ${{ matrix.zig-version }}
 
-      - name: Native modules
-        run: |
-          make native
-
       - name: Linux modules
         run: |
-          make linux
+          zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
 
       - name: macOS modules
         run: |
-          make macos
+          zig build -Dtarget=aarch64-macos-none -Doptimize=ReleaseFast
 
       - name: Windows modules
         run: |
-          make windows
+          zig build -Dtarget=x86_64-windows-msvc -Doptimize=ReleaseFast
 
       - name: WebAssembly modules
         run: |
-          make wasm
+          zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
 
       - name: Tests master
         run: |
-          make test
+          zig build test --summary all
