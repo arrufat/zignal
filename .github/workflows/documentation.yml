@@ -37,7 +37,7 @@ jobs:
       - name: Build Examples
         run: |
           cd examples
-          make wasm
+          zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
           mv zig-out ../zig-out/docs/examples
 
       - name: Upload Artifact
