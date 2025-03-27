@@ -11,6 +11,24 @@ Zignal is an image processing library heavily inspired by the amazing [dlib](htt
 This library is in early stages of development and being used internally.
 As a result, the API might change often.
 
+## Installation
+
+```console
+zig fetch --save https://github.com/bfactory-ai/zignal/archive/<commit-hash>.tar.gz
+```
+or
+```console
+zig fetch --save https://github.com/bfactory-ai/zignal/archive/master.tar.gz
+```
+
+Then, in your `build.zig`
+```zig
+const zignal = b.dependency("zignal", .{ .target = target, .optimize = optimize });
+// And assuming that your b.addExecutable `exe`:
+exe.root_module.addImport("zignal", zignal.module("zignal"));
+// If your creating a `module` using b.createModule, then:
+module.addImport("zignal", zignal.module("zignal"));
+```
 
 ## Motivation
 
