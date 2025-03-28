@@ -352,7 +352,7 @@ pub fn fillSmoothPolygon(
         const segment = try tessellateCurve(allocator, .{ p0, cp1, cp2, p1 }, 10);
         try points.appendSlice(segment);
     }
-    fillPolygon(T, image, points.items, color);
+    fillPolygon(allocator, T, image, points.items, color);
 }
 
 /// Draws the given rectangle with the specified width and color.
@@ -505,17 +505,19 @@ pub fn drawCircleFast(
 
 /// Fills the given polygon defined as an array of points on image using the scanline algorithm.
 pub fn fillPolygon(
+    allocator: std.mem.Allocator,
     comptime T: type,
     image: Image(T),
     polygon: []const Point2d(f32),
     color: T,
-) void {
+) !void {
     const rows = image.rows;
     const cols = image.cols;
-    var inters: [16]f32 = undefined;
+    var intersections: std.ArrayList(f32) = .init(allocator);
+    defer intersections.deinit();
     for (0..rows) |r| {
         const y: f32 = @floatFromInt(r);
-        var num_inters: usize = 0;
+        intersections.clearRetainingCapacity();
         const frows: f32 = @floatFromInt(rows);
         for (0..polygon.len) |i| {
             const p1 = &polygon[i];
@@ -537,17 +539,16 @@ pub fn fillPolygon(
             }
 
             // Add x coordinates of intersecting points
-            inters[num_inters] = p1.x + (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
-            num_inters += 1;
+            try intersections.append(p1.x + (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y));
         }
 
-        std.mem.sort(f32, inters[0..num_inters], {}, std.sort.asc(f32));
+        std.mem.sort(f32, intersections.items, {}, std.sort.asc(f32));
 
         // Paint the inside of the polygon
         var i: usize = 0;
-        while (i < num_inters) : (i += 2) {
-            var left_x: i32 = @intFromFloat(@ceil(inters[i]));
-            var right_x: i32 = @intFromFloat(@floor(inters[i + 1]));
+        while (i < intersections.items.len) : (i += 2) {
+            var left_x: i32 = @intFromFloat(@ceil(intersections.items[i]));
+            var right_x: i32 = @intFromFloat(@floor(intersections.items[i + 1]));
             left_x = @max(0, left_x);
             right_x = @min(as(i32, cols), right_x);
             while (left_x <= right_x) : (left_x += 1) {
