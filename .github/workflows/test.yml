@@ -32,6 +32,10 @@ jobs:
         with:
           version: ${{ matrix.zig-version }}
 
+      - name: Tests master
+        run: |
+          zig build test --summary all
+
       - name: Linux modules
         run: |
           zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
@@ -47,7 +51,3 @@ jobs:
       - name: WebAssembly modules
         run: |
           zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
-
-      - name: Tests master
-        run: |
-          zig build test --summary all
