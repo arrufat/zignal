@@ -53,7 +53,7 @@ pub fn Point2d(comptime T: type) type {
         }
 
         /// Casts the underlying 2d point type T to U.
-        pub fn cast(self: Point2d(T), comptime U: type) Point2d(U) {
+        pub fn as(self: Point2d(T), comptime U: type) Point2d(U) {
             return .{ .x = @floatCast(self.x), .y = @floatCast(self.y) };
         }
 
@@ -108,7 +108,7 @@ pub fn Point3d(comptime T: type) type {
         }
 
         /// Casts the underlying 3d point type T to U.
-        pub fn cast(self: Point3d(T), comptime U: type) Point3d(U) {
+        pub fn as(self: Point3d(T), comptime U: type) Point3d(U) {
             return .{ .x = @floatCast(self.x), .y = @floatCast(self.y), .z = @floatCast(self.z) };
         }
 
