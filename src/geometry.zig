@@ -253,8 +253,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
             const num_points: T = @floatFromInt(from_points.len);
-            var mean_from: Point2d(T) = .{ .x = 0, .y = 0 };
-            var mean_to: Point2d(T) = .{ .x = 0, .y = 0 };
+            var mean_from: Point2d(T) = .zero;
+            var mean_to: Point2d(T) = .zero;
             var sigma_from: T = 0;
             var sigma_to: T = 0;
             var cov: Matrix(T, 2, 2) = .initAll(0);
