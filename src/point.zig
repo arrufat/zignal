@@ -8,6 +8,12 @@ pub fn Point2d(comptime T: type) type {
         x: T,
         y: T,
 
+        /// Intializes a point at the origin of coordinates.
+        pub const origin: Point2d(T) = .{ .x = 0, .y = 0 };
+
+        /// Intializes a point with all coordinates set to zero.  It is equivalent to .origin.
+        pub const zero: Point2d(T) = .origin;
+
         /// Scales self x and y coordinates with x_scale and y_scale, respectively.
         pub fn scale(self: Point2d(T), x_scale: T, y_scale: T) Point2d(T) {
             return .{ .x = self.x * x_scale, .y = self.y * y_scale };
@@ -72,8 +78,14 @@ pub fn Point3d(comptime T: type) type {
         y: T,
         z: T,
 
+        /// Intializes a point at the origin of coordinates.
+        pub const origin: Point3d(T) = .{ .x = 0, .y = 0, .z = 0 };
+
+        /// Intializes a point with all coordinates set to zero.  It is equivalent to .origin.
+        pub const zero: Point3d(T) = .origin;
+
         /// Scales self x, y and z coordinates with x_scale, y_scale and z_scale, respectively.
-        pub fn scale(self: Point2d(T), x_scale: T, y_scale: T, z_scale: T) Point2d(T) {
+        pub fn scale(self: Point3d(T), x_scale: T, y_scale: T, z_scale: T) Point3d(T) {
             return .{ .x = self.x * x_scale, .y = self.y * y_scale, .z = self.z * z_scale };
         }
 
