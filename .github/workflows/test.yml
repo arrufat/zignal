@@ -3,12 +3,12 @@ name: test
 on:
   push:
     paths:
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/test.yml"
       - "**.zig"
       - "**.zon"
   pull_request:
     paths:
-      - ".github/workflows/ci.yml"
+      - ".github/workflows/test.yml"
       - "**.zig"
       - "**.zon"
 
@@ -38,16 +38,16 @@ jobs:
 
       - name: Linux modules
         run: |
-          zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
+          zig build check -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
 
       - name: macOS modules
         run: |
-          zig build -Dtarget=aarch64-macos-none -Doptimize=ReleaseFast
+          zig build check -Dtarget=aarch64-macos-none -Doptimize=ReleaseFast
 
       - name: Windows modules
         run: |
-          zig build -Dtarget=x86_64-windows-msvc -Doptimize=ReleaseFast
+          zig build check -Dtarget=x86_64-windows-msvc -Doptimize=ReleaseFast
 
       - name: WebAssembly modules
         run: |
-          zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
+          zig build check -Dtarget=wasm32-freestanding -Doptimize=ReleaseSmall
