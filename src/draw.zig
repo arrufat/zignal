@@ -545,10 +545,10 @@ pub fn fillPolygon(
         std.mem.sort(f32, intersections.items, {}, std.sort.asc(f32));
 
         // Paint the inside of the polygon
-        var i: usize = 0;
+        var i: usize = 1;
         while (i < intersections.items.len) : (i += 2) {
-            var left_x: i32 = @intFromFloat(@ceil(intersections.items[i]));
-            var right_x: i32 = @intFromFloat(@floor(intersections.items[i + 1]));
+            var left_x: i32 = @intFromFloat(@ceil(intersections.items[i - 1]));
+            var right_x: i32 = @intFromFloat(@floor(intersections.items[i]));
             left_x = @max(0, left_x);
             right_x = @min(as(i32, cols), right_x);
             while (left_x <= right_x) : (left_x += 1) {
