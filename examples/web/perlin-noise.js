@@ -23,7 +23,7 @@
     window.wasm = obj;
     console.log("wasm loaded");
     const canvas = document.getElementById("canvas-perlin");
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const rows = 512;
     const cols = 512;
     const rgbaSize = rows * cols * 4;

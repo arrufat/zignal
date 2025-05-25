@@ -9,7 +9,7 @@ pub const std_options: std.Options = .{
     .log_level = .info,
 };
 
-var opts = perlin.Options(f32){
+var opts: perlin.Options(f32) = .{
     .amplitude = 1,
     .frequency = 1,
     .octaves = 1,
