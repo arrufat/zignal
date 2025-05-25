@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: Grab Zig
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
           version: ${{ matrix.zig-version }}
 
