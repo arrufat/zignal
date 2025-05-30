@@ -1,3 +1,6 @@
+//! This module defines a generic Image struct and provides a suite of image processing operations,
+//! including initialization, manipulation (flipping, resizing, rotation, cropping),
+//! filtering (integral image, box blur, sharpen, Sobel edge detection), and pixel access utilities.
 const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqualDeep;
@@ -35,7 +38,8 @@ pub fn Image(comptime T: type) type {
             return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice(), .stride = cols };
         }
 
-        /// Contructs an image of rows and cols size reinterpreting the slice of bytes as a slice of T.
+        /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
+        /// The length of the `bytes` slice must be exactly `rows * cols * @sizeOf(T)`.
         pub fn initFromBytes(rows: usize, cols: usize, bytes: []u8) Image(T) {
             assert(rows * cols * @sizeOf(T) == bytes.len);
             return .{
@@ -46,7 +50,8 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Returns the image data reinterpreted as a slice of bytes
+        /// Returns the image data reinterpreted as a slice of bytes.
+        /// Note: The image should not be a view; this is enforced by an assertion.
         pub fn asBytes(self: Self) []u8 {
             assert(self.rows * self.cols == self.data.len);
             assert(!self.isView());
@@ -72,8 +77,8 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Returns true if and only if self and other have the same number of rows, columns and
-        /// data size.
+        /// Returns true if and only if `self` and `other` have the same number of rows and columns.
+        /// It does not compare pixel data or types.
         pub fn hasSameShape(self: Self, other: anytype) bool {
             return self.rows == other.rows and self.cols == other.cols;
         }
@@ -101,8 +106,8 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Returns true if, and only if, self is a view of another image.  This is computed
-        /// by comparing the `rows` and `stride` fields.
+        /// Returns true if, and only if, `self` is a view of another image.
+        /// This is determined by checking if the `cols` field differs from the `stride` field.
         pub fn isView(self: Self) bool {
             return self.cols != self.stride;
         }
@@ -145,6 +150,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Performs bilinear interpolation at position x, y.
+        /// Returns `null` if the coordinates `(x, y)` are too close to the image border for valid interpolation.
         pub fn interpolateBilinear(self: Self, x: f32, y: f32) ?T {
             const left: isize = @intFromFloat(@floor(x));
             const top: isize = @intFromFloat(@floor(y));
@@ -198,7 +204,15 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Rotates the image by angle (in radians) from center.  It must be freed on the caller side.
+        /// Rotates the image by `angle` (in radians) around a specified `center` point.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the rotated image's data.
+        /// - `center`: The `Point2d(f32)` around which to rotate.
+        /// - `angle`: The rotation angle in radians.
+        /// - `rotated`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
+        ///   with the rotated image data. The caller is responsible for deallocating `rotated.data`
+        ///   if it was allocated by this function.
         pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
             var array: std.ArrayList(T) = .init(allocator);
             try array.resize(self.rows * self.cols);
@@ -216,14 +230,21 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Rotates the image by angle (in radians) from the center.  It must be freed on the
-        /// caller side.
+        /// Rotates the image by `angle` (in radians) around its center.
+        /// The returned `Image(T)` has newly allocated data that the caller is responsible for deallocating.
         pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
             return try self.rotateFrom(allocator, .{ .x = self.cols / 2, .y = self.rows / 2 }, angle);
         }
 
-        /// Crops the rectangle out of the image.  If the rectangle is not fully contained in the
-        /// image, that area is filled with black/transparent pixels.
+        /// Crops a rectangular region from the image.
+        /// If the specified `rectangle` is not fully contained within the image, the out-of-bounds
+        /// areas in the output `chip` are filled with zeroed pixels (e.g., black/transparent).
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the cropped image's data.
+        /// - `rectangle`: The `Rectangle(f32)` defining the region to crop. Coordinates will be rounded.
+        /// - `chip`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
+        ///   with the cropped image data. The caller is responsible for deallocating `chip.data`.
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32), chip: *Self) !void {
             const chip_top: isize = @intFromFloat(@round(rectangle.t));
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
@@ -239,7 +260,9 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Computes the integral image of self.
+        /// Computes the integral image (also known as a summed-area table) of `self`.
+        /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
+        /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
         pub fn integralImage(
             self: Self,
             allocator: Allocator,
@@ -285,7 +308,9 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Computes a blurred version of self efficiently by using an integral image.
+        /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
+        /// using an integral image. The `radius` parameter determines the size of the box window.
+        /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
@@ -390,9 +415,11 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Computes a sharpened version of self efficiently by using an integral image.
-        /// The code is almost exactly the same as in blurBox, except that we compute the
-        /// sharpened version as: sharpened = 2 * self - blurred.
+        /// Computes a sharpened version of `self` by enhancing edges.
+        /// It uses the formula `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred
+        /// version of the original image (calculated efficiently using an integral image).
+        /// The `radius` parameter controls the size of the blur. This operation effectively
+        /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
@@ -496,7 +523,12 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Applies the sobel filter to self to perform edge detection.
+        /// Applies the Sobel filter to `self` to perform edge detection.
+        /// The output is a grayscale image representing the magnitude of gradients at each pixel.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
+        /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
             if (!self.hasSameShape(out.*)) {
                 out.* = try .initAlloc(allocator, self.rows, self.cols);
