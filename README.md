@@ -26,7 +26,7 @@ Then, in your `build.zig`
 const zignal = b.dependency("zignal", .{ .target = target, .optimize = optimize });
 // And assuming that your b.addExecutable `exe`:
 exe.root_module.addImport("zignal", zignal.module("zignal"));
-// If your creating a `module` using b.createModule, then:
+// If you're creating a `module` using b.createModule, then:
 module.addImport("zignal", zignal.module("zignal"));
 ```
 
@@ -59,6 +59,9 @@ Current features include:
   - lines
   - circles
   - polygons
+  - crosses
+  - Bézier curves
+  - smooth polygons (drawing and filling)
 
 ## Examples
 

@@ -1,3 +1,4 @@
+//! This module defines various color space structures and provides functions for converting between them.
 const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
@@ -11,13 +12,6 @@ pub fn isColor(comptime T: type) bool {
         u8, Rgb, Rgba, Hsl, Hsv, Xyz, Lab, Lms, Oklab, Xyb => true,
         else => false,
     };
-}
-
-fn assertAllFieldTypesAreSame(comptime T: type) void {
-    comptime assert(isColor(T));
-    return for (std.meta.fields(T)) |field| {
-        if (std.meta.fields(T)[0].type != field.type) break false;
-    } else true;
 }
 
 /// Checks whether a type T can be used as an Rgb color, i.e., it has r, g, b fields of type u8.
@@ -40,6 +34,8 @@ fn isRgbCompatible(comptime T: type) bool {
 }
 
 /// Converts color into the T colorspace.
+/// When converting from a `u8` type, it's generally assumed to be a grayscale value which is then
+/// converted to the target colorspace, often via an intermediate RGB representation.
 pub fn convert(comptime T: type, color: anytype) T {
     const ColorType: type = @TypeOf(color);
     comptime assert(isColor(T));
@@ -81,17 +77,17 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         Lms => switch (ColorType) {
             Lms => color,
-            u8 => .{},
+            u8 => Rgb.fromGray(color).toLms(),
             inline else => color.toLms(),
         },
         Oklab => switch (ColorType) {
             Oklab => color,
-            u8 => .{},
+            u8 => Rgb.fromGray(color).toOklab(),
             inline else => color.toOklab(),
         },
         Xyb => switch (ColorType) {
             Xyb => color,
-            u8 => .{},
+            u8 => Rgb.fromGray(color).toXyb(),
             inline else => color.toXyb(),
         },
         else => @compileError("Unsupported color " ++ @typeName(T)),
@@ -253,8 +249,8 @@ const RgbFloat = struct {
     }
 };
 
-/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace, with all components
-/// within the range 0-255.
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace.
+/// Each component (r, g, b) is an unsigned 8-bit integer (0-255).
 pub const Rgb = struct {
     r: u8,
     g: u8,
@@ -351,8 +347,8 @@ pub const Rgb = struct {
     }
 };
 
-/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with alpha channel,
-/// with all components within the range 0-255.
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with an alpha channel.
+/// Each component (r, g, b, a) is an unsigned 8-bit integer (0-255).
 pub const Rgba = packed struct {
     r: u8,
     g: u8,
@@ -451,8 +447,10 @@ pub const Rgba = packed struct {
     }
 };
 
-/// A color in the [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
-/// (0-359), s and l between 0-100.
+/// A color in the [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace.
+/// - h: Hue, in degrees (0-360, though often normalized to 0-359).
+/// - s: Saturation, as a percentage (0-100).
+/// - l: Lightness, as a percentage (0-100).
 pub const Hsl = struct {
     h: f64,
     s: f64,
@@ -555,8 +553,10 @@ pub const Hsl = struct {
     }
 };
 
-/// A color in the [HSV](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace: h in degrees
-/// (0-359), s and v between 0-100.
+/// A color in the [HSV](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace.
+/// - h: Hue, in degrees (0-360, though often normalized to 0-359).
+/// - s: Saturation, as a percentage (0-100).
+/// - v: Value, as a percentage (0-100).
 pub const Hsv = struct {
     h: f64,
     s: f64,
@@ -650,9 +650,12 @@ pub const Hsv = struct {
     }
 };
 
-/// The [CIE 1931 color space](https://en.wikipedia.org/wiki/CIE_1931_color_space), a device
-/// independent space also known as XYZ which covers the full gamut of human-perceptible colors
+/// A color in the [CIE 1931 XYZ color space](https://en.wikipedia.org/wiki/CIE_1931_color_space).
+/// This is a device-independent space that covers the full gamut of human-perceptible colors
 /// visible to the CIE 2° standard observer.
+/// - x, y, z: Tristimulus values, typically non-negative. Y represents luminance.
+///   The typical range for these values can vary depending on the reference white point (e.g. D65).
+///   Often, Y is normalized to 100 for white.
 pub const Xyz = struct {
     x: f64,
     y: f64,
@@ -759,8 +762,11 @@ pub const Xyz = struct {
     }
 };
 
-/// A color in the [CIELAB colorspace](https://en.wikipedia.org/wiki/CIELAB_color_space).  L:
-/// 0 to 100, a: -128 to 127, b: -128 to 127.
+/// A color in the [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space) (also known as L*a*b*).
+/// It expresses color as three values:
+/// - l: Lightness (0 for black to 100 for white).
+/// - a: Green-red axis (-128 for green to +127 for red).
+/// - b: Blue-yellow axis (-128 for blue to +127 for yellow).
 pub const Lab = struct {
     l: f64,
     a: f64,
@@ -857,8 +863,11 @@ pub const Lab = struct {
     }
 };
 
-/// A color in the [Oklab](https://en.wikipedia.org/wiki/Oklab_color_space) colorspace.  L:
-/// 0 to 1 a: -0.5 to 0.5, b: -0.5to 0.5.
+/// A color in the [Oklab color space](https://bottosson.github.io/posts/oklab/).
+/// Oklab is designed to be a perceptually uniform color space.
+/// - l: Perceived lightness (0 for black to approximately 1 for white).
+/// - a: Green-red axis (negative values towards green, positive towards red, typically around -0.4 to 0.4).
+/// - b: Blue-yellow axis (negative values towards blue, positive towards yellow, typically around -0.4 to 0.4).
 pub const Oklab = struct {
     l: f64,
     a: f64,
@@ -932,12 +941,13 @@ pub const Oklab = struct {
     }
 };
 
-/// A color in the [LMS colorspace](https://en.wikipedia.org/wiki/LMS_color_space), representing
-/// the response of the three types of cones of the human eye.
+/// A color in the [LMS color space](https://en.wikipedia.org/wiki/LMS_color_space).
+/// Represents the response of the three types of cones (Long, Medium, Short wavelength) in the human eye.
+/// Values are typically positive and represent the stimulus for each cone type.
 pub const Lms = struct {
-    l: f64,
-    m: f64,
-    s: f64,
+    l: f64, // Long cone response
+    m: f64, // Medium cone response
+    s: f64, // Short cone response
     pub const black: Lms = .{ .l = 0, .m = 0, .s = 0 };
 
     /// Alpha-blends color into self.
@@ -1010,10 +1020,12 @@ pub const Lms = struct {
     }
 };
 
-/// A color in the [XYB colorspace](https://en.wikipedia.org/wiki/LMS_color_space#Image_processing)
-/// used in JPEG XL, which can be interpreted as a hybrid color theory where L and M are
-/// opponents but S is handled in a tricromatic way. In practical terms, this allows for using
-/// less data for storing blue signals without losing much perceived quality.
+/// A color in the [XYB color space](https://jpeg.org/jpegxl/documentation/xl-color-management.html#xyb)
+/// used in JPEG XL. It's derived from LMS and designed for efficient image compression.
+/// - x: X component (L-M, red-green opponent channel).
+/// - y: Y component (L+M, luminance-like channel).
+/// - b: B component (S, blue-yellow like channel, but often scaled S cone response).
+/// Ranges can vary based on transformations, but often centered around 0 for x and b, and positive for y.
 pub const Xyb = struct {
     x: f64,
     y: f64,
@@ -1131,7 +1143,7 @@ test "secondary colors" {
     try testColorConversion(.{ .r = 255, .g = 255, .b = 0 }, Lab{ .l = 97.13824698129729, .a = -21.555908334832285, .b = 94.48248544644461 });
 }
 
-test "complimetary colors" {
+test "complementary colors" {
     // orange: 0xff8800
     try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsl{ .h = 32, .s = 100, .l = 50 });
     try testColorConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsv{ .h = 32, .s = 100, .v = 100 });

@@ -1,3 +1,6 @@
+//! This module provides a generic, fixed-size Matrix struct for floating-point types
+//! and a collection of common linear algebra operations such as addition, multiplication,
+//! dot product, transpose, norm computation, determinant, and inverse (for small matrices).
 const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
@@ -10,6 +13,7 @@ const Point3d = @import("point.zig").Point3d;
 /// Creates a Matrix with elements of type T and size rows times cols.
 pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
     assert(@typeInfo(T) == .float);
+    // A fixed-size matrix with elements of type T (compile-time float).
     return struct {
         const Self = @This();
         comptime rows: usize = rows,
@@ -21,7 +25,8 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return .{ .items = @splat(@splat(value)) };
         }
 
-        /// Returns an identity matrix of the matrix size.
+        /// Returns an identity-like matrix. For square matrices, this is the standard identity matrix.
+        /// For non-square matrices, it has 1s on the main diagonal (min(rows,cols)) and 0s elsewhere.
         pub fn identity() Self {
             var self: Self = .{};
             for (0..self.rows) |r| {
@@ -36,7 +41,8 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return self;
         }
 
-        /// Returns a matrix filled with random numbers.
+        /// Returns a matrix filled with random floating-point numbers of type `T` using the provided `seed`.
+        /// If `seed` is `null`, a seed is generated from the current system time.
         pub fn random(seed: ?u64) Self {
             const s: u64 = seed orelse @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
             var prng: std.Random.DefaultPrng = .init(s);
@@ -58,7 +64,9 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             };
         }
 
-        /// Reshapes the matrix to a new shape.
+        /// Returns a new matrix with dimensions `new_rows` x `new_cols`, containing the same elements
+        /// as `self` interpreted in row-major order. The total number of elements (`rows * cols`)
+        /// must equal (`new_rows * new_cols`).
         pub fn reshape(self: Self, comptime new_rows: usize, comptime new_cols: usize) Matrix(T, new_rows, new_cols) {
             comptime assert(rows * cols == new_rows * new_cols);
             var matrix: Matrix(T, new_rows, new_cols) = .{};
@@ -72,6 +80,9 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Returns a string representation of the matrix, for printing.
+        /// The returned buffer size is fixed at compile time (`rows * cols * @bitSizeOf(T)`) and
+        /// represents an estimate; the actual string length may be smaller. The large buffer size
+        /// is a simple upper bound and might be excessive for typical float string representations.
         pub fn toString(self: Self) [rows * cols * @bitSizeOf(T)]u8 {
             var print_buffer: [rows * cols * @bitSizeOf(T)]u8 = undefined;
             var printed: usize = 0;
@@ -87,19 +98,22 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return print_buffer;
         }
 
-        /// Converts a 2D+ column matrix into a Point2d.
+        /// Converts a column matrix (or the first column of a wider matrix) with at least 2 rows
+        /// into a `Point2d(T)`, using `self.at(0,0)` as x and `self.at(1,0)` as y.
         pub fn toPoint2d(self: Self) Point2d(T) {
             comptime assert(rows >= 2 and cols == 1);
             return .{ .x = self.at(0, 0), .y = self.at(1, 0) };
         }
 
-        /// Converts a 3D+ column matrix into a Point3d.
+        /// Converts a column matrix (or the first column of a wider matrix) with at least 3 rows
+        /// into a `Point3d(T)`, using `self.at(0,0)` as x, `self.at(1,0)` as y, and `self.at(2,0)` as z.
         pub fn toPoint3d(self: Self) Point3d(T) {
             comptime assert(rows >= 3 and cols == 1);
             return .{ .x = self.at(0, 0), .y = self.at(1, 0), .z = self.at(2, 0) };
         }
 
         /// Retrieves the element at position row, col in the matrix.
+        /// Panics if `row` or `col` are out of bounds (if runtime safety is enabled).
         pub fn at(self: Self, row: usize, col: usize) T {
             assert(row < self.rows);
             assert(col < self.cols);
@@ -107,6 +121,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Sets the element at row, col to val.
+        /// Panics if `row` or `col` are out of bounds (if runtime safety is enabled).
         pub fn set(self: *Self, row: usize, col: usize, val: T) void {
             assert(row < self.rows);
             assert(col < self.cols);
@@ -114,6 +129,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Computes the trace (i.e. sum of the diagonal elements).
+        /// `rows` must equal `cols` (i.e., a square matrix).
         pub fn trace(self: Self) T {
             comptime assert(self.cols == self.rows);
             var val: T = 0;
@@ -156,7 +172,8 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return matrix;
         }
 
-        /// Sets the sub-matrix at positon row, col to sub_matrix.
+        /// Sets the sub-matrix at position row, col to sub_matrix.
+        /// `matrix`: The sub-matrix whose elements will be copied into `self`.
         pub fn setSubMatrix(self: *Self, row: usize, col: usize, matrix: anytype) void {
             assert(matrix.rows + row <= self.rows);
             assert(matrix.cols + col <= self.cols);
@@ -183,7 +200,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             }
         }
 
-        /// Returns the sub-matrix at positon row, col.
+        /// Returns a new matrix which is a copy of the specified rectangular region of `self`.
         pub fn getSubMatrix(
             self: Self,
             comptime row_begin: usize,
@@ -236,6 +253,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Adds a matrix.
+        /// Both `self` and `other` must have the same dimensions.
         pub fn add(self: Self, other: Self) Self {
             var result: Self = undefined;
             for (0..self.rows) |r| {
@@ -247,6 +265,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Performs pointwise multiplication.
+        /// Both `self` and `other` must have the same dimensions.
         pub fn times(self: Self, other: Self) Self {
             var result: @TypeOf(self) = undefined;
             for (0..self.rows) |r| {
@@ -258,6 +277,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Performs the dot (or internal product) of two matrices.
+        /// The number of columns in `self` must equal the number of rows in `other`.
         pub fn dot(self: Self, other: anytype) Matrix(T, self.rows, other.cols) {
             comptime assert(self.cols == other.rows);
             var result: Matrix(T, self.rows, other.cols) = .initAll(0);
@@ -310,9 +330,11 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return result;
         }
 
-        /// Computes the "element-wise" matrix norm of the matrix.
+        /// Computes the element-wise p-norm of the matrix (treating all elements as a single vector).
+        /// `p` must be non-negative. Supports `std.math.inf(T)` for the L-infinity norm (max absolute element)
+        /// and `-std.math.inf(T)` for the minimum absolute element value.
         pub fn norm(self: Self, p: T) T {
-            assert(p >= 0);
+            assert(p >= 0 or p == -std.math.inf(T));
             if (p == std.math.inf(T)) {
                 return self.maxNorm();
             } else if (p == -std.math.inf(T)) {
@@ -328,9 +350,23 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             }
         }
 
-        /// Computes the L0 norm, also know as the sparse norm of the matrix.
+        /// Computes the L0 norm, which is the count of non-zero elements in the matrix.
+        /// This is equivalent to `self.norm(0)` if 0^0 is taken as 0, but this implementation
+        /// directly counts non-zero elements for clarity.
         pub fn sparseNorm(self: Self) T {
-            return self.norm(0);
+            var count: T = 0;
+            for (self.items) |row| {
+                for (row) |col| {
+                    count += if (col != 0) 1 else 0;
+                }
+            }
+            return count;
+        }
+
+        /// Computes the nuclear norm of the matrix as sum of the absolute values of all elements.
+        /// This is equivalent to `self.norm(1)`.
+        pub fn nuclearNorm(self: Self) T {
+            return self.norm(1);
         }
 
         /// Computes the Frobenius norm of the matrix as the square root of the sum of its squared values.
@@ -338,12 +374,8 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return self.norm(2);
         }
 
-        /// Computes the Nuclear norm of the matrix as the sum of its absolute values.
-        pub fn nuclearNorm(self: Self) T {
-            return self.norm(1);
-        }
-
-        /// Computes the Max norm of the matrix as the maximum absolute value.
+        /// Computes the L-infinity norm (maximum absolute value among all elements) of the matrix.
+        /// Equivalent to `self.norm(std.math.inf(T))`.
         pub fn maxNorm(self: Self) T {
             var result: T = -std.math.inf(T);
             for (self.items) |row| {
@@ -357,7 +389,9 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return result;
         }
 
-        /// Computes the Min norm of the matrix as the minimum absolute value.
+        /// Computes the minimum absolute value among all elements of the matrix.
+        /// Equivalent to `self.norm(-std.math.inf(T))` if interpreting p as a selector for min
+        /// rather than a typical norm parameter.
         pub fn minNorm(self: Self) T {
             var result: T = std.math.inf(T);
             for (self.items) |row| {
@@ -372,6 +406,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
         }
 
         /// Computes the determinant of self if it's a square matrix, otherwise it fails to compile.
+        /// Requires a square matrix.
         pub fn determinant(self: Self) T {
             comptime assert(self.rows == self.cols);
             return switch (self.rows) {
@@ -389,6 +424,7 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
 
         /// Computes the inverse of self if it's a square matrix, otherwise it fails to compile.
         /// Returns null if the matrix is not invertible.
+        /// Requires a square matrix.
         pub fn inverse(self: Self) ?Self {
             comptime assert(self.rows == self.cols);
             const det = self.determinant();

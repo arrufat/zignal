@@ -1,3 +1,6 @@
+//! Defines geometric primitives like Rectangles, Points (via import from point.zig),
+//! various geometric transformations (Similarity, Affine, Projective),
+//! and computational geometry utilities like point-in-triangle tests and convex hull computation (Graham's scan).
 const std = @import("std");
 const assert = std.debug.assert;
 const expect = std.testing.expect;
@@ -163,7 +166,8 @@ test "Rectangle grow and shrink" {
     try expectEqualDeep(rect, rect2);
 }
 
-/// Returns true if, and only if, p is inside the triangle `tri`.
+/// Returns true if, and only if, point `p` is inside the triangle `tri`.
+/// Uses the barycentric coordinate method.
 pub fn pointInTriangle(comptime T: type, p: Point2d(T), tri: [3]Point2d(T)) bool {
     const s = (tri[0].x - tri[2].x) * (p.y - tri[2].y) - (tri[0].y - tri[2].y) * (p.x - tri[2].x);
     const t = (tri[1].x - tri[0].x) * (p.y - tri[0].y) - (tri[1].y - tri[0].y) * (p.x - tri[0].x);
@@ -198,23 +202,23 @@ test "pointInTriangle" {
     try expect(pointInTriangle(f32, p, tri));
 }
 
-/// Returns the baricenter of the triangle.
-pub fn findBaricenter(comptime T: type, triangle: [3]Point2d(T)) Point2d(T) {
+/// Returns the barycenter (geometric centroid) of the triangle.
+pub fn findBarycenter(comptime T: type, triangle: [3]Point2d(T)) Point2d(T) {
     return .{
         .x = (triangle[0].x + triangle[1].x + triangle[2].x) / 3,
         .y = (triangle[0].y + triangle[1].y + triangle[2].y) / 3,
     };
 }
 
-test "findBaricenter" {
+test "findBarycenter" {
     // Test case 1: Simple triangle.
     var tri = [_]Point2d(f32){
         .{ .x = 0, .y = 0 },
         .{ .x = 2, .y = 0 },
         .{ .x = 1, .y = 2 },
     };
-    var baricenter = findBaricenter(f32, tri);
-    try expectEqualDeep(baricenter, Point2d(f32){ .x = 1, .y = 2.0 / 3.0 });
+    var barycenter = findBarycenter(f32, tri);
+    try expectEqualDeep(barycenter, Point2d(f32){ .x = 1, .y = 2.0 / 3.0 });
 
     // Test case 2: Another triangle to ensure precision.
     tri = .{
@@ -222,8 +226,8 @@ test "findBaricenter" {
         .{ .x = 1, .y = -1 },
         .{ .x = 0, .y = 2 },
     };
-    baricenter = findBaricenter(f32, tri);
-    try expectEqualDeep(baricenter, Point2d(f32){ .x = 0, .y = 0 });
+    barycenter = findBarycenter(f32, tri);
+    try expectEqualDeep(barycenter, Point2d(f32){ .x = 0, .y = 0 });
 }
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
@@ -341,9 +345,12 @@ pub fn AffineTransform(comptime T: type) type {
         }
 
         /// Finds the best affine transform that maps between the two given sets of points.
+        /// Requires exactly 3 pairs of points.
         pub fn find(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
-            assert(from_points.len >= 2);
-            assert(from_points.len == to_points.len);
+            // Affine transform is uniquely defined by 3 non-collinear points.
+            // The init function takes [3]Point2d which enforces this at compile time for fixed arrays.
+            assert(from_points.len == 3);
+            assert(to_points.len == 3);
             var p: Matrix(T, 3, from_points.len) = .{};
             var q: Matrix(T, 2, to_points.len) = .{};
             for (0..from_points.len) |i| {
@@ -438,6 +445,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 accum,
                 .{ .with_u = true, .with_v = false, .mode = .full_u },
             );
+            // TODO: Check the retval from svd (result[3]) for convergence errors.
+            // If svd fails to converge, the resulting transform matrix might be unstable.
             self.matrix = blk: {
                 var min: T = q.at(0, 0);
                 var idx: usize = 0;
@@ -622,7 +631,7 @@ pub fn ConvexHull(comptime T: type) type {
                 try self.hull.append(p);
             }
 
-            // Handle the case were all input points were collinear.
+            // Handle the case where all input points were collinear.
             if (self.hull.items.len < 3) {
                 return null;
             }
