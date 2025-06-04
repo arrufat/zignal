@@ -33,6 +33,20 @@ fn isRgbCompatible(comptime T: type) bool {
     return checks == 3;
 }
 
+test "isRgbCompatible" {
+    try comptime expectEqual(isRgbCompatible(u8), false);
+    try comptime expectEqual(isRgbCompatible(RgbFloat), false);
+    try comptime expectEqual(isRgbCompatible(Rgb), true);
+    try comptime expectEqual(isRgbCompatible(Rgba), true);
+    try comptime expectEqual(isRgbCompatible(Hsl), false);
+    try comptime expectEqual(isRgbCompatible(Hsv), false);
+    try comptime expectEqual(isRgbCompatible(Xyz), false);
+    try comptime expectEqual(isRgbCompatible(Lab), false);
+    try comptime expectEqual(isRgbCompatible(Lms), false);
+    try comptime expectEqual(isRgbCompatible(Oklab), false);
+    try comptime expectEqual(isRgbCompatible(Xyb), false);
+}
+
 /// Converts color into the T colorspace.
 /// When converting from a `u8` type, it's generally assumed to be a grayscale value which is then
 /// converted to the target colorspace, often via an intermediate RGB representation.
@@ -92,20 +106,6 @@ pub fn convert(comptime T: type, color: anytype) T {
         },
         else => @compileError("Unsupported color " ++ @typeName(T)),
     };
-}
-
-test "isRgbCompatible" {
-    try comptime expectEqual(isRgbCompatible(u8), false);
-    try comptime expectEqual(isRgbCompatible(RgbFloat), false);
-    try comptime expectEqual(isRgbCompatible(Rgb), true);
-    try comptime expectEqual(isRgbCompatible(Rgba), true);
-    try comptime expectEqual(isRgbCompatible(Hsl), false);
-    try comptime expectEqual(isRgbCompatible(Hsv), false);
-    try comptime expectEqual(isRgbCompatible(Xyz), false);
-    try comptime expectEqual(isRgbCompatible(Lab), false);
-    try comptime expectEqual(isRgbCompatible(Lms), false);
-    try comptime expectEqual(isRgbCompatible(Oklab), false);
-    try comptime expectEqual(isRgbCompatible(Xyb), false);
 }
 
 test "convert grayscale" {
