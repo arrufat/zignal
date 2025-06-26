@@ -35,7 +35,7 @@ pub fn build(b: *Build) void {
 
     const test_step = b.step("test", "Run library tests");
     for ([_][]const u8{
-        "colorspace",
+        "color",
         "image",
         "geometry",
         "matrix",

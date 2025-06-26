@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const convert = @import("zignal").colorspace.convert;
+const convert = @import("zignal").color.convert;
 const Hsl = @import("zignal").Hsl;
 const Hsv = @import("zignal").Hsv;
 const Lab = @import("zignal").Lab;
