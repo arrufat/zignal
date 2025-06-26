@@ -652,29 +652,6 @@ test "integral image struct" {
     }
 }
 
-test "integral image performance" {
-    const Timer = std.time.Timer;
-    const print = std.debug.print;
-
-    // Create a larger image for meaningful timing
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 1024, 1024);
-    defer image.deinit(std.testing.allocator);
-
-    // Fill with random-ish data
-    for (image.data, 0..) |*pixel, i| {
-        pixel.* = @intCast((i * 17 + 23) % 256);
-    }
-
-    var integral: Image(f32) = undefined;
-
-    // Benchmark implementation
-    var timer = try Timer.start();
-    try image.integralImage(std.testing.allocator, &integral);
-    const time = timer.read();
-    defer integral.deinit(std.testing.allocator);
-
-    print("\nIntegral Image Benchmark (1024x1024 u8): {d:.2}ms\n", .{@as(f64, @floatFromInt(time)) / 1e6});
-}
 
 test "getRectangle" {
     var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
