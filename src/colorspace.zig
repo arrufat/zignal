@@ -255,7 +255,7 @@ const RgbFloat = struct {
     }
 };
 
-/// Generic format function for color types with ANSI terminal colors
+/// Generic format function for color types with optional ANSI terminal colors
 fn formatColor(
     comptime T: type,
     self: T,
@@ -263,14 +263,7 @@ fn formatColor(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    _ = fmt;
     _ = options;
-
-    // Determine text color based on background darkness
-    const fg: u8 = if (shouldUseLightText(self)) 255 else 0;
-
-    // Convert to RGB for terminal display
-    const rgb = convert(Rgb, self);
 
     // Get the short type name
     const type_name = comptime blk: {
@@ -281,11 +274,25 @@ fn formatColor(
         break :blk full_name;
     };
 
-    // Start with ANSI escape codes
-    try writer.print(
-        "\x1b[1m\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m{s}{{ ",
-        .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, type_name },
-    );
+    // Check if we should use ANSI colors
+    const use_ansi = comptime std.mem.eql(u8, fmt, "ansi") or std.mem.eql(u8, fmt, "color");
+
+    if (use_ansi) {
+        // Convert to RGB for terminal display
+        const rgb = convert(Rgb, self);
+
+        // Determine text color based on background darkness
+        const fg: u8 = if (shouldUseLightText(self)) 255 else 0;
+
+        // Start with ANSI escape codes
+        try writer.print(
+            "\x1b[1m\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m{s}{{ ",
+            .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, type_name },
+        );
+    } else {
+        // Plain text format
+        try writer.print("{s}{{ ", .{type_name});
+    }
 
     // Print each field
     const fields = std.meta.fields(T);
@@ -306,7 +313,11 @@ fn formatColor(
     }
 
     // Close and reset
-    try writer.print(" }}\x1b[0m", .{});
+    if (use_ansi) {
+        try writer.print(" }}\x1b[0m", .{});
+    } else {
+        try writer.print(" }}", .{});
+    }
 }
 
 /// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace, with all components
@@ -1295,6 +1306,26 @@ test "vivid colors" {
     try testColorConversion(.{ .r = 128, .g = 223, .b = 255 }, Lab{ .l = 84.26919487615707, .a = -19.773688316136685, .b = -24.252061008370738 });
 }
 
+test "color formatting" {
+    const red = Rgb{ .r = 255, .g = 0, .b = 0 };
+
+    // Test plain format
+    var plain_buffer: [100]u8 = undefined;
+    var plain_stream = std.io.fixedBufferStream(&plain_buffer);
+    try red.format("", .{}, plain_stream.writer());
+    const plain_result = plain_stream.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, plain_result, "Rgb{ .r = 255, .g = 0, .b = 0 }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plain_result, "\x1b[") == null); // No ANSI codes
+
+    // Test colored format
+    var color_buffer: [200]u8 = undefined;
+    var color_stream = std.io.fixedBufferStream(&color_buffer);
+    try red.format("color", .{}, color_stream.writer());
+    const color_result = color_stream.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, color_result, "Rgb{ .r = 255, .g = 0, .b = 0 }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, color_result, "\x1b[") != null); // Has ANSI codes
+}
+
 test "100 random colors" {
     const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
     var prng: std.Random.DefaultPrng = .init(seed);
@@ -1329,15 +1360,19 @@ pub fn main() void {
 
     std.debug.print("Color format demonstration:\n\n", .{});
 
+    // Show first color in both plain and colored format
+    const demo_color = colors[0]; // Red
+    std.debug.print("Plain format:\n", .{});
+    std.debug.print("  RGB: {}\n", .{demo_color});
+    std.debug.print("  Lab: {}\n", .{demo_color.toLab()});
+    std.debug.print("\nColored format:\n", .{});
+    std.debug.print("  RGB: {color}\n", .{demo_color});
+    std.debug.print("  Lab: {ansi}\n", .{demo_color.toLab()});
+    std.debug.print("\n", .{});
+
+    // Show all colors with ANSI formatting
+    std.debug.print("All colors with ANSI formatting:\n\n", .{});
     for (colors) |color| {
-        // Show same color in different color spaces
-        std.debug.print("RGB:   {}\n", .{color});
-        std.debug.print("RGBA:  {}\n", .{color.toRgba(255)});
-        std.debug.print("HSL:   {}\n", .{color.toHsl()});
-        std.debug.print("HSV:   {}\n", .{color.toHsv()});
-        std.debug.print("Lab:   {}\n", .{color.toLab()});
-        std.debug.print("Oklab: {}\n", .{color.toOklab()});
-        std.debug.print("XYZ:   {}\n", .{color.toXyz()});
-        std.debug.print("\n", .{});
+        std.debug.print("  {color}  {color}  {color}\n", .{ color, color.toHsl(), color.toLab() });
     }
 }
