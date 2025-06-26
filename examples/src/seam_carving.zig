@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 
 const Image = @import("zignal").Image;
-const isColor = @import("zignal").colorspace.isColor;
+const isColor = @import("zignal").color.isColor;
 const Rgb = @import("zignal").Rgb;
 const Rgba = @import("zignal").Rgba;
 

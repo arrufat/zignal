@@ -8,10 +8,10 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const Allocator = std.mem.Allocator;
 
 const as = @import("meta.zig").as;
-const convert = @import("colorspace.zig").convert;
+const convert = @import("color.zig").convert;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
-const Rgba = @import("colorspace.zig").Rgba;
+const Rgba = @import("color.zig").Rgba;
 
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point2d = @import("point.zig").Point2d;
