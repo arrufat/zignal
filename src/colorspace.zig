@@ -141,6 +141,82 @@ test "alphaBlend" {
     try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
 }
 
+test "blend methods for all color types" {
+    // Test data: blend red (255,0,0) with 50% alpha onto black background
+    const red_rgba = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    const expected_rgb = Rgb{ .r = 128, .g = 0, .b = 0 }; // 50% blend of red on black
+    
+    // Test Rgba.blend
+    {
+        var rgba_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+        rgba_color.blend(red_rgba);
+        try expectEqualDeep(rgba_color.toRgb(), expected_rgb);
+    }
+    
+    // Test Hsl.blend
+    {
+        var hsl_color = Hsl{ .h = 0, .s = 0, .l = 0 }; // black
+        hsl_color.blend(red_rgba);
+        const result_rgb = hsl_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+    
+    // Test Hsv.blend
+    {
+        var hsv_color = Hsv{ .h = 0, .s = 0, .v = 0 }; // black
+        hsv_color.blend(red_rgba);
+        const result_rgb = hsv_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+    
+    // Test Lab.blend
+    {
+        var lab_color = Lab{ .l = 0, .a = 0, .b = 0 }; // black
+        lab_color.blend(red_rgba);
+        const result_rgb = lab_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+    
+    // Test Oklab.blend
+    {
+        var oklab_color = Oklab{ .l = 0, .a = 0, .b = 0 }; // black
+        oklab_color.blend(red_rgba);
+        const result_rgb = oklab_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+    
+    // Test Lms.blend
+    {
+        var lms_color = Lms{ .l = 0, .m = 0, .s = 0 }; // black
+        lms_color.blend(red_rgba);
+        const result_rgb = lms_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+    
+    // Test Xyb.blend
+    {
+        var xyb_color = Xyb{ .x = 0, .y = 0, .b = 0 }; // black
+        xyb_color.blend(red_rgba);
+        const result_rgb = xyb_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);          
+    }
+}
+
+test "blend with zero alpha should not change color" {
+    const transparent_red = Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 };
+    const original_blue = Rgb{ .r = 0, .g = 0, .b = 255 };
+    
+    // Test that blending with zero alpha doesn't change the original color
+    var test_rgb = original_blue;
+    test_rgb.blend(transparent_red);
+    try expectEqualDeep(test_rgb, original_blue);
+    
+    var test_hsl = original_blue.toHsl();
+    const original_hsl = test_hsl;
+    test_hsl.blend(transparent_red);
+    try expectEqualDeep(test_hsl, original_hsl);
+}
+
 inline fn linearToGamma(x: f64) f64 {
     return if (x > 0.0031308) 1.055 * pow(f64, x, (1.0 / 2.4)) - 0.055 else x * 12.92;
 }
@@ -544,7 +620,7 @@ pub const Hsl = struct {
     pub fn blend(self: *Hsl, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toHsl();
+        self.* = rgb.toHsl();
     }
 
     /// Checks if the color is a shade of gray.
@@ -654,7 +730,7 @@ pub const Hsv = struct {
     pub fn blend(self: *Hsv, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toHsv();
+        self.* = rgb.toHsv();
     }
 
     /// Checks if the color is a shade of gray.
@@ -872,7 +948,7 @@ pub const Lab = struct {
     pub fn blend(self: *Lab, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toLab();
+        self.* = rgb.toLab();
     }
 
     /// Checks if the color is a shade of gray.
@@ -977,7 +1053,7 @@ pub const Oklab = struct {
     pub fn blend(self: *Oklab, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toOklab();
+        self.* = rgb.toOklab();
     }
 
     /// Checks if the color is a shade of gray.
@@ -1057,7 +1133,7 @@ pub const Lms = struct {
     pub fn blend(self: *Lms, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toLms();
+        self.* = rgb.toLms();
     }
 
     /// Checks if the color is a shade of gray.
@@ -1143,7 +1219,7 @@ pub const Xyb = struct {
     pub fn blend(self: *Xyb, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toXyb();
+        self.* = rgb.toXyb();
     }
 
     /// Checks if the color is a shade of gray.
