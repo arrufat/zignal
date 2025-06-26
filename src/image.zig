@@ -233,7 +233,9 @@ pub fn Image(comptime T: type) type {
         /// Rotates the image by `angle` (in radians) around its center.
         /// The returned `Image(T)` has newly allocated data that the caller is responsible for deallocating.
         pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
-            return try self.rotateFrom(allocator, .{ .x = self.cols / 2, .y = self.rows / 2 }, angle);
+            var result: Self = undefined;
+            try self.rotateFrom(allocator, .{ .x = @as(f32, @floatFromInt(self.cols)) / 2, .y = @as(f32, @floatFromInt(self.rows)) / 2 }, angle, &result);
+            return result;
         }
 
         /// Crops a rectangular region from the image.
@@ -353,56 +355,71 @@ pub fn Image(comptime T: type) type {
                     var integral: Image(f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
-                    const size = self.rows * self.cols;
-                    var pos: usize = 0;
-                    var rem: usize = size;
-                    const simd_len = std.simd.suggestVectorLength(T) orelse 1;
-                    while (pos < size) {
-                        const r = pos / self.cols;
-                        const c = pos % self.cols;
+
+                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+                    // Process each row
+                    for (0..self.rows) |r| {
                         const r1 = r -| radius;
                         const r2 = @min(r + radius, self.rows - 1);
                         const r1_offset = r1 * self.cols;
                         const r2_offset = r2 * self.cols;
-                        const r2_r1 = r2 - r1;
-                        if (r1 >= radius and r2 <= self.rows - 1 - radius and
-                            self.cols >= 1 + radius + simd_len and
-                            c >= radius and c <= self.cols - 1 - radius - simd_len and
-                            rem >= simd_len)
-                        {
-                            const c1 = c - radius;
-                            const c2 = c + radius;
-                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len].*;
-                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len].*;
-                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len].*;
-                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len].*;
-                            const areas: @Vector(simd_len, f32) = @splat(@as(f32, @floatFromInt(r2_r1 * 2 * radius)));
-                            const sums = int22s - int21s - int12s + int11s;
-                            const vals: [simd_len]f32 = if (@typeInfo(T) == .int) @round(sums / areas) else sums / areas;
-                            for (vals, 0..) |val, i| {
-                                if (@typeInfo(T) == .int) {
-                                    blurred.at(r, c + i).* = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), val)));
-                                } else {
-                                    blurred.at(r, c + i).* = val;
+
+                        var c: usize = 0;
+
+                        // Process SIMD chunks where safe (away from borders)
+                        const row_safe = r >= radius and r + radius < self.rows;
+                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
+                            // Skip left border
+                            while (c < radius) : (c += 1) {
+                                const c1 = c -| radius;
+                                const c2 = @min(c + radius, self.cols - 1);
+                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                                const sum = integral.at(r2, c2).* - integral.at(r2, c1).* -
+                                    integral.at(r1, c2).* + integral.at(r1, c1).*;
+                                blurred.at(r, c).* = if (@typeInfo(T) == .int)
+                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
+                                else
+                                    as(T, sum / area);
+                            }
+
+                            // SIMD middle section (constant area when row is safe)
+                            const safe_end = self.cols - radius - simd_len;
+                            if (c <= safe_end) {
+                                const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                                while (c <= safe_end) : (c += simd_len) {
+                                    const c1 = c - radius;
+                                    const c2 = c + radius;
+                                    const int11: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len].*;
+                                    const int12: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len].*;
+                                    const int21: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len].*;
+                                    const int22: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len].*;
+                                    const sums = int22 - int21 - int12 + int11;
+                                    const vals = sums / area_vec;
+
+                                    for (0..simd_len) |i| {
+                                        blurred.at(r, c + i).* = if (@typeInfo(T) == .int)
+                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(vals[i]))))
+                                        else
+                                            vals[i];
+                                    }
                                 }
                             }
-                            pos += simd_len;
-                            rem -= simd_len;
-                        } else {
+                        }
+
+                        // Process remaining pixels (right border and any leftover)
+                        while (c < self.cols) : (c += 1) {
                             const c1 = c -| radius;
                             const c2 = @min(c + radius, self.cols - 1);
-                            const pos11 = r1_offset + c1;
-                            const pos12 = r1_offset + c2;
-                            const pos21 = r2_offset + c1;
-                            const pos22 = r2_offset + c2;
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
-                            blurred.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), (@round(sum / area))))),
-                                else => as(T, sum / area),
-                            };
-                            pos += 1;
-                            rem -= 1;
+                            const sum = integral.at(r2, c2).* - integral.at(r2, c1).* -
+                                integral.at(r1, c2).* + integral.at(r1, c1).*;
+                            blurred.at(r, c).* = if (@typeInfo(T) == .int)
+                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
+                            else
+                                as(T, sum / area);
                         }
                     }
                 },
@@ -410,33 +427,25 @@ pub fn Image(comptime T: type) type {
                     var integral: Image([Self.channels()]f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
-                    const size = self.rows * self.cols;
-                    var pos: usize = 0;
-                    var rem: usize = size;
-                    while (pos < size) {
-                        const r = pos / self.cols;
-                        const c = pos % self.cols;
-                        const r1 = r -| radius;
-                        const c1 = c -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const c2 = @min(c + radius, self.cols - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-                        const pos11 = r1_offset + c1;
-                        const pos12 = r1_offset + c2;
-                        const pos21 = r2_offset + c1;
-                        const pos22 = r2_offset + c2;
-                        const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                        inline for (std.meta.fields(T), 0..) |f, i| {
-                            const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
-                            @field(blurred.data[pos], f.name) = switch (@typeInfo(f.type)) {
-                                .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
-                                .float => as(f.type, sum / area),
-                                else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
-                            };
+
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const r1 = r -| radius;
+                            const c1 = c -| radius;
+                            const r2 = @min(r + radius, self.rows - 1);
+                            const c2 = @min(c + radius, self.cols - 1);
+                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+
+                            inline for (std.meta.fields(T), 0..) |f, i| {
+                                const sum = integral.at(r2, c2)[i] - integral.at(r2, c1)[i] -
+                                    integral.at(r1, c2)[i] + integral.at(r1, c1)[i];
+                                @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
+                                    .float => as(f.type, sum / area),
+                                    else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
+                                };
+                            }
                         }
-                        pos += 1;
-                        rem -= 1;
                     }
                 },
                 else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
@@ -462,55 +471,74 @@ pub fn Image(comptime T: type) type {
                     var integral: Image(f32) = undefined;
                     defer integral.deinit(allocator);
                     try self.integralImage(allocator, &integral);
-                    const size = self.rows * self.cols;
-                    var pos: usize = 0;
-                    var rem: usize = size;
-                    const simd_len = std.simd.suggestVectorLength(T) orelse 1;
-                    const box_areas: @Vector(simd_len, f32) = @splat(2 * radius * 2 * radius);
-                    while (pos < size) {
-                        const r = pos / self.cols;
-                        const c = pos % self.cols;
+
+                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+                    // Process each row
+                    for (0..self.rows) |r| {
                         const r1 = r -| radius;
                         const r2 = @min(r + radius, self.rows - 1);
                         const r1_offset = r1 * self.cols;
                         const r2_offset = r2 * self.cols;
-                        if (r1 >= radius and r2 <= self.rows - 1 - radius and
-                            c >= radius and c <= self.cols - 1 - radius - simd_len and
-                            rem >= simd_len)
-                        {
-                            const c1 = c - radius;
-                            const c2 = c + radius;
-                            const int11s: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len];
-                            const int12s: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len];
-                            const int21s: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len];
-                            const int22s: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len];
-                            const sums = int22s - int21s - int12s + int11s;
-                            const vals: [simd_len]f32 = @round(sums / box_areas);
-                            for (vals, 0..) |val, i| {
-                                if (@typeInfo(T) == .int) {
-                                    const temp = @max(0, @min(std.math.maxInt(T), as(isize, self.data[pos]) * 2 - @as(isize, val)));
-                                    sharpened.at(r, c + i).* = as(T, temp);
-                                } else {
-                                    sharpened.at(r, c + i).* = 2 * self.data[pos] - val;
+
+                        var c: usize = 0;
+
+                        // Process SIMD chunks where safe (away from borders)
+                        const row_safe = r >= radius and r + radius < self.rows;
+                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
+                            // Skip left border
+                            while (c < radius) : (c += 1) {
+                                const c1 = c -| radius;
+                                const c2 = @min(c + radius, self.cols - 1);
+                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                                const sum = integral.at(r2, c2).* - integral.at(r2, c1).* -
+                                    integral.at(r1, c2).* + integral.at(r1, c1).*;
+                                const blurred = sum / area;
+                                sharpened.at(r, c).* = if (@typeInfo(T) == .int)
+                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
+                                else
+                                    as(T, 2 * as(f32, self.at(r, c).*) - blurred);
+                            }
+
+                            // SIMD middle section (constant area when row is safe)
+                            const safe_end = self.cols - radius - simd_len;
+                            if (c <= safe_end) {
+                                const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                                while (c <= safe_end) : (c += simd_len) {
+                                    const c1 = c - radius;
+                                    const c2 = c + radius;
+                                    const int11: @Vector(simd_len, f32) = integral.data[r1_offset + c1 ..][0..simd_len].*;
+                                    const int12: @Vector(simd_len, f32) = integral.data[r1_offset + c2 ..][0..simd_len].*;
+                                    const int21: @Vector(simd_len, f32) = integral.data[r2_offset + c1 ..][0..simd_len].*;
+                                    const int22: @Vector(simd_len, f32) = integral.data[r2_offset + c2 ..][0..simd_len].*;
+                                    const sums = int22 - int21 - int12 + int11;
+                                    const blurred_vals = sums / area_vec;
+
+                                    for (0..simd_len) |i| {
+                                        const original = self.at(r, c + i).*;
+                                        sharpened.at(r, c + i).* = if (@typeInfo(T) == .int)
+                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, original) - blurred_vals[i]))))
+                                        else
+                                            as(T, 2 * as(f32, original) - blurred_vals[i]);
+                                    }
                                 }
                             }
-                            pos += simd_len;
-                            rem -= simd_len;
-                        } else {
+                        }
+
+                        // Process remaining pixels (right border and any leftover)
+                        while (c < self.cols) : (c += 1) {
                             const c1 = c -| radius;
                             const c2 = @min(c + radius, self.cols - 1);
-                            const pos11 = r1_offset + c1;
-                            const pos12 = r1_offset + c2;
-                            const pos21 = r2_offset + c1;
-                            const pos22 = r2_offset + c2;
                             const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = integral.data[pos22] - integral.data[pos21] - integral.data[pos12] + integral.data[pos11];
-                            sharpened.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area)))),
-                                else => as(T, sum / area),
-                            };
-                            pos += 1;
-                            rem -= 1;
+                            const sum = integral.at(r2, c2).* - integral.at(r2, c1).* -
+                                integral.at(r1, c2).* + integral.at(r1, c1).*;
+                            const blurred = sum / area;
+                            sharpened.at(r, c).* = if (@typeInfo(T) == .int)
+                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
+                            else
+                                as(T, 2 * as(f32, self.at(r, c).*) - blurred);
                         }
                     }
                 },
@@ -518,33 +546,30 @@ pub fn Image(comptime T: type) type {
                     var integral: Image([Self.channels()]f32) = undefined;
                     try self.integralImage(allocator, &integral);
                     defer integral.deinit(allocator);
-                    const size = self.rows * self.cols;
-                    var pos: usize = 0;
-                    var rem: usize = size;
-                    while (pos < size) {
-                        const r = pos / self.cols;
-                        const c = pos % self.cols;
-                        const r1 = r -| radius;
-                        const c1 = c -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const c2 = @min(c + radius, self.cols - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-                        const pos11 = r1_offset + c1;
-                        const pos12 = r1_offset + c2;
-                        const pos21 = r2_offset + c1;
-                        const pos22 = r2_offset + c2;
-                        const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                        inline for (std.meta.fields(T), 0..) |f, i| {
-                            const sum = integral.data[pos22][i] - integral.data[pos21][i] - integral.data[pos12][i] + integral.data[pos11][i];
-                            @field(sharpened.data[pos], f.name) = switch (@typeInfo(f.type)) {
-                                .int => as(f.type, @max(0, @min(std.math.maxInt(f.type), as(isize, @field(self.data[pos], f.name)) * 2 - as(isize, @round(sum / area))))),
-                                .float => as(f.type, 2 * @field(self.data[pos], f.name) - sum / area),
-                                else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
-                            };
+
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const r1 = r -| radius;
+                            const c1 = c -| radius;
+                            const r2 = @min(r + radius, self.rows - 1);
+                            const c2 = @min(c + radius, self.cols - 1);
+                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+
+                            inline for (std.meta.fields(T), 0..) |f, i| {
+                                const sum = integral.at(r2, c2)[i] - integral.at(r2, c1)[i] -
+                                    integral.at(r1, c2)[i] + integral.at(r1, c1)[i];
+                                const blurred = sum / area;
+                                const original = @field(self.at(r, c).*, f.name);
+                                @field(sharpened.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    .int => blk: {
+                                        const sharpened_val = 2 * as(f32, original) - blurred;
+                                        break :blk @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
+                                    },
+                                    .float => as(f.type, 2 * as(f32, original) - blurred),
+                                    else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
+                                };
+                            }
                         }
-                        pos += 1;
-                        rem -= 1;
                     }
                 },
                 else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
@@ -652,7 +677,6 @@ test "integral image struct" {
     }
 }
 
-
 test "getRectangle" {
     var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
@@ -669,4 +693,196 @@ test "view" {
     try expectEqual(view.isView(), true);
     try expectEqual(image.isView(), false);
     try expectEqualDeep(rect, view.getRectangle());
+}
+
+test "boxBlur basic functionality" {
+    // Test with uniform image - should remain unchanged
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with uniform value
+    for (image.data) |*pixel| pixel.* = 128;
+
+    var blurred: Image(u8) = undefined;
+    try image.boxBlur(std.testing.allocator, &blurred, 1);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Uniform image should remain uniform after blur
+    for (blurred.data) |pixel| {
+        try expectEqual(@as(u8, 128), pixel);
+    }
+}
+
+test "boxBlur zero radius" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c);
+        }
+    }
+
+    var blurred: Image(u8) = undefined;
+    try image.boxBlur(std.testing.allocator, &blurred, 0);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Zero radius should produce identical image
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, blurred.at(r, c).*);
+        }
+    }
+}
+
+test "boxBlur border effects" {
+    // Create a small image to test border handling
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize with a pattern where center is 255, edges are 0
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(2, 2).* = 255; // Center pixel
+
+    var blurred: Image(u8) = undefined;
+    try image.boxBlur(std.testing.allocator, &blurred, 1);
+    defer blurred.deinit(std.testing.allocator);
+
+    // The center should be blurred down, corners should have some blur effect
+    try expectEqual(@as(usize, 5), blurred.rows);
+    try expectEqual(@as(usize, 5), blurred.cols);
+
+    // Corner pixels should have received some blur from the center
+    // but less than center pixels due to smaller effective area
+    const corner_val = blurred.at(0, 0).*;
+    const center_val = blurred.at(2, 2).*;
+
+    // Center should be less than original 255 due to averaging with zeros
+    // Corner should be less than center due to smaller kernel area
+    try expectEqual(corner_val < center_val, true);
+    try expectEqual(center_val < 255, true);
+}
+
+test "boxBlur struct type" {
+    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize with different colors
+    image.at(0, 0).* = .{ .r = 255, .g = 0, .b = 0, .a = 255 }; // Red
+    image.at(0, 1).* = .{ .r = 0, .g = 255, .b = 0, .a = 255 }; // Green
+    image.at(0, 2).* = .{ .r = 0, .g = 0, .b = 255, .a = 255 }; // Blue
+    image.at(1, 0).* = .{ .r = 255, .g = 255, .b = 0, .a = 255 }; // Yellow
+    image.at(1, 1).* = .{ .r = 255, .g = 255, .b = 255, .a = 255 }; // White
+    image.at(1, 2).* = .{ .r = 255, .g = 0, .b = 255, .a = 255 }; // Magenta
+    image.at(2, 0).* = .{ .r = 0, .g = 255, .b = 255, .a = 255 }; // Cyan
+    image.at(2, 1).* = .{ .r = 128, .g = 128, .b = 128, .a = 255 }; // Gray
+    image.at(2, 2).* = .{ .r = 0, .g = 0, .b = 0, .a = 255 }; // Black
+
+    var blurred: Image(Rgba) = undefined;
+    try image.boxBlur(std.testing.allocator, &blurred, 1);
+    defer blurred.deinit(std.testing.allocator);
+
+    try expectEqual(@as(usize, 3), blurred.rows);
+    try expectEqual(@as(usize, 3), blurred.cols);
+
+    // Center pixel should be average of all surrounding pixels
+    const center = blurred.at(1, 1).*;
+    // All channels should be affected by blur
+    try expectEqual(center.r != 255, true);
+    try expectEqual(center.g != 255, true);
+    try expectEqual(center.b != 255, true);
+}
+
+test "sharpen basic functionality" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create an edge pattern: left half dark, right half bright
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 2) 64 else 192;
+        }
+    }
+
+    var sharpened: Image(u8) = undefined;
+    try image.sharpen(std.testing.allocator, &sharpened, 1);
+    defer sharpened.deinit(std.testing.allocator);
+
+    try expectEqual(@as(usize, 5), sharpened.rows);
+    try expectEqual(@as(usize, 5), sharpened.cols);
+
+    // Edge pixels should have more contrast after sharpening
+    const left_val = sharpened.at(2, 0).*;
+    const right_val = sharpened.at(2, 4).*;
+
+    // Sharpening should increase contrast at edges
+    try expectEqual(left_val <= 64, true); // Dark side should get darker or stay same
+    try expectEqual(right_val >= 192, true); // Bright side should get brighter or stay same
+}
+
+test "sharpen zero radius" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c + 10);
+        }
+    }
+
+    var sharpened: Image(u8) = undefined;
+    try image.sharpen(std.testing.allocator, &sharpened, 0);
+    defer sharpened.deinit(std.testing.allocator);
+
+    // Zero radius should produce identical image
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, sharpened.at(r, c).*);
+        }
+    }
+}
+
+test "sharpen uniform image" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 4, 4);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with uniform value
+    for (image.data) |*pixel| pixel.* = 100;
+
+    var sharpened: Image(u8) = undefined;
+    try image.sharpen(std.testing.allocator, &sharpened, 1);
+    defer sharpened.deinit(std.testing.allocator);
+
+    // Uniform image should remain uniform after sharpening
+    // (2 * original - blurred = 2 * 100 - 100 = 100)
+    for (sharpened.data) |pixel| {
+        try expectEqual(@as(u8, 100), pixel);
+    }
+}
+
+test "sharpen struct type" {
+    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a simple pattern with a bright center
+    for (image.data) |*pixel| pixel.* = .{ .r = 64, .g = 64, .b = 64, .a = 255 };
+    image.at(1, 1).* = .{ .r = 192, .g = 192, .b = 192, .a = 255 }; // Bright center
+
+    var sharpened: Image(Rgba) = undefined;
+    try image.sharpen(std.testing.allocator, &sharpened, 1);
+    defer sharpened.deinit(std.testing.allocator);
+
+    try expectEqual(@as(usize, 3), sharpened.rows);
+    try expectEqual(@as(usize, 3), sharpened.cols);
+
+    // Center should be enhanced (brighter than original)
+    const original_center = image.at(1, 1).*;
+    const sharpened_center = sharpened.at(1, 1).*;
+
+    // Center should be sharpened (enhanced contrast)
+    try expectEqual(sharpened_center.r >= original_center.r, true);
+    try expectEqual(sharpened_center.g >= original_center.g, true);
+    try expectEqual(sharpened_center.b >= original_center.b, true);
 }
