@@ -9,7 +9,7 @@ const pow = std.math.pow;
 /// Returns true if and only if T can be treated as a color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, Rgb, Rgba, Hsl, Hsv, Xyz, Lab, Lms, Oklab, Xyb => true,
+        u8, Rgb, Rgba, RgbFloat, Hsl, Hsv, Xyz, Lab, Lms, Oklab, Xyb => true,
         else => false,
     };
 }
@@ -45,6 +45,12 @@ test "isRgbCompatible" {
     try comptime expectEqual(isRgbCompatible(Lms), false);
     try comptime expectEqual(isRgbCompatible(Oklab), false);
     try comptime expectEqual(isRgbCompatible(Xyb), false);
+}
+
+/// Helper function to determine if foreground text should be black or white based on background color
+fn shouldUseLightText(color: anytype) bool {
+    comptime assert(isColor(@TypeOf(color)));
+    return convert(Oklab, color).l < 0.5;
 }
 
 /// Converts color into the T colorspace.
@@ -249,13 +255,71 @@ const RgbFloat = struct {
     }
 };
 
-/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace.
-/// Each component (r, g, b) is an unsigned 8-bit integer (0-255).
+/// Generic format function for color types with ANSI terminal colors
+fn formatColor(
+    comptime T: type,
+    self: T,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+
+    // Determine text color based on background darkness
+    const fg: u8 = if (shouldUseLightText(self)) 255 else 0;
+
+    // Convert to RGB for terminal display
+    const rgb = convert(Rgb, self);
+
+    // Get the short type name
+    const type_name = comptime blk: {
+        const full_name = @typeName(T);
+        if (std.mem.lastIndexOf(u8, full_name, ".")) |pos| {
+            break :blk full_name[pos + 1 ..];
+        }
+        break :blk full_name;
+    };
+
+    // Start with ANSI escape codes
+    try writer.print(
+        "\x1b[1m\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m{s}{{ ",
+        .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, type_name },
+    );
+
+    // Print each field
+    const fields = std.meta.fields(T);
+    inline for (fields, 0..) |field, i| {
+        try writer.print(".{s} = ", .{field.name});
+
+        // Format the field value appropriately
+        const value = @field(self, field.name);
+        switch (field.type) {
+            u8 => try writer.print("{}", .{value}),
+            f64 => try writer.print("{d:.2}", .{value}), // 2 decimal places for floats
+            else => try writer.print("{}", .{value}),
+        }
+
+        if (i < fields.len - 1) {
+            try writer.print(", ", .{});
+        }
+    }
+
+    // Close and reset
+    try writer.print(" }}\x1b[0m", .{});
+}
+
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace, with all components
+/// within the range 0-255.
 pub const Rgb = struct {
     r: u8,
     g: u8,
     b: u8,
     pub const black: Rgb = .{ .r = 0, .g = 0, .b = 0 };
+
+    pub fn format(self: Rgb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Rgb, self, fmt, options, writer);
+    }
 
     /// Returns the normalized RGB color in floating point.
     pub fn toRgbFloat(self: Rgb) RgbFloat {
@@ -355,6 +419,10 @@ pub const Rgba = packed struct {
     b: u8,
     a: u8,
     pub const black: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    pub fn format(self: Rgba, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Rgba, self, fmt, options, writer);
+    }
 
     /// Constructs a RGBA color from a gray and alpha values.
     pub fn fromGray(gray: u8, alpha: u8) Rgba {
@@ -456,6 +524,10 @@ pub const Hsl = struct {
     s: f64,
     l: f64,
     pub const black: Hsl = .{ .h = 0, .s = 0, .l = 0 };
+
+    pub fn format(self: Hsl, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Hsl, self, fmt, options, writer);
+    }
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsl, color: Rgba) void {
@@ -563,6 +635,10 @@ pub const Hsv = struct {
     v: f64,
     pub const black: Hsv = .{ .h = 0, .s = 0, .v = 0 };
 
+    pub fn format(self: Hsv, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Hsv, self, fmt, options, writer);
+    }
+
     /// Alpha-blends color into self.
     pub fn blend(self: *Hsv, color: Rgba) void {
         var rgb = self.toRgb();
@@ -661,6 +737,10 @@ pub const Xyz = struct {
     y: f64,
     z: f64,
     pub const black: Xyz = .{ .x = 0, .y = 0, .z = 0 };
+
+    pub fn format(self: Xyz, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Xyz, self, fmt, options, writer);
+    }
 
     /// Checks if the CIE 1931 XYZ color is a shade of gray.
     pub fn isGray(self: Xyz) bool {
@@ -773,6 +853,10 @@ pub const Lab = struct {
     b: f64,
     pub const black: Lab = .{ .l = 0, .a = 0, .b = 0 };
 
+    pub fn format(self: Lab, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Lab, self, fmt, options, writer);
+    }
+
     /// Alpha-blends color into self.
     pub fn blend(self: *Lab, color: Rgba) void {
         var rgb = self.toRgb();
@@ -874,6 +958,10 @@ pub const Oklab = struct {
     b: f64,
     pub const black: Oklab = .{ .l = 0, .a = 0, .b = 0 };
 
+    pub fn format(self: Oklab, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Oklab, self, fmt, options, writer);
+    }
+
     /// Alpha-blends color into self.
     pub fn blend(self: *Oklab, color: Rgba) void {
         var rgb = self.toRgb();
@@ -949,6 +1037,10 @@ pub const Lms = struct {
     m: f64, // Medium cone response
     s: f64, // Short cone response
     pub const black: Lms = .{ .l = 0, .m = 0, .s = 0 };
+
+    pub fn format(self: Lms, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Lms, self, fmt, options, writer);
+    }
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Lms, color: Rgba) void {
@@ -1031,6 +1123,10 @@ pub const Xyb = struct {
     y: f64,
     b: f64,
     pub const black: Xyb = .{ .x = 0, .y = 0, .b = 0 };
+
+    pub fn format(self: Xyb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        return formatColor(Xyb, self, fmt, options, writer);
+    }
 
     /// Alpha-blends color into self.
     pub fn blend(self: *Xyb, color: Rgba) void {
@@ -1213,5 +1309,35 @@ test "100 random colors" {
         try expectEqualDeep(rgb, rgb_from_xyz);
         const rgb_from_lab = rgb.toLab().toRgb();
         try expectEqualDeep(rgb, rgb_from_lab);
+    }
+}
+
+pub fn main() void {
+    // Test various colors
+    const colors = [_]Rgb{
+        .{ .r = 255, .g = 0, .b = 0 }, // Red
+        .{ .r = 0, .g = 255, .b = 0 }, // Green
+        .{ .r = 0, .g = 0, .b = 255 }, // Blue
+        .{ .r = 255, .g = 255, .b = 0 }, // Yellow
+        .{ .r = 255, .g = 0, .b = 255 }, // Magenta
+        .{ .r = 0, .g = 255, .b = 255 }, // Cyan
+        .{ .r = 255, .g = 255, .b = 255 }, // White
+        .{ .r = 0, .g = 0, .b = 0 }, // Black
+        .{ .r = 128, .g = 128, .b = 128 }, // Gray
+        .{ .r = 255, .g = 128, .b = 0 }, // Orange
+    };
+
+    std.debug.print("Color format demonstration:\n\n", .{});
+
+    for (colors) |color| {
+        // Show same color in different color spaces
+        std.debug.print("RGB:   {}\n", .{color});
+        std.debug.print("RGBA:  {}\n", .{color.toRgba(255)});
+        std.debug.print("HSL:   {}\n", .{color.toHsl()});
+        std.debug.print("HSV:   {}\n", .{color.toHsv()});
+        std.debug.print("Lab:   {}\n", .{color.toLab()});
+        std.debug.print("Oklab: {}\n", .{color.toOklab()});
+        std.debug.print("XYZ:   {}\n", .{color.toXyz()});
+        std.debug.print("\n", .{});
     }
 }
