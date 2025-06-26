@@ -977,7 +977,7 @@ pub const Oklab = struct {
     pub fn blend(self: *Oklab, color: Rgba) void {
         var rgb = self.toRgb();
         rgb.blend(color);
-        self = rgb.toLab();
+        self = rgb.toOklab();
     }
 
     /// Checks if the color is a shade of gray.
