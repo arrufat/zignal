@@ -263,6 +263,7 @@ pub fn Image(comptime T: type) type {
         /// Computes the integral image (also known as a summed-area table) of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
+        /// Uses SIMD optimizations for improved performance with a two-pass approach.
         pub fn integralImage(
             self: Self,
             allocator: Allocator,
@@ -273,33 +274,60 @@ pub fn Image(comptime T: type) type {
             }
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    var tmp: f32 = 0;
-                    for (0..self.cols) |c| {
-                        tmp += as(f32, (self.at(0, c).*));
-                        integral.at(0, c).* = tmp;
-                    }
-                    for (1..self.rows) |r| {
-                        tmp = 0;
+                    // First pass: compute row-wise cumulative sums
+                    for (0..self.rows) |r| {
+                        var tmp: f32 = 0;
+                        const row_offset = r * self.stride;
+                        const out_offset = r * integral.cols;
                         for (0..self.cols) |c| {
-                            tmp += as(f32, self.at(r, c).*);
-                            integral.at(r, c).* = tmp + integral.at(r - 1, c).*;
+                            tmp += as(f32, self.data[row_offset + c]);
+                            integral.data[out_offset + c] = tmp;
+                        }
+                    }
+
+                    // Second pass: add column-wise cumulative sums using SIMD
+                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+                    for (1..self.rows) |r| {
+                        const prev_row_offset = (r - 1) * integral.cols;
+                        const curr_row_offset = r * integral.cols;
+                        var c: usize = 0;
+
+                        // Process SIMD-width chunks
+                        while (c + simd_len <= self.cols) : (c += simd_len) {
+                            const prev_vals: @Vector(simd_len, f32) = integral.data[prev_row_offset + c ..][0..simd_len].*;
+                            const curr_vals: @Vector(simd_len, f32) = integral.data[curr_row_offset + c ..][0..simd_len].*;
+                            integral.data[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
+                        }
+
+                        // Handle remaining columns
+                        while (c < self.cols) : (c += 1) {
+                            integral.data[curr_row_offset + c] += integral.data[prev_row_offset + c];
                         }
                     }
                 },
                 .@"struct" => {
-                    var tmp = [_]f32{0} ** Self.channels();
-                    for (0..self.cols) |c| {
-                        inline for (std.meta.fields(T), 0..) |f, i| {
-                            tmp[i] += as(f32, @field(self.at(0, c).*, f.name));
-                            integral.at(0, c)[i] = tmp[i];
-                        }
-                    }
-                    for (1..self.rows) |r| {
-                        tmp = [_]f32{0} ** Self.channels();
+                    const num_channels = comptime Self.channels();
+
+                    // First pass: compute row-wise cumulative sums for all channels
+                    for (0..self.rows) |r| {
+                        var tmp = [_]f32{0} ** num_channels;
+                        const row_offset = r * self.stride;
+                        const out_offset = r * integral.cols;
                         for (0..self.cols) |c| {
                             inline for (std.meta.fields(T), 0..) |f, i| {
-                                tmp[i] += as(f32, @field(self.at(r, c).*, f.name));
-                                integral.at(r, c)[i] = tmp[i] + integral.at(r - 1, c)[i];
+                                tmp[i] += as(f32, @field(self.data[row_offset + c], f.name));
+                                integral.data[out_offset + c][i] = tmp[i];
+                            }
+                        }
+                    }
+
+                    // Second pass: add column-wise cumulative sums
+                    for (1..self.rows) |r| {
+                        const prev_row_offset = (r - 1) * integral.cols;
+                        const curr_row_offset = r * integral.cols;
+                        for (0..self.cols) |c| {
+                            inline for (0..num_channels) |i| {
+                                integral.data[curr_row_offset + c][i] += integral.data[prev_row_offset + c][i];
                             }
                         }
                     }
@@ -622,6 +650,30 @@ test "integral image struct" {
             }
         }
     }
+}
+
+test "integral image performance" {
+    const Timer = std.time.Timer;
+    const print = std.debug.print;
+
+    // Create a larger image for meaningful timing
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 1024, 1024);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with random-ish data
+    for (image.data, 0..) |*pixel, i| {
+        pixel.* = @intCast((i * 17 + 23) % 256);
+    }
+
+    var integral: Image(f32) = undefined;
+
+    // Benchmark implementation
+    var timer = try Timer.start();
+    try image.integralImage(std.testing.allocator, &integral);
+    const time = timer.read();
+    defer integral.deinit(std.testing.allocator);
+
+    print("\nIntegral Image Benchmark (1024x1024 u8): {d:.2}ms\n", .{@as(f64, @floatFromInt(time)) / 1e6});
 }
 
 test "getRectangle" {
