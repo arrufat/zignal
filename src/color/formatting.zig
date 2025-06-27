@@ -1,5 +1,5 @@
 //! Shared formatting utilities for color types.
-//! 
+//!
 //! Provides ANSI terminal color formatting for all color types, allowing colors to be
 //! displayed with their actual color as background in terminal output.
 
@@ -70,13 +70,13 @@ pub fn formatColor(
 }
 
 fn shouldUseLightText(rgb: anytype) bool {
-    const luma = if (@hasDecl(@TypeOf(rgb), "luma")) 
-        rgb.luma() 
-    else 
+    const luma = if (@hasDecl(@TypeOf(rgb), "luma"))
+        rgb.luma()
+    else
         // Fallback calculation
-        (@as(f64, @floatFromInt(rgb.r)) * 0.2126 + 
-         @as(f64, @floatFromInt(rgb.g)) * 0.7152 + 
-         @as(f64, @floatFromInt(rgb.b)) * 0.0722) / 255;
-    
+        (@as(f64, @floatFromInt(rgb.r)) * 0.2126 +
+            @as(f64, @floatFromInt(rgb.g)) * 0.7152 +
+            @as(f64, @floatFromInt(rgb.b)) * 0.0722) / 255;
+
     return luma < 0.5;
 }
