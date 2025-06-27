@@ -1,6 +1,3 @@
-//! A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with an alpha channel.
-//! Each component (r, g, b, a) is an unsigned 8-bit integer (0-255).
-
 const std = @import("std");
 const formatting = @import("formatting.zig");
 
@@ -14,6 +11,8 @@ const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Xyb = @import("Xyb.zig");
 
+/// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with an alpha channel.
+/// Each component (r, g, b, a) is an unsigned 8-bit integer (0-255).
 pub const Rgba = packed struct {
     r: u8,
     g: u8,
