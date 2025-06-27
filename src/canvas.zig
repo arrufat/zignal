@@ -31,6 +31,7 @@ pub fn Canvas(comptime T: type) type {
         pub fn drawLine(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
+            // To avoid casting all the time, perform all operations using the underlying type of p1 and p2.
             const Float = @TypeOf(p1.x);
             var x1 = @round(p1.x);
             var y1 = @round(p1.y);
@@ -76,10 +77,12 @@ pub fn Canvas(comptime T: type) type {
                     }
                 }
             } else {
+                // This part is a little more complicated because we are going to perform alpha blending
+                // so the diagonal lines look nice.
                 const max_alpha: Float = @floatFromInt(c2.a);
                 const rise = y2 - y1;
                 const run = x2 - x1;
-                if (@abs(rise) < @abs(run)) {
+                if (@abs(rise) < @abs(run)) { // Gentle slope: Iterate over x-coordinates
                     const slope = rise / run;
                     const first = if (x1 > x2) @max(x2, 0) else @max(x1, 0);
                     const last = if (x1 > x2) @min(x1, cols - 1) else @min(x2, cols - 1);
@@ -125,7 +128,7 @@ pub fn Canvas(comptime T: type) type {
                             }
                         }
                     }
-                } else {
+                } else { // Steep slope: Iterate over y-coordinates
                     const slope = run / rise;
                     const first = if (y1 > y2) @max(y2, 0) else @max(y1, 0);
                     const last = if (y1 > y2) @min(y1, rows - 1) else @min(y2, rows - 1);
