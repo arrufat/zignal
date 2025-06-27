@@ -16,7 +16,7 @@ pub const Lab = @import("color/Lab.zig");
 pub const Lms = @import("color/Lms.zig");
 pub const Oklab = @import("color/Oklab.zig");
 pub const Rgb = @import("color/Rgb.zig");
-pub const Rgba = @import("color/Rgba.zig");
+pub const Rgba = @import("color/Rgba.zig").Rgba;
 pub const Xyb = @import("color/Xyb.zig");
 pub const Xyz = @import("color/Xyz.zig");
 
@@ -122,10 +122,69 @@ test "blend with zero alpha should not change color" {
     try expectEqualDeep(test_hsl, original_hsl);
 }
 
-test "hex to RGB/A" {
+test "Rgb fromHex and toHex" {
+    // Test fromHex with various colors
     try expectEqualDeep(Rgb.fromHex(0x4e008e), Rgb{ .r = 78, .g = 0, .b = 142 });
     try expectEqualDeep(Rgb.fromHex(0x000000), Rgb{ .r = 0, .g = 0, .b = 0 });
     try expectEqualDeep(Rgb.fromHex(0xffffff), Rgb{ .r = 255, .g = 255, .b = 255 });
+    try expectEqualDeep(Rgb.fromHex(0xff0000), Rgb{ .r = 255, .g = 0, .b = 0 });
+    try expectEqualDeep(Rgb.fromHex(0x00ff00), Rgb{ .r = 0, .g = 255, .b = 0 });
+    try expectEqualDeep(Rgb.fromHex(0x0000ff), Rgb{ .r = 0, .g = 0, .b = 255 });
+    try expectEqualDeep(Rgb.fromHex(0x808080), Rgb{ .r = 128, .g = 128, .b = 128 });
+    
+    // Test toHex converts back correctly
+    const purple = Rgb{ .r = 78, .g = 0, .b = 142 };
+    try expectEqual(purple.toHex(), 0x4e008e);
+    
+    const black = Rgb{ .r = 0, .g = 0, .b = 0 };
+    try expectEqual(black.toHex(), 0x000000);
+    
+    const white = Rgb{ .r = 255, .g = 255, .b = 255 };
+    try expectEqual(white.toHex(), 0xffffff);
+    
+    const red = Rgb{ .r = 255, .g = 0, .b = 0 };
+    try expectEqual(red.toHex(), 0xff0000);
+    
+    // Test round-trip conversion
+    const test_colors = [_]u24{ 0x123456, 0xabcdef, 0x987654, 0xfedcba, 0x111111, 0xeeeeee };
+    for (test_colors) |hex_color| {
+        const rgb = Rgb.fromHex(hex_color);
+        const converted_back = rgb.toHex();
+        try expectEqual(converted_back, hex_color);
+    }
+}
+
+test "Rgba fromHex and toHex" {
+    // Test fromHex with various colors (RGBA format)
+    try expectEqualDeep(Rgba.fromHex(0x4e008eff), Rgba{ .r = 78, .g = 0, .b = 142, .a = 255 });
+    try expectEqualDeep(Rgba.fromHex(0x000000ff), Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 });
+    try expectEqualDeep(Rgba.fromHex(0xffffff00), Rgba{ .r = 255, .g = 255, .b = 255, .a = 0 });
+    try expectEqualDeep(Rgba.fromHex(0xff000080), Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 });
+    try expectEqualDeep(Rgba.fromHex(0x00ff00c0), Rgba{ .r = 0, .g = 255, .b = 0, .a = 192 });
+    try expectEqualDeep(Rgba.fromHex(0x0000ff40), Rgba{ .r = 0, .g = 0, .b = 255, .a = 64 });
+    
+    // Test toHex converts back correctly  
+    const purple_alpha = Rgba{ .r = 78, .g = 0, .b = 142, .a = 255 };
+    try expectEqual(purple_alpha.toHex(), 0x4e008eff);
+    
+    const transparent_white = Rgba{ .r = 255, .g = 255, .b = 255, .a = 0 };
+    try expectEqual(transparent_white.toHex(), 0xffffff00);
+    
+    const semi_red = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    try expectEqual(semi_red.toHex(), 0xff000080);
+    
+    // Test round-trip conversion
+    const test_colors = [_]u32{ 0x12345678, 0xabcdef90, 0x98765432, 0xfedcba01, 0x11111111, 0xeeeeeeee };
+    for (test_colors) |hex_color| {
+        const rgba = Rgba.fromHex(hex_color);
+        const converted_back = rgba.toHex();
+        try expectEqual(converted_back, hex_color);
+    }
+    
+    // Test edge cases
+    try expectEqualDeep(Rgba.fromHex(0x00000000), Rgba.transparent);
+    try expectEqualDeep(Rgba.fromHex(0x000000ff), Rgba.black);
+    try expectEqualDeep(Rgba.fromHex(0xffffffff), Rgba.white);
 }
 
 test "primary colors" {
