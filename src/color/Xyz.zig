@@ -27,14 +27,17 @@ pub const black: @This() = .{ .x = 0, .y = 0, .z = 0 };
 
 const Self = @This();
 
+/// Formats the CIE XYZ color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     return formatting.formatColor(Self, self, fmt, options, writer);
 }
 
+/// Returns true if the color represents a neutral gray (via RGB conversion).
 pub fn isGray(self: Self) bool {
     return self.toRgb().isGray();
 }
 
+/// Converts to grayscale via Lab lightness component for accuracy.
 pub fn toGray(self: Self) u8 {
     return self.toLab().toGray();
 }

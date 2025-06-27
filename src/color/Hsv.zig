@@ -26,14 +26,17 @@ pub const white: @This() = .{ .h = 0, .s = 0, .v = 100 };
 
 const Self = @This();
 
+/// Formats the HSV color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     return formatting.formatColor(Self, self, fmt, options, writer);
 }
 
+/// Returns true if saturation is 0 (grayscale).
 pub fn isGray(self: Self) bool {
     return self.s == 0;
 }
 
+/// Converts to grayscale using the value component.
 pub fn toGray(self: Self) u8 {
     return @intFromFloat(@round(self.v / 100 * 255));
 }

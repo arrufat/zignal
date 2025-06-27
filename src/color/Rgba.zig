@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
@@ -22,10 +23,12 @@ pub const Rgba = packed struct {
     pub const white: Rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
     pub const transparent: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
+    /// Formats the RGBA color for display. Use "color" format for ANSI color output.
     pub fn format(self: Rgba, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         return formatting.formatColor(Rgba, self, fmt, options, writer);
     }
 
+    /// Creates an RGBA color from a grayscale value with specified alpha.
     pub fn fromGray(gray: u8, alpha: u8) Rgba {
         return .{ .r = gray, .g = gray, .b = gray, .a = alpha };
     }
@@ -35,17 +38,17 @@ pub const Rgba = packed struct {
         return @bitCast(std.mem.nativeToBig(u32, hex_code));
     }
 
+    /// Calculates the perceptual luminance using ITU-R BT.709 coefficients (ignores alpha).
     pub fn luma(self: Rgba) f64 {
-        const r = @as(f64, @floatFromInt(self.r)) / 255;
-        const g = @as(f64, @floatFromInt(self.g)) / 255;
-        const b = @as(f64, @floatFromInt(self.b)) / 255;
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        return conversions.rgbLuma(self.r, self.g, self.b);
     }
 
+    /// Returns true if all RGB components are equal (grayscale, ignores alpha).
     pub fn isGray(self: Rgba) bool {
         return self.r == self.g and self.g == self.b;
     }
 
+    /// Converts to grayscale using perceptual luminance calculation (ignores alpha).
     pub fn toGray(self: Rgba) u8 {
         return @intFromFloat(self.luma() * 255);
     }

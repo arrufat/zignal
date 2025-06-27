@@ -94,11 +94,24 @@ inline fn gammaToLinear(x: f64) f64 {
     return if (x > 0.04045) pow(f64, (x + 0.055) / 1.055, 2.4) else x / 12.92;
 }
 
+/// Calculates perceptual luminance from 8-bit RGB using ITU-R BT.709 coefficients.
+/// Returns value in [0.0, 1.0] range representing perceived brightness.
+pub fn rgbLuma(r: u8, g: u8, b: u8) f64 {
+    const rf = @as(f64, @floatFromInt(r)) / 255;
+    const gf = @as(f64, @floatFromInt(g)) / 255;
+    const bf = @as(f64, @floatFromInt(b)) / 255;
+    return 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
+}
+
+/// Internal floating-point RGB representation for lossless color space conversions.
+/// Components are normalized to [0.0, 1.0] range to avoid precision loss during
+/// mathematical transformations between color spaces.
 const RgbFloat = struct {
     r: f64,
     g: f64,
     b: f64,
 
+    /// Creates RgbFloat from 8-bit RGB components by normalizing to [0.0, 1.0] range.
     pub fn fromRgb(r: u8, g: u8, b: u8) RgbFloat {
         return .{
             .r = @as(f64, @floatFromInt(r)) / 255,
@@ -107,16 +120,13 @@ const RgbFloat = struct {
         };
     }
 
+    /// Converts RgbFloat back to 8-bit RGB, clamping values to [0, 255] range.
     pub fn toRgb(self: RgbFloat) Rgb {
         return .{
             .r = @intFromFloat(@round(255 * @max(0, @min(1, self.r)))),
             .g = @intFromFloat(@round(255 * @max(0, @min(1, self.g)))),
             .b = @intFromFloat(@round(255 * @max(0, @min(1, self.b)))),
         };
-    }
-
-    pub fn luma(self: RgbFloat) f64 {
-        return 0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b;
     }
 };
 

@@ -27,15 +27,18 @@ pub const black: @This() = .{ .x = 0, .y = 0, .b = 0 };
 
 const Self = @This();
 
+/// Formats the XYB color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     return formatting.formatColor(Self, self, fmt, options, writer);
 }
 
+/// Returns true if the color represents a neutral gray (via Oklab a=0, b=0).
 pub fn isGray(self: Self) bool {
     const oklab = self.toOklab();
     return oklab.a == 0 and oklab.b == 0;
 }
 
+/// Converts to grayscale using Oklab lightness for perceptual accuracy.
 pub fn toGray(self: Self) u8 {
     return @intFromFloat(@round(@max(0, @min(1, self.toOklab().l)) * 255));
 }
