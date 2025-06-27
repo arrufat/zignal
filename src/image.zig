@@ -7,14 +7,14 @@ const expectEqual = std.testing.expectEqualDeep;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const Allocator = std.mem.Allocator;
 
-const as = @import("meta.zig").as;
 const convert = @import("color.zig").convert;
-const isScalar = @import("meta.zig").isScalar;
-const isStruct = @import("meta.zig").isStruct;
 const Rgba = @import("color.zig").Rgba;
 
-const Rectangle = @import("geometry.zig").Rectangle;
+const as = @import("meta.zig").as;
+const isScalar = @import("meta.zig").isScalar;
+const isStruct = @import("meta.zig").isStruct;
 const Point2d = @import("point.zig").Point2d;
+const Rectangle = @import("geometry.zig").Rectangle;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
