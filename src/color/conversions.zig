@@ -8,27 +8,29 @@ const assert = std.debug.assert;
 const lerp = std.math.lerp;
 const pow = std.math.pow;
 
+const Hsl = @import("Hsl.zig");
+const Hsv = @import("Hsv.zig");
+const Lab = @import("Lab.zig");
+const Lms = @import("Lms.zig");
+const Oklab = @import("Oklab.zig");
+const Rgb = @import("Rgb.zig");
+const Rgba = @import("Rgba.zig").Rgba;
+const Xyb = @import("Xyb.zig");
+const Xyz = @import("Xyz.zig");
+
+/// Returns true if, and only if, `T` is a known color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, @import("Rgb.zig"), @import("Rgba.zig").Rgba, @import("Hsl.zig"), @import("Hsv.zig"), @import("Lab.zig"), @import("Xyz.zig"), @import("Lms.zig"), @import("Oklab.zig"), @import("Xyb.zig") => true,
+        u8, Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Xyb => true,
         else => false,
     };
 }
 
+/// Generic function to convert `color` into colorspace `T`.
 pub fn convert(comptime T: type, color: anytype) T {
     const ColorType: type = @TypeOf(color);
     comptime assert(isColor(T));
     comptime assert(isColor(ColorType));
-
-    const Rgb = @import("Rgb.zig");
-    const Rgba = @import("Rgba.zig").Rgba;
-    const Hsl = @import("Hsl.zig");
-    const Hsv = @import("Hsv.zig");
-    const Lab = @import("Lab.zig");
-    const Xyz = @import("Xyz.zig");
-    const Lms = @import("Lms.zig");
-    const Oklab = @import("Oklab.zig");
-    const Xyb = @import("Xyb.zig");
 
     return switch (T) {
         u8 => switch (ColorType) {

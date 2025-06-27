@@ -1,15 +1,14 @@
 const std = @import("std");
-const formatting = @import("formatting.zig");
 
-// Import color types
-const Rgb = @import("Rgb.zig");
+const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
-const Xyz = @import("Xyz.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Rgb = @import("Rgb.zig");
 const Xyb = @import("Xyb.zig");
+const Xyz = @import("Xyz.zig");
 
 /// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with an alpha channel.
 /// Each component (r, g, b, a) is an unsigned 8-bit integer (0-255).
