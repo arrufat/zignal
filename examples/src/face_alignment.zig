@@ -6,7 +6,7 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Hsv = zignal.Hsv;
-const drawRectangle = zignal.drawRectangle;
+const Canvas = zignal.Canvas;
 
 const Point2d = zignal.Point2d(f32);
 const SimilarityTransform = zignal.SimilarityTransform(f32);
@@ -86,7 +86,8 @@ pub fn extractAlignedFace(
     // Draw a rectangle around the detected face.  Note that the color can be any Zignal
     // supported color, and the appropriate conversion will be performed.  In this case,
     // the image is in Rgba format, and the color is in Hsv.  Zignal will handle that.
-    drawRectangle(Rgba, image, rect, 1, Hsv{ .h = 0, .s = 100, .v = 100 });
+    const canvas: Canvas(T) = .init(image, allocator);
+    canvas.drawRectangle(rect, 1, Hsv{ .h = 0, .s = 100, .v = 100 });
 
     // Crop out the detected face.
     var chip: Image(Rgba) = undefined;
