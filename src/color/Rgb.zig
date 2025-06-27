@@ -26,14 +26,17 @@ pub const blue: @This() = .{ .r = 0, .g = 0, .b = 255 };
 
 const Self = @This();
 
+/// Formats the RGB color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     return formatting.formatColor(Self, self, fmt, options, writer);
 }
 
+/// Creates an RGB color from a grayscale value (gray applied to all channels).
 pub fn fromGray(gray: u8) Self {
     return .{ .r = gray, .g = gray, .b = gray };
 }
 
+/// Creates RGB from 24-bit hexadecimal value (0xRRGGBB format).
 pub fn fromHex(hex_code: u24) Self {
     return .{
         .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
@@ -42,17 +45,17 @@ pub fn fromHex(hex_code: u24) Self {
     };
 }
 
+/// Calculates the perceptual luminance using ITU-R BT.709 coefficients.
 pub fn luma(self: Self) f64 {
-    const r = @as(f64, @floatFromInt(self.r)) / 255;
-    const g = @as(f64, @floatFromInt(self.g)) / 255;
-    const b = @as(f64, @floatFromInt(self.b)) / 255;
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return conversions.rgbLuma(self.r, self.g, self.b);
 }
 
+/// Returns true if all RGB components are equal (grayscale).
 pub fn isGray(self: Self) bool {
     return self.r == self.g and self.g == self.b;
 }
 
+/// Converts to grayscale using perceptual luminance calculation.
 pub fn toGray(self: Self) u8 {
     return @intFromFloat(self.luma() * 255);
 }

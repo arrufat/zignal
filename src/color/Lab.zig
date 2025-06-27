@@ -27,14 +27,17 @@ pub const white: @This() = .{ .l = 100, .a = 0, .b = 0 };
 
 const Self = @This();
 
+/// Formats the CIELAB color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     return formatting.formatColor(Self, self, fmt, options, writer);
 }
 
+/// Returns true if both a* and b* components are 0 (neutral gray).
 pub fn isGray(self: Self) bool {
     return self.a == 0 and self.b == 0;
 }
 
+/// Converts to grayscale using the L* (lightness) component.
 pub fn toGray(self: Self) u8 {
     return @intFromFloat(@round(self.l / 100 * 255));
 }
