@@ -38,38 +38,47 @@ pub fn toGray(self: Self) u8 {
     return @intFromFloat(@round(self.l / 100 * 255));
 }
 
+/// Converts HSL to RGB color space.
 pub fn toRgb(self: Self) Rgb {
     return conversions.hslToRgb(self);
 }
 
+/// Converts HSL to RGBA by first converting to RGB and adding alpha.
 pub fn toRgba(self: Self, alpha: u8) Rgba {
     return self.toRgb().toRgba(alpha);
 }
 
+/// Converts HSL to HSV color space via RGB intermediate conversion.
 pub fn toHsv(self: Self) Hsv {
     return self.toRgb().toHsv();
 }
 
+/// Converts HSL to CIE XYZ color space via RGB intermediate conversion.
 pub fn toXyz(self: Self) Xyz {
     return self.toRgb().toXyz();
 }
 
+/// Converts HSL to CIELAB color space using direct conversion.
 pub fn toLab(self: Self) Lab {
     return conversions.hslToLab(self);
 }
 
+/// Converts HSL to LMS cone response via RGB intermediate conversion.
 pub fn toLms(self: Self) Lms {
     return self.toRgb().toLms();
 }
 
+/// Converts HSL to Oklab via RGB intermediate conversion.
 pub fn toOklab(self: Self) Oklab {
     return self.toRgb().toOklab();
 }
 
+/// Converts HSL to XYB via RGB intermediate conversion.
 pub fn toXyb(self: Self) Xyb {
     return self.toRgb().toXyb();
 }
 
+/// Alpha blends the given RGBA color onto this HSL color in-place.
 pub fn blend(self: *Self, color: Rgba) void {
     var rgb = self.toRgb();
     rgb.blend(color);

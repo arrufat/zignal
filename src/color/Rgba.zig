@@ -30,6 +30,7 @@ pub const Rgba = packed struct {
         return .{ .r = gray, .g = gray, .b = gray, .a = alpha };
     }
 
+    /// Creates RGBA from 32-bit hexadecimal value (0xRRGGBBAA format).
     pub fn fromHex(hex_code: u32) Rgba {
         return @bitCast(std.mem.nativeToBig(u32, hex_code));
     }
@@ -49,42 +50,52 @@ pub const Rgba = packed struct {
         return @intFromFloat(self.luma() * 255);
     }
 
+    /// Converts RGBA to 32-bit hexadecimal representation (0xRRGGBBAA format).
     pub fn toHex(self: Rgba) u32 {
         return std.mem.bigToNative(u32, @bitCast(self));
     }
 
+    /// Converts RGBA to RGB by discarding the alpha channel.
     pub fn toRgb(self: Rgba) Rgb {
         return .{ .r = self.r, .g = self.g, .b = self.b };
     }
 
+    /// Converts RGBA to HSL by first converting to RGB.
     pub fn toHsl(self: Rgba) Hsl {
         return self.toRgb().toHsl();
     }
 
+    /// Converts RGBA to HSV by first converting to RGB.
     pub fn toHsv(self: Rgba) Hsv {
         return self.toRgb().toHsv();
     }
 
+    /// Converts RGBA to CIELAB by first converting to RGB.
     pub fn toLab(self: Rgba) Lab {
         return self.toRgb().toLab();
     }
 
+    /// Converts RGBA to CIE XYZ by first converting to RGB.
     pub fn toXyz(self: Rgba) Xyz {
         return self.toRgb().toXyz();
     }
 
+    /// Converts RGBA to LMS cone response by first converting to RGB.
     pub fn toLms(self: Rgba) Lms {
         return self.toRgb().toLms();
     }
 
+    /// Converts RGBA to Oklab by first converting to RGB.
     pub fn toOklab(self: Rgba) Oklab {
         return self.toRgb().toOklab();
     }
 
+    /// Converts RGBA to XYB by first converting to RGB.
     pub fn toXyb(self: Rgba) Xyb {
         return self.toRgb().toXyb();
     }
 
+    /// Alpha blends the given RGBA color onto this RGBA color in-place.
     pub fn blend(self: *Rgba, color: Rgba) void {
         if (color.a == 0) return;
 
