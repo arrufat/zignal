@@ -10,7 +10,7 @@ const pow = std.math.pow;
 
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, @import("Rgb.zig"), @import("Rgba.zig"), @import("Hsl.zig"), @import("Hsv.zig"), @import("Lab.zig"), @import("Xyz.zig"), @import("Lms.zig"), @import("Oklab.zig"), @import("Xyb.zig") => true,
+        u8, @import("Rgb.zig"), @import("Rgba.zig").Rgba, @import("Hsl.zig"), @import("Hsv.zig"), @import("Lab.zig"), @import("Xyz.zig"), @import("Lms.zig"), @import("Oklab.zig"), @import("Xyb.zig") => true,
         else => false,
     };
 }
@@ -21,7 +21,7 @@ pub fn convert(comptime T: type, color: anytype) T {
     comptime assert(isColor(ColorType));
 
     const Rgb = @import("Rgb.zig");
-    const Rgba = @import("Rgba.zig");
+    const Rgba = @import("Rgba.zig").Rgba;
     const Hsl = @import("Hsl.zig");
     const Hsv = @import("Hsv.zig");
     const Lab = @import("Lab.zig");
@@ -43,8 +43,7 @@ pub fn convert(comptime T: type, color: anytype) T {
         Rgba => switch (ColorType) {
             Rgba => color,
             u8 => .{ .r = color, .g = color, .b = color, .a = 255 },
-            Rgb => color.toRgba(255),
-            inline else => color.toRgb().toRgba(255),
+            inline else => color.toRgba(255),
         },
         Hsl => switch (ColorType) {
             Hsl => color,

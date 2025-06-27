@@ -6,6 +6,16 @@ const std = @import("std");
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 
+// Import color types
+const Rgba = @import("Rgba.zig").Rgba;
+const Hsl = @import("Hsl.zig");
+const Hsv = @import("Hsv.zig");
+const Lab = @import("Lab.zig");
+const Xyz = @import("Xyz.zig");
+const Lms = @import("Lms.zig");
+const Oklab = @import("Oklab.zig");
+const Xyb = @import("Xyb.zig");
+
 r: u8,
 g: u8,
 b: u8,
@@ -53,39 +63,39 @@ pub fn toHex(self: Self) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
 }
 
-pub fn toRgba(self: Self, alpha: u8) @import("Rgba.zig") {
+pub fn toRgba(self: Self, alpha: u8) Rgba {
     return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
 }
 
-pub fn toHsl(self: Self) @import("Hsl.zig") {
+pub fn toHsl(self: Self) Hsl {
     return conversions.rgbToHsl(self);
 }
 
-pub fn toHsv(self: Self) @import("Hsv.zig") {
+pub fn toHsv(self: Self) Hsv {
     return conversions.rgbToHsv(self);
 }
 
-pub fn toXyz(self: Self) @import("Xyz.zig") {
+pub fn toXyz(self: Self) Xyz {
     return conversions.rgbToXyz(self);
 }
 
-pub fn toLab(self: Self) @import("Lab.zig") {
+pub fn toLab(self: Self) Lab {
     return conversions.rgbToLab(self);
 }
 
-pub fn toLms(self: Self) @import("Lms.zig") {
+pub fn toLms(self: Self) Lms {
     return conversions.xyzToLms(self.toXyz());
 }
 
-pub fn toOklab(self: Self) @import("Oklab.zig") {
+pub fn toOklab(self: Self) Oklab {
     return conversions.lmsToOklab(self.toLms());
 }
 
-pub fn toXyb(self: Self) @import("Xyb.zig") {
+pub fn toXyb(self: Self) Xyb {
     return conversions.lmsToXyb(self.toLms());
 }
 
-pub fn blend(self: *Self, color: @import("Rgba.zig")) void {
+pub fn blend(self: *Self, color: Rgba) void {
     if (color.a == 0) return;
 
     const a = @as(f32, @floatFromInt(color.a)) / 255;
