@@ -107,7 +107,7 @@ const RgbFloat = struct {
         };
     }
 
-    pub fn toRgb(self: RgbFloat) @import("Rgb.zig") {
+    pub fn toRgb(self: RgbFloat) Rgb {
         return .{
             .r = @intFromFloat(@round(255 * @max(0, @min(1, self.r)))),
             .g = @intFromFloat(@round(255 * @max(0, @min(1, self.g)))),
@@ -120,7 +120,13 @@ const RgbFloat = struct {
     }
 };
 
-pub fn rgbToHsl(rgb: @import("Rgb.zig")) @import("Hsl.zig") {
+/// Converts the RGB color into an HSL color by calculating:
+/// - Minimum and maximum color values
+/// - Delta between max and min
+/// - Hue based on which color channel is max
+/// - Lightness as average of max and min
+/// - Saturation based on delta and lightness
+pub fn rgbToHsl(rgb: Rgb) Hsl {
     const rgb_float = RgbFloat.fromRgb(rgb.r, rgb.g, rgb.b);
     const min = @min(rgb_float.r, @min(rgb_float.g, rgb_float.b));
     const max = @max(rgb_float.r, @max(rgb_float.g, rgb_float.b));
@@ -146,7 +152,11 @@ pub fn rgbToHsl(rgb: @import("Rgb.zig")) @import("Hsl.zig") {
     };
 }
 
-pub fn hslToRgb(hsl: @import("Hsl.zig")) @import("Rgb.zig") {
+/// Converts HSL to RGB using the standard algorithm:
+/// - Calculates hue sector and fractional part
+/// - Applies saturation and lightness transformations
+/// - Maps to RGB values based on hue sector
+pub fn hslToRgb(hsl: Hsl) Rgb {
     const h = @max(0, @min(360, hsl.h));
     const s = @max(0, @min(1, hsl.s / 100));
     const l = @max(0, @min(1, hsl.l / 100));
@@ -185,7 +195,11 @@ pub fn hslToRgb(hsl: @import("Hsl.zig")) @import("Rgb.zig") {
     return rgb_float.toRgb();
 }
 
-pub fn rgbToLab(rgb: @import("Rgb.zig")) @import("Lab.zig") {
+/// Converts RGB to CIELAB color space by:
+/// - First converting RGB to XYZ using gamma correction
+/// - Then converting XYZ to Lab using cube root transformations
+/// - Normalizing by D65 illuminant reference white point
+pub fn rgbToLab(rgb: Rgb) Lab {
     const rgb_float = RgbFloat.fromRgb(rgb.r, rgb.g, rgb.b);
 
     // Convert to XYZ first
@@ -227,7 +241,11 @@ pub fn rgbToLab(rgb: @import("Rgb.zig")) @import("Lab.zig") {
     };
 }
 
-pub fn labToRgb(lab: @import("Lab.zig")) @import("Rgb.zig") {
+/// Converts CIELAB to RGB by:
+/// - Converting Lab to XYZ using inverse cube root transformations
+/// - Converting XYZ to RGB using matrix multiplication
+/// - Applying gamma correction for final RGB values
+pub fn labToRgb(lab: Lab) Rgb {
     // Convert Lab to XYZ first
     var y: f64 = (@max(0, @min(100, lab.l)) + 16.0) / 116.0;
     var x: f64 = (@max(-128, @min(127, lab.a)) / 500.0) + y;
@@ -270,16 +288,20 @@ pub fn labToRgb(lab: @import("Lab.zig")) @import("Rgb.zig") {
     return rgb_float.toRgb();
 }
 
-pub fn hslToLab(hsl: @import("Hsl.zig")) @import("Lab.zig") {
+pub fn hslToLab(hsl: Hsl) Lab {
     return rgbToLab(hslToRgb(hsl));
 }
 
-pub fn labToHsl(lab: @import("Lab.zig")) @import("Hsl.zig") {
+pub fn labToHsl(lab: Lab) Hsl {
     return rgbToHsl(labToRgb(lab));
 }
 
 // HSV conversions
-pub fn rgbToHsv(rgb: @import("Rgb.zig")) @import("Hsv.zig") {
+/// Converts RGB to HSV color space using:
+/// - Value as maximum of RGB components
+/// - Saturation based on delta between max and min
+/// - Hue calculated from which component is maximum
+pub fn rgbToHsv(rgb: Rgb) Hsv {
     const rgb_float = RgbFloat.fromRgb(rgb.r, rgb.g, rgb.b);
     const min = @min(rgb_float.r, @min(rgb_float.g, rgb_float.b));
     const max = @max(rgb_float.r, @max(rgb_float.g, rgb_float.b));
@@ -300,7 +322,11 @@ pub fn rgbToHsv(rgb: @import("Rgb.zig")) @import("Hsv.zig") {
     };
 }
 
-pub fn hsvToRgb(hsv: @import("Hsv.zig")) @import("Rgb.zig") {
+/// Converts HSV to RGB using the standard algorithm:
+/// - Calculates hue sector (0-5) and fractional part
+/// - Computes intermediate values p, q, t
+/// - Maps to RGB based on hue sector
+pub fn hsvToRgb(hsv: Hsv) Rgb {
     const hue = @max(0, @min(1, hsv.h / 360));
     const sat = @max(0, @min(1, hsv.s / 100));
     const val = @max(0, @min(1, hsv.v / 100));
@@ -335,16 +361,20 @@ pub fn hsvToRgb(hsv: @import("Hsv.zig")) @import("Rgb.zig") {
     return rgb_float.toRgb();
 }
 
-pub fn hsvToHsl(hsv: @import("Hsv.zig")) @import("Hsl.zig") {
+pub fn hsvToHsl(hsv: Hsv) Hsl {
     return rgbToHsl(hsvToRgb(hsv));
 }
 
-pub fn hsvToLab(hsv: @import("Hsv.zig")) @import("Lab.zig") {
+pub fn hsvToLab(hsv: Hsv) Lab {
     return rgbToLab(hsvToRgb(hsv));
 }
 
 // XYZ conversions
-pub fn rgbToXyz(rgb: @import("Rgb.zig")) @import("Xyz.zig") {
+/// Converts RGB to CIE 1931 XYZ color space using:
+/// - Gamma correction to convert from sRGB to linear RGB
+/// - Matrix multiplication with sRGB to XYZ transformation matrix
+/// - Scaling by 100 for standard XYZ range
+pub fn rgbToXyz(rgb: Rgb) Xyz {
     const rgb_float = RgbFloat.fromRgb(rgb.r, rgb.g, rgb.b);
     const r = gammaToLinear(rgb_float.r);
     const g = gammaToLinear(rgb_float.g);
@@ -357,7 +387,11 @@ pub fn rgbToXyz(rgb: @import("Rgb.zig")) @import("Xyz.zig") {
     };
 }
 
-pub fn xyzToRgb(xyz: @import("Xyz.zig")) @import("Rgb.zig") {
+/// Converts CIE XYZ to RGB by:
+/// - Matrix multiplication with XYZ to sRGB transformation matrix
+/// - Applying gamma correction to convert linear RGB to sRGB
+/// - Clamping values to valid RGB range [0,1]
+pub fn xyzToRgb(xyz: Xyz) Rgb {
     const r = (xyz.x * 3.2406 + xyz.y * -1.5372 + xyz.z * -0.4986) / 100;
     const g = (xyz.x * -0.9689 + xyz.y * 1.8758 + xyz.z * 0.0415) / 100;
     const b = (xyz.x * 0.0557 + xyz.y * -0.2040 + xyz.z * 1.0570) / 100;
@@ -371,15 +405,19 @@ pub fn xyzToRgb(xyz: @import("Xyz.zig")) @import("Rgb.zig") {
     return rgb_float.toRgb();
 }
 
-pub fn xyzToHsl(xyz: @import("Xyz.zig")) @import("Hsl.zig") {
+pub fn xyzToHsl(xyz: Xyz) Hsl {
     return rgbToHsl(xyzToRgb(xyz));
 }
 
-pub fn xyzToHsv(xyz: @import("Xyz.zig")) @import("Hsv.zig") {
+pub fn xyzToHsv(xyz: Xyz) Hsv {
     return rgbToHsv(xyzToRgb(xyz));
 }
 
-pub fn xyzToLab(xyz: @import("Xyz.zig")) @import("Lab.zig") {
+/// Converts XYZ to CIELAB using:
+/// - Normalization by D65 illuminant white point
+/// - Cube root transformation for perceptual uniformity
+/// - L* (lightness), a* (green-red), b* (blue-yellow) calculations
+pub fn xyzToLab(xyz: Xyz) Lab {
     // Observer. = 2°, illuminant = D65.
     var x = xyz.x / 95.047;
     var y = xyz.y / 100.000;
@@ -410,7 +448,10 @@ pub fn xyzToLab(xyz: @import("Xyz.zig")) @import("Lab.zig") {
     };
 }
 
-pub fn xyzToLms(xyz: @import("Xyz.zig")) @import("Lms.zig") {
+/// Converts XYZ to LMS (Long, Medium, Short) cone response space using:
+/// - Linear transformation matrix based on human cone sensitivity
+/// - Represents how the human eye's cone cells respond to light
+pub fn xyzToLms(xyz: Xyz) Lms {
     return .{
         .l = (0.8951 * xyz.x + 0.2664 * xyz.y - 0.1614 * xyz.z) / 100,
         .m = (-0.7502 * xyz.x + 1.7135 * xyz.y + 0.0367 * xyz.z) / 100,
@@ -418,28 +459,31 @@ pub fn xyzToLms(xyz: @import("Xyz.zig")) @import("Lms.zig") {
     };
 }
 
-pub fn xyzToOklab(xyz: @import("Xyz.zig")) @import("Oklab.zig") {
+pub fn xyzToOklab(xyz: Xyz) Oklab {
     return lmsToOklab(xyzToLms(xyz));
 }
 
-pub fn xyzToXyb(xyz: @import("Xyz.zig")) @import("Xyb.zig") {
+pub fn xyzToXyb(xyz: Xyz) Xyb {
     return lmsToXyb(xyzToLms(xyz));
 }
 
 // LMS conversions
-pub fn lmsToRgb(lms: @import("Lms.zig")) @import("Rgb.zig") {
+pub fn lmsToRgb(lms: Lms) Rgb {
     return xyzToRgb(lmsToXyz(lms));
 }
 
-pub fn lmsToHsl(lms: @import("Lms.zig")) @import("Hsl.zig") {
+pub fn lmsToHsl(lms: Lms) Hsl {
     return rgbToHsl(lmsToRgb(lms));
 }
 
-pub fn lmsToHsv(lms: @import("Lms.zig")) @import("Hsv.zig") {
+pub fn lmsToHsv(lms: Lms) Hsv {
     return rgbToHsv(lmsToRgb(lms));
 }
 
-pub fn lmsToXyz(lms: @import("Lms.zig")) @import("Xyz.zig") {
+/// Converts LMS cone response to CIE XYZ using:
+/// - Inverse transformation matrix of XYZ to LMS conversion
+/// - Restores device-independent XYZ representation from cone response
+pub fn lmsToXyz(lms: Lms) Xyz {
     return .{
         .x = 100 * (0.9869929 * lms.l - 0.1470543 * lms.m + 0.1599627 * lms.s),
         .y = 100 * (0.4323053 * lms.l + 0.5183603 * lms.m + 0.0492912 * lms.s),
@@ -447,11 +491,15 @@ pub fn lmsToXyz(lms: @import("Lms.zig")) @import("Xyz.zig") {
     };
 }
 
-pub fn lmsToLab(lms: @import("Lms.zig")) @import("Lab.zig") {
+pub fn lmsToLab(lms: Lms) Lab {
     return xyzToLab(lmsToXyz(lms));
 }
 
-pub fn lmsToOklab(lms: @import("Lms.zig")) @import("Oklab.zig") {
+/// Converts LMS to Oklab using:
+/// - Cube root transformation for perceptual uniformity
+/// - Linear transformation designed for better hue uniformity than CIELAB
+/// - Oklab aims to be more perceptually uniform than other Lab spaces
+pub fn lmsToOklab(lms: Lms) Oklab {
     const lp = std.math.cbrt(lms.l);
     const mp = std.math.cbrt(lms.m);
     const sp = std.math.cbrt(lms.s);
@@ -462,32 +510,40 @@ pub fn lmsToOklab(lms: @import("Lms.zig")) @import("Oklab.zig") {
     };
 }
 
-pub fn lmsToXyb(lms: @import("Lms.zig")) @import("Xyb.zig") {
+/// Converts LMS to XYB color space using:
+/// - X = L - M (difference between long and medium cone response)
+/// - Y = L + M (sum of long and medium cone response)
+/// - B = S (short cone response unchanged)
+pub fn lmsToXyb(lms: Lms) Xyb {
     return .{ .x = lms.l - lms.m, .y = lms.l + lms.m, .b = lms.s };
 }
 
 // Oklab conversions
-pub fn oklabToRgb(oklab: @import("Oklab.zig")) @import("Rgb.zig") {
+pub fn oklabToRgb(oklab: Oklab) Rgb {
     return lmsToRgb(oklabToLms(oklab));
 }
 
-pub fn oklabToHsl(oklab: @import("Oklab.zig")) @import("Hsl.zig") {
+pub fn oklabToHsl(oklab: Oklab) Hsl {
     return rgbToHsl(oklabToRgb(oklab));
 }
 
-pub fn oklabToHsv(oklab: @import("Oklab.zig")) @import("Hsv.zig") {
+pub fn oklabToHsv(oklab: Oklab) Hsv {
     return rgbToHsv(oklabToRgb(oklab));
 }
 
-pub fn oklabToXyz(oklab: @import("Oklab.zig")) @import("Xyz.zig") {
+pub fn oklabToXyz(oklab: Oklab) Xyz {
     return lmsToXyz(oklabToLms(oklab));
 }
 
-pub fn oklabToLab(oklab: @import("Oklab.zig")) @import("Lab.zig") {
+pub fn oklabToLab(oklab: Oklab) Lab {
     return xyzToLab(oklabToXyz(oklab));
 }
 
-pub fn oklabToLms(oklab: @import("Oklab.zig")) @import("Lms.zig") {
+/// Converts Oklab to LMS using:
+/// - Inverse linear transformation from Oklab space
+/// - Cube (power of 3) transformation to restore LMS cone response
+/// - Precise inverse of the LMS to Oklab conversion
+pub fn oklabToLms(oklab: Oklab) Lms {
     return .{
         .l = std.math.pow(f64, 0.9999999985 * oklab.l + 0.3963377922 * oklab.a + 0.2158037581 * oklab.b, 3),
         .m = std.math.pow(f64, 1.000000009 * oklab.l - 0.1055613423 * oklab.a - 0.06385417477 * oklab.b, 3),
@@ -495,32 +551,36 @@ pub fn oklabToLms(oklab: @import("Oklab.zig")) @import("Lms.zig") {
     };
 }
 
-pub fn oklabToXyb(oklab: @import("Oklab.zig")) @import("Xyb.zig") {
+pub fn oklabToXyb(oklab: Oklab) Xyb {
     return lmsToXyb(oklabToLms(oklab));
 }
 
 // XYB conversions
-pub fn xybToRgb(xyb: @import("Xyb.zig")) @import("Rgb.zig") {
+pub fn xybToRgb(xyb: Xyb) Rgb {
     return lmsToRgb(xybToLms(xyb));
 }
 
-pub fn xybToHsl(xyb: @import("Xyb.zig")) @import("Hsl.zig") {
+pub fn xybToHsl(xyb: Xyb) Hsl {
     return lmsToHsl(xybToLms(xyb));
 }
 
-pub fn xybToHsv(xyb: @import("Xyb.zig")) @import("Hsv.zig") {
+pub fn xybToHsv(xyb: Xyb) Hsv {
     return lmsToHsv(xybToLms(xyb));
 }
 
-pub fn xybToXyz(xyb: @import("Xyb.zig")) @import("Xyz.zig") {
+pub fn xybToXyz(xyb: Xyb) Xyz {
     return lmsToXyz(xybToLms(xyb));
 }
 
-pub fn xybToLab(xyb: @import("Xyb.zig")) @import("Lab.zig") {
+pub fn xybToLab(xyb: Xyb) Lab {
     return xyzToLab(xybToXyz(xyb));
 }
 
-pub fn xybToLms(xyb: @import("Xyb.zig")) @import("Lms.zig") {
+/// Converts XYB to LMS cone response using:
+/// - L = 0.5 * (X + Y) (recovers long cone response)
+/// - M = 0.5 * (Y - X) (recovers medium cone response)
+/// - S = B (short cone response unchanged)
+pub fn xybToLms(xyb: Xyb) Lms {
     return .{
         .l = 0.5 * (xyb.x + xyb.y),
         .m = 0.5 * (xyb.y - xyb.x),
@@ -528,6 +588,6 @@ pub fn xybToLms(xyb: @import("Xyb.zig")) @import("Lms.zig") {
     };
 }
 
-pub fn xybToOklab(xyb: @import("Xyb.zig")) @import("Oklab.zig") {
+pub fn xybToOklab(xyb: Xyb) Oklab {
     return lmsToOklab(xybToLms(xyb));
 }

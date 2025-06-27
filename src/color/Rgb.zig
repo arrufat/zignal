@@ -57,42 +57,52 @@ pub fn toGray(self: Self) u8 {
     return @intFromFloat(self.luma() * 255);
 }
 
+/// Converts RGB to 24-bit hexadecimal representation (0xRRGGBB format).
 pub fn toHex(self: Self) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
 }
 
+/// Converts RGB to RGBA by adding the specified alpha channel value.
 pub fn toRgba(self: Self, alpha: u8) Rgba {
     return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
 }
 
+/// Converts RGB to HSL (Hue, Saturation, Lightness) color space.
 pub fn toHsl(self: Self) Hsl {
     return conversions.rgbToHsl(self);
 }
 
+/// Converts RGB to HSV (Hue, Saturation, Value) color space.
 pub fn toHsv(self: Self) Hsv {
     return conversions.rgbToHsv(self);
 }
 
+/// Converts RGB to CIE 1931 XYZ color space using D65 illuminant.
 pub fn toXyz(self: Self) Xyz {
     return conversions.rgbToXyz(self);
 }
 
+/// Converts RGB to CIELAB color space via XYZ intermediate conversion.
 pub fn toLab(self: Self) Lab {
     return conversions.rgbToLab(self);
 }
 
+/// Converts RGB to LMS (Long, Medium, Short) cone response space.
 pub fn toLms(self: Self) Lms {
     return conversions.xyzToLms(self.toXyz());
 }
 
+/// Converts RGB to Oklab color space for improved perceptual uniformity.
 pub fn toOklab(self: Self) Oklab {
     return conversions.lmsToOklab(self.toLms());
 }
 
+/// Converts RGB to XYB color space via LMS intermediate conversion.
 pub fn toXyb(self: Self) Xyb {
     return conversions.lmsToXyb(self.toLms());
 }
 
+/// Alpha blends the given RGBA color onto this RGB color in-place.
 pub fn blend(self: *Self, color: Rgba) void {
     if (color.a == 0) return;
 

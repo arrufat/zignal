@@ -40,38 +40,47 @@ pub fn toGray(self: Self) u8 {
     return @intFromFloat(@round(@max(0, @min(1, self.toOklab().l)) * 255));
 }
 
+/// Converts XYB to RGB color space.
 pub fn toRgb(self: Self) Rgb {
     return conversions.xybToRgb(self);
 }
 
+/// Converts XYB to RGBA by first converting to RGB and adding alpha.
 pub fn toRgba(self: Self, alpha: u8) Rgba {
     return self.toRgb().toRgba(alpha);
 }
 
+/// Converts XYB to HSL color space using direct conversion.
 pub fn toHsl(self: Self) Hsl {
     return conversions.xybToHsl(self);
 }
 
+/// Converts XYB to HSV color space using direct conversion.
 pub fn toHsv(self: Self) Hsv {
     return conversions.xybToHsv(self);
 }
 
+/// Converts XYB to CIE XYZ color space using direct conversion.
 pub fn toXyz(self: Self) Xyz {
     return conversions.xybToXyz(self);
 }
 
+/// Converts XYB to CIELAB color space using direct conversion.
 pub fn toLab(self: Self) Lab {
     return conversions.xybToLab(self);
 }
 
+/// Converts XYB to LMS cone response using direct conversion.
 pub fn toLms(self: Self) Lms {
     return conversions.xybToLms(self);
 }
 
+/// Converts XYB to Oklab color space using direct conversion.
 pub fn toOklab(self: Self) Oklab {
     return conversions.xybToOklab(self);
 }
 
+/// Alpha blends the given RGBA color onto this XYB color in-place.
 pub fn blend(self: *Self, color: Rgba) void {
     var rgb = self.toRgb();
     rgb.blend(color);

@@ -39,34 +39,42 @@ pub fn toGray(self: Self) u8 {
     return self.toLab().toGray();
 }
 
+/// Converts CIE XYZ to RGB color space.
 pub fn toRgb(self: Self) Rgb {
     return conversions.xyzToRgb(self);
 }
 
+/// Converts CIE XYZ to RGBA by first converting to RGB and adding alpha.
 pub fn toRgba(self: Self, alpha: u8) Rgba {
     return self.toRgb().toRgba(alpha);
 }
 
+/// Converts CIE XYZ to HSL color space using direct conversion.
 pub fn toHsl(self: Self) Hsl {
     return conversions.xyzToHsl(self);
 }
 
+/// Converts CIE XYZ to HSV color space using direct conversion.
 pub fn toHsv(self: Self) Hsv {
     return conversions.xyzToHsv(self);
 }
 
+/// Converts CIE XYZ to CIELAB color space using direct conversion.
 pub fn toLab(self: Self) Lab {
     return conversions.xyzToLab(self);
 }
 
+/// Converts CIE XYZ to LMS cone response space using direct conversion.
 pub fn toLms(self: Self) Lms {
     return conversions.xyzToLms(self);
 }
 
+/// Converts CIE XYZ to Oklab color space using direct conversion.
 pub fn toOklab(self: Self) Oklab {
     return conversions.xyzToOklab(self);
 }
 
+/// Converts CIE XYZ to XYB color space using direct conversion.
 pub fn toXyb(self: Self) Xyb {
     return conversions.xyzToXyb(self);
 }
