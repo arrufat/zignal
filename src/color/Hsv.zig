@@ -7,17 +7,15 @@ const std = @import("std");
 
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
-
-// Import color types
-const Rgb = @import("Rgb.zig");
-const Rgba = @import("Rgba.zig").Rgba;
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
-const Xyz = @import("Xyz.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Rgb = @import("Rgb.zig");
+const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
+const Xyz = @import("Xyz.zig");
 
 h: f64,
 s: f64,
