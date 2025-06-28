@@ -55,13 +55,14 @@ Current features include:
   - blur
   - sharpen
   - views (called `sub_image` in dlib or `roi` in OpenCV.)
-- drawing and filling functions
-  - lines
-  - circles
-  - polygons
-  - crosses
-  - Bézier curves
-  - smooth polygons (drawing and filling)
+- Canvas drawing API with consistent parameter ordering
+  - lines with variable width and antialiasing
+  - circles (filled and outlined) with smooth edges
+  - polygons (filled and outlined)
+  - rectangles with customizable borders
+  - Bézier curves (quadratic and cubic) with adaptive subdivision
+  - spline polygons with tension control for smooth curved shapes
+  - multiple fill modes: solid (fast) and smooth (antialiased)
 
 ## Examples
 
