@@ -279,8 +279,22 @@ pub fn Image(comptime T: type) type {
             };
         }
 
+        /// Rotates the image by `angle` (in radians) around its center.
+        /// This is the most common rotation operation with optimal output dimensions to avoid clipping.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the rotated image's data.
+        /// - `angle`: The rotation angle in radians.
+        /// - `rotated`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
+        ///   with the rotated image data. The caller is responsible for deallocating `rotated.data`
+        ///   if it was allocated by this function.
+        pub fn rotate(self: Self, allocator: Allocator, angle: f32, rotated: *Self) !void {
+            rotated.* = Self.empty;
+            try self.rotateAround(allocator, self.getCenter(), angle, rotated);
+        }
+
         /// Rotates the image by `angle` (in radians) around a specified `center` point.
-        /// This is the most flexible rotation function that allows custom output dimensions.
+        /// This allows custom rotation centers and output dimensions.
         ///
         /// Parameters:
         /// - `allocator`: The allocator to use for the rotated image's data.
@@ -290,7 +304,7 @@ pub fn Image(comptime T: type) type {
         ///   are both 0, optimal dimensions will be computed automatically. Otherwise, the specified
         ///   dimensions will be used. The function will initialize `rotated` with the rotated image data.
         ///   The caller is responsible for deallocating `rotated.data` if it was allocated by this function.
-        pub fn rotate(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
+        pub fn rotateAround(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
             // Auto-compute optimal bounds if dimensions are 0
             const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
                 const bounds = self.rotateBounds(angle);
@@ -1136,25 +1150,25 @@ test "rotate orthogonal fast paths" {
 
     // Test 0 degree rotation
     var rotated_0: Image(u8) = .empty;
-    try image.rotate(std.testing.allocator, image.getCenter(), 0, &rotated_0);
+    try image.rotate(std.testing.allocator, 0, &rotated_0);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
     var rotated_90: Image(u8) = .empty;
-    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi / 2.0, &rotated_90);
+    try image.rotate(std.testing.allocator, std.math.pi / 2.0, &rotated_90);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
     var rotated_180: Image(u8) = .empty;
-    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi, &rotated_180);
+    try image.rotate(std.testing.allocator, std.math.pi, &rotated_180);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
     var rotated_270: Image(u8) = .empty;
-    try image.rotate(std.testing.allocator, image.getCenter(), 3.0 * std.math.pi / 2.0, &rotated_270);
+    try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, &rotated_270);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -1184,7 +1198,7 @@ test "rotate arbitrary angle" {
 
     // Test 45 degree rotation
     var rotated: Image(u8) = .empty;
-    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi / 4.0, &rotated);
+    try image.rotate(std.testing.allocator, std.math.pi / 4.0, &rotated);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content

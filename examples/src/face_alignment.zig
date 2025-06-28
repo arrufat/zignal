@@ -78,7 +78,7 @@ pub fn extractAlignedFace(
 
     // Rotate the image first to align the face.
     var rotated: Image(Rgba) = .empty;
-    try image.rotate(allocator, center, angle, &rotated);
+    try image.rotateAround(allocator, center, angle, &rotated);
     defer rotated.deinit(allocator);
 
     // Draw the rectangle on the input image.
