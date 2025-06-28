@@ -102,6 +102,20 @@ pub fn Image(comptime T: type) type {
             return .{ .l = 0, .t = 0, .r = self.cols - 1, .b = self.rows - 1 };
         }
 
+        /// Returns the center point of the image as a Point2d(f32).
+        /// This is commonly used as the rotation center for image rotation.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// try image.rotate(allocator, image.getCenter(), angle, &rotated);
+        /// ```
+        pub fn getCenter(self: Self) Point2d(f32) {
+            return .{
+                .x = @as(f32, @floatFromInt(self.cols)) / 2.0,
+                .y = @as(f32, @floatFromInt(self.rows)) / 2.0,
+            };
+        }
+
         /// Returns an image view with boundaries defined by `rect` within the image boundaries.
         /// The returned image references the memory of `self`, so there are no allocations
         /// or copies.
@@ -276,7 +290,7 @@ pub fn Image(comptime T: type) type {
         ///   are both 0, optimal dimensions will be computed automatically. Otherwise, the specified
         ///   dimensions will be used. The function will initialize `rotated` with the rotated image data.
         ///   The caller is responsible for deallocating `rotated.data` if it was allocated by this function.
-        pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
+        pub fn rotate(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
             // Auto-compute optimal bounds if dimensions are 0
             const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
                 const bounds = self.rotateBounds(angle);
@@ -421,20 +435,6 @@ pub fn Image(comptime T: type) type {
                     }
                 }
             }
-        }
-
-        /// Rotates the image by `angle` (in radians) around its center.
-        /// Uses optimal output dimensions to avoid clipping the rotated image.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the rotated image's data.
-        /// - `angle`: The rotation angle in radians.
-        /// - `rotated`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
-        ///   with the rotated image data. The caller is responsible for deallocating `rotated.data`
-        ///   if it was allocated by this function.
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, rotated: *Self) !void {
-            rotated.* = Self.empty;
-            try self.rotateFrom(allocator, .{ .x = @as(f32, @floatFromInt(self.cols)) / 2, .y = @as(f32, @floatFromInt(self.rows)) / 2 }, angle, rotated);
         }
 
         /// Crops a rectangular region from the image.
@@ -1135,26 +1135,26 @@ test "rotate orthogonal fast paths" {
     image.at(2, 3).* = 12;
 
     // Test 0 degree rotation
-    var rotated_0: Image(u8) = undefined;
-    try image.rotate(std.testing.allocator, 0, &rotated_0);
+    var rotated_0: Image(u8) = .empty;
+    try image.rotate(std.testing.allocator, image.getCenter(), 0, &rotated_0);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
-    var rotated_90: Image(u8) = undefined;
-    try image.rotate(std.testing.allocator, std.math.pi / 2.0, &rotated_90);
+    var rotated_90: Image(u8) = .empty;
+    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi / 2.0, &rotated_90);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
-    var rotated_180: Image(u8) = undefined;
-    try image.rotate(std.testing.allocator, std.math.pi, &rotated_180);
+    var rotated_180: Image(u8) = .empty;
+    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi, &rotated_180);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
-    var rotated_270: Image(u8) = undefined;
-    try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, &rotated_270);
+    var rotated_270: Image(u8) = .empty;
+    try image.rotate(std.testing.allocator, image.getCenter(), 3.0 * std.math.pi / 2.0, &rotated_270);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -1183,8 +1183,8 @@ test "rotate arbitrary angle" {
     }
 
     // Test 45 degree rotation
-    var rotated: Image(u8) = undefined;
-    try image.rotate(std.testing.allocator, std.math.pi / 4.0, &rotated);
+    var rotated: Image(u8) = .empty;
+    try image.rotate(std.testing.allocator, image.getCenter(), std.math.pi / 4.0, &rotated);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content
