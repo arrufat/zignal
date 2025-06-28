@@ -87,7 +87,7 @@ pub fn extractAlignedFace(
     // supported color, and the appropriate conversion will be performed.  In this case,
     // the image is in Rgba format, and the color is in Hsv.  Zignal will handle that.
     const canvas: Canvas(T) = .init(image, allocator);
-    canvas.drawRectangle(rect, 1, Hsv{ .h = 0, .s = 100, .v = 100 });
+    canvas.drawRectangle(rect, 1, Hsv{ .h = 0, .s = 100, .v = 100 }, .solid);
 
     // Crop out the detected face.
     var chip: Image(Rgba) = undefined;
