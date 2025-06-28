@@ -34,6 +34,32 @@ module.addImport("zignal", zignal.module("zignal"));
 
 This library is used by [Ameli](https://ameli.co.kr/) for their makeup virtual try on.
 
+## Example
+
+```zig
+const std = @import("std");
+const zignal = @import("zignal");
+const Canvas = zignal.Canvas;
+const Image = zignal.Image;
+const Rgba = zignal.color.Rgba;
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    // Create a 800x600 RGBA image
+    var image: Image(Rgba) = try .initAlloc(allocator, 600, 800);
+    defer image.deinit(allocator);
+
+    // Create a drawing canvas
+    const canvas: Canvas(Rgba) = .init(image, allocator);
+
+    // Draw shapes
+    const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    canvas.drawLine(.{.x = 50, .y = 50}, .{.x = 750, .y = 100}, red, 5, .smooth);
+    canvas.drawCircle(.{.x = 400, .y = 300}, 100, red, 3, .smooth);
+}
+```
+
 ## Features
 
 Initially, the features in this library are the ones required to get the virtual try on for makeup working.
