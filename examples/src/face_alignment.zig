@@ -48,16 +48,16 @@ pub fn extractAlignedFace(
         .{ .x = 0.3340850613712, .y = 0.2290642403242 },
         .{ .x = 0.4901123135679, .y = 0.6277975316475 },
     };
-    const scale_cols: f32 = @floatFromInt(image.cols - 1);
-    const scale_rows: f32 = @floatFromInt(image.rows - 1);
+    const fcols: f32 = @floatFromInt(image.cols);
+    const frows: f32 = @floatFromInt(image.rows);
 
     // These are the detected points from MediaPipe.
     const to_points: [5]Point2d = .{
-        landmarks[alignment[0]].scale(scale_cols, scale_rows),
-        landmarks[alignment[1]].scale(scale_cols, scale_rows),
-        landmarks[alignment[2]].scale(scale_cols, scale_rows),
-        landmarks[alignment[3]].scale(scale_cols, scale_rows),
-        landmarks[alignment[4]].scale(scale_cols, scale_rows),
+        landmarks[alignment[0]].scale(fcols, frows),
+        landmarks[alignment[1]].scale(fcols, frows),
+        landmarks[alignment[2]].scale(fcols, frows),
+        landmarks[alignment[3]].scale(fcols, frows),
+        landmarks[alignment[4]].scale(fcols, frows),
     };
     assert(from_points.len == to_points.len);
     assert(out.cols == out.rows);
@@ -76,25 +76,29 @@ pub fn extractAlignedFace(
     const scale = p.norm();
     const center = transform.project(.{ .x = side / 2, .y = side / 2 });
 
-    // Align the face: rotate the image so that the face is aligned.
-    var rotated: Image(Rgba) = undefined;
+    // Rotate the image first to align the face.
+    var rotated: Image(Rgba) = .empty;
     try image.rotateFrom(allocator, center, angle, &rotated);
     defer rotated.deinit(allocator);
 
-    // Get the rectangle around the face.
-    const rect: Rectangle = .initCenter(center.x, center.y, side * scale, side * scale);
-    // Draw a rectangle around the detected face.  Note that the color can be any Zignal
-    // supported color, and the appropriate conversion will be performed.  In this case,
-    // the image is in Rgba format, and the color is in Hsv.  Zignal will handle that.
+    // Draw the rectangle on the input image.
+    var rect: Rectangle = .initCenter(center.x, center.y, side * scale, side * scale);
     const canvas: Canvas(T) = .init(image, allocator);
     canvas.drawRectangle(rect, Hsv{ .h = 0, .s = 100, .v = 100 }, 1, .solid);
 
-    // Crop out the detected face.
-    var chip: Image(Rgba) = undefined;
+    // Calculate where the center point ended up in the rotated image.
+    const offset: Point2d = .{
+        .x = (@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2,
+        .y = (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2,
+    };
+
+    // Adjust the rectangle to crop from the rotated image (it has been resized not to be clipped).
+    rect = .initCenter(center.x + offset.x, center.y + offset.y, side * scale, side * scale);
+    var chip: Image(Rgba) = .empty;
     try rotated.crop(allocator, rect, &chip);
     defer chip.deinit(allocator);
 
-    // Resize it to the desired size.
+    // Resize to the desired size
     var resized: Image(Rgba) = try .initAlloc(allocator, out.rows, out.cols);
     defer resized.deinit(allocator);
     chip.resize(resized);

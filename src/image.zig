@@ -25,6 +25,20 @@ pub fn Image(comptime T: type) type {
         stride: usize,
 
         const Self = @This();
+
+        /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
+        /// When passed to functions like `rotateFrom()`, `boxBlur()`, etc., the function will
+        /// automatically allocate and size the image appropriately. This eliminates the need
+        /// to pre-allocate or guess output dimensions.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// var rotated: Image(u8) = .empty;
+        /// try image.rotateFrom(allocator, center, angle, &rotated); // Auto-sizes to optimal dimensions
+        /// defer rotated.deinit(allocator);
+        /// ```
+        pub const empty: Self = .{ .rows = 0, .cols = 0, .data = undefined, .stride = 0 };
+
         /// Constructs an image of rows and cols size.  If the slice is owned by this image,
         /// deinit should also be called.
         pub fn init(rows: usize, cols: usize, data: []T) Image(T) {
@@ -204,38 +218,223 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Computes the optimal output dimensions for rotating an image by the given angle.
+        /// This ensures that the entire rotated image fits within the output bounds without clipping.
+        ///
+        /// Parameters:
+        /// - `angle`: The rotation angle in radians.
+        ///
+        /// Returns:
+        /// - A struct containing the optimal `rows` and `cols` for the rotated image.
+        pub fn rotateBounds(self: Self, angle: f32) struct { rows: usize, cols: usize } {
+            // Normalize angle to [0, 2π) range
+            const normalized_angle = @mod(angle, std.math.tau);
+            const epsilon = 1e-6;
+
+            // Exact dimensions for orthogonal rotations
+            if (@abs(normalized_angle) < epsilon or @abs(normalized_angle - std.math.tau) < epsilon) {
+                // 0° or 360° - same dimensions
+                return .{ .rows = self.rows, .cols = self.cols };
+            }
+
+            if (@abs(normalized_angle - std.math.pi / 2.0) < epsilon) {
+                // 90° - swap dimensions
+                return .{ .rows = self.cols, .cols = self.rows };
+            }
+
+            if (@abs(normalized_angle - std.math.pi) < epsilon) {
+                // 180° - same dimensions
+                return .{ .rows = self.rows, .cols = self.cols };
+            }
+
+            if (@abs(normalized_angle - 3.0 * std.math.pi / 2.0) < epsilon) {
+                // 270° - swap dimensions
+                return .{ .rows = self.cols, .cols = self.rows };
+            }
+
+            // General case using trigonometry
+            const cos_abs = @abs(@cos(angle));
+            const sin_abs = @abs(@sin(angle));
+            const w: f32 = @floatFromInt(self.cols);
+            const h: f32 = @floatFromInt(self.rows);
+            const new_w = w * cos_abs + h * sin_abs;
+            const new_h = h * cos_abs + w * sin_abs;
+            return .{
+                .cols = @intFromFloat(@ceil(new_w)),
+                .rows = @intFromFloat(@ceil(new_h)),
+            };
+        }
+
         /// Rotates the image by `angle` (in radians) around a specified `center` point.
+        /// This is the most flexible rotation function that allows custom output dimensions.
         ///
         /// Parameters:
         /// - `allocator`: The allocator to use for the rotated image's data.
         /// - `center`: The `Point2d(f32)` around which to rotate.
         /// - `angle`: The rotation angle in radians.
-        /// - `rotated`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
-        ///   with the rotated image data. The caller is responsible for deallocating `rotated.data`
-        ///   if it was allocated by this function.
+        /// - `rotated`: An out-parameter pointer to an `Image(T)`. If `rotated.rows` and `rotated.cols`
+        ///   are both 0, optimal dimensions will be computed automatically. Otherwise, the specified
+        ///   dimensions will be used. The function will initialize `rotated` with the rotated image data.
+        ///   The caller is responsible for deallocating `rotated.data` if it was allocated by this function.
         pub fn rotateFrom(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
+            // Auto-compute optimal bounds if dimensions are 0
+            const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
+                const bounds = self.rotateBounds(angle);
+                break :blk .{ bounds.rows, bounds.cols };
+            } else .{ rotated.rows, rotated.cols };
+            // Normalize angle to [0, 2π) range
+            const normalized_angle = @mod(angle, std.math.tau);
+            const epsilon = 1e-6;
+
+            // Fast paths for orthogonal rotations
+            if (@abs(normalized_angle) < epsilon or @abs(normalized_angle - std.math.tau) < epsilon) {
+                // 0° or 360° - copy
+                var array: std.ArrayList(T) = .init(allocator);
+                try array.resize(actual_rows * actual_cols);
+                rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice());
+
+                const offset_r = (actual_rows -| self.rows) / 2;
+                const offset_c = (actual_cols -| self.cols) / 2;
+
+                for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
+                for (0..@min(self.rows, actual_rows)) |r| {
+                    for (0..@min(self.cols, actual_cols)) |c| {
+                        if (r + offset_r < actual_rows and c + offset_c < actual_cols) {
+                            rotated.at(r + offset_r, c + offset_c).* = self.at(r, c).*;
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (@abs(normalized_angle - std.math.pi / 2.0) < epsilon) {
+                // 90° clockwise - transpose and flip horizontally
+                return self.rotate90CW(allocator, actual_rows, actual_cols, rotated);
+            }
+
+            if (@abs(normalized_angle - std.math.pi) < epsilon) {
+                // 180° - flip both axes
+                return self.rotate180(allocator, actual_rows, actual_cols, rotated);
+            }
+
+            if (@abs(normalized_angle - 3.0 * std.math.pi / 2.0) < epsilon) {
+                // 270° clockwise (90° counter-clockwise) - transpose and flip vertically
+                return self.rotate270CW(allocator, actual_rows, actual_cols, rotated);
+            }
+
+            // General rotation using inverse transformation for better cache locality
             var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(self.rows * self.cols);
-            rotated.* = .init(self.rows, self.cols, try array.toOwnedSlice());
-            const cos = @cos(angle);
+            try array.resize(actual_rows * actual_cols);
+            rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice());
+
+            const cos = @cos(angle); // Forward transformation
             const sin = @sin(angle);
-            for (0..self.rows) |r| {
+
+            // Calculate the offset to center the original image in the larger output
+            const offset_x: f32 = (@as(f32, @floatFromInt(actual_cols)) - @as(f32, @floatFromInt(self.cols))) / 2;
+            const offset_y: f32 = (@as(f32, @floatFromInt(actual_rows)) - @as(f32, @floatFromInt(self.rows))) / 2;
+
+            // The rotation center in the output image space
+            const rotated_center_x = center.x + offset_x;
+            const rotated_center_y = center.y + offset_y;
+
+            for (0..actual_rows) |r| {
                 const y: f32 = @floatFromInt(r);
-                for (0..self.cols) |c| {
+
+                for (0..actual_cols) |c| {
                     const x: f32 = @floatFromInt(c);
-                    const rx = cos * (x - center.x) - sin * (y - center.y) + center.x;
-                    const ry = sin * (x - center.x) + cos * (y - center.y) + center.y;
-                    rotated.at(r, c).* = if (self.interpolateBilinear(rx, ry)) |val| val else std.mem.zeroes(T);
+
+                    // Apply inverse rotation around the translated center point
+                    const dx = x - rotated_center_x;
+                    const dy = y - rotated_center_y;
+                    const rotated_dx = cos * dx - sin * dy;
+                    const rotated_dy = sin * dx + cos * dy;
+                    const src_x = rotated_dx + center.x;
+                    const src_y = rotated_dy + center.y;
+
+                    rotated.at(r, c).* = if (self.interpolateBilinear(src_x, src_y)) |val| val else std.mem.zeroes(T);
+                }
+            }
+        }
+
+        /// Fast 90-degree clockwise rotation.
+        fn rotate90CW(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .init(allocator);
+            try array.resize(output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+
+            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
+
+            const offset_r = (output_rows -| self.cols) / 2;
+            const offset_c = (output_cols -| self.rows) / 2;
+
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const new_r = c + offset_r;
+                    const new_c = (self.rows - 1 - r) + offset_c;
+                    if (new_r < output_rows and new_c < output_cols) {
+                        rotated.at(new_r, new_c).* = self.at(r, c).*;
+                    }
+                }
+            }
+        }
+
+        /// Fast 180-degree rotation.
+        fn rotate180(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .init(allocator);
+            try array.resize(output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+
+            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
+
+            const offset_r = (output_rows -| self.rows) / 2;
+            const offset_c = (output_cols -| self.cols) / 2;
+
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const new_r = (self.rows - 1 - r) + offset_r;
+                    const new_c = (self.cols - 1 - c) + offset_c;
+                    if (new_r < output_rows and new_c < output_cols) {
+                        rotated.at(new_r, new_c).* = self.at(r, c).*;
+                    }
+                }
+            }
+        }
+
+        /// Fast 270-degree clockwise rotation.
+        fn rotate270CW(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .init(allocator);
+            try array.resize(output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+
+            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
+
+            const offset_r = (output_rows -| self.cols) / 2;
+            const offset_c = (output_cols -| self.rows) / 2;
+
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const new_r = (self.cols - 1 - c) + offset_r;
+                    const new_c = r + offset_c;
+                    if (new_r < output_rows and new_c < output_cols) {
+                        rotated.at(new_r, new_c).* = self.at(r, c).*;
+                    }
                 }
             }
         }
 
         /// Rotates the image by `angle` (in radians) around its center.
-        /// The returned `Image(T)` has newly allocated data that the caller is responsible for deallocating.
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32) !Self {
-            var result: Self = undefined;
-            try self.rotateFrom(allocator, .{ .x = @as(f32, @floatFromInt(self.cols)) / 2, .y = @as(f32, @floatFromInt(self.rows)) / 2 }, angle, &result);
-            return result;
+        /// Uses optimal output dimensions to avoid clipping the rotated image.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the rotated image's data.
+        /// - `angle`: The rotation angle in radians.
+        /// - `rotated`: An out-parameter pointer to an `Image(T)` that will be initialized by this function
+        ///   with the rotated image data. The caller is responsible for deallocating `rotated.data`
+        ///   if it was allocated by this function.
+        pub fn rotate(self: Self, allocator: Allocator, angle: f32, rotated: *Self) !void {
+            rotated.* = Self.empty;
+            try self.rotateFrom(allocator, .{ .x = @as(f32, @floatFromInt(self.cols)) / 2, .y = @as(f32, @floatFromInt(self.rows)) / 2 }, angle, rotated);
         }
 
         /// Crops a rectangular region from the image.
@@ -885,4 +1084,110 @@ test "sharpen struct type" {
     try expectEqual(sharpened_center.r >= original_center.r, true);
     try expectEqual(sharpened_center.g >= original_center.g, true);
     try expectEqual(sharpened_center.b >= original_center.b, true);
+}
+
+test "rotateBounds" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 100, 200);
+    defer image.deinit(std.testing.allocator);
+
+    // Test 0 degrees - should be same size
+    const bounds_0 = image.rotateBounds(0);
+    try expectEqual(@as(usize, 200), bounds_0.cols);
+    try expectEqual(@as(usize, 100), bounds_0.rows);
+
+    // Test 90 degrees - should be swapped exactly
+    const bounds_90 = image.rotateBounds(std.math.pi / 2.0);
+    try expectEqual(@as(usize, 100), bounds_90.cols);
+    try expectEqual(@as(usize, 200), bounds_90.rows);
+
+    // Test 180 degrees - should be same size
+    const bounds_180 = image.rotateBounds(std.math.pi);
+    try expectEqual(@as(usize, 200), bounds_180.cols);
+    try expectEqual(@as(usize, 100), bounds_180.rows);
+
+    // Test 270 degrees - should be swapped exactly
+    const bounds_270 = image.rotateBounds(3.0 * std.math.pi / 2.0);
+    try expectEqual(@as(usize, 100), bounds_270.cols);
+    try expectEqual(@as(usize, 200), bounds_270.rows);
+
+    // Test 45 degrees - should be larger
+    const bounds_45 = image.rotateBounds(std.math.pi / 4.0);
+    try expectEqual(bounds_45.cols > 200, true);
+    try expectEqual(bounds_45.rows > 100, true);
+}
+
+test "rotate orthogonal fast paths" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 4);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a pattern to verify correct rotation
+    image.at(0, 0).* = 1;
+    image.at(0, 1).* = 2;
+    image.at(0, 2).* = 3;
+    image.at(0, 3).* = 4;
+    image.at(1, 0).* = 5;
+    image.at(1, 1).* = 6;
+    image.at(1, 2).* = 7;
+    image.at(1, 3).* = 8;
+    image.at(2, 0).* = 9;
+    image.at(2, 1).* = 10;
+    image.at(2, 2).* = 11;
+    image.at(2, 3).* = 12;
+
+    // Test 0 degree rotation
+    var rotated_0: Image(u8) = undefined;
+    try image.rotate(std.testing.allocator, 0, &rotated_0);
+    defer rotated_0.deinit(std.testing.allocator);
+    try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
+
+    // Test 90 degree rotation
+    var rotated_90: Image(u8) = undefined;
+    try image.rotate(std.testing.allocator, std.math.pi / 2.0, &rotated_90);
+    defer rotated_90.deinit(std.testing.allocator);
+    // After 90° rotation, top-left becomes bottom-left
+    // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
+
+    // Test 180 degree rotation
+    var rotated_180: Image(u8) = undefined;
+    try image.rotate(std.testing.allocator, std.math.pi, &rotated_180);
+    defer rotated_180.deinit(std.testing.allocator);
+
+    // Test 270 degree rotation
+    var rotated_270: Image(u8) = undefined;
+    try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, &rotated_270);
+    defer rotated_270.deinit(std.testing.allocator);
+
+    // Verify dimensions are as expected
+    try expectEqual(@as(usize, 3), rotated_0.rows);
+    try expectEqual(@as(usize, 4), rotated_0.cols);
+    // 90° rotation should have exact swapped dimensions
+    try expectEqual(@as(usize, 4), rotated_90.rows);
+    try expectEqual(@as(usize, 3), rotated_90.cols);
+    // 180° rotation should have same dimensions as original
+    try expectEqual(@as(usize, 3), rotated_180.rows);
+    try expectEqual(@as(usize, 4), rotated_180.cols);
+    // 270° rotation should have exact swapped dimensions
+    try expectEqual(@as(usize, 4), rotated_270.rows);
+    try expectEqual(@as(usize, 3), rotated_270.cols);
+}
+
+test "rotate arbitrary angle" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 10, 10);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if ((r + c) % 2 == 0) 255 else 0;
+        }
+    }
+
+    // Test 45 degree rotation
+    var rotated: Image(u8) = undefined;
+    try image.rotate(std.testing.allocator, std.math.pi / 4.0, &rotated);
+    defer rotated.deinit(std.testing.allocator);
+
+    // Should be larger than original to fit rotated content
+    try expectEqual(rotated.rows > 10, true);
+    try expectEqual(rotated.cols > 10, true);
 }
