@@ -28,7 +28,7 @@ pub fn Canvas(comptime T: type) type {
 
         const Self = @This();
 
-        /// Creates a drawing canvas from an image, with an optional allocator for operations that need it.
+        /// Creates a drawing canvas from an image, with an allocator for operations that need it.
         pub fn init(image: Image(T), allocator: std.mem.Allocator) Self {
             return .{ .image = image, .allocator = allocator };
         }
