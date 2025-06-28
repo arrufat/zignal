@@ -288,8 +288,8 @@ pub fn Canvas(comptime T: type) type {
             // Use chord + control polygon approximation
             const chord = @sqrt((p3.x - p0.x) * (p3.x - p0.x) + (p3.y - p0.y) * (p3.y - p0.y));
             const control_net = @sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)) +
-                               @sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y)) +
-                               @sqrt((p3.x - p2.x) * (p3.x - p2.x) + (p3.y - p2.y) * (p3.y - p2.y));
+                @sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y)) +
+                @sqrt((p3.x - p2.x) * (p3.x - p2.x) + (p3.y - p2.y) * (p3.y - p2.y));
             return (chord + control_net) / 2.0;
         }
 
@@ -301,10 +301,10 @@ pub fn Canvas(comptime T: type) type {
             // Estimate number of segments based on curve length
             const chord = @sqrt((p2.x - p0.x) * (p2.x - p0.x) + (p2.y - p0.y) * (p2.y - p0.y));
             const control_net = @sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.y - p0.y) * (p1.y - p0.y)) +
-                               @sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y));
+                @sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y));
             const estimated_length = (chord + control_net) / 2.0;
             const segments = @max(3, @as(usize, @intFromFloat(estimated_length / 2.0)));
-            
+
             var prev_point = p0;
             var i: usize = 1;
             while (i <= segments) : (i += 1) {
@@ -324,10 +324,10 @@ pub fn Canvas(comptime T: type) type {
             // Use adaptive subdivision based on estimated length
             const estimated_length = estimateCubicBezierLength(p0, p1, p2, p3);
             const base_segments = @max(4, @as(usize, @intFromFloat(estimated_length / 2.0)));
-            
+
             // For smooth mode or thick lines, use more segments
             const segments = if (mode == .smooth or width > 2) base_segments * 2 else base_segments;
-            
+
             var prev_point = p0;
             var i: usize = 1;
             while (i <= segments) : (i += 1) {
@@ -337,7 +337,6 @@ pub fn Canvas(comptime T: type) type {
                 prev_point = current_point;
             }
         }
-
 
         /// Calculates spline control points for a vertex in a polygon using tension.
         fn calculateSmoothControlPoints(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), tension: f32) struct { cp1: Point2d(f32), cp2: Point2d(f32) } {
@@ -360,7 +359,7 @@ pub fn Canvas(comptime T: type) type {
         pub fn drawSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, tension: f32, mode: FillMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
-            
+
             for (0..polygon.len) |i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
@@ -376,25 +375,25 @@ pub fn Canvas(comptime T: type) type {
         pub fn fillSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, tension: f32, mode: FillMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
-            
+
             var points = std.ArrayList(Point2d(f32)).init(self.allocator);
             defer points.deinit();
-            
+
             for (0..polygon.len) |i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
-                
+
                 // Use adaptive tessellation based on curve length
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
                 const segments = @max(4, @min(50, @as(usize, @intFromFloat(estimated_length / 3.0))));
-                
+
                 const segment = try self.tessellateCubicBezier(p0, control_points.cp1, control_points.cp2, p1, segments, null);
                 defer self.allocator.free(segment);
                 try points.appendSlice(segment);
             }
-            
+
             try self.fillPolygon(points.items, color, mode);
         }
 
@@ -485,7 +484,7 @@ pub fn Canvas(comptime T: type) type {
                 const inner_radius = radius - line_width / 2.0;
                 const outer_radius = radius + line_width / 2.0;
                 const solid_color = convert(T, color);
-                
+
                 // Calculate bounding box
                 const left: usize = @intFromFloat(@round(@max(0, center.x - outer_radius - 1)));
                 const top: usize = @intFromFloat(@round(@max(0, center.y - outer_radius - 1)));
@@ -499,7 +498,7 @@ pub fn Canvas(comptime T: type) type {
                         const dist_sq = x * x + y * y;
                         const inner_radius_sq = inner_radius * inner_radius;
                         const outer_radius_sq = outer_radius * outer_radius;
-                        
+
                         if (dist_sq >= inner_radius_sq and dist_sq <= outer_radius_sq) {
                             const pos = r * self.image.cols + c;
                             self.image.data[pos] = solid_color;
@@ -516,7 +515,7 @@ pub fn Canvas(comptime T: type) type {
             const line_width: f32 = @floatFromInt(width);
             const inner_radius = radius - line_width / 2.0;
             const outer_radius = radius + line_width / 2.0;
-            
+
             // Calculate bounding box
             const left: usize = @intFromFloat(@round(@max(0, center.x - outer_radius - 1)));
             const top: usize = @intFromFloat(@round(@max(0, center.y - outer_radius - 1)));
@@ -530,23 +529,23 @@ pub fn Canvas(comptime T: type) type {
                 for (left..right) |c| {
                     const x = @as(f32, @floatFromInt(c)) - center.x;
                     const dist = @sqrt(x * x + y * y);
-                    
+
                     // Only draw if we're in the ring area
                     if (dist >= inner_radius - 0.5 and dist <= outer_radius + 0.5) {
                         var alpha: f32 = 1.0;
-                        
+
                         // Smooth outer edge
                         if (dist > outer_radius - 0.5) {
                             alpha = @min(alpha, outer_radius + 0.5 - dist);
                         }
-                        
+
                         // Smooth inner edge
                         if (dist < inner_radius + 0.5) {
                             alpha = @min(alpha, dist - (inner_radius - 0.5));
                         }
-                        
+
                         alpha = @max(0, @min(1, alpha));
-                        
+
                         if (alpha > 0) {
                             const pos = r * self.image.cols + c;
                             var c1 = convert(Rgba, self.image.data[pos]);
@@ -757,6 +756,5 @@ pub fn Canvas(comptime T: type) type {
                 return polygon;
             }
         }
-
     };
 }
