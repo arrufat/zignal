@@ -380,25 +380,52 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
-            var points = std.ArrayList(Point2d(f32)).init(self.allocator);
-            defer points.deinit();
+            // Stack buffer for common cases (up to 50 segments per curve, 8 curves)
+            const max_stack_points = 400;
+            var stack_buffer: [max_stack_points]Point2d(f32) = undefined;
+            var total_points: usize = 0;
 
+            // First pass: calculate total points needed
+            for (0..polygon.len) |i| {
+                const p0 = polygon[i];
+                const p1 = polygon[(i + 1) % polygon.len];
+                const p2 = polygon[(i + 2) % polygon.len];
+                const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
+                const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
+                const segments = @max(4, @min(50, @as(usize, @intFromFloat(estimated_length / 3.0))));
+                total_points += segments;
+            }
+
+            // Use stack buffer if possible, otherwise allocate
+            var points_buffer: []Point2d(f32) = undefined;
+            var heap_buffer: ?[]Point2d(f32) = null;
+            defer if (heap_buffer) |h| self.allocator.free(h);
+
+            if (total_points <= max_stack_points) {
+                points_buffer = stack_buffer[0..total_points];
+            } else {
+                heap_buffer = try self.allocator.alloc(Point2d(f32), total_points);
+                points_buffer = heap_buffer.?;
+            }
+
+            // Second pass: tessellate curves into the buffer
+            var write_idx: usize = 0;
             for (0..polygon.len) |i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
 
-                // Use adaptive tessellation based on curve length
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
                 const segments = @max(4, @min(50, @as(usize, @intFromFloat(estimated_length / 3.0))));
 
-                const segment = try self.tessellateCubicBezier(p0, control_points.cp1, control_points.cp2, p1, segments, null);
-                defer self.allocator.free(segment);
-                try points.appendSlice(segment);
+                // Tessellate directly into our buffer
+                const segment_buffer = points_buffer[write_idx..write_idx + segments];
+                _ = try self.tessellateCubicBezier(p0, control_points.cp1, control_points.cp2, p1, segments, segment_buffer);
+                write_idx += segments;
             }
 
-            try self.fillPolygon(points.items, color, mode);
+            try self.fillPolygon(points_buffer, color, mode);
         }
 
         /// Draws the outline of a rectangle on the given image.
