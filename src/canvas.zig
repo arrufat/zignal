@@ -421,7 +421,7 @@ pub fn Canvas(comptime T: type) type {
 
                 // Tessellate directly into our buffer
                 const segment_buffer = points_buffer[write_idx..write_idx + segments];
-                _ = try self.tessellateCubicBezier(p0, control_points.cp1, control_points.cp2, p1, segments, segment_buffer);
+                self.tessellateCubicBezier(p0, control_points.cp1, control_points.cp2, p1, segment_buffer);
                 write_idx += segments;
             }
 
@@ -788,24 +788,13 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Tessellates a cubic Bézier curve into a series of line segments (points).
-        /// If buffer is provided, it will be used instead of allocating new memory.
-        fn tessellateCubicBezier(self: Self, p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), p3: Point2d(f32), segments: usize, buffer: ?[]Point2d(f32)) anyerror![]const Point2d(f32) {
-            if (buffer) |buf| {
-                // Use provided buffer
-                const actual_segments = @min(segments, buf.len);
-                for (0..actual_segments) |i| {
-                    const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(actual_segments - 1));
-                    buf[i] = evalCubicBezier(p0, p1, p2, p3, t);
-                }
-                return buf[0..actual_segments];
-            } else {
-                // Allocate new memory
-                var polygon = try self.allocator.alloc(Point2d(f32), segments);
-                for (0..segments) |i| {
-                    const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments - 1));
-                    polygon[i] = evalCubicBezier(p0, p1, p2, p3, t);
-                }
-                return polygon;
+        /// Writes the points directly into the provided buffer.
+        fn tessellateCubicBezier(self: Self, p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), p3: Point2d(f32), buffer: []Point2d(f32)) void {
+            _ = self;
+            const segments = buffer.len;
+            for (0..segments) |i| {
+                const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments - 1));
+                buffer[i] = evalCubicBezier(p0, p1, p2, p3, t);
             }
         }
     };
