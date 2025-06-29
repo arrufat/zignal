@@ -98,6 +98,18 @@ pub const Rgba = packed struct {
         return self.toRgb().toXyb();
     }
 
+    /// Returns a new RGBA color with the alpha channel multiplied by the given factor.
+    /// Useful for modulating transparency in drawing operations.
+    pub fn fade(self: Rgba, alpha: f32) Rgba {
+        const new_alpha = @as(f32, @floatFromInt(self.a)) * std.math.clamp(alpha, 0.0, 1.0);
+        return .{
+            .r = self.r,
+            .g = self.g,
+            .b = self.b,
+            .a = @intFromFloat(new_alpha),
+        };
+    }
+
     /// Alpha blends the given RGBA color onto this RGBA color in-place.
     pub fn blend(self: *Rgba, color: Rgba) void {
         if (color.a == 0) return;
