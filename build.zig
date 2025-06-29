@@ -8,6 +8,9 @@ pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Option to print MD5 checksums for updating golden values
+    const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
+
     // Export module for use as dependency
     _ = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig") });
 
@@ -41,6 +44,7 @@ pub fn build(b: *Build) void {
         "matrix",
         "svd",
         "perlin",
+        "canvas",
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
@@ -48,6 +52,11 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
         });
+
+        // Pass build options to tests
+        const options = b.addOptions();
+        options.addOption(bool, "print_md5sums", print_md5sums);
+        module_test.root_module.addOptions("build_options", options);
         const module_test_run = b.addRunArtifact(module_test);
         test_step.dependOn(&module_test_run.step);
     }

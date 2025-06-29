@@ -1,16 +1,20 @@
 //! This module provides a Canvas for drawing various shapes and lines on images.
+
 const std = @import("std");
 const assert = std.debug.assert;
-
-const Rgba = @import("color.zig").Rgba;
-const Hsv = @import("color.zig").Hsv;
+const testing = std.testing;
+const expect = testing.expect;
+const expectEqual = testing.expectEqual;
+const expectEqualStrings = testing.expectEqualStrings;
 
 const as = @import("meta.zig").as;
 const convert = @import("color.zig").convert;
+const Hsv = @import("color.zig").Hsv;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
 const Point2d = @import("point.zig").Point2d;
 const Rectangle = @import("geometry.zig").Rectangle;
+const Rgba = @import("color.zig").Rgba;
 
 /// Antialiasing mode for polygon filling operations
 pub const FillMode = enum {
@@ -757,4 +761,589 @@ pub fn Canvas(comptime T: type) type {
             }
         }
     };
+}
+
+// Property-based tests for drawing functions
+
+// MD5 checksum tests for pixel-perfect stability
+//
+// These tests ensure that drawing operations produce identical results across releases.
+// To update the checksums after intentional changes to drawing algorithms:
+//   zig build test -Dprint-md5sums=true
+// Then copy the printed checksums into the md5_checksums array below.
+const DrawTestCase = struct {
+    name: []const u8,
+    md5sum: []const u8,
+    draw_fn: *const fn (canvas: Canvas(Rgba)) void,
+};
+
+// Golden MD5 checksums for drawing operations
+const md5_checksums = [_]DrawTestCase{
+    .{ .name = "line_horizontal", .md5sum = "96fc75d0d893373c0050e5fe76f5d7ea", .draw_fn = drawLineHorizontal },
+    .{ .name = "line_vertical", .md5sum = "f7d52e274636af2b20b62172a408b446", .draw_fn = drawLineVertical },
+    .{ .name = "line_diagonal", .md5sum = "1aee6bf80fd2e6a849e5520937566478", .draw_fn = drawLineDiagonal },
+    .{ .name = "line_thick", .md5sum = "d8323d8d6580a34e724873701245f117", .draw_fn = drawLineThick },
+    .{ .name = "circle_filled_solid", .md5sum = "efe2aa5419c9ffdead0dfddffb3b6a67", .draw_fn = drawCircleFilledSolid },
+    .{ .name = "circle_filled_smooth", .md5sum = "4996924718641236276cdb1c166ae515", .draw_fn = drawCircleFilledSmooth },
+    .{ .name = "circle_outline", .md5sum = "ae7e973d5644ff7bdde7338296e4ab40", .draw_fn = drawCircleOutline },
+    .{ .name = "rectangle_filled", .md5sum = "3783f1119b7d5482b5a333f76c322c92", .draw_fn = drawRectangleFilled },
+    .{ .name = "rectangle_outline", .md5sum = "033fdc24b89399af7b1810783e357b5f", .draw_fn = drawRectangleOutline },
+    .{ .name = "triangle_filled", .md5sum = "283a9de3dd51dd00794559cc231ff5ac", .draw_fn = drawTriangleFilled },
+    .{ .name = "bezier_cubic", .md5sum = "3a2b0d540a2353c817077729ee10007a", .draw_fn = drawBezierCubic },
+    .{ .name = "bezier_quadratic", .md5sum = "9bf9d650485c3c5ed002f6766f9783c1", .draw_fn = drawBezierQuadratic },
+    .{ .name = "polygon_complex", .md5sum = "da9b83426d2118ce99948eabebff91fb", .draw_fn = drawPolygonComplex },
+    .{ .name = "spline_polygon", .md5sum = "61834cc2edc7c6e3398a54a584c8465e", .draw_fn = drawSplinePolygon },
+};
+
+// Test drawing functions for MD5 checksums
+fn drawLineHorizontal(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    canvas.drawLine(.{ .x = 10, .y = 50 }, .{ .x = 90, .y = 50 }, color, 1, .solid);
+}
+
+fn drawLineVertical(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
+    canvas.drawLine(.{ .x = 50, .y = 10 }, .{ .x = 50, .y = 90 }, color, 1, .solid);
+}
+
+fn drawLineDiagonal(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+    canvas.drawLine(.{ .x = 10, .y = 10 }, .{ .x = 90, .y = 90 }, color, 1, .solid);
+}
+
+fn drawLineThick(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 255, .g = 128, .b = 0, .a = 255 };
+    canvas.drawLine(.{ .x = 20, .y = 20 }, .{ .x = 80, .y = 80 }, color, 5, .smooth);
+}
+
+fn drawCircleFilledSolid(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 128, .g = 0, .b = 128, .a = 255 };
+    canvas.fillCircle(.{ .x = 50, .y = 50 }, 30, color, .solid);
+}
+
+fn drawCircleFilledSmooth(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 0, .g = 128, .b = 128, .a = 255 };
+    canvas.fillCircle(.{ .x = 50, .y = 50 }, 25, color, .smooth);
+}
+
+fn drawCircleOutline(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
+    canvas.drawCircle(.{ .x = 50, .y = 50 }, 35, color, 3, .smooth);
+}
+
+fn drawRectangleFilled(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 64, .g = 128, .b = 192, .a = 255 };
+    const rect = Rectangle(f32){ .l = 20, .t = 30, .r = 80, .b = 70 };
+    const corners = [_]Point2d(f32){
+        .{ .x = rect.l, .y = rect.t },
+        .{ .x = rect.r, .y = rect.t },
+        .{ .x = rect.r, .y = rect.b },
+        .{ .x = rect.l, .y = rect.b },
+    };
+    canvas.fillPolygon(&corners, color, .solid) catch unreachable;
+}
+
+fn drawRectangleOutline(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 192, .g = 64, .b = 128, .a = 255 };
+    const rect = Rectangle(f32){ .l = 15, .t = 25, .r = 85, .b = 75 };
+    canvas.drawRectangle(rect, color, 2, .smooth);
+}
+
+fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 255, .g = 192, .b = 128, .a = 255 };
+    const triangle = [_]Point2d(f32){
+        .{ .x = 50, .y = 20 },
+        .{ .x = 80, .y = 80 },
+        .{ .x = 20, .y = 80 },
+    };
+    canvas.fillPolygon(&triangle, color, .smooth) catch unreachable;
+}
+
+fn drawBezierCubic(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 128, .g = 192, .b = 255, .a = 255 };
+    canvas.drawCubicBezier(
+        .{ .x = 10, .y = 50 },
+        .{ .x = 30, .y = 10 },
+        .{ .x = 70, .y = 90 },
+        .{ .x = 90, .y = 50 },
+        color,
+        2,
+        .solid,
+    );
+}
+
+fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 255, .g = 128, .b = 192, .a = 255 };
+    canvas.drawQuadraticBezier(
+        .{ .x = 20, .y = 80 },
+        .{ .x = 50, .y = 20 },
+        .{ .x = 80, .y = 80 },
+        color,
+        3,
+        .smooth,
+    );
+}
+
+fn drawPolygonComplex(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 128, .g = 255, .b = 128, .a = 255 };
+    const polygon = [_]Point2d(f32){
+        .{ .x = 50, .y = 10 },
+        .{ .x = 70, .y = 30 },
+        .{ .x = 90, .y = 40 },
+        .{ .x = 70, .y = 60 },
+        .{ .x = 50, .y = 90 },
+        .{ .x = 30, .y = 60 },
+        .{ .x = 10, .y = 40 },
+        .{ .x = 30, .y = 30 },
+    };
+    canvas.fillPolygon(&polygon, color, .smooth) catch unreachable;
+}
+
+fn drawSplinePolygon(canvas: Canvas(Rgba)) void {
+    const color = Rgba{ .r = 192, .g = 128, .b = 255, .a = 255 };
+    const polygon = [_]Point2d(f32){
+        .{ .x = 50, .y = 20 },
+        .{ .x = 80, .y = 35 },
+        .{ .x = 80, .y = 65 },
+        .{ .x = 50, .y = 80 },
+        .{ .x = 20, .y = 65 },
+        .{ .x = 20, .y = 35 },
+    };
+    canvas.drawSplinePolygon(&polygon, color, 2, 0.5, .smooth);
+}
+
+test "MD5 checksum regression tests" {
+    const allocator = testing.allocator;
+    const print_md5sums = @import("build_options").print_md5sums;
+
+    // Fixed size for consistent checksums
+    const width = 100;
+    const height = 100;
+
+    for (md5_checksums) |test_case| {
+        var img = try Image(Rgba).initAlloc(allocator, width, height);
+        defer img.deinit(allocator);
+
+        // White background
+        for (img.data) |*pixel| {
+            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        }
+
+        const canvas = Canvas(Rgba).init(img, allocator);
+        test_case.draw_fn(canvas);
+
+        // Calculate MD5
+        var md5sum: [std.crypto.hash.Md5.digest_length]u8 = undefined;
+        std.crypto.hash.Md5.hash(img.asBytes(), &md5sum, .{});
+        const hex_bytes = std.fmt.bytesToHex(md5sum, .lower);
+
+        if (print_md5sums) {
+            std.debug.print("    .{{ .name = \"{s}\", .md5sum = \"{s}\", .draw_fn = {s} }},\n", .{
+                test_case.name,
+                &hex_bytes,
+                test_case.name,
+            });
+        } else {
+            try expectEqualStrings(&hex_bytes, test_case.md5sum);
+        }
+    }
+}
+
+test "line endpoints are connected" {
+    const allocator = testing.allocator;
+    const width = 100;
+    const height = 100;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    // Fill with white
+    for (img.data) |*pixel| {
+        pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    // Test various line directions
+    const test_cases = [_]struct { p1: Point2d(f32), p2: Point2d(f32) }{
+        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 90, .y = 10 } }, // horizontal
+        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 10, .y = 90 } }, // vertical
+        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 90, .y = 90 } }, // diagonal
+        .{ .p1 = .{ .x = 90, .y = 10 }, .p2 = .{ .x = 10, .y = 90 } }, // reverse diagonal
+    };
+
+    for (test_cases) |tc| {
+        // Clear image
+        for (img.data) |*pixel| {
+            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        }
+
+        canvas.drawLine(tc.p1, tc.p2, color, 1, .solid);
+
+        // Check that endpoints are set (or very close)
+        // At least one pixel near each endpoint should be black
+        var p1_found = false;
+        var p2_found = false;
+
+        // Check 3x3 area around endpoints
+        for (0..3) |dy| {
+            for (0..3) |dx| {
+                const y1 = @as(i32, @intFromFloat(tc.p1.y)) + @as(i32, @intCast(dy)) - 1;
+                const x1 = @as(i32, @intFromFloat(tc.p1.x)) + @as(i32, @intCast(dx)) - 1;
+                const y2 = @as(i32, @intFromFloat(tc.p2.y)) + @as(i32, @intCast(dy)) - 1;
+                const x2 = @as(i32, @intFromFloat(tc.p2.x)) + @as(i32, @intCast(dx)) - 1;
+
+                if (y1 >= 0 and y1 < height and x1 >= 0 and x1 < width) {
+                    const idx1 = @as(usize, @intCast(y1)) * width + @as(usize, @intCast(x1));
+                    if (img.data[idx1].r == 0) p1_found = true;
+                }
+
+                if (y2 >= 0 and y2 < height and x2 >= 0 and x2 < width) {
+                    const idx2 = @as(usize, @intCast(y2)) * width + @as(usize, @intCast(x2));
+                    if (img.data[idx2].r == 0) p2_found = true;
+                }
+            }
+        }
+
+        try expect(p1_found);
+        try expect(p2_found);
+    }
+}
+
+test "thick lines have correct width" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    // Test different line widths
+    const line_widths = [_]usize{ 1, 3, 5, 10, 20 };
+
+    for (line_widths) |line_width| {
+        // Clear image
+        for (img.data) |*pixel| {
+            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        }
+
+        // Draw horizontal line in the middle
+        const y = @as(f32, @floatFromInt(height / 2));
+        canvas.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, color, line_width, .solid);
+
+        // Measure actual width at several points along the line
+        var measured_widths: [3]usize = .{ 0, 0, 0 };
+        const x_positions = [_]usize{ 75, 100, 125 };
+
+        for (x_positions, 0..) |x, i| {
+            var min_y: usize = height;
+            var max_y: usize = 0;
+
+            for (0..height) |py| {
+                const idx = py * width + x;
+                if (img.data[idx].r == 0) {
+                    min_y = @min(min_y, py);
+                    max_y = @max(max_y, py);
+                }
+            }
+
+            if (max_y >= min_y) {
+                measured_widths[i] = max_y - min_y + 1;
+            }
+        }
+
+        // Allow for some tolerance due to rounding
+        for (measured_widths) |measured| {
+            try expect(measured >= line_width - 1 and measured <= line_width + 1);
+        }
+    }
+}
+
+test "filled circle has correct radius" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    const test_radii = [_]f32{ 5, 10, 20, 30, 40 };
+    const center = Point2d(f32){ .x = 100, .y = 100 };
+
+    for (test_radii) |radius| {
+        // Clear image
+        for (img.data) |*pixel| {
+            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        }
+
+        canvas.fillCircle(center, radius, color, .solid);
+
+        // Check pixels at various distances from center
+        var inside_count: usize = 0;
+        var outside_count: usize = 0;
+        var edge_count: usize = 0;
+
+        for (0..height) |y| {
+            for (0..width) |x| {
+                const dx = @as(f32, @floatFromInt(x)) - center.x;
+                const dy = @as(f32, @floatFromInt(y)) - center.y;
+                const dist = @sqrt(dx * dx + dy * dy);
+                const idx = y * width + x;
+                const is_black = img.data[idx].r == 0;
+
+                if (dist < radius - 1) {
+                    // Should be inside
+                    if (is_black) inside_count += 1;
+                } else if (dist > radius + 1) {
+                    // Should be outside
+                    if (!is_black) outside_count += 1;
+                } else {
+                    // Edge region
+                    edge_count += 1;
+                }
+            }
+        }
+
+        // Most pixels inside radius should be filled
+        const inside_total = @as(usize, @intFromFloat(std.math.pi * (radius - 1) * (radius - 1)));
+        // Allow 15% tolerance for small circles due to discretization
+        const tolerance_factor: f32 = if (radius <= 10) 0.85 else 0.9;
+        const expected_count = @as(usize, @intFromFloat(@as(f32, @floatFromInt(inside_total)) * tolerance_factor));
+        try expect(inside_count >= expected_count);
+    }
+}
+
+test "circle outline has correct thickness" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    const center = Point2d(f32){ .x = 100, .y = 100 };
+    const radius: f32 = 40;
+    const line_widths = [_]usize{ 1, 3, 5, 10 };
+
+    for (line_widths) |line_width| {
+        // Clear image
+        for (img.data) |*pixel| {
+            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        }
+
+        canvas.drawCircle(center, radius, color, line_width, .solid);
+
+        // Sample along several radii to check thickness
+        const angles = [_]f32{ 0, std.math.pi / @as(f32, 4), std.math.pi / @as(f32, 2), 3 * std.math.pi / @as(f32, 4) };
+
+        for (angles) |angle| {
+            var black_pixels: usize = 0;
+
+            // Count black pixels along this radius
+            var r: f32 = 0;
+            while (r < radius * 2) : (r += 0.5) {
+                const x = center.x + r * @cos(angle);
+                const y = center.y + r * @sin(angle);
+
+                if (x >= 0 and x < width and y >= 0 and y < height) {
+                    const idx = @as(usize, @intFromFloat(y)) * width + @as(usize, @intFromFloat(x));
+                    if (img.data[idx].r == 0) {
+                        black_pixels += 1;
+                    }
+                }
+            }
+
+            // Should have approximately line_width black pixels
+            try expect(black_pixels >= line_width / 2 and black_pixels <= line_width * 3);
+        }
+    }
+}
+
+test "filled rectangle has correct area" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    const rect = Rectangle(f32){ .l = 50, .t = 50, .r = 150, .b = 130 };
+    const rect_width = rect.r - rect.l;
+    const rect_height = rect.b - rect.t;
+    const expected_area = rect_width * rect_height;
+
+    // Clear and draw filled rectangle using polygon fill
+    for (img.data) |*pixel| {
+        pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    const corners = [_]Point2d(f32){
+        .{ .x = rect.l, .y = rect.t },
+        .{ .x = rect.r, .y = rect.t },
+        .{ .x = rect.r, .y = rect.b },
+        .{ .x = rect.l, .y = rect.b },
+    };
+    try canvas.fillPolygon(&corners, color, .solid);
+
+    // Count black pixels
+    var black_pixels: usize = 0;
+    for (img.data) |pixel| {
+        if (pixel.r == 0) black_pixels += 1;
+    }
+
+    // Should match expected area closely
+    const tolerance = expected_area * 0.01; // 1% tolerance
+    const diff = @abs(@as(f32, @floatFromInt(black_pixels)) - expected_area);
+    try expect(diff <= tolerance);
+}
+
+test "polygon fill respects convexity" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    // Test convex polygon (triangle)
+    const triangle = [_]Point2d(f32){
+        .{ .x = 100, .y = 30 },
+        .{ .x = 170, .y = 150 },
+        .{ .x = 30, .y = 150 },
+    };
+
+    for (img.data) |*pixel| {
+        pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    try canvas.fillPolygon(&triangle, color, .solid);
+
+    // Check that points inside triangle are filled
+    const test_points = [_]struct { p: Point2d(f32), inside: bool }{
+        .{ .p = .{ .x = 100, .y = 100 }, .inside = true }, // centroid
+        .{ .p = .{ .x = 100, .y = 50 }, .inside = true }, // near top
+        .{ .p = .{ .x = 50, .y = 140 }, .inside = true }, // near bottom left
+        .{ .p = .{ .x = 150, .y = 140 }, .inside = true }, // near bottom right
+        .{ .p = .{ .x = 20, .y = 20 }, .inside = false }, // outside
+        .{ .p = .{ .x = 180, .y = 180 }, .inside = false }, // outside
+    };
+
+    for (test_points) |tp| {
+        const x = @as(usize, @intFromFloat(tp.p.x));
+        const y = @as(usize, @intFromFloat(tp.p.y));
+        if (x < width and y < height) {
+            const idx = y * width + x;
+            const is_black = img.data[idx].r == 0;
+            try expectEqual(tp.inside, is_black);
+        }
+    }
+}
+
+test "antialiased vs solid fill coverage" {
+    const allocator = testing.allocator;
+    const width = 100;
+    const height = 100;
+    var img_solid = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img_solid.deinit(allocator);
+    var img_smooth = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img_smooth.deinit(allocator);
+
+    const canvas_solid = Canvas(Rgba).init(img_solid, allocator);
+    const canvas_smooth = Canvas(Rgba).init(img_smooth, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    // Clear both images
+    for (img_solid.data, img_smooth.data) |*p1, *p2| {
+        p1.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+        p2.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    // Draw same circle with different modes
+    const center = Point2d(f32){ .x = 50, .y = 50 };
+    const radius: f32 = 20;
+
+    canvas_solid.fillCircle(center, radius, color, .solid);
+    canvas_smooth.fillCircle(center, radius, color, .smooth);
+
+    // Count coverage (sum of darkness)
+    var solid_coverage: f32 = 0;
+    var smooth_coverage: f32 = 0;
+
+    for (img_solid.data, img_smooth.data) |p1, p2| {
+        solid_coverage += @as(f32, @floatFromInt(255 - p1.r));
+        smooth_coverage += @as(f32, @floatFromInt(255 - p2.r));
+    }
+
+    // Antialiased version should have similar total coverage
+    // but slightly less due to edge smoothing
+    try expect(smooth_coverage > solid_coverage * 0.9);
+    try expect(smooth_coverage <= solid_coverage);
+}
+
+test "bezier curve smoothness" {
+    const allocator = testing.allocator;
+    const width = 200;
+    const height = 200;
+    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    defer img.deinit(allocator);
+
+    const canvas = Canvas(Rgba).init(img, allocator);
+    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    // Clear image
+    for (img.data) |*pixel| {
+        pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    // Draw cubic bezier
+    const p0 = Point2d(f32){ .x = 20, .y = 100 };
+    const p1 = Point2d(f32){ .x = 60, .y = 20 };
+    const p2 = Point2d(f32){ .x = 140, .y = 180 };
+    const p3 = Point2d(f32){ .x = 180, .y = 100 };
+
+    canvas.drawCubicBezier(p0, p1, p2, p3, color, 2, .solid);
+
+    // Verify endpoints are connected
+    var p0_found = false;
+    var p3_found = false;
+
+    // Check 3x3 area around endpoints
+    for (0..3) |dy| {
+        for (0..3) |dx| {
+            const y0 = @as(i32, @intFromFloat(p0.y)) + @as(i32, @intCast(dy)) - 1;
+            const x0 = @as(i32, @intFromFloat(p0.x)) + @as(i32, @intCast(dx)) - 1;
+            const y3 = @as(i32, @intFromFloat(p3.y)) + @as(i32, @intCast(dy)) - 1;
+            const x3 = @as(i32, @intFromFloat(p3.x)) + @as(i32, @intCast(dx)) - 1;
+
+            if (y0 >= 0 and y0 < height and x0 >= 0 and x0 < width) {
+                const idx0 = @as(usize, @intCast(y0)) * width + @as(usize, @intCast(x0));
+                if (img.data[idx0].r == 0) p0_found = true;
+            }
+
+            if (y3 >= 0 and y3 < height and x3 >= 0 and x3 < width) {
+                const idx3 = @as(usize, @intCast(y3)) * width + @as(usize, @intCast(x3));
+                if (img.data[idx3].r == 0) p3_found = true;
+            }
+        }
+    }
+
+    try expect(p0_found);
+    try expect(p3_found);
+
+    // Verify curve has pixels (not empty)
+    var black_pixel_count: usize = 0;
+    for (img.data) |pixel| {
+        if (pixel.r == 0) black_pixel_count += 1;
+    }
+    try expect(black_pixel_count > 50); // Should have a reasonable number of pixels
 }
