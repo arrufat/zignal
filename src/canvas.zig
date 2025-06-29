@@ -662,9 +662,11 @@ pub fn Canvas(comptime T: type) type {
             const start_y = @max(0, @as(i32, @intFromFloat(@floor(min_y))));
             const end_y = @min(@as(i32, @intCast(rows)) - 1, @as(i32, @intFromFloat(@ceil(max_y))));
 
-            // Use fixed array for intersections - 256 should be enough for everyone
-            const max_intersections = 256;
-            var intersections: [max_intersections]f32 = undefined;
+            // Use stack buffer for small polygons, fallback to heap for complex ones
+            const stack_buffer_size = 64;
+            var stack_intersections: [stack_buffer_size]f32 = undefined;
+            var heap_intersections: ?[]f32 = null;
+            defer if (heap_intersections) |h| self.allocator.free(h);
 
             var c2 = convert(Rgba, color);
             const max_alpha: f32 = @floatFromInt(c2.a);
@@ -674,25 +676,44 @@ pub fn Canvas(comptime T: type) type {
                 const fy: f32 = @floatFromInt(y);
                 var intersection_count: usize = 0;
 
-                // Find intersections with polygon edges
+                // Count intersections first
+                for (0..polygon.len) |i| {
+                    const p1 = polygon[i];
+                    const p2 = polygon[(i + 1) % polygon.len];
+
+                    if ((p1.y <= fy and p2.y > fy) or (p2.y <= fy and p1.y > fy)) {
+                        intersection_count += 1;
+                    }
+                }
+
+                // Get appropriate buffer
+                var intersections: []f32 = undefined;
+                if (intersection_count <= stack_buffer_size) {
+                    intersections = stack_intersections[0..intersection_count];
+                } else {
+                    // Need heap allocation
+                    if (heap_intersections == null or heap_intersections.?.len < intersection_count) {
+                        if (heap_intersections) |h| self.allocator.free(h);
+                        heap_intersections = try self.allocator.alloc(f32, intersection_count);
+                    }
+                    intersections = heap_intersections.?[0..intersection_count];
+                }
+
+                // Find actual intersections
+                var idx: usize = 0;
                 for (0..polygon.len) |i| {
                     const p1 = polygon[i];
                     const p2 = polygon[(i + 1) % polygon.len];
 
                     if ((p1.y <= fy and p2.y > fy) or (p2.y <= fy and p1.y > fy)) {
                         const intersection = p1.x + (fy - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
-
-                        if (intersection_count >= max_intersections) {
-                            return error.TooManyIntersections;
-                        }
-
-                        intersections[intersection_count] = intersection;
-                        intersection_count += 1;
+                        intersections[idx] = intersection;
+                        idx += 1;
                     }
                 }
 
                 // Get intersection slice
-                const intersection_slice = intersections[0..intersection_count];
+                const intersection_slice = intersections;
 
                 // Sort intersections
                 if (intersection_slice.len > 1) {
