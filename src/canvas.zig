@@ -17,7 +17,7 @@ const Rectangle = @import("geometry.zig").Rectangle;
 const Rgba = @import("color.zig").Rgba;
 
 /// Rendering quality mode for drawing operations
-pub const FillMode = enum {
+pub const DrawMode = enum {
     /// Fast rendering - hard edges, maximum performance
     fast,
     /// Soft rendering - antialiased edges, better quality
@@ -64,9 +64,9 @@ pub fn Canvas(comptime T: type) type {
         /// Draws a colored straight line of a custom width between p1 and p2 on an image.
         /// Width=1 lines use fast Bresenham algorithm with no caps for precise pixel placement.
         /// Width>1 lines are rendered as rectangles with rounded caps for smooth appearance.
-        /// Use FillMode.soft for anti-aliased lines or FillMode.fast for fast non-anti-aliased lines.
+        /// Use DrawMode.soft for anti-aliased lines or DrawMode.fast for fast non-anti-aliased lines.
         /// If the `color` is of Rgba type, it alpha-blends it onto the image.
-        pub fn drawLine(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype, width: usize, mode: FillMode) void {
+        pub fn drawLine(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -397,7 +397,7 @@ pub fn Canvas(comptime T: type) type {
         /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
         /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
         /// Round joints are added at vertices to ensure smooth connections.
-        pub fn drawPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, mode: FillMode) void {
+        pub fn drawPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -408,7 +408,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws the outline of a rectangle on the given image.
-        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: usize, mode: FillMode) void {
+        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             const points: []const Point2d(f32) = &.{
                 .{ .x = rect.l, .y = rect.t },
@@ -420,8 +420,8 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws the outline of a circle on the given image.
-        /// Use FillMode.soft for anti-aliased edges or FillMode.fast for fast aliased edges.
-        pub fn drawCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, width: usize, mode: FillMode) void {
+        /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for fast aliased edges.
+        pub fn drawCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
@@ -544,8 +544,8 @@ pub fn Canvas(comptime T: type) type {
 
         /// Fills the given polygon on an image using the scanline algorithm.
         /// The polygon is defined by an array of points (vertices).
-        /// Use FillMode.fast for hard edges (fastest) or FillMode.soft for antialiased edges.
-        pub fn fillPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, mode: FillMode) !void {
+        /// Use DrawMode.fast for hard edges (fastest) or DrawMode.soft for antialiased edges.
+        pub fn fillPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
@@ -660,8 +660,8 @@ pub fn Canvas(comptime T: type) type {
             }
         }
         /// Fills a circle on the given image.
-        /// Use FillMode.soft for anti-aliased edges or FillMode.fast for hard edges.
-        pub fn fillCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, mode: FillMode) void {
+        /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for hard edges.
+        pub fn fillCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0) return;
 
@@ -735,7 +735,7 @@ pub fn Canvas(comptime T: type) type {
             p2: Point2d(f32),
             color: anytype,
             width: usize,
-            mode: FillMode,
+            mode: DrawMode,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -764,7 +764,7 @@ pub fn Canvas(comptime T: type) type {
             p3: Point2d(f32),
             color: anytype,
             width: usize,
-            mode: FillMode,
+            mode: DrawMode,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -787,7 +787,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws a spline polygon outline with Bézier curves connecting vertices.
         /// The polygon's edges are rendered as cubic Bézier splines for smooth, curved appearance.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn drawSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, tension: f32, mode: FillMode) void {
+        pub fn drawSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, tension: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
 
@@ -803,7 +803,7 @@ pub fn Canvas(comptime T: type) type {
         /// Fills a spline polygon with Bézier curves connecting vertices.
         /// The polygon's outline is defined by Bézier splines for smooth, curved edges.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn fillSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, tension: f32, mode: FillMode) !void {
+        pub fn fillSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, tension: f32, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
@@ -951,7 +951,7 @@ pub fn Canvas(comptime T: type) type {
             evalArgs: anytype,
             color: anytype,
             width: usize,
-            mode: FillMode,
+            mode: DrawMode,
         ) void {
             var stack_buffer: [bezier_max_segments_count]Point2d(f32) = undefined;
 
