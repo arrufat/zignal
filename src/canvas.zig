@@ -62,13 +62,13 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws a line between two points with configurable width and rendering quality.
-        /// 
+        ///
         /// Algorithm selection:
         /// - Width 1, fast mode: Bresenham's algorithm (pixel-perfect, no antialiasing)
         /// - Width 1, soft mode: Xiaolin Wu's algorithm (smooth antialiasing)
         /// - Width >1, fast mode: Rectangle with circular caps (solid rendering)
         /// - Width >1, soft mode: Distance-based antialiasing (superior quality)
-        /// 
+        ///
         /// Parameters:
         /// - p1, p2: Line endpoints in floating-point coordinates
         /// - color: Any color type (Rgba colors support alpha blending)
