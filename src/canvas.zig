@@ -61,11 +61,19 @@ pub fn Canvas(comptime T: type) type {
             return .{ .image = image, .allocator = allocator };
         }
 
-        /// Draws a colored straight line of a custom width between p1 and p2 on an image.
-        /// Width=1 lines use fast Bresenham algorithm with no caps for precise pixel placement.
-        /// Width>1 lines are rendered as rectangles with rounded caps for smooth appearance.
-        /// Use DrawMode.soft for anti-aliased lines or DrawMode.fast for fast non-anti-aliased lines.
-        /// If the `color` is of Rgba type, it alpha-blends it onto the image.
+        /// Draws a line between two points with configurable width and rendering quality.
+        /// 
+        /// Algorithm selection:
+        /// - Width 1, fast mode: Bresenham's algorithm (pixel-perfect, no antialiasing)
+        /// - Width 1, soft mode: Xiaolin Wu's algorithm (smooth antialiasing)
+        /// - Width >1, fast mode: Rectangle with circular caps (solid rendering)
+        /// - Width >1, soft mode: Distance-based antialiasing (superior quality)
+        /// 
+        /// Parameters:
+        /// - p1, p2: Line endpoints in floating-point coordinates
+        /// - color: Any color type (Rgba colors support alpha blending)
+        /// - width: Line thickness in pixels (0 = no drawing)
+        /// - mode: .fast (performance) or .soft (quality with antialiasing)
         pub fn drawLine(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -76,33 +84,35 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Internal function for drawing solid (non-anti-aliased) lines.
-        /// Uses Bresenham's algorithm for 1px lines and polygon-based approach for thick lines.
+        /// Internal dispatcher for fast (non-antialiased) line rendering.
+        /// - Width 1: Uses Bresenham's algorithm for pixel-perfect precision
+        /// - Width >1: Uses rectangle-based approach with circular end caps
         fn drawLineFast(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
             if (width == 1) {
                 // Use Bresenham's algorithm for 1px lines - fast and precise
                 self.drawLineBresenham(p1, p2, color);
             } else {
                 // Use polygon-based approach for thick lines
-                self.drawLinePolygon(p1, p2, width, color);
+                self.drawLineRectangle(p1, p2, width, color);
             }
         }
-        /// Internal function for drawing smooth (anti-aliased) lines.
-        /// Uses Wu's algorithm for 1px lines (optimal antialiasing) and distance-based
-        /// antialiasing for thick lines (better quality than polygon approach).
+        /// Internal dispatcher for soft (antialiased) line rendering.
+        /// - Width 1: Uses Xiaolin Wu's algorithm for optimal thin line antialiasing
+        /// - Width >1: Uses distance-based algorithm for superior thick line quality
         fn drawLineSoft(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
             if (width == 1) {
                 // Use Wu's algorithm for 1px lines - optimal antialiasing and performance
-                self.drawLineWu(p1, p2, color);
+                self.drawLineXiaolinWu(p1, p2, color);
             } else {
                 // Use distance-based antialiasing for thick lines - better quality
                 self.drawLineDistance(p1, p2, width, color);
             }
         }
 
-        /// Bresenham's line algorithm for 1-pixel width solid lines.
-        /// Fast integer-only algorithm that draws precise pixel-perfect lines.
-        /// No antialiasing - draws hard edges for maximum performance.
+        /// Bresenham's line algorithm for 1-pixel width lines.
+        /// Classic rasterization algorithm using integer arithmetic for maximum speed.
+        /// Produces pixel-perfect lines with hard edges and no antialiasing.
+        /// Optimal for grid-aligned graphics and when performance is critical.
         fn drawLineBresenham(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
             var x1: i32 = @intFromFloat(p1.x);
             var y1: i32 = @intFromFloat(p1.y);
@@ -134,12 +144,13 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Wu's anti-aliasing algorithm for 1-pixel width lines.
-        /// Provides optimal antialiasing quality and performance for thin lines.
-        fn drawLineWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
+        /// Xiaolin Wu's antialiasing algorithm for 1-pixel width lines.
+        /// Uses fractional coverage to create smooth line edges with alpha blending.
+        /// Handles steep vs. shallow lines optimally by swapping coordinates.
+        /// Provides the best quality-to-performance ratio for thin antialiased lines.
+        fn drawLineXiaolinWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
             const c2 = convert(Rgba, color);
 
-            // Wu's algorithm for 1px lines
             var x1 = p1.x;
             var y1 = p1.y;
             var x2 = p2.x;
@@ -202,9 +213,11 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Polygon-based thick line drawing for solid (non-anti-aliased) lines.
-        /// Creates a filled rectangle with circular end caps for thick line appearance.
-        fn drawLinePolygon(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
+        /// Rectangle-based thick line rendering for fast (non-antialiased) mode.
+        /// Constructs a filled rectangle perpendicular to the line direction,
+        /// then adds circular end caps for smooth line termination.
+        /// Handles zero-length lines by drawing a single filled circle.
+        fn drawLineRectangle(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
             const solid_color = convert(T, color);
 
             // For thick lines, draw as a filled rectangle
@@ -240,8 +253,11 @@ pub fn Canvas(comptime T: type) type {
             self.fillCircle(p2, half_width, color, .fast);
         }
 
-        /// Distance-based anti-aliased line drawing for thick lines.
-        /// Uses exact distance calculation from each pixel to the line for superior quality.
+        /// Distance-based antialiased rendering for thick lines.
+        /// Calculates the exact perpendicular distance from each pixel to the line segment,
+        /// applying smooth alpha falloff at edges for superior visual quality.
+        /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
+        /// More expensive than rectangle-based approach but produces better results.
         fn drawLineDistance(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
             const rows: f32 = @floatFromInt(self.image.rows);
             const cols: f32 = @floatFromInt(self.image.cols);
