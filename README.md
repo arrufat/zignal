@@ -49,14 +49,15 @@ pub fn main() !void {
     // Create a 800x600 RGBA image
     var image: Image(Rgba) = try .initAlloc(allocator, 600, 800);
     defer image.deinit(allocator);
+    @memset(image.data, Rgba.white);
 
     // Create a drawing canvas
     const canvas: Canvas(Rgba) = .init(image, allocator);
 
     // Draw shapes
     const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    canvas.drawLine(.{.x = 50, .y = 50}, .{.x = 750, .y = 100}, red, 5, .smooth);
-    canvas.drawCircle(.{.x = 400, .y = 300}, 100, red, 3, .smooth);
+    canvas.drawLine(.{.x = 50, .y = 50}, .{.x = 750, .y = 100}, red, 5, .soft);
+    canvas.drawCircle(.{.x = 400, .y = 300}, 100, red, 3, .soft);
 }
 ```
 
@@ -83,12 +84,12 @@ Current features include:
   - views (called `sub_image` in dlib or `roi` in OpenCV.)
 - Canvas drawing API with consistent parameter ordering
   - lines with variable width and antialiasing
-  - circles (filled and outlined) with smooth edges
+  - circles (filled and outlined) with soft edges
   - polygons (filled and outlined)
   - rectangles with customizable borders
   - Bézier curves (quadratic and cubic) with adaptive subdivision
-  - spline polygons with tension control for smooth curved shapes
-  - multiple fill modes: solid (fast) and smooth (antialiased)
+  - spline polygons with tension control for soft curved shapes
+  - multiple drawing modes: fast (hard edges) and soft (antialiased edges)
 
 ## Examples
 
