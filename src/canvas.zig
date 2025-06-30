@@ -140,7 +140,6 @@ pub fn Canvas(comptime T: type) type {
         /// Wu's anti-aliasing algorithm for 1-pixel width lines.
         /// Provides optimal antialiasing quality and performance for thin lines.
         fn drawLineWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
-            const Float = @TypeOf(p1.x);
             const c2 = convert(Rgba, color);
 
             // Wu's algorithm for 1px lines
@@ -151,12 +150,12 @@ pub fn Canvas(comptime T: type) type {
 
             const steep = @abs(y2 - y1) > @abs(x2 - x1);
             if (steep) {
-                std.mem.swap(Float, &x1, &y1);
-                std.mem.swap(Float, &x2, &y2);
+                std.mem.swap(f32, &x1, &y1);
+                std.mem.swap(f32, &x2, &y2);
             }
             if (x1 > x2) {
-                std.mem.swap(Float, &x1, &x2);
-                std.mem.swap(Float, &y1, &y2);
+                std.mem.swap(f32, &x1, &x2);
+                std.mem.swap(f32, &y1, &y2);
             }
 
             const dx = x2 - x1;
@@ -247,10 +246,9 @@ pub fn Canvas(comptime T: type) type {
         /// Distance-based anti-aliased line drawing for thick lines.
         /// Uses exact distance calculation from each pixel to the line for superior quality.
         fn drawLineDistance(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
-            const Float = @TypeOf(p1.x);
-            const rows: Float = @floatFromInt(self.image.rows);
-            const cols: Float = @floatFromInt(self.image.cols);
-            const half_width: Float = @as(Float, @floatFromInt(width)) / 2.0;
+            const rows: f32 = @floatFromInt(self.image.rows);
+            const cols: f32 = @floatFromInt(self.image.cols);
+            const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
             const c2 = convert(Rgba, color);
 
             // Calculate line direction vector
@@ -269,7 +267,7 @@ pub fn Canvas(comptime T: type) type {
                 const x1 = @round(p1.x);
                 var y1 = @round(p1.y);
                 var y2 = @round(p2.y);
-                if (y1 > y2) std.mem.swap(Float, &y1, &y2);
+                if (y1 > y2) std.mem.swap(f32, &y1, &y2);
                 if (x1 < 0 or x1 >= cols) return;
                 var y = y1;
                 while (y <= y2) : (y += 1) {
@@ -288,7 +286,7 @@ pub fn Canvas(comptime T: type) type {
                 var x1 = @round(p1.x);
                 var x2 = @round(p2.x);
                 const y1 = @round(p1.y);
-                if (x1 > x2) std.mem.swap(Float, &x1, &x2);
+                if (x1 > x2) std.mem.swap(f32, &x1, &x2);
                 if (y1 < 0 or y1 >= rows) return;
                 var x = x1;
                 while (x <= x2) : (x += 1) {
@@ -324,9 +322,9 @@ pub fn Canvas(comptime T: type) type {
             const inv_length_sq = 1.0 / length_sq;
 
             // Iterate through pixels in bounding box
-            var py: Float = min_y;
+            var py: f32 = min_y;
             while (py <= max_y) : (py += 1) {
-                var px: Float = min_x;
+                var px: f32 = min_x;
                 while (px <= max_x) : (px += 1) {
                     // Optimized distance calculation
                     const dpx = px - p1.x;
@@ -340,7 +338,7 @@ pub fn Canvas(comptime T: type) type {
 
                     // Anti-aliased coverage based on distance
                     if (dist <= half_width + antialias_edge_offset) {
-                        var alpha: Float = 1.0;
+                        var alpha: f32 = 1.0;
                         if (dist > half_width - antialias_edge_offset) {
                             alpha = (half_width + antialias_edge_offset - dist);
                         }
