@@ -16,75 +16,74 @@ const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
-const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
 
 x: f64,
 y: f64,
 b: f64,
 
-pub const black: @This() = .{ .x = 0, .y = 0, .b = 0 };
+const Xyb = @This();
 
-const Self = @This();
+pub const black: Xyb = .{ .x = 0, .y = 0, .b = 0 };
 
 /// Formats the XYB color for display. Use "color" format for ANSI color output.
-pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Self, self, fmt, options, writer);
+pub fn format(self: Xyb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    return formatting.formatColor(Xyb, self, fmt, options, writer);
 }
 
 /// Returns true if the color represents a neutral gray (via Oklab a=0, b=0).
-pub fn isGray(self: Self) bool {
+pub fn isGray(self: Xyb) bool {
     const oklab = self.toOklab();
     return oklab.a == 0 and oklab.b == 0;
 }
 
 /// Converts to grayscale using Oklab lightness for perceptual accuracy.
-pub fn toGray(self: Self) u8 {
+pub fn toGray(self: Xyb) u8 {
     return @intFromFloat(@round(@max(0, @min(1, self.toOklab().l)) * 255));
 }
 
 /// Converts XYB to RGB color space.
-pub fn toRgb(self: Self) Rgb {
+pub fn toRgb(self: Xyb) Rgb {
     return conversions.xybToRgb(self);
 }
 
 /// Converts XYB to RGBA by first converting to RGB and adding alpha.
-pub fn toRgba(self: Self, alpha: u8) Rgba {
+pub fn toRgba(self: Xyb, alpha: u8) Rgba {
     return self.toRgb().toRgba(alpha);
 }
 
 /// Converts XYB to HSL color space using direct conversion.
-pub fn toHsl(self: Self) Hsl {
+pub fn toHsl(self: Xyb) Hsl {
     return conversions.xybToHsl(self);
 }
 
 /// Converts XYB to HSV color space using direct conversion.
-pub fn toHsv(self: Self) Hsv {
+pub fn toHsv(self: Xyb) Hsv {
     return conversions.xybToHsv(self);
 }
 
 /// Converts XYB to CIE XYZ color space using direct conversion.
-pub fn toXyz(self: Self) Xyz {
+pub fn toXyz(self: Xyb) Xyz {
     return conversions.xybToXyz(self);
 }
 
 /// Converts XYB to CIELAB color space using direct conversion.
-pub fn toLab(self: Self) Lab {
+pub fn toLab(self: Xyb) Lab {
     return conversions.xybToLab(self);
 }
 
 /// Converts XYB to LMS cone response using direct conversion.
-pub fn toLms(self: Self) Lms {
+pub fn toLms(self: Xyb) Lms {
     return conversions.xybToLms(self);
 }
 
 /// Converts XYB to Oklab color space using direct conversion.
-pub fn toOklab(self: Self) Oklab {
+pub fn toOklab(self: Xyb) Oklab {
     return conversions.xybToOklab(self);
 }
 
 /// Alpha blends the given RGBA color onto this XYB color in-place.
-pub fn blend(self: *Self, color: Rgba) void {
+pub fn blend(self: *Xyb, color: Rgba) void {
     var rgb = self.toRgb();
     rgb.blend(color);
     self.* = rgb.toXyb();
