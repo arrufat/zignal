@@ -18,26 +18,26 @@ r: u8,
 g: u8,
 b: u8,
 
-pub const black: @This() = .{ .r = 0, .g = 0, .b = 0 };
-pub const white: @This() = .{ .r = 255, .g = 255, .b = 255 };
-pub const red: @This() = .{ .r = 255, .g = 0, .b = 0 };
-pub const green: @This() = .{ .r = 0, .g = 255, .b = 0 };
-pub const blue: @This() = .{ .r = 0, .g = 0, .b = 255 };
+const Rgb = @This();
 
-const Self = @This();
+pub const black: Rgb = .{ .r = 0, .g = 0, .b = 0 };
+pub const white: Rgb = .{ .r = 255, .g = 255, .b = 255 };
+pub const red: Rgb = .{ .r = 255, .g = 0, .b = 0 };
+pub const green: Rgb = .{ .r = 0, .g = 255, .b = 0 };
+pub const blue: Rgb = .{ .r = 0, .g = 0, .b = 255 };
 
 /// Formats the RGB color for display. Use "color" format for ANSI color output.
-pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Self, self, fmt, options, writer);
+pub fn format(self: Rgb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    return formatting.formatColor(Rgb, self, fmt, options, writer);
 }
 
 /// Creates an RGB color from a grayscale value (gray applied to all channels).
-pub fn fromGray(gray: u8) Self {
+pub fn fromGray(gray: u8) Rgb {
     return .{ .r = gray, .g = gray, .b = gray };
 }
 
 /// Creates RGB from 24-bit hexadecimal value (0xRRGGBB format).
-pub fn fromHex(hex_code: u24) Self {
+pub fn fromHex(hex_code: u24) Rgb {
     return .{
         .r = @intCast((hex_code >> (8 * 2)) & 0x0000ff),
         .g = @intCast((hex_code >> (8 * 1)) & 0x0000ff),
@@ -46,67 +46,67 @@ pub fn fromHex(hex_code: u24) Self {
 }
 
 /// Calculates the perceptual luminance using ITU-R BT.709 coefficients.
-pub fn luma(self: Self) f64 {
+pub fn luma(self: Rgb) f64 {
     return conversions.rgbLuma(self.r, self.g, self.b);
 }
 
 /// Returns true if all RGB components are equal (grayscale).
-pub fn isGray(self: Self) bool {
+pub fn isGray(self: Rgb) bool {
     return self.r == self.g and self.g == self.b;
 }
 
 /// Converts to grayscale using perceptual luminance calculation.
-pub fn toGray(self: Self) u8 {
+pub fn toGray(self: Rgb) u8 {
     return @intFromFloat(self.luma() * 255);
 }
 
 /// Converts RGB to 24-bit hexadecimal representation (0xRRGGBB format).
-pub fn toHex(self: Self) u24 {
+pub fn toHex(self: Rgb) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
 }
 
 /// Converts RGB to RGBA by adding the specified alpha channel value.
-pub fn toRgba(self: Self, alpha: u8) Rgba {
+pub fn toRgba(self: Rgb, alpha: u8) Rgba {
     return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
 }
 
 /// Converts RGB to HSL (Hue, Saturation, Lightness) color space.
-pub fn toHsl(self: Self) Hsl {
+pub fn toHsl(self: Rgb) Hsl {
     return conversions.rgbToHsl(self);
 }
 
 /// Converts RGB to HSV (Hue, Saturation, Value) color space.
-pub fn toHsv(self: Self) Hsv {
+pub fn toHsv(self: Rgb) Hsv {
     return conversions.rgbToHsv(self);
 }
 
 /// Converts RGB to CIE 1931 XYZ color space using D65 illuminant.
-pub fn toXyz(self: Self) Xyz {
+pub fn toXyz(self: Rgb) Xyz {
     return conversions.rgbToXyz(self);
 }
 
 /// Converts RGB to CIELAB color space via XYZ intermediate conversion.
-pub fn toLab(self: Self) Lab {
+pub fn toLab(self: Rgb) Lab {
     return conversions.rgbToLab(self);
 }
 
 /// Converts RGB to LMS (Long, Medium, Short) cone response space.
-pub fn toLms(self: Self) Lms {
+pub fn toLms(self: Rgb) Lms {
     return conversions.xyzToLms(self.toXyz());
 }
 
 /// Converts RGB to Oklab color space for improved perceptual uniformity.
-pub fn toOklab(self: Self) Oklab {
+pub fn toOklab(self: Rgb) Oklab {
     return conversions.lmsToOklab(self.toLms());
 }
 
 /// Converts RGB to XYB color space via LMS intermediate conversion.
-pub fn toXyb(self: Self) Xyb {
+pub fn toXyb(self: Rgb) Xyb {
     return conversions.lmsToXyb(self.toLms());
 }
 
 /// Alpha blends the given RGBA color onto this RGB color in-place.
-pub fn blend(self: *Self, color: Rgba) void {
+pub fn blend(self: *Rgb, color: Rgba) void {
     if (color.a == 0) return;
 
     const a = @as(f32, @floatFromInt(color.a)) / 255;

@@ -23,9 +23,9 @@ x: f64,
 y: f64,
 z: f64,
 
-pub const black: @This() = .{ .x = 0, .y = 0, .z = 0 };
-
 const Self = @This();
+
+pub const black: Self = .{ .x = 0, .y = 0, .z = 0 };
 
 /// Formats the CIE XYZ color for display. Use "color" format for ANSI color output.
 pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

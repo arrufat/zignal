@@ -7,7 +7,6 @@ const std = @import("std");
 
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
-const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
@@ -21,68 +20,68 @@ h: f64,
 s: f64,
 l: f64,
 
-pub const black: @This() = .{ .h = 0, .s = 0, .l = 0 };
-pub const white: @This() = .{ .h = 0, .s = 0, .l = 100 };
+const Hsl = @This();
 
-const Self = @This();
+pub const black: Hsl = .{ .h = 0, .s = 0, .l = 0 };
+pub const white: Hsl = .{ .h = 0, .s = 0, .l = 100 };
 
 /// Formats the HSL color for display. Use "color" format for ANSI color output.
-pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Self, self, fmt, options, writer);
+pub fn format(self: Hsl, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    return formatting.formatColor(Hsl, self, fmt, options, writer);
 }
 
 /// Returns true if saturation is 0 (grayscale).
-pub fn isGray(self: Self) bool {
+pub fn isGray(self: Hsl) bool {
     return self.s == 0;
 }
 
 /// Converts to grayscale using the lightness component.
-pub fn toGray(self: Self) u8 {
+pub fn toGray(self: Hsl) u8 {
     return @intFromFloat(@round(self.l / 100 * 255));
 }
 
 /// Converts HSL to RGB color space.
-pub fn toRgb(self: Self) Rgb {
+pub fn toRgb(self: Hsl) Rgb {
     return conversions.hslToRgb(self);
 }
 
 /// Converts HSL to RGBA by first converting to RGB and adding alpha.
-pub fn toRgba(self: Self, alpha: u8) Rgba {
+pub fn toRgba(self: Hsl, alpha: u8) Rgba {
     return self.toRgb().toRgba(alpha);
 }
 
 /// Converts HSL to HSV color space via RGB intermediate conversion.
-pub fn toHsv(self: Self) Hsv {
+pub fn toHsv(self: Hsl) Hsv {
     return self.toRgb().toHsv();
 }
 
 /// Converts HSL to CIE XYZ color space via RGB intermediate conversion.
-pub fn toXyz(self: Self) Xyz {
+pub fn toXyz(self: Hsl) Xyz {
     return self.toRgb().toXyz();
 }
 
 /// Converts HSL to CIELAB color space using direct conversion.
-pub fn toLab(self: Self) Lab {
+pub fn toLab(self: Hsl) Lab {
     return conversions.hslToLab(self);
 }
 
 /// Converts HSL to LMS cone response via RGB intermediate conversion.
-pub fn toLms(self: Self) Lms {
+pub fn toLms(self: Hsl) Lms {
     return self.toRgb().toLms();
 }
 
 /// Converts HSL to Oklab via RGB intermediate conversion.
-pub fn toOklab(self: Self) Oklab {
+pub fn toOklab(self: Hsl) Oklab {
     return self.toRgb().toOklab();
 }
 
 /// Converts HSL to XYB via RGB intermediate conversion.
-pub fn toXyb(self: Self) Xyb {
+pub fn toXyb(self: Hsl) Xyb {
     return self.toRgb().toXyb();
 }
 
 /// Alpha blends the given RGBA color onto this HSL color in-place.
-pub fn blend(self: *Self, color: Rgba) void {
+pub fn blend(self: *Hsl, color: Rgba) void {
     var rgb = self.toRgb();
     rgb.blend(color);
     self.* = rgb.toHsl();
