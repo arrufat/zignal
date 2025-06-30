@@ -79,8 +79,6 @@ pub fn Canvas(comptime T: type) type {
         /// Internal function for drawing solid (non-anti-aliased) lines.
         /// Uses Bresenham's algorithm for 1px lines and polygon-based approach for thick lines.
         fn drawLineFast(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
-            comptime assert(isColor(@TypeOf(color)));
-            if (width == 0) return;
             if (width == 1) {
                 // Use Bresenham's algorithm for 1px lines - fast and precise
                 self.drawLineBresenham(p1, p2, color);
@@ -93,7 +91,6 @@ pub fn Canvas(comptime T: type) type {
         /// Uses Wu's algorithm for 1px lines (optimal antialiasing) and distance-based
         /// antialiasing for thick lines (better quality than polygon approach).
         fn drawLineSoft(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
-            if (width == 0) return;
             if (width == 1) {
                 // Use Wu's algorithm for 1px lines - optimal antialiasing and performance
                 self.drawLineWu(p1, p2, color);
