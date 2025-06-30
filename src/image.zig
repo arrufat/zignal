@@ -522,28 +522,61 @@ pub fn Image(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const num_channels = comptime Self.channels();
+                    if (is4xu8Struct(T)) {
+                        // SIMD-optimized path for 4x u8 structs (e.g., RGBA)
+                        // First pass: row-wise cumulative sums
+                        for (0..self.rows) |r| {
+                            var tmp: @Vector(4, f32) = @splat(0);
+                            const row_offset = r * self.stride;
+                            const out_offset = r * integral.cols;
 
-                    // First pass: compute row-wise cumulative sums for all channels
-                    for (0..self.rows) |r| {
-                        var tmp = [_]f32{0} ** num_channels;
-                        const row_offset = r * self.stride;
-                        const out_offset = r * integral.cols;
-                        for (0..self.cols) |c| {
-                            inline for (std.meta.fields(T), 0..) |f, i| {
-                                tmp[i] += as(f32, @field(self.data[row_offset + c], f.name));
-                                integral.data[out_offset + c][i] = tmp[i];
+                            for (0..self.cols) |c| {
+                                const pixel = self.data[row_offset + c];
+                                var pixel_vec: @Vector(4, f32) = undefined;
+                                inline for (std.meta.fields(T), 0..) |field, i| {
+                                    pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
+                                }
+                                tmp += pixel_vec;
+                                integral.data[out_offset + c] = tmp;
                             }
                         }
-                    }
 
-                    // Second pass: add column-wise cumulative sums
-                    for (1..self.rows) |r| {
-                        const prev_row_offset = (r - 1) * integral.cols;
-                        const curr_row_offset = r * integral.cols;
-                        for (0..self.cols) |c| {
-                            inline for (0..num_channels) |i| {
-                                integral.data[curr_row_offset + c][i] += integral.data[prev_row_offset + c][i];
+                        // Second pass: column-wise cumulative sums
+                        for (1..self.rows) |r| {
+                            const prev_row_offset = (r - 1) * integral.cols;
+                            const curr_row_offset = r * integral.cols;
+
+                            for (0..self.cols) |c| {
+                                const prev_vec: @Vector(4, f32) = integral.data[prev_row_offset + c];
+                                const curr_vec: @Vector(4, f32) = integral.data[curr_row_offset + c];
+                                integral.data[curr_row_offset + c] = prev_vec + curr_vec;
+                            }
+                        }
+                    } else {
+                        // Generic scalar path for other struct types
+                        const num_channels = comptime Self.channels();
+
+                        // First pass: compute row-wise cumulative sums for all channels
+                        for (0..self.rows) |r| {
+                            var tmp = [_]f32{0} ** num_channels;
+                            const row_offset = r * self.stride;
+                            const out_offset = r * integral.cols;
+                            for (0..self.cols) |c| {
+                                inline for (std.meta.fields(T), 0..) |f, i| {
+                                    tmp[i] += as(f32, @field(self.data[row_offset + c], f.name));
+                                    integral.data[out_offset + c][i] = tmp[i];
+                                }
+                            }
+                        }
+
+                        // Second pass: add column-wise cumulative sums
+                        for (1..self.rows) |r| {
+                            const prev_row_offset = (r - 1) * integral.cols;
+                            const curr_row_offset = r * integral.cols;
+                            for (0..self.cols) |c| {
+                                inline for (0..num_channels) |i| {
+                                    integral.data[curr_row_offset + c][i] += integral.data[prev_row_offset + c][i];
+                                }
                             }
                         }
                     }
@@ -682,7 +715,7 @@ pub fn Image(comptime T: type) type {
                     assert(field.type == u8);
                 }
             }
-            
+
             // Initialize output if needed
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
@@ -765,7 +798,7 @@ pub fn Image(comptime T: type) type {
                     assert(field.type == u8);
                 }
             }
-            
+
             // Initialize output if needed
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
@@ -1077,6 +1110,54 @@ test "integral image struct" {
     }
 }
 
+test "integral image RGB vs RGBA with full alpha produces same RGB values" {
+    const Rgb = @import("color.zig").Rgb;
+    const test_size = 10;
+
+    // Create RGB image
+    var rgb_img = try Image(Rgb).initAlloc(std.testing.allocator, test_size, test_size);
+    defer rgb_img.deinit(std.testing.allocator);
+
+    // Create RGBA image
+    var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
+    defer rgba_img.deinit(std.testing.allocator);
+
+    // Fill both with identical RGB values
+    var seed: u8 = 0;
+    for (0..test_size) |r| {
+        for (0..test_size) |c| {
+            seed +%= 17;
+            const r_val = seed;
+            const g_val = seed +% 50;
+            const b_val = seed +% 100;
+
+            rgb_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val };
+            rgba_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val, .a = 255 };
+        }
+    }
+
+    // Apply integralImage to both
+    var rgb_integral: Image([3]f32) = undefined;
+    try rgb_img.integralImage(std.testing.allocator, &rgb_integral);
+    defer rgb_integral.deinit(std.testing.allocator);
+
+    var rgba_integral: Image([4]f32) = undefined;
+    try rgba_img.integralImage(std.testing.allocator, &rgba_integral);
+    defer rgba_integral.deinit(std.testing.allocator);
+
+    // Compare RGB channels - they should be identical
+    for (0..test_size) |r| {
+        for (0..test_size) |c| {
+            const rgb = rgb_integral.at(r, c).*;
+            const rgba = rgba_integral.at(r, c).*;
+
+            try expectEqual(rgb[0], rgba[0]);
+            try expectEqual(rgb[1], rgba[1]);
+            try expectEqual(rgb[2], rgba[2]);
+        }
+    }
+}
+
 test "getRectangle" {
     var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
@@ -1197,19 +1278,19 @@ test "boxBlur struct type" {
 test "boxBlur RGB vs RGBA with full alpha produces same RGB values" {
     // Simple test: RGB image and RGBA image with alpha=255 should produce
     // identical results for the RGB channels
-    
+
     const Rgb = @import("color.zig").Rgb;
     const test_size = 10;
     const radius = 2;
-    
+
     // Create RGB image
     var rgb_img = try Image(Rgb).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgb_img.deinit(std.testing.allocator);
-    
-    // Create RGBA image  
+
+    // Create RGBA image
     var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
-    
+
     // Fill both with identical RGB values
     var seed: u8 = 0;
     for (0..test_size) |r| {
@@ -1218,27 +1299,27 @@ test "boxBlur RGB vs RGBA with full alpha produces same RGB values" {
             const r_val = seed;
             const g_val = seed +% 50;
             const b_val = seed +% 100;
-            
+
             rgb_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val };
             rgba_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val, .a = 255 };
         }
     }
-    
+
     // Apply blur to both
     var rgb_blurred: Image(Rgb) = undefined;
     try rgb_img.boxBlur(std.testing.allocator, &rgb_blurred, radius);
     defer rgb_blurred.deinit(std.testing.allocator);
-    
+
     var rgba_blurred: Image(Rgba) = undefined;
     try rgba_img.boxBlur(std.testing.allocator, &rgba_blurred, radius);
     defer rgba_blurred.deinit(std.testing.allocator);
-    
+
     // Compare RGB channels - they should be identical
     for (0..test_size) |r| {
         for (0..test_size) |c| {
             const rgb = rgb_blurred.at(r, c).*;
             const rgba = rgba_blurred.at(r, c).*;
-            
+
             try expectEqual(rgb.r, rgba.r);
             try expectEqual(rgb.g, rgba.g);
             try expectEqual(rgb.b, rgba.b);
@@ -1250,19 +1331,19 @@ test "boxBlur RGB vs RGBA with full alpha produces same RGB values" {
 test "sharpen RGB vs RGBA with full alpha produces same RGB values" {
     // Simple test: RGB image and RGBA image with alpha=255 should produce
     // identical results for the RGB channels when sharpened
-    
+
     const Rgb = @import("color.zig").Rgb;
     const test_size = 8;
     const radius = 1;
-    
+
     // Create RGB image
     var rgb_img = try Image(Rgb).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgb_img.deinit(std.testing.allocator);
-    
-    // Create RGBA image  
+
+    // Create RGBA image
     var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
-    
+
     // Fill both with identical RGB values (create an edge pattern for sharpening)
     for (0..test_size) |r| {
         for (0..test_size) |c| {
@@ -1270,27 +1351,27 @@ test "sharpen RGB vs RGBA with full alpha produces same RGB values" {
             const r_val = val;
             const g_val = val +% 30;
             const b_val = val +% 60;
-            
+
             rgb_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val };
             rgba_img.at(r, c).* = .{ .r = r_val, .g = g_val, .b = b_val, .a = 255 };
         }
     }
-    
+
     // Apply sharpen to both
     var rgb_sharpened: Image(Rgb) = undefined;
     try rgb_img.sharpen(std.testing.allocator, &rgb_sharpened, radius);
     defer rgb_sharpened.deinit(std.testing.allocator);
-    
+
     var rgba_sharpened: Image(Rgba) = undefined;
     try rgba_img.sharpen(std.testing.allocator, &rgba_sharpened, radius);
     defer rgba_sharpened.deinit(std.testing.allocator);
-    
+
     // Compare RGB channels - they should be identical
     for (0..test_size) |r| {
         for (0..test_size) |c| {
             const rgb = rgb_sharpened.at(r, c).*;
             const rgba = rgba_sharpened.at(r, c).*;
-            
+
             try expectEqual(rgb.r, rgba.r);
             try expectEqual(rgb.g, rgba.g);
             try expectEqual(rgb.b, rgba.b);
