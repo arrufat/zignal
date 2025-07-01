@@ -66,8 +66,8 @@ pub fn Canvas(comptime T: type) type {
             @memset(self.image.data, convert(T, color));
         }
 
-        /// Fills a horizontal span using @memset for optimal performance.
-        fn fillHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+        /// Sets a horizontal span to `color` using @memset.
+        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
@@ -149,7 +149,7 @@ pub fn Canvas(comptime T: type) type {
             if (y1 == y2) {
                 const min_x = @min(x1, x2);
                 const max_x = @max(x1, x2);
-                self.fillHorizontalSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color);
+                self.setHorizontalSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color);
                 return;
             }
 
@@ -224,7 +224,7 @@ pub fn Canvas(comptime T: type) type {
                 const solid_start = @ceil(min_x);
                 const solid_end = @floor(max_x);
                 if (solid_end >= solid_start) {
-                    self.fillHorizontalSpan(solid_start, solid_end, y, convert(T, c2));
+                    self.setHorizontalSpan(solid_start, solid_end, y, convert(T, c2));
                 }
 
                 // Right endpoint antialiasing
@@ -370,7 +370,7 @@ pub fn Canvas(comptime T: type) type {
                     // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
                     const x_start = x1 - half_width;
                     const x_end = x1 + half_width;
-                    self.fillHorizontalSpan(x_start, x_end, y, pixel_color);
+                    self.setHorizontalSpan(x_start, x_end, y, pixel_color);
                 }
                 // Add rounded caps
                 self.fillCircle(p1, half_width, color, .soft);
@@ -401,7 +401,7 @@ pub fn Canvas(comptime T: type) type {
                             }
                         } else {
                             // Middle rows - use fillHorizontalSpan for performance
-                            self.fillHorizontalSpan(x1, x2, py, pixel_color);
+                            self.setHorizontalSpan(x1, x2, py, pixel_color);
                         }
                     }
                 }
@@ -758,7 +758,7 @@ pub fn Canvas(comptime T: type) type {
                         },
                         .fast => {
                             // Fast mode - use @memset for optimal span filling
-                            self.fillHorizontalSpan(left_edge, right_edge, y, solid_color);
+                            self.setHorizontalSpan(left_edge, right_edge, y, solid_color);
                         },
                     }
                 }
@@ -823,7 +823,7 @@ pub fn Canvas(comptime T: type) type {
                 if (dx > 0) {
                     const x1 = center.x - dx;
                     const x2 = center.x + dx;
-                    self.fillHorizontalSpan(x1, x2, y, solid_color);
+                    self.setHorizontalSpan(x1, x2, y, solid_color);
                 }
             }
         }
