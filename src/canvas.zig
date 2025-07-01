@@ -143,6 +143,30 @@ pub fn Canvas(comptime T: type) type {
             const x2: i32 = @intFromFloat(p2.x);
             const y2: i32 = @intFromFloat(p2.y);
 
+            const pixel_color = convert(T, color);
+
+            // Special case for horizontal lines - use fillHorizontalSpan for better performance
+            if (y1 == y2) {
+                const min_x = @min(x1, x2);
+                const max_x = @max(x1, x2);
+                self.fillHorizontalSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color);
+                return;
+            }
+
+            // Special case for vertical lines - direct pixel access
+            if (x1 == x2) {
+                const min_y = @min(y1, y2);
+                const max_y = @max(y1, y2);
+                var y = min_y;
+                while (y <= max_y) : (y += 1) {
+                    if (self.image.atOrNull(y, x1)) |pixel| {
+                        pixel.* = pixel_color;
+                    }
+                }
+                return;
+            }
+
+            // General case - standard Bresenham algorithm
             const dx: i32 = @intCast(@abs(x2 - x1));
             const dy: i32 = @intCast(@abs(y2 - y1));
             const sx: i32 = if (x1 < x2) 1 else -1;
@@ -151,7 +175,7 @@ pub fn Canvas(comptime T: type) type {
 
             while (true) {
                 if (self.image.atOrNull(y1, x1)) |pixel| {
-                    pixel.* = convert(T, color);
+                    pixel.* = pixel_color;
                 }
 
                 if (x1 == x2 and y1 == y2) break;
@@ -179,6 +203,38 @@ pub fn Canvas(comptime T: type) type {
             var y1 = p1.y;
             var x2 = p2.x;
             var y2 = p2.y;
+
+            // Special case for perfectly horizontal lines
+            if (@abs(y2 - y1) < 0.01) {
+                const y = @round(y1);
+                const min_x = @min(x1, x2);
+                const max_x = @max(x1, x2);
+
+                // Handle fractional endpoints with antialiasing
+                const left_x = @floor(min_x);
+                const right_x = @ceil(max_x);
+
+                // Left endpoint antialiasing
+                if (min_x > left_x) {
+                    const alpha = min_x - left_x;
+                    self.setPixel(.{ .x = left_x, .y = y }, c2.fade(alpha));
+                }
+
+                // Middle solid part - use fillHorizontalSpan for performance
+                const solid_start = @ceil(min_x);
+                const solid_end = @floor(max_x);
+                if (solid_end >= solid_start) {
+                    self.fillHorizontalSpan(solid_start, solid_end, y, convert(T, c2));
+                }
+
+                // Right endpoint antialiasing
+                if (max_x < right_x) {
+                    const alpha = right_x - max_x;
+                    self.setPixel(.{ .x = right_x, .y = y }, c2.fade(alpha));
+                }
+
+                return;
+            }
 
             const steep = @abs(y2 - y1) > @abs(x2 - x1);
             if (steep) {
@@ -306,14 +362,15 @@ pub fn Canvas(comptime T: type) type {
                 var y2 = @round(p2.y);
                 if (y1 > y2) std.mem.swap(f32, &y1, &y2);
                 if (x1 < 0 or x1 >= cols) return;
+
+                const pixel_color = convert(T, c2);
                 var y = y1;
                 while (y <= y2) : (y += 1) {
                     if (y < 0 or y >= rows) continue;
-                    var i = -half_width;
-                    while (i <= half_width) : (i += 1) {
-                        const px = x1 + i;
-                        self.setPixel(.{ .x = px, .y = y }, c2);
-                    }
+                    // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
+                    const x_start = x1 - half_width;
+                    const x_end = x1 + half_width;
+                    self.fillHorizontalSpan(x_start, x_end, y, pixel_color);
                 }
                 // Add rounded caps
                 self.fillCircle(p1, half_width, color, .soft);
@@ -325,13 +382,27 @@ pub fn Canvas(comptime T: type) type {
                 const y1 = @round(p1.y);
                 if (x1 > x2) std.mem.swap(f32, &x1, &x2);
                 if (y1 < 0 or y1 >= rows) return;
-                var x = x1;
-                while (x <= x2) : (x += 1) {
-                    if (x < 0 or x >= cols) continue;
-                    var i = -half_width;
-                    while (i <= half_width) : (i += 1) {
-                        const py = y1 + i;
-                        self.setPixel(.{ .x = x, .y = py }, c2);
+
+                const pixel_color = convert(T, c2);
+
+                // Draw horizontal spans for each row of the thick line
+                var i = -half_width;
+                while (i <= half_width) : (i += 1) {
+                    const py = y1 + i;
+                    if (py >= 0 and py < rows) {
+                        // For soft mode, we need to handle edge pixels with alpha blending
+                        if (i == -half_width or i == half_width) {
+                            // Edge rows - use setPixel for alpha blending
+                            var x = x1;
+                            while (x <= x2) : (x += 1) {
+                                if (x >= 0 and x < cols) {
+                                    self.setPixel(.{ .x = x, .y = py }, c2);
+                                }
+                            }
+                        } else {
+                            // Middle rows - use fillHorizontalSpan for performance
+                            self.fillHorizontalSpan(x1, x2, py, pixel_color);
+                        }
                     }
                 }
                 // Add rounded caps
@@ -607,6 +678,7 @@ pub fn Canvas(comptime T: type) type {
             defer if (heap_intersections) |h| self.allocator.free(h);
 
             const c2 = convert(Rgba, color);
+            const solid_color = convert(T, c2);
 
             var y = start_y;
             while (y <= end_y) : (y += 1) {
@@ -680,14 +752,13 @@ pub fn Canvas(comptime T: type) type {
                                 alpha = @max(0, @min(1, alpha));
 
                                 if (alpha > 0) {
-                                    const rgba_color = convert(Rgba, color);
-                                    self.setPixel(.{ .x = x, .y = y }, rgba_color.fade(alpha));
+                                    self.setPixel(.{ .x = x, .y = y }, c2.fade(alpha));
                                 }
                             }
                         },
                         .fast => {
                             // Fast mode - use @memset for optimal span filling
-                            self.fillHorizontalSpan(left_edge, right_edge, y, convert(T, c2));
+                            self.fillHorizontalSpan(left_edge, right_edge, y, solid_color);
                         },
                     }
                 }
