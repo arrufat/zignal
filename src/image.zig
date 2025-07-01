@@ -98,6 +98,11 @@ pub fn Image(comptime T: type) type {
             return self.rows == other.rows and self.cols == other.cols;
         }
 
+        /// Returns the total number of pixels in the image (rows * cols).
+        pub inline fn size(self: Self) usize {
+            return self.rows * self.cols;
+        }
+
         /// Returns the bounding rectangle for the current image.
         pub fn getRectangle(self: Self) Rectangle(usize) {
             return .{ .l = 0, .t = 0, .r = self.cols - 1, .b = self.rows - 1 };
