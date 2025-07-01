@@ -68,22 +68,22 @@ pub fn Canvas(comptime T: type) type {
 
         /// Gets a reference to the pixel at the given coordinates.
         /// Panics if coordinates are out of bounds.
-        pub fn at(self: Self, row: usize, col: usize) *T {
+        pub inline fn at(self: Self, row: usize, col: usize) *T {
             return self.image.at(row, col);
         }
 
         /// Gets a reference to the pixel at the given coordinates, or null if out of bounds.
-        pub fn atOrNull(self: Self, row: usize, col: usize) ?*T {
+        pub inline fn atOrNull(self: Self, row: usize, col: usize) ?*T {
             return self.image.atOrNull(row, col);
         }
 
         /// Returns the number of rows (height) in the canvas.
-        pub fn rows(self: Self) usize {
+        pub inline fn rows(self: Self) usize {
             return self.image.rows;
         }
 
         /// Returns the number of columns (width) in the canvas.
-        pub fn cols(self: Self) usize {
+        pub inline fn cols(self: Self) usize {
             return self.image.cols;
         }
 
