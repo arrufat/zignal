@@ -73,7 +73,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Gets a reference to the pixel at the given coordinates, or null if out of bounds.
-        pub inline fn atOrNull(self: Self, row: usize, col: usize) ?*T {
+        pub inline fn atOrNull(self: Self, row: isize, col: isize) ?*T {
             return self.image.atOrNull(row, col);
         }
 
@@ -190,7 +190,7 @@ pub fn Canvas(comptime T: type) type {
                 const max_y = @max(y1, y2);
                 var y = min_y;
                 while (y <= max_y) : (y += 1) {
-                    if (self.image.atOrNull(y, x1)) |pixel| {
+                    if (self.atOrNull(y, x1)) |pixel| {
                         pixel.* = pixel_color;
                     }
                 }
@@ -205,7 +205,7 @@ pub fn Canvas(comptime T: type) type {
             var err = dx - dy;
 
             while (true) {
-                if (self.image.atOrNull(y1, x1)) |pixel| {
+                if (self.atOrNull(y1, x1)) |pixel| {
                     pixel.* = pixel_color;
                 }
 
@@ -498,7 +498,7 @@ pub fn Canvas(comptime T: type) type {
         pub fn setPixel(self: Self, point: Point2d(f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
-            if (self.image.atOrNull(@intFromFloat(point.y), @intFromFloat(point.x))) |pixel| {
+            if (self.atOrNull(@intFromFloat(point.y), @intFromFloat(point.x))) |pixel| {
                 switch (ColorType) {
                     Rgba => {
                         if (color.a == 255) {
