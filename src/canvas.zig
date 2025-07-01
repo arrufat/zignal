@@ -61,6 +61,30 @@ pub fn Canvas(comptime T: type) type {
             return .{ .image = image, .allocator = allocator };
         }
 
+        /// Fills the entire canvas with a solid color using @memset.
+        pub fn fill(self: Self, color: anytype) void {
+            @memset(self.image.data, convert(T, color));
+        }
+
+        /// Fills a horizontal span using @memset for optimal performance.
+        fn fillHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
+
+            if (y < 0 or y >= frows) return;
+            if (x2 < 0 or x1 >= fcols) return;
+
+            const row: usize = @intFromFloat(y);
+            const start: usize = @intFromFloat(@max(0, @floor(x1)));
+            const end: usize = @intFromFloat(@min(fcols - 1, @ceil(x2)));
+
+            if (start > end) return;
+
+            const offset = row * self.image.stride + start;
+            const len = end - start + 1;
+            @memset(self.image.data[offset .. offset + len], color);
+        }
+
         /// Draws a line between two points with configurable width and rendering quality.
         ///
         /// Algorithm selection:
@@ -553,9 +577,12 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Fills the given polygon on an image using the scanline algorithm.
+        /// Fills the given polygon on an image using the scanline algorithm with @memset optimization.
         /// The polygon is defined by an array of points (vertices).
-        /// Use DrawMode.fast for hard edges (fastest) or DrawMode.soft for antialiased edges.
+        ///
+        /// **Rendering Modes:**
+        /// - **DrawMode.fast**: Hard edges, maximum performance with @memset optimization
+        /// - **DrawMode.soft**: Antialiased edges, uses alpha blending (no @memset)
         pub fn fillPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
@@ -638,38 +665,35 @@ pub fn Canvas(comptime T: type) type {
                     const x_start = @max(0, @floor(left_edge));
                     const x_end = @min(@as(f32, @floatFromInt(cols)) - 1, @ceil(right_edge));
 
-                    if (mode == .soft) {
-                        var x = x_start;
-                        while (x <= x_end) : (x += 1) {
-                            // Apply antialiasing at edges
-                            var alpha: f32 = 1.0;
-                            if (x < left_edge + 1) {
-                                alpha = @min(alpha, x + antialias_edge_offset - left_edge);
-                            }
-                            if (x > right_edge - 1) {
-                                alpha = @min(alpha, right_edge - (x - antialias_edge_offset));
-                            }
-                            alpha = @max(0, @min(1, alpha));
+                    switch (mode) {
+                        .soft => {
+                            var x = x_start;
+                            while (x <= x_end) : (x += 1) {
+                                // Apply antialiasing at edges
+                                var alpha: f32 = 1.0;
+                                if (x < left_edge + 1) {
+                                    alpha = @min(alpha, x + antialias_edge_offset - left_edge);
+                                }
+                                if (x > right_edge - 1) {
+                                    alpha = @min(alpha, right_edge - (x - antialias_edge_offset));
+                                }
+                                alpha = @max(0, @min(1, alpha));
 
-                            if (alpha > 0) {
-                                const rgba_color = convert(Rgba, color);
-                                self.setPixel(.{ .x = x, .y = y }, rgba_color.fade(alpha));
+                                if (alpha > 0) {
+                                    const rgba_color = convert(Rgba, color);
+                                    self.setPixel(.{ .x = x, .y = y }, rgba_color.fade(alpha));
+                                }
                             }
-                        }
-                    } else {
-                        // Fast mode - use integer loop for direct array access
-                        const x_start_int = @as(i32, @intFromFloat(x_start));
-                        const x_end_int = @as(i32, @intFromFloat(x_end));
-                        var x = x_start_int;
-                        while (x <= x_end_int) : (x += 1) {
-                            if (self.image.atOrNull(@intFromFloat(y), @intCast(x))) |pixel| {
-                                pixel.* = convert(T, c2);
-                            }
-                        }
+                        },
+                        .fast => {
+                            // Fast mode - use @memset for optimal span filling
+                            self.fillHorizontalSpan(left_edge, right_edge, y, convert(T, c2));
+                        },
                     }
                 }
             }
         }
+
         /// Fills a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for hard edges.
         pub fn fillCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, mode: DrawMode) void {
