@@ -741,23 +741,18 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleFast(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
             const solid_color = convert(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: usize = @intFromFloat(@round(@max(0, center.x - radius)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y - radius)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x + radius)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y + radius)));
+            const top = @max(0, center.y - radius);
+            const bottom = @min(frows - 1, center.y + radius);
 
-            const radius_sq = radius * radius;
+            var y = top;
+            while (y <= bottom) : (y += 1) {
+                const dy = y - center.y;
+                const dx = @sqrt(@max(0, radius * radius - dy * dy));
 
-            for (top..bottom) |r| {
-                const y = as(f32, r) - center.y;
-                for (left..right) |c| {
-                    const x = as(f32, c) - center.x;
-                    const dist_sq = x * x + y * y;
-                    if (dist_sq <= radius_sq) {
-                        const pos = r * self.image.cols + c;
-                        self.image.data[pos] = solid_color;
-                    }
+                if (dx > 0) {
+                    const x1 = center.x - dx;
+                    const x2 = center.x + dx;
+                    self.fillHorizontalSpan(x1, x2, y, solid_color);
                 }
             }
         }
@@ -1052,13 +1047,13 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "line_vertical", .md5sum = "f7d52e274636af2b20b62172a408b446", .draw_fn = drawLineVertical },
     .{ .name = "line_diagonal", .md5sum = "1aee6bf80fd2e6a849e5520937566478", .draw_fn = drawLineDiagonal },
     .{ .name = "line_thick", .md5sum = "d8323d8d6580a34e724873701245f117", .draw_fn = drawLineThick },
-    .{ .name = "circle_filled_solid", .md5sum = "efe2aa5419c9ffdead0dfddffb3b6a67", .draw_fn = drawCircleFilledSolid },
+    .{ .name = "circle_filled_solid", .md5sum = "3b3866e705fded47367902dedb825e4e", .draw_fn = drawCircleFilledSolid },
     .{ .name = "circle_filled_smooth", .md5sum = "4996924718641236276cdb1c166ae515", .draw_fn = drawCircleFilledSmooth },
     .{ .name = "circle_outline", .md5sum = "ae7e973d5644ff7bdde7338296e4ab40", .draw_fn = drawCircleOutline },
     .{ .name = "rectangle_filled", .md5sum = "3783f1119b7d5482b5a333f76c322c92", .draw_fn = drawRectangleFilled },
     .{ .name = "rectangle_outline", .md5sum = "033fdc24b89399af7b1810783e357b5f", .draw_fn = drawRectangleOutline },
     .{ .name = "triangle_filled", .md5sum = "283a9de3dd51dd00794559cc231ff5ac", .draw_fn = drawTriangleFilled },
-    .{ .name = "bezier_cubic", .md5sum = "3a2b0d540a2353c817077729ee10007a", .draw_fn = drawBezierCubic },
+    .{ .name = "bezier_cubic", .md5sum = "fe95149bead3b0a028057c8c7fb969af", .draw_fn = drawBezierCubic },
     .{ .name = "bezier_quadratic", .md5sum = "c3286e308aaaef5b302129cf67b713c6", .draw_fn = drawBezierQuadratic },
     .{ .name = "polygon_complex", .md5sum = "da9b83426d2118ce99948eabebff91fb", .draw_fn = drawPolygonComplex },
     .{ .name = "spline_polygon", .md5sum = "6bae24f211c7fdd391cb5159dd4e8fd0", .draw_fn = drawSplinePolygon },
