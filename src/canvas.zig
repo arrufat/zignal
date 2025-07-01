@@ -87,6 +87,16 @@ pub fn Canvas(comptime T: type) type {
             return self.image.cols;
         }
 
+        /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
+        /// The view shares memory with the parent canvas - changes are reflected in both.
+        /// Coordinates are automatically clipped to the canvas bounds.
+        pub fn view(self: Self, rect: Rectangle(usize)) Self {
+            return .{
+                .image = self.image.view(rect),
+                .allocator = self.allocator,
+            };
+        }
+
         /// Sets a horizontal span to `color` using @memset.
         pub fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
