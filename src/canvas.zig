@@ -67,7 +67,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Sets a horizontal span to `color` using @memset.
-        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+        pub fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
