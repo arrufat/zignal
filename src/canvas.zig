@@ -87,6 +87,17 @@ pub fn Canvas(comptime T: type) type {
             return self.image.cols;
         }
 
+        /// Returns the total number of pixels in the canvas (rows * cols).
+        pub inline fn size(self: Self) usize {
+            return self.image.size();
+        }
+
+        /// Returns true if and only if this canvas and `other` have the same number of rows and columns.
+        /// It does not compare pixel data or types.
+        pub inline fn hasSameShape(self: Self, other: anytype) bool {
+            return self.image.hasSameShape(other.image);
+        }
+
         /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
         /// The view shares memory with the parent canvas - changes are reflected in both.
         /// Coordinates are automatically clipped to the canvas bounds.
