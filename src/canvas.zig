@@ -66,6 +66,27 @@ pub fn Canvas(comptime T: type) type {
             @memset(self.image.data, convert(T, color));
         }
 
+        /// Gets a reference to the pixel at the given coordinates.
+        /// Panics if coordinates are out of bounds.
+        pub fn at(self: Self, row: usize, col: usize) *T {
+            return self.image.at(row, col);
+        }
+
+        /// Gets a reference to the pixel at the given coordinates, or null if out of bounds.
+        pub fn atOrNull(self: Self, row: usize, col: usize) ?*T {
+            return self.image.atOrNull(row, col);
+        }
+
+        /// Returns the number of rows (height) in the canvas.
+        pub fn rows(self: Self) usize {
+            return self.image.rows;
+        }
+
+        /// Returns the number of columns (width) in the canvas.
+        pub fn cols(self: Self) usize {
+            return self.image.cols;
+        }
+
         /// Sets a horizontal span to `color` using @memset.
         pub fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
@@ -339,8 +360,8 @@ pub fn Canvas(comptime T: type) type {
         /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
         /// More expensive than rectangle-based approach but produces better results.
         fn drawLineDistance(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
-            const rows: f32 = @floatFromInt(self.image.rows);
-            const cols: f32 = @floatFromInt(self.image.cols);
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
             const c2 = convert(Rgba, color);
 
@@ -361,12 +382,12 @@ pub fn Canvas(comptime T: type) type {
                 var y1 = @round(p1.y);
                 var y2 = @round(p2.y);
                 if (y1 > y2) std.mem.swap(f32, &y1, &y2);
-                if (x1 < 0 or x1 >= cols) return;
+                if (x1 < 0 or x1 >= fcols) return;
 
                 const pixel_color = convert(T, c2);
                 var y = y1;
                 while (y <= y2) : (y += 1) {
-                    if (y < 0 or y >= rows) continue;
+                    if (y < 0 or y >= frows) continue;
                     // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
                     const x_start = x1 - half_width;
                     const x_end = x1 + half_width;
@@ -381,7 +402,7 @@ pub fn Canvas(comptime T: type) type {
                 var x2 = @round(p2.x);
                 const y1 = @round(p1.y);
                 if (x1 > x2) std.mem.swap(f32, &x1, &x2);
-                if (y1 < 0 or y1 >= rows) return;
+                if (y1 < 0 or y1 >= frows) return;
 
                 const pixel_color = convert(T, c2);
 
@@ -389,13 +410,13 @@ pub fn Canvas(comptime T: type) type {
                 var i = -half_width;
                 while (i <= half_width) : (i += 1) {
                     const py = y1 + i;
-                    if (py >= 0 and py < rows) {
+                    if (py >= 0 and py < frows) {
                         // For soft mode, we need to handle edge pixels with alpha blending
                         if (i == -half_width or i == half_width) {
                             // Edge rows - use setPixel for alpha blending
                             var x = x1;
                             while (x <= x2) : (x += 1) {
-                                if (x >= 0 and x < cols) {
+                                if (x >= 0 and x < fcols) {
                                     self.setPixel(.{ .x = x, .y = py }, c2);
                                 }
                             }
@@ -419,9 +440,9 @@ pub fn Canvas(comptime T: type) type {
             const line_max_y = @max(p1.y, p2.y) + half_width;
 
             const min_x = @max(0, @floor(line_min_x));
-            const max_x = @min(cols - 1, @ceil(line_max_x));
+            const max_x = @min(fcols - 1, @ceil(line_max_x));
             const min_y = @max(0, @floor(line_min_y));
-            const max_y = @min(rows - 1, @ceil(line_max_y));
+            const max_y = @min(frows - 1, @ceil(line_max_y));
 
             // Precompute for distance calculation optimization
             const dx_sq = dx * dx;
@@ -658,8 +679,8 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
-            const rows = self.image.rows;
-            const cols = self.image.cols;
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
 
             // Find bounding box for optimization
             var min_y = polygon[0].y;
@@ -670,7 +691,7 @@ pub fn Canvas(comptime T: type) type {
             }
 
             const start_y = @max(0, @floor(min_y));
-            const end_y = @min(@as(f32, @floatFromInt(rows)) - 1, @ceil(max_y));
+            const end_y = @min(frows - 1, @ceil(max_y));
 
             // Use stack buffer for small polygons, fallback to heap for complex ones
             var stack_intersections: [polygon_intersection_stack_buffer_size]f32 = undefined;
@@ -735,7 +756,7 @@ pub fn Canvas(comptime T: type) type {
                     const right_edge = intersection_slice[i + 1];
 
                     const x_start = @max(0, @floor(left_edge));
-                    const x_end = @min(@as(f32, @floatFromInt(cols)) - 1, @ceil(right_edge));
+                    const x_end = @min(fcols - 1, @ceil(right_edge));
 
                     switch (mode) {
                         .soft => {
