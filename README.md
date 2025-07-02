@@ -97,7 +97,7 @@ One of the greatest things about dlib is the large amount of examples illustrati
 I plan to showcase most of the features of this library as simple HTML/JS + Wasm examples, which can be accessed from [here](https://bfactory-ai.github.io/zignal/examples/).
 
 Currently, there are examples for:
-- [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspace.html)
+- [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspaces.html)
 - [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html)
 - [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin-noise.html)
 - [Seam carving](https://bfactory-ai.github.io/zignal/examples/seam-carving.html)
