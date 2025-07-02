@@ -1,5 +1,5 @@
 (function () {
-  let wasmPromise = fetch("colorspace.wasm");
+  let wasmPromise = fetch("colorspaces.wasm");
   var wasmExports = null;
   const textDecoder = new TextDecoder();
 

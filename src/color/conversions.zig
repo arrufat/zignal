@@ -27,7 +27,7 @@ pub fn isColor(comptime T: type) bool {
 }
 
 /// Generic function to convert `color` into colorspace `T`.
-pub fn convert(comptime T: type, color: anytype) T {
+pub fn convertColor(comptime T: type, color: anytype) T {
     const ColorType: type = @TypeOf(color);
     comptime assert(isColor(T));
     comptime assert(isColor(ColorType));

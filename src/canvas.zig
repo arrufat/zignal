@@ -8,7 +8,7 @@ const expectEqual = testing.expectEqual;
 const expectEqualStrings = testing.expectEqualStrings;
 
 const as = @import("meta.zig").as;
-const convert = @import("color.zig").convert;
+const convertColor = @import("color.zig").convertColor;
 const Hsv = @import("color.zig").Hsv;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
@@ -63,7 +63,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Fills the entire canvas with a solid color using @memset.
         pub fn fill(self: Self, color: anytype) void {
-            @memset(self.image.data, convert(T, color));
+            @memset(self.image.data, convertColor(T, color));
         }
 
         /// Gets a reference to the pixel at the given coordinates.
@@ -185,7 +185,7 @@ pub fn Canvas(comptime T: type) type {
             const x2: i32 = @intFromFloat(p2.x);
             const y2: i32 = @intFromFloat(p2.y);
 
-            const pixel_color = convert(T, color);
+            const pixel_color = convertColor(T, color);
 
             // Special case for horizontal lines - use fillHorizontalSpan for better performance
             if (y1 == y2) {
@@ -239,7 +239,7 @@ pub fn Canvas(comptime T: type) type {
         /// Handles steep vs. shallow lines optimally by swapping coordinates.
         /// Provides the best quality-to-performance ratio for thin antialiased lines.
         fn drawLineXiaolinWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
-            const c2 = convert(Rgba, color);
+            const c2 = convertColor(Rgba, color);
 
             var x1 = p1.x;
             var y1 = p1.y;
@@ -266,7 +266,7 @@ pub fn Canvas(comptime T: type) type {
                 const solid_start = @ceil(min_x);
                 const solid_end = @floor(max_x);
                 if (solid_end >= solid_start) {
-                    self.setHorizontalSpan(solid_start, solid_end, y, convert(T, c2));
+                    self.setHorizontalSpan(solid_start, solid_end, y, convertColor(T, c2));
                 }
 
                 // Right endpoint antialiasing
@@ -340,7 +340,7 @@ pub fn Canvas(comptime T: type) type {
         /// then adds circular end caps for smooth line termination.
         /// Handles zero-length lines by drawing a single filled circle.
         fn drawLineRectangle(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
-            const solid_color = convert(T, color);
+            const solid_color = convertColor(T, color);
 
             // For thick lines, draw as a filled rectangle
             const dx = p2.x - p1.x;
@@ -384,7 +384,7 @@ pub fn Canvas(comptime T: type) type {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
-            const c2 = convert(Rgba, color);
+            const c2 = convertColor(Rgba, color);
 
             // Calculate line direction vector
             const dx = p2.x - p1.x;
@@ -405,7 +405,7 @@ pub fn Canvas(comptime T: type) type {
                 if (y1 > y2) std.mem.swap(f32, &y1, &y2);
                 if (x1 < 0 or x1 >= fcols) return;
 
-                const pixel_color = convert(T, c2);
+                const pixel_color = convertColor(T, c2);
                 var y = y1;
                 while (y <= y2) : (y += 1) {
                     if (y < 0 or y >= frows) continue;
@@ -425,7 +425,7 @@ pub fn Canvas(comptime T: type) type {
                 if (x1 > x2) std.mem.swap(f32, &x1, &x2);
                 if (y1 < 0 or y1 >= frows) return;
 
-                const pixel_color = convert(T, c2);
+                const pixel_color = convertColor(T, c2);
 
                 // Draw horizontal spans for each row of the thick line
                 var i = -half_width;
@@ -514,15 +514,15 @@ pub fn Canvas(comptime T: type) type {
                     Rgba => {
                         if (color.a == 255) {
                             // Opaque - direct assignment
-                            pixel.* = convert(T, color);
+                            pixel.* = convertColor(T, color);
                         } else if (color.a > 0) {
                             // Transparent - blend
-                            var dst = convert(Rgba, pixel.*);
+                            var dst = convertColor(Rgba, pixel.*);
                             dst.blend(color);
-                            pixel.* = convert(T, dst);
+                            pixel.* = convertColor(T, dst);
                         }
                     },
-                    else => pixel.* = convert(T, color),
+                    else => pixel.* = convertColor(T, color),
                 }
             }
         }
@@ -619,7 +619,7 @@ pub fn Canvas(comptime T: type) type {
                 const line_width: f32 = @floatFromInt(width);
                 const inner_radius = radius - line_width / 2.0;
                 const outer_radius = radius + line_width / 2.0;
-                const solid_color = convert(T, color);
+                const solid_color = convertColor(T, color);
 
                 // Calculate bounding box
                 const left: usize = @intFromFloat(@round(@max(0, center.x - outer_radius - 1)));
@@ -658,7 +658,7 @@ pub fn Canvas(comptime T: type) type {
             const right: usize = @intFromFloat(@round(@min(fcols, center.x + outer_radius + 1)));
             const bottom: usize = @intFromFloat(@round(@min(frows, center.y + outer_radius + 1)));
 
-            const c2 = convert(Rgba, color);
+            const c2 = convertColor(Rgba, color);
 
             for (top..bottom) |r| {
                 const y = @as(f32, @floatFromInt(r)) - center.y;
@@ -719,8 +719,8 @@ pub fn Canvas(comptime T: type) type {
             var heap_intersections: ?[]f32 = null;
             defer if (heap_intersections) |h| self.allocator.free(h);
 
-            const c2 = convert(Rgba, color);
-            const solid_color = convert(T, c2);
+            const c2 = convertColor(Rgba, color);
+            const solid_color = convertColor(T, c2);
 
             var y = start_y;
             while (y <= end_y) : (y += 1) {
@@ -839,7 +839,7 @@ pub fn Canvas(comptime T: type) type {
                         if (dist > radius - 1) {
                             // Edge antialiasing
                             const edge_alpha = radius - dist;
-                            const rgba_color = convert(Rgba, color);
+                            const rgba_color = convertColor(Rgba, color);
                             self.setPixel(.{ .x = @floatFromInt(c), .y = @floatFromInt(r) }, rgba_color.fade(edge_alpha));
                         } else {
                             // Full opacity in the center - direct assignment
@@ -852,7 +852,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling solid (non-anti-aliased) circles.
         fn fillCircleFast(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
-            const solid_color = convert(T, color);
+            const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
             const top = @max(0, center.y - radius);
             const bottom = @min(frows - 1, center.y + radius);

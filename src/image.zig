@@ -7,13 +7,11 @@ const expectEqual = std.testing.expectEqualDeep;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const Allocator = std.mem.Allocator;
 
-const convert = @import("color.zig").convert;
-const Rgba = @import("color.zig").Rgba;
-
 const as = @import("meta.zig").as;
+const color = @import("color.zig");
+const is4xu8Struct = @import("meta.zig").is4xu8Struct;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
-const is4xu8Struct = @import("meta.zig").is4xu8Struct;
 const Point2d = @import("point.zig").Point2d;
 const Rectangle = @import("geometry.zig").Rectangle;
 
@@ -48,9 +46,7 @@ pub fn Image(comptime T: type) type {
 
         /// Constructs an image of rows and cols size allocating its own memory.
         pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
-            var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(rows * cols);
-            return .{ .rows = rows, .cols = cols, .data = try array.toOwnedSlice(), .stride = cols };
+            return .{ .rows = rows, .cols = cols, .data = try allocator.alloc(T, rows * cols), .stride = cols };
         }
 
         /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
@@ -144,6 +140,31 @@ pub fn Image(comptime T: type) type {
         /// This is determined by checking if the `cols` field differs from the `stride` field.
         pub fn isView(self: Self) bool {
             return self.cols != self.stride;
+        }
+
+        /// Converts the image to a different pixel type.
+        /// Allocates a new image with the target pixel type and converts each pixel using the color conversion system.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// var rgba_image: Image(Rgba) = ...;
+        /// var gray_image = try rgba_image.convert(u8, allocator);
+        /// defer gray_image.deinit(allocator);
+        /// ```
+        pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
+            // If types are the same, just return a copy
+            if (T == TargetType) {
+                const result = try Image(TargetType).initAlloc(allocator, self.rows, self.cols);
+                @memcpy(result.data, self.data);
+                return result;
+            }
+
+            // Convert each pixel using the color conversion system
+            var result = try Image(TargetType).initAlloc(allocator, self.rows, self.cols);
+            for (self.data, 0..) |pixel, i| {
+                result.data[i] = color.convertColor(TargetType, pixel);
+            }
+            return result;
         }
 
         /// Returns the value at position row, col.  It assumes the coordinates are in bounds and
@@ -1045,7 +1066,7 @@ pub fn Image(comptime T: type) type {
                         for (0..vert_filter[0].len) |n| {
                             const px: isize = ic - 1 + @as(isize, @intCast(n));
                             if (self.atOrNull(py, px)) |val| {
-                                const p: i32 = @intCast(convert(u8, val.*));
+                                const p: i32 = @intCast(color.convertColor(u8, val.*));
                                 horz_temp += p * horz_filter[m][n];
                                 vert_temp += p * vert_filter[m][n];
                             }
@@ -1095,7 +1116,7 @@ test "integral image view scalar" {
 }
 
 test "integral image struct" {
-    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
     var integral: Image([4]f32) = undefined;
@@ -1124,7 +1145,7 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     defer rgb_img.deinit(std.testing.allocator);
 
     // Create RGBA image
-    var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
+    var rgba_img = try Image(color.Rgba).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
 
     // Fill both with identical RGB values
@@ -1164,7 +1185,7 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
 }
 
 test "getRectangle" {
-    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
@@ -1172,7 +1193,7 @@ test "getRectangle" {
 }
 
 test "view" {
-    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
@@ -1251,7 +1272,7 @@ test "boxBlur border effects" {
 }
 
 test "boxBlur struct type" {
-    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with different colors
@@ -1265,7 +1286,7 @@ test "boxBlur struct type" {
     image.at(2, 1).* = .{ .r = 128, .g = 128, .b = 128, .a = 255 }; // Gray
     image.at(2, 2).* = .{ .r = 0, .g = 0, .b = 0, .a = 255 }; // Black
 
-    var blurred: Image(Rgba) = undefined;
+    var blurred: Image(color.Rgba) = undefined;
     try image.boxBlur(std.testing.allocator, &blurred, 1);
     defer blurred.deinit(std.testing.allocator);
 
@@ -1293,7 +1314,7 @@ test "boxBlur RGB vs RGBA with full alpha produces same RGB values" {
     defer rgb_img.deinit(std.testing.allocator);
 
     // Create RGBA image
-    var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
+    var rgba_img = try Image(color.Rgba).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
 
     // Fill both with identical RGB values
@@ -1315,7 +1336,7 @@ test "boxBlur RGB vs RGBA with full alpha produces same RGB values" {
     try rgb_img.boxBlur(std.testing.allocator, &rgb_blurred, radius);
     defer rgb_blurred.deinit(std.testing.allocator);
 
-    var rgba_blurred: Image(Rgba) = undefined;
+    var rgba_blurred: Image(color.Rgba) = undefined;
     try rgba_img.boxBlur(std.testing.allocator, &rgba_blurred, radius);
     defer rgba_blurred.deinit(std.testing.allocator);
 
@@ -1346,7 +1367,7 @@ test "sharpen RGB vs RGBA with full alpha produces same RGB values" {
     defer rgb_img.deinit(std.testing.allocator);
 
     // Create RGBA image
-    var rgba_img = try Image(Rgba).initAlloc(std.testing.allocator, test_size, test_size);
+    var rgba_img = try Image(color.Rgba).initAlloc(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
 
     // Fill both with identical RGB values (create an edge pattern for sharpening)
@@ -1367,7 +1388,7 @@ test "sharpen RGB vs RGBA with full alpha produces same RGB values" {
     try rgb_img.sharpen(std.testing.allocator, &rgb_sharpened, radius);
     defer rgb_sharpened.deinit(std.testing.allocator);
 
-    var rgba_sharpened: Image(Rgba) = undefined;
+    var rgba_sharpened: Image(color.Rgba) = undefined;
     try rgba_img.sharpen(std.testing.allocator, &rgba_sharpened, radius);
     defer rgba_sharpened.deinit(std.testing.allocator);
 
@@ -1442,7 +1463,7 @@ test "sharpen uniform image" {
     // Fill with uniform value
     for (image.data) |*pixel| pixel.* = 100;
 
-    var sharpened: Image(u8) = undefined;
+    var sharpened: Image(u8) = .empty;
     try image.sharpen(std.testing.allocator, &sharpened, 1);
     defer sharpened.deinit(std.testing.allocator);
 
@@ -1454,14 +1475,14 @@ test "sharpen uniform image" {
 }
 
 test "sharpen struct type" {
-    var image: Image(Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Create a simple pattern with a bright center
     for (image.data) |*pixel| pixel.* = .{ .r = 64, .g = 64, .b = 64, .a = 255 };
     image.at(1, 1).* = .{ .r = 192, .g = 192, .b = 192, .a = 255 }; // Bright center
 
-    var sharpened: Image(Rgba) = undefined;
+    var sharpened: Image(color.Rgba) = .empty;
     try image.sharpen(std.testing.allocator, &sharpened, 1);
     defer sharpened.deinit(std.testing.allocator);
 
