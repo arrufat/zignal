@@ -8,7 +8,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const conversions = @import("color/conversions.zig");
-pub const convert = conversions.convert;
+pub const convertColor = conversions.convertColor;
 pub const isColor = conversions.isColor;
 pub const Hsl = @import("color/Hsl.zig");
 pub const Hsv = @import("color/Hsv.zig");
@@ -26,17 +26,17 @@ pub const Xyz = @import("color/Xyz.zig");
 
 // Helper function for testing round-trip conversions
 fn testColorConversion(from: Rgb, to: anytype) !void {
-    const converted = convert(@TypeOf(to), from);
+    const converted = convertColor(@TypeOf(to), from);
     try expectEqualDeep(converted, to);
-    const recovered = convert(Rgb, converted);
+    const recovered = convertColor(Rgb, converted);
     try expectEqualDeep(recovered, from);
 }
 
 test "convert grayscale" {
-    try expectEqual(convert(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
-    try expectEqual(convert(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
-    try expectEqual(convert(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
-    try expectEqual(convert(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
+    try expectEqual(convertColor(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
+    try expectEqual(convertColor(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
+    try expectEqual(convertColor(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
+    try expectEqual(convertColor(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
 }
 
 test "alphaBlend" {
@@ -329,16 +329,16 @@ test "generic convert function" {
     const red = Rgb{ .r = 255, .g = 0, .b = 0 };
 
     // Test conversion to all color types
-    const red_rgba = convert(Rgba, red);
+    const red_rgba = convertColor(Rgba, red);
     try expectEqualDeep(red_rgba, Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 });
 
-    const red_hsl = convert(Hsl, red);
+    const red_hsl = convertColor(Hsl, red);
     try expectEqualDeep(red_hsl, Hsl{ .h = 0, .s = 100, .l = 50 });
 
-    const red_hsv = convert(Hsv, red);
+    const red_hsv = convertColor(Hsv, red);
     try expectEqualDeep(red_hsv, Hsv{ .h = 0, .s = 100, .v = 100 });
 
-    const gray = convert(u8, red);
+    const gray = convertColor(u8, red);
     try expectEqual(gray, 54); // Luma-based grayscale of red
 }
 
