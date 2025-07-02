@@ -138,11 +138,12 @@ const HuffmanDecoder = struct {
     }
 
     pub fn buildFromLengths(self: *HuffmanDecoder, code_lengths: []const u8) !void {
+
         // Reset fast table and clear nodes
         self.fast_table = [_]u16{0} ** 512;
         self.nodes.clearRetainingCapacity();
         self.root = null;
-        
+
         // Count codes of each length
         var length_count = [_]u16{0} ** 16;
         for (code_lengths) |len| {
@@ -170,7 +171,7 @@ const HuffmanDecoder = struct {
 
             const sym_code = first_code[len];
             first_code[len] += 1;
-            
+
             // Reverse the bits for proper deflate bit order
             const reversed_code = reverseBits(sym_code, @intCast(len));
 
@@ -277,6 +278,7 @@ pub const DeflateDecoder = struct {
     output: ArrayList(u8),
     literal_decoder: HuffmanDecoder,
     distance_decoder: HuffmanDecoder,
+    current_byte_offset: usize = 0,
 
     pub fn init(allocator: Allocator) DeflateDecoder {
         return .{
@@ -295,8 +297,10 @@ pub const DeflateDecoder = struct {
 
     pub fn decode(self: *DeflateDecoder, compressed_data: []const u8) !ArrayList(u8) {
         var reader = BitReader.init(compressed_data);
+        self.current_byte_offset = 0;
 
         while (true) {
+            self.current_byte_offset = reader.byte_pos;
             const is_final = try reader.readBits(1) == 1;
             const block_type = try reader.readBits(2);
 
@@ -451,20 +455,24 @@ pub const DeflateDecoder = struct {
     }
 
     fn decodeSymbol(self: *DeflateDecoder, reader: *BitReader, decoder: *HuffmanDecoder) !u16 {
-        _ = self; // unused parameter
+        self.current_byte_offset = reader.byte_pos;
 
-        // Try fast lookup first (simplified for now)
+        // Try fast lookup (handle shorter codes when near end of data)
         const remaining_bits = (reader.data.len - reader.byte_pos) * 8 - reader.bit_pos;
-        if (remaining_bits >= 9) {
-            // Read bits for fast lookup
+
+        // Always try fast lookup if we have any bits available
+        if (remaining_bits > 0) {
+            // Read up to 9 bits for fast lookup, but handle cases with fewer bits
             var peek_value: u16 = 0;
             var temp_byte_pos = reader.byte_pos;
             var temp_bit_pos = reader.bit_pos;
+            var bits_read: u8 = 0;
 
             for (0..9) |i| {
                 if (temp_byte_pos >= reader.data.len) break;
                 const bit = (reader.data[temp_byte_pos] >> @as(u3, @intCast(temp_bit_pos))) & 1;
                 peek_value |= @as(u16, bit) << @intCast(i);
+                bits_read += 1;
                 temp_bit_pos += 1;
                 if (temp_bit_pos >= 8) {
                     temp_bit_pos = 0;
@@ -476,17 +484,27 @@ pub const DeflateDecoder = struct {
             if (entry != 0) {
                 const symbol = entry & 0xFFF;
                 const code_length: u8 = @intCast((entry >> 12) & 0xF);
-                // Advance reader by code_length bits
-                _ = try reader.readBits(code_length);
-                return symbol;
+
+                // Check if we have enough bits for this code
+                if (remaining_bits >= code_length) {
+                    // Advance reader by code_length bits
+                    _ = try reader.readBits(code_length);
+                    return symbol;
+                }
             }
         }
 
         // Fall back to tree traversal for longer codes
         if (decoder.root) |root| {
             var current = root;
+            var bits_read: u8 = 0;
+            var bit_sequence: u16 = 0;
+
             while (current.symbol == null) {
                 const bit = try reader.readBits(1);
+                bit_sequence = (bit_sequence << 1) | @as(u16, @intCast(bit));
+                bits_read += 1;
+
                 if (bit == 0) {
                     if (current.left) |left| {
                         current = left;
@@ -519,6 +537,185 @@ pub fn inflate(allocator: Allocator, compressed_data: []const u8) ![]u8 {
     return result.toOwnedSlice();
 }
 
+// Build static Huffman encoder tables by computing codes from lengths
+const StaticHuffmanTables = struct {
+    const LiteralCode = struct {
+        code: u16,
+        bits: u8,
+    };
+
+    // Build literal codes from the same lengths as decoder uses
+    const literal_codes = blk: {
+        @setEvalBranchQuota(10000); // Increase quota for comptime evaluation
+        var codes: [288]LiteralCode = undefined;
+
+        // Count codes of each length
+        var length_count = [_]u16{0} ** 16;
+        for (FIXED_LITERAL_LENGTHS) |len| {
+            if (len > 0) length_count[len] += 1;
+        }
+
+        // Calculate first code for each length
+        var code: u16 = 0;
+        var first_code = [_]u16{0} ** 16;
+        for (1..16) |bits| {
+            code = (code + length_count[bits - 1]) << 1;
+            first_code[bits] = code;
+        }
+
+        // Assign codes to symbols
+        for (FIXED_LITERAL_LENGTHS, 0..) |len, symbol| {
+            if (len == 0) {
+                codes[symbol] = LiteralCode{ .code = 0, .bits = 0 };
+                continue;
+            }
+
+            const sym_code = first_code[len];
+            first_code[len] += 1;
+
+            // Reverse the bits for proper deflate bit order
+            const reversed_code = reverseBits(sym_code, @intCast(len));
+            codes[symbol] = LiteralCode{ .code = reversed_code, .bits = @intCast(len) };
+        }
+
+        break :blk codes;
+    };
+
+    // Distance codes built from fixed lengths like decoder
+    const distance_codes = blk: {
+        var codes: [32]LiteralCode = undefined;
+
+        // Count codes of each length
+        var length_count = [_]u16{0} ** 16;
+        for (FIXED_DISTANCE_LENGTHS) |len| {
+            if (len > 0) length_count[len] += 1;
+        }
+
+        // Calculate first code for each length
+        var code: u16 = 0;
+        var first_code = [_]u16{0} ** 16;
+        for (1..16) |bits| {
+            code = (code + length_count[bits - 1]) << 1;
+            first_code[bits] = code;
+        }
+
+        // Assign codes to symbols (same logic as literals)
+        for (FIXED_DISTANCE_LENGTHS, 0..) |len, symbol| {
+            if (len == 0) {
+                codes[symbol] = LiteralCode{ .code = 0, .bits = 0 };
+                continue;
+            }
+
+            const sym_code = first_code[len];
+            first_code[len] += 1;
+
+            // Reverse the bits for proper deflate bit order
+            const reversed_code = reverseBits(sym_code, @intCast(len));
+            codes[symbol] = LiteralCode{ .code = reversed_code, .bits = @intCast(len) };
+        }
+
+        break :blk codes;
+    };
+
+    fn reverseBits(code: u16, length: u8) u16 {
+        var result: u16 = 0;
+        var temp = code;
+        for (0..length) |_| {
+            result = (result << 1) | (temp & 1);
+            temp >>= 1;
+        }
+        return result;
+    }
+};
+
+// Length and distance encoding tables for LZ77
+const LengthCode = struct {
+    code: u16,
+    extra_bits: u8,
+    base: u16,
+};
+
+const DistanceCode = struct {
+    code: u16,
+    extra_bits: u8,
+    base: u16,
+};
+
+// Length codes (257-285 map to lengths 3-258)
+const length_codes = [_]LengthCode{
+    .{ .code = 257, .extra_bits = 0, .base = 3 },   .{ .code = 258, .extra_bits = 0, .base = 4 },
+    .{ .code = 259, .extra_bits = 0, .base = 5 },   .{ .code = 260, .extra_bits = 0, .base = 6 },
+    .{ .code = 261, .extra_bits = 0, .base = 7 },   .{ .code = 262, .extra_bits = 0, .base = 8 },
+    .{ .code = 263, .extra_bits = 0, .base = 9 },   .{ .code = 264, .extra_bits = 0, .base = 10 },
+    .{ .code = 265, .extra_bits = 1, .base = 11 },  .{ .code = 266, .extra_bits = 1, .base = 13 },
+    .{ .code = 267, .extra_bits = 1, .base = 15 },  .{ .code = 268, .extra_bits = 1, .base = 17 },
+    .{ .code = 269, .extra_bits = 2, .base = 19 },  .{ .code = 270, .extra_bits = 2, .base = 23 },
+    .{ .code = 271, .extra_bits = 2, .base = 27 },  .{ .code = 272, .extra_bits = 2, .base = 31 },
+    .{ .code = 273, .extra_bits = 3, .base = 35 },  .{ .code = 274, .extra_bits = 3, .base = 43 },
+    .{ .code = 275, .extra_bits = 3, .base = 51 },  .{ .code = 276, .extra_bits = 3, .base = 59 },
+    .{ .code = 277, .extra_bits = 4, .base = 67 },  .{ .code = 278, .extra_bits = 4, .base = 83 },
+    .{ .code = 279, .extra_bits = 4, .base = 99 },  .{ .code = 280, .extra_bits = 4, .base = 115 },
+    .{ .code = 281, .extra_bits = 5, .base = 131 }, .{ .code = 282, .extra_bits = 5, .base = 163 },
+    .{ .code = 283, .extra_bits = 5, .base = 195 }, .{ .code = 284, .extra_bits = 5, .base = 227 },
+    .{ .code = 285, .extra_bits = 0, .base = 258 },
+};
+
+// Distance codes (0-29 map to distances 1-32768)
+const distance_codes = [_]DistanceCode{
+    .{ .code = 0, .extra_bits = 0, .base = 1 },       .{ .code = 1, .extra_bits = 0, .base = 2 },
+    .{ .code = 2, .extra_bits = 0, .base = 3 },       .{ .code = 3, .extra_bits = 0, .base = 4 },
+    .{ .code = 4, .extra_bits = 1, .base = 5 },       .{ .code = 5, .extra_bits = 1, .base = 7 },
+    .{ .code = 6, .extra_bits = 2, .base = 9 },       .{ .code = 7, .extra_bits = 2, .base = 13 },
+    .{ .code = 8, .extra_bits = 3, .base = 17 },      .{ .code = 9, .extra_bits = 3, .base = 25 },
+    .{ .code = 10, .extra_bits = 4, .base = 33 },     .{ .code = 11, .extra_bits = 4, .base = 49 },
+    .{ .code = 12, .extra_bits = 5, .base = 65 },     .{ .code = 13, .extra_bits = 5, .base = 97 },
+    .{ .code = 14, .extra_bits = 6, .base = 129 },    .{ .code = 15, .extra_bits = 6, .base = 193 },
+    .{ .code = 16, .extra_bits = 7, .base = 257 },    .{ .code = 17, .extra_bits = 7, .base = 385 },
+    .{ .code = 18, .extra_bits = 8, .base = 513 },    .{ .code = 19, .extra_bits = 8, .base = 769 },
+    .{ .code = 20, .extra_bits = 9, .base = 1025 },   .{ .code = 21, .extra_bits = 9, .base = 1537 },
+    .{ .code = 22, .extra_bits = 10, .base = 2049 },  .{ .code = 23, .extra_bits = 10, .base = 3073 },
+    .{ .code = 24, .extra_bits = 11, .base = 4097 },  .{ .code = 25, .extra_bits = 11, .base = 6145 },
+    .{ .code = 26, .extra_bits = 12, .base = 8193 },  .{ .code = 27, .extra_bits = 12, .base = 12289 },
+    .{ .code = 28, .extra_bits = 13, .base = 16385 }, .{ .code = 29, .extra_bits = 13, .base = 24577 },
+};
+
+// Bit writer for variable-length codes
+const BitWriter = struct {
+    output: *ArrayList(u8),
+    bit_buffer: u32 = 0,
+    bit_count: u8 = 0,
+
+    pub fn init(output: *ArrayList(u8)) BitWriter {
+        return .{ .output = output };
+    }
+
+    pub fn writeBits(self: *BitWriter, code: u32, bits: u8) !void {
+        self.bit_buffer |= code << @as(u5, @intCast(self.bit_count));
+        self.bit_count += bits;
+
+        while (self.bit_count >= 8) {
+            try self.output.append(@intCast(self.bit_buffer & 0xFF));
+            self.bit_buffer >>= 8;
+            self.bit_count -= 8;
+        }
+    }
+
+    pub fn flush(self: *BitWriter) !void {
+        if (self.bit_count > 0) {
+            try self.output.append(@intCast(self.bit_buffer & 0xFF));
+            self.bit_buffer = 0;
+            self.bit_count = 0;
+        }
+    }
+};
+
+// Compression methods for deflate
+pub const CompressionMethod = enum {
+    uncompressed, // BTYPE = 00 - no compression
+    static_huffman, // BTYPE = 01 - static Huffman codes
+    // dynamic_huffman could be added later
+};
+
 // DEFLATE encoder for PNG compression
 pub const DeflateEncoder = struct {
     allocator: Allocator,
@@ -535,10 +732,101 @@ pub const DeflateEncoder = struct {
         self.output.deinit();
     }
 
-    pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
-        // For PNG, we'll use a simple deflate implementation
-        // Write final block with no compression (type 00)
+    // Simple LZ77 match finder
+    const Match = struct {
+        length: u16,
+        distance: u16,
+    };
 
+    fn findMatch(data: []const u8, pos: usize) ?Match {
+        if (pos < 3 or data.len < 3) return null;
+
+        const max_length = @min(258, data.len - pos);
+        if (max_length < 3) return null;
+
+        const max_distance = @min(32768, pos);
+
+        var best_length: u16 = 0;
+        var best_distance: u16 = 0;
+
+        // Simple search - only check a few recent positions to avoid infinite loops
+        const search_limit = @min(max_distance, 256); // Limit search to prevent infinite loops
+
+        var distance: u16 = 1;
+        while (distance <= search_limit) : (distance += 1) {
+            if (distance > pos) break;
+
+            const match_pos = pos - distance;
+            var length: u16 = 0;
+
+            // Find the length of the match with proper bounds checking
+            while (length < max_length and
+                pos + length < data.len and
+                match_pos + length < data.len and
+                data[pos + length] == data[match_pos + length])
+            {
+                length += 1;
+            }
+
+            // Must be at least 3 bytes to be worthwhile
+            if (length >= 3 and length > best_length) {
+                best_length = length;
+                best_distance = distance;
+                // Early exit for good matches to avoid spending too much time
+                if (length >= 32) break;
+            }
+        }
+
+        if (best_length >= 3) {
+            return Match{ .length = best_length, .distance = best_distance };
+        }
+
+        return null;
+    }
+
+    fn getLengthCode(length: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
+        for (length_codes) |lc| {
+            if (length >= lc.base) {
+                const next_base = if (lc.code == 285) 259 else length_codes[lc.code - 257 + 1].base;
+                if (length < next_base) {
+                    return .{
+                        .code = lc.code,
+                        .extra_bits = lc.extra_bits,
+                        .extra_value = length - lc.base,
+                    };
+                }
+            }
+        }
+        // Should never reach here for valid lengths
+        return .{ .code = 285, .extra_bits = 0, .extra_value = 0 };
+    }
+
+    fn getDistanceCode(distance: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
+        for (distance_codes) |dc| {
+            if (distance >= dc.base) {
+                const next_base = if (dc.code == 29) 32769 else distance_codes[dc.code + 1].base;
+                if (distance < next_base) {
+                    // Distance code found
+                    return .{
+                        .code = dc.code,
+                        .extra_bits = dc.extra_bits,
+                        .extra_value = distance - dc.base,
+                    };
+                }
+            }
+        }
+        // Should never reach here for valid distances
+        return .{ .code = 29, .extra_bits = 0, .extra_value = 0 };
+    }
+
+    pub fn encode(self: *DeflateEncoder, data: []const u8, method: CompressionMethod) !ArrayList(u8) {
+        switch (method) {
+            .uncompressed => return self.encodeUncompressed(data),
+            .static_huffman => return self.encodeStaticHuffman(data),
+        }
+    }
+
+    fn encodeUncompressed(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         const block_size = @min(data.len, 65535); // Max uncompressed block size
         var pos: usize = 0;
 
@@ -570,18 +858,84 @@ pub const DeflateEncoder = struct {
 
         return self.output.clone();
     }
+
+    fn encodeStaticHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        // Use static Huffman compression (BTYPE = 01)
+        var writer = BitWriter.init(&self.output);
+
+        // Debug: check for problematic data patterns
+        var has_high_bytes = false;
+        for (data) |byte| {
+            if (byte > 250) {
+                has_high_bytes = true;
+                break;
+            }
+        }
+        if (has_high_bytes) {}
+
+        // Write block header: BFINAL=1, BTYPE=01 (static Huffman)
+        try writer.writeBits(0x3, 3); // 011 in binary (LSB first: BFINAL=1, BTYPE=01)
+
+        var pos: usize = 0;
+        while (pos < data.len) {
+            // Try to find a match
+            if (findMatch(data, pos)) |match| {
+                // Output length/distance pair
+                const length_info = getLengthCode(match.length);
+                const distance_info = getDistanceCode(match.distance);
+
+                // LZ77 match found
+
+                // Write length code (using static Huffman table)
+                const length_huffman = StaticHuffmanTables.literal_codes[length_info.code];
+                try writer.writeBits(length_huffman.code, length_huffman.bits);
+
+                // Write extra length bits if needed
+                if (length_info.extra_bits > 0) {
+                    try writer.writeBits(length_info.extra_value, length_info.extra_bits);
+                }
+
+                // Write distance code (5 bits, values 0-31)
+                const distance_huffman = StaticHuffmanTables.distance_codes[distance_info.code];
+                try writer.writeBits(distance_huffman.code, distance_huffman.bits);
+
+                // Write extra distance bits if needed
+                if (distance_info.extra_bits > 0) {
+                    try writer.writeBits(distance_info.extra_value, distance_info.extra_bits);
+                }
+
+                pos += match.length;
+            } else {
+                // Output literal
+                const literal = data[pos];
+                const literal_huffman = StaticHuffmanTables.literal_codes[literal];
+                try writer.writeBits(literal_huffman.code, literal_huffman.bits);
+                pos += 1;
+            }
+        }
+
+        // Write end-of-block symbol (256)
+        const eob_huffman = StaticHuffmanTables.literal_codes[256];
+        try writer.writeBits(eob_huffman.code, eob_huffman.bits);
+
+        // Flush remaining bits
+        try writer.flush();
+
+        return self.output.clone();
+    }
 };
 
-// Public compression function (simple implementation for PNG)
-pub fn deflate(allocator: Allocator, data: []const u8) ![]u8 {
+// Public compression function with selectable compression method
+pub fn deflate(allocator: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
     var encoder = DeflateEncoder.init(allocator);
     defer encoder.deinit();
 
-    var result = try encoder.encode(data);
+    var result = try encoder.encode(data, method);
     defer result.deinit();
 
     return result.toOwnedSlice();
 }
+
 
 // Adler-32 checksum implementation (required for zlib format)
 fn adler32(data: []const u8) u32 {
@@ -598,9 +952,9 @@ fn adler32(data: []const u8) u32 {
 }
 
 // Compress data using zlib format (RFC 1950) - required for PNG IDAT chunks
-pub fn zlibCompress(allocator: Allocator, data: []const u8) ![]u8 {
+pub fn zlibCompress(allocator: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
     // Generate raw DEFLATE data first
-    const deflate_data = try deflate(allocator, data);
+    const deflate_data = try deflate(allocator, data, method);
     defer allocator.free(deflate_data);
 
     // Calculate Adler-32 checksum of original data
@@ -637,6 +991,7 @@ pub fn zlibCompress(allocator: Allocator, data: []const u8) ![]u8 {
 
     return result.toOwnedSlice();
 }
+
 
 // Decompress zlib format data (RFC 1950)
 pub fn zlibDecompress(allocator: Allocator, zlib_data: []const u8) ![]u8 {
@@ -697,7 +1052,7 @@ test "deflate round-trip compression" {
     const original_data = "Hello, World! This is a test string for deflate compression.";
 
     // Compress
-    const compressed = try deflate(allocator, original_data);
+    const compressed = try deflate(allocator, original_data, .uncompressed);
     defer allocator.free(compressed);
 
     // Decompress
@@ -713,7 +1068,7 @@ test "deflate endianness" {
 
     // Test that block headers are written in correct endianness
     const test_data = "Test";
-    const compressed = try deflate(allocator, test_data);
+    const compressed = try deflate(allocator, test_data, .uncompressed);
     defer allocator.free(compressed);
 
     // Check first block header
@@ -741,7 +1096,7 @@ test "huffman tree bit order" {
 
     // Test code lengths that would trigger the bit-reversal issue with codes longer than 9
     const code_lengths = [_]u8{
-        3, 4, 5, 6, 6, 6, 7, 7, 7, 8, 10, 10, 10, 11, 11, 12, 12, 12, 12, 13 // symbols 0-19
+        3, 4, 5, 6, 6, 6, 7, 7, 7, 8, 10, 10, 10, 11, 11, 12, 12, 12, 12, 13, // symbols 0-19
     };
 
     try decoder.buildFromLengths(&code_lengths);
@@ -759,13 +1114,139 @@ test "png huffman decoding regression" {
     defer decoder.deinit();
 
     // Code lengths from a real PNG that previously failed
-    const code_lengths = [_]u8{
-        0, 0, 0, 0, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 0
-    };
+    const code_lengths = [_]u8{ 0, 0, 0, 0, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 0 };
 
     // This should not panic or fail
     try decoder.buildFromLengths(&code_lengths);
     try std.testing.expect(decoder.root != null);
+}
+
+test "compression methods comparison" {
+    const allocator = std.testing.allocator;
+
+    // Test data with some repetition to benefit from compression
+    const test_data = "Hello World! Hello World! Hello World! This is a test string for compression.";
+
+    // Test uncompressed method
+    const uncompressed = try deflate(allocator, test_data, .uncompressed);
+    defer allocator.free(uncompressed);
+
+    // Test static Huffman method
+    const static_huffman = try deflate(allocator, test_data, .static_huffman);
+    defer allocator.free(static_huffman);
+
+    // Both should decompress back to the original
+    const decompressed1 = try inflate(allocator, uncompressed);
+    defer allocator.free(decompressed1);
+    try std.testing.expectEqualSlices(u8, test_data, decompressed1);
+
+    // Test static Huffman decompression
+    const decompressed2 = try inflate(allocator, static_huffman);
+    defer allocator.free(decompressed2);
+    try std.testing.expectEqualSlices(u8, test_data, decompressed2);
+
+    // Static Huffman should typically produce smaller output than uncompressed
+    // (Not always true for very small data, but good to check)
+    std.log.info("Uncompressed size: {}, Static Huffman size: {}", .{ uncompressed.len, static_huffman.len });
+}
+
+test "static huffman zlib round trip" {
+    const allocator = std.testing.allocator;
+
+    // Simple test data
+    const test_data = "Test data for static Huffman compression";
+
+    // Test zlib with static Huffman
+    const compressed = try zlibCompress(allocator, test_data, .static_huffman);
+    defer allocator.free(compressed);
+
+    const decompressed = try zlibDecompress(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, test_data, decompressed);
+}
+
+test "static huffman with pattern data" {
+    const allocator = std.testing.allocator;
+
+    // Test data that mimics grayscale patterns that might cause issues
+    var test_data: [256]u8 = undefined;
+    for (0..256) |i| {
+        test_data[i] = @intCast(i % 256);
+    }
+
+    // Test zlib with static Huffman
+    const compressed = try zlibCompress(allocator, &test_data, .static_huffman);
+    defer allocator.free(compressed);
+
+    const decompressed = try zlibDecompress(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, &test_data, decompressed);
+}
+
+test "static huffman end-of-stream edge case" {
+    const allocator = std.testing.allocator;
+
+    // Create a specific pattern that results in the end-of-block symbol
+    // being at the very end with fewer than 9 bits available
+    // This reproduces the exact bug that was fixed
+    const test_data = [_]u8{ 0, 255, 0, 255, 0, 255, 0, 255 };
+
+    // Compress with static Huffman - this should create a compressed stream
+    // where the final EOB symbol (256) has only 7-8 bits available for reading
+    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    defer allocator.free(compressed);
+
+    // This decompression should succeed even though the final symbol
+    // requires fast lookup but there are <9 bits remaining
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, &test_data, decompressed);
+}
+
+test "static huffman with high bytes" {
+    const allocator = std.testing.allocator;
+
+    // Test specifically with high byte values that are causing issues
+    const test_data = [_]u8{ 250, 251, 252, 253, 254, 255, 255, 254, 253, 252, 251, 250 };
+
+    // Test raw deflate with static Huffman
+    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    defer allocator.free(compressed);
+
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, &test_data, decompressed);
+}
+
+test "debug specific grayscale pattern" {
+    const allocator = std.testing.allocator;
+
+    // Create the exact pattern that PNG grayscale uses (with row filters)
+    var test_data: [64]u8 = undefined;
+    for (0..8) |y| {
+        test_data[y * 8] = 0; // Row filter byte (none = 0)
+        for (1..8) |x| {
+            // Checkerboard pattern like the PNG example
+            if ((x / 4 + y / 4) % 2 == 0) {
+                test_data[y * 8 + x] = @intCast((x * y * 255) / 49); // Will be high values
+            } else {
+                test_data[y * 8 + x] = @intCast(255 - (x * y * 255) / 49);
+            }
+        }
+    }
+
+    // Test with static Huffman
+    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    defer allocator.free(compressed);
+
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, &test_data, decompressed);
 }
 
 test "zlib round-trip compression" {
@@ -775,7 +1256,7 @@ test "zlib round-trip compression" {
     const original_data = "Hello, zlib compression test for PNG!";
 
     // Compress with zlib format
-    const compressed = try zlibCompress(allocator, original_data);
+    const compressed = try zlibCompress(allocator, original_data, .uncompressed);
     defer allocator.free(compressed);
 
     // Decompress
@@ -791,7 +1272,7 @@ test "zlib header validation" {
 
     // Test with valid header
     const test_data = "Test";
-    const compressed = try zlibCompress(allocator, test_data);
+    const compressed = try zlibCompress(allocator, test_data, .uncompressed);
     defer allocator.free(compressed);
 
     // Check zlib header format
