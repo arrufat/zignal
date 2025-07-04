@@ -517,7 +517,9 @@ pub fn Canvas(comptime T: type) type {
                             pixel.* = convertColor(T, color);
                         } else if (color.a > 0) {
                             // Transparent - blend
-                            pixel.blend(color);
+                            var dst = convertColor(Rgba, pixel.*);
+                            dst.blend(color);
+                            pixel.* = convertColor(T, dst);
                         }
                     },
                     else => pixel.* = convertColor(T, color),
