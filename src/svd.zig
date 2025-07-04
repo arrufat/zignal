@@ -222,18 +222,18 @@ pub fn svd(
         const k = n - 1 - rk;
         var iter: usize = 0;
 
-        state_machine: switch (SvdState.test_splitting) {
+        svd_state: switch (SvdState.test_splitting) {
             .test_splitting => {
                 for (0..k + 1) |rl| {
                     l = k - rl;
                     if (@abs(e.at(l, 0)) <= eps) {
-                        continue :state_machine .test_convergence;
+                        continue :svd_state .test_convergence;
                     }
                     if (@abs(q.at(l - 1, 0)) <= eps) {
-                        continue :state_machine .cancellation;
+                        continue :svd_state .cancellation;
                     }
                 }
-                continue :state_machine .test_convergence;
+                continue :svd_state .test_convergence;
             },
 
             .cancellation => {
@@ -241,12 +241,12 @@ pub fn svd(
                 c = 0;
                 s = 1;
                 const l1 = l - 1;
-                inner: for (l..k + 1) |i| {
+                for (l..k + 1) |i| {
                     f = s * e.at(i, 0);
                     e.items[i][0] *= c;
 
                     if (@abs(f) <= eps) {
-                        break :inner;
+                        continue :svd_state .test_convergence;
                     }
                     g = q.at(i, 0);
                     h = @sqrt(f * f + g * g);
@@ -262,19 +262,19 @@ pub fn svd(
                         }
                     }
                 }
-                continue :state_machine .test_convergence;
+                continue :svd_state .test_convergence;
             },
 
             .test_convergence => {
                 z = q.at(k, 0);
                 if (l == k) {
-                    continue :state_machine .convergence_check;
+                    continue :svd_state .convergence_check;
                 }
                 // Shift from bottom 2x2 minor.
                 iter += 1;
                 if (iter > 300) {
                     retval = k;
-                    break :state_machine;
+                    break :svd_state;
                 }
                 x = q.at(l, 0);
                 y = q.at(k - 1, 0);
@@ -328,7 +328,7 @@ pub fn svd(
                 e.items[l][0] = 0;
                 e.items[k][0] = f;
                 q.items[k][0] = x;
-                continue :state_machine .test_splitting;
+                continue :svd_state .test_splitting;
             },
 
             .convergence_check => {
@@ -341,7 +341,7 @@ pub fn svd(
                         }
                     }
                 }
-                break :state_machine;
+                break :svd_state;
             },
         }
     }
