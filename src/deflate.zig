@@ -936,7 +936,6 @@ pub fn deflate(allocator: Allocator, data: []const u8, method: CompressionMethod
     return result.toOwnedSlice();
 }
 
-
 // Adler-32 checksum implementation (required for zlib format)
 fn adler32(data: []const u8) u32 {
     const MOD_ADLER: u32 = 65521;
@@ -991,7 +990,6 @@ pub fn zlibCompress(allocator: Allocator, data: []const u8, method: CompressionM
 
     return result.toOwnedSlice();
 }
-
 
 // Decompress zlib format data (RFC 1950)
 pub fn zlibDecompress(allocator: Allocator, zlib_data: []const u8) ![]u8 {
