@@ -7,6 +7,13 @@ const SvdMode = enum {
     skinny_u,
     full_u,
 };
+
+const SvdState = enum {
+    test_splitting,
+    cancellation,
+    test_convergence,
+    convergence_check,
+};
 const SvdOptions = struct {
     with_u: bool = true,
     with_v: bool = false,
@@ -215,30 +222,22 @@ pub fn svd(
         const k = n - 1 - rk;
         var iter: usize = 0;
 
-        var test_f_splitting = true;
-        var cancellation = true;
-        var test_f_convergence = true;
-        var convergence = true;
-
-        outer: while (k >= 0) {
-            if (test_f_splitting) {
-                cancellation = true;
-                inner: for (0..k + 1) |rl| {
+        state_machine: switch (SvdState.test_splitting) {
+            .test_splitting => {
+                for (0..k + 1) |rl| {
                     l = k - rl;
                     if (@abs(e.at(l, 0)) <= eps) {
-                        test_f_convergence = true;
-                        cancellation = false;
-                        break :inner;
+                        continue :state_machine .test_convergence;
                     }
                     if (@abs(q.at(l - 1, 0)) <= eps) {
-                        cancellation = true;
-                        break :inner;
+                        continue :state_machine .cancellation;
                     }
                 }
-            }
+                continue :state_machine .test_convergence;
+            },
 
-            // Cancellation of e.at(l, 0) if l > 0
-            if (cancellation) {
+            .cancellation => {
+                // Cancellation of e.at(l, 0) if l > 0
                 c = 0;
                 s = 1;
                 const l1 = l - 1;
@@ -247,7 +246,6 @@ pub fn svd(
                     e.items[i][0] *= c;
 
                     if (@abs(f) <= eps) {
-                        test_f_convergence = true;
                         break :inner;
                     }
                     g = q.at(i, 0);
@@ -264,23 +262,19 @@ pub fn svd(
                         }
                     }
                 }
-                test_f_convergence = true;
-            }
+                continue :state_machine .test_convergence;
+            },
 
-            if (test_f_convergence) {
+            .test_convergence => {
                 z = q.at(k, 0);
                 if (l == k) {
-                    convergence = true;
-                    test_f_splitting = false;
-                    cancellation = false;
-                    test_f_convergence = false;
-                    continue :outer;
+                    continue :state_machine .convergence_check;
                 }
                 // Shift from bottom 2x2 minor.
                 iter += 1;
                 if (iter > 300) {
                     retval = k;
-                    break :outer;
+                    break :state_machine;
                 }
                 x = q.at(l, 0);
                 y = q.at(k - 1, 0);
@@ -334,11 +328,10 @@ pub fn svd(
                 e.items[l][0] = 0;
                 e.items[k][0] = f;
                 q.items[k][0] = x;
-                test_f_splitting = true;
-                continue :outer;
-            }
+                continue :state_machine .test_splitting;
+            },
 
-            if (convergence) {
+            .convergence_check => {
                 if (z < 0) {
                     // q.at(k, 0) is made non-negative
                     q.items[k][0] = -z;
@@ -348,15 +341,14 @@ pub fn svd(
                         }
                     }
                 }
-                break :outer;
-            }
-            test_f_splitting = true;
+                break :state_machine;
+            },
         }
     }
     return .{ u, q, v, retval };
 }
 
-test "svd" {
+test "svd basic" {
     const m: usize = 5;
     const n: usize = 4;
     // Example matrix taken from Wikipedia
@@ -411,4 +403,83 @@ test "svd" {
             try std.testing.expectApproxEqAbs(vvt.at(i, j), id_n.at(i, j), 1e-15);
         }
     }
+}
+
+test "svd modes" {
+    const m: usize = 4;
+    const n: usize = 4;
+    const a: Matrix(f64, m, n) = .{
+        .items = .{
+            .{ 2, 1, 0, 0 },
+            .{ 1, 2, 1, 0 },
+            .{ 0, 1, 2, 1 },
+            .{ 0, 0, 1, 2 },
+        },
+    };
+
+    // Test no_u mode
+    const res_no_u = svd(f64, m, n, a, .{ .with_u = false, .with_v = true, .mode = .no_u });
+    const q_no_u = res_no_u[1];
+    _ = res_no_u[2]; // v_no_u
+
+    // Test skinny_u mode
+    const res_skinny = svd(f64, m, n, a, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    const u_skinny = res_skinny[0];
+    const q_skinny = res_skinny[1];
+
+    // Test full_u mode
+    const res_full = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const u_full = res_full[0];
+    const q_full = res_full[1];
+    _ = res_full[2]; // v_full
+
+    // Singular values should be the same across modes
+    const tol = @sqrt(std.math.floatEps(f64));
+    for (0..n) |i| {
+        try std.testing.expectApproxEqRel(q_no_u.at(i, 0), q_skinny.at(i, 0), tol);
+        try std.testing.expectApproxEqRel(q_skinny.at(i, 0), q_full.at(i, 0), tol);
+    }
+
+    // Check matrix dimensions
+    try std.testing.expect(u_skinny.rows == m and u_skinny.cols == n);
+    try std.testing.expect(u_full.rows == m and u_full.cols == m);
+}
+
+test "svd identity matrix" {
+    const n: usize = 3;
+    const a: Matrix(f64, n, n) = .identity();
+
+    const res = svd(f64, n, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const q = res[1];
+
+    // Identity matrix should have all singular values equal to 1
+    const tol = @sqrt(std.math.floatEps(f64));
+    for (0..n) |i| {
+        try std.testing.expectApproxEqRel(q.at(i, 0), 1.0, tol);
+    }
+}
+
+test "svd singular matrix" {
+    const m: usize = 3;
+    const n: usize = 3;
+    const a: Matrix(f64, m, n) = .{
+        .items = .{
+            .{ 1, 2, 3 },
+            .{ 2, 4, 6 },
+            .{ 1, 2, 3 },
+        },
+    };
+
+    const res = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const q = res[1];
+
+    // This matrix has rank 1, so should have 2 zero singular values
+    const tol = @sqrt(std.math.floatEps(f64));
+    var zero_count: usize = 0;
+    for (0..n) |i| {
+        if (q.at(i, 0) < tol) {
+            zero_count += 1;
+        }
+    }
+    try std.testing.expect(zero_count == 2);
 }
