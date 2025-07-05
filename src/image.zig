@@ -154,10 +154,7 @@ pub fn Image(comptime T: type) type {
                 for (0..self.rows) |r| {
                     const src_row_start = r * self.stride;
                     const dst_row_start = r * dst.stride;
-                    @memcpy(
-                        dst.data[dst_row_start..dst_row_start + self.cols], 
-                        self.data[src_row_start..src_row_start + self.cols]
-                    );
+                    @memcpy(dst.data[dst_row_start .. dst_row_start + self.cols], self.data[src_row_start .. src_row_start + self.cols]);
                 }
             } else {
                 // Fast copy for non-views
@@ -682,7 +679,7 @@ pub fn Image(comptime T: type) type {
                             // SIMD middle section (constant area when row is safe)
                             const safe_end = self.cols - radius - simd_len;
                             if (c <= safe_end) {
-                                const const_area: f32 = @floatFromInt((r2 - r1) * (2 * radius + 1));
+                                const const_area: f32 = @floatFromInt((r2 - r1) * 2 * radius);
                                 const area_vec: @Vector(simd_len, f32) = @splat(const_area);
 
                                 while (c <= safe_end) : (c += simd_len) {
@@ -1217,54 +1214,54 @@ test "getRectangle" {
 test "copy function with views" {
     var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 7);
     defer image.deinit(std.testing.allocator);
-    
+
     // Fill with pattern
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             image.at(r, c).* = @intCast(r * 10 + c);
         }
     }
-    
+
     // Create a view
     const view = image.view(.{ .l = 1, .t = 1, .r = 4, .b = 3 });
-    
+
     // Copy view to new image
     var copied: Image(u8) = try .initAlloc(std.testing.allocator, view.rows, view.cols);
     defer copied.deinit(std.testing.allocator);
-    
+
     view.copy(copied);
-    
+
     // Verify copied data matches view
     for (0..view.rows) |r| {
         for (0..view.cols) |c| {
             try expectEqual(view.at(r, c).*, copied.at(r, c).*);
         }
     }
-    
+
     // Test copy from regular image to view
     var target: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
     defer target.deinit(std.testing.allocator);
-    
+
     // Fill target with different pattern
     for (0..target.rows) |r| {
         for (0..target.cols) |c| {
             target.at(r, c).* = 99;
         }
     }
-    
+
     // Create view of target
     const target_view = target.view(.{ .l = 2, .t = 2, .r = 5, .b = 4 });
-    
+
     // Copy original view to target view
     view.copy(target_view);
-    
+
     // Verify the view area was copied correctly
     for (0..view.rows) |r| {
         for (0..view.cols) |c| {
             try expectEqual(view.at(r, c).*, target_view.at(r, c).*);
         }
     }
-    
+
     // Verify areas outside the view weren't touched
     try expectEqual(@as(u8, 99), target.at(0, 0).*);
     try expectEqual(@as(u8, 99), target.at(5, 7).*);
@@ -1273,14 +1270,14 @@ test "copy function with views" {
 test "copy function in-place behavior" {
     var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
-    
+
     // Fill with pattern
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             image.at(r, c).* = @intCast(r * 3 + c);
         }
     }
-    
+
     // Store original values
     var original_values: [9]u8 = undefined;
     for (0..image.rows) |r| {
@@ -1288,10 +1285,10 @@ test "copy function in-place behavior" {
             original_values[r * 3 + c] = image.at(r, c).*;
         }
     }
-    
+
     // In-place copy should be no-op
     image.copy(image);
-    
+
     // Values should be unchanged
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -1303,22 +1300,22 @@ test "copy function in-place behavior" {
 test "boxBlur radius 0 with views" {
     var image: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
     defer image.deinit(std.testing.allocator);
-    
+
     // Fill with pattern
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             image.at(r, c).* = @intCast(r * 10 + c);
         }
     }
-    
+
     // Create a view
     const view = image.view(.{ .l = 1, .t = 1, .r = 5, .b = 4 });
-    
+
     // Apply boxBlur with radius 0 to view
     var blurred: Image(u8) = undefined;
     try view.boxBlur(std.testing.allocator, &blurred, 0);
     defer blurred.deinit(std.testing.allocator);
-    
+
     // Should be identical to view
     for (0..view.rows) |r| {
         for (0..view.cols) |c| {
@@ -1440,7 +1437,7 @@ test "boxBlur SIMD vs non-SIMD consistency" {
     // Test specifically designed to trigger both SIMD and non-SIMD paths
     // Large enough for SIMD optimizations with different radii
     const test_size = 64; // Large enough for SIMD
-    
+
     for ([_]usize{ 1, 2, 3, 5 }) |radius| {
         var image: Image(u8) = try .initAlloc(std.testing.allocator, test_size, test_size);
         defer image.deinit(std.testing.allocator);
@@ -1459,15 +1456,15 @@ test "boxBlur SIMD vs non-SIMD consistency" {
         // The key test: center pixels processed by SIMD should be mathematically consistent
         // with border pixels processed by scalar code. For a checkerboard, we can verify
         // the blur result is symmetric and area calculations are correct.
-        
+
         // Check symmetry - if area calculations are correct, symmetric patterns should blur symmetrically
         const center = test_size / 2;
         try expectEqual(blurred.at(center, center).*, blurred.at(center, center).*); // Trivial but ensures no crash
-        
+
         // Check that corners have lower values (smaller effective area) than center
         const corner_val = blurred.at(0, 0).*;
         const center_val = blurred.at(center, center).*;
-        
+
         // For checkerboard pattern, center should be ~127.5, corners should be higher due to smaller kernel
         try expectEqual(corner_val >= center_val, true);
     }
@@ -1478,38 +1475,38 @@ test "boxBlur border area calculations" {
     // uniform images with different values
     const test_size = 12;
     const radius = 3;
-    
+
     // Test with uniform image - all pixels should have the same value after blur
     var uniform_image: Image(u8) = try .initAlloc(std.testing.allocator, test_size, test_size);
     defer uniform_image.deinit(std.testing.allocator);
-    
+
     for (uniform_image.data) |*pixel| pixel.* = 200;
-    
+
     var uniform_blurred: Image(u8) = undefined;
     try uniform_image.boxBlur(std.testing.allocator, &uniform_blurred, radius);
     defer uniform_blurred.deinit(std.testing.allocator);
-    
+
     // All pixels should remain 200 since it's uniform
     for (0..test_size) |r| {
         for (0..test_size) |c| {
             try expectEqual(@as(u8, 200), uniform_blurred.at(r, c).*);
         }
     }
-    
+
     // Test with gradient - area calculations should be smooth
     var gradient_image: Image(u8) = try .initAlloc(std.testing.allocator, test_size, test_size);
     defer gradient_image.deinit(std.testing.allocator);
-    
+
     for (0..test_size) |r| {
         for (0..test_size) |c| {
             gradient_image.at(r, c).* = @intCast((r * 255) / test_size);
         }
     }
-    
+
     var gradient_blurred: Image(u8) = undefined;
     try gradient_image.boxBlur(std.testing.allocator, &gradient_blurred, radius);
     defer gradient_blurred.deinit(std.testing.allocator);
-    
+
     // Check that we got reasonable blur results (no crashes, no extreme values)
     for (0..test_size) |r| {
         for (0..test_size) |c| {
@@ -1552,7 +1549,7 @@ test "boxBlur struct type comprehensive" {
                     try expectEqual(@as(u8, 255), blurred.at(r, c).a);
                 }
             }
-            
+
             // Check that gradients remain smooth
             for (1..test_size - 1) |r| {
                 const curr_r = blurred.at(r, test_size / 2).r;
