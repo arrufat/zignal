@@ -154,7 +154,10 @@ pub fn Image(comptime T: type) type {
                 for (0..self.rows) |r| {
                     const src_row_start = r * self.stride;
                     const dst_row_start = r * dst.stride;
-                    @memcpy(dst.data[dst_row_start .. dst_row_start + self.cols], self.data[src_row_start .. src_row_start + self.cols]);
+                    @memcpy(
+                        dst.data[dst_row_start .. dst_row_start + self.cols],
+                        self.data[src_row_start .. src_row_start + self.cols],
+                    );
                 }
             } else {
                 // Fast copy for non-views
