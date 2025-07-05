@@ -142,6 +142,29 @@ pub fn Image(comptime T: type) type {
             return self.cols != self.stride;
         }
 
+        /// Copies image data from `self` to `dst`, correctly handling views.
+        /// If src and dst are the same object, does nothing (no-op).
+        /// Uses fast @memcpy when neither image is a view, falls back to row-by-row copying otherwise.
+        pub fn copy(self: Self, dst: Self) void {
+            if (self.data.ptr == dst.data.ptr) {
+                return; // Same underlying data, nothing to copy
+            }
+            if (self.isView() or dst.isView()) {
+                // Row-by-row copy for views
+                for (0..self.rows) |r| {
+                    const src_row_start = r * self.stride;
+                    const dst_row_start = r * dst.stride;
+                    @memcpy(
+                        dst.data[dst_row_start..dst_row_start + self.cols], 
+                        self.data[src_row_start..src_row_start + self.cols]
+                    );
+                }
+            } else {
+                // Fast copy for non-views
+                @memcpy(dst.data, self.data);
+            }
+        }
+
         /// Converts the image to a different pixel type.
         /// Allocates a new image with the target pixel type and converts each pixel using the color conversion system.
         ///
@@ -618,8 +641,8 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0 and &self != blurred) {
-                for (self.data, blurred.data) |s, *b| b.* = s;
+            if (radius == 0) {
+                self.copy(blurred.*);
                 return;
             }
 
@@ -745,8 +768,8 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0 and &self != blurred) {
-                @memcpy(blurred.data, self.data);
+            if (radius == 0) {
+                self.copy(blurred.*);
                 return;
             }
 
@@ -828,8 +851,8 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0 and &self != sharpened) {
-                @memcpy(sharpened.data, self.data);
+            if (radius == 0) {
+                self.copy(sharpened.*);
                 return;
             }
 
@@ -914,8 +937,8 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
             }
-            if (radius == 0 and &self != sharpened) {
-                for (self.data, sharpened.data) |s, *b| b.* = s;
+            if (radius == 0) {
+                self.copy(sharpened.*);
                 return;
             }
 
@@ -1189,6 +1212,119 @@ test "getRectangle" {
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
     try expectEqual(rect.height(), image.rows);
+}
+
+test "copy function with views" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 7);
+    defer image.deinit(std.testing.allocator);
+    
+    // Fill with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+    
+    // Create a view
+    const view = image.view(.{ .l = 1, .t = 1, .r = 4, .b = 3 });
+    
+    // Copy view to new image
+    var copied: Image(u8) = try .initAlloc(std.testing.allocator, view.rows, view.cols);
+    defer copied.deinit(std.testing.allocator);
+    
+    view.copy(copied);
+    
+    // Verify copied data matches view
+    for (0..view.rows) |r| {
+        for (0..view.cols) |c| {
+            try expectEqual(view.at(r, c).*, copied.at(r, c).*);
+        }
+    }
+    
+    // Test copy from regular image to view
+    var target: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    defer target.deinit(std.testing.allocator);
+    
+    // Fill target with different pattern
+    for (0..target.rows) |r| {
+        for (0..target.cols) |c| {
+            target.at(r, c).* = 99;
+        }
+    }
+    
+    // Create view of target
+    const target_view = target.view(.{ .l = 2, .t = 2, .r = 5, .b = 4 });
+    
+    // Copy original view to target view
+    view.copy(target_view);
+    
+    // Verify the view area was copied correctly
+    for (0..view.rows) |r| {
+        for (0..view.cols) |c| {
+            try expectEqual(view.at(r, c).*, target_view.at(r, c).*);
+        }
+    }
+    
+    // Verify areas outside the view weren't touched
+    try expectEqual(@as(u8, 99), target.at(0, 0).*);
+    try expectEqual(@as(u8, 99), target.at(5, 7).*);
+}
+
+test "copy function in-place behavior" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+    
+    // Fill with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c);
+        }
+    }
+    
+    // Store original values
+    var original_values: [9]u8 = undefined;
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            original_values[r * 3 + c] = image.at(r, c).*;
+        }
+    }
+    
+    // In-place copy should be no-op
+    image.copy(image);
+    
+    // Values should be unchanged
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(original_values[r * 3 + c], image.at(r, c).*);
+        }
+    }
+}
+
+test "boxBlur radius 0 with views" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    defer image.deinit(std.testing.allocator);
+    
+    // Fill with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+    
+    // Create a view
+    const view = image.view(.{ .l = 1, .t = 1, .r = 5, .b = 4 });
+    
+    // Apply boxBlur with radius 0 to view
+    var blurred: Image(u8) = undefined;
+    try view.boxBlur(std.testing.allocator, &blurred, 0);
+    defer blurred.deinit(std.testing.allocator);
+    
+    // Should be identical to view
+    for (0..view.rows) |r| {
+        for (0..view.cols) |c| {
+            try expectEqual(view.at(r, c).*, blurred.at(r, c).*);
+        }
+    }
 }
 
 test "view" {
