@@ -1,0 +1,328 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
+const Matrix = @import("../matrix.zig").Matrix;
+const Point2d = @import("points.zig").Point2d;
+const svd = @import("../svd.zig").svd;
+
+/// Applies a similarity transform to a point.  By default, it will be initialized to the identity
+/// function.  Use the fit method to update the transform to map between two sets of points.
+pub fn SimilarityTransform(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        matrix: Matrix(T, 2, 2),
+        bias: Matrix(T, 2, 1),
+        pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
+
+        /// Finds the best similarity transform that maps between the two given sets of points.
+        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+            var transform: SimilarityTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
+        }
+
+        /// Projects the given point using the similarity transform.
+        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
+            return self.matrix.dot(src).add(self.bias).toPoint2d();
+        }
+
+        /// Finds the best similarity transform that maps between the two given sets of points.
+        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+            assert(from_points.len >= 2);
+            assert(from_points.len == to_points.len);
+            const num_points: T = @floatFromInt(from_points.len);
+            var mean_from: Point2d(T) = .origin;
+            var mean_to: Point2d(T) = .origin;
+            var sigma_from: T = 0;
+            var sigma_to: T = 0;
+            var cov: Matrix(T, 2, 2) = .initAll(0);
+            self.matrix = cov;
+            for (0..from_points.len) |i| {
+                mean_from.x += from_points[i].x;
+                mean_from.y += from_points[i].y;
+                mean_to.x += to_points[i].x;
+                mean_to.y += to_points[i].y;
+            }
+            mean_from.x /= num_points;
+            mean_from.y /= num_points;
+            mean_to.x /= num_points;
+            mean_to.y /= num_points;
+
+            for (0..from_points.len) |i| {
+                const from = Point2d(T){ .x = from_points[i].x - mean_from.x, .y = from_points[i].y - mean_from.y };
+                const to = Point2d(T){ .x = to_points[i].x - mean_to.x, .y = to_points[i].y - mean_to.y };
+
+                sigma_from += from.x * from.x + from.y * from.y;
+                sigma_to += to.x * to.x + to.y * to.y;
+
+                const from_mat: Matrix(T, 1, 2) = .{ .items = .{.{ from.x, from.y }} };
+                const to_mat: Matrix(T, 2, 1) = .{ .items = .{ .{to.x}, .{to.y} } };
+                cov = cov.add(to_mat.dot(from_mat));
+            }
+            sigma_from /= num_points;
+            sigma_to /= num_points;
+            cov = cov.scale(1.0 / num_points);
+            const det_cov = cov.at(0, 0) * cov.at(1, 1) - cov.at(0, 1) * cov.at(1, 0);
+            const result = svd(
+                T,
+                cov.rows,
+                cov.cols,
+                cov,
+                .{ .with_u = true, .with_v = true, .mode = .skinny_u },
+            );
+            const u: *const Matrix(T, 2, 2) = &result[0];
+            const d: Matrix(T, 2, 2) = .{ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
+            const v: *const Matrix(T, 2, 2) = &result[2];
+            const det_u = u.at(0, 0) * u.at(1, 1) - u.at(0, 1) * u.at(1, 0);
+            const det_v = v.at(0, 0) * v.at(1, 1) - v.at(0, 1) * v.at(1, 0);
+            var s: Matrix(T, cov.rows, cov.cols) = .identity();
+            if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
+                if (d.at(1, 1) < d.at(0, 0)) {
+                    s.set(1, 1, -1);
+                } else {
+                    s.set(0, 0, -1);
+                }
+            }
+            const r = u.dot(s.dot(v.transpose()));
+            var c: T = 1;
+            if (sigma_from != 0) {
+                c = 1.0 / sigma_from * d.dot(s).trace();
+            }
+            const m_from: Matrix(T, 2, 1) = .{ .items = .{ .{mean_from.x}, .{mean_from.y} } };
+            const m_to: Matrix(T, 2, 1) = .{ .items = .{ .{mean_to.x}, .{mean_to.y} } };
+            self.matrix = r.scale(c);
+            self.bias = m_to.add(r.dot(m_from).scale(-c));
+        }
+    };
+}
+
+/// Applies an affine transform to a point.  By default, it will be initialized to the identity
+/// function.  Use the fit method to update the transform to map between two sets of points.
+pub fn AffineTransform(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        matrix: Matrix(T, 2, 2),
+        bias: Matrix(T, 2, 1),
+        pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
+
+        /// Finds the best affine transform that maps between the two given sets of points.
+        pub fn init(from_points: [3]Point2d(T), to_points: [3]Point2d(T)) Self {
+            var transform: AffineTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
+        }
+
+        /// Projects the given point using the affine transform.
+        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+            const src: Matrix(T, 2, 1) = .{ .items = .{ .{point.x}, .{point.y} } };
+            return self.matrix.dot(src).add(self.bias).toPoint2d();
+        }
+
+        /// Finds the best affine transform that maps between the two given sets of points.
+        /// Requires exactly 3 pairs of points.
+        pub fn find(self: *Self, from_points: [3]Point2d(T), to_points: [3]Point2d(T)) void {
+            // Affine transform is uniquely defined by 3 non-collinear points.
+            // The init function takes [3]Point2d which enforces this at compile time for fixed arrays.
+            assert(from_points.len == 3);
+            assert(to_points.len == 3);
+            var p: Matrix(T, 3, from_points.len) = .{};
+            var q: Matrix(T, 2, to_points.len) = .{};
+            for (0..from_points.len) |i| {
+                p.set(0, i, from_points[i].x);
+                p.set(1, i, from_points[i].y);
+                p.set(2, i, 1);
+
+                q.set(0, i, to_points[i].x);
+                q.set(1, i, to_points[i].y);
+            }
+            const m = q.dot(p.inverse().?);
+            self.matrix = m.getSubMatrix(0, 0, 2, 2);
+            self.bias = m.getCol(2);
+        }
+    };
+}
+
+/// Applies a projective transform to a point.  By default, it will be initialized to the identity
+/// function.  Use the fit method to update the transform to map between two sets of points.
+pub fn ProjectiveTransform(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        matrix: Matrix(T, 3, 3),
+        pub const identity: Self = .{ .matrix = .identity() };
+
+        /// Finds the best projective transform that maps between the two given sets of points.
+        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+            var transform: ProjectiveTransform(T) = .identity;
+            transform.find(from_points, to_points);
+            return transform;
+        }
+
+        /// Projects the given point using the projective transform
+        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+            const src = Matrix(T, 3, 1){ .items = .{ .{point.x}, .{point.y}, .{1} } };
+            var dst = self.matrix.dot(src);
+            if (dst.at(2, 0) != 0) {
+                dst = dst.scale(1 / dst.at(2, 0));
+            }
+            return dst.toPoint2d();
+        }
+
+        /// Returns the inverse of the current projective transform.
+        pub fn inverse(self: Self) ?Self {
+            return if (self.matrix.inverse()) |inv| .{ .matrix = inv } else null;
+        }
+
+        /// Finds the best projective transform that maps between the two given sets of points.
+        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+            assert(from_points.len >= 4);
+            assert(from_points.len == to_points.len);
+            var accum: Matrix(T, 9, 9) = .initAll(0);
+            var b: Matrix(T, 2, 9) = .initAll(0);
+            for (0..from_points.len) |i| {
+                const f = Matrix(T, 1, 3){ .items = .{.{ from_points[i].x, from_points[i].y, 1 }} };
+                const t = Matrix(T, 1, 3){ .items = .{.{ to_points[i].x, to_points[i].y, 1 }} };
+                b.setSubMatrix(0, 0, f.scale(t.at(0, 1)));
+                b.setSubMatrix(1, 0, f);
+                b.setSubMatrix(0, 3, f.scale(-t.at(0, 0)));
+                b.setSubMatrix(1, 6, f.scale(-t.at(0, 0)));
+                accum = accum.add(b.transpose().dot(b));
+            }
+            const u, const q, _, _ = svd(
+                T,
+                accum.rows,
+                accum.cols,
+                accum,
+                .{ .with_u = true, .with_v = false, .mode = .full_u },
+            );
+            // TODO: Check the retval from svd (result[3]) for convergence errors.
+            // If svd fails to converge, the resulting transform matrix might be unstable.
+            self.matrix = blk: {
+                var min: T = q.at(0, 0);
+                var idx: usize = 0;
+                for (1..q.rows) |i| {
+                    const val = q.at(i, 0);
+                    if (val < min) {
+                        min = val;
+                        idx = i;
+                    }
+                }
+                break :blk u.getCol(idx).reshape(3, 3);
+            };
+        }
+    };
+}
+
+test "affine3" {
+    const T = f64;
+    const from_points: []const Point2d(T) = &.{
+        .{ .x = 0, .y = 0 },
+        .{ .x = 0, .y = 1 },
+        .{ .x = 1, .y = 1 },
+    };
+    const to_points: []const Point2d(T) = &.{
+        .{ .x = 0, .y = 1 },
+        .{ .x = 1, .y = 1 },
+        .{ .x = 1, .y = 0 },
+    };
+    const tf: AffineTransform(f64) = .init(from_points[0..3].*, to_points[0..3].*);
+    const matrix: Matrix(T, 2, 2) = .{ .items = .{ .{ 0, 1 }, .{ -1, 0 } } };
+    const bias: Matrix(T, 2, 1) = .{ .items = .{ .{0}, .{1} } };
+    try std.testing.expectEqualDeep(tf.matrix, matrix);
+    try std.testing.expectEqualDeep(tf.bias, bias);
+
+    const itf: AffineTransform(f64) = .init(to_points[0..3].*, from_points[0..3].*);
+    for (from_points, to_points) |f, t| {
+        try std.testing.expectEqualDeep(tf.project(f), t);
+        try std.testing.expectEqualDeep(itf.project(t), f);
+    }
+}
+
+test "projection4" {
+    const T = f64;
+    const tol = 1e-5;
+    const from_points: []const Point2d(T) = &.{
+        .{ .x = 199.67754364, .y = 200.17905235 },
+        .{ .x = 167.90229797, .y = 175.55920601 },
+        .{ .x = 270.33649445, .y = 207.96521187 },
+        .{ .x = 267.53637314, .y = 188.24442387 },
+    };
+    const to_points: []const Point2d(T) = &.{
+        .{ .x = 440.68012238, .y = 275.45248032 },
+        .{ .x = 429.62512970, .y = 262.64307976 },
+        .{ .x = 484.23328400, .y = 279.44332123 },
+        .{ .x = 488.08315277, .y = 272.79547691 },
+    };
+    const transform: ProjectiveTransform(T) = .init(from_points, to_points);
+    const matrix: Matrix(T, 3, 3) = .{
+        .items = .{
+            .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
+            .{ -2.8361695646354147e-03, 2.9060176209597761e-03, -4.3735741833190661e-01 },
+            .{ -1.0156215756801098e-05, 1.3270311721030187e-05, -2.1603199531972065e-03 },
+        },
+    };
+    for (0..transform.matrix.rows) |r| {
+        for (0..transform.matrix.cols) |c| {
+            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c), matrix.at(r, c), 1e-3);
+        }
+    }
+    for (from_points, to_points) |f, t| {
+        const p = transform.project(f);
+        try std.testing.expectApproxEqRel(p.x, t.x, tol);
+        try std.testing.expectApproxEqRel(p.y, t.y, tol);
+    }
+
+    const m_inv = transform.inverse().?;
+    const t_inv: ProjectiveTransform(T) = .init(to_points, from_points);
+    for (from_points) |f| {
+        var fp = t_inv.project(transform.project(f));
+        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
+        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
+
+        fp = m_inv.project(transform.project(f));
+        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
+        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
+    }
+}
+
+test "projection8" {
+    const T = f64;
+    const from_points: []const Point2d(T) = &.{
+        .{ .x = 319.48406982, .y = 240.21486282 },
+        .{ .x = 268.64367676, .y = 210.67104721 },
+        .{ .x = 432.53839111, .y = 249.55825424 },
+        .{ .x = 428.05819702, .y = 225.89330864 },
+        .{ .x = 687.00787354, .y = 240.97020721 },
+        .{ .x = 738.32287598, .y = 208.32876205 },
+        .{ .x = 574.62890625, .y = 250.60971451 },
+        .{ .x = 579.63378906, .y = 225.37580109 },
+    };
+
+    const to_points: []const Point2d(T) = &.{
+        .{ .x = 330.48120117, .y = 408.22596359 },
+        .{ .x = 317.55538940, .y = 393.26282501 },
+        .{ .x = 356.74267578, .y = 411.06428146 },
+        .{ .x = 349.94784546, .y = 400.26379395 },
+        .{ .x = 438.15582275, .y = 411.75442886 },
+        .{ .x = 452.01367188, .y = 398.08815765 },
+        .{ .x = 398.66107178, .y = 413.83139420 },
+        .{ .x = 395.29974365, .y = 401.73685455 },
+    };
+    const transform: ProjectiveTransform(T) = .init(from_points, to_points);
+    const matrix = Matrix(T, 3, 3){ .items = .{
+        .{ 7.9497770144471079e-05, 8.6315632819330035e-04, -6.3240797603906806e-01 },
+        .{ 3.9739851020393160e-04, 6.4356336568222570e-04, -7.7463154396817901e-01 },
+        .{ 1.0207719920241196e-06, 2.6961794891002063e-06, -2.1907681782918601e-03 },
+    } };
+    const tol = std.math.sqrt(std.math.floatEps(T));
+    for (0..transform.matrix.rows) |r| {
+        for (0..transform.matrix.cols) |c| {
+            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c), matrix.at(r, c), tol);
+        }
+    }
+    for (0..from_points.len) |i| {
+        const p = transform.project(from_points[i]);
+        try std.testing.expectApproxEqRel(p.x, to_points[i].x, 1e-2);
+        try std.testing.expectApproxEqRel(p.y, to_points[i].y, 1e-2);
+    }
+}

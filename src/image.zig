@@ -12,7 +12,7 @@ const color = @import("color.zig");
 const is4xu8Struct = @import("meta.zig").is4xu8Struct;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
-const Point2d = @import("point.zig").Point2d;
+const Point2d = @import("geometry/points.zig").Point2d;
 const Rectangle = @import("geometry.zig").Rectangle;
 
 /// A simple image struct that encapsulates the size and the data.

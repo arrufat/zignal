@@ -32,8 +32,9 @@ const png = @import("png.zig");
 pub const savePng = png.savePng;
 pub const loadPng = png.loadPng;
 
-const point = @import("point.zig");
-pub const Point2d = point.Point2d;
-pub const Point3d = point.Point3d;
+pub const Point2d = geometry.Point2d;
+pub const Point3d = geometry.Point3d;
+pub const pointInTriangle = geometry.pointInTriangle;
+pub const findBarycenter = geometry.findBarycenter;
 
 pub const svd = @import("svd.zig").svd;
