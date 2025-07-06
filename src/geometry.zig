@@ -608,19 +608,30 @@ pub fn ConvexHull(comptime T: type) type {
             try self.points.resize(points.len);
             @memcpy(self.points.items, points);
 
-            // Find the point with the lowest y-coordinate.
-            // If there are ties, choose the one with the lowest x-coordinate.
-            var lowest: Point2d(T) = .{ .x = std.math.floatMax(T), .y = std.math.floatMax(T) };
-            for (self.points.items) |p| {
-                if (p.y < lowest.y or (p.y == lowest.y and p.x < lowest.x)) {
-                    lowest = p;
+            // Find the topmost-leftmost point (lowest y, then lowest x)
+            var lowest_idx: usize = 0;
+            for (self.points.items[1..], 1..) |p, i| {
+                const current = self.points.items[lowest_idx];
+                if (p.y < current.y or (p.y == current.y and p.x < current.x)) {
+                    lowest_idx = i;
                 }
             }
 
-            // Sort the points by polar angle in clockwise order.
-            std.mem.sort(Point2d(T), self.points.items, lowest, clockwiseOrder);
+            // Swap the pivot point to the beginning
+            if (lowest_idx != 0) {
+                std.mem.swap(Point2d(T), &self.points.items[0], &self.points.items[lowest_idx]);
+            }
+            const lowest = self.points.items[0];
+
+            // Sort remaining points by polar angle in clockwise order
+            std.mem.sort(Point2d(T), self.points.items[1..], lowest, clockwiseOrder);
+
             self.hull.clearRetainingCapacity();
-            for (self.points.items) |p| {
+            try self.hull.append(lowest); // Add pivot first
+
+            // Process remaining points
+            for (self.points.items[1..]) |p| {
+                // Remove points that do NOT create a clockwise turn
                 while (self.hull.items.len > 1 and computeOrientation(
                     self.hull.items[self.hull.items.len - 2],
                     self.hull.items[self.hull.items.len - 1],
