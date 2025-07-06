@@ -7,8 +7,8 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const builtin = @import("builtin");
 
-const Point2d = @import("point.zig").Point2d;
-const Point3d = @import("point.zig").Point3d;
+const Point2d = @import("geometry/points.zig").Point2d;
+const Point3d = @import("geometry/points.zig").Point3d;
 
 /// Creates a Matrix with elements of type T and size rows times cols.
 pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {

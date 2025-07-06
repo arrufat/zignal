@@ -12,7 +12,7 @@ const convertColor = @import("color.zig").convertColor;
 const Hsv = @import("color.zig").Hsv;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
-const Point2d = @import("point.zig").Point2d;
+const Point2d = @import("geometry/points.zig").Point2d;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Rgba = @import("color.zig").Rgba;
 
