@@ -48,7 +48,7 @@ pub fn main() !void {
     @memset(image.data, Rgba.white);
 
     // Create a drawing canvas
-    const canvas: Canvas(Rgba) = .init(image, allocator);
+    const canvas: Canvas(Rgba) = .init(allocator, image);
 
     // Draw shapes
     const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };

@@ -83,7 +83,7 @@ pub fn extractAlignedFace(
 
     // Draw the rectangle on the input image.
     var rect: Rectangle = .initCenter(center.x, center.y, side * scale, side * scale);
-    const canvas: Canvas(T) = .init(image, allocator);
+    const canvas: Canvas(T) = .init(allocator, image);
     canvas.drawRectangle(rect, Hsv{ .h = 0, .s = 100, .v = 100 }, 1, .fast);
 
     // Calculate where the center point ended up in the rotated image.

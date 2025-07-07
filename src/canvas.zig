@@ -56,8 +56,8 @@ pub fn Canvas(comptime T: type) type {
         /// Stack buffer size for spline polygon tessellation (avoids allocation for typical polygons)
         const spline_polygon_stack_buffer_size = 400;
 
-        /// Creates a drawing canvas from an image, with an allocator for operations that need it.
-        pub fn init(image: Image(T), allocator: std.mem.Allocator) Self {
+        /// Creates a drawing canvas from an image.
+        pub fn init(allocator: std.mem.Allocator, image: Image(T)) Self {
             return .{ .image = image, .allocator = allocator };
         }
 
