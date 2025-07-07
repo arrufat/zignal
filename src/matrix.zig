@@ -89,9 +89,24 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            _ = fmt; // fmt parameter not used for now
+            _ = fmt;
 
-            // Use precision from format options if specified, otherwise use default Zig formatting
+            // Helper function to format a number with fallback to truncation
+            const formatNumber = struct {
+                fn format(buf: []u8, comptime format_str: []const u8, value: T) []const u8 {
+                    return std.fmt.bufPrint(buf, format_str, .{value}) catch blk: {
+                        // If formatting fails, truncate and add ellipsis
+                        if (buf.len >= 4) {
+                            const truncated = std.fmt.bufPrint(buf[0 .. buf.len - 3], "{d}", .{value}) catch buf[0 .. buf.len - 3];
+                            @memcpy(buf[truncated.len .. truncated.len + 3], "...");
+                            break :blk buf[0 .. truncated.len + 3];
+                        } else {
+                            // Buffer too small even for ellipsis
+                            break :blk "...";
+                        }
+                    };
+                }
+            }.format;
 
             // First pass: calculate the maximum width needed for each column
             var col_widths: [cols]usize = [_]usize{0} ** cols;
@@ -102,18 +117,26 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
                     var temp_buf: [64]u8 = undefined;
                     const formatted = if (options.precision) |precision|
                         switch (precision) {
-                            0 => std.fmt.bufPrint(temp_buf[0..], "{d:.0}", .{self.items[r][c]}) catch "overflow",
-                            1 => std.fmt.bufPrint(temp_buf[0..], "{d:.1}", .{self.items[r][c]}) catch "overflow",
-                            2 => std.fmt.bufPrint(temp_buf[0..], "{d:.2}", .{self.items[r][c]}) catch "overflow",
-                            3 => std.fmt.bufPrint(temp_buf[0..], "{d:.3}", .{self.items[r][c]}) catch "overflow",
-                            4 => std.fmt.bufPrint(temp_buf[0..], "{d:.4}", .{self.items[r][c]}) catch "overflow",
-                            5 => std.fmt.bufPrint(temp_buf[0..], "{d:.5}", .{self.items[r][c]}) catch "overflow",
-                            6 => std.fmt.bufPrint(temp_buf[0..], "{d:.6}", .{self.items[r][c]}) catch "overflow",
-                            else => std.fmt.bufPrint(temp_buf[0..], "{d}", .{self.items[r][c]}) catch "overflow",
+                            0 => formatNumber(temp_buf[0..], "{d:.0}", self.items[r][c]),
+                            1 => formatNumber(temp_buf[0..], "{d:.1}", self.items[r][c]),
+                            2 => formatNumber(temp_buf[0..], "{d:.2}", self.items[r][c]),
+                            3 => formatNumber(temp_buf[0..], "{d:.3}", self.items[r][c]),
+                            4 => formatNumber(temp_buf[0..], "{d:.4}", self.items[r][c]),
+                            5 => formatNumber(temp_buf[0..], "{d:.5}", self.items[r][c]),
+                            6 => formatNumber(temp_buf[0..], "{d:.6}", self.items[r][c]),
+                            7 => formatNumber(temp_buf[0..], "{d:.7}", self.items[r][c]),
+                            8 => formatNumber(temp_buf[0..], "{d:.8}", self.items[r][c]),
+                            9 => formatNumber(temp_buf[0..], "{d:.9}", self.items[r][c]),
+                            10 => formatNumber(temp_buf[0..], "{d:.10}", self.items[r][c]),
+                            11 => formatNumber(temp_buf[0..], "{d:.11}", self.items[r][c]),
+                            12 => formatNumber(temp_buf[0..], "{d:.12}", self.items[r][c]),
+                            13 => formatNumber(temp_buf[0..], "{d:.13}", self.items[r][c]),
+                            14 => formatNumber(temp_buf[0..], "{d:.14}", self.items[r][c]),
+                            15 => formatNumber(temp_buf[0..], "{d:.15}", self.items[r][c]),
+                            else => formatNumber(temp_buf[0..], "{d}", self.items[r][c]),
                         }
                     else
-                        // Use default Zig formatting (scientific notation)
-                        std.fmt.bufPrint(temp_buf[0..], "{}", .{self.items[r][c]}) catch "overflow";
+                        formatNumber(temp_buf[0..], "{}", self.items[r][c]);
                     col_widths[c] = @max(col_widths[c], formatted.len);
                 }
             }
@@ -126,18 +149,26 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
                     var temp_buf: [64]u8 = undefined;
                     const formatted = if (options.precision) |precision|
                         switch (precision) {
-                            0 => std.fmt.bufPrint(temp_buf[0..], "{d:.0}", .{self.items[r][c]}) catch "overflow",
-                            1 => std.fmt.bufPrint(temp_buf[0..], "{d:.1}", .{self.items[r][c]}) catch "overflow",
-                            2 => std.fmt.bufPrint(temp_buf[0..], "{d:.2}", .{self.items[r][c]}) catch "overflow",
-                            3 => std.fmt.bufPrint(temp_buf[0..], "{d:.3}", .{self.items[r][c]}) catch "overflow",
-                            4 => std.fmt.bufPrint(temp_buf[0..], "{d:.4}", .{self.items[r][c]}) catch "overflow",
-                            5 => std.fmt.bufPrint(temp_buf[0..], "{d:.5}", .{self.items[r][c]}) catch "overflow",
-                            6 => std.fmt.bufPrint(temp_buf[0..], "{d:.6}", .{self.items[r][c]}) catch "overflow",
-                            else => std.fmt.bufPrint(temp_buf[0..], "{d}", .{self.items[r][c]}) catch "overflow",
+                            0 => formatNumber(temp_buf[0..], "{d:.0}", self.items[r][c]),
+                            1 => formatNumber(temp_buf[0..], "{d:.1}", self.items[r][c]),
+                            2 => formatNumber(temp_buf[0..], "{d:.2}", self.items[r][c]),
+                            3 => formatNumber(temp_buf[0..], "{d:.3}", self.items[r][c]),
+                            4 => formatNumber(temp_buf[0..], "{d:.4}", self.items[r][c]),
+                            5 => formatNumber(temp_buf[0..], "{d:.5}", self.items[r][c]),
+                            6 => formatNumber(temp_buf[0..], "{d:.6}", self.items[r][c]),
+                            7 => formatNumber(temp_buf[0..], "{d:.7}", self.items[r][c]),
+                            8 => formatNumber(temp_buf[0..], "{d:.8}", self.items[r][c]),
+                            9 => formatNumber(temp_buf[0..], "{d:.9}", self.items[r][c]),
+                            10 => formatNumber(temp_buf[0..], "{d:.10}", self.items[r][c]),
+                            11 => formatNumber(temp_buf[0..], "{d:.11}", self.items[r][c]),
+                            12 => formatNumber(temp_buf[0..], "{d:.12}", self.items[r][c]),
+                            13 => formatNumber(temp_buf[0..], "{d:.13}", self.items[r][c]),
+                            14 => formatNumber(temp_buf[0..], "{d:.14}", self.items[r][c]),
+                            15 => formatNumber(temp_buf[0..], "{d:.15}", self.items[r][c]),
+                            else => formatNumber(temp_buf[0..], "{d}", self.items[r][c]),
                         }
                     else
-                        // Use default Zig formatting (scientific notation)
-                        std.fmt.bufPrint(temp_buf[0..], "{}", .{self.items[r][c]}) catch "overflow";
+                        formatNumber(temp_buf[0..], "{}", self.items[r][c]);
 
                     // Right-align the number within the column width
                     const padding = col_widths[c] - formatted.len;
