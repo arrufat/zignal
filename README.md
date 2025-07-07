@@ -14,11 +14,7 @@ As a result, the API might change often.
 ## Installation
 
 ```console
-zig fetch --save https://github.com/bfactory-ai/zignal/archive/<commit-hash>.tar.gz
-```
-or
-```console
-zig fetch --save https://github.com/bfactory-ai/zignal/archive/master.tar.gz
+zig fetch --save git+https://github.com/bfactory-ai/zignal
 ```
 
 Then, in your `build.zig`
