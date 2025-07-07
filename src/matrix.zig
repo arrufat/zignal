@@ -79,23 +79,74 @@ pub fn Matrix(comptime T: type, comptime rows: usize, comptime cols: usize) type
             return matrix;
         }
 
-        /// Returns a string representation of the matrix, for printing.
-        /// The returned buffer size is fixed at compile time (`rows * cols * @bitSizeOf(T)`) and
-        /// represents an estimate; the actual string length may be smaller. The large buffer size
-        /// is a simple upper bound and might be excessive for typical float string representations.
-        pub fn toString(self: Self) [rows * cols * @bitSizeOf(T)]u8 {
-            var print_buffer: [rows * cols * @bitSizeOf(T)]u8 = undefined;
-            var printed: usize = 0;
-            var written: []u8 = undefined;
-            for (self.items) |row| {
-                for (row) |val| {
-                    written = std.fmt.bufPrint(print_buffer[printed..], " {}", .{val}) catch unreachable;
-                    printed += written.len;
+        /// Formats the matrix for pretty printing with configurable precision.
+        /// Supports format specifiers like {d:.2} for 2 decimal places.
+        /// Matrix elements are aligned in columns with proper spacing.
+        pub fn format(
+            self: Self,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt; // fmt parameter not used for now
+
+            // Extract precision from format options or use default
+            const precision = options.precision orelse 6;
+
+            // First pass: calculate the maximum width needed for each column
+            var col_widths: [cols]usize = [_]usize{0} ** cols;
+
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    // Create a temporary buffer to measure the width of this element
+                    var temp_buf: [64]u8 = undefined;
+                    const formatted = switch (precision) {
+                        0 => std.fmt.bufPrint(temp_buf[0..], "{d:.0}", .{self.items[r][c]}) catch "overflow",
+                        1 => std.fmt.bufPrint(temp_buf[0..], "{d:.1}", .{self.items[r][c]}) catch "overflow",
+                        2 => std.fmt.bufPrint(temp_buf[0..], "{d:.2}", .{self.items[r][c]}) catch "overflow",
+                        3 => std.fmt.bufPrint(temp_buf[0..], "{d:.3}", .{self.items[r][c]}) catch "overflow",
+                        4 => std.fmt.bufPrint(temp_buf[0..], "{d:.4}", .{self.items[r][c]}) catch "overflow",
+                        5 => std.fmt.bufPrint(temp_buf[0..], "{d:.5}", .{self.items[r][c]}) catch "overflow",
+                        6 => std.fmt.bufPrint(temp_buf[0..], "{d:.6}", .{self.items[r][c]}) catch "overflow",
+                        else => std.fmt.bufPrint(temp_buf[0..], "{d}", .{self.items[r][c]}) catch "overflow",
+                    };
+                    col_widths[c] = @max(col_widths[c], formatted.len);
                 }
-                written = std.fmt.bufPrint(print_buffer[printed..], "\n", .{}) catch unreachable;
-                printed += written.len;
             }
-            return print_buffer;
+
+            // Second pass: format and write the matrix with proper alignment
+            for (0..rows) |r| {
+                try writer.writeAll("[ ");
+                for (0..cols) |c| {
+                    // Format the number with specified precision
+                    var temp_buf: [64]u8 = undefined;
+                    const formatted = switch (precision) {
+                        0 => std.fmt.bufPrint(temp_buf[0..], "{d:.0}", .{self.items[r][c]}) catch "overflow",
+                        1 => std.fmt.bufPrint(temp_buf[0..], "{d:.1}", .{self.items[r][c]}) catch "overflow",
+                        2 => std.fmt.bufPrint(temp_buf[0..], "{d:.2}", .{self.items[r][c]}) catch "overflow",
+                        3 => std.fmt.bufPrint(temp_buf[0..], "{d:.3}", .{self.items[r][c]}) catch "overflow",
+                        4 => std.fmt.bufPrint(temp_buf[0..], "{d:.4}", .{self.items[r][c]}) catch "overflow",
+                        5 => std.fmt.bufPrint(temp_buf[0..], "{d:.5}", .{self.items[r][c]}) catch "overflow",
+                        6 => std.fmt.bufPrint(temp_buf[0..], "{d:.6}", .{self.items[r][c]}) catch "overflow",
+                        else => std.fmt.bufPrint(temp_buf[0..], "{d}", .{self.items[r][c]}) catch "overflow",
+                    };
+
+                    // Right-align the number within the column width
+                    const padding = col_widths[c] - formatted.len;
+                    for (0..padding) |_| {
+                        try writer.writeAll(" ");
+                    }
+                    try writer.writeAll(formatted);
+
+                    if (c < cols - 1) {
+                        try writer.writeAll("  "); // Two spaces between columns
+                    }
+                }
+                try writer.writeAll(" ]");
+                if (r < rows - 1) {
+                    try writer.writeAll("\n");
+                }
+            }
         }
 
         /// Converts a column matrix (or the first column of a wider matrix) with at least 2 rows
@@ -561,4 +612,43 @@ test "inverse" {
         .{ 3.0 / 4.0, -1.0 / 3.0, 1.0 / 12.0 },
     } };
     try expectEqualDeep(b.inverse().?, b_i);
+}
+
+test "format" {
+    // Test 2x3 matrix with known values
+    const m: Matrix(f32, 2, 3) = .{ .items = .{
+        .{ 1.23, -4.5, 7.0 },
+        .{ 10.1, 0.0, -5.67 },
+    } };
+    std.debug.print("\n{}\n", .{m});
+
+    // Test default formatting (6 decimal places)
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+    try std.fmt.format(stream.writer(), "{}", .{m});
+    const result_default = stream.getWritten();
+    const expected_default = "[  1.230000  -4.500000   7.000000 ]\n[ 10.100000   0.000000  -5.670000 ]";
+    try std.testing.expect(std.mem.eql(u8, result_default, expected_default));
+
+    // Test 2 decimal places
+    stream.reset();
+    try std.fmt.format(stream.writer(), "{:.2}", .{m});
+    const result_2dp = stream.getWritten();
+    const expected_2dp = "[  1.23  -4.50   7.00 ]\n[ 10.10   0.00  -5.67 ]";
+    try std.testing.expect(std.mem.eql(u8, result_2dp, expected_2dp));
+
+    // Test 0 decimal places (integers)
+    stream.reset();
+    try std.fmt.format(stream.writer(), "{:.0}", .{m});
+    const result_0dp = stream.getWritten();
+    const expected_0dp = "[  1  -5   7 ]\n[ 10   0  -6 ]";
+    try std.testing.expect(std.mem.eql(u8, result_0dp, expected_0dp));
+
+    // Test 1x1 matrix
+    const m_single: Matrix(f64, 1, 1) = .{ .items = .{.{3.14159}} };
+    stream.reset();
+    try std.fmt.format(stream.writer(), "{:.3}", .{m_single});
+    const result_single = stream.getWritten();
+    const expected_single = "[ 3.142 ]";
+    try std.testing.expect(std.mem.eql(u8, result_single, expected_single));
 }
