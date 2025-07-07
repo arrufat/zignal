@@ -1306,7 +1306,7 @@ test "MD5 checksum regression tests" {
             pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
         }
 
-        const canvas = Canvas(Rgba).init(img, allocator);
+        const canvas = Canvas(Rgba).init(allocator, img);
         test_case.draw_fn(canvas);
 
         // Calculate MD5
@@ -1338,7 +1338,7 @@ test "line endpoints are connected" {
         pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
     }
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test various line directions
@@ -1394,7 +1394,7 @@ test "thick lines have correct width" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test different line widths
@@ -1445,7 +1445,7 @@ test "filled circle has correct radius" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const test_radii = [_]f32{ 5, 10, 20, 30, 40 };
@@ -1501,7 +1501,7 @@ test "circle outline has correct thickness" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const center = Point2d(f32){ .x = 100, .y = 100 };
@@ -1549,7 +1549,7 @@ test "filled rectangle has correct area" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const rect = Rectangle(f32){ .l = 50, .t = 50, .r = 150, .b = 130 };
@@ -1589,7 +1589,7 @@ test "polygon fill respects convexity" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test convex polygon (triangle)
@@ -1635,8 +1635,8 @@ test "antialiased vs solid fill coverage" {
     var img_smooth = try Image(Rgba).initAlloc(allocator, width, height);
     defer img_smooth.deinit(allocator);
 
-    const canvas_solid = Canvas(Rgba).init(img_solid, allocator);
-    const canvas_smooth = Canvas(Rgba).init(img_smooth, allocator);
+    const canvas_solid = Canvas(Rgba).init(allocator, img_solid);
+    const canvas_smooth = Canvas(Rgba).init(allocator, img_smooth);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Clear both images
@@ -1674,7 +1674,7 @@ test "bezier curve smoothness" {
     var img = try Image(Rgba).initAlloc(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(img, allocator);
+    const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Clear image
