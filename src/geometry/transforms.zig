@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Matrix = @import("../matrix.zig").Matrix;
+const SMatrix = @import("../matrix.zig").SMatrix;
 const Point2d = @import("points.zig").Point2d;
 const svd = @import("../svd.zig").svd;
 
@@ -10,8 +10,8 @@ const svd = @import("../svd.zig").svd;
 pub fn SimilarityTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2),
-        bias: Matrix(T, 2, 1),
+        matrix: SMatrix(T, 2, 2),
+        bias: SMatrix(T, 2, 1),
         pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best similarity transform that maps between the two given sets of points.
@@ -23,7 +23,7 @@ pub fn SimilarityTransform(comptime T: type) type {
 
         /// Projects the given point using the similarity transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src = Matrix(T, 2, 1){ .items = .{ .{point.x}, .{point.y} } };
+            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x}, .{point.y} });
             return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
@@ -36,7 +36,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             var mean_to: Point2d(T) = .origin;
             var sigma_from: T = 0;
             var sigma_to: T = 0;
-            var cov: Matrix(T, 2, 2) = .initAll(0);
+            var cov: SMatrix(T, 2, 2) = .initAll(0);
             self.matrix = cov;
             for (0..from_points.len) |i| {
                 mean_from.x += from_points[i].x;
@@ -56,14 +56,14 @@ pub fn SimilarityTransform(comptime T: type) type {
                 sigma_from += from.x * from.x + from.y * from.y;
                 sigma_to += to.x * to.x + to.y * to.y;
 
-                const from_mat: Matrix(T, 1, 2) = .{ .items = .{.{ from.x, from.y }} };
-                const to_mat: Matrix(T, 2, 1) = .{ .items = .{ .{to.x}, .{to.y} } };
+                const from_mat: SMatrix(T, 1, 2) = .init(.{.{ from.x, from.y }});
+                const to_mat: SMatrix(T, 2, 1) = .init(.{ .{to.x}, .{to.y} });
                 cov = cov.add(to_mat.dot(from_mat));
             }
             sigma_from /= num_points;
             sigma_to /= num_points;
             cov = cov.scale(1.0 / num_points);
-            const det_cov = cov.at(0, 0) * cov.at(1, 1) - cov.at(0, 1) * cov.at(1, 0);
+            const det_cov = cov.at(0, 0).* * cov.at(1, 1).* - cov.at(0, 1).* * cov.at(1, 0).*;
             const result = svd(
                 T,
                 cov.rows,
@@ -71,17 +71,17 @@ pub fn SimilarityTransform(comptime T: type) type {
                 cov,
                 .{ .with_u = true, .with_v = true, .mode = .skinny_u },
             );
-            const u: *const Matrix(T, 2, 2) = &result[0];
-            const d: Matrix(T, 2, 2) = .{ .items = .{ .{ result[1].at(0, 0), 0 }, .{ 0, result[1].at(1, 0) } } };
-            const v: *const Matrix(T, 2, 2) = &result[2];
-            const det_u = u.at(0, 0) * u.at(1, 1) - u.at(0, 1) * u.at(1, 0);
-            const det_v = v.at(0, 0) * v.at(1, 1) - v.at(0, 1) * v.at(1, 0);
-            var s: Matrix(T, cov.rows, cov.cols) = .identity();
+            const u: *const SMatrix(T, 2, 2) = &result[0];
+            const d: SMatrix(T, 2, 2) = .init(.{ .{ result[1].at(0, 0).*, 0 }, .{ 0, result[1].at(1, 0).* } });
+            const v: *const SMatrix(T, 2, 2) = &result[2];
+            const det_u = u.at(0, 0).* * u.at(1, 1).* - u.at(0, 1).* * u.at(1, 0).*;
+            const det_v = v.at(0, 0).* * v.at(1, 1).* - v.at(0, 1).* * v.at(1, 0).*;
+            var s: SMatrix(T, cov.rows, cov.cols) = .identity();
             if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
-                if (d.at(1, 1) < d.at(0, 0)) {
-                    s.set(1, 1, -1);
+                if (d.at(1, 1).* < d.at(0, 0).*) {
+                    s.at(1, 1).* = -1;
                 } else {
-                    s.set(0, 0, -1);
+                    s.at(0, 0).* = -1;
                 }
             }
             const r = u.dot(s.dot(v.transpose()));
@@ -89,8 +89,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             if (sigma_from != 0) {
                 c = 1.0 / sigma_from * d.dot(s).trace();
             }
-            const m_from: Matrix(T, 2, 1) = .{ .items = .{ .{mean_from.x}, .{mean_from.y} } };
-            const m_to: Matrix(T, 2, 1) = .{ .items = .{ .{mean_to.x}, .{mean_to.y} } };
+            const m_from: SMatrix(T, 2, 1) = .init(.{ .{mean_from.x}, .{mean_from.y} });
+            const m_to: SMatrix(T, 2, 1) = .init(.{ .{mean_to.x}, .{mean_to.y} });
             self.matrix = r.scale(c);
             self.bias = m_to.add(r.dot(m_from).scale(-c));
         }
@@ -102,8 +102,8 @@ pub fn SimilarityTransform(comptime T: type) type {
 pub fn AffineTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 2, 2),
-        bias: Matrix(T, 2, 1),
+        matrix: SMatrix(T, 2, 2),
+        bias: SMatrix(T, 2, 1),
         pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best affine transform that maps between the two given sets of points.
@@ -115,7 +115,7 @@ pub fn AffineTransform(comptime T: type) type {
 
         /// Projects the given point using the affine transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src: Matrix(T, 2, 1) = .{ .items = .{ .{point.x}, .{point.y} } };
+            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x}, .{point.y} });
             return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
@@ -126,15 +126,15 @@ pub fn AffineTransform(comptime T: type) type {
             // The init function takes [3]Point2d which enforces this at compile time for fixed arrays.
             assert(from_points.len == 3);
             assert(to_points.len == 3);
-            var p: Matrix(T, 3, from_points.len) = .{};
-            var q: Matrix(T, 2, to_points.len) = .{};
+            var p: SMatrix(T, 3, from_points.len) = .{};
+            var q: SMatrix(T, 2, to_points.len) = .{};
             for (0..from_points.len) |i| {
-                p.set(0, i, from_points[i].x);
-                p.set(1, i, from_points[i].y);
-                p.set(2, i, 1);
+                p.at(0, i).* = from_points[i].x;
+                p.at(1, i).* = from_points[i].y;
+                p.at(2, i).* = 1;
 
-                q.set(0, i, to_points[i].x);
-                q.set(1, i, to_points[i].y);
+                q.at(0, i).* = to_points[i].x;
+                q.at(1, i).* = to_points[i].y;
             }
             const m = q.dot(p.inverse().?);
             self.matrix = m.getSubMatrix(0, 0, 2, 2);
@@ -148,7 +148,7 @@ pub fn AffineTransform(comptime T: type) type {
 pub fn ProjectiveTransform(comptime T: type) type {
     return struct {
         const Self = @This();
-        matrix: Matrix(T, 3, 3),
+        matrix: SMatrix(T, 3, 3),
         pub const identity: Self = .{ .matrix = .identity() };
 
         /// Finds the best projective transform that maps between the two given sets of points.
@@ -160,10 +160,10 @@ pub fn ProjectiveTransform(comptime T: type) type {
 
         /// Projects the given point using the projective transform
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src = Matrix(T, 3, 1){ .items = .{ .{point.x}, .{point.y}, .{1} } };
+            const src: SMatrix(T, 3, 1) = .init(.{ .{point.x}, .{point.y}, .{1} });
             var dst = self.matrix.dot(src);
-            if (dst.at(2, 0) != 0) {
-                dst = dst.scale(1 / dst.at(2, 0));
+            if (dst.at(2, 0).* != 0) {
+                dst = dst.scale(1 / dst.at(2, 0).*);
             }
             return dst.toPoint2d();
         }
@@ -177,15 +177,15 @@ pub fn ProjectiveTransform(comptime T: type) type {
         pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
-            var accum: Matrix(T, 9, 9) = .initAll(0);
-            var b: Matrix(T, 2, 9) = .initAll(0);
+            var accum: SMatrix(T, 9, 9) = .initAll(0);
+            var b: SMatrix(T, 2, 9) = .initAll(0);
             for (0..from_points.len) |i| {
-                const f = Matrix(T, 1, 3){ .items = .{.{ from_points[i].x, from_points[i].y, 1 }} };
-                const t = Matrix(T, 1, 3){ .items = .{.{ to_points[i].x, to_points[i].y, 1 }} };
-                b.setSubMatrix(0, 0, f.scale(t.at(0, 1)));
+                const f: SMatrix(T, 1, 3) = .init(.{.{ from_points[i].x, from_points[i].y, 1 }});
+                const t: SMatrix(T, 1, 3) = .init(.{.{ to_points[i].x, to_points[i].y, 1 }});
+                b.setSubMatrix(0, 0, f.scale(t.at(0, 1).*));
                 b.setSubMatrix(1, 0, f);
-                b.setSubMatrix(0, 3, f.scale(-t.at(0, 0)));
-                b.setSubMatrix(1, 6, f.scale(-t.at(0, 0)));
+                b.setSubMatrix(0, 3, f.scale(-t.at(0, 0).*));
+                b.setSubMatrix(1, 6, f.scale(-t.at(0, 0).*));
                 accum = accum.add(b.transpose().dot(b));
             }
             const u, const q, _, _ = svd(
@@ -198,10 +198,10 @@ pub fn ProjectiveTransform(comptime T: type) type {
             // TODO: Check the retval from svd (result[3]) for convergence errors.
             // If svd fails to converge, the resulting transform matrix might be unstable.
             self.matrix = blk: {
-                var min: T = q.at(0, 0);
+                var min: T = q.at(0, 0).*;
                 var idx: usize = 0;
                 for (1..q.rows) |i| {
-                    const val = q.at(i, 0);
+                    const val = q.at(i, 0).*;
                     if (val < min) {
                         min = val;
                         idx = i;
@@ -226,8 +226,8 @@ test "affine3" {
         .{ .x = 1, .y = 0 },
     };
     const tf: AffineTransform(f64) = .init(from_points[0..3].*, to_points[0..3].*);
-    const matrix: Matrix(T, 2, 2) = .{ .items = .{ .{ 0, 1 }, .{ -1, 0 } } };
-    const bias: Matrix(T, 2, 1) = .{ .items = .{ .{0}, .{1} } };
+    const matrix: SMatrix(T, 2, 2) = .init(.{ .{ 0, 1 }, .{ -1, 0 } });
+    const bias: SMatrix(T, 2, 1) = .init(.{ .{0}, .{1} });
     try std.testing.expectEqualDeep(tf.matrix, matrix);
     try std.testing.expectEqualDeep(tf.bias, bias);
 
@@ -254,16 +254,14 @@ test "projection4" {
         .{ .x = 488.08315277, .y = 272.79547691 },
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
-    const matrix: Matrix(T, 3, 3) = .{
-        .items = .{
-            .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
-            .{ -2.8361695646354147e-03, 2.9060176209597761e-03, -4.3735741833190661e-01 },
-            .{ -1.0156215756801098e-05, 1.3270311721030187e-05, -2.1603199531972065e-03 },
-        },
-    };
+    const matrix: SMatrix(T, 3, 3) = .init(.{
+        .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
+        .{ -2.8361695646354147e-03, 2.9060176209597761e-03, -4.3735741833190661e-01 },
+        .{ -1.0156215756801098e-05, 1.3270311721030187e-05, -2.1603199531972065e-03 },
+    });
     for (0..transform.matrix.rows) |r| {
         for (0..transform.matrix.cols) |c| {
-            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c), matrix.at(r, c), 1e-3);
+            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c).*, matrix.at(r, c).*, 1e-3);
         }
     }
     for (from_points, to_points) |f, t| {
@@ -309,15 +307,15 @@ test "projection8" {
         .{ .x = 395.29974365, .y = 401.73685455 },
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
-    const matrix = Matrix(T, 3, 3){ .items = .{
+    const matrix: SMatrix(T, 3, 3) = .init(.{
         .{ 7.9497770144471079e-05, 8.6315632819330035e-04, -6.3240797603906806e-01 },
         .{ 3.9739851020393160e-04, 6.4356336568222570e-04, -7.7463154396817901e-01 },
         .{ 1.0207719920241196e-06, 2.6961794891002063e-06, -2.1907681782918601e-03 },
-    } };
+    });
     const tol = std.math.sqrt(std.math.floatEps(T));
     for (0..transform.matrix.rows) |r| {
         for (0..transform.matrix.cols) |c| {
-            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c), matrix.at(r, c), tol);
+            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c).*, matrix.at(r, c).*, tol);
         }
     }
     for (0..from_points.len) |i| {
