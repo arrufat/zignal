@@ -1252,8 +1252,8 @@ test "matrix operations: add, sub, scale, transpose" {
     try expectEqual(@as(usize, 2), static_transposed.cols);
     try expectEqual(@as(f32, 1.0), static_transposed.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), static_transposed.at(0, 1).*);
-    try expectEqual(@as(f32, 1.5), static_added.at(0, 0).*);     // 1.0 + 0.5
-    try expectEqual(@as(f32, 9.0), static_added.at(1, 2).*);     // 6.0 + 3.0
+    try expectEqual(@as(f32, 1.5), static_added.at(0, 0).*); // 1.0 + 0.5
+    try expectEqual(@as(f32, 9.0), static_added.at(1, 2).*); // 6.0 + 3.0
     try expectEqual(@as(f32, 0.5), static_subtracted.at(0, 0).*); // 1.0 - 0.5
     try expectEqual(@as(f32, 3.0), static_subtracted.at(1, 2).*); // 6.0 - 3.0
 

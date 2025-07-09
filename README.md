@@ -97,6 +97,7 @@ Currently, there are examples for:
 - [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html)
 - [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin-noise.html)
 - [Seam carving](https://bfactory-ai.github.io/zignal/examples/seam-carving.html)
+- [Feature distribution matching](https://bfactory-ai.github.io/zignal/examples/fdm.html)
 
 ## Acknowledgements
 

@@ -42,3 +42,4 @@ pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;
 
 pub const svd = @import("svd.zig").svd;
+pub const featureDistributionMatch = @import("fdm.zig").featureDistributionMatch;

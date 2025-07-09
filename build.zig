@@ -47,6 +47,7 @@ pub fn build(b: *Build) void {
         "canvas",
         "png",
         "deflate",
+        "fdm",
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
