@@ -234,6 +234,17 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return result;
         }
 
+        /// Subtracts a matrix.
+        pub fn sub(self: Self, other: Self) Self {
+            var result: Self = .{};
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    result.items[r][c] = self.items[r][c] - other.items[r][c];
+                }
+            }
+            return result;
+        }
+
         /// Sets the sub-matrix at position row, col to sub_matrix.
         pub fn setSubMatrix(self: *Self, row_idx: usize, col_idx: usize, matrix: anytype) void {
             assert(matrix.rows + row_idx <= rows);
@@ -689,6 +700,14 @@ pub fn OpsBuilder(comptime T: type) type {
             assert(self.result.rows == other.rows and self.result.cols == other.cols);
             for (0..self.result.data.len) |i| {
                 self.result.data[i] += other.data[i];
+            }
+        }
+
+        /// Subtract another matrix element-wise
+        pub fn sub(self: *Self, other: Matrix(T)) !void {
+            assert(self.result.rows == other.rows and self.result.cols == other.cols);
+            for (0..self.result.data.len) |i| {
+                self.result.data[i] -= other.data[i];
             }
         }
 
@@ -1205,7 +1224,7 @@ test "matrix multiplication (dot product)" {
     }
 }
 
-test "matrix operations: add, scale, transpose" {
+test "matrix operations: add, sub, scale, transpose" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -1215,9 +1234,17 @@ test "matrix operations: add, scale, transpose" {
         .{ 4.0, 5.0, 6.0 },
     });
 
+    // Test operand matrix for add/sub operations
+    const static_operand = SMatrix(f32, 2, 3).init(.{
+        .{ 0.5, 1.0, 1.5 },
+        .{ 2.0, 2.5, 3.0 },
+    });
+
     // SMatrix operations
     const static_scaled = static_matrix.scale(2.0);
     const static_transposed = static_matrix.transpose();
+    const static_added = static_matrix.add(static_operand);
+    const static_subtracted = static_matrix.sub(static_operand);
 
     try expectEqual(@as(f32, 2.0), static_scaled.at(0, 0).*);
     try expectEqual(@as(f32, 12.0), static_scaled.at(1, 2).*);
@@ -1225,6 +1252,10 @@ test "matrix operations: add, scale, transpose" {
     try expectEqual(@as(usize, 2), static_transposed.cols);
     try expectEqual(@as(f32, 1.0), static_transposed.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), static_transposed.at(0, 1).*);
+    try expectEqual(@as(f32, 1.5), static_added.at(0, 0).*);     // 1.0 + 0.5
+    try expectEqual(@as(f32, 9.0), static_added.at(1, 2).*);     // 6.0 + 3.0
+    try expectEqual(@as(f32, 0.5), static_subtracted.at(0, 0).*); // 1.0 - 0.5
+    try expectEqual(@as(f32, 3.0), static_subtracted.at(1, 2).*); // 6.0 - 3.0
 
     // OpsBuilder operations on equivalent matrix
     const dynamic_matrix = try static_matrix.toMatrix(arena.allocator());
@@ -1245,6 +1276,12 @@ test "matrix operations: add, scale, transpose" {
     try add_ops.add(add_matrix);
     const dynamic_added = add_ops.toOwned();
 
+    // Test subtract
+    const dynamic_operand = try static_operand.toMatrix(arena.allocator());
+    var sub_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try sub_ops.sub(dynamic_operand);
+    const dynamic_subtracted = sub_ops.toOwned();
+
     // Verify results match
     for (0..2) |r| {
         for (0..3) |c| {
@@ -1258,4 +1295,9 @@ test "matrix operations: add, scale, transpose" {
     }
     try expectEqual(@as(f32, 2.0), dynamic_added.at(0, 0).*); // 1 + 1
     try expectEqual(@as(f32, 7.0), dynamic_added.at(1, 2).*); // 6 + 1
+    for (0..2) |r| {
+        for (0..3) |c| {
+            try expectEqual(static_subtracted.at(r, c).*, dynamic_subtracted.at(r, c).*);
+        }
+    }
 }
