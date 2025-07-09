@@ -27,6 +27,20 @@
     reader.onload = function (e) {
       const img = new Image();
       img.onload = function () {
+        // Limit image size to max 1024 on longest side
+        const maxSize = 1024;
+        let width = img.width;
+        let height = img.height;
+        let wasResized = false;
+        
+        if (width > maxSize || height > maxSize) {
+          const scale = Math.min(maxSize / width, maxSize / height);
+          width = Math.floor(width * scale);
+          height = Math.floor(height * scale);
+          wasResized = true;
+          console.log(`Image resized from ${img.width}x${img.height} to ${width}x${height}`);
+        }
+
         if (isSource) {
           srcImageObj = img;
           srcImage = file;
@@ -35,10 +49,12 @@
           refImage = file;
         }
 
-        // Set canvas to actual image dimensions
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+        // Set canvas to resized dimensions
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Draw resized image
+        ctx.drawImage(img, 0, 0, width, height);
       };
       img.src = e.target.result;
     };
