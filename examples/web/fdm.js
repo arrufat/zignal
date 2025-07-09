@@ -109,15 +109,14 @@
 
     const srcSize = srcRows * srcCols * 4;
     const refSize = refRows * refCols * 4;
-    // FDM needs a lot of memory for matrix operations
-    // SVD and other operations require significant temporary storage
-    // Increase multiplier from 20x to 50x for larger images
+    // FDM needs extra memory for matrix operations (must match Zig expectation)
     const extraSize = (srcRows * srcCols + refRows * refCols) * 8 * 50;
 
     // Allocate memory in WASM
-    const srcPtr = wasm_exports.alloc(srcSize);
-    const refPtr = wasm_exports.alloc(refSize);
-    const extraPtr = wasm_exports.alloc(extraSize);
+    // Use >>> 0 to ensure pointers are treated as unsigned 32-bit integers
+    const srcPtr = wasm_exports.alloc(srcSize) >>> 0;
+    const refPtr = wasm_exports.alloc(refSize) >>> 0;
+    const extraPtr = wasm_exports.alloc(extraSize) >>> 0;
 
     // Copy image data to WASM memory
     const srcArray = new Uint8ClampedArray(wasm_exports.memory.buffer, srcPtr, srcSize);
@@ -135,7 +134,8 @@
     document.getElementById("time").textContent = `time: ${timeMs.toFixed(0)} ms`;
 
     // Get result and display
-    const resultImageData = new ImageData(srcArray, srcCols, srcRows);
+    const resultArray = new Uint8ClampedArray(wasm_exports.memory.buffer, srcPtr, srcSize);
+    const resultImageData = new ImageData(resultArray, srcCols, srcRows);
 
     canvas3.width = srcCols;
     canvas3.height = srcRows;
