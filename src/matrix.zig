@@ -47,10 +47,10 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Retrieves a pointer to the element at position row, col in the matrix.
-        pub inline fn at(self: anytype, row: usize, col: usize) @TypeOf(&self.items[row][col]) {
-            assert(row < rows);
-            assert(col < cols);
-            return &self.items[row][col];
+        pub inline fn at(self: anytype, row_idx: usize, col_idx: usize) @TypeOf(&self.items[row_idx][col_idx]) {
+            assert(row_idx < rows);
+            assert(col_idx < cols);
+            return &self.items[row_idx][col_idx];
         }
 
         /// Returns a matrix with all elements set to value.
@@ -235,12 +235,12 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Sets the sub-matrix at position row, col to sub_matrix.
-        pub fn setSubMatrix(self: *Self, row: usize, col: usize, matrix: anytype) void {
-            assert(matrix.rows + row <= rows);
-            assert(matrix.cols + col <= cols);
+        pub fn setSubMatrix(self: *Self, row_idx: usize, col_idx: usize, matrix: anytype) void {
+            assert(matrix.rows + row_idx <= rows);
+            assert(matrix.cols + col_idx <= cols);
             for (0..matrix.rows) |r| {
                 for (0..matrix.cols) |c| {
-                    self.items[row + r][col + c] = matrix.items[r][c];
+                    self.items[row_idx + r][col_idx + c] = matrix.items[r][c];
                 }
             }
         }
@@ -257,7 +257,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Returns a new matrix which is a copy of the specified rectangular region of `self`.
-        pub fn getSubMatrix(
+        pub fn subMatrix(
             self: Self,
             comptime row_begin: usize,
             comptime col_begin: usize,
@@ -278,11 +278,32 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Returns the elements in the column as a column Matrix.
-        pub fn getCol(self: Self, col: usize) SMatrix(T, rows, 1) {
-            assert(col < cols);
+        pub fn col(self: Self, col_idx: usize) SMatrix(T, rows, 1) {
+            assert(col_idx < cols);
             var result: SMatrix(T, rows, 1) = .{};
             for (0..rows) |r| {
-                result.items[r][0] = self.items[r][col];
+                result.items[r][0] = self.items[r][col_idx];
+            }
+            return result;
+        }
+
+        /// Returns the elements in the row as a row Matrix.
+        pub fn row(self: Self, row_idx: usize) SMatrix(T, 1, cols) {
+            assert(row_idx < rows);
+            var result: SMatrix(T, 1, cols) = .{};
+            for (0..cols) |c| {
+                result.items[0][c] = self.items[row_idx][c];
+            }
+            return result;
+        }
+
+        /// Converts this SMatrix to a dynamic Matrix
+        pub fn toMatrix(self: Self, allocator: std.mem.Allocator) !Matrix(T) {
+            var result = try Matrix(T).init(allocator, rows, cols);
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    result.at(r, c).* = self.items[r][c];
+                }
             }
             return result;
         }
@@ -608,6 +629,31 @@ pub fn Matrix(comptime T: type) type {
                 }
             }
         }
+
+        /// Converts a Matrix to a static SMatrix with the given dimensions
+        pub fn toSMatrix(self: Self, comptime rows: usize, comptime cols: usize) SMatrix(T, rows, cols) {
+            assert(self.rows == rows);
+            assert(self.cols == cols);
+
+            var result: SMatrix(T, rows, cols) = .{};
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    result.at(r, c).* = self.at(r, c).*;
+                }
+            }
+            return result;
+        }
+
+        /// Creates a Matrix from a static SMatrix
+        pub fn fromSMatrix(allocator: std.mem.Allocator, smatrix: anytype) !Matrix(T) {
+            var result = try Matrix(T).init(allocator, smatrix.rows, smatrix.cols);
+            for (0..smatrix.rows) |r| {
+                for (0..smatrix.cols) |c| {
+                    result.at(r, c).* = smatrix.at(r, c).*;
+                }
+            }
+            return result;
+        }
     };
 }
 
@@ -692,8 +738,112 @@ pub fn OpsBuilder(comptime T: type) type {
             self.result = new_result;
         }
 
-        /// Execute and return the final result, transferring ownership
-        pub fn exec(self: *Self) !Matrix(T) {
+        /// Computes the determinant of the matrix (only for square matrices up to 3x3)
+        fn determinant(matrix: Matrix(T)) T {
+            assert(matrix.rows == matrix.cols);
+
+            return switch (matrix.rows) {
+                1 => matrix.at(0, 0).*,
+                2 => matrix.at(0, 0).* * matrix.at(1, 1).* - matrix.at(0, 1).* * matrix.at(1, 0).*,
+                3 => matrix.at(0, 0).* * matrix.at(1, 1).* * matrix.at(2, 2).* +
+                    matrix.at(0, 1).* * matrix.at(1, 2).* * matrix.at(2, 0).* +
+                    matrix.at(0, 2).* * matrix.at(1, 0).* * matrix.at(2, 1).* -
+                    matrix.at(0, 2).* * matrix.at(1, 1).* * matrix.at(2, 0).* -
+                    matrix.at(0, 1).* * matrix.at(1, 0).* * matrix.at(2, 2).* -
+                    matrix.at(0, 0).* * matrix.at(1, 2).* * matrix.at(2, 1).*,
+                else => blk: {
+                    std.debug.panic("OpsBuilder.determinant() is not implemented for sizes above 3x3", .{});
+                    break :blk 0;
+                },
+            };
+        }
+
+        /// Inverts the matrix (only for square matrices up to 3x3)
+        pub fn inverse(self: *Self) !void {
+            assert(self.result.rows == self.result.cols);
+
+            const det = determinant(self.result);
+            if (det == 0) {
+                return error.SingularMatrix;
+            }
+
+            var inv = try Matrix(T).init(self.allocator, self.result.rows, self.result.cols);
+
+            switch (self.result.rows) {
+                1 => inv.at(0, 0).* = 1 / det,
+                2 => {
+                    inv.at(0, 0).* = self.result.at(1, 1).* / det;
+                    inv.at(0, 1).* = -self.result.at(0, 1).* / det;
+                    inv.at(1, 0).* = -self.result.at(1, 0).* / det;
+                    inv.at(1, 1).* = self.result.at(0, 0).* / det;
+                },
+                3 => {
+                    inv.at(0, 0).* = (self.result.at(1, 1).* * self.result.at(2, 2).* - self.result.at(1, 2).* * self.result.at(2, 1).*) / det;
+                    inv.at(0, 1).* = (self.result.at(0, 2).* * self.result.at(2, 1).* - self.result.at(0, 1).* * self.result.at(2, 2).*) / det;
+                    inv.at(0, 2).* = (self.result.at(0, 1).* * self.result.at(1, 2).* - self.result.at(0, 2).* * self.result.at(1, 1).*) / det;
+                    inv.at(1, 0).* = (self.result.at(1, 2).* * self.result.at(2, 0).* - self.result.at(1, 0).* * self.result.at(2, 2).*) / det;
+                    inv.at(1, 1).* = (self.result.at(0, 0).* * self.result.at(2, 2).* - self.result.at(0, 2).* * self.result.at(2, 0).*) / det;
+                    inv.at(1, 2).* = (self.result.at(0, 2).* * self.result.at(1, 0).* - self.result.at(0, 0).* * self.result.at(1, 2).*) / det;
+                    inv.at(2, 0).* = (self.result.at(1, 0).* * self.result.at(2, 1).* - self.result.at(1, 1).* * self.result.at(2, 0).*) / det;
+                    inv.at(2, 1).* = (self.result.at(0, 1).* * self.result.at(2, 0).* - self.result.at(0, 0).* * self.result.at(2, 1).*) / det;
+                    inv.at(2, 2).* = (self.result.at(0, 0).* * self.result.at(1, 1).* - self.result.at(0, 1).* * self.result.at(1, 0).*) / det;
+                },
+                else => {
+                    std.debug.panic("OpsBuilder.inverse() is not implemented for sizes above 3x3", .{});
+                },
+            }
+
+            self.result.deinit();
+            self.result = inv;
+        }
+
+        /// Extract a submatrix - changes dimensions
+        pub fn subMatrix(self: *Self, row_begin: usize, col_begin: usize, row_count: usize, col_count: usize) !void {
+            assert(row_begin + row_count <= self.result.rows);
+            assert(col_begin + col_count <= self.result.cols);
+
+            var new_result = try Matrix(T).init(self.allocator, row_count, col_count);
+
+            for (0..row_count) |r| {
+                for (0..col_count) |c| {
+                    new_result.at(r, c).* = self.result.at(row_begin + r, col_begin + c).*;
+                }
+            }
+
+            self.result.deinit();
+            self.result = new_result;
+        }
+
+        /// Extract a column - changes dimensions
+        pub fn col(self: *Self, col_idx: usize) !void {
+            assert(col_idx < self.result.cols);
+
+            var new_result = try Matrix(T).init(self.allocator, self.result.rows, 1);
+
+            for (0..self.result.rows) |r| {
+                new_result.at(r, 0).* = self.result.at(r, col_idx).*;
+            }
+
+            self.result.deinit();
+            self.result = new_result;
+        }
+
+        /// Extract a row - changes dimensions
+        pub fn row(self: *Self, row_idx: usize) !void {
+            assert(row_idx < self.result.rows);
+
+            var new_result = try Matrix(T).init(self.allocator, 1, self.result.cols);
+
+            for (0..self.result.cols) |c| {
+                new_result.at(0, c).* = self.result.at(row_idx, c).*;
+            }
+
+            self.result.deinit();
+            self.result = new_result;
+        }
+
+        /// Transfer ownership of the result to the caller
+        pub fn toOwned(self: *Self) Matrix(T) {
             const final_result = self.result;
             // Mark as consumed to prevent deinit from freeing it
             self.consumed = true;
@@ -871,32 +1021,6 @@ test "format" {
     try std.testing.expect(std.mem.eql(u8, result_single, expected_single));
 }
 
-test "dynamic matrix basic operations" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var dyn_matrix = try Matrix(f32).init(arena.allocator(), 2, 3);
-
-    // Test basic set/get operations
-    dyn_matrix.at(0, 0).* = 1.0;
-    dyn_matrix.at(0, 1).* = 2.0;
-    dyn_matrix.at(0, 2).* = 3.0;
-    dyn_matrix.at(1, 0).* = 4.0;
-    dyn_matrix.at(1, 1).* = 5.0;
-    dyn_matrix.at(1, 2).* = 6.0;
-
-    try expectEqual(@as(f32, 1.0), dyn_matrix.at(0, 0).*);
-    try expectEqual(@as(f32, 6.0), dyn_matrix.at(1, 2).*);
-
-    // Test dimensions
-    const shape = dyn_matrix.shape();
-    try expectEqual(@as(usize, 2), shape[0]);
-    try expectEqual(@as(usize, 3), shape[1]);
-
-    // Test sum
-    try expectEqual(@as(f32, 21.0), dyn_matrix.sum());
-}
-
 test "dynamic matrix with OpsBuilder dot product" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -924,7 +1048,7 @@ test "dynamic matrix with OpsBuilder dot product" {
     // Multiply A * B using OpsBuilder
     var ops = try OpsBuilder(f64).init(arena.allocator(), a);
     try ops.dot(b);
-    const result = try ops.exec();
+    const result = ops.toOwned();
 
     // Verify result dimensions
     const shape = result.shape();
@@ -940,124 +1064,198 @@ test "dynamic matrix with OpsBuilder dot product" {
     try expectEqual(@as(f64, 154.0), result.at(1, 1).*);
 }
 
-test "static matrix direct chaining" {
-    // Create static test matrices
-    const a = SMatrix(f32, 2, 2).init(.{
-        .{ 1.0, 2.0 },
-        .{ 3.0, 4.0 },
-    });
-
-    const b = SMatrix(f32, 2, 2).init(.{
-        .{ 2.0, 0.0 },
-        .{ 0.0, 2.0 },
-    });
-
-    // Direct chaining - clean and simple!
-    const result = a.dot(b).transpose().scale(0.5);
-
-    // Verify result - same computation as dynamic version
-    try expectEqual(@as(f32, 1.0), result.at(0, 0).*);
-    try expectEqual(@as(f32, 3.0), result.at(0, 1).*);
-    try expectEqual(@as(f32, 2.0), result.at(1, 0).*);
-    try expectEqual(@as(f32, 4.0), result.at(1, 1).*);
-}
-
-test "OpsBuilder basic operations" {
+test "complex operation chaining" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    // Create test matrix
-    var matrix = try Matrix(f32).init(arena.allocator(), 2, 2);
-    matrix.at(0, 0).* = 1.0;
-    matrix.at(0, 1).* = 2.0;
-    matrix.at(1, 0).* = 3.0;
-    matrix.at(1, 1).* = 4.0;
+    // Test data
+    const static_a = SMatrix(f32, 2, 2).init(.{ .{ 1.0, 2.0 }, .{ 3.0, 4.0 } });
+    const static_b = SMatrix(f32, 2, 2).init(.{ .{ 2.0, 0.0 }, .{ 0.0, 2.0 } });
 
-    // Test scale operation
-    var ops = try OpsBuilder(f32).init(arena.allocator(), matrix);
-    try ops.scale(2.0);
-    const result = try ops.exec();
-
-    try expectEqual(@as(f32, 2.0), result.at(0, 0).*);
-    try expectEqual(@as(f32, 4.0), result.at(0, 1).*);
-    try expectEqual(@as(f32, 6.0), result.at(1, 0).*);
-    try expectEqual(@as(f32, 8.0), result.at(1, 1).*);
-}
-
-test "OpsBuilder with add and times" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    // Create test matrices
-    var a = try Matrix(f32).init(arena.allocator(), 2, 3);
-    for (0..6) |i| {
-        a.data[i] = @floatFromInt(i + 1);
-    }
-
-    var b = try Matrix(f32).init(arena.allocator(), 2, 3);
-    for (0..6) |i| {
-        b.data[i] = 2.0;
-    }
-
-    // Test add operation
-    var ops1 = try OpsBuilder(f32).init(arena.allocator(), a);
-    try ops1.add(b);
-    const result1 = try ops1.exec();
-
-    try expectEqual(@as(f32, 3.0), result1.at(0, 0).*);
-    try expectEqual(@as(f32, 8.0), result1.at(1, 2).*);
-
-    // Test times (element-wise multiplication)
-    var ops2 = try OpsBuilder(f32).init(arena.allocator(), a);
-    try ops2.times(b);
-    const result2 = try ops2.exec();
-
-    try expectEqual(@as(f32, 2.0), result2.at(0, 0).*);
-    try expectEqual(@as(f32, 12.0), result2.at(1, 2).*);
-}
-
-test "OpsBuilder vs static matrix chaining" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    // Create static matrices
-    const static_a = SMatrix(f32, 2, 2).init(.{
-        .{ 1.0, 2.0 },
-        .{ 3.0, 4.0 },
-    });
-
-    const static_b = SMatrix(f32, 2, 2).init(.{
-        .{ 2.0, 0.0 },
-        .{ 0.0, 2.0 },
-    });
-
-    // Create identical dynamic matrices
-    var dynamic_a = try Matrix(f32).init(arena.allocator(), 2, 2);
-    dynamic_a.at(0, 0).* = 1.0;
-    dynamic_a.at(0, 1).* = 2.0;
-    dynamic_a.at(1, 0).* = 3.0;
-    dynamic_a.at(1, 1).* = 4.0;
-
-    var dynamic_b = try Matrix(f32).init(arena.allocator(), 2, 2);
-    dynamic_b.at(0, 0).* = 2.0;
-    dynamic_b.at(0, 1).* = 0.0;
-    dynamic_b.at(1, 0).* = 0.0;
-    dynamic_b.at(1, 1).* = 2.0;
-
-    // Static matrix chaining API
+    // SMatrix chaining (direct method calls)
     const static_result = static_a.dot(static_b).transpose().scale(0.5);
 
-    // Using OpsBuilder for dynamic matrices
-    var ops_builder = try OpsBuilder(f32).init(arena.allocator(), dynamic_a);
-    try ops_builder.dot(dynamic_b);
-    try ops_builder.transpose();
-    try ops_builder.scale(0.5);
-    const dynamic_result = try ops_builder.exec();
+    // OpsBuilder chaining (equivalent operations)
+    const dynamic_a = try static_a.toMatrix(arena.allocator());
+    const dynamic_b = try static_b.toMatrix(arena.allocator());
 
-    // Verify both give same results
+    var ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_a);
+    try ops.dot(dynamic_b);
+    try ops.transpose();
+    try ops.scale(0.5);
+    const dynamic_result = ops.toOwned();
+
+    // Verify both approaches give identical results
     for (0..2) |r| {
         for (0..2) |c| {
             try expectEqual(static_result.at(r, c).*, dynamic_result.at(r, c).*);
         }
     }
+}
+
+test "matrix conversions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test SMatrix to Matrix conversion
+    const static_matrix = SMatrix(f64, 2, 3).init(.{
+        .{ 1.5, 2.5, 3.5 },
+        .{ 4.5, 5.5, 6.5 },
+    });
+    const dynamic_matrix = try static_matrix.toMatrix(arena.allocator());
+    try expectEqual(@as(usize, 2), dynamic_matrix.rows);
+    try expectEqual(@as(usize, 3), dynamic_matrix.cols);
+    try expectEqual(@as(f64, 1.5), dynamic_matrix.at(0, 0).*);
+    try expectEqual(@as(f64, 6.5), dynamic_matrix.at(1, 2).*);
+
+    // Test round-trip conversion: SMatrix -> Matrix -> SMatrix
+    const back_to_static = dynamic_matrix.toSMatrix(2, 3);
+    for (0..2) |r| {
+        for (0..3) |c| {
+            try expectEqual(static_matrix.at(r, c).*, back_to_static.at(r, c).*);
+        }
+    }
+}
+
+test "row and column extraction" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test data
+    const test_matrix = SMatrix(f32, 3, 2).init(.{
+        .{ 1.0, 2.0 },
+        .{ 3.0, 4.0 },
+        .{ 5.0, 6.0 },
+    });
+
+    // Test SMatrix row/col extraction
+    const static_row = test_matrix.row(1);
+    const static_col = test_matrix.col(1);
+    try expectEqual(@as(f32, 3.0), static_row.at(0, 0).*);
+    try expectEqual(@as(f32, 4.0), static_row.at(0, 1).*);
+    try expectEqual(@as(f32, 2.0), static_col.at(0, 0).*);
+    try expectEqual(@as(f32, 4.0), static_col.at(1, 0).*);
+    try expectEqual(@as(f32, 6.0), static_col.at(2, 0).*);
+
+    // Test OpsBuilder row/col extraction on equivalent Matrix
+    const dynamic_matrix = try test_matrix.toMatrix(arena.allocator());
+
+    var row_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try row_ops.row(1);
+    const dynamic_row = row_ops.toOwned();
+    try expectEqual(@as(usize, 1), dynamic_row.rows);
+    try expectEqual(@as(usize, 2), dynamic_row.cols);
+    try expectEqual(@as(f32, 3.0), dynamic_row.at(0, 0).*);
+    try expectEqual(@as(f32, 4.0), dynamic_row.at(0, 1).*);
+
+    var col_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try col_ops.col(1);
+    const dynamic_col = col_ops.toOwned();
+    try expectEqual(@as(usize, 3), dynamic_col.rows);
+    try expectEqual(@as(usize, 1), dynamic_col.cols);
+    try expectEqual(@as(f32, 2.0), dynamic_col.at(0, 0).*);
+    try expectEqual(@as(f32, 4.0), dynamic_col.at(1, 0).*);
+    try expectEqual(@as(f32, 6.0), dynamic_col.at(2, 0).*);
+
+    // Verify both approaches give identical results
+    try expectEqual(static_row.at(0, 0).*, dynamic_row.at(0, 0).*);
+    try expectEqual(static_row.at(0, 1).*, dynamic_row.at(0, 1).*);
+    try expectEqual(static_col.at(0, 0).*, dynamic_col.at(0, 0).*);
+    try expectEqual(static_col.at(1, 0).*, dynamic_col.at(1, 0).*);
+    try expectEqual(static_col.at(2, 0).*, dynamic_col.at(2, 0).*);
+}
+
+test "matrix multiplication (dot product)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test matrices
+    const static_a = SMatrix(f32, 2, 3).init(.{
+        .{ 1.0, 2.0, 3.0 },
+        .{ 4.0, 5.0, 6.0 },
+    });
+    const static_b = SMatrix(f32, 3, 2).init(.{
+        .{ 7.0, 8.0 },
+        .{ 9.0, 10.0 },
+        .{ 11.0, 12.0 },
+    });
+
+    // SMatrix dot product
+    const static_result = static_a.dot(static_b);
+    try expectEqual(@as(f32, 58.0), static_result.at(0, 0).*); // 1*7 + 2*9 + 3*11 = 58
+    try expectEqual(@as(f32, 64.0), static_result.at(0, 1).*); // 1*8 + 2*10 + 3*12 = 64
+    try expectEqual(@as(f32, 139.0), static_result.at(1, 0).*); // 4*7 + 5*9 + 6*11 = 139
+    try expectEqual(@as(f32, 154.0), static_result.at(1, 1).*); // 4*8 + 5*10 + 6*12 = 154
+
+    // OpsBuilder dot product on equivalent matrices
+    const dynamic_a = try static_a.toMatrix(arena.allocator());
+    const dynamic_b = try static_b.toMatrix(arena.allocator());
+
+    var ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_a);
+    try ops.dot(dynamic_b);
+    const dynamic_result = ops.toOwned();
+
+    // Verify both approaches give identical results
+    try expectEqual(@as(usize, 2), dynamic_result.rows);
+    try expectEqual(@as(usize, 2), dynamic_result.cols);
+    for (0..2) |r| {
+        for (0..2) |c| {
+            try expectEqual(static_result.at(r, c).*, dynamic_result.at(r, c).*);
+        }
+    }
+}
+
+test "matrix operations: add, scale, transpose" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test data
+    const static_matrix = SMatrix(f32, 2, 3).init(.{
+        .{ 1.0, 2.0, 3.0 },
+        .{ 4.0, 5.0, 6.0 },
+    });
+
+    // SMatrix operations
+    const static_scaled = static_matrix.scale(2.0);
+    const static_transposed = static_matrix.transpose();
+
+    try expectEqual(@as(f32, 2.0), static_scaled.at(0, 0).*);
+    try expectEqual(@as(f32, 12.0), static_scaled.at(1, 2).*);
+    try expectEqual(@as(usize, 3), static_transposed.rows);
+    try expectEqual(@as(usize, 2), static_transposed.cols);
+    try expectEqual(@as(f32, 1.0), static_transposed.at(0, 0).*);
+    try expectEqual(@as(f32, 4.0), static_transposed.at(0, 1).*);
+
+    // OpsBuilder operations on equivalent matrix
+    const dynamic_matrix = try static_matrix.toMatrix(arena.allocator());
+
+    // Test scale
+    var scale_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try scale_ops.scale(2.0);
+    const dynamic_scaled = scale_ops.toOwned();
+
+    // Test transpose
+    var transpose_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try transpose_ops.transpose();
+    const dynamic_transposed = transpose_ops.toOwned();
+
+    // Test add
+    const add_matrix = try Matrix(f32).initAll(arena.allocator(), 2, 3, 1.0);
+    var add_ops = try OpsBuilder(f32).init(arena.allocator(), dynamic_matrix);
+    try add_ops.add(add_matrix);
+    const dynamic_added = add_ops.toOwned();
+
+    // Verify results match
+    for (0..2) |r| {
+        for (0..3) |c| {
+            try expectEqual(static_scaled.at(r, c).*, dynamic_scaled.at(r, c).*);
+        }
+    }
+    for (0..3) |r| {
+        for (0..2) |c| {
+            try expectEqual(static_transposed.at(r, c).*, dynamic_transposed.at(r, c).*);
+        }
+    }
+    try expectEqual(@as(f32, 2.0), dynamic_added.at(0, 0).*); // 1 + 1
+    try expectEqual(@as(f32, 7.0), dynamic_added.at(1, 2).*); // 6 + 1
 }
