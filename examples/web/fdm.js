@@ -117,7 +117,6 @@
     // Allocate memory in WASM
     const srcPtr = wasm_exports.alloc(srcSize);
     const refPtr = wasm_exports.alloc(refSize);
-    const outPtr = wasm_exports.alloc(srcSize);
     const extraPtr = wasm_exports.alloc(extraSize);
 
     // Copy image data to WASM memory
@@ -130,14 +129,13 @@
     const startTime = performance.now();
 
     // Call FDM function
-    wasm_exports.fdm(srcPtr, srcRows, srcCols, refPtr, refRows, refCols, outPtr, extraPtr, extraSize);
+    wasm_exports.fdm(srcPtr, srcRows, srcCols, refPtr, refRows, refCols, extraPtr, extraSize);
 
     const timeMs = performance.now() - startTime;
     document.getElementById("time").textContent = `time: ${timeMs.toFixed(0)} ms`;
 
     // Get result and display
-    const outArray = new Uint8ClampedArray(wasm_exports.memory.buffer, outPtr, srcSize);
-    const resultImageData = new ImageData(outArray, srcCols, srcRows);
+    const resultImageData = new ImageData(srcArray, srcCols, srcRows);
 
     canvas3.width = srcCols;
     canvas3.height = srcRows;
@@ -146,7 +144,6 @@
     // Free memory
     wasm_exports.free(srcPtr, srcSize);
     wasm_exports.free(refPtr, refSize);
-    wasm_exports.free(outPtr, srcSize);
     wasm_exports.free(extraPtr, extraSize);
   });
 
