@@ -111,6 +111,12 @@ fn buildWasm(
     module.use_lld = true;
     module.rdynamic = true;
 
+    // Set initial memory to 256MB (4096 pages) and max to 4GB for FDM operations
+    module.export_memory = true;
+    module.import_memory = false;
+    module.initial_memory = 256 * 1024 * 1024; // 256 MB
+    module.max_memory = 4 * 1024 * 1024 * 1024; // 4 GB
+
     // Install files in the .prefix (zig-out) directory
     b.getInstallStep().dependOn(
         &b.addInstallFile(
