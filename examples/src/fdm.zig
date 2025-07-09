@@ -27,17 +27,11 @@ pub export fn fdm(
     ref_ptr: [*]Rgba,
     ref_rows: usize,
     ref_cols: usize,
-    out_ptr: [*]Rgba,
     extra_ptr: ?[*]u8,
     extra_len: usize,
 ) void {
-    var arena: std.heap.ArenaAllocator = .init(blk: {
+    const allocator: std.mem.Allocator = blk: {
         if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
-            // FDM needs memory for multiple large matrices during computation:
-            // - Multiple Matrix(f64) instances for src/ref transformations
-            // - SVD operations which create additional matrices
-            // - Various intermediate operations
-            // Estimate: need at least 50x the combined image sizes in f64 values
             const min_size = (src_rows * src_cols + ref_rows * ref_cols) * @sizeOf(f64) * 50;
             if (extra_len < min_size) {
                 std.log.err("Not enough extra memory: need at least {d}, got {d}", .{ min_size, extra_len });
@@ -52,22 +46,16 @@ pub export fn fdm(
         } else {
             break :blk std.heap.page_allocator;
         }
-    });
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    };
 
     const src_size = src_rows * src_cols;
     const ref_size = ref_rows * ref_cols;
 
     const src_img: Image(Rgba) = .init(src_rows, src_cols, src_ptr[0..src_size]);
     const ref_img: Image(Rgba) = .init(ref_rows, ref_cols, ref_ptr[0..ref_size]);
-    const out_img: Image(Rgba) = .init(src_rows, src_cols, out_ptr[0..src_size]);
-
-    // Copy source to output
-    @memcpy(out_img.data, src_img.data);
 
     // Apply FDM
-    featureDistributionMatch(Rgba, allocator, out_img, ref_img) catch |err| {
+    featureDistributionMatch(Rgba, allocator, src_img, ref_img) catch |err| {
         std.log.err("FDM failed: {}", .{err});
         @panic("FDM failed");
     };
