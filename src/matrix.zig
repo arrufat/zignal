@@ -486,7 +486,7 @@ pub fn Matrix(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        data: []T,
+        items: []T,
         rows: usize,
         cols: usize,
         allocator: std.mem.Allocator,
@@ -494,7 +494,7 @@ pub fn Matrix(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
             const data = try allocator.alloc(T, rows * cols);
             return Self{
-                .data = data,
+                .items = data,
                 .rows = rows,
                 .cols = cols,
                 .allocator = allocator,
@@ -502,7 +502,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.allocator.free(self.data);
+            self.allocator.free(self.items);
         }
 
         /// Returns the rows and columns as a struct.
@@ -514,14 +514,14 @@ pub fn Matrix(comptime T: type) type {
         pub inline fn at(self: Self, row: usize, col: usize) *T {
             assert(row < self.rows);
             assert(col < self.cols);
-            return &self.data[row * self.cols + col];
+            return &self.items[row * self.cols + col];
         }
 
         /// Returns a matrix with all elements set to value.
         pub fn initAll(allocator: std.mem.Allocator, rows: usize, cols: usize, value: T) !Self {
             var result = try init(allocator, rows, cols);
             for (0..rows * cols) |i| {
-                result.data[i] = value;
+                result.items[i] = value;
             }
             return result;
         }
@@ -548,7 +548,7 @@ pub fn Matrix(comptime T: type) type {
             var rand = prng.random();
             var result = try init(allocator, rows, cols);
             for (0..rows * cols) |i| {
-                result.data[i] = rand.float(T);
+                result.items[i] = rand.float(T);
             }
             return result;
         }
@@ -556,7 +556,7 @@ pub fn Matrix(comptime T: type) type {
         /// Sums all the elements in a matrix.
         pub fn sum(self: Self) T {
             var accum: T = 0;
-            for (self.data) |val| {
+            for (self.items) |val| {
                 accum += val;
             }
             return accum;
@@ -565,7 +565,7 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
             var squared_sum: T = 0;
-            for (self.data) |val| {
+            for (self.items) |val| {
                 squared_sum += val * val;
             }
             return @sqrt(squared_sum);
@@ -681,7 +681,7 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Initialize builder with a copy of the input matrix
         pub fn init(allocator: std.mem.Allocator, matrix: Matrix(T)) !Self {
             const result = try Matrix(T).init(allocator, matrix.rows, matrix.cols);
-            @memcpy(result.data, matrix.data);
+            @memcpy(result.items, matrix.items);
             return Self{
                 .result = result,
                 .allocator = allocator,
@@ -698,23 +698,23 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Add another matrix element-wise
         pub fn add(self: *Self, other: Matrix(T)) !void {
             assert(self.result.rows == other.rows and self.result.cols == other.cols);
-            for (0..self.result.data.len) |i| {
-                self.result.data[i] += other.data[i];
+            for (0..self.result.items.len) |i| {
+                self.result.items[i] += other.items[i];
             }
         }
 
         /// Subtract another matrix element-wise
         pub fn sub(self: *Self, other: Matrix(T)) !void {
             assert(self.result.rows == other.rows and self.result.cols == other.cols);
-            for (0..self.result.data.len) |i| {
-                self.result.data[i] -= other.data[i];
+            for (0..self.result.items.len) |i| {
+                self.result.items[i] -= other.items[i];
             }
         }
 
         /// Scale all elements by a value
         pub fn scale(self: *Self, value: T) !void {
-            for (0..self.result.data.len) |i| {
-                self.result.data[i] *= value;
+            for (0..self.result.items.len) |i| {
+                self.result.items[i] *= value;
             }
         }
 
@@ -733,8 +733,8 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Perform element-wise multiplication
         pub fn times(self: *Self, other: Matrix(T)) !void {
             assert(self.result.rows == other.rows and self.result.cols == other.cols);
-            for (0..self.result.data.len) |i| {
-                self.result.data[i] *= other.data[i];
+            for (0..self.result.items.len) |i| {
+                self.result.items[i] *= other.items[i];
             }
         }
 
