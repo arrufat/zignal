@@ -13,11 +13,16 @@ pub fn build(b: *std.Build) void {
         "face_alignment",
         "perlin_noise",
         "seam_carving",
+        "fdm",
     };
 
     // List of additional examples to build as executables
     const exec_examples = [_][]const u8{
         "png_example",
+        "matrix_builder_example",
+        "test_large_numbers",
+        "drawing_example",
+        // "fdm",
     };
 
     // Build exec_examples with run steps and check compilation
@@ -47,6 +52,7 @@ pub fn build(b: *std.Build) void {
 
             // Create individual run step
             const run_exe = b.addRunArtifact(exe);
+            if (b.args) |args| run_exe.addArgs(args);
 
             // Replace underscores with hyphens for step name
             const run_name = blk: {
