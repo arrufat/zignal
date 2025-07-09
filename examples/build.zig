@@ -19,10 +19,6 @@ pub fn build(b: *std.Build) void {
     // List of additional examples to build as executables
     const exec_examples = [_][]const u8{
         "png_example",
-        "matrix_builder_example",
-        "test_large_numbers",
-        "drawing_example",
-        // "fdm",
     };
 
     // Build exec_examples with run steps and check compilation
