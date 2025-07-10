@@ -27,12 +27,12 @@
     reader.onload = function (e) {
       const img = new Image();
       img.onload = function () {
-        // Limit image size to max 1024 on longest side
-        const maxSize = 1024;
+        // Limit image size to max 2048 on longest side
+        const maxSize = 2048;
         let width = img.width;
         let height = img.height;
         let wasResized = false;
-        
+
         if (width > maxSize || height > maxSize) {
           const scale = Math.min(maxSize / width, maxSize / height);
           width = Math.floor(width * scale);
@@ -52,7 +52,7 @@
         // Set canvas to resized dimensions
         canvas.width = width;
         canvas.height = height;
-        
+
         // Draw resized image
         ctx.drawImage(img, 0, 0, width, height);
       };
