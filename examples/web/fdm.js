@@ -1,10 +1,10 @@
 (function () {
-  const canvas1 = document.getElementById("canvas1");
-  const canvas2 = document.getElementById("canvas2");
-  const canvas3 = document.getElementById("canvas3");
-  const ctx1 = canvas1.getContext("2d", { willReadFrequently: true });
-  const ctx2 = canvas2.getContext("2d", { willReadFrequently: true });
-  const ctx3 = canvas3.getContext("2d", { willReadFrequently: true });
+  const canvasSrc = document.getElementById("canvas-src");
+  const canvasRef = document.getElementById("canvas-ref");
+  const canvasRes = document.getElementById("canvas-res");
+  const ctxSrc = canvasSrc.getContext("2d", { willReadFrequently: true });
+  const ctxRef = canvasRef.getContext("2d", { willReadFrequently: true });
+  const ctxRes = canvasRes.getContext("2d", { willReadFrequently: true });
   const matchButton = document.getElementById("match-button");
 
   let srcImage = null;
@@ -67,7 +67,7 @@
   fileInput1.style.display = "none";
   fileInput1.addEventListener("change", function (e) {
     const file = e.target.files[0];
-    displayImage(canvas1, ctx1, file, true);
+    displayImage(canvasSrc, ctxSrc, file, true);
   });
 
   // File input for reference image
@@ -76,37 +76,37 @@
   fileInput2.style.display = "none";
   fileInput2.addEventListener("change", function (e) {
     const file = e.target.files[0];
-    displayImage(canvas2, ctx2, file, false);
+    displayImage(canvasRef, ctxRef, file, false);
   });
 
-  canvas1.addEventListener("click", function () {
+  canvasSrc.addEventListener("click", function () {
     fileInput1.click();
   });
 
-  canvas2.addEventListener("click", function () {
+  canvasRef.addEventListener("click", function () {
     fileInput2.click();
   });
 
   // Drag and drop for source image
-  canvas1.ondragover = function (event) {
+  canvasSrc.ondragover = function (event) {
     event.preventDefault();
   };
 
-  canvas1.ondrop = function (event) {
+  canvasSrc.ondrop = function (event) {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
-    displayImage(canvas1, ctx1, file, true);
+    displayImage(canvasSrc, ctxSrc, file, true);
   };
 
   // Drag and drop for reference image
-  canvas2.ondragover = function (event) {
+  canvasRef.ondragover = function (event) {
     event.preventDefault();
   };
 
-  canvas2.ondrop = function (event) {
+  canvasRef.ondrop = function (event) {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
-    displayImage(canvas2, ctx2, file, false);
+    displayImage(canvasRef, ctxRef, file, false);
   };
 
   matchButton.addEventListener("click", function () {
@@ -115,13 +115,13 @@
       return;
     }
 
-    const srcImageData = ctx1.getImageData(0, 0, canvas1.width, canvas1.height);
-    const refImageData = ctx2.getImageData(0, 0, canvas2.width, canvas2.height);
+    const srcImageData = ctxSrc.getImageData(0, 0, canvasSrc.width, canvasSrc.height);
+    const refImageData = ctxRef.getImageData(0, 0, canvasRef.width, canvasRef.height);
 
-    const srcRows = canvas1.height;
-    const srcCols = canvas1.width;
-    const refRows = canvas2.height;
-    const refCols = canvas2.width;
+    const srcRows = canvasSrc.height;
+    const srcCols = canvasSrc.width;
+    const refRows = canvasRef.height;
+    const refCols = canvasRef.width;
 
     const srcSize = srcRows * srcCols * 4;
     const refSize = refRows * refCols * 4;
@@ -153,9 +153,9 @@
     const resultArray = new Uint8ClampedArray(wasm_exports.memory.buffer, srcPtr, srcSize);
     const resultImageData = new ImageData(resultArray, srcCols, srcRows);
 
-    canvas3.width = srcCols;
-    canvas3.height = srcRows;
-    ctx3.putImageData(resultImageData, 0, 0);
+    canvasRes.width = srcCols;
+    canvasRes.height = srcRows;
+    ctxRes.putImageData(resultImageData, 0, 0);
 
     // Free memory
     wasm_exports.free(srcPtr, srcSize);
