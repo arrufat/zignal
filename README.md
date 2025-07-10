@@ -98,6 +98,7 @@ Currently, there are examples for:
 - [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin-noise.html)
 - [Seam carving](https://bfactory-ai.github.io/zignal/examples/seam-carving.html)
 - [Feature distribution matching](https://bfactory-ai.github.io/zignal/examples/fdm.html)
+- [White balance](https://bfactory-ai.github.io/zignal/examples/white-balance.html)
 
 ## Acknowledgements
 
