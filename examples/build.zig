@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
         "face_alignment",
         "perlin_noise",
         "seam_carving",
+        "whitebalance",
         "fdm",
     };
 
