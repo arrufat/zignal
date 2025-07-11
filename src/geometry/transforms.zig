@@ -73,9 +73,9 @@ pub fn SimilarityTransform(comptime T: type) type {
                 cov,
                 .{ .with_u = true, .with_v = true, .mode = .skinny_u },
             );
-            const u: *const SMatrix(T, 2, 2) = &result[0];
-            const d: SMatrix(T, 2, 2) = .init(.{ .{ result[1].at(0, 0).*, 0 }, .{ 0, result[1].at(1, 0).* } });
-            const v: *const SMatrix(T, 2, 2) = &result[2];
+            const u = &result.u;
+            const d: SMatrix(T, 2, 2) = .init(.{ .{ result.s.at(0, 0).*, 0 }, .{ 0, result.s.at(1, 0).* } });
+            const v = &result.v;
             const det_u = u.at(0, 0).* * u.at(1, 1).* - u.at(0, 1).* * u.at(1, 0).*;
             const det_v = v.at(0, 0).* * v.at(1, 1).* - v.at(0, 1).* * v.at(1, 0).*;
             var s: SMatrix(T, cov.rows, cov.cols) = .identity();
@@ -221,20 +221,22 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 b.setSubMatrix(1, 6, f.scale(-t.at(0, 0).*));
                 accum = accum.add(b.transpose().dot(b));
             }
-            const u, const q, _, _ = svd(
+            const result = svd(
                 T,
                 accum.rows,
                 accum.cols,
                 accum,
                 .{ .with_u = true, .with_v = false, .mode = .full_u },
             );
-            // TODO: Check the retval from svd (result[3]) for convergence errors.
-            // If svd fails to converge, the resulting transform matrix might be unstable.
+            const u = &result.u;
+            const s = &result.s;
+            // TODO: Check the result.converged from svd for convergence errors.
+            // If svd fails to converge (result.converged != 0), the resulting transform matrix might be unstable.
             self.matrix = blk: {
-                var min: T = q.at(0, 0).*;
+                var min: T = s.at(0, 0).*;
                 var idx: usize = 0;
-                for (1..q.rows) |i| {
-                    const val = q.at(i, 0).*;
+                for (1..s.rows) |i| {
+                    const val = s.at(i, 0).*;
                     if (val < min) {
                         min = val;
                         idx = i;

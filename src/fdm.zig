@@ -193,11 +193,11 @@ fn whitening(
         .mode = .skinny_u,
     });
 
-    var u_matrix = try Matrix(f64).init(gpa, res[0].rows, res[0].cols);
+    var u_matrix = try Matrix(f64).init(gpa, res.u.rows, res.u.cols);
     defer u_matrix.deinit();
     for (0..u_matrix.rows) |r| {
         for (0..u_matrix.cols) |c| {
-            u_matrix.at(r, c).* = res[0].items[r][c];
+            u_matrix.at(r, c).* = res.u.items[r][c];
         }
     }
 
@@ -207,7 +207,7 @@ fn whitening(
     for (0..whitening_matrix.rows) |r| {
         for (0..whitening_matrix.cols) |c| {
             if (r == c) {
-                const eigenval = res[1].items[r][0];
+                const eigenval = res.s.items[r][0];
                 // Avoid division by zero or very small numbers
                 if (eigenval > 1e-10) {
                     whitening_matrix.at(r, c).* = 1 / @sqrt(eigenval);
@@ -257,11 +257,11 @@ fn covarianceTransformation(
         .mode = .skinny_u,
     });
 
-    var ref_u = try Matrix(f64).init(gpa, ref_res[0].rows, ref_res[0].cols);
+    var ref_u = try Matrix(f64).init(gpa, ref_res.u.rows, ref_res.u.cols);
     defer ref_u.deinit();
     for (0..ref_u.rows) |r| {
         for (0..ref_u.cols) |c| {
-            ref_u.at(r, c).* = ref_res[0].items[r][c];
+            ref_u.at(r, c).* = ref_res.u.items[r][c];
         }
     }
 
@@ -271,7 +271,7 @@ fn covarianceTransformation(
     for (0..ref_transform.rows) |r| {
         for (0..ref_transform.cols) |c| {
             if (r == c) {
-                const ref_eigenval = ref_res[1].items[r][0];
+                const ref_eigenval = ref_res.s.items[r][0];
                 // Protect against non-positive eigenvalues
                 if (ref_eigenval > std.math.floatEps(f64)) {
                     ref_transform.at(r, c).* = @sqrt(ref_eigenval);
