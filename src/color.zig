@@ -377,7 +377,7 @@ test "comprehensive color conversion paths" {
     // Test all conversions FROM each color type to ensure no compilation errors
     // and that all conversion methods exist and work correctly
 
-    // From Rgba - only has toRgb() method, other conversions go through RGB
+    // From Rgba - test all 8 conversion methods
     _ = rgba.toRgb();
     _ = rgba.toHsl();
     _ = rgba.toHsv();
