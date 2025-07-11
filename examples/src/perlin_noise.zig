@@ -1,15 +1,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const perlin = @import("zignal").perlin;
-const Rgba = @import("zignal").Rgba;
-const Image = @import("zignal").Image;
+const zignal = @import("zignal");
+const perlin = zignal.perlin;
+const PerlinOptions = zignal.PerlinOptions;
+const Rgba = zignal.Rgba;
+const Image = zignal.Image;
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
     .log_level = .info,
 };
 
-var opts: perlin.Options(f32) = .{
+var opts: PerlinOptions(f32) = .{
     .amplitude = 1,
     .frequency = 1,
     .octaves = 1,
@@ -50,7 +52,7 @@ pub export fn generate(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
             const x: f32 = @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(image.cols));
             const val: u8 = @intFromFloat(
                 @max(0, @min(255, @round(
-                    255 * (opts.amplitude / 2 * (perlin.generate(f32, x, y, 0, opts) + opts.amplitude)),
+                    255 * (opts.amplitude / 2 * (perlin(f32, x, y, 0, opts) + opts.amplitude)),
                 ))),
             );
             image.at(r, c).* = Rgba.fromGray(val, 255);
