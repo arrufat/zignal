@@ -2,23 +2,75 @@ const std = @import("std");
 
 const SMatrix = @import("matrix.zig").SMatrix;
 
-const SvdMode = enum {
+/// Controls the size and computation of the left singular vectors matrix (U) in SVD.
+/// This allows optimization of memory usage and computation time based on your needs.
+pub const SvdMode = enum {
+    /// Skip computation of U matrix entirely. Use when only singular values are needed.
     no_u,
+    /// Compute only the first n columns of U (economy/thin SVD). Results in U being m×n.
+    /// More memory efficient when m >> n.
     skinny_u,
+    /// Compute the full m×m U matrix. Use when all left singular vectors are needed.
     full_u,
 };
 
+/// Internal state machine for the SVD algorithm's iterative process.
+/// Based on the classical Golub-Reinsch algorithm.
 const SvdState = enum {
+    /// Test if the superdiagonal element can be set to zero (decoupling test)
     test_splitting,
+    /// Cancel the superdiagonal element using Givens rotations
     cancellation,
+    /// Check if the algorithm has converged for the current singular value
     test_convergence,
+    /// Final convergence check and sign correction
     convergence_check,
 };
-const SvdOptions = struct {
+
+/// Configuration options for SVD computation.
+/// Allows fine-grained control over which matrices are computed.
+pub const SvdOptions = struct {
+    /// Whether to compute the left singular vectors (U matrix).
+    /// Set to false when only singular values are needed.
     with_u: bool = true,
+    /// Whether to compute the right singular vectors (V matrix).
+    /// Set to false when only U and singular values are needed.
     with_v: bool = false,
+    /// Controls the size of the U matrix when with_u is true.
+    /// Ignored when with_u is false.
     mode: SvdMode = .full_u,
 };
+
+/// Result type for SVD decomposition: A = U × Σ × V^T
+/// where A is the input matrix, U contains left singular vectors,
+/// Σ is a diagonal matrix of singular values (stored as a vector),
+/// and V contains right singular vectors.
+///
+/// The dimensions of matrices depend on the options used:
+/// - U: m×m (full_u), m×n (skinny_u), or empty (no_u)
+/// - s: n×1 vector of singular values in descending order
+/// - V: n×n matrix (or empty if with_v=false)
+pub fn SvdResult(
+    comptime T: type,
+    comptime rows: usize,
+    comptime cols: usize,
+    comptime options: SvdOptions,
+) type {
+    return struct {
+        /// Left singular vectors matrix. Each column is a left singular vector.
+        /// Dimensions: m×m (full_u) or m×n (skinny_u)
+        u: SMatrix(T, rows, if (options.mode == .skinny_u) cols else rows),
+        /// Singular values in descending order as a column vector.
+        /// These are the diagonal elements of the Σ matrix.
+        s: SMatrix(T, cols, 1),
+        /// Right singular vectors matrix. Each column is a right singular vector.
+        /// The matrix is orthogonal: V^T × V = I
+        v: SMatrix(T, cols, cols),
+        /// Convergence status: 0 if successful, k if failed at k-th singular value.
+        /// Non-zero values indicate the iterative algorithm failed to converge.
+        converged: usize,
+    };
+}
 
 /// Performs singular value decompostion. Code adapted from dlib's svd4, which is, in turn,
 /// translated to 'C' from the original Algol code in "Hanbook for Automatic Computation, vol. II,
@@ -45,7 +97,7 @@ pub fn svd(
     comptime cols: usize,
     a: SMatrix(T, rows, cols),
     comptime options: SvdOptions,
-) struct { SMatrix(T, rows, rows), SMatrix(T, cols, 1), SMatrix(T, cols, cols), usize } {
+) SvdResult(T, rows, cols, options) {
     comptime std.debug.assert(rows >= cols);
     var eps: T = std.math.floatEps(T);
     const tol: T = std.math.floatMin(T) / eps;
@@ -345,7 +397,7 @@ pub fn svd(
             },
         }
     }
-    return .{ u, q, v, retval };
+    return .{ .u = u, .s = q, .v = v, .converged = retval };
 }
 
 test "svd basic" {
@@ -360,13 +412,13 @@ test "svd basic" {
         .{ 2, 0, 0, 0 },
     });
     const res = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
-    const u: *const SMatrix(f64, m, m) = &res[0];
-    const q: *const SMatrix(f64, n, 1) = &res[1];
-    const v: *const SMatrix(f64, n, n) = &res[2];
+    const u = &res.u;
+    const s = &res.s;
+    const v = &res.v;
     var w: SMatrix(f64, m, n) = .initAll(0);
-    // build the diagonal matrix from q.
-    for (0..q.rows) |i| {
-        w.items[i][i] = q.items[i][0];
+    // build the diagonal matrix from s.
+    for (0..s.rows) |i| {
+        w.items[i][i] = s.items[i][0];
     }
     // check decomposition
     const tol = @sqrt(std.math.floatEps(f64));
@@ -415,25 +467,25 @@ test "svd modes" {
 
     // Test no_u mode
     const res_no_u = svd(f64, m, n, a, .{ .with_u = false, .with_v = true, .mode = .no_u });
-    const q_no_u = res_no_u[1];
-    _ = res_no_u[2]; // v_no_u
+    const s_no_u = &res_no_u.s;
+    _ = res_no_u.v; // v_no_u
 
     // Test skinny_u mode
     const res_skinny = svd(f64, m, n, a, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
-    const u_skinny = res_skinny[0];
-    const q_skinny = res_skinny[1];
+    const u_skinny = &res_skinny.u;
+    const s_skinny = &res_skinny.s;
 
     // Test full_u mode
     const res_full = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
-    const u_full = res_full[0];
-    const q_full = res_full[1];
-    _ = res_full[2]; // v_full
+    const u_full = &res_full.u;
+    const s_full = &res_full.s;
+    _ = res_full.v; // v_full
 
     // Singular values should be the same across modes
     const tol = @sqrt(std.math.floatEps(f64));
     for (0..n) |i| {
-        try std.testing.expectApproxEqRel(q_no_u.items[i][0], q_skinny.items[i][0], tol);
-        try std.testing.expectApproxEqRel(q_skinny.items[i][0], q_full.items[i][0], tol);
+        try std.testing.expectApproxEqRel(s_no_u.items[i][0], s_skinny.items[i][0], tol);
+        try std.testing.expectApproxEqRel(s_skinny.items[i][0], s_full.items[i][0], tol);
     }
 
     // Check matrix dimensions
@@ -446,12 +498,12 @@ test "svd identity matrix" {
     const a: SMatrix(f64, n, n) = .identity();
 
     const res = svd(f64, n, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
-    const q = res[1];
+    const s = &res.s;
 
     // Identity matrix should have all singular values equal to 1
     const tol = @sqrt(std.math.floatEps(f64));
     for (0..n) |i| {
-        try std.testing.expectApproxEqRel(q.items[i][0], 1.0, tol);
+        try std.testing.expectApproxEqRel(s.items[i][0], 1.0, tol);
     }
 }
 
@@ -465,13 +517,13 @@ test "svd singular matrix" {
     });
 
     const res = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
-    const q = res[1];
+    const s = &res.s;
 
     // This matrix has rank 1, so should have 2 zero singular values
     const tol = @sqrt(std.math.floatEps(f64));
     var zero_count: usize = 0;
     for (0..n) |i| {
-        if (q.items[i][0] < tol) {
+        if (s.items[i][0] < tol) {
             zero_count += 1;
         }
     }
