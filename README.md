@@ -45,10 +45,10 @@ pub fn main() !void {
     // Create a 800x600 RGBA image
     var image: Image(Rgba) = try .initAlloc(allocator, 600, 800);
     defer image.deinit(allocator);
-    @memset(image.data, Rgba.white);
 
     // Create a drawing canvas
     const canvas: Canvas(Rgba) = .init(allocator, image);
+    canvas.fill(Rgba.white);
 
     // Draw shapes
     const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
