@@ -38,6 +38,7 @@ const zignal = @import("zignal");
 const Canvas = zignal.Canvas;
 const Image = zignal.Image;
 const Rgba = zignal.color.Rgba;
+const savePng = zignal.savePng;
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -54,6 +55,9 @@ pub fn main() !void {
     const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
     canvas.drawLine(.{.x = 50, .y = 50}, .{.x = 750, .y = 100}, red, 5, .soft);
     canvas.drawCircle(.{.x = 400, .y = 300}, 100, red, 3, .soft);
+
+    // Save the result to a PNG file
+    try savePng(Rgba, allocator, image, "drawing_example.png");
 }
 ```
 
