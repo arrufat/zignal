@@ -4,7 +4,7 @@ const lerp = std.math.lerp;
 const expectEqual = std.testing.expectEqual;
 
 /// Controls how Perlin noise is generated.
-pub fn Options(T: type) type {
+pub fn PerlinOptions(T: type) type {
     return struct {
         /// The amplitude of the generated noise
         amplitude: T = 1,
@@ -20,7 +20,7 @@ pub fn Options(T: type) type {
         lacunarity: T = 2,
 
         /// Initializes PerlinOptions while checking the ranges are correct.
-        pub fn init(amplitude: T, frequency: T, octaves: usize, persistence: T, lacunarity: T) Options(T) {
+        pub fn init(amplitude: T, frequency: T, octaves: usize, persistence: T, lacunarity: T) PerlinOptions(T) {
             {
                 @setRuntimeSafety(true);
                 assert(amplitude > 0);
@@ -41,7 +41,7 @@ pub fn Options(T: type) type {
 }
 
 /// Generates perlin noise using the specified options.
-pub fn generate(T: type, x: T, y: T, z: T, opts: Options(T)) T {
+pub fn perlin(T: type, x: T, y: T, z: T, opts: PerlinOptions(T)) T {
     var total_noise: T = 0;
     var max_amplitude: T = 0.0;
     var cur_amplitude: T = 1;

@@ -58,7 +58,10 @@ pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
 pub const OpsBuilder = matrix.OpsBuilder;
 pub const meta = @import("meta.zig");
-pub const perlin = @import("perlin.zig");
+
+const perlin_mod = @import("perlin.zig");
+pub const perlin = perlin_mod.perlin;
+pub const PerlinOptions = perlin_mod.PerlinOptions;
 
 const png = @import("png.zig");
 pub const savePng = png.savePng;
