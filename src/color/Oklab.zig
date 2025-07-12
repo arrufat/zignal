@@ -16,6 +16,7 @@ const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
+const Ycbcr = @import("Ycbcr.zig");
 
 l: f64,
 a: f64,
@@ -78,6 +79,11 @@ pub fn toLms(self: Oklab) Lms {
 /// Converts Oklab to XYB color space using direct conversion.
 pub fn toXyb(self: Oklab) Xyb {
     return conversions.oklabToXyb(self);
+}
+
+/// Converts Oklab to YCbCr via RGB.
+pub fn toYcbcr(self: Oklab) Ycbcr {
+    return self.toRgb().toYcbcr();
 }
 
 /// Alpha blends the given RGBA color onto this Oklab color in-place.

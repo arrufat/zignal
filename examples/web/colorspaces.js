@@ -76,6 +76,10 @@
     document.getElementById("xyb-x").addEventListener("input", updateFromXyb);
     document.getElementById("xyb-y").addEventListener("input", updateFromXyb);
     document.getElementById("xyb-b").addEventListener("input", updateFromXyb);
+    // Event listeners for YCbCr
+    document.getElementById("ycbcr-y").addEventListener("input", updateFromYcbcr);
+    document.getElementById("ycbcr-cb").addEventListener("input", updateFromYcbcr);
+    document.getElementById("ycbcr-cr").addEventListener("input", updateFromYcbcr);
 
     function updateFromHex() {
       const hex = document.getElementById("hex-#").value;
@@ -175,6 +179,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function rgb2ycbcr(r, g, b) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.rgb2ycbcr(r, g, b, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromRgb() {
       const r = parseInt(document.getElementById("rgb-r").value);
       const g = parseInt(document.getElementById("rgb-g").value);
@@ -192,6 +205,7 @@
       rgb2lms(r, g, b);
       rgb2oklab(r, g, b);
       rgb2xyb(r, g, b);
+      rgb2ycbcr(r, g, b);
       updateHex();
     }
 
@@ -259,6 +273,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function hsl2ycbcr(h, s, l) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.hsl2ycbcr(h, s, l, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromHsl() {
       const h = parseFloat(document.getElementById("hsl-h").value);
       const s = parseFloat(document.getElementById("hsl-s").value);
@@ -276,6 +299,7 @@
       hsl2lms(h, s, l);
       hsl2oklab(h, s, l);
       hsl2xyb(h, s, l);
+      hsl2ycbcr(h, s, l);
       updateHex();
     }
 
@@ -344,6 +368,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function hsv2ycbcr(h, s, v) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.hsv2ycbcr(h, s, v, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromHsv() {
       const h = parseFloat(document.getElementById("hsv-h").value);
       const s = parseFloat(document.getElementById("hsv-s").value);
@@ -361,6 +394,7 @@
       hsv2lms(h, s, v);
       hsv2oklab(h, s, v);
       hsv2xyb(h, s, v);
+      hsv2ycbcr(h, s, v);
       updateHex();
     }
 
@@ -429,6 +463,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function xyz2ycbcr(x, y, z) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.xyz2ycbcr(x, y, z, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromXyz() {
       const x = parseFloat(document.getElementById("xyz-x").value);
       const y = parseFloat(document.getElementById("xyz-y").value);
@@ -446,6 +489,7 @@
       xyz2lms(x, y, z);
       xyz2oklab(x, y, z);
       xyz2xyb(x, y, z);
+      xyz2ycbcr(x, y, z);
       updateHex();
     }
 
@@ -514,6 +558,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function lab2ycbcr(l, a, b) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.lab2ycbcr(l, a, b, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromLab() {
       const l = parseFloat(document.getElementById("lab-l").value);
       const a = parseFloat(document.getElementById("lab-a").value);
@@ -531,6 +584,7 @@
       lab2lms(l, a, b);
       lab2oklab(l, a, b);
       lab2xyb(l, a, b);
+      lab2ycbcr(l, a, b);
       updateHex();
     }
 
@@ -599,6 +653,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function lms2ycbcr(l, m, s) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.lms2ycbcr(l, m, s, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromLms() {
       const l = parseFloat(document.getElementById("lms-l").value);
       const a = parseFloat(document.getElementById("lms-m").value);
@@ -613,6 +676,7 @@
       lms2lab(l, a, b);
       lms2oklab(l, a, b);
       lms2xyb(l, a, b);
+      lms2ycbcr(l, a, b);
       updateHex();
     }
 
@@ -681,6 +745,15 @@
       document.getElementById("xyb-b").value = out[2].toFixed(6);
     }
 
+    function oklab2ycbcr(l, a, b) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.oklab2ycbcr(l, a, b, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromOklab() {
       const l = parseFloat(document.getElementById("oklab-l").value);
       const a = parseFloat(document.getElementById("oklab-a").value);
@@ -698,6 +771,7 @@
       oklab2lms(l, a, b);
       oklab2lab(l, a, b);
       oklab2xyb(l, a, b);
+      oklab2ycbcr(l, a, b);
       updateHex();
     }
 
@@ -764,6 +838,15 @@
       document.getElementById("oklab-b").value = out[2].toFixed(6);
     }
 
+    function xyb2ycbcr(x, y, b) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.xyb2ycbcr(x, y, b, outPtr);
+      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
+      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
+      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+    }
+
     function updateFromXyb() {
       const x = parseFloat(document.getElementById("xyb-x").value);
       const y = parseFloat(document.getElementById("xyb-y").value);
@@ -776,6 +859,102 @@
       xyb2lab(x, y, b);
       xyb2lms(x, y, b);
       xyb2oklab(x, y, b);
+      xyb2ycbcr(x, y, b);
+      updateHex();
+    }
+
+    // --- YCbCr ---
+
+    function ycbcr2rgb(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2rgb(y, cb, cr, outPtr);
+      document.getElementById("rgb-r").value = out[0];
+      document.getElementById("rgb-g").value = out[1];
+      document.getElementById("rgb-b").value = out[2];
+    }
+
+    function ycbcr2hsl(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2hsl(y, cb, cr, outPtr);
+      document.getElementById("hsl-h").value = out[0].toFixed(6);
+      document.getElementById("hsl-s").value = out[1].toFixed(6);
+      document.getElementById("hsl-l").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2hsv(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2hsv(y, cb, cr, outPtr);
+      document.getElementById("hsv-h").value = out[0].toFixed(6);
+      document.getElementById("hsv-s").value = out[1].toFixed(6);
+      document.getElementById("hsv-v").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2xyz(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2xyz(y, cb, cr, outPtr);
+      document.getElementById("xyz-x").value = out[0].toFixed(6);
+      document.getElementById("xyz-y").value = out[1].toFixed(6);
+      document.getElementById("xyz-z").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2lab(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2lab(y, cb, cr, outPtr);
+      document.getElementById("lab-l").value = out[0].toFixed(6);
+      document.getElementById("lab-a").value = out[1].toFixed(6);
+      document.getElementById("lab-b").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2lms(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2lms(y, cb, cr, outPtr);
+      document.getElementById("lms-l").value = out[0].toFixed(6);
+      document.getElementById("lms-m").value = out[1].toFixed(6);
+      document.getElementById("lms-s").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2oklab(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2oklab(y, cb, cr, outPtr);
+      document.getElementById("oklab-l").value = out[0].toFixed(6);
+      document.getElementById("oklab-a").value = out[1].toFixed(6);
+      document.getElementById("oklab-b").value = out[2].toFixed(6);
+    }
+
+    function ycbcr2xyb(y, cb, cr) {
+      const outPtr = wasmExports.alloc(3 * 4);
+      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      wasmExports.ycbcr2xyb(y, cb, cr, outPtr);
+      document.getElementById("xyb-x").value = out[0].toFixed(6);
+      document.getElementById("xyb-y").value = out[1].toFixed(6);
+      document.getElementById("xyb-b").value = out[2].toFixed(6);
+    }
+
+    function updateFromYcbcr() {
+      const y = parseFloat(document.getElementById("ycbcr-y").value);
+      const cb = parseFloat(document.getElementById("ycbcr-cb").value);
+      const cr = parseFloat(document.getElementById("ycbcr-cr").value);
+      if (y < 0) document.getElementById("ycbcr-y").value = 0;
+      if (cb < 0) document.getElementById("ycbcr-cb").value = 0;
+      if (cr < 0) document.getElementById("ycbcr-cr").value = 0;
+      if (y > 255) document.getElementById("ycbcr-y").value = 255;
+      if (cb > 255) document.getElementById("ycbcr-cb").value = 255;
+      if (cr > 255) document.getElementById("ycbcr-cr").value = 255;
+      ycbcr2rgb(y, cb, cr);
+      ycbcr2hsl(y, cb, cr);
+      ycbcr2hsv(y, cb, cr);
+      ycbcr2xyz(y, cb, cr);
+      ycbcr2lab(y, cb, cr);
+      ycbcr2lms(y, cb, cr);
+      ycbcr2oklab(y, cb, cr);
+      ycbcr2xyb(y, cb, cr);
       updateHex();
     }
   });

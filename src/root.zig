@@ -44,6 +44,7 @@ pub const Lab = color.Lab;
 pub const Lms = color.Lms;
 pub const Oklab = color.Oklab;
 pub const Xyb = color.Xyb;
+pub const Ycbcr = color.Ycbcr;
 
 const geometry = @import("geometry.zig");
 pub const Rectangle = geometry.Rectangle;
@@ -71,6 +72,9 @@ pub const Point2d = geometry.Point2d;
 pub const Point3d = geometry.Point3d;
 pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;
+
+pub const jpeg = @import("jpeg.zig");
+pub const loadJpeg = jpeg.loadJpeg;
 
 pub const svd = @import("svd.zig").svd;
 pub const SvdMode = @import("svd.zig").SvdMode;

@@ -10,6 +10,7 @@ const Oklab = @import("zignal").Oklab;
 const Rgb = @import("zignal").Rgb;
 const Xyb = @import("zignal").Xyb;
 const Xyz = @import("zignal").Xyz;
+const Ycbcr = @import("zignal").Ycbcr;
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -73,6 +74,14 @@ export fn rgb2xyb(red: u8, green: u8, blue: u8, out: [*]f64) void {
     out[1] = res.y;
     out[2] = res.b;
 }
+
+export fn rgb2ycbcr(red: u8, green: u8, blue: u8, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Rgb{ .r = red, .g = green, .b = blue });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
 // --- HSL ---
 
 export fn hsl2rgb(h: f64, s: f64, l: f64, out: [*]u8) void {
@@ -129,6 +138,14 @@ export fn hsl2xyb(h: f64, s: f64, l: f64, out: [*]f64) void {
     out[0] = res.x;
     out[1] = res.y;
     out[2] = res.b;
+}
+
+export fn hsl2ycbcr(h: f64, s: f64, l: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Hsl{ .h = h, .s = s, .l = l });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
 }
 
 // --- HSV ---
@@ -189,6 +206,14 @@ export fn hsv2xyb(h: f64, s: f64, v: f64, out: [*]f64) void {
     out[2] = res.b;
 }
 
+export fn hsv2ycbcr(h: f64, s: f64, v: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Hsv{ .h = h, .s = s, .v = v });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
+
 // --- XYZ ---
 
 export fn xyz2rgb(x: f64, y: f64, z: f64, out: [*]u8) void {
@@ -245,6 +270,14 @@ export fn xyz2xyb(x: f64, y: f64, z: f64, out: [*]f64) void {
     out[0] = res.x;
     out[1] = res.y;
     out[2] = res.b;
+}
+
+export fn xyz2ycbcr(x: f64, y: f64, z: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Xyz{ .x = x, .y = y, .z = z });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
 }
 
 // --- LAB ---
@@ -476,5 +509,104 @@ export fn xyb2lab(x: f64, y: f64, b: f64, out: [*]f64) void {
     std.log.debug("Lab: {[l]d} {[a]d} {[b]d}", res);
     out[0] = res.l;
     out[1] = res.a;
+    out[2] = res.b;
+}
+
+// Add all remaining Ycbcr conversion functions
+export fn lab2ycbcr(l: f64, a: f64, b: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Lab{ .l = l, .a = a, .b = b });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
+
+export fn lms2ycbcr(l: f64, m: f64, s: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Lms{ .l = l, .m = m, .s = s });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
+
+export fn oklab2ycbcr(l: f64, a: f64, b: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Oklab{ .l = l, .a = a, .b = b });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
+
+export fn xyb2ycbcr(x: f64, y: f64, b: f64, out: [*]f64) void {
+    const res = convertColor(Ycbcr, Xyb{ .x = x, .y = y, .b = b });
+    std.log.debug("Ycbcr: {[y]d} {[cb]d} {[cr]d}", res);
+    out[0] = res.y;
+    out[1] = res.cb;
+    out[2] = res.cr;
+}
+
+// --- YCBCR ---
+
+export fn ycbcr2rgb(y: f64, cb: f64, cr: f64, out: [*]u8) void {
+    const res = convertColor(Rgb, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("RGB: {[r]d} {[g]d} {[b]d}", res);
+    out[0] = res.r;
+    out[1] = res.g;
+    out[2] = res.b;
+}
+
+export fn ycbcr2hsl(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Hsl, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("HSL: {[h]d} {[s]d} {[l]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.l;
+}
+
+export fn ycbcr2hsv(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Hsv, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("HSV: {[h]d} {[s]d} {[v]d}", res);
+    out[0] = res.h;
+    out[1] = res.s;
+    out[2] = res.v;
+}
+
+export fn ycbcr2xyz(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Xyz, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("XYZ: {[x]d} {[y]d} {[z]d}", res);
+    out[0] = res.x;
+    out[1] = res.y;
+    out[2] = res.z;
+}
+
+export fn ycbcr2lab(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Lab, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("Lab: {[l]d} {[a]d} {[b]d}", res);
+    out[0] = res.l;
+    out[1] = res.a;
+    out[2] = res.b;
+}
+
+export fn ycbcr2lms(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Lms, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("LMS: {[l]d} {[m]d} {[s]d}", res);
+    out[0] = res.l;
+    out[1] = res.m;
+    out[2] = res.s;
+}
+
+export fn ycbcr2oklab(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Oklab, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("Oklab: {[l]d} {[a]d} {[b]d}", res);
+    out[0] = res.l;
+    out[1] = res.a;
+    out[2] = res.b;
+}
+
+export fn ycbcr2xyb(y: f64, cb: f64, cr: f64, out: [*]f64) void {
+    const res = convertColor(Xyb, Ycbcr{ .y = @floatCast(y), .cb = @floatCast(cb), .cr = @floatCast(cr) });
+    std.log.debug("Xyb: {[x]d} {[y]d} {[b]d}", res);
+    out[0] = res.x;
+    out[1] = res.y;
     out[2] = res.b;
 }

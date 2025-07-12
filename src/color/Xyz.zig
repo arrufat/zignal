@@ -18,6 +18,7 @@ const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
+const Ycbcr = @import("Ycbcr.zig");
 
 x: f64,
 y: f64,
@@ -80,4 +81,9 @@ pub fn toOklab(self: Self) Oklab {
 /// Converts CIE XYZ to XYB color space using direct conversion.
 pub fn toXyb(self: Self) Xyb {
     return conversions.xyzToXyb(self);
+}
+
+/// Converts CIE XYZ to YCbCr via RGB.
+pub fn toYcbcr(self: Self) Ycbcr {
+    return self.toRgb().toYcbcr();
 }

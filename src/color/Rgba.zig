@@ -10,6 +10,7 @@ const Oklab = @import("Oklab.zig");
 const Rgb = @import("Rgb.zig");
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
+const Ycbcr = @import("Ycbcr.zig");
 
 /// A color in the [sRGB](https://en.wikipedia.org/wiki/SRGB) colorspace with an alpha channel.
 /// Each component (r, g, b, a) is an unsigned 8-bit integer (0-255).
@@ -96,6 +97,11 @@ pub const Rgba = packed struct {
     /// Converts RGBA to XYB by first converting to RGB.
     pub fn toXyb(self: Rgba) Xyb {
         return self.toRgb().toXyb();
+    }
+
+    /// Converts RGBA to YCbCr by first converting to RGB.
+    pub fn toYcbcr(self: Rgba) Ycbcr {
+        return self.toRgb().toYcbcr();
     }
 
     /// Returns a new RGBA color with the alpha channel multiplied by the given factor.
