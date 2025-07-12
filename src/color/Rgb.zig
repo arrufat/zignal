@@ -13,6 +13,7 @@ const Oklab = @import("Oklab.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
+const Ycbcr = @import("Ycbcr.zig");
 
 r: u8,
 g: u8,
@@ -103,6 +104,11 @@ pub fn toOklab(self: Rgb) Oklab {
 /// Converts RGB to XYB color space via LMS intermediate conversion.
 pub fn toXyb(self: Rgb) Xyb {
     return conversions.lmsToXyb(self.toLms());
+}
+
+/// Converts RGB to Ycbcr color space using ITU-R BT.601 coefficients.
+pub fn toYcbcr(self: Rgb) Ycbcr {
+    return conversions.rgbToYcbcr(self);
 }
 
 /// Alpha blends the given RGBA color onto this RGB color in-place.

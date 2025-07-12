@@ -15,6 +15,7 @@ const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
+const Ycbcr = @import("Ycbcr.zig");
 
 h: f64,
 s: f64,
@@ -78,6 +79,11 @@ pub fn toOklab(self: Hsv) Oklab {
 /// Converts HSV to XYB via RGB intermediate conversion.
 pub fn toXyb(self: Hsv) Xyb {
     return self.toRgb().toXyb();
+}
+
+/// Converts HSV to YCbCr via RGB.
+pub fn toYcbcr(self: Hsv) Ycbcr {
+    return self.toRgb().toYcbcr();
 }
 
 /// Alpha blends the given RGBA color onto this HSV color in-place.
