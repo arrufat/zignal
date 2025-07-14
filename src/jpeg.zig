@@ -1729,6 +1729,7 @@ pub fn loadJpeg(comptime T: type, allocator: Allocator, file_path: []const u8) !
 
     // Create output image
     var img = try Image(T).initAlloc(allocator, decoder.height, decoder.width);
+    errdefer img.deinit(allocator);
 
     // Complete block-based pipeline:
     // Step 1: Decode all blocks into storage (storage allocated during parseSOF)
