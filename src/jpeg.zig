@@ -1213,7 +1213,7 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
 
             // Detect hierarchical JPEG
             .DHP => return error.UnsupportedHierarchicalJpeg,
-            
+
             // Detect differential JPEG
             .DNL => return error.UnsupportedJpegVariant,
 
@@ -1258,16 +1258,16 @@ pub const JpegError = error{
     InvalidDRI,
     UnsupportedJpegFormat,
     // Specific unsupported format errors
-    UnsupportedExtendedSequential,    // SOF1
-    UnsupportedLosslessJpeg,          // SOF3
-    UnsupportedJpegVariant,           // SOF5-SOF15
-    UnsupportedArithmeticCoding,      // DAC marker
-    Unsupported12BitPrecision,        // 12-bit samples
-    Unsupported16BitPrecision,        // 16-bit samples
-    UnsupportedPrecision,             // Other precision values
-    UnsupportedComponentCount,        // Valid but unsupported component counts
-    UnsupportedSamplingFactor,        // Sampling factors > 4
-    UnsupportedHierarchicalJpeg,      // DHP marker
+    UnsupportedExtendedSequential, // SOF1
+    UnsupportedLosslessJpeg, // SOF3
+    UnsupportedJpegVariant, // SOF5-SOF15
+    UnsupportedArithmeticCoding, // DAC marker
+    Unsupported12BitPrecision, // 12-bit samples
+    Unsupported16BitPrecision, // 16-bit samples
+    UnsupportedPrecision, // Other precision values
+    UnsupportedComponentCount, // Valid but unsupported component counts
+    UnsupportedSamplingFactor, // Sampling factors > 4
+    UnsupportedHierarchicalJpeg, // DHP marker
     // Invalid format errors
     InvalidComponentCount,
     InvalidHuffmanTable,
