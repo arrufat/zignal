@@ -301,14 +301,24 @@ pub const JpegDecoder = struct {
         if (data.len < length) return error.InvalidSOF;
 
         const precision = data[2];
-        if (precision != 8) return error.UnsupportedJpegFormat; // Only 8-bit precision supported
+        // Provide specific error messages for different precision values
+        switch (precision) {
+            8 => {}, // Supported
+            12 => return error.Unsupported12BitPrecision,
+            16 => return error.Unsupported16BitPrecision,
+            else => return error.UnsupportedPrecision,
+        }
 
         self.height = (@as(u16, data[3]) << 8) | data[4];
         self.width = (@as(u16, data[5]) << 8) | data[6];
         self.num_components = data[7];
 
-        if (self.num_components != 1 and self.num_components != 3) {
-            return error.InvalidComponentCount;
+        // Distinguish between invalid and unsupported component counts
+        switch (self.num_components) {
+            1, 3 => {}, // Supported: grayscale and YCbCr
+            4 => return error.UnsupportedComponentCount, // CMYK - valid but unsupported
+            0 => return error.InvalidComponentCount, // Invalid: no components
+            else => return error.InvalidComponentCount, // Invalid: too many components
         }
 
         // Parse component information
@@ -334,7 +344,35 @@ pub const JpegDecoder = struct {
 
         // Validate sampling factors
         if (max_h_sampling > 4 or max_v_sampling > 4) {
-            return error.InvalidComponentCount;
+            return error.UnsupportedSamplingFactor;
+        }
+
+        // Validate specific chroma subsampling combinations
+        if (self.num_components == 3) {
+            // For color images, check if we support the chroma subsampling
+            const y_h = self.components[0].h_sampling;
+            const y_v = self.components[0].v_sampling;
+            const cb_h = self.components[1].h_sampling;
+            const cb_v = self.components[1].v_sampling;
+            const cr_h = self.components[2].h_sampling;
+            const cr_v = self.components[2].v_sampling;
+
+            // Cb and Cr must have same sampling factors
+            if (cb_h != cr_h or cb_v != cr_v) {
+                return error.InvalidComponentCount; // Inconsistent chroma sampling
+            }
+
+            // Check for supported subsampling ratios
+            const is_444 = (y_h == 1 and y_v == 1 and cb_h == 1 and cb_v == 1);
+            const is_420 = (y_h == 2 and y_v == 2 and cb_h == 1 and cb_v == 1);
+            const is_422 = (y_h == 2 and y_v == 1 and cb_h == 1 and cb_v == 1);
+            const is_411 = (y_h == 4 and y_v == 1 and cb_h == 1 and cb_v == 1);
+
+            if (!is_444 and !is_420 and !is_422 and !is_411) {
+                // Note: While 4:2:2 and 4:1:1 pass validation, they use fallback processing
+                // Only 4:4:4 and 4:2:0 have optimized implementations
+                return error.UnsupportedSamplingFactor;
+            }
         }
 
         // Calculate block dimensions
@@ -1138,6 +1176,10 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
                 pos += 2 + length;
             },
 
+            // Specific unsupported SOF markers
+            .SOF1 => return error.UnsupportedExtendedSequential,
+            .SOF3 => return error.UnsupportedLosslessJpeg,
+
             .DHT => {
                 try decoder.parseDHT(data[pos + 2 ..]);
                 const length = try readMarkerLength(data, pos + 2);
@@ -1166,6 +1208,15 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
                 pos += 2 + length;
             },
 
+            // Detect arithmetic coding
+            .DAC => return error.UnsupportedArithmeticCoding,
+
+            // Detect hierarchical JPEG
+            .DHP => return error.UnsupportedHierarchicalJpeg,
+            
+            // Detect differential JPEG
+            .DNL => return error.UnsupportedJpegVariant,
+
             .APP0, .APP1, .APP2, .APP3, .APP4, .APP5, .APP6, .APP7, .APP8, .APP9, .APP10, .APP11, .APP12, .APP13, .APP14, .APP15, .COM => {
                 // Skip application and comment markers
                 if (pos + 4 > data.len) break;
@@ -1174,7 +1225,13 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
             },
 
             else => {
-                // Skip unknown markers with length
+                // Check for other unsupported SOF markers
+                const marker_value = @intFromEnum(marker);
+                if (marker_value >= 0xFFC5 and marker_value <= 0xFFCF) {
+                    // SOF5-SOF15 are unsupported variants
+                    return error.UnsupportedJpegVariant;
+                }
+                // Skip other unknown markers with length
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
                 pos += 2 + length;
@@ -1200,6 +1257,18 @@ pub const JpegError = error{
     InvalidSOS,
     InvalidDRI,
     UnsupportedJpegFormat,
+    // Specific unsupported format errors
+    UnsupportedExtendedSequential,    // SOF1
+    UnsupportedLosslessJpeg,          // SOF3
+    UnsupportedJpegVariant,           // SOF5-SOF15
+    UnsupportedArithmeticCoding,      // DAC marker
+    Unsupported12BitPrecision,        // 12-bit samples
+    Unsupported16BitPrecision,        // 16-bit samples
+    UnsupportedPrecision,             // Other precision values
+    UnsupportedComponentCount,        // Valid but unsupported component counts
+    UnsupportedSamplingFactor,        // Sampling factors > 4
+    UnsupportedHierarchicalJpeg,      // DHP marker
+    // Invalid format errors
     InvalidComponentCount,
     InvalidHuffmanTable,
     InvalidQuantTable,
