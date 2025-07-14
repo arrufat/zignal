@@ -15,11 +15,14 @@ pub fn build(b: *Build) void {
     _ = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig") });
 
     // Create a simple library for documentation generation
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "zignal",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     // Generate documentation
@@ -52,9 +55,11 @@ pub fn build(b: *Build) void {
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
-            .root_source_file = b.path(b.fmt("src/{s}.zig", .{module})),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("src/{s}.zig", .{module})),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
 
         // Pass build options to tests
