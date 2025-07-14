@@ -9,11 +9,52 @@ const Allocator = std.mem.Allocator;
 
 const as = @import("meta.zig").as;
 const color = @import("color.zig");
+const Point2d = @import("geometry/points.zig").Point2d;
 const is4xu8Struct = @import("meta.zig").is4xu8Struct;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
-const Point2d = @import("geometry/points.zig").Point2d;
+const jpeg = @import("jpeg.zig");
+const png = @import("png.zig");
 const Rectangle = @import("geometry.zig").Rectangle;
+
+/// Supported image formats for automatic detection and loading
+pub const ImageFormat = enum {
+    png,
+    jpeg,
+
+    /// Detect image format from the first few bytes of data
+    pub fn detectFromBytes(data: []const u8) ?ImageFormat {
+        // PNG signature
+        if (data.len >= 8) {
+            if (std.mem.eql(u8, data[0..8], &png.signature)) {
+                return .png;
+            }
+        }
+
+        // JPEG signature
+        if (data.len >= 2) {
+            if (std.mem.eql(u8, data[0..2], &jpeg.signature)) {
+                return .jpeg;
+            }
+        }
+
+        return null;
+    }
+
+    /// Detect image format from file path by reading the first few bytes
+    pub fn detectFromPath(_: Allocator, file_path: []const u8) !?ImageFormat {
+        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return null,
+            else => return err,
+        };
+        defer file.close();
+
+        var header: [8]u8 = undefined;
+        const bytes_read = try file.read(&header);
+
+        return detectFromBytes(header[0..bytes_read]);
+    }
+};
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -58,6 +99,23 @@ pub fn Image(comptime T: type) type {
                 .cols = cols,
                 .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
                 .stride = cols,
+            };
+        }
+
+        /// Loads an image from a file with automatic format detection.
+        /// Detects format based on file header signatures and calls the appropriate loader.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// var img = try Image(Rgb).load(allocator, "photo.jpg");
+        /// defer img.deinit(allocator);
+        /// ```
+        pub fn load(allocator: Allocator, file_path: []const u8) !Self {
+            const format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
+
+            return switch (format) {
+                .png => png.loadPng(T, allocator, file_path),
+                .jpeg => jpeg.loadJpeg(T, allocator, file_path),
             };
         }
 

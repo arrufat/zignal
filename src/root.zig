@@ -29,6 +29,9 @@
 //!
 //! Available on [GitHub](https://github.com/bfactory-ai/zignal).
 
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 pub const Canvas = @import("canvas.zig").Canvas;
 pub const DrawMode = @import("canvas.zig").DrawMode;
 
@@ -52,7 +55,19 @@ pub const AffineTransform = geometry.AffineTransform;
 pub const ProjectiveTransform = geometry.ProjectiveTransform;
 pub const SimilarityTransform = geometry.SimilarityTransform;
 pub const ConvexHull = geometry.ConvexHull;
+
 pub const Image = @import("image.zig").Image;
+
+/// Load an image with automatic format detection (PNG, JPEG)
+pub fn loadImage(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
+    return Image(T).load(allocator, file_path);
+}
+pub const ImageFormat = @import("image.zig").ImageFormat;
+const png = @import("png.zig");
+pub const savePng = png.savePng;
+pub const loadPng = png.loadPng;
+pub const jpeg = @import("jpeg.zig");
+pub const loadJpeg = jpeg.loadJpeg;
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
@@ -64,17 +79,10 @@ const perlin_mod = @import("perlin.zig");
 pub const perlin = perlin_mod.perlin;
 pub const PerlinOptions = perlin_mod.PerlinOptions;
 
-const png = @import("png.zig");
-pub const savePng = png.savePng;
-pub const loadPng = png.loadPng;
-
 pub const Point2d = geometry.Point2d;
 pub const Point3d = geometry.Point3d;
 pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;
-
-pub const jpeg = @import("jpeg.zig");
-pub const loadJpeg = jpeg.loadJpeg;
 
 pub const svd = @import("svd.zig").svd;
 pub const SvdMode = @import("svd.zig").SvdMode;

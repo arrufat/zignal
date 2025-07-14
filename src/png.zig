@@ -14,7 +14,7 @@ const convertColor = @import("color.zig").convertColor;
 const deflate = @import("deflate.zig");
 
 // PNG signature: 8 bytes that identify a PNG file
-const PNG_SIGNATURE = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
+pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
 // PNG color types
 pub const ColorType = enum(u8) {
@@ -259,7 +259,7 @@ fn parseHeader(chunk: Chunk) !Header {
 
 // PNG decoder entry point
 pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
-    if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &PNG_SIGNATURE)) {
+    if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
     }
 
@@ -634,7 +634,7 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
     defer writer.deinit();
 
     // Write PNG signature
-    try writer.data.appendSlice(&PNG_SIGNATURE);
+    try writer.data.appendSlice(&signature);
 
     // Create and write IHDR
     const header = Header{
@@ -905,7 +905,7 @@ test "PNG round-trip encoding/decoding" {
 
     // Verify PNG signature
     try std.testing.expect(png_data.len > 8);
-    try std.testing.expectEqualSlices(u8, &PNG_SIGNATURE, png_data[0..8]);
+    try std.testing.expectEqualSlices(u8, &signature, png_data[0..8]);
 
     // Decode back from PNG
     var decoded_png = try decode(allocator, png_data);
@@ -1115,7 +1115,7 @@ test "PNG bounds checking - large image dimensions" {
     defer png_data.deinit();
 
     // PNG signature
-    try png_data.appendSlice(&PNG_SIGNATURE);
+    try png_data.appendSlice(&signature);
 
     // IHDR chunk with oversized dimensions
     const ihdr_length: u32 = 13;

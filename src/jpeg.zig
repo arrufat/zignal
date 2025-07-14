@@ -12,6 +12,9 @@ const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 const Ycbcr = @import("color.zig").Ycbcr;
 
+// JPEG signature: 2 bytes that identify a JPEG file (SOI marker)
+pub const signature = [_]u8{ 0xFF, 0xD8 };
+
 /// Zigzag scan order for 8x8 DCT blocks
 pub const zigzag = [64]u8{
     0,  1,  8,  16, 9,  2,  3,  10,
@@ -1098,7 +1101,7 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
     errdefer decoder.deinit();
 
     // Check for JPEG SOI marker
-    if (data.len < 2 or data[0] != 0xFF or data[1] != 0xD8) {
+    if (data.len < 2 or !std.mem.eql(u8, data[0..2], &signature)) {
         return error.InvalidJpegFile;
     }
 
@@ -1713,11 +1716,20 @@ pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Im
     }
 }
 
-// Load JPEG file using pure Zig implementation (supports baseline and progressive JPEG)
+// Load JPEG file (supports baseline and progressive JPEG)
 pub fn loadJpeg(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
 
+    // Early signature validation - check for JPEG SOI marker
+    var signature_buffer: [2]u8 = undefined;
+    const bytes_read = try file.read(&signature_buffer);
+    if (bytes_read < 2 or !std.mem.eql(u8, signature_buffer[0..2], &signature)) {
+        return error.InvalidJpegFile;
+    }
+
+    // Reset file position and read entire file
+    try file.seekTo(0);
     const file_size = try file.getEndPos();
     const data = try allocator.alloc(u8, file_size);
     defer allocator.free(data);
