@@ -4,6 +4,13 @@
 //! displayed with their actual color as background in terminal output.
 
 const std = @import("std");
+const expectEqualStrings = std.testing.expectEqualStrings;
+const expect = std.testing.expect;
+
+const convertColor = @import("conversions.zig").convertColor;
+const Hsl = @import("Hsl.zig");
+const Rgb = @import("Rgb.zig");
+const Oklab = @import("Oklab.zig");
 
 pub fn formatColor(
     comptime T: type,
@@ -20,8 +27,8 @@ pub fn formatColor(
         break :blk full_name;
     };
 
-    // Convert to RGB for terminal display - this assumes the type has a toRgb() method
-    const rgb = if (@hasDecl(T, "toRgb")) self.toRgb() else self;
+    // Convert to RGB for terminal display using the generic conversion function
+    const rgb = convertColor(Rgb, self);
 
     // Determine text color based on background darkness
     const fg: u8 = if (shouldUseLightText(rgb)) 255 else 0;
@@ -55,23 +62,11 @@ pub fn formatColor(
 }
 
 fn shouldUseLightText(rgb: anytype) bool {
-    const luma = if (@hasDecl(@TypeOf(rgb), "luma"))
-        rgb.luma()
-    else
-        // Fallback calculation
-        (@as(f64, @floatFromInt(rgb.r)) * 0.2126 +
-            @as(f64, @floatFromInt(rgb.g)) * 0.7152 +
-            @as(f64, @floatFromInt(rgb.b)) * 0.0722) / 255;
-
-    return luma < 0.5;
+    const oklab = convertColor(Oklab, rgb);
+    return oklab.l < 0.5;
 }
 
 // Tests for color formatting functionality
-const expectEqualStrings = std.testing.expectEqualStrings;
-const expect = std.testing.expect;
-const Rgb = @import("Rgb.zig");
-const Hsl = @import("Hsl.zig");
-
 test "RGB color formatting - plain text with {any}" {
     const red = Rgb{ .r = 255, .g = 0, .b = 0 };
     const green = Rgb{ .r = 0, .g = 255, .b = 0 };
