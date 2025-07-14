@@ -5,6 +5,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqualDeep;
 const expectEqualDeep = std.testing.expectEqualDeep;
+const expectEqualStrings = std.testing.expectEqualStrings;
 const Allocator = std.mem.Allocator;
 
 const as = @import("meta.zig").as;
@@ -111,9 +112,9 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(allocator: Allocator, file_path: []const u8) !Self {
-            const format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
+            const image_format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
 
-            return switch (format) {
+            return switch (image_format) {
                 .png => png.loadPng(T, allocator, file_path),
                 .jpeg => jpeg.loadJpeg(T, allocator, file_path),
             };
@@ -254,6 +255,23 @@ pub fn Image(comptime T: type) type {
             assert(row < self.rows);
             assert(col < self.cols);
             return &self.data[row * self.stride + col];
+        }
+
+        /// Formats the image as a grid of colored spaces, where each pixel is represented by a space
+        /// with the appropriate background color. This provides a visual representation of the image
+        /// in terminal output.
+        pub fn format(self: Self, writer: anytype) !void {
+            const Rgb = @import("color.zig").Rgb;
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const pixel = self.at(r, c).*;
+                    const rgb = color.convertColor(Rgb, pixel);
+                    try writer.print("\x1b[48;2;{d};{d};{d}m \x1b[0m", .{ rgb.r, rgb.g, rgb.b });
+                }
+                if (r < self.rows - 1) {
+                    try writer.print("\n", .{});
+                }
+            }
         }
 
         /// Returns the optional value at row, col in the image.
@@ -1924,4 +1942,32 @@ test "rotate arbitrary angle" {
     // Should be larger than original to fit rotated content
     try expectEqual(rotated.rows > 10, true);
     try expectEqual(rotated.cols > 10, true);
+}
+
+test "image format function" {
+    const Rgb = @import("color.zig").Rgb;
+
+    // Create a small 2x2 RGB image
+    var image = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    defer image.deinit(std.testing.allocator);
+
+    // Set up a pattern: red, green, blue, white
+    image.at(0, 0).* = Rgb.red;
+    image.at(0, 1).* = Rgb.green;
+    image.at(1, 0).* = Rgb.blue;
+    image.at(1, 1).* = Rgb.white;
+
+    // Test that format function works without error
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+
+    try std.fmt.format(stream.writer(), "{f}", .{image});
+    const result = stream.getWritten();
+
+    // The expected output should be:
+    // Row 0: red_bg + green_bg + newline
+    // Row 1: blue_bg + white_bg
+    const expected = "\x1b[48;2;255;0;0m \x1b[0m\x1b[48;2;0;255;0m \x1b[0m\n\x1b[48;2;0;0;255m \x1b[0m\x1b[48;2;255;255;255m \x1b[0m";
+
+    try expectEqualStrings(expected, result);
 }
