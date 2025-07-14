@@ -27,9 +27,9 @@ const Lab = @This();
 pub const black: Lab = .{ .l = 0, .a = 0, .b = 0 };
 pub const white: Lab = .{ .l = 100, .a = 0, .b = 0 };
 
-/// Formats the CIELAB color for display. Use "color" format for ANSI color output.
-pub fn format(self: Lab, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Lab, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Lab, writer: anytype) !void {
+    return formatting.formatColor(Lab, self, writer);
 }
 
 /// Returns true if both a* and b* components are 0 (neutral gray).

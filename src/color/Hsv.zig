@@ -26,9 +26,9 @@ const Hsv = @This();
 pub const black: Hsv = .{ .h = 0, .s = 0, .v = 0 };
 pub const white: Hsv = .{ .h = 0, .s = 0, .v = 100 };
 
-/// Formats the HSV color for display. Use "color" format for ANSI color output.
-pub fn format(self: Hsv, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Hsv, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Hsv, writer: anytype) !void {
+    return formatting.formatColor(Hsv, self, writer);
 }
 
 /// Returns true if saturation is 0 (grayscale).

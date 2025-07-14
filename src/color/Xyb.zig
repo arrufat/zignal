@@ -28,8 +28,9 @@ const Xyb = @This();
 pub const black: Xyb = .{ .x = 0, .y = 0, .b = 0 };
 
 /// Formats the XYB color for display. Use "color" format for ANSI color output.
-pub fn format(self: Xyb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Xyb, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Xyb, writer: anytype) !void {
+    return formatting.formatColor(Xyb, self, writer);
 }
 
 /// Returns true if the color represents a neutral gray (via Oklab a=0, b=0).

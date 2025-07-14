@@ -1145,7 +1145,7 @@ test "compression methods comparison" {
 
     // Static Huffman should typically produce smaller output than uncompressed
     // (Not always true for very small data, but good to check)
-    std.log.info("Uncompressed size: {}, Static Huffman size: {}", .{ uncompressed.len, static_huffman.len });
+    std.log.info("Uncompressed size: {any}, Static Huffman size: {any}", .{ uncompressed.len, static_huffman.len });
 }
 
 test "static huffman zlib round trip" {

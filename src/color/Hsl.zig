@@ -26,9 +26,9 @@ const Hsl = @This();
 pub const black: Hsl = .{ .h = 0, .s = 0, .l = 0 };
 pub const white: Hsl = .{ .h = 0, .s = 0, .l = 100 };
 
-/// Formats the HSL color for display. Use "color" format for ANSI color output.
-pub fn format(self: Hsl, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Hsl, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Hsl, writer: anytype) !void {
+    return formatting.formatColor(Hsl, self, writer);
 }
 
 /// Returns true if saturation is 0 (grayscale).

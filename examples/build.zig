@@ -20,7 +20,6 @@ pub fn build(b: *std.Build) void {
     // List of additional examples to build as executables
     const exec_examples = [_][]const u8{
         "png_example",
-        "jpeg_example",
     };
 
     // Build exec_examples with run steps and check compilation
@@ -38,9 +37,11 @@ pub fn build(b: *std.Build) void {
         for (exec_examples) |example_name| {
             const exe = b.addExecutable(.{
                 .name = example_name,
-                .root_source_file = b.path(b.fmt("src/{s}.zig", .{example_name})),
-                .target = target,
-                .optimize = optimize,
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(b.fmt("src/{s}.zig", .{example_name})),
+                    .target = target,
+                    .optimize = optimize,
+                }),
             });
             exe.root_module.addImport("zignal", zignal.module("zignal"));
             b.installArtifact(exe);
@@ -88,23 +89,25 @@ fn buildWasm(
 ) *std.Build.Step.Compile {
     const module = b.addExecutable(.{
         .name = name,
-        .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
-        .optimize = optimize,
-        .target = b.resolveTargetQuery(.{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-            .cpu_features_add = std.Target.wasm.featureSet(&.{
-                .atomics,
-                .bulk_memory,
-                // .extended_const, not supported by Safari
-                .multivalue,
-                .mutable_globals,
-                .nontrapping_fptoint,
-                .reference_types,
-                //.relaxed_simd, not supported by Firefox or Safari
-                .sign_ext,
-                .simd128,
-                // .tail_call, not supported by Safari
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
+            .optimize = optimize,
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+                .cpu_features_add = std.Target.wasm.featureSet(&.{
+                    .atomics,
+                    .bulk_memory,
+                    // .extended_const, not supported by Safari
+                    .multivalue,
+                    .mutable_globals,
+                    .nontrapping_fptoint,
+                    .reference_types,
+                    //.relaxed_simd, not supported by Firefox or Safari
+                    .sign_ext,
+                    .simd128,
+                    // .tail_call, not supported by Safari
+                }),
             }),
         }),
     });
