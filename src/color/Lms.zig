@@ -25,8 +25,9 @@ const Lms = @This();
 pub const black: Lms = .{ .l = 0, .m = 0, .s = 0 };
 
 /// Formats the LMS color for display. Use "color" format for ANSI color output.
-pub fn format(self: Lms, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Lms, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Lms, writer: anytype) !void {
+    return formatting.formatColor(Lms, self, writer);
 }
 
 /// Returns true if the color represents a neutral gray (via Oklab a*=0, b*=0).

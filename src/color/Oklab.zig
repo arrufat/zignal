@@ -27,8 +27,9 @@ const Oklab = @This();
 pub const black: Oklab = .{ .l = 0, .a = 0, .b = 0 };
 
 /// Formats the Oklab color for display. Use "color" format for ANSI color output.
-pub fn format(self: Oklab, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Oklab, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Oklab, writer: anytype) !void {
+    return formatting.formatColor(Oklab, self, writer);
 }
 
 /// Returns true if both a and b components are 0 (neutral gray).

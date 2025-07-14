@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const min_zig_version = std.SemanticVersion.parse("0.14.0") catch unreachable;
+const min_zig_version = std.SemanticVersion.parse(@import("build.zig.zon").minimum_zig_version) catch unreachable;
 
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});

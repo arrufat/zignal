@@ -27,9 +27,9 @@ pub const red: Rgb = .{ .r = 255, .g = 0, .b = 0 };
 pub const green: Rgb = .{ .r = 0, .g = 255, .b = 0 };
 pub const blue: Rgb = .{ .r = 0, .g = 0, .b = 255 };
 
-/// Formats the RGB color for display. Use "color" format for ANSI color output.
-pub fn format(self: Rgb, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Rgb, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Rgb, writer: anytype) !void {
+    return formatting.formatColor(Rgb, self, writer);
 }
 
 /// Creates an RGB color from a grayscale value (gray applied to all channels).

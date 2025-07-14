@@ -277,18 +277,18 @@ test "vivid colors" {
 test "color formatting" {
     const red = Rgb{ .r = 255, .g = 0, .b = 0 };
 
-    // Test plain format
+    // Test plain format with {any}
     var plain_buffer: [100]u8 = undefined;
     var plain_stream = std.io.fixedBufferStream(&plain_buffer);
-    try red.format("", .{}, plain_stream.writer());
+    try std.fmt.format(plain_stream.writer(), "{any}", .{red});
     const plain_result = plain_stream.getWritten();
-    try std.testing.expect(std.mem.indexOf(u8, plain_result, "Rgb{ .r = 255, .g = 0, .b = 0 }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plain_result, ".r = 255, .g = 0, .b = 0") != null);
     try std.testing.expect(std.mem.indexOf(u8, plain_result, "\x1b[") == null); // No ANSI codes
 
-    // Test colored format
+    // Test colored format with {f}
     var color_buffer: [200]u8 = undefined;
     var color_stream = std.io.fixedBufferStream(&color_buffer);
-    try red.format("color", .{}, color_stream.writer());
+    try std.fmt.format(color_stream.writer(), "{f}", .{red});
     const color_result = color_stream.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, color_result, "Rgb{ .r = 255, .g = 0, .b = 0 }") != null);
     try std.testing.expect(std.mem.indexOf(u8, color_result, "\x1b[") != null); // Has ANSI codes

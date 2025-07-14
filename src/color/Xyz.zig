@@ -29,8 +29,9 @@ const Self = @This();
 pub const black: Self = .{ .x = 0, .y = 0, .z = 0 };
 
 /// Formats the CIE XYZ color for display. Use "color" format for ANSI color output.
-pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    return formatting.formatColor(Self, self, fmt, options, writer);
+/// Default formatting with ANSI color output
+pub fn format(self: Self, writer: anytype) !void {
+    return formatting.formatColor(Self, self, writer);
 }
 
 /// Returns true if the color represents a neutral gray (via RGB conversion).

@@ -24,9 +24,9 @@ pub const Rgba = packed struct {
     pub const white: Rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
     pub const transparent: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
-    /// Formats the RGBA color for display. Use "color" format for ANSI color output.
-    pub fn format(self: Rgba, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        return formatting.formatColor(Rgba, self, fmt, options, writer);
+    /// Default formatting with ANSI color output
+    pub fn format(self: Rgba, writer: anytype) !void {
+        return formatting.formatColor(Rgba, self, writer);
     }
 
     /// Creates an RGBA color from a grayscale value with specified alpha.
