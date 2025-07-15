@@ -13,9 +13,9 @@ pub const std_options = std.Options{
 };
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const gpa = debug_allocator.allocator();
 
     std.log.info("🎨 Zignal PNG Codec Demonstration", .{});
     std.log.info("==================================", .{});
@@ -28,8 +28,8 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n📸 1. RGB Image Creation & Round-trip Testing", .{});
 
-    var rgb_image = try Image(Rgb).initAlloc(allocator, height, width);
-    defer rgb_image.deinit(allocator);
+    var rgb_image = try Image(Rgb).initAlloc(gpa, height, width);
+    defer rgb_image.deinit(gpa);
 
     // Create a colorful test pattern
     for (0..height) |y| {
@@ -41,12 +41,12 @@ pub fn main() !void {
         }
     }
 
-    try savePng(Rgb, allocator, rgb_image, "demo_rgb_gradient.png");
+    try savePng(Rgb, gpa, rgb_image, "demo_rgb_gradient.png");
     std.log.info("  ✓ Saved RGB gradient ({}x{}) as demo_rgb_gradient.png", .{ width, height });
 
     // Test optimized loading (RGB → RGB, no conversion)
-    var loaded_rgb = try loadPng(Rgb, allocator, "demo_rgb_gradient.png");
-    defer loaded_rgb.deinit(allocator);
+    var loaded_rgb = try loadPng(Rgb, gpa, "demo_rgb_gradient.png");
+    defer loaded_rgb.deinit(gpa);
     std.log.info("  ✓ Loaded back as RGB (optimized path - no conversion)", .{});
 
     // Verify pixel-perfect round-trip
@@ -64,8 +64,8 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n🎭 2. RGBA with Transparency", .{});
 
-    var rgba_image = try Image(Rgba).initAlloc(allocator, height, width);
-    defer rgba_image.deinit(allocator);
+    var rgba_image = try Image(Rgba).initAlloc(gpa, height, width);
+    defer rgba_image.deinit(gpa);
 
     for (0..height) |y| {
         for (0..width) |x| {
@@ -86,12 +86,12 @@ pub fn main() !void {
         }
     }
 
-    try savePng(Rgba, allocator, rgba_image, "demo_rgba_radial.png");
+    try savePng(Rgba, gpa, rgba_image, "demo_rgba_radial.png");
     std.log.info("  ✓ Saved RGBA with radial transparency as demo_rgba_radial.png", .{});
 
     // Test RGBA round-trip
-    var loaded_rgba = try loadPng(Rgba, allocator, "demo_rgba_radial.png");
-    defer loaded_rgba.deinit(allocator);
+    var loaded_rgba = try loadPng(Rgba, gpa, "demo_rgba_radial.png");
+    defer loaded_rgba.deinit(gpa);
     std.log.info("  ✓ Loaded back as RGBA (optimized path)", .{});
 
     // ========================================================================
@@ -99,8 +99,8 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n⚫ 3. Grayscale Images", .{});
 
-    var gray_image = try Image(u8).initAlloc(allocator, height, width);
-    defer gray_image.deinit(allocator);
+    var gray_image = try Image(u8).initAlloc(gpa, height, width);
+    defer gray_image.deinit(gpa);
 
     // Create a pattern with various gray levels
     for (0..height) |y| {
@@ -113,11 +113,11 @@ pub fn main() !void {
         }
     }
 
-    try savePng(u8, allocator, gray_image, "demo_grayscale_pattern.png");
+    try savePng(u8, gpa, gray_image, "demo_grayscale_pattern.png");
     std.log.info("  ✓ Saved grayscale pattern as demo_grayscale_pattern.png", .{});
 
-    var loaded_gray = try loadPng(u8, allocator, "demo_grayscale_pattern.png");
-    defer loaded_gray.deinit(allocator);
+    var loaded_gray = try loadPng(u8, gpa, "demo_grayscale_pattern.png");
+    defer loaded_gray.deinit(gpa);
     std.log.info("  ✓ Loaded back as grayscale (optimized path)", .{});
 
     // ========================================================================
@@ -126,18 +126,18 @@ pub fn main() !void {
     std.log.info("\n🔄 4. Cross-Format Loading & Automatic Conversion", .{});
 
     // Load RGB PNG as grayscale (automatic conversion)
-    var rgb_as_gray = try loadPng(u8, allocator, "demo_rgb_gradient.png");
-    defer rgb_as_gray.deinit(allocator);
+    var rgb_as_gray = try loadPng(u8, gpa, "demo_rgb_gradient.png");
+    defer rgb_as_gray.deinit(gpa);
     std.log.info("  ✓ Loaded RGB PNG as grayscale (automatic RGB→u8 conversion)", .{});
 
     // Load RGB PNG as RGBA (automatic conversion with alpha=255)
-    var rgb_as_rgba = try loadPng(Rgba, allocator, "demo_rgb_gradient.png");
-    defer rgb_as_rgba.deinit(allocator);
+    var rgb_as_rgba = try loadPng(Rgba, gpa, "demo_rgb_gradient.png");
+    defer rgb_as_rgba.deinit(gpa);
     std.log.info("  ✓ Loaded RGB PNG as RGBA (automatic RGB→RGBA conversion)", .{});
 
     // Load grayscale PNG as RGB (automatic conversion)
-    var gray_as_rgb = try loadPng(Rgb, allocator, "demo_grayscale_pattern.png");
-    defer gray_as_rgb.deinit(allocator);
+    var gray_as_rgb = try loadPng(Rgb, gpa, "demo_grayscale_pattern.png");
+    defer gray_as_rgb.deinit(gpa);
     std.log.info("  ✓ Loaded grayscale PNG as RGB (automatic u8→RGB conversion)", .{});
 
     // ========================================================================
@@ -146,8 +146,8 @@ pub fn main() !void {
     std.log.info("\n🌈 5. Custom Color Space Support", .{});
 
     // Create HSL image and save as PNG (automatic conversion to RGB)
-    var hsl_image = try Image(Hsl).initAlloc(allocator, height / 2, width / 2);
-    defer hsl_image.deinit(allocator);
+    var hsl_image = try Image(Hsl).initAlloc(gpa, height / 2, width / 2);
+    defer hsl_image.deinit(gpa);
 
     for (0..height / 2) |y| {
         for (0..width / 2) |x| {
@@ -159,12 +159,12 @@ pub fn main() !void {
         }
     }
 
-    try savePng(Hsl, allocator, hsl_image, "demo_hsl_colorwheel.png");
+    try savePng(Hsl, gpa, hsl_image, "demo_hsl_colorwheel.png");
     std.log.info("  ✓ Saved HSL color wheel as PNG (automatic HSL→RGB conversion)", .{});
 
     // Load back as HSL (PNG→RGB→HSL conversion)
-    var loaded_hsl = try loadPng(Hsl, allocator, "demo_hsl_colorwheel.png");
-    defer loaded_hsl.deinit(allocator);
+    var loaded_hsl = try loadPng(Hsl, gpa, "demo_hsl_colorwheel.png");
+    defer loaded_hsl.deinit(gpa);
     std.log.info("  ✓ Loaded back as HSL (automatic RGB→HSL conversion)", .{});
 
     // ========================================================================
@@ -173,21 +173,21 @@ pub fn main() !void {
     std.log.info("\n🧪 6. Edge Cases & Validation", .{});
 
     // Test 1x1 pixel image
-    var tiny_image = try Image(Rgb).initAlloc(allocator, 1, 1);
-    defer tiny_image.deinit(allocator);
+    var tiny_image = try Image(Rgb).initAlloc(gpa, 1, 1);
+    defer tiny_image.deinit(gpa);
     tiny_image.data[0] = Rgb{ .r = 255, .g = 0, .b = 128 };
 
-    try savePng(Rgb, allocator, tiny_image, "demo_1x1.png");
-    var loaded_tiny = try loadPng(Rgb, allocator, "demo_1x1.png");
-    defer loaded_tiny.deinit(allocator);
+    try savePng(Rgb, gpa, tiny_image, "demo_1x1.png");
+    var loaded_tiny = try loadPng(Rgb, gpa, "demo_1x1.png");
+    defer loaded_tiny.deinit(gpa);
     std.log.info("  ✓ 1x1 pixel image: {s}", .{if (tiny_image.data[0].r == loaded_tiny.data[0].r and
         tiny_image.data[0].g == loaded_tiny.data[0].g and
         tiny_image.data[0].b == loaded_tiny.data[0].b) "PERFECT" else "FAILED"});
 
     // Test large-ish image (performance test)
     const large_size = 128;
-    var large_image = try Image(Rgb).initAlloc(allocator, large_size, large_size);
-    defer large_image.deinit(allocator);
+    var large_image = try Image(Rgb).initAlloc(gpa, large_size, large_size);
+    defer large_image.deinit(gpa);
 
     for (0..large_size) |y| {
         for (0..large_size) |x| {
@@ -195,9 +195,9 @@ pub fn main() !void {
         }
     }
 
-    try savePng(Rgb, allocator, large_image, "demo_large_128x128.png");
-    var loaded_large = try loadPng(Rgb, allocator, "demo_large_128x128.png");
-    defer loaded_large.deinit(allocator);
+    try savePng(Rgb, gpa, large_image, "demo_large_128x128.png");
+    var loaded_large = try loadPng(Rgb, gpa, "demo_large_128x128.png");
+    defer loaded_large.deinit(gpa);
     std.log.info("  ✓ Large 128x128 image: {s}", .{if (large_image.data[0].r == loaded_large.data[0].r) "SUCCESS" else "FAILED"});
 
     // ========================================================================
@@ -210,15 +210,15 @@ pub fn main() !void {
 
     // Time optimized loading (no conversion)
     t.reset();
-    var perf_rgb = try loadPng(Rgb, allocator, "demo_rgb_gradient.png");
+    var perf_rgb = try loadPng(Rgb, gpa, "demo_rgb_gradient.png");
     const optimized_time = t.read();
-    perf_rgb.deinit(allocator);
+    perf_rgb.deinit(gpa);
 
     // Time conversion loading
     t.reset();
-    var perf_gray = try loadPng(u8, allocator, "demo_rgb_gradient.png");
+    var perf_gray = try loadPng(u8, gpa, "demo_rgb_gradient.png");
     const conversion_time = t.read();
-    perf_gray.deinit(allocator);
+    perf_gray.deinit(gpa);
 
     std.log.info("  ✓ Optimized loading (RGB→RGB):  {d:.2}ms", .{@as(f64, @floatFromInt(optimized_time)) / 1_000_000});
     std.log.info("  ✓ Conversion loading (RGB→u8):  {d:.2}ms", .{@as(f64, @floatFromInt(conversion_time)) / 1_000_000});

@@ -82,6 +82,57 @@ pub const Header = struct {
     }
 };
 
+// Adam7 interlacing constants
+const Adam7Pass = struct {
+    x_start: u32,
+    y_start: u32,
+    x_step: u32,
+    y_step: u32,
+};
+
+const adam7_passes = [7]Adam7Pass{
+    .{ .x_start = 0, .y_start = 0, .x_step = 8, .y_step = 8 },
+    .{ .x_start = 4, .y_start = 0, .x_step = 8, .y_step = 8 },
+    .{ .x_start = 0, .y_start = 4, .x_step = 4, .y_step = 8 },
+    .{ .x_start = 2, .y_start = 0, .x_step = 4, .y_step = 4 },
+    .{ .x_start = 0, .y_start = 2, .x_step = 2, .y_step = 4 },
+    .{ .x_start = 1, .y_start = 0, .x_step = 2, .y_step = 2 },
+    .{ .x_start = 0, .y_start = 1, .x_step = 1, .y_step = 2 },
+};
+
+// Calculate sub-image dimensions for Adam7 pass
+fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, height: u32 } {
+    if (pass >= 7) return .{ .width = 0, .height = 0 };
+
+    const pass_info = adam7_passes[pass];
+    const pass_width = if (width > pass_info.x_start)
+        (width - pass_info.x_start + pass_info.x_step - 1) / pass_info.x_step
+    else
+        0;
+    const pass_height = if (height > pass_info.y_start)
+        (height - pass_info.y_start + pass_info.y_step - 1) / pass_info.y_step
+    else
+        0;
+
+    return .{ .width = pass_width, .height = pass_height };
+}
+
+// Calculate total scanline data size for interlaced image
+fn adam7TotalSize(header: Header) usize {
+    var total_size: usize = 0;
+    const channels = header.channels();
+
+    for (0..7) |pass| {
+        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
+        if (dims.width > 0 and dims.height > 0) {
+            const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+            total_size += dims.height * (pass_scanline_bytes + 1); // +1 for filter byte
+        }
+    }
+
+    return total_size;
+}
+
 // PNG decoder/encoder state
 pub const PngImage = struct {
     header: Header,
@@ -329,6 +380,23 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
     const width = png_image.header.width;
     const height = png_image.header.height;
     const scanline_bytes = png_image.header.scanlineBytes();
+
+    // Handle interlaced images separately
+    if (png_image.header.interlace_method == 1) {
+        // Interlaced image - use Adam7 deinterlacing
+        switch (png_image.header.color_type) {
+            .grayscale, .grayscale_alpha => {
+                return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_image.header) };
+            },
+            .rgb => {
+                return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_image.header) };
+            },
+            .rgba => {
+                return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_image.header) };
+            },
+            .palette => return error.UnsupportedColorType, // TODO: implement palette support
+        }
+    }
 
     // Determine native format and convert accordingly
     switch (png_image.header.color_type) {
@@ -827,6 +895,17 @@ fn filterRow(
 
 // Apply defiltering to all scanlines after deflate decompression
 fn defilterScanlines(data: []u8, header: Header) !void {
+    if (header.interlace_method == 1) {
+        // Interlaced image - use Adam7 defiltering
+        try defilterAdam7Scanlines(data, header);
+    } else {
+        // Non-interlaced image - use standard defiltering
+        try defilterStandardScanlines(data, header);
+    }
+}
+
+// Apply defiltering to standard (non-interlaced) scanlines
+fn defilterStandardScanlines(data: []u8, header: Header) !void {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
     const expected_size = header.height * (scanline_bytes + 1); // +1 for filter byte
@@ -855,6 +934,203 @@ fn defilterScanlines(data: []u8, header: Header) !void {
         defilterRow(filter_type, current_scanline, previous_scanline, bytes_per_pixel);
         previous_scanline = current_scanline;
     }
+}
+
+// Apply defiltering to Adam7 interlaced scanlines
+fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
+    const expected_size = adam7TotalSize(header);
+
+    if (data.len != expected_size) {
+        return error.InvalidScanlineData;
+    }
+
+    const bytes_per_pixel = header.bytesPerPixel();
+    const channels = header.channels();
+    var data_offset: usize = 0;
+
+    // Process each of the 7 Adam7 passes
+    for (0..7) |pass| {
+        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
+        if (dims.width == 0 or dims.height == 0) continue;
+
+        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+        var previous_scanline: ?[]u8 = null;
+
+        for (0..dims.height) |y| {
+            const row_start = data_offset + y * (pass_scanline_bytes + 1);
+            const filter_byte = data[row_start];
+            const current_scanline = data[row_start + 1 .. row_start + 1 + pass_scanline_bytes];
+
+            const filter_type: FilterType = switch (filter_byte) {
+                0 => .none,
+                1 => .sub,
+                2 => .up,
+                3 => .average,
+                4 => .paeth,
+                else => return error.InvalidFilterType,
+            };
+
+            defilterRow(filter_type, current_scanline, previous_scanline, bytes_per_pixel);
+            previous_scanline = current_scanline;
+        }
+
+        data_offset += dims.height * (pass_scanline_bytes + 1);
+    }
+}
+
+// Deinterlace Adam7 data and convert to requested pixel format
+fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header) !Image(T) {
+    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
+    if (total_pixels > std.math.maxInt(usize)) {
+        return error.ImageTooLarge;
+    }
+
+    var output_data = try allocator.alloc(T, @intCast(total_pixels));
+    const channels = header.channels();
+    var data_offset: usize = 0;
+
+    // Process each of the 7 Adam7 passes
+    for (0..7) |pass| {
+        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
+        if (dims.width == 0 or dims.height == 0) continue;
+
+        const pass_info = adam7_passes[pass];
+        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+
+        for (0..dims.height) |pass_y| {
+            const src_row_start = data_offset + pass_y * (pass_scanline_bytes + 1) + 1; // +1 to skip filter byte
+            const src_row = decompressed[src_row_start .. src_row_start + pass_scanline_bytes];
+
+            const final_y = pass_info.y_start + pass_y * pass_info.y_step;
+            if (final_y >= header.height) continue;
+
+            for (0..dims.width) |pass_x| {
+                const final_x = pass_info.x_start + pass_x * pass_info.x_step;
+                if (final_x >= header.width) continue;
+
+                const final_pixel_idx = final_y * header.width + final_x;
+
+                // Extract pixel value based on color type and bit depth
+                output_data[final_pixel_idx] = switch (header.color_type) {
+                    .grayscale, .grayscale_alpha => extractGrayscalePixel(T, src_row, pass_x, header),
+                    .rgb => extractRgbPixel(T, src_row, pass_x, header),
+                    .rgba => extractRgbaPixel(T, src_row, pass_x, header),
+                    .palette => @panic("Palette images not supported yet"), // TODO: implement palette support
+                };
+            }
+        }
+
+        data_offset += dims.height * (pass_scanline_bytes + 1);
+    }
+
+    return Image(T){
+        .rows = @intCast(header.height),
+        .cols = @intCast(header.width),
+        .data = output_data,
+        .stride = @intCast(header.width),
+    };
+}
+
+// Extract grayscale pixel from Adam7 pass data
+fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header) T {
+    const pixel_value = switch (header.bit_depth) {
+        8 => if (header.color_type == .grayscale_alpha) src_row[pass_x * 2] else src_row[pass_x],
+        16 => blk: {
+            const offset = if (header.color_type == .grayscale_alpha) pass_x * 4 else pass_x * 2;
+            if (offset + 1 >= src_row.len) break :blk 0;
+            break :blk @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8));
+        },
+        1, 2, 4 => blk: {
+            const bits_per_pixel = header.bit_depth;
+            const pixels_per_byte = 8 / bits_per_pixel;
+            const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+            const byte_idx = pass_x / pixels_per_byte;
+            if (byte_idx >= src_row.len) break :blk 0;
+            const pixel_idx = pass_x % pixels_per_byte;
+            const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
+            const pixel_val = (src_row[byte_idx] >> bit_offset) & mask;
+            const scale_factor = 255 / mask;
+            break :blk pixel_val * scale_factor;
+        },
+        else => 0,
+    };
+
+    return switch (T) {
+        u8 => pixel_value,
+        Rgb => Rgb{ .r = pixel_value, .g = pixel_value, .b = pixel_value },
+        Rgba => Rgba{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = 255 },
+        else => @compileError("Unsupported pixel type"),
+    };
+}
+
+// Extract RGB pixel from Adam7 pass data
+fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header) T {
+    const offset = pass_x * 3;
+    if (offset + 2 >= src_row.len) {
+        return switch (T) {
+            u8 => 0,
+            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
+            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            else => @compileError("Unsupported pixel type"),
+        };
+    }
+
+    const r = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8))
+    else
+        src_row[offset];
+    const g = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8))
+    else
+        src_row[offset + 1];
+    const b = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8))
+    else
+        src_row[offset + 2];
+
+    return switch (T) {
+        u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
+        Rgb => Rgb{ .r = r, .g = g, .b = b },
+        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = 255 },
+        else => @compileError("Unsupported pixel type"),
+    };
+}
+
+// Extract RGBA pixel from Adam7 pass data
+fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header) T {
+    const offset = pass_x * 4;
+    if (offset + 3 >= src_row.len) {
+        return switch (T) {
+            u8 => 0,
+            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
+            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            else => @compileError("Unsupported pixel type"),
+        };
+    }
+
+    const r = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8))
+    else
+        src_row[offset];
+    const g = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8))
+    else
+        src_row[offset + 1];
+    const b = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8))
+    else
+        src_row[offset + 2];
+    const a = if (header.bit_depth == 16)
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 6 .. offset + 8][0..2], .big) >> 8))
+    else
+        src_row[offset + 3];
+
+    return switch (T) {
+        u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
+        Rgb => Rgb{ .r = r, .g = g, .b = b },
+        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = a },
+        else => @compileError("Unsupported pixel type"),
+    };
 }
 
 // Simple test for the PNG structure
@@ -1222,4 +1498,34 @@ test "PNG integer overflow protection" {
     if (total_bytes > std.math.maxInt(usize)) {
         try std.testing.expect(true); // Would be caught by our protection
     }
+}
+
+test "Adam7 interlaced PNG support" {
+    // Test that we can create an interlaced header
+    const interlaced_header = Header{
+        .width = 4,
+        .height = 4,
+        .bit_depth = 8,
+        .color_type = .rgb,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 1,
+    };
+
+    // Test basic interlaced properties
+    try std.testing.expectEqual(@as(u8, 1), interlaced_header.interlace_method);
+    try std.testing.expectEqual(@as(u8, 3), interlaced_header.channels());
+
+    // Test that Adam7 total size calculation works
+    const total_size = adam7TotalSize(interlaced_header);
+    try std.testing.expect(total_size > 0);
+
+    // Test pixel extraction functions work correctly
+    const rgb_src = [_]u8{ 255, 0, 0, 0, 255, 0, 0, 0, 255 }; // red, green, blue pixels
+    const rgb_pixel = extractRgbPixel(Rgb, &rgb_src, 1, interlaced_header);
+    try std.testing.expectEqual(Rgb{ .r = 0, .g = 255, .b = 0 }, rgb_pixel);
+
+    const rgba_src = [_]u8{ 255, 0, 0, 255, 0, 255, 0, 128 }; // red (alpha=255), green (alpha=128)
+    const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, interlaced_header);
+    try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
 }
