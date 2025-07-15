@@ -14,6 +14,7 @@ pub const isColor = conversions.isColor;
 pub const Hsl = @import("color/Hsl.zig");
 pub const Hsv = @import("color/Hsv.zig");
 pub const Lab = @import("color/Lab.zig");
+pub const Lch = @import("color/Lch.zig");
 pub const Lms = @import("color/Lms.zig");
 pub const Oklab = @import("color/Oklab.zig");
 pub const Oklch = @import("color/Oklch.zig");
@@ -375,7 +376,7 @@ test "extended color space round trips" {
 }
 
 /// List of color types to test. This is the only thing to update when adding a new color space.
-const ColorTypes = .{ Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
+const ColorTypes = .{ Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
 
 /// Strips all type names to their unqualified base names.
 fn getSimpleTypeName(comptime T: type) []const u8 {

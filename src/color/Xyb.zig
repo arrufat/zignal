@@ -12,6 +12,7 @@ const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
+const Lch = @import("Lch.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Oklch = @import("Oklch.zig");
@@ -73,6 +74,11 @@ pub fn toXyz(self: Xyb) Xyz {
 /// Converts XYB to CIELAB color space using direct conversion.
 pub fn toLab(self: Xyb) Lab {
     return conversions.xybToLab(self);
+}
+
+/// Converts XYB to LCh color space via Lab intermediate conversion.
+pub fn toLch(self: Xyb) Lch {
+    return self.toLab().toLch();
 }
 
 /// Converts XYB to LMS cone response using direct conversion.

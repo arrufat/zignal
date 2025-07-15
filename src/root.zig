@@ -8,7 +8,7 @@
 //!
 //! - **Image Operations**: Load, save, manipulate, and transform images
 //! - **Drawing & Canvas**: Lines, circles, polygons, Bézier curves with antialiasing
-//! - **Color Spaces**: RGB, HSL, HSV, XYZ, Lab, LMS, Oklab, XYB conversions
+//! - **Color Spaces**: RGB, HSL, HSV, XYZ, Lab, LCh, LMS, Oklab, Oklch, XYB conversions
 //! - **Geometry**: 2D/3D points, rectangles, transforms (affine, projective, similarity)
 //! - **Matrix Operations**: Linear algebra with SVD decomposition support
 //! - **Computer Vision**: Feature distribution matching, convex hull algorithms
@@ -44,6 +44,7 @@ pub const Hsl = color.Hsl;
 pub const Hsv = color.Hsv;
 pub const Xyz = color.Xyz;
 pub const Lab = color.Lab;
+pub const Lch = color.Lch;
 pub const Lms = color.Lms;
 pub const Oklab = color.Oklab;
 pub const Oklch = color.Oklch;

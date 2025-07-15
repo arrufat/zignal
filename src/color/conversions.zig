@@ -11,6 +11,7 @@ const pow = std.math.pow;
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
+const Lch = @import("Lch.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Oklch = @import("Oklch.zig");
@@ -23,7 +24,7 @@ const Ycbcr = @import("Ycbcr.zig");
 /// Returns true if, and only if, `T` is a known color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr => true,
+        u8, Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr => true,
         else => false,
     };
 }
@@ -63,6 +64,11 @@ pub fn convertColor(comptime T: type, color: anytype) T {
             Lab => color,
             u8 => .{ .l = @as(f64, @floatFromInt(color)) / 255 * 100, .a = 0, .b = 0 },
             inline else => color.toLab(),
+        },
+        Lch => switch (ColorType) {
+            Lch => color,
+            u8 => .{ .l = @as(f64, @floatFromInt(color)) / 255 * 100, .c = 0, .h = 0 },
+            inline else => color.toLch(),
         },
         Xyz => switch (ColorType) {
             Xyz => color,
@@ -316,6 +322,50 @@ pub fn hslToLab(hsl: Hsl) Lab {
 
 pub fn labToHsl(lab: Lab) Hsl {
     return rgbToHsl(labToRgb(lab));
+}
+
+/// Converts CIELAB to LCh (cylindrical representation).
+/// - L: Lightness (unchanged)
+/// - C: Chroma = √(a² + b²)
+/// - h: Hue = atan2(b, a) converted to degrees
+pub fn labToLch(lab: Lab) Lch {
+    const c = @sqrt(lab.a * lab.a + lab.b * lab.b);
+    var h = std.math.atan2(lab.b, lab.a) * 180.0 / std.math.pi;
+    // Ensure hue is in range [0, 360)
+    if (h < 0) {
+        h += 360.0;
+    }
+    return .{
+        .l = lab.l,
+        .c = c,
+        .h = h,
+    };
+}
+
+/// Converts LCh to CIELAB (rectangular representation).
+/// - L: Lightness (unchanged)
+/// - a: C × cos(h)
+/// - b: C × sin(h)
+pub fn lchToLab(lch: Lch) Lab {
+    const h_rad = lch.h * std.math.pi / 180.0;
+    return .{
+        .l = lch.l,
+        .a = lch.c * @cos(h_rad),
+        .b = lch.c * @sin(h_rad),
+    };
+}
+
+// LCh conversions
+pub fn lchToRgb(lch: Lch) Rgb {
+    return labToRgb(lchToLab(lch));
+}
+
+pub fn lchToHsl(lch: Lch) Hsl {
+    return labToHsl(lchToLab(lch));
+}
+
+pub fn lchToHsv(lch: Lch) Hsv {
+    return rgbToHsv(lchToRgb(lch));
 }
 
 // HSV conversions

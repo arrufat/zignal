@@ -9,6 +9,7 @@ const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
+const Lch = @import("Lch.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Oklch = @import("Oklch.zig");
@@ -59,6 +60,11 @@ pub fn toHsv(self: Ycbcr) Hsv {
 /// Converts to Lab via RGB.
 pub fn toLab(self: Ycbcr) Lab {
     return self.toRgb().toLab();
+}
+
+/// Converts to LCh via RGB.
+pub fn toLch(self: Ycbcr) Lch {
+    return self.toRgb().toLch();
 }
 
 /// Converts to XYZ via RGB.
