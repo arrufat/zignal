@@ -4,6 +4,7 @@
 //! Each color type is implemented as a separate file using Zig's file-as-struct pattern.
 
 const std = @import("std");
+const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
@@ -373,145 +374,80 @@ test "extended color space round trips" {
     }
 }
 
-test "comprehensive color conversion paths" {
-    // Test color: bright red-orange to ensure all conversion methods compile and work
-    const test_rgb = Rgb{ .r = 255, .g = 64, .b = 32 };
+/// List of color types to test. This is the only thing to update when adding a new color space.
+const ColorTypes = .{ Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
 
-    // Convert to all color types to ensure all conversion methods work
-    const rgba = test_rgb.toRgba(200);
-    const hsl = test_rgb.toHsl();
-    const hsv = test_rgb.toHsv();
-    const lab = test_rgb.toLab();
-    const xyz = test_rgb.toXyz();
-    const lms = test_rgb.toLms();
-    const oklab = test_rgb.toOklab();
-    const oklch = test_rgb.toOklch();
-    const xyb = test_rgb.toXyb();
-    const ycbcr = test_rgb.toYcbcr();
+/// Strips all type names to their unqualified base names.
+fn getSimpleTypeName(comptime T: type) []const u8 {
+    const full_name = @typeName(T);
+    if (std.mem.lastIndexOf(u8, full_name, ".")) |dot_index| {
+        return full_name[dot_index + 1 ..];
+    }
+    return full_name;
+}
 
-    // Test all conversions FROM each color type to ensure no compilation errors
-    // and that all conversion methods exist and work correctly
+/// Generates the list of conversion methods based on the color type names.
+fn generateConversionMethods() [ColorTypes.len][]const u8 {
+    var methods: [ColorTypes.len][]const u8 = undefined;
+    inline for (ColorTypes, 0..) |ColorType, i| {
+        const simple_name = getSimpleTypeName(ColorType);
+        methods[i] = "to" ++ simple_name;
+    }
+    return methods;
+}
 
-    // From Rgba - test all 10 conversion methods
-    _ = rgba.toRgb();
-    _ = rgba.toHsl();
-    _ = rgba.toHsv();
-    _ = rgba.toLab();
-    _ = rgba.toOklch();
-    _ = rgba.toXyz();
-    _ = rgba.toLms();
-    _ = rgba.toOklab();
-    _ = rgba.toXyb();
-    _ = rgba.toYcbcr();
+/// Skip self-conversion methods (e.g., Rgb.toRgb doesn't exist)
+fn shouldSkipMethod(comptime ColorType: type, comptime method_name: []const u8) bool {
+    if (method_name.len < 3 or !std.mem.startsWith(u8, method_name, "to")) return false;
 
-    // From Hsl - test all 10 conversion methods
-    _ = hsl.toRgb();
-    _ = hsl.toRgba(255);
-    _ = hsl.toHsv(); // This was the buggy method we fixed
-    _ = hsl.toLab();
-    _ = hsl.toOklch();
-    _ = hsl.toXyz();
-    _ = hsl.toLms();
-    _ = hsl.toOklab();
-    _ = hsl.toXyb();
-    _ = hsl.toYcbcr();
+    const target_type_name = method_name[2..]; // Remove "to" prefix
+    const current_type_name = getSimpleTypeName(ColorType);
 
-    // From Hsv - test all 10 conversion methods
-    _ = hsv.toRgb();
-    _ = hsv.toRgba(255);
-    _ = hsv.toHsl();
-    _ = hsv.toLab();
-    _ = hsv.toOklch();
-    _ = hsv.toXyz();
-    _ = hsv.toLms();
-    _ = hsv.toOklab();
-    _ = hsv.toXyb();
-    _ = hsv.toYcbcr();
+    return std.mem.eql(u8, current_type_name, target_type_name);
+}
 
-    // From Lab - test all 10 conversion methods
-    // From Lab - toOklchall 10 conversion methods
-    _ = lab.toRgb();
-    _ = lab.toRgba(255);
-    _ = lab.toHsl();
-    _ = lab.toHsv();
-    _ = lab.toXyz();
-    _ = lab.toLms();
-    _ = lab.toOklab();
-    _ = lab.toXyb();
-    _ = lab.toYcbcr();
+test "comprehensive color conversion method validation and round-trip testing" {
+    @setEvalBranchQuota(10000);
+    // Test colors for round-trip validation
+    const test_colors = [_]Rgb{
+        .{ .r = 255, .g = 0, .b = 0 }, // Pure red
+        .{ .r = 0, .g = 255, .b = 0 }, // Pure green
+        .{ .r = 0, .g = 0, .b = 255 }, // Pure blue
+        .{ .r = 255, .g = 255, .b = 255 }, // White
+        .{ .r = 128, .g = 128, .b = 128 }, // Gray
+        .{ .r = 255, .g = 64, .b = 32 }, // Orange-red
+        .{ .r = 64, .g = 192, .b = 128 }, // Teal-green
+    };
 
-    // From Xyz - test all 10 conversion methods
-    _ = xyz.toRgb();
-    _ = xyz.toRgba(255);
-    _ = xyz.toHsl();
-    _ = xyz.toHsv();
-    _ = xyz.toLab();
-    _ = xyz.toOklch();
-    _ = xyz.toLms();
-    _ = xyz.toOklab();
-    _ = xyz.toXyb();
-    _ = xyz.toYcbcr();
+    // Use metaprogramming to verify all color types have expected conversion methods
+    // and test round-trip accuracy for each conversion
+    inline for (ColorTypes) |ColorType| {
+        inline for (comptime generateConversionMethods()) |method_name| {
+            // Skip self-conversion and special cases
+            if (comptime shouldSkipMethod(ColorType, method_name)) continue;
 
-    // From Lms - test all 10 conversion methods
-    _ = lms.toRgb();
-    _ = lms.toRgba(255);
-    _ = lms.toHsl();
-    _ = lms.toHsv();
-    _ = lms.toLab();
-    _ = lms.toOklch();
-    _ = lms.toXyz();
-    _ = lms.toOklab();
-    _ = lms.toXyb();
-    _ = lms.toYcbcr();
+            // Verify method exists using @hasDecl
+            try expect(@hasDecl(ColorType, method_name));
 
-    // From Oklab - test all 10 conversion methods
-    _ = oklab.toRgb();
-    _ = oklab.toRgba(255);
-    _ = oklab.toHsl();
-    _ = oklab.toHsv();
-    _ = oklab.toLab();
-    _ = oklab.toOklch();
-    _ = oklab.toXyz();
-    _ = oklab.toLms();
-    _ = oklab.toOklch();
-    _ = oklab.toXyb();
-    _ = oklab.toYcbcr();
+            // Test round-trip conversion accuracy for this specific method
+            if (comptime std.mem.eql(u8, method_name, "toRgb")) {
+                // For toRgb methods, test conversion from each test color
+                for (test_colors) |test_rgb| {
+                    const intermediate_color = convertColor(ColorType, test_rgb);
+                    const recovered_rgb = intermediate_color.toRgb();
+                    try expectEqualDeep(test_rgb, recovered_rgb);
+                }
+            }
 
-    // From Oklch - test all 10 conversion methods
-    _ = oklch.toRgb();
-    _ = oklch.toRgba(255);
-    _ = oklch.toHsl();
-    _ = oklch.toHsv();
-    _ = oklch.toLab();
-    _ = oklch.toXyz();
-    _ = oklch.toLms();
-    _ = oklch.toOklab();
-    _ = oklch.toXyb();
-    _ = oklch.toYcbcr();
-
-    // From Xyb - test all 10 conversion methods
-    _ = xyb.toRgb();
-    _ = xyb.toRgba(255);
-    _ = xyb.toHsl();
-    _ = xyb.toHsv();
-    _ = xyb.toLab();
-    _ = xyb.toOklch();
-    _ = xyb.toXyz();
-    _ = xyb.toLms();
-    _ = xyb.toOklab();
-    _ = xyb.toYcbcr();
-
-    // From Ycbcr - test all 10 conversion methods
-    _ = ycbcr.toRgb();
-    _ = ycbcr.toRgba(255);
-    _ = ycbcr.toHsl();
-    _ = ycbcr.toHsv();
-    _ = ycbcr.toLab();
-    _ = ycbcr.toOklch();
-    _ = ycbcr.toXyz();
-    _ = ycbcr.toLms();
-    _ = ycbcr.toOklab();
-    _ = ycbcr.toXyb();
+            // Special case: test RGBA round-trip
+            if (comptime ColorType == Rgba and std.mem.eql(u8, method_name, "toRgb")) {
+                for (test_colors) |test_rgb| {
+                    const rgba = test_rgb.toRgba(255);
+                    try expectEqualDeep(test_rgb, rgba.toRgb());
+                }
+            }
+        }
+    }
 }
 
 test "color conversion accuracy with reference values" {
