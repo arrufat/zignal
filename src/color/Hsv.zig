@@ -11,6 +11,7 @@ const Hsl = @import("Hsl.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -27,7 +28,7 @@ pub const black: Hsv = .{ .h = 0, .s = 0, .v = 0 };
 pub const white: Hsv = .{ .h = 0, .s = 0, .v = 100 };
 
 /// Default formatting with ANSI color output
-pub fn format(self: Hsv, writer: anytype) !void {
+pub fn format(self: Hsv, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Hsv, self, writer);
 }
 
@@ -74,6 +75,11 @@ pub fn toLms(self: Hsv) Lms {
 /// Converts HSV to Oklab via RGB intermediate conversion.
 pub fn toOklab(self: Hsv) Oklab {
     return self.toRgb().toOklab();
+}
+
+/// Converts HSV to Oklch via RGB intermediate conversion.
+pub fn toOklch(self: Hsv) Oklch {
+    return self.toRgb().toOklch();
 }
 
 /// Converts HSV to XYB via RGB intermediate conversion.

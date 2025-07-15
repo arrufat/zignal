@@ -15,6 +15,7 @@ pub const Hsv = @import("color/Hsv.zig");
 pub const Lab = @import("color/Lab.zig");
 pub const Lms = @import("color/Lms.zig");
 pub const Oklab = @import("color/Oklab.zig");
+pub const Oklch = @import("color/Oklch.zig");
 pub const Rgb = @import("color/Rgb.zig");
 pub const Rgba = @import("color/Rgba.zig").Rgba;
 pub const Xyb = @import("color/Xyb.zig");
@@ -88,6 +89,14 @@ test "blend methods for all color types" {
         var oklab_color = Oklab{ .l = 0, .a = 0, .b = 0 }; // black
         oklab_color.blend(red_rgba);
         const result_rgb = oklab_color.toRgb();
+        try expectEqualDeep(result_rgb, expected_rgb);
+    }
+
+    // Test Oklch.blend
+    {
+        var oklch_color = Oklch{ .l = 0, .c = 0, .h = 0 }; // black
+        oklch_color.blend(red_rgba);
+        const result_rgb = oklch_color.toRgb();
         try expectEqualDeep(result_rgb, expected_rgb);
     }
 
@@ -321,6 +330,7 @@ test "color type validation" {
     try expectEqual(isColor(Xyz), true);
     try expectEqual(isColor(Lms), true);
     try expectEqual(isColor(Oklab), true);
+    try expectEqual(isColor(Oklch), true);
     try expectEqual(isColor(Xyb), true);
     try expectEqual(isColor(Ycbcr), true);
     try expectEqual(isColor(f32), false);
@@ -358,6 +368,7 @@ test "extended color space round trips" {
         try expectEqualDeep(original, original.toXyz().toRgb());
         try expectEqualDeep(original, original.toLms().toRgb());
         try expectEqualDeep(original, original.toOklab().toRgb());
+        try expectEqualDeep(original, original.toOklch().toRgb());
         try expectEqualDeep(original, original.toXyb().toRgb());
     }
 }
@@ -374,46 +385,51 @@ test "comprehensive color conversion paths" {
     const xyz = test_rgb.toXyz();
     const lms = test_rgb.toLms();
     const oklab = test_rgb.toOklab();
+    const oklch = test_rgb.toOklch();
     const xyb = test_rgb.toXyb();
     const ycbcr = test_rgb.toYcbcr();
 
     // Test all conversions FROM each color type to ensure no compilation errors
     // and that all conversion methods exist and work correctly
 
-    // From Rgba - test all 9 conversion methods
+    // From Rgba - test all 10 conversion methods
     _ = rgba.toRgb();
     _ = rgba.toHsl();
     _ = rgba.toHsv();
     _ = rgba.toLab();
+    _ = rgba.toOklch();
     _ = rgba.toXyz();
     _ = rgba.toLms();
     _ = rgba.toOklab();
     _ = rgba.toXyb();
     _ = rgba.toYcbcr();
 
-    // From Hsl - test all 9 conversion methods
+    // From Hsl - test all 10 conversion methods
     _ = hsl.toRgb();
     _ = hsl.toRgba(255);
     _ = hsl.toHsv(); // This was the buggy method we fixed
     _ = hsl.toLab();
+    _ = hsl.toOklch();
     _ = hsl.toXyz();
     _ = hsl.toLms();
     _ = hsl.toOklab();
     _ = hsl.toXyb();
     _ = hsl.toYcbcr();
 
-    // From Hsv - test all 9 conversion methods
+    // From Hsv - test all 10 conversion methods
     _ = hsv.toRgb();
     _ = hsv.toRgba(255);
     _ = hsv.toHsl();
     _ = hsv.toLab();
+    _ = hsv.toOklch();
     _ = hsv.toXyz();
     _ = hsv.toLms();
     _ = hsv.toOklab();
     _ = hsv.toXyb();
     _ = hsv.toYcbcr();
 
-    // From Lab - test all 9 conversion methods
+    // From Lab - test all 10 conversion methods
+    // From Lab - toOklchall 10 conversion methods
     _ = lab.toRgb();
     _ = lab.toRgba(255);
     _ = lab.toHsl();
@@ -424,56 +440,74 @@ test "comprehensive color conversion paths" {
     _ = lab.toXyb();
     _ = lab.toYcbcr();
 
-    // From Xyz - test all 9 conversion methods
+    // From Xyz - test all 10 conversion methods
     _ = xyz.toRgb();
     _ = xyz.toRgba(255);
     _ = xyz.toHsl();
     _ = xyz.toHsv();
     _ = xyz.toLab();
+    _ = xyz.toOklch();
     _ = xyz.toLms();
     _ = xyz.toOklab();
     _ = xyz.toXyb();
     _ = xyz.toYcbcr();
 
-    // From Lms - test all 9 conversion methods
+    // From Lms - test all 10 conversion methods
     _ = lms.toRgb();
     _ = lms.toRgba(255);
     _ = lms.toHsl();
     _ = lms.toHsv();
     _ = lms.toLab();
+    _ = lms.toOklch();
     _ = lms.toXyz();
     _ = lms.toOklab();
     _ = lms.toXyb();
     _ = lms.toYcbcr();
 
-    // From Oklab - test all 9 conversion methods
+    // From Oklab - test all 10 conversion methods
     _ = oklab.toRgb();
     _ = oklab.toRgba(255);
     _ = oklab.toHsl();
     _ = oklab.toHsv();
     _ = oklab.toLab();
+    _ = oklab.toOklch();
     _ = oklab.toXyz();
     _ = oklab.toLms();
+    _ = oklab.toOklch();
     _ = oklab.toXyb();
     _ = oklab.toYcbcr();
 
-    // From Xyb - test all 9 conversion methods
+    // From Oklch - test all 10 conversion methods
+    _ = oklch.toRgb();
+    _ = oklch.toRgba(255);
+    _ = oklch.toHsl();
+    _ = oklch.toHsv();
+    _ = oklch.toLab();
+    _ = oklch.toXyz();
+    _ = oklch.toLms();
+    _ = oklch.toOklab();
+    _ = oklch.toXyb();
+    _ = oklch.toYcbcr();
+
+    // From Xyb - test all 10 conversion methods
     _ = xyb.toRgb();
     _ = xyb.toRgba(255);
     _ = xyb.toHsl();
     _ = xyb.toHsv();
     _ = xyb.toLab();
+    _ = xyb.toOklch();
     _ = xyb.toXyz();
     _ = xyb.toLms();
     _ = xyb.toOklab();
     _ = xyb.toYcbcr();
 
-    // From Ycbcr - test all 9 conversion methods
+    // From Ycbcr - test all 10 conversion methods
     _ = ycbcr.toRgb();
     _ = ycbcr.toRgba(255);
     _ = ycbcr.toHsl();
     _ = ycbcr.toHsv();
     _ = ycbcr.toLab();
+    _ = ycbcr.toOklch();
     _ = ycbcr.toXyz();
     _ = ycbcr.toLms();
     _ = ycbcr.toOklab();

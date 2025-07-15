@@ -10,6 +10,7 @@ const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
@@ -28,7 +29,7 @@ pub const green: Rgb = .{ .r = 0, .g = 255, .b = 0 };
 pub const blue: Rgb = .{ .r = 0, .g = 0, .b = 255 };
 
 /// Default formatting with ANSI color output
-pub fn format(self: Rgb, writer: anytype) !void {
+pub fn format(self: Rgb, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Rgb, self, writer);
 }
 
@@ -99,6 +100,11 @@ pub fn toLms(self: Rgb) Lms {
 /// Converts RGB to Oklab color space for improved perceptual uniformity.
 pub fn toOklab(self: Rgb) Oklab {
     return conversions.lmsToOklab(self.toLms());
+}
+
+/// Converts RGB to Oklch color space via Oklab intermediate conversion.
+pub fn toOklch(self: Rgb) Oklch {
+    return conversions.oklabToOklch(self.toOklab());
 }
 
 /// Converts RGB to XYB color space via LMS intermediate conversion.

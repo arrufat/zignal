@@ -40,7 +40,7 @@
             margin: 0 auto;
             text-align: center;
         }
-        
+
         /* Dynamic background transition */
         body {
             transition: background-color 0.3s ease;
@@ -50,74 +50,78 @@
   <body>
     <div class="header">
       <h1>Color Space Converter</h1>
-      <p>Convert colors between different color spaces: RGB, HSL, HSV, XYZ, Lab, LMS, Oklab, XYB, and YCbCr</p>
+      <p>Convert colors between different color spaces: RGB, HSL, HSV, XYZ, Lab, LMS, Oklab, Oklch, XYB, and YCbCr</p>
     </div>
-
     <div class="instructions">
       Change values in any color space to see real-time conversion to all other formats. Click color space names to copy values.
     </div>
-
     <div class="color-converter-table">
       <div id="hex" class="color-space">
-      <button class="copy-button" onClick="copyToClipboard('hex')">HEX</button>
-      <input type="text" id="hex-#" value="#000000">
-      <input type="color" name="color" id="color" value="#000000">
-      <label id="validation-message" style="min-height: 1em; display: inline-block; min-width: 150px;">&nbsp;</label>
-    </div>
-    <div id="rgb" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('rgb')">RGB</button>
-      <input type="number" id="rgb-r" min="0" max="255" value="0">
-      <input type="number" id="rgb-g" min="0" max="255" value="0">
-      <input type="number" id="rgb-b" min="0" max="255" value="0">
-    </div>
-    <div id="hsl" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('hsl')">HSL</button>
-      <input type="number" id="hsl-h" min="0" max="360" value="0">
-      <input type="number" id="hsl-s" min="0" max="100" value="0">
-      <input type="number" id="hsl-l" min="0" max="100" value="0">
-    </div>
-    <div id="hsv" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('hsv')">HSV</button>
-      <input type="number" id="hsv-h" min="0" max="360" value="0">
-      <input type="number" id="hsv-s" min="0" max="100" value="0">
-      <input type="number" id="hsv-v" min="0" max="100" value="0">
-    </div>
-    <div id="xyz" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('xyz')">XYZ</button>
-      <input type="number" id="xyz-x" min="0" max="95.050" step="0.1" value="0">
-      <input type="number" id="xyz-y" min="0" max="100" step="0.1" value="0">
-      <input type="number" id="xyz-z" min="0" max="108.900" step="0.1" value="0">
-    </div>
-    <div id="lab" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('lab')">Lab</button>
-      <input type="number" id="lab-l" min="0" max="100" step="0.1" value="0">
-      <input type="number" id="lab-a" min="-128" max="127" step="0.1" value="0">
-      <input type="number" id="lab-b" min="-128" max="127" step="0.1" value="0">
-    </div>
-    <div id="lms" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('lms')">LMS</button>
-      <input type="number" id="lms-l" min="0" step="0.001" value="0">
-      <input type="number" id="lms-m" min="0" step="0.001" value="0">
-      <input type="number" id="lms-s" min="0" step="0.001" value="0">
-    </div>
-    <div id="oklab" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('oklab')">Oklab</button>
-      <input type="number" id="oklab-l" min="0" max="1" step="0.01" value="0">
-      <input type="number" id="oklab-a" min="-0.5" max="0.5" step="0.01" value="0">
-      <input type="number" id="oklab-b" min="-0.5" max="0.5" step="0.01" value="0">
-    </div>
-    <div id="xyb" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('xyb')">XYB</button>
-      <input type="number" id="xyb-x" step="0.1" value="0">
-      <input type="number" id="xyb-y" step="0.1" value="0">
-      <input type="number" id="xyb-b" min="0" step="0.1" value="0">
-    </div>
-    <div id="ycbcr" class="color-space">
-      <button class="copy-button" onclick="copyToClipboard('ycbcr')">YCbCr</button>
-      <input type="number" id="ycbcr-y" min="0" max="255" step="0.1" value="0">
-      <input type="number" id="ycbcr-cb" min="0" max="255" step="0.1" value="128">
-      <input type="number" id="ycbcr-cr" min="0" max="255" step="0.1" value="128">
-    </div>
+        <button class="copy-button" onClick="copyToClipboard('hex')">HEX</button>
+        <input type="text" id="hex-#" value="#000000">
+        <input type="color" name="color" id="color" value="#000000">
+        <label id="validation-message" style="min-height: 1em; display: inline-block; min-width: 150px;">&nbsp;</label>
+      </div>
+      <div id="rgb" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('rgb')">RGB</button>
+        <input type="number" id="rgb-r" min="0" max="255" value="0">
+        <input type="number" id="rgb-g" min="0" max="255" value="0">
+        <input type="number" id="rgb-b" min="0" max="255" value="0">
+      </div>
+      <div id="hsl" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('hsl')">HSL</button>
+        <input type="number" id="hsl-h" min="0" max="360" value="0">
+        <input type="number" id="hsl-s" min="0" max="100" value="0">
+        <input type="number" id="hsl-l" min="0" max="100" value="0">
+      </div>
+      <div id="hsv" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('hsv')">HSV</button>
+        <input type="number" id="hsv-h" min="0" max="360" value="0">
+        <input type="number" id="hsv-s" min="0" max="100" value="0">
+        <input type="number" id="hsv-v" min="0" max="100" value="0">
+      </div>
+      <div id="xyz" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('xyz')">XYZ</button>
+        <input type="number" id="xyz-x" min="0" max="95.050" step="0.1" value="0">
+        <input type="number" id="xyz-y" min="0" max="100" step="0.1" value="0">
+        <input type="number" id="xyz-z" min="0" max="108.900" step="0.1" value="0">
+      </div>
+      <div id="lab" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('lab')">Lab</button>
+        <input type="number" id="lab-l" min="0" max="100" step="0.1" value="0">
+        <input type="number" id="lab-a" min="-128" max="127" step="0.1" value="0">
+        <input type="number" id="lab-b" min="-128" max="127" step="0.1" value="0">
+      </div>
+      <div id="lms" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('lms')">LMS</button>
+        <input type="number" id="lms-l" min="0" step="0.001" value="0">
+        <input type="number" id="lms-m" min="0" step="0.001" value="0">
+        <input type="number" id="lms-s" min="0" step="0.001" value="0">
+      </div>
+      <div id="oklab" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('oklab')">Oklab</button>
+        <input type="number" id="oklab-l" min="0" max="1" step="0.01" value="0">
+        <input type="number" id="oklab-a" min="-0.5" max="0.5" step="0.01" value="0">
+        <input type="number" id="oklab-b" min="-0.5" max="0.5" step="0.01" value="0">
+      </div>
+      <div id="oklch" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('oklch')">Oklch</button>
+        <input type="number" id="oklch-l" min="0" max="1" step="0.01" value="0">
+        <input type="number" id="oklch-c" min="0" max="0.5" step="0.01" value="0">
+        <input type="number" id="oklch-h" min="0" max="360" step="1" value="0">
+      </div>
+      <div id="xyb" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('xyb')">XYB</button>
+        <input type="number" id="xyb-x" step="0.1" value="0">
+        <input type="number" id="xyb-y" step="0.1" value="0">
+        <input type="number" id="xyb-b" min="0" step="0.1" value="0">
+      </div>
+      <div id="ycbcr" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('ycbcr')">YCbCr</button>
+        <input type="number" id="ycbcr-y" min="0" max="255" step="0.1" value="0">
+        <input type="number" id="ycbcr-cb" min="0" max="255" step="0.1" value="128">
+        <input type="number" id="ycbcr-cr" min="0" max="255" step="0.1" value="128">
+      </div>
     </div>
     <script src="colorspaces.js"></script>
     <script>
@@ -157,6 +161,9 @@
           case 'oklab':
             inputs = ['oklab-l', 'oklab-a', 'oklab-b'].map(id => document.getElementById(id));
             break;
+          case 'oklch':
+            inputs = ['oklch-l', 'oklch-c', 'oklch-h'].map(id => document.getElementById(id));
+            break;
           case 'xyb':
             inputs = ['xyb-x', 'xyb-y', 'xyb-b'].map(id => document.getElementById(id));
             break;
@@ -174,57 +181,57 @@
           console.error('Failed to copy: ', err);
         });
       }
-      
+
       // Function to update background with a pastel version of current color
       function updateBackground() {
         try {
           const rgbR = parseInt(document.getElementById('rgb-r').value) || 0;
-          const rgbG = parseInt(document.getElementById('rgb-g').value) || 0; 
+          const rgbG = parseInt(document.getElementById('rgb-g').value) || 0;
           const rgbB = parseInt(document.getElementById('rgb-b').value) || 0;
-          
+
           // Check if color is grayscale (R = G = B)
           if (rgbR === rgbG && rgbG === rgbB) {
             // Use default background for grayscale colors
             document.body.style.backgroundColor = '#f5f5f5';
             return;
           }
-          
+
           // Convert RGB to HSL for easier manipulation
           const hsl = rgbToHsl(rgbR, rgbG, rgbB);
-          
+
           // Check if saturation is very low (essentially gray)
           if (hsl.s < 5) {
             // Use default background for very low saturation colors
             document.body.style.backgroundColor = '#f5f5f5';
             return;
           }
-          
+
           // Create pastel version: high lightness (88%), low saturation (25%)
           const pastelHsl = `hsl(${hsl.h}, 25%, 88%)`;
-          
+
           document.body.style.backgroundColor = pastelHsl;
         } catch (error) {
           // Fallback to default background if conversion fails
           document.body.style.backgroundColor = '#f5f5f5';
         }
       }
-      
+
       // Helper function to convert RGB to HSL
       function rgbToHsl(r, g, b) {
         r /= 255;
         g /= 255;
         b /= 255;
-        
+
         const max = Math.max(r, g, b);
         const min = Math.min(r, g, b);
         let h, s, l = (max + min) / 2;
-        
+
         if (max === min) {
           h = s = 0; // achromatic
         } else {
           const d = max - min;
           s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-          
+
           switch (max) {
             case r: h = (g - b) / d + (g < b ? 6 : 0); break;
             case g: h = (b - r) / d + 2; break;
@@ -232,41 +239,41 @@
           }
           h /= 6;
         }
-        
+
         return {
           h: Math.round(h * 360),
           s: Math.round(s * 100),
           l: Math.round(l * 100)
         };
       }
-      
+
       // Handle mouse wheel events on number inputs
       function handleWheel(event) {
         if (event.target.type === 'number') {
           event.preventDefault();
-          
+
           const input = event.target;
           const step = parseFloat(input.step) || 1;
           const min = parseFloat(input.min);
           const max = parseFloat(input.max);
           let currentValue = parseFloat(input.value) || 0;
-          
+
           // Determine direction (negative deltaY means scroll up)
           const delta = event.deltaY < 0 ? step : -step;
           let newValue = currentValue + delta;
-          
+
           // Clamp to min/max if they exist
           if (!isNaN(min) && newValue < min) newValue = min;
           if (!isNaN(max) && newValue > max) newValue = max;
-          
+
           // Update input value
           input.value = newValue;
-          
+
           // Trigger input event to update other color spaces
           input.dispatchEvent(new Event('input', { bubbles: true }));
         }
       }
-      
+
       // Call updateBackground when any color input changes
       document.addEventListener('DOMContentLoaded', function() {
         // Get all color input elements and add event listeners
@@ -274,13 +281,13 @@
         inputs.forEach(input => {
           input.addEventListener('input', updateBackground);
           input.addEventListener('change', updateBackground);
-          
+
           // Add wheel event listener for number inputs
           if (input.type === 'number') {
             input.addEventListener('wheel', handleWheel);
           }
         });
-        
+
         // Initial background update
         updateBackground();
       });

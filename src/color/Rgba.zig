@@ -7,6 +7,7 @@ const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
@@ -25,7 +26,7 @@ pub const Rgba = packed struct {
     pub const transparent: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
     /// Default formatting with ANSI color output
-    pub fn format(self: Rgba, writer: anytype) !void {
+    pub fn format(self: Rgba, writer: *std.Io.Writer) !void {
         return formatting.formatColor(Rgba, self, writer);
     }
 
@@ -92,6 +93,11 @@ pub const Rgba = packed struct {
     /// Converts RGBA to Oklab by first converting to RGB.
     pub fn toOklab(self: Rgba) Oklab {
         return self.toRgb().toOklab();
+    }
+
+    /// Converts RGBA to Oklch by first converting to RGB.
+    pub fn toOklch(self: Rgba) Oklch {
+        return self.toRgb().toOklch();
     }
 
     /// Converts RGBA to XYB by first converting to RGB.

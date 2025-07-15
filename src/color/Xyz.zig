@@ -14,6 +14,7 @@ const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -30,7 +31,7 @@ pub const black: Self = .{ .x = 0, .y = 0, .z = 0 };
 
 /// Formats the CIE XYZ color for display. Use "color" format for ANSI color output.
 /// Default formatting with ANSI color output
-pub fn format(self: Self, writer: anytype) !void {
+pub fn format(self: Self, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Self, self, writer);
 }
 
@@ -77,6 +78,11 @@ pub fn toLms(self: Self) Lms {
 /// Converts CIE XYZ to Oklab color space using direct conversion.
 pub fn toOklab(self: Self) Oklab {
     return conversions.xyzToOklab(self);
+}
+
+/// Converts CIE XYZ to Oklch via Oklab intermediate conversion.
+pub fn toOklch(self: Self) Oklch {
+    return self.toOklab().toOklch();
 }
 
 /// Converts CIE XYZ to XYB color space using direct conversion.

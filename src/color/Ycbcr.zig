@@ -11,6 +11,7 @@ const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -31,7 +32,7 @@ pub const white: Ycbcr = .{ .y = 255, .cb = 128, .cr = 128 };
 
 /// Formats the Ycbcr color for display. Use "color" format for ANSI color output.
 /// Default formatting with ANSI color output
-pub fn format(self: Ycbcr, writer: anytype) !void {
+pub fn format(self: Ycbcr, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Ycbcr, self, writer);
 }
 
@@ -73,6 +74,11 @@ pub fn toLms(self: Ycbcr) Lms {
 /// Converts to Oklab via RGB.
 pub fn toOklab(self: Ycbcr) Oklab {
     return self.toRgb().toOklab();
+}
+
+/// Converts to Oklch via RGB.
+pub fn toOklch(self: Ycbcr) Oklch {
+    return self.toRgb().toOklch();
 }
 
 /// Converts to XYB via RGB.
