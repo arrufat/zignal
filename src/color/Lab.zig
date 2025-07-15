@@ -12,6 +12,7 @@ const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -28,7 +29,7 @@ pub const black: Lab = .{ .l = 0, .a = 0, .b = 0 };
 pub const white: Lab = .{ .l = 100, .a = 0, .b = 0 };
 
 /// Default formatting with ANSI color output
-pub fn format(self: Lab, writer: anytype) !void {
+pub fn format(self: Lab, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Lab, self, writer);
 }
 
@@ -75,6 +76,11 @@ pub fn toLms(self: Lab) Lms {
 /// Converts CIELAB to Oklab via LMS intermediate conversion.
 pub fn toOklab(self: Lab) Oklab {
     return self.toLms().toOklab();
+}
+
+/// Converts CIELAB to Oklch via Oklab intermediate conversion.
+pub fn toOklch(self: Lab) Oklch {
+    return self.toOklab().toOklch();
 }
 
 /// Converts CIELAB to XYB via LMS intermediate conversion.

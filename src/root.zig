@@ -46,6 +46,7 @@ pub const Xyz = color.Xyz;
 pub const Lab = color.Lab;
 pub const Lms = color.Lms;
 pub const Oklab = color.Oklab;
+pub const Oklch = color.Oklch;
 pub const Xyb = color.Xyb;
 pub const Ycbcr = color.Ycbcr;
 

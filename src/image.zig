@@ -260,7 +260,7 @@ pub fn Image(comptime T: type) type {
         /// Formats the image as a grid of colored spaces, where each pixel is represented by a space
         /// with the appropriate background color. This provides a visual representation of the image
         /// in terminal output.
-        pub fn format(self: Self, writer: anytype) !void {
+        pub fn format(self: Self, writer: *std.Io.Writer) !void {
             const Rgb = @import("color.zig").Rgb;
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {

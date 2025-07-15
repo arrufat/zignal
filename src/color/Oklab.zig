@@ -12,6 +12,7 @@ const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -28,7 +29,7 @@ pub const black: Oklab = .{ .l = 0, .a = 0, .b = 0 };
 
 /// Formats the Oklab color for display. Use "color" format for ANSI color output.
 /// Default formatting with ANSI color output
-pub fn format(self: Oklab, writer: anytype) !void {
+pub fn format(self: Oklab, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Oklab, self, writer);
 }
 
@@ -75,6 +76,11 @@ pub fn toLab(self: Oklab) Lab {
 /// Converts Oklab to LMS cone response using direct conversion.
 pub fn toLms(self: Oklab) Lms {
     return conversions.oklabToLms(self);
+}
+
+/// Converts Oklab to Oklch (cylindrical representation).
+pub fn toOklch(self: Oklab) Oklch {
+    return conversions.oklabToOklch(self);
 }
 
 /// Converts Oklab to XYB color space using direct conversion.

@@ -13,6 +13,7 @@ const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
+const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
@@ -22,7 +23,7 @@ const Ycbcr = @import("Ycbcr.zig");
 /// Returns true if, and only if, `T` is a known color.
 pub fn isColor(comptime T: type) bool {
     return switch (T) {
-        u8, Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Xyb, Ycbcr => true,
+        u8, Rgb, Rgba, Hsl, Hsv, Lab, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr => true,
         else => false,
     };
 }
@@ -77,6 +78,11 @@ pub fn convertColor(comptime T: type, color: anytype) T {
             Oklab => color,
             u8 => Rgb.fromGray(color).toOklab(),
             inline else => color.toOklab(),
+        },
+        Oklch => switch (ColorType) {
+            Oklch => color,
+            u8 => Rgb.fromGray(color).toOklch(),
+            inline else => color.toOklch(),
         },
         Xyb => switch (ColorType) {
             Xyb => color,
@@ -569,6 +575,69 @@ pub fn oklabToLms(oklab: Oklab) Lms {
 
 pub fn oklabToXyb(oklab: Oklab) Xyb {
     return lmsToXyb(oklabToLms(oklab));
+}
+
+/// Converts Oklab to Oklch (cylindrical representation).
+/// - L: Lightness (unchanged)
+/// - C: Chroma = √(a² + b²)
+/// - h: Hue = atan2(b, a) converted to degrees
+pub fn oklabToOklch(oklab: Oklab) Oklch {
+    const c = @sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
+    var h = std.math.atan2(oklab.b, oklab.a) * 180.0 / std.math.pi;
+
+    // Ensure hue is in range [0, 360)
+    if (h < 0) {
+        h += 360.0;
+    }
+
+    return .{
+        .l = oklab.l,
+        .c = c,
+        .h = h,
+    };
+}
+
+/// Converts Oklch to Oklab (rectangular representation).
+/// - L: Lightness (unchanged)
+/// - a: C × cos(h)
+/// - b: C × sin(h)
+pub fn oklchToOklab(oklch: Oklch) Oklab {
+    const h_rad = oklch.h * std.math.pi / 180.0;
+
+    return .{
+        .l = oklch.l,
+        .a = oklch.c * @cos(h_rad),
+        .b = oklch.c * @sin(h_rad),
+    };
+}
+
+// Oklch conversions
+pub fn oklchToRgb(oklch: Oklch) Rgb {
+    return oklabToRgb(oklchToOklab(oklch));
+}
+
+pub fn oklchToHsl(oklch: Oklch) Hsl {
+    return oklabToHsl(oklchToOklab(oklch));
+}
+
+pub fn oklchToHsv(oklch: Oklch) Hsv {
+    return oklabToHsv(oklchToOklab(oklch));
+}
+
+pub fn oklchToXyz(oklch: Oklch) Xyz {
+    return oklabToXyz(oklchToOklab(oklch));
+}
+
+pub fn oklchToLab(oklch: Oklch) Lab {
+    return oklabToLab(oklchToOklab(oklch));
+}
+
+pub fn oklchToLms(oklch: Oklch) Lms {
+    return oklabToLms(oklchToOklab(oklch));
+}
+
+pub fn oklchToXyb(oklch: Oklch) Xyb {
+    return oklabToXyb(oklchToOklab(oklch));
 }
 
 // XYB conversions

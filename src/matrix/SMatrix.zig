@@ -394,7 +394,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Default formatting (scientific notation)
-        pub fn format(self: Self, writer: anytype) !void {
+        pub fn format(self: Self, writer: *std.Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
         }
 

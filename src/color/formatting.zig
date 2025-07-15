@@ -15,7 +15,7 @@ const Rgb = @import("Rgb.zig");
 pub fn formatColor(
     comptime T: type,
     self: T,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) !void {
 
     // Get the short type name
