@@ -10,6 +10,7 @@ const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
+const Lch = @import("Lch.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Oklch = @import("Oklch.zig");
@@ -91,6 +92,11 @@ pub fn toXyb(self: Lab) Xyb {
 /// Converts CIELAB to YCbCr via RGB.
 pub fn toYcbcr(self: Lab) Ycbcr {
     return self.toRgb().toYcbcr();
+}
+
+/// Converts CIELAB to LCh (cylindrical representation).
+pub fn toLch(self: Lab) Lch {
+    return conversions.labToLch(self);
 }
 
 /// Alpha blends the given RGBA color onto this CIELAB color in-place.

@@ -5,6 +5,7 @@ const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
+const Lch = @import("Lch.zig");
 const Lms = @import("Lms.zig");
 const Oklab = @import("Oklab.zig");
 const Oklch = @import("Oklch.zig");
@@ -78,6 +79,11 @@ pub const Rgba = packed struct {
     /// Converts RGBA to CIELAB by first converting to RGB.
     pub fn toLab(self: Rgba) Lab {
         return self.toRgb().toLab();
+    }
+
+    /// Converts RGBA to LCh by first converting to RGB.
+    pub fn toLch(self: Rgba) Lch {
+        return self.toRgb().toLch();
     }
 
     /// Converts RGBA to CIE XYZ by first converting to RGB.

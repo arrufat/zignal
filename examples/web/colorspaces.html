@@ -50,7 +50,7 @@
   <body>
     <div class="header">
       <h1>Color Space Converter</h1>
-      <p>Convert colors between different color spaces: RGB, HSL, HSV, XYZ, Lab, LMS, Oklab, Oklch, XYB, and YCbCr</p>
+      <p>Convert colors between different color spaces: RGB, HSL, HSV, XYZ, Lab, LCh, LMS, Oklab, Oklch, XYB, and YCbCr</p>
     </div>
     <div class="instructions">
       Change values in any color space to see real-time conversion to all other formats. Click color space names to copy values.
@@ -91,6 +91,12 @@
         <input type="number" id="lab-l" min="0" max="100" step="0.1" value="0">
         <input type="number" id="lab-a" min="-128" max="127" step="0.1" value="0">
         <input type="number" id="lab-b" min="-128" max="127" step="0.1" value="0">
+      </div>
+      <div id="lch" class="color-space">
+        <button class="copy-button" onclick="copyToClipboard('lch')">LCh</button>
+        <input type="number" id="lch-l" min="0" max="100" step="0.1" value="0">
+        <input type="number" id="lch-c" min="0" max="200" step="0.1" value="0">
+        <input type="number" id="lch-h" min="0" max="360" step="1" value="0">
       </div>
       <div id="lms" class="color-space">
         <button class="copy-button" onclick="copyToClipboard('lms')">LMS</button>
@@ -154,6 +160,9 @@
             break;
           case 'lab':
             inputs = ['lab-l', 'lab-a', 'lab-b'].map(id => document.getElementById(id));
+            break;
+          case 'lch':
+            inputs = ['lch-l', 'lch-c', 'lch-h'].map(id => document.getElementById(id));
             break;
           case 'lms':
             inputs = ['lms-l', 'lms-m', 'lms-s'].map(id => document.getElementById(id));
