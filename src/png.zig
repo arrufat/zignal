@@ -394,7 +394,13 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
             .rgba => {
                 return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_image.header) };
             },
-            .palette => return error.UnsupportedColorType, // TODO: implement palette support
+            .palette => {
+                if (png_image.transparency != null) {
+                    return .{ .rgba = try deinterlaceAdam7Palette(allocator, Rgba, decompressed, png_image.header, png_image.palette orelse return error.MissingPalette, png_image.transparency) };
+                } else {
+                    return .{ .rgb = try deinterlaceAdam7Palette(allocator, Rgb, decompressed, png_image.header, png_image.palette orelse return error.MissingPalette, null) };
+                }
+            },
         }
     }
 
@@ -514,32 +520,94 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
             return .{ .rgba = Image(Rgba).init(height, width, output_data) };
         },
         .palette => {
-            // Convert palette to RGB
+            // Convert palette to RGB or RGBA (if transparency present)
             if (png_image.palette == null) return error.MissingPalette;
             const palette = png_image.palette.?;
+            const transparency = png_image.transparency;
 
             const total_pixels = @as(u64, width) * @as(u64, height);
             if (total_pixels > std.math.maxInt(usize)) {
                 return error.ImageTooLarge;
             }
-            var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
 
-            for (0..height) |y| {
-                const src_row_start = y * (scanline_bytes + 1) + 1;
-                const dst_row_start = y * width;
-                const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                const dst_row = output_data[dst_row_start .. dst_row_start + width];
+            if (transparency != null) {
+                // Has transparency - convert to RGBA
+                var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
+                const transparency_data = transparency.?;
 
-                for (dst_row, 0..) |*pixel, i| {
-                    if (i >= src_row.len) return error.InvalidScanlineData;
-                    const index = src_row[i];
-                    if (index >= palette.len) return error.InvalidPaletteIndex;
-                    const rgb = palette[index];
-                    pixel.* = Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
+                for (0..height) |y| {
+                    const src_row_start = y * (scanline_bytes + 1) + 1;
+                    const dst_row_start = y * width;
+                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
+
+                    for (dst_row, 0..) |*pixel, i| {
+                        const index = switch (png_image.header.bit_depth) {
+                            8 => blk: {
+                                if (i >= src_row.len) return error.InvalidScanlineData;
+                                break :blk src_row[i];
+                            },
+                            1, 2, 4 => blk: {
+                                const bits_per_pixel = png_image.header.bit_depth;
+                                const pixels_per_byte = 8 / bits_per_pixel;
+                                const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+                                const byte_idx = i / pixels_per_byte;
+                                if (byte_idx >= src_row.len) return error.InvalidScanlineData;
+                                const pixel_idx = i % pixels_per_byte;
+                                const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
+                                break :blk (src_row[byte_idx] >> bit_offset) & mask;
+                            },
+                            else => return error.InvalidBitDepth,
+                        };
+
+                        if (index >= palette.len) return error.InvalidPaletteIndex;
+                        const rgb = palette[index];
+
+                        // Get alpha value from transparency chunk (default to opaque if not present)
+                        const alpha = if (index < transparency_data.len) transparency_data[index] else 255;
+
+                        pixel.* = Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha };
+                    }
                 }
-            }
 
-            return .{ .rgb = Image(Rgb).init(height, width, output_data) };
+                return .{ .rgba = Image(Rgba).init(height, width, output_data) };
+            } else {
+                // No transparency - convert to RGB
+                var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
+
+                for (0..height) |y| {
+                    const src_row_start = y * (scanline_bytes + 1) + 1;
+                    const dst_row_start = y * width;
+                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
+
+                    for (dst_row, 0..) |*pixel, i| {
+                        const index = switch (png_image.header.bit_depth) {
+                            8 => blk: {
+                                if (i >= src_row.len) return error.InvalidScanlineData;
+                                break :blk src_row[i];
+                            },
+                            1, 2, 4 => blk: {
+                                const bits_per_pixel = png_image.header.bit_depth;
+                                const pixels_per_byte = 8 / bits_per_pixel;
+                                const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+                                const byte_idx = i / pixels_per_byte;
+                                if (byte_idx >= src_row.len) return error.InvalidScanlineData;
+                                const pixel_idx = i % pixels_per_byte;
+                                const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
+                                break :blk (src_row[byte_idx] >> bit_offset) & mask;
+                            },
+                            else => return error.InvalidBitDepth,
+                        };
+
+                        if (index >= palette.len) return error.InvalidPaletteIndex;
+                        const rgb = palette[index];
+                        pixel.* = Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
+                    }
+                }
+
+                return .{ .rgb = Image(Rgb).init(height, width, output_data) };
+            }
         },
     }
 }
@@ -547,16 +615,16 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
 // High-level API functions
 
 /// Load PNG file from disk and decode to specified pixel type.
-/// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (8-bit, non-interlaced only).
-/// Includes Adam7 interlacing support for non-palette formats. Automatically converts to desired output type.
-/// 
+/// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (1/2/4/8-bit with transparency).
+/// Includes full Adam7 interlacing support for all formats. Automatically converts to desired output type.
+///
 /// Parameters:
 /// - T: Desired output pixel type (u8, Rgb, Rgba, etc.) - color conversion applied if needed
 /// - allocator: Memory allocator for image data
 /// - file_path: Path to PNG file
-/// 
+///
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
-/// 
+///
 /// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
 pub fn loadPng(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const png_data = try std.fs.cwd().readFileAlloc(allocator, file_path, 100 * 1024 * 1024);
@@ -777,13 +845,13 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T)) ![]u
 /// Save Image to PNG file with automatic format detection.
 /// Encodes to optimal PNG format based on input pixel type with automatic conversion if needed.
 /// Uses deflate compression with PNG row filtering for optimal file size.
-/// 
+///
 /// Parameters:
 /// - T: Input image pixel type (u8->grayscale, Rgb->RGB, Rgba->RGBA, others converted to RGB)
 /// - allocator: Memory allocator for encoding operations
 /// - image: Source image to save
 /// - file_path: Output PNG file path
-/// 
+///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
 pub fn savePng(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encodeImage(T, allocator, image);
@@ -1038,6 +1106,92 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
                     .rgba => extractRgbaPixel(T, src_row, pass_x, header),
                     .palette => @panic("Palette images not supported yet"), // TODO: implement palette support
                 };
+            }
+        }
+
+        data_offset += dims.height * (pass_scanline_bytes + 1);
+    }
+
+    return Image(T){
+        .rows = @intCast(header.height),
+        .cols = @intCast(header.width),
+        .data = output_data,
+        .stride = @intCast(header.width),
+    };
+}
+
+// Deinterlace Adam7 palette data and convert to RGB or RGBA
+fn deinterlaceAdam7Palette(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, palette: [][3]u8, transparency: ?[]u8) !Image(T) {
+    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
+    if (total_pixels > std.math.maxInt(usize)) {
+        return error.ImageTooLarge;
+    }
+
+    var output_data = try allocator.alloc(T, @intCast(total_pixels));
+    const channels = header.channels();
+    var data_offset: usize = 0;
+
+    // Process each of the 7 Adam7 passes
+    for (0..7) |pass| {
+        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
+        if (dims.width == 0 or dims.height == 0) continue;
+
+        const pass_info = adam7_passes[pass];
+        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+
+        for (0..dims.height) |pass_y| {
+            const src_row_start = data_offset + pass_y * (pass_scanline_bytes + 1) + 1; // +1 to skip filter byte
+            const src_row = decompressed[src_row_start .. src_row_start + pass_scanline_bytes];
+
+            const final_y = pass_info.y_start + pass_y * pass_info.y_step;
+            if (final_y >= header.height) continue;
+
+            for (0..dims.width) |pass_x| {
+                const final_x = pass_info.x_start + pass_x * pass_info.x_step;
+                if (final_x >= header.width) continue;
+
+                const final_pixel_idx = final_y * header.width + final_x;
+
+                // Extract palette index based on bit depth
+                const index = switch (header.bit_depth) {
+                    8 => blk: {
+                        if (pass_x >= src_row.len) break :blk 0;
+                        break :blk src_row[pass_x];
+                    },
+                    1, 2, 4 => blk: {
+                        const bits_per_pixel = header.bit_depth;
+                        const pixels_per_byte = 8 / bits_per_pixel;
+                        const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+                        const byte_idx = pass_x / pixels_per_byte;
+                        if (byte_idx >= src_row.len) break :blk 0;
+                        const pixel_idx = pass_x % pixels_per_byte;
+                        const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
+                        break :blk (src_row[byte_idx] >> bit_offset) & mask;
+                    },
+                    else => 0,
+                };
+
+                // Convert palette index to RGB
+                if (index >= palette.len) {
+                    // Invalid palette index - use black as fallback
+                    output_data[final_pixel_idx] = switch (T) {
+                        Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
+                        Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+                        u8 => 0,
+                        else => @compileError("Unsupported pixel type for palette conversion"),
+                    };
+                } else {
+                    const rgb = palette[index];
+                    // Get alpha value from transparency chunk (default to opaque if not present)
+                    const alpha = if (transparency != null and index < transparency.?.len) transparency.?[index] else 255;
+
+                    output_data[final_pixel_idx] = switch (T) {
+                        Rgb => Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] },
+                        Rgba => Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha },
+                        u8 => @as(u8, @intCast((@as(u16, rgb[0]) + @as(u16, rgb[1]) + @as(u16, rgb[2])) / 3)),
+                        else => @compileError("Unsupported pixel type for palette conversion"),
+                    };
+                }
             }
         }
 
@@ -1549,4 +1703,59 @@ test "Adam7 interlaced PNG support" {
     const rgba_src = [_]u8{ 255, 0, 0, 255, 0, 255, 0, 128 }; // red (alpha=255), green (alpha=128)
     const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, interlaced_header);
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
+}
+
+test "PNG palette transparency support" {
+    const allocator = std.testing.allocator;
+
+    // Create a palette PNG with transparency
+    var png_image = PngImage{
+        .header = Header{
+            .width = 2,
+            .height = 2,
+            .bit_depth = 8,
+            .color_type = .palette,
+            .compression_method = 0,
+            .filter_method = 0,
+            .interlace_method = 0,
+        },
+        .idat_data = ArrayList(u8).init(allocator),
+    };
+    defer png_image.deinit(allocator);
+
+    // Create palette: red, green, blue, white
+    const palette = try allocator.alloc([3]u8, 4);
+    defer allocator.free(palette);
+    palette[0] = [3]u8{ 255, 0, 0 };   // red
+    palette[1] = [3]u8{ 0, 255, 0 };   // green
+    palette[2] = [3]u8{ 0, 0, 255 };   // blue
+    palette[3] = [3]u8{ 255, 255, 255 }; // white
+    png_image.palette = palette;
+
+    // Create transparency: red=255, green=128, blue=64, white=0 (transparent)
+    const transparency = try allocator.alloc(u8, 4);
+    defer allocator.free(transparency);
+    transparency[0] = 255; // red opaque
+    transparency[1] = 128; // green semi-transparent
+    transparency[2] = 64;  // blue more transparent
+    transparency[3] = 0;   // white fully transparent
+    png_image.transparency = transparency;
+
+    // Clear pointers before deinit to avoid double-free
+    defer {
+        png_image.palette = null;
+        png_image.transparency = null;
+    }
+
+    // Test palette transparency access
+    try std.testing.expectEqual(@as(u8, 255), transparency[0]);
+    try std.testing.expectEqual(@as(u8, 128), transparency[1]);
+    try std.testing.expectEqual(@as(u8, 64), transparency[2]);
+    try std.testing.expectEqual(@as(u8, 0), transparency[3]);
+
+    // Test palette RGB values
+    try std.testing.expectEqual([3]u8{ 255, 0, 0 }, palette[0]);
+    try std.testing.expectEqual([3]u8{ 0, 255, 0 }, palette[1]);
+    try std.testing.expectEqual([3]u8{ 0, 0, 255 }, palette[2]);
+    try std.testing.expectEqual([3]u8{ 255, 255, 255 }, palette[3]);
 }
