@@ -1785,7 +1785,18 @@ pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Im
     }
 }
 
-// Load JPEG file (supports baseline and progressive JPEG)
+/// Load JPEG file from disk and decode to specified pixel type.
+/// Supports baseline DCT (SOF0) and progressive DCT (SOF2) JPEG formats.
+/// Handles grayscale (1 component) and YCbCr color (3 components) with 4:4:4 and 4:2:0 chroma subsampling (4:2:2/4:1:1 supported with fallback processing).
+/// 
+/// Parameters:
+/// - T: Desired output pixel type (u8, f32, Rgb, etc.) - color conversion applied if needed
+/// - allocator: Memory allocator for image data
+/// - file_path: Path to JPEG file
+/// 
+/// Returns: Decoded Image(T) with automatic color space conversion from source format
+/// 
+/// Errors: InvalidJpegFile, UnsupportedJpegFormat, OutOfMemory, and various JPEG parsing errors
 pub fn loadJpeg(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();

@@ -546,7 +546,18 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
 
 // High-level API functions
 
-/// Generic PNG load function that works with any supported pixel type
+/// Load PNG file from disk and decode to specified pixel type.
+/// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (8-bit, non-interlaced only).
+/// Includes Adam7 interlacing support for non-palette formats. Automatically converts to desired output type.
+/// 
+/// Parameters:
+/// - T: Desired output pixel type (u8, Rgb, Rgba, etc.) - color conversion applied if needed
+/// - allocator: Memory allocator for image data
+/// - file_path: Path to PNG file
+/// 
+/// Returns: Decoded Image(T) with automatic color space conversion from source format
+/// 
+/// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
 pub fn loadPng(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const png_data = try std.fs.cwd().readFileAlloc(allocator, file_path, 100 * 1024 * 1024);
     defer allocator.free(png_data);
@@ -763,7 +774,17 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T)) ![]u
     }
 }
 
-/// Generic PNG save function that works with any supported pixel type
+/// Save Image to PNG file with automatic format detection.
+/// Encodes to optimal PNG format based on input pixel type with automatic conversion if needed.
+/// Uses deflate compression with PNG row filtering for optimal file size.
+/// 
+/// Parameters:
+/// - T: Input image pixel type (u8->grayscale, Rgb->RGB, Rgba->RGBA, others converted to RGB)
+/// - allocator: Memory allocator for encoding operations
+/// - image: Source image to save
+/// - file_path: Output PNG file path
+/// 
+/// Errors: OutOfMemory, file creation/write errors, encoding errors
 pub fn savePng(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encodeImage(T, allocator, image);
     defer allocator.free(png_data);
