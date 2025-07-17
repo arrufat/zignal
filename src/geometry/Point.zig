@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 /// Higher dimensions use at(index) for access.
 pub fn Point(comptime T: type, comptime dim: usize) type {
     assert(@typeInfo(T) == .float);
-    assert(dim >= 1);
+    comptime assert(dim >= 1);
 
     return struct {
         const Self = @This();
