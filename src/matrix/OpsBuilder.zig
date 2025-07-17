@@ -86,59 +86,208 @@ pub fn OpsBuilder(comptime T: type) type {
             try self.gemm(other, false, false, 1.0, 0.0, null);
         }
 
-        /// Computes the determinant of the matrix (only for square matrices up to 3x3)
-        fn determinant(matrix: Matrix(T)) T {
-            assert(matrix.rows == matrix.cols);
+        /// Computes the determinant of the matrix using analytical formulas for small matrices
+        /// and LU decomposition for larger matrices
+        pub fn determinant(self: *Self) !T {
+            assert(self.result.rows == self.result.cols);
 
-            return switch (matrix.rows) {
-                1 => matrix.at(0, 0).*,
-                2 => matrix.at(0, 0).* * matrix.at(1, 1).* - matrix.at(0, 1).* * matrix.at(1, 0).*,
-                3 => matrix.at(0, 0).* * matrix.at(1, 1).* * matrix.at(2, 2).* +
-                    matrix.at(0, 1).* * matrix.at(1, 2).* * matrix.at(2, 0).* +
-                    matrix.at(0, 2).* * matrix.at(1, 0).* * matrix.at(2, 1).* -
-                    matrix.at(0, 2).* * matrix.at(1, 1).* * matrix.at(2, 0).* -
-                    matrix.at(0, 1).* * matrix.at(1, 0).* * matrix.at(2, 2).* -
-                    matrix.at(0, 0).* * matrix.at(1, 2).* * matrix.at(2, 1).*,
-                else => blk: {
-                    std.debug.panic("OpsBuilder.determinant() is not implemented for sizes above 3x3", .{});
-                    break :blk 0;
-                },
-            };
+            const n = self.result.rows;
+
+            // Use analytical formulas for small matrices (more efficient)
+            if (n <= 3) {
+                return switch (n) {
+                    1 => self.result.at(0, 0).*,
+                    2 => self.result.at(0, 0).* * self.result.at(1, 1).* -
+                        self.result.at(0, 1).* * self.result.at(1, 0).*,
+                    3 => self.result.at(0, 0).* * self.result.at(1, 1).* * self.result.at(2, 2).* +
+                        self.result.at(0, 1).* * self.result.at(1, 2).* * self.result.at(2, 0).* +
+                        self.result.at(0, 2).* * self.result.at(1, 0).* * self.result.at(2, 1).* -
+                        self.result.at(0, 2).* * self.result.at(1, 1).* * self.result.at(2, 0).* -
+                        self.result.at(0, 1).* * self.result.at(1, 0).* * self.result.at(2, 2).* -
+                        self.result.at(0, 0).* * self.result.at(1, 2).* * self.result.at(2, 1).*,
+                    else => unreachable,
+                };
+            }
+
+            // Use LU decomposition for larger matrices
+            return try self.determinantLU();
         }
 
-        /// Inverts the matrix (only for square matrices up to 3x3)
+        /// Computes determinant using LU decomposition with partial pivoting
+        /// det(A) = det(P) * det(L) * det(U) = ±1 * 1 * product(diagonal of U)
+        fn determinantLU(self: *Self) !T {
+            const n = self.result.rows;
+
+            // Create a copy of the matrix for LU decomposition
+            var lu = try Matrix(T).init(self.allocator, n, n);
+            defer lu.deinit();
+            @memcpy(lu.items, self.result.items);
+
+            var sign: T = 1.0; // Track sign changes from row swaps
+
+            // Perform LU decomposition with partial pivoting
+            for (0..n) |pivot_col| {
+                // Find pivot
+                var max_row = pivot_col;
+                var max_val = @abs(lu.at(pivot_col, pivot_col).*);
+
+                for (pivot_col + 1..n) |row_idx| {
+                    const val = @abs(lu.at(row_idx, pivot_col).*);
+                    if (val > max_val) {
+                        max_val = val;
+                        max_row = row_idx;
+                    }
+                }
+
+                // Check for zero pivot (singular matrix)
+                if (max_val < std.math.floatEps(T) * 10) {
+                    return 0; // Determinant is zero
+                }
+
+                // Swap rows if needed
+                if (max_row != pivot_col) {
+                    sign = -sign; // Each row swap changes the sign
+                    for (0..n) |j| {
+                        const temp = lu.at(pivot_col, j).*;
+                        lu.at(pivot_col, j).* = lu.at(max_row, j).*;
+                        lu.at(max_row, j).* = temp;
+                    }
+                }
+
+                // Eliminate column below pivot
+                for (pivot_col + 1..n) |row_idx| {
+                    const factor = lu.at(row_idx, pivot_col).* / lu.at(pivot_col, pivot_col).*;
+                    lu.at(row_idx, pivot_col).* = factor; // Store L factor
+
+                    for (pivot_col + 1..n) |col_idx| {
+                        lu.at(row_idx, col_idx).* -= factor * lu.at(pivot_col, col_idx).*;
+                    }
+                }
+            }
+
+            // Calculate determinant as product of diagonal elements of U
+            var det = sign;
+            for (0..n) |i| {
+                det *= lu.at(i, i).*;
+            }
+
+            return det;
+        }
+
+        /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
+        /// and Gauss-Jordan elimination for larger matrices
         pub fn inverse(self: *Self) !void {
             assert(self.result.rows == self.result.cols);
 
-            const det = determinant(self.result);
-            if (det == 0) {
-                return error.SingularMatrix;
+            const n = self.result.rows;
+
+            // Use analytical formulas for small matrices (more efficient)
+            if (n <= 3) {
+                const det = try self.determinant();
+                if (@abs(det) < std.math.floatEps(T)) {
+                    return error.SingularMatrix;
+                }
+
+                var inv = try Matrix(T).init(self.allocator, n, n);
+
+                switch (n) {
+                    1 => inv.at(0, 0).* = 1 / det,
+                    2 => {
+                        inv.at(0, 0).* = self.result.at(1, 1).* / det;
+                        inv.at(0, 1).* = -self.result.at(0, 1).* / det;
+                        inv.at(1, 0).* = -self.result.at(1, 0).* / det;
+                        inv.at(1, 1).* = self.result.at(0, 0).* / det;
+                    },
+                    3 => {
+                        inv.at(0, 0).* = (self.result.at(1, 1).* * self.result.at(2, 2).* - self.result.at(1, 2).* * self.result.at(2, 1).*) / det;
+                        inv.at(0, 1).* = (self.result.at(0, 2).* * self.result.at(2, 1).* - self.result.at(0, 1).* * self.result.at(2, 2).*) / det;
+                        inv.at(0, 2).* = (self.result.at(0, 1).* * self.result.at(1, 2).* - self.result.at(0, 2).* * self.result.at(1, 1).*) / det;
+                        inv.at(1, 0).* = (self.result.at(1, 2).* * self.result.at(2, 0).* - self.result.at(1, 0).* * self.result.at(2, 2).*) / det;
+                        inv.at(1, 1).* = (self.result.at(0, 0).* * self.result.at(2, 2).* - self.result.at(0, 2).* * self.result.at(2, 0).*) / det;
+                        inv.at(1, 2).* = (self.result.at(0, 2).* * self.result.at(1, 0).* - self.result.at(0, 0).* * self.result.at(1, 2).*) / det;
+                        inv.at(2, 0).* = (self.result.at(1, 0).* * self.result.at(2, 1).* - self.result.at(1, 1).* * self.result.at(2, 0).*) / det;
+                        inv.at(2, 1).* = (self.result.at(0, 1).* * self.result.at(2, 0).* - self.result.at(0, 0).* * self.result.at(2, 1).*) / det;
+                        inv.at(2, 2).* = (self.result.at(0, 0).* * self.result.at(1, 1).* - self.result.at(0, 1).* * self.result.at(1, 0).*) / det;
+                    },
+                    else => unreachable,
+                }
+
+                self.result.deinit();
+                self.result = inv;
+            } else {
+                // Use Gauss-Jordan elimination for larger matrices
+                try self.inverseGaussJordan();
+            }
+        }
+
+        /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
+        /// This is a general method that works for any size square matrix
+        fn inverseGaussJordan(self: *Self) !void {
+            const n = self.result.rows;
+
+            // Create augmented matrix [A | I]
+            var augmented = try Matrix(T).init(self.allocator, n, 2 * n);
+            defer augmented.deinit();
+
+            // Copy original matrix to left half and identity to right half
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    augmented.at(i, j).* = self.result.at(i, j).*;
+                    augmented.at(i, n + j).* = if (i == j) 1.0 else 0.0;
+                }
             }
 
-            var inv = try Matrix(T).init(self.allocator, self.result.rows, self.result.cols);
+            // Perform Gauss-Jordan elimination
+            for (0..n) |pivot_col| {
+                // Find pivot (partial pivoting for numerical stability)
+                var max_row = pivot_col;
+                var max_val = @abs(augmented.at(pivot_col, pivot_col).*);
 
-            switch (self.result.rows) {
-                1 => inv.at(0, 0).* = 1 / det,
-                2 => {
-                    inv.at(0, 0).* = self.result.at(1, 1).* / det;
-                    inv.at(0, 1).* = -self.result.at(0, 1).* / det;
-                    inv.at(1, 0).* = -self.result.at(1, 0).* / det;
-                    inv.at(1, 1).* = self.result.at(0, 0).* / det;
-                },
-                3 => {
-                    inv.at(0, 0).* = (self.result.at(1, 1).* * self.result.at(2, 2).* - self.result.at(1, 2).* * self.result.at(2, 1).*) / det;
-                    inv.at(0, 1).* = (self.result.at(0, 2).* * self.result.at(2, 1).* - self.result.at(0, 1).* * self.result.at(2, 2).*) / det;
-                    inv.at(0, 2).* = (self.result.at(0, 1).* * self.result.at(1, 2).* - self.result.at(0, 2).* * self.result.at(1, 1).*) / det;
-                    inv.at(1, 0).* = (self.result.at(1, 2).* * self.result.at(2, 0).* - self.result.at(1, 0).* * self.result.at(2, 2).*) / det;
-                    inv.at(1, 1).* = (self.result.at(0, 0).* * self.result.at(2, 2).* - self.result.at(0, 2).* * self.result.at(2, 0).*) / det;
-                    inv.at(1, 2).* = (self.result.at(0, 2).* * self.result.at(1, 0).* - self.result.at(0, 0).* * self.result.at(1, 2).*) / det;
-                    inv.at(2, 0).* = (self.result.at(1, 0).* * self.result.at(2, 1).* - self.result.at(1, 1).* * self.result.at(2, 0).*) / det;
-                    inv.at(2, 1).* = (self.result.at(0, 1).* * self.result.at(2, 0).* - self.result.at(0, 0).* * self.result.at(2, 1).*) / det;
-                    inv.at(2, 2).* = (self.result.at(0, 0).* * self.result.at(1, 1).* - self.result.at(0, 1).* * self.result.at(1, 0).*) / det;
-                },
-                else => {
-                    std.debug.panic("OpsBuilder.inverse() is not implemented for sizes above 3x3", .{});
-                },
+                for (pivot_col + 1..n) |row_idx| {
+                    const val = @abs(augmented.at(row_idx, pivot_col).*);
+                    if (val > max_val) {
+                        max_val = val;
+                        max_row = row_idx;
+                    }
+                }
+
+                // Check for singular matrix
+                if (max_val < std.math.floatEps(T) * 10) {
+                    return error.SingularMatrix;
+                }
+
+                // Swap rows if needed
+                if (max_row != pivot_col) {
+                    for (0..2 * n) |j| {
+                        const temp = augmented.at(pivot_col, j).*;
+                        augmented.at(pivot_col, j).* = augmented.at(max_row, j).*;
+                        augmented.at(max_row, j).* = temp;
+                    }
+                }
+
+                // Scale pivot row
+                const pivot = augmented.at(pivot_col, pivot_col).*;
+                for (0..2 * n) |j| {
+                    augmented.at(pivot_col, j).* /= pivot;
+                }
+
+                // Eliminate column in all other rows
+                for (0..n) |row_idx| {
+                    if (row_idx != pivot_col) {
+                        const factor = augmented.at(row_idx, pivot_col).*;
+                        for (0..2 * n) |j| {
+                            augmented.at(row_idx, j).* -= factor * augmented.at(pivot_col, j).*;
+                        }
+                    }
+                }
+            }
+
+            // Extract inverse from right half of augmented matrix
+            var inv = try Matrix(T).init(self.allocator, n, n);
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    inv.at(i, j).* = augmented.at(i, n + j).*;
+                }
             }
 
             self.result.deinit();
@@ -799,61 +948,61 @@ test "OpsBuilder SIMD 9x9 matrix with known values" {
 
     // Create simple 9x9 matrix with predictable values (forces SIMD: 729 ops > 512)
     var test_matrix = try Matrix(f32).init(arena.allocator(), 9, 9);
-    
+
     // Fill with simple pattern: A[i,j] = i + 1 (row number)
     for (0..9) |i| {
         for (0..9) |j| {
             test_matrix.at(i, j).* = @as(f32, @floatFromInt(i + 1));
         }
     }
-    
+
     // Test Case 1: A * A (should use SIMD same-matrix optimization)
     var ops1: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
     try ops1.gemm(test_matrix, false, false, 1.0, 0.0, null);
     const result1 = ops1.toOwned();
-    
+
     // Verify Case 1: A * A (uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result1.rows);
     try expectEqual(@as(usize, 9), result1.cols);
-    try expectEqual(@as(f32, 45.0), result1.at(0, 0).*);   // Row 0 * Col 0
-    try expectEqual(@as(f32, 90.0), result1.at(1, 0).*);   // Row 1 * Col 0
-    try expectEqual(@as(f32, 405.0), result1.at(8, 8).*);  // Row 8 * Col 8
+    try expectEqual(@as(f32, 45.0), result1.at(0, 0).*); // Row 0 * Col 0
+    try expectEqual(@as(f32, 90.0), result1.at(1, 0).*); // Row 1 * Col 0
+    try expectEqual(@as(f32, 405.0), result1.at(8, 8).*); // Row 8 * Col 8
 
     // Test Case 2: A^T * A (covariance)
     var ops2: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
     try ops2.gemm(test_matrix, true, false, 1.0, 0.0, null);
     const result2 = ops2.toOwned();
-    
+
     // Verify Case 2: A^T * A (covariance, uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result2.rows);
     try expectEqual(@as(usize, 9), result2.cols);
-    try expectEqual(@as(f32, 285.0), result2.at(0, 0).*);  // Sum of squares: 1²+2²+...+9²
-    try expectEqual(@as(f32, 285.0), result2.at(8, 8).*);  // Same for all diagonal elements
+    try expectEqual(@as(f32, 285.0), result2.at(0, 0).*); // Sum of squares: 1²+2²+...+9²
+    try expectEqual(@as(f32, 285.0), result2.at(8, 8).*); // Same for all diagonal elements
 
-    // Test Case 3: A * A^T (gram matrix)  
+    // Test Case 3: A * A^T (gram matrix)
     var ops3: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
     try ops3.gemm(test_matrix, false, true, 1.0, 0.0, null);
     const result3 = ops3.toOwned();
-    
+
     // Verify Case 3: A * A^T (gram matrix, uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result3.rows);
     try expectEqual(@as(usize, 9), result3.cols);
-    try expectEqual(@as(f32, 9.0), result3.at(0, 0).*);    // 1² * 9 elements
-    try expectEqual(@as(f32, 36.0), result3.at(1, 1).*);   // 2² * 9 elements
-    try expectEqual(@as(f32, 729.0), result3.at(8, 8).*);  // 9² * 9 elements
+    try expectEqual(@as(f32, 9.0), result3.at(0, 0).*); // 1² * 9 elements
+    try expectEqual(@as(f32, 36.0), result3.at(1, 1).*); // 2² * 9 elements
+    try expectEqual(@as(f32, 729.0), result3.at(8, 8).*); // 9² * 9 elements
 
     // Test Case 4: A^T * A^T
     var ops4: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
     try ops4.gemm(test_matrix, true, true, 1.0, 0.0, null);
     const result4 = ops4.toOwned();
-    
+
     // Verify Case 4: A^T * A^T (uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result4.rows);
     try expectEqual(@as(usize, 9), result4.cols);
-    try expectEqual(@as(f32, 45.0), result4.at(0, 0).*);   // Corners same as case 1
-    try expectEqual(@as(f32, 405.0), result4.at(0, 8).*);  
-    try expectEqual(@as(f32, 45.0), result4.at(8, 0).*);   
-    try expectEqual(@as(f32, 405.0), result4.at(8, 8).*);  
+    try expectEqual(@as(f32, 45.0), result4.at(0, 0).*); // Corners same as case 1
+    try expectEqual(@as(f32, 405.0), result4.at(0, 8).*);
+    try expectEqual(@as(f32, 45.0), result4.at(8, 0).*);
+    try expectEqual(@as(f32, 405.0), result4.at(8, 8).*);
 }
 
 test "OpsBuilder matrix operations: add, sub, scale, transpose" {
@@ -920,4 +1069,280 @@ test "OpsBuilder matrix operations: add, sub, scale, transpose" {
             try expectEqual(static_subtracted.at(r, c).*, dynamic_subtracted.at(r, c).*);
         }
     }
+}
+
+test "OpsBuilder matrix inverse - small matrices" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test 2x2 matrix inverse
+    var mat2 = try Matrix(f64).init(arena.allocator(), 2, 2);
+    mat2.at(0, 0).* = 4.0;
+    mat2.at(0, 1).* = 7.0;
+    mat2.at(1, 0).* = 2.0;
+    mat2.at(1, 1).* = 6.0;
+
+    var ops2: OpsBuilder(f64) = try .init(arena.allocator(), mat2);
+    try ops2.inverse();
+    const inv2 = ops2.toOwned();
+
+    // Verify A * A^(-1) = I
+    var check2: OpsBuilder(f64) = try .init(arena.allocator(), mat2);
+    try check2.dot(inv2);
+    const identity2 = check2.toOwned();
+
+    const eps = 1e-10;
+    try std.testing.expect(@abs(identity2.at(0, 0).* - 1.0) < eps);
+    try std.testing.expect(@abs(identity2.at(0, 1).* - 0.0) < eps);
+    try std.testing.expect(@abs(identity2.at(1, 0).* - 0.0) < eps);
+    try std.testing.expect(@abs(identity2.at(1, 1).* - 1.0) < eps);
+
+    // Test 3x3 matrix inverse
+    var mat3 = try Matrix(f64).init(arena.allocator(), 3, 3);
+    mat3.at(0, 0).* = 1.0;
+    mat3.at(0, 1).* = 2.0;
+    mat3.at(0, 2).* = 3.0;
+    mat3.at(1, 0).* = 0.0;
+    mat3.at(1, 1).* = 1.0;
+    mat3.at(1, 2).* = 4.0;
+    mat3.at(2, 0).* = 5.0;
+    mat3.at(2, 1).* = 6.0;
+    mat3.at(2, 2).* = 0.0;
+
+    var ops3: OpsBuilder(f64) = try .init(arena.allocator(), mat3);
+    try ops3.inverse();
+    const inv3 = ops3.toOwned();
+
+    // Verify A * A^(-1) = I
+    var check3: OpsBuilder(f64) = try .init(arena.allocator(), mat3);
+    try check3.dot(inv3);
+    const identity3 = check3.toOwned();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            const expected: f64 = if (i == j) 1.0 else 0.0;
+            try std.testing.expect(@abs(identity3.at(i, j).* - expected) < eps);
+        }
+    }
+}
+
+test "OpsBuilder matrix inverse - large matrices using Gauss-Jordan" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test 4x4 matrix inverse
+    var mat4 = try Matrix(f64).init(arena.allocator(), 4, 4);
+    // Create a well-conditioned matrix
+    mat4.at(0, 0).* = 5.0;
+    mat4.at(0, 1).* = 1.0;
+    mat4.at(0, 2).* = 0.0;
+    mat4.at(0, 3).* = 2.0;
+    mat4.at(1, 0).* = 1.0;
+    mat4.at(1, 1).* = 4.0;
+    mat4.at(1, 2).* = 1.0;
+    mat4.at(1, 3).* = 1.0;
+    mat4.at(2, 0).* = 0.0;
+    mat4.at(2, 1).* = 1.0;
+    mat4.at(2, 2).* = 3.0;
+    mat4.at(2, 3).* = 0.0;
+    mat4.at(3, 0).* = 2.0;
+    mat4.at(3, 1).* = 1.0;
+    mat4.at(3, 2).* = 0.0;
+    mat4.at(3, 3).* = 4.0;
+
+    var ops4: OpsBuilder(f64) = try .init(arena.allocator(), mat4);
+    try ops4.inverse();
+    const inv4 = ops4.toOwned();
+
+    // Verify A * A^(-1) = I
+    var check4: OpsBuilder(f64) = try .init(arena.allocator(), mat4);
+    try check4.dot(inv4);
+    const identity4 = check4.toOwned();
+
+    const eps = 1e-10;
+    for (0..4) |i| {
+        for (0..4) |j| {
+            const expected: f64 = if (i == j) 1.0 else 0.0;
+            try std.testing.expect(@abs(identity4.at(i, j).* - expected) < eps);
+        }
+    }
+
+    // Test 5x5 matrix inverse
+    var mat5 = try Matrix(f64).init(arena.allocator(), 5, 5);
+    // Create a diagonally dominant matrix (well-conditioned)
+    for (0..5) |i| {
+        for (0..5) |j| {
+            if (i == j) {
+                mat5.at(i, j).* = 10.0;
+            } else {
+                mat5.at(i, j).* = @as(f64, @floatFromInt(i + j)) * 0.5;
+            }
+        }
+    }
+
+    var ops5: OpsBuilder(f64) = try .init(arena.allocator(), mat5);
+    try ops5.inverse();
+    const inv5 = ops5.toOwned();
+
+    // Verify A * A^(-1) = I
+    var check5: OpsBuilder(f64) = try .init(arena.allocator(), mat5);
+    try check5.dot(inv5);
+    const identity5 = check5.toOwned();
+
+    for (0..5) |i| {
+        for (0..5) |j| {
+            const expected: f64 = if (i == j) 1.0 else 0.0;
+            try std.testing.expect(@abs(identity5.at(i, j).* - expected) < eps);
+        }
+    }
+}
+
+test "OpsBuilder matrix inverse - singular matrix error" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test singular 2x2 matrix
+    var sing2 = try Matrix(f64).init(arena.allocator(), 2, 2);
+    sing2.at(0, 0).* = 1.0;
+    sing2.at(0, 1).* = 2.0;
+    sing2.at(1, 0).* = 2.0;
+    sing2.at(1, 1).* = 4.0; // Second row is multiple of first
+
+    var ops_sing2: OpsBuilder(f64) = try .init(arena.allocator(), sing2);
+    try std.testing.expectError(error.SingularMatrix, ops_sing2.inverse());
+
+    // Test singular 4x4 matrix (uses Gauss-Jordan)
+    var sing4 = try Matrix(f64).init(arena.allocator(), 4, 4);
+    // Make third row a linear combination of first two
+    sing4.at(0, 0).* = 1.0;
+    sing4.at(0, 1).* = 2.0;
+    sing4.at(0, 2).* = 3.0;
+    sing4.at(0, 3).* = 4.0;
+    sing4.at(1, 0).* = 5.0;
+    sing4.at(1, 1).* = 6.0;
+    sing4.at(1, 2).* = 7.0;
+    sing4.at(1, 3).* = 8.0;
+    sing4.at(2, 0).* = 6.0; // row2 = row0 + row1
+    sing4.at(2, 1).* = 8.0;
+    sing4.at(2, 2).* = 10.0;
+    sing4.at(2, 3).* = 12.0;
+    sing4.at(3, 0).* = 9.0;
+    sing4.at(3, 1).* = 10.0;
+    sing4.at(3, 2).* = 11.0;
+    sing4.at(3, 3).* = 12.0;
+
+    var ops_sing4: OpsBuilder(f64) = try .init(arena.allocator(), sing4);
+    defer ops_sing4.deinit();
+    try std.testing.expectError(error.SingularMatrix, ops_sing4.inverse());
+}
+
+test "OpsBuilder determinant - small matrices" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test 1x1 matrix
+    var mat1 = try Matrix(f64).init(arena.allocator(), 1, 1);
+    mat1.at(0, 0).* = 5.0;
+    var ops1 = try OpsBuilder(f64).init(arena.allocator(), mat1);
+    defer ops1.deinit();
+    try expectEqual(@as(f64, 5.0), try ops1.determinant());
+
+    // Test 2x2 matrix
+    var mat2 = try Matrix(f64).init(arena.allocator(), 2, 2);
+    mat2.at(0, 0).* = 4.0;
+    mat2.at(0, 1).* = 7.0;
+    mat2.at(1, 0).* = 2.0;
+    mat2.at(1, 1).* = 6.0;
+    var ops2 = try OpsBuilder(f64).init(arena.allocator(), mat2);
+    defer ops2.deinit();
+    // det = 4*6 - 7*2 = 24 - 14 = 10
+    try expectEqual(@as(f64, 10.0), try ops2.determinant());
+
+    // Test 3x3 matrix
+    var mat3 = try Matrix(f64).init(arena.allocator(), 3, 3);
+    mat3.at(0, 0).* = 1.0;
+    mat3.at(0, 1).* = 2.0;
+    mat3.at(0, 2).* = 3.0;
+    mat3.at(1, 0).* = 0.0;
+    mat3.at(1, 1).* = 1.0;
+    mat3.at(1, 2).* = 4.0;
+    mat3.at(2, 0).* = 5.0;
+    mat3.at(2, 1).* = 6.0;
+    mat3.at(2, 2).* = 0.0;
+    var ops3 = try OpsBuilder(f64).init(arena.allocator(), mat3);
+    defer ops3.deinit();
+    // det = 1*(1*0 - 4*6) - 2*(0*0 - 4*5) + 3*(0*6 - 1*5)
+    //     = 1*(-24) - 2*(-20) + 3*(-5)
+    //     = -24 + 40 - 15 = 1
+    try expectEqual(@as(f64, 1.0), try ops3.determinant());
+}
+
+test "OpsBuilder determinant - large matrices using LU" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Test 4x4 matrix
+    var mat4 = try Matrix(f64).init(arena.allocator(), 4, 4);
+    mat4.at(0, 0).* = 5.0;
+    mat4.at(0, 1).* = 1.0;
+    mat4.at(0, 2).* = 0.0;
+    mat4.at(0, 3).* = 2.0;
+    mat4.at(1, 0).* = 1.0;
+    mat4.at(1, 1).* = 4.0;
+    mat4.at(1, 2).* = 1.0;
+    mat4.at(1, 3).* = 1.0;
+    mat4.at(2, 0).* = 0.0;
+    mat4.at(2, 1).* = 1.0;
+    mat4.at(2, 2).* = 3.0;
+    mat4.at(2, 3).* = 0.0;
+    mat4.at(3, 0).* = 2.0;
+    mat4.at(3, 1).* = 1.0;
+    mat4.at(3, 2).* = 0.0;
+    mat4.at(3, 3).* = 4.0;
+
+    var ops4 = try OpsBuilder(f64).init(arena.allocator(), mat4);
+    defer ops4.deinit();
+    const det4 = try ops4.determinant();
+
+    // This matrix should have a non-zero determinant
+    try std.testing.expect(@abs(det4) > 1e-10);
+
+    // Test singular matrix (determinant should be 0)
+    var sing = try Matrix(f64).init(arena.allocator(), 4, 4);
+    sing.at(0, 0).* = 1.0;
+    sing.at(0, 1).* = 2.0;
+    sing.at(0, 2).* = 3.0;
+    sing.at(0, 3).* = 4.0;
+    sing.at(1, 0).* = 2.0;
+    sing.at(1, 1).* = 4.0;
+    sing.at(1, 2).* = 6.0;
+    sing.at(1, 3).* = 8.0; // Row 2 = 2 * Row 1
+    sing.at(2, 0).* = 3.0;
+    sing.at(2, 1).* = 5.0;
+    sing.at(2, 2).* = 7.0;
+    sing.at(2, 3).* = 9.0;
+    sing.at(3, 0).* = 4.0;
+    sing.at(3, 1).* = 6.0;
+    sing.at(3, 2).* = 8.0;
+    sing.at(3, 3).* = 10.0;
+
+    var ops_sing = try OpsBuilder(f64).init(arena.allocator(), sing);
+    defer ops_sing.deinit();
+    const det_sing = try ops_sing.determinant();
+
+    // Singular matrix should have determinant 0
+    try std.testing.expect(@abs(det_sing) < 1e-10);
+
+    // Test 5x5 identity matrix (determinant should be 1)
+    var identity5 = try Matrix(f64).init(arena.allocator(), 5, 5);
+    @memset(identity5.items, 0);
+    for (0..5) |i| {
+        identity5.at(i, i).* = 1.0;
+    }
+
+    var ops_id = try OpsBuilder(f64).init(arena.allocator(), identity5);
+    defer ops_id.deinit();
+    const det_id = try ops_id.determinant();
+
+    try expectEqual(@as(f64, 1.0), det_id);
 }

@@ -463,13 +463,13 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             comptime assert(rows == cols);
             return switch (rows) {
                 1 => self.item(),
-                2 => self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*,
-                3 => self.at(0, 0).* * self.at(1, 1).* * self.at(2, 2).* +
-                    self.at(0, 1).* * self.at(1, 2).* * self.at(2, 0).* +
-                    self.at(0, 2).* * self.at(1, 0).* * self.at(2, 1).* -
-                    self.at(0, 2).* * self.at(1, 1).* * self.at(2, 0).* -
-                    self.at(0, 1).* * self.at(1, 0).* * self.at(2, 2).* -
-                    self.at(0, 0).* * self.at(1, 2).* * self.at(2, 1).*,
+                2 => self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0],
+                3 => self.items[0][0] * self.items[1][1] * self.items[2][2] +
+                    self.items[0][1] * self.items[1][2] * self.items[2][0] +
+                    self.items[0][2] * self.items[1][0] * self.items[2][1] -
+                    self.items[0][2] * self.items[1][1] * self.items[2][0] -
+                    self.items[0][1] * self.items[1][0] * self.items[2][2] -
+                    self.items[0][0] * self.items[1][2] * self.items[2][1],
                 else => @compileError("Matrix(T).determinant() is not implemented for sizes above 3"),
             };
         }
@@ -483,23 +483,23 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             }
             var inv: Self = .{};
             switch (rows) {
-                1 => inv.at(0, 0).* = 1 / det,
+                1 => inv.items[0][0] = 1 / det,
                 2 => {
-                    inv.at(0, 0).* = self.at(1, 1).* / det;
-                    inv.at(0, 1).* = -self.at(0, 1).* / det;
-                    inv.at(1, 0).* = -self.at(1, 0).* / det;
-                    inv.at(1, 1).* = self.at(0, 0).* / det;
+                    inv.items[0][0] = self.items[1][1] / det;
+                    inv.items[0][1] = -self.items[0][1] / det;
+                    inv.items[1][0] = -self.items[1][0] / det;
+                    inv.items[1][1] = self.items[0][0] / det;
                 },
                 3 => {
-                    inv.at(0, 0).* = (self.at(1, 1).* * self.at(2, 2).* - self.at(1, 2).* * self.at(2, 1).*) / det;
-                    inv.at(0, 1).* = (self.at(0, 2).* * self.at(2, 1).* - self.at(0, 1).* * self.at(2, 2).*) / det;
-                    inv.at(0, 2).* = (self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*) / det;
-                    inv.at(1, 0).* = (self.at(1, 2).* * self.at(2, 0).* - self.at(1, 0).* * self.at(2, 2).*) / det;
-                    inv.at(1, 1).* = (self.at(0, 0).* * self.at(2, 2).* - self.at(0, 2).* * self.at(2, 0).*) / det;
-                    inv.at(1, 2).* = (self.at(0, 2).* * self.at(1, 0).* - self.at(0, 0).* * self.at(1, 2).*) / det;
-                    inv.at(2, 0).* = (self.at(1, 0).* * self.at(2, 1).* - self.at(1, 1).* * self.at(2, 0).*) / det;
-                    inv.at(2, 1).* = (self.at(0, 1).* * self.at(2, 0).* - self.at(0, 0).* * self.at(2, 1).*) / det;
-                    inv.at(2, 2).* = (self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*) / det;
+                    inv.items[0][0] = (self.items[1][1] * self.items[2][2] - self.items[1][2] * self.items[2][1]) / det;
+                    inv.items[0][1] = (self.items[0][2] * self.items[2][1] - self.items[0][1] * self.items[2][2]) / det;
+                    inv.items[0][2] = (self.items[0][1] * self.items[1][2] - self.items[0][2] * self.items[1][1]) / det;
+                    inv.items[1][0] = (self.items[1][2] * self.items[2][0] - self.items[1][0] * self.items[2][2]) / det;
+                    inv.items[1][1] = (self.items[0][0] * self.items[2][2] - self.items[0][2] * self.items[2][0]) / det;
+                    inv.items[1][2] = (self.items[0][2] * self.items[1][0] - self.items[0][0] * self.items[1][2]) / det;
+                    inv.items[2][0] = (self.items[1][0] * self.items[2][1] - self.items[1][1] * self.items[2][0]) / det;
+                    inv.items[2][1] = (self.items[0][1] * self.items[2][0] - self.items[0][0] * self.items[2][1]) / det;
+                    inv.items[2][2] = (self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0]) / det;
                 },
                 else => @compileError("Matrix(T).inverse() is not implemented for sizes above 3"),
             }
