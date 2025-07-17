@@ -5,7 +5,7 @@ const SMatrix = @import("../matrix.zig").SMatrix;
 const Matrix = @import("../matrix.zig").Matrix;
 const OpsBuilder = @import("../matrix.zig").OpsBuilder;
 const svd = @import("../svd.zig").svd;
-const Point2d = @import("points.zig").Point2d;
+const Point2d = @import("Point.zig").Point2d;
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
@@ -25,7 +25,7 @@ pub fn SimilarityTransform(comptime T: type) type {
 
         /// Projects the given point using the similarity transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x}, .{point.y} });
+            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x()}, .{point.y()} });
             return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
@@ -41,25 +41,21 @@ pub fn SimilarityTransform(comptime T: type) type {
             var cov: SMatrix(T, 2, 2) = .initAll(0);
             self.matrix = cov;
             for (0..from_points.len) |i| {
-                mean_from.x += from_points[i].x;
-                mean_from.y += from_points[i].y;
-                mean_to.x += to_points[i].x;
-                mean_to.y += to_points[i].y;
+                mean_from = mean_from.add(from_points[i]);
+                mean_to = mean_to.add(to_points[i]);
             }
-            mean_from.x /= num_points;
-            mean_from.y /= num_points;
-            mean_to.x /= num_points;
-            mean_to.y /= num_points;
+            mean_from = mean_from.scale(1.0 / num_points);
+            mean_to = mean_to.scale(1.0 / num_points);
 
             for (0..from_points.len) |i| {
-                const from = Point2d(T){ .x = from_points[i].x - mean_from.x, .y = from_points[i].y - mean_from.y };
-                const to = Point2d(T){ .x = to_points[i].x - mean_to.x, .y = to_points[i].y - mean_to.y };
+                const from = from_points[i].sub(mean_from);
+                const to = to_points[i].sub(mean_to);
 
-                sigma_from += from.x * from.x + from.y * from.y;
-                sigma_to += to.x * to.x + to.y * to.y;
+                sigma_from += from.normSquared();
+                sigma_to += to.normSquared();
 
-                const from_mat: SMatrix(T, 1, 2) = .init(.{.{ from.x, from.y }});
-                const to_mat: SMatrix(T, 2, 1) = .init(.{ .{to.x}, .{to.y} });
+                const from_mat: SMatrix(T, 1, 2) = .init(.{.{ from.x(), from.y() }});
+                const to_mat: SMatrix(T, 2, 1) = .init(.{ .{to.x()}, .{to.y()} });
                 cov = cov.add(to_mat.dot(from_mat));
             }
             sigma_from /= num_points;
@@ -91,8 +87,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             if (sigma_from != 0) {
                 c = 1.0 / sigma_from * d.dot(s).trace();
             }
-            const m_from: SMatrix(T, 2, 1) = .init(.{ .{mean_from.x}, .{mean_from.y} });
-            const m_to: SMatrix(T, 2, 1) = .init(.{ .{mean_to.x}, .{mean_to.y} });
+            const m_from: SMatrix(T, 2, 1) = .init(.{ .{mean_from.x()}, .{mean_from.y()} });
+            const m_to: SMatrix(T, 2, 1) = .init(.{ .{mean_to.x()}, .{mean_to.y()} });
             self.matrix = r.scale(c);
             self.bias = m_to.add(r.dot(m_from).scale(-c));
         }
@@ -121,7 +117,7 @@ pub fn AffineTransform(comptime T: type) type {
 
         /// Projects the given point using the affine transform.
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x}, .{point.y} });
+            const src: SMatrix(T, 2, 1) = .init(.{ .{point.x()}, .{point.y()} });
             return self.matrix.dot(src).add(self.bias).toPoint2d();
         }
 
@@ -134,12 +130,12 @@ pub fn AffineTransform(comptime T: type) type {
             var q = try Matrix(T).init(self.allocator, 2, to_points.len);
             defer q.deinit();
             for (0..from_points.len) |i| {
-                p.at(0, i).* = from_points[i].x;
-                p.at(1, i).* = from_points[i].y;
+                p.at(0, i).* = from_points[i].x();
+                p.at(1, i).* = from_points[i].y();
                 p.at(2, i).* = 1;
 
-                q.at(0, i).* = to_points[i].x;
-                q.at(1, i).* = to_points[i].y;
+                q.at(0, i).* = to_points[i].x();
+                q.at(1, i).* = to_points[i].y();
             }
             // Use OpsBuilder to perform matrix operations
             var p_ops = try OpsBuilder(T).init(self.allocator, p);
@@ -193,7 +189,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
 
         /// Projects the given point using the projective transform
         pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
-            const src: SMatrix(T, 3, 1) = .init(.{ .{point.x}, .{point.y}, .{1} });
+            const src: SMatrix(T, 3, 1) = .init(.{ .{point.x()}, .{point.y()}, .{1} });
             var dst = self.matrix.dot(src);
             if (dst.at(2, 0).* != 0) {
                 dst = dst.scale(1 / dst.at(2, 0).*);
@@ -213,8 +209,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
             var accum: SMatrix(T, 9, 9) = .initAll(0);
             var b: SMatrix(T, 2, 9) = .initAll(0);
             for (0..from_points.len) |i| {
-                const f: SMatrix(T, 1, 3) = .init(.{.{ from_points[i].x, from_points[i].y, 1 }});
-                const t: SMatrix(T, 1, 3) = .init(.{.{ to_points[i].x, to_points[i].y, 1 }});
+                const f: SMatrix(T, 1, 3) = .init(.{.{ from_points[i].x(), from_points[i].y(), 1 }});
+                const t: SMatrix(T, 1, 3) = .init(.{.{ to_points[i].x(), to_points[i].y(), 1 }});
                 b.setSubMatrix(0, 0, f.scale(t.at(0, 1).*));
                 b.setSubMatrix(1, 0, f);
                 b.setSubMatrix(0, 3, f.scale(-t.at(0, 0).*));
@@ -251,14 +247,14 @@ pub fn ProjectiveTransform(comptime T: type) type {
 test "affine3" {
     const T = f64;
     const from_points: []const Point2d(T) = &.{
-        .{ .x = 0, .y = 0 },
-        .{ .x = 0, .y = 1 },
-        .{ .x = 1, .y = 1 },
+        Point2d(T).init2d(0, 0),
+        Point2d(T).init2d(0, 1),
+        Point2d(T).init2d(1, 1),
     };
     const to_points: []const Point2d(T) = &.{
-        .{ .x = 0, .y = 1 },
-        .{ .x = 1, .y = 1 },
-        .{ .x = 1, .y = 0 },
+        Point2d(T).init2d(0, 1),
+        Point2d(T).init2d(1, 1),
+        Point2d(T).init2d(1, 0),
     };
     const tf = try AffineTransform(f64).init(std.testing.allocator, from_points[0..3], to_points[0..3]);
     const matrix: SMatrix(T, 2, 2) = .init(.{ .{ 0, 1 }, .{ -1, 0 } });
@@ -277,16 +273,16 @@ test "projection4" {
     const T = f64;
     const tol = 1e-5;
     const from_points: []const Point2d(T) = &.{
-        .{ .x = 199.67754364, .y = 200.17905235 },
-        .{ .x = 167.90229797, .y = 175.55920601 },
-        .{ .x = 270.33649445, .y = 207.96521187 },
-        .{ .x = 267.53637314, .y = 188.24442387 },
+        Point2d(T).init2d(199.67754364, 200.17905235),
+        Point2d(T).init2d(167.90229797, 175.55920601),
+        Point2d(T).init2d(270.33649445, 207.96521187),
+        Point2d(T).init2d(267.53637314, 188.24442387),
     };
     const to_points: []const Point2d(T) = &.{
-        .{ .x = 440.68012238, .y = 275.45248032 },
-        .{ .x = 429.62512970, .y = 262.64307976 },
-        .{ .x = 484.23328400, .y = 279.44332123 },
-        .{ .x = 488.08315277, .y = 272.79547691 },
+        Point2d(T).init2d(440.68012238, 275.45248032),
+        Point2d(T).init2d(429.62512970, 262.64307976),
+        Point2d(T).init2d(484.23328400, 279.44332123),
+        Point2d(T).init2d(488.08315277, 272.79547691),
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix: SMatrix(T, 3, 3) = .init(.{
@@ -301,45 +297,45 @@ test "projection4" {
     }
     for (from_points, to_points) |f, t| {
         const p = transform.project(f);
-        try std.testing.expectApproxEqRel(p.x, t.x, tol);
-        try std.testing.expectApproxEqRel(p.y, t.y, tol);
+        try std.testing.expectApproxEqRel(p.x(), t.x(), tol);
+        try std.testing.expectApproxEqRel(p.y(), t.y(), tol);
     }
 
     const m_inv = transform.inverse().?;
     const t_inv: ProjectiveTransform(T) = .init(to_points, from_points);
     for (from_points) |f| {
         var fp = t_inv.project(transform.project(f));
-        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
-        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
+        try std.testing.expectApproxEqRel(f.x(), fp.x(), tol);
+        try std.testing.expectApproxEqRel(f.y(), fp.y(), tol);
 
         fp = m_inv.project(transform.project(f));
-        try std.testing.expectApproxEqRel(f.x, fp.x, tol);
-        try std.testing.expectApproxEqRel(f.y, fp.y, tol);
+        try std.testing.expectApproxEqRel(f.x(), fp.x(), tol);
+        try std.testing.expectApproxEqRel(f.y(), fp.y(), tol);
     }
 }
 
 test "projection8" {
     const T = f64;
     const from_points: []const Point2d(T) = &.{
-        .{ .x = 319.48406982, .y = 240.21486282 },
-        .{ .x = 268.64367676, .y = 210.67104721 },
-        .{ .x = 432.53839111, .y = 249.55825424 },
-        .{ .x = 428.05819702, .y = 225.89330864 },
-        .{ .x = 687.00787354, .y = 240.97020721 },
-        .{ .x = 738.32287598, .y = 208.32876205 },
-        .{ .x = 574.62890625, .y = 250.60971451 },
-        .{ .x = 579.63378906, .y = 225.37580109 },
+        Point2d(T).init2d(319.48406982, 240.21486282),
+        Point2d(T).init2d(268.64367676, 210.67104721),
+        Point2d(T).init2d(432.53839111, 249.55825424),
+        Point2d(T).init2d(428.05819702, 225.89330864),
+        Point2d(T).init2d(687.00787354, 240.97020721),
+        Point2d(T).init2d(738.32287598, 208.32876205),
+        Point2d(T).init2d(574.62890625, 250.60971451),
+        Point2d(T).init2d(579.63378906, 225.37580109),
     };
 
     const to_points: []const Point2d(T) = &.{
-        .{ .x = 330.48120117, .y = 408.22596359 },
-        .{ .x = 317.55538940, .y = 393.26282501 },
-        .{ .x = 356.74267578, .y = 411.06428146 },
-        .{ .x = 349.94784546, .y = 400.26379395 },
-        .{ .x = 438.15582275, .y = 411.75442886 },
-        .{ .x = 452.01367188, .y = 398.08815765 },
-        .{ .x = 398.66107178, .y = 413.83139420 },
-        .{ .x = 395.29974365, .y = 401.73685455 },
+        Point2d(T).init2d(330.48120117, 408.22596359),
+        Point2d(T).init2d(317.55538940, 393.26282501),
+        Point2d(T).init2d(356.74267578, 411.06428146),
+        Point2d(T).init2d(349.94784546, 400.26379395),
+        Point2d(T).init2d(438.15582275, 411.75442886),
+        Point2d(T).init2d(452.01367188, 398.08815765),
+        Point2d(T).init2d(398.66107178, 413.83139420),
+        Point2d(T).init2d(395.29974365, 401.73685455),
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix: SMatrix(T, 3, 3) = .init(.{
@@ -355,7 +351,7 @@ test "projection8" {
     }
     for (0..from_points.len) |i| {
         const p = transform.project(from_points[i]);
-        try std.testing.expectApproxEqRel(p.x, to_points[i].x, 1e-2);
-        try std.testing.expectApproxEqRel(p.y, to_points[i].y, 1e-2);
+        try std.testing.expectApproxEqRel(p.x(), to_points[i].x(), 1e-2);
+        try std.testing.expectApproxEqRel(p.y(), to_points[i].y(), 1e-2);
     }
 }

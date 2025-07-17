@@ -4,8 +4,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const formatting = @import("formatting.zig");
 
-const Point2d = @import("../geometry/points.zig").Point2d;
-const Point3d = @import("../geometry/points.zig").Point3d;
+const Point2d = @import("../geometry/Point.zig").Point2d;
+const Point3d = @import("../geometry/Point.zig").Point3d;
 
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
@@ -253,6 +253,46 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return result;
         }
 
+        /// Compute Gram matrix: X * X^T
+        /// Useful for kernel methods and when rows < columns
+        /// The resulting matrix is rows × rows
+        pub fn gram(self: Self) SMatrix(T, rows, rows) {
+            var result: SMatrix(T, rows, rows) = .initAll(0);
+            
+            // Compute X * X^T
+            for (0..rows) |i| {
+                for (0..rows) |j| {
+                    var accumulator: T = 0;
+                    for (0..cols) |k| {
+                        accumulator += self.items[i][k] * self.items[j][k];
+                    }
+                    result.items[i][j] = accumulator;
+                }
+            }
+            
+            return result;
+        }
+
+        /// Compute covariance matrix: X^T * X
+        /// Useful for statistical analysis and when rows > columns
+        /// The resulting matrix is columns × columns
+        pub fn covariance(self: Self) SMatrix(T, cols, cols) {
+            var result: SMatrix(T, cols, cols) = .initAll(0);
+            
+            // Compute X^T * X
+            for (0..cols) |i| {
+                for (0..cols) |j| {
+                    var accumulator: T = 0;
+                    for (0..rows) |k| {
+                        accumulator += self.items[k][i] * self.items[k][j];
+                    }
+                    result.items[i][j] = accumulator;
+                }
+            }
+            
+            return result;
+        }
+
         /// Returns a new matrix which is a copy of the specified rectangular region of `self`.
         pub fn subMatrix(
             self: Self,
@@ -322,7 +362,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         /// Converts a column matrix into a Point2d.
         pub fn toPoint2d(self: Self) Point2d(T) {
             comptime assert(rows >= 2 and cols == 1);
-            return .{ .x = self.items[0][0], .y = self.items[1][0] };
+            return Point2d(T).init2d(self.items[0][0], self.items[1][0]);
         }
 
         /// Computes the trace (sum of diagonal elements) of a square matrix.
@@ -620,4 +660,37 @@ test "SMatrix operations: add, sub, scale, transpose" {
     try expectEqual(@as(f32, 9.0), static_added.at(1, 2).*); // 6.0 + 3.0
     try expectEqual(@as(f32, 0.5), static_subtracted.at(0, 0).*); // 1.0 - 0.5
     try expectEqual(@as(f32, 3.0), static_subtracted.at(1, 2).*); // 6.0 - 3.0
+}
+
+test "SMatrix gram and covariance matrices" {
+    // Create test matrix (3 samples × 2 features)
+    const data = SMatrix(f64, 3, 2).init(.{
+        .{ 1.0, 2.0 },
+        .{ 3.0, 4.0 },
+        .{ 5.0, 6.0 },
+    });
+
+    // Test Gram matrix (X * X^T) - should be 3×3
+    const gram_result = data.gram();
+    try expectEqual(@as(usize, 3), gram_result.rows);
+    try expectEqual(@as(usize, 3), gram_result.cols);
+
+    // Verify gram matrix values
+    // First row: [1*1+2*2, 1*3+2*4, 1*5+2*6] = [5, 11, 17]
+    try expectEqual(@as(f64, 5.0), gram_result.at(0, 0).*);
+    try expectEqual(@as(f64, 11.0), gram_result.at(0, 1).*);
+    try expectEqual(@as(f64, 17.0), gram_result.at(0, 2).*);
+
+    // Test Covariance matrix (X^T * X) - should be 2×2
+    const cov_result = data.covariance();
+    try expectEqual(@as(usize, 2), cov_result.rows);
+    try expectEqual(@as(usize, 2), cov_result.cols);
+
+    // Verify covariance matrix values
+    // First row: [1*1+3*3+5*5, 1*2+3*4+5*6] = [35, 44]
+    try expectEqual(@as(f64, 35.0), cov_result.at(0, 0).*);
+    try expectEqual(@as(f64, 44.0), cov_result.at(0, 1).*);
+    // Second row: [2*1+4*3+6*5, 2*2+4*4+6*6] = [44, 56]
+    try expectEqual(@as(f64, 44.0), cov_result.at(1, 0).*);
+    try expectEqual(@as(f64, 56.0), cov_result.at(1, 1).*);
 }

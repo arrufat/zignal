@@ -52,6 +52,7 @@ pub fn build(b: *Build) void {
         "deflate",
         "fdm",
         "jpeg",
+        "pca",
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,

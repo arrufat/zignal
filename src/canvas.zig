@@ -12,7 +12,7 @@ const convertColor = @import("color.zig").convertColor;
 const Hsv = @import("color.zig").Hsv;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
-const Point2d = @import("geometry/points.zig").Point2d;
+const Point2d = @import("geometry/Point.zig").Point2d;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Rgba = @import("color.zig").Rgba;
 
@@ -180,10 +180,10 @@ pub fn Canvas(comptime T: type) type {
         /// Produces pixel-perfect lines with hard edges and no antialiasing.
         /// Optimal for grid-aligned graphics and when performance is critical.
         fn drawLineBresenham(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
-            var x1: i32 = @intFromFloat(p1.x);
-            var y1: i32 = @intFromFloat(p1.y);
-            const x2: i32 = @intFromFloat(p2.x);
-            const y2: i32 = @intFromFloat(p2.y);
+            var x1: i32 = @intFromFloat(p1.x());
+            var y1: i32 = @intFromFloat(p1.y());
+            const x2: i32 = @intFromFloat(p2.x());
+            const y2: i32 = @intFromFloat(p2.y());
 
             const pixel_color = convertColor(T, color);
 
@@ -241,10 +241,10 @@ pub fn Canvas(comptime T: type) type {
         fn drawLineXiaolinWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
             const c2 = convertColor(Rgba, color);
 
-            var x1 = p1.x;
-            var y1 = p1.y;
-            var x2 = p2.x;
-            var y2 = p2.y;
+            var x1 = p1.x();
+            var y1 = p1.y();
+            var x2 = p2.x();
+            var y2 = p2.y();
 
             // Special case for perfectly horizontal lines
             if (@abs(y2 - y1) < 0.01) {
@@ -259,7 +259,7 @@ pub fn Canvas(comptime T: type) type {
                 // Left endpoint antialiasing
                 if (min_x > left_x) {
                     const alpha = min_x - left_x;
-                    self.setPixel(.{ .x = left_x, .y = y }, c2.fade(alpha));
+                    self.setPixel(Point2d(f32).init2d(left_x, y), c2.fade(alpha));
                 }
 
                 // Middle solid part - use fillHorizontalSpan for performance
@@ -272,7 +272,7 @@ pub fn Canvas(comptime T: type) type {
                 // Right endpoint antialiasing
                 if (max_x < right_x) {
                     const alpha = right_x - max_x;
-                    self.setPixel(.{ .x = right_x, .y = y }, c2.fade(alpha));
+                    self.setPixel(Point2d(f32).init2d(right_x, y), c2.fade(alpha));
                 }
 
                 return;
@@ -298,11 +298,11 @@ pub fn Canvas(comptime T: type) type {
             var x_gap = rfpart(x1 + 0.5);
 
             if (steep) {
-                self.setPixel(.{ .x = y_end, .y = x_end }, c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.{ .x = y_end + 1, .y = x_end }, c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(y_end, x_end), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(y_end + 1, x_end), c2.fade(fpart(y_end) * x_gap));
             } else {
-                self.setPixel(.{ .x = x_end, .y = y_end }, c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.{ .x = x_end, .y = y_end + 1 }, c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(x_end, y_end), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(x_end, y_end + 1), c2.fade(fpart(y_end) * x_gap));
             }
             var intery = y_end + gradient;
 
@@ -312,11 +312,11 @@ pub fn Canvas(comptime T: type) type {
             x_gap = fpart(x2 + 0.5);
 
             if (steep) {
-                self.setPixel(.{ .x = y_end, .y = x_end }, c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.{ .x = y_end + 1, .y = x_end }, c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(y_end, x_end), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(y_end + 1, x_end), c2.fade(fpart(y_end) * x_gap));
             } else {
-                self.setPixel(.{ .x = x_end, .y = y_end }, c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.{ .x = x_end, .y = y_end + 1 }, c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(x_end, y_end), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(Point2d(f32).init2d(x_end, y_end + 1), c2.fade(fpart(y_end) * x_gap));
             }
 
             // Main loop
@@ -325,11 +325,11 @@ pub fn Canvas(comptime T: type) type {
             var x = x_px1 + 1;
             while (x < x_px2) : (x += 1) {
                 if (steep) {
-                    self.setPixel(.{ .x = intery, .y = x }, c2.fade(rfpart(intery)));
-                    self.setPixel(.{ .x = intery + 1, .y = x }, c2.fade(fpart(intery)));
+                    self.setPixel(Point2d(f32).init2d(intery, x), c2.fade(rfpart(intery)));
+                    self.setPixel(Point2d(f32).init2d(intery + 1, x), c2.fade(fpart(intery)));
                 } else {
-                    self.setPixel(.{ .x = x, .y = intery }, c2.fade(rfpart(intery)));
-                    self.setPixel(.{ .x = x, .y = intery + 1 }, c2.fade(fpart(intery)));
+                    self.setPixel(Point2d(f32).init2d(x, intery), c2.fade(rfpart(intery)));
+                    self.setPixel(Point2d(f32).init2d(x, intery + 1), c2.fade(fpart(intery)));
                 }
                 intery += gradient;
             }
@@ -343,8 +343,8 @@ pub fn Canvas(comptime T: type) type {
             const solid_color = convertColor(T, color);
 
             // For thick lines, draw as a filled rectangle
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
+            const dx = p2.x() - p1.x();
+            const dy = p2.y() - p1.y();
             const line_length = @sqrt(dx * dx + dy * dy);
 
             if (line_length == 0) {
@@ -361,10 +361,10 @@ pub fn Canvas(comptime T: type) type {
 
             // Create rectangle corners
             const corners = [_]Point2d(f32){
-                .{ .x = p1.x - perp_x, .y = p1.y - perp_y },
-                .{ .x = p1.x + perp_x, .y = p1.y + perp_y },
-                .{ .x = p2.x + perp_x, .y = p2.y + perp_y },
-                .{ .x = p2.x - perp_x, .y = p2.y - perp_y },
+                Point2d(f32).init2d(p1.x() - perp_x, p1.y() - perp_y),
+                Point2d(f32).init2d(p1.x() + perp_x, p1.y() + perp_y),
+                Point2d(f32).init2d(p2.x() + perp_x, p2.y() + perp_y),
+                Point2d(f32).init2d(p2.x() - perp_x, p2.y() - perp_y),
             };
 
             // Fill rectangle using scanline algorithm (no anti-aliasing)
@@ -387,8 +387,8 @@ pub fn Canvas(comptime T: type) type {
             const c2 = convertColor(Rgba, color);
 
             // Calculate line direction vector
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
+            const dx = p2.x() - p1.x();
+            const dy = p2.y() - p1.y();
             const line_length = @sqrt(dx * dx + dy * dy);
 
             if (line_length == 0) {
@@ -399,9 +399,9 @@ pub fn Canvas(comptime T: type) type {
 
             // Special case for perfectly horizontal/vertical lines (faster rendering)
             if (@abs(dx) < horizontal_vertical_threshold) { // Vertical line
-                const x1 = @round(p1.x);
-                var y1 = @round(p1.y);
-                var y2 = @round(p2.y);
+                const x1 = @round(p1.x());
+                var y1 = @round(p1.y());
+                var y2 = @round(p2.y());
                 if (y1 > y2) std.mem.swap(f32, &y1, &y2);
                 if (x1 < 0 or x1 >= fcols) return;
 
@@ -419,9 +419,9 @@ pub fn Canvas(comptime T: type) type {
                 self.fillCircle(p2, half_width, color, .soft);
                 return;
             } else if (@abs(dy) < horizontal_vertical_threshold) { // Horizontal line
-                var x1 = @round(p1.x);
-                var x2 = @round(p2.x);
-                const y1 = @round(p1.y);
+                var x1 = @round(p1.x());
+                var x2 = @round(p2.x());
+                const y1 = @round(p1.y());
                 if (x1 > x2) std.mem.swap(f32, &x1, &x2);
                 if (y1 < 0 or y1 >= frows) return;
 
@@ -438,7 +438,7 @@ pub fn Canvas(comptime T: type) type {
                             var x = x1;
                             while (x <= x2) : (x += 1) {
                                 if (x >= 0 and x < fcols) {
-                                    self.setPixel(.{ .x = x, .y = py }, c2);
+                                    self.setPixel(Point2d(f32).init2d(x, py), c2);
                                 }
                             }
                         } else {
@@ -455,10 +455,10 @@ pub fn Canvas(comptime T: type) type {
 
             // For diagonal lines, use optimized distance-based anti-aliasing
             // Calculate tighter bounding box
-            const line_min_x = @min(p1.x, p2.x) - half_width;
-            const line_max_x = @max(p1.x, p2.x) + half_width;
-            const line_min_y = @min(p1.y, p2.y) - half_width;
-            const line_max_y = @max(p1.y, p2.y) + half_width;
+            const line_min_x = @min(p1.x(), p2.x()) - half_width;
+            const line_max_x = @max(p1.x(), p2.x()) + half_width;
+            const line_min_y = @min(p1.y(), p2.y()) - half_width;
+            const line_max_y = @max(p1.y(), p2.y()) + half_width;
 
             const min_x = @max(0, @floor(line_min_x));
             const max_x = @min(fcols - 1, @ceil(line_max_x));
@@ -477,11 +477,11 @@ pub fn Canvas(comptime T: type) type {
                 var px: f32 = min_x;
                 while (px <= max_x) : (px += 1) {
                     // Optimized distance calculation
-                    const dpx = px - p1.x;
-                    const dpy = py - p1.y;
+                    const dpx = px - p1.x();
+                    const dpy = py - p1.y();
                     const t = @max(0, @min(1, (dpx * dx + dpy * dy) * inv_length_sq));
-                    const closest_x = p1.x + t * dx;
-                    const closest_y = p1.y + t * dy;
+                    const closest_x = p1.x() + t * dx;
+                    const closest_y = p1.y() + t * dy;
                     const dist_x = px - closest_x;
                     const dist_y = py - closest_y;
                     const dist = @sqrt(dist_x * dist_x + dist_y * dist_y);
@@ -494,7 +494,7 @@ pub fn Canvas(comptime T: type) type {
                         }
 
                         if (alpha > 0) {
-                            self.setPixel(.{ .x = px, .y = py }, c2.fade(alpha));
+                            self.setPixel(Point2d(f32).init2d(px, py), c2.fade(alpha));
                         }
                     }
                 }
@@ -509,7 +509,7 @@ pub fn Canvas(comptime T: type) type {
         pub fn setPixel(self: Self, point: Point2d(f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
-            if (self.atOrNull(@intFromFloat(point.y), @intFromFloat(point.x))) |pixel| {
+            if (self.atOrNull(@intFromFloat(point.y()), @intFromFloat(point.x()))) |pixel| {
                 switch (ColorType) {
                     Rgba => {
                         if (color.a == 255) {
@@ -559,10 +559,10 @@ pub fn Canvas(comptime T: type) type {
         pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             const points: []const Point2d(f32) = &.{
-                .{ .x = rect.l, .y = rect.t },
-                .{ .x = rect.r, .y = rect.t },
-                .{ .x = rect.r, .y = rect.b },
-                .{ .x = rect.l, .y = rect.b },
+                Point2d(f32).init2d(rect.l, rect.t),
+                Point2d(f32).init2d(rect.r, rect.t),
+                Point2d(f32).init2d(rect.r, rect.b),
+                Point2d(f32).init2d(rect.l, rect.b),
             };
             self.drawPolygon(points, color, width, mode);
         }
@@ -583,22 +583,22 @@ pub fn Canvas(comptime T: type) type {
         fn drawCircleFast(self: Self, center: Point2d(f32), radius: f32, width: usize, color: anytype) void {
             if (width == 1) {
                 // Use fast Bresenham for 1-pixel width
-                const cx = @round(center.x);
-                const cy = @round(center.y);
+                const cx = @round(center.x());
+                const cy = @round(center.y());
                 const r = @round(radius);
                 var x: f32 = r;
                 var y: f32 = 0;
                 var err: f32 = 0;
                 while (x >= y) {
                     const points = [_]Point2d(f32){
-                        .{ .x = cx + x, .y = cy + y },
-                        .{ .x = cx - x, .y = cy + y },
-                        .{ .x = cx + x, .y = cy - y },
-                        .{ .x = cx - x, .y = cy - y },
-                        .{ .x = cx + y, .y = cy + x },
-                        .{ .x = cx - y, .y = cy + x },
-                        .{ .x = cx + y, .y = cy - x },
-                        .{ .x = cx - y, .y = cy - x },
+                        Point2d(f32).init2d(cx + x, cy + y),
+                        Point2d(f32).init2d(cx - x, cy + y),
+                        Point2d(f32).init2d(cx + x, cy - y),
+                        Point2d(f32).init2d(cx - x, cy - y),
+                        Point2d(f32).init2d(cx + y, cy + x),
+                        Point2d(f32).init2d(cx - y, cy + x),
+                        Point2d(f32).init2d(cx + y, cy - x),
+                        Point2d(f32).init2d(cx - y, cy - x),
                     };
                     for (points) |p| {
                         self.setPixel(p, color);
@@ -622,15 +622,15 @@ pub fn Canvas(comptime T: type) type {
                 const solid_color = convertColor(T, color);
 
                 // Calculate bounding box
-                const left: usize = @intFromFloat(@round(@max(0, center.x - outer_radius - 1)));
-                const top: usize = @intFromFloat(@round(@max(0, center.y - outer_radius - 1)));
-                const right: usize = @intFromFloat(@round(@min(fcols, center.x + outer_radius + 1)));
-                const bottom: usize = @intFromFloat(@round(@min(frows, center.y + outer_radius + 1)));
+                const left: usize = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
+                const top: usize = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
+                const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
+                const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
                 for (top..bottom) |r| {
-                    const y = @as(f32, @floatFromInt(r)) - center.y;
+                    const y = @as(f32, @floatFromInt(r)) - center.y();
                     for (left..right) |c| {
-                        const x = @as(f32, @floatFromInt(c)) - center.x;
+                        const x = @as(f32, @floatFromInt(c)) - center.x();
                         const dist_sq = x * x + y * y;
                         const inner_radius_sq = inner_radius * inner_radius;
                         const outer_radius_sq = outer_radius * outer_radius;
@@ -653,17 +653,17 @@ pub fn Canvas(comptime T: type) type {
             const outer_radius = radius + line_width / 2.0;
 
             // Calculate bounding box
-            const left: usize = @intFromFloat(@round(@max(0, center.x - outer_radius - 1)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y - outer_radius - 1)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x + outer_radius + 1)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y + outer_radius + 1)));
+            const left: usize = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
+            const top: usize = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
+            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
+            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
             const c2 = convertColor(Rgba, color);
 
             for (top..bottom) |r| {
-                const y = @as(f32, @floatFromInt(r)) - center.y;
+                const y = @as(f32, @floatFromInt(r)) - center.y();
                 for (left..right) |c| {
-                    const x = @as(f32, @floatFromInt(c)) - center.x;
+                    const x = @as(f32, @floatFromInt(c)) - center.x();
                     const dist = @sqrt(x * x + y * y);
 
                     // Only draw if we're in the ring area
@@ -683,7 +683,7 @@ pub fn Canvas(comptime T: type) type {
                         alpha = @max(0, @min(1, alpha));
 
                         if (alpha > 0) {
-                            self.setPixel(.{ .x = @floatFromInt(c), .y = @floatFromInt(r) }, c2.fade(alpha));
+                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), c2.fade(alpha));
                         }
                     }
                 }
@@ -704,11 +704,11 @@ pub fn Canvas(comptime T: type) type {
             const fcols: f32 = @floatFromInt(self.image.cols);
 
             // Find bounding box for optimization
-            var min_y = polygon[0].y;
-            var max_y = polygon[0].y;
+            var min_y = polygon[0].y();
+            var max_y = polygon[0].y();
             for (polygon) |p| {
-                min_y = @min(min_y, p.y);
-                max_y = @max(max_y, p.y);
+                min_y = @min(min_y, p.y());
+                max_y = @max(max_y, p.y());
             }
 
             const start_y = @max(0, @floor(min_y));
@@ -731,7 +731,7 @@ pub fn Canvas(comptime T: type) type {
                     const p1 = polygon[i];
                     const p2 = polygon[(i + 1) % polygon.len];
 
-                    if ((p1.y <= y and p2.y > y) or (p2.y <= y and p1.y > y)) {
+                    if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
                         intersection_count += 1;
                     }
                 }
@@ -755,8 +755,8 @@ pub fn Canvas(comptime T: type) type {
                     const p1 = polygon[i];
                     const p2 = polygon[(i + 1) % polygon.len];
 
-                    if ((p1.y <= y and p2.y > y) or (p2.y <= y and p1.y > y)) {
-                        const intersection = p1.x + (y - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
+                    if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
+                        const intersection = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
                         intersections[idx] = intersection;
                         idx += 1;
                     }
@@ -794,7 +794,7 @@ pub fn Canvas(comptime T: type) type {
                                 alpha = @max(0, @min(1, alpha));
 
                                 if (alpha > 0) {
-                                    self.setPixel(.{ .x = x, .y = y }, c2.fade(alpha));
+                                    self.setPixel(Point2d(f32).init2d(x, y), c2.fade(alpha));
                                 }
                             }
                         },
@@ -823,15 +823,15 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleSoft(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: usize = @intFromFloat(@round(@max(0, center.x - radius)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y - radius)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x + radius)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y + radius)));
+            const left: usize = @intFromFloat(@round(@max(0, center.x() - radius)));
+            const top: usize = @intFromFloat(@round(@max(0, center.y() - radius)));
+            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + radius)));
+            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + radius)));
 
             for (top..bottom) |r| {
-                const y = as(f32, r) - center.y;
+                const y = as(f32, r) - center.y();
                 for (left..right) |c| {
-                    const x = as(f32, c) - center.x;
+                    const x = as(f32, c) - center.x();
                     const dist_sq = x * x + y * y;
                     if (dist_sq <= radius * radius) {
                         // Apply antialiasing at the edge
@@ -840,10 +840,10 @@ pub fn Canvas(comptime T: type) type {
                             // Edge antialiasing
                             const edge_alpha = radius - dist;
                             const rgba_color = convertColor(Rgba, color);
-                            self.setPixel(.{ .x = @floatFromInt(c), .y = @floatFromInt(r) }, rgba_color.fade(edge_alpha));
+                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), rgba_color.fade(edge_alpha));
                         } else {
                             // Full opacity in the center - direct assignment
-                            self.setPixel(.{ .x = @floatFromInt(c), .y = @floatFromInt(r) }, color);
+                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), color);
                         }
                     }
                 }
@@ -854,17 +854,17 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleFast(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
             const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
-            const top = @max(0, center.y - radius);
-            const bottom = @min(frows - 1, center.y + radius);
+            const top = @max(0, center.y() - radius);
+            const bottom = @min(frows - 1, center.y() + radius);
 
             var y = top;
             while (y <= bottom) : (y += 1) {
-                const dy = y - center.y;
+                const dy = y - center.y();
                 const dx = @sqrt(@max(0, radius * radius - dy * dy));
 
                 if (dx > 0) {
-                    const x1 = center.x - dx;
-                    const x2 = center.x + dx;
+                    const x1 = center.x() - dx;
+                    const x2 = center.x() + dx;
                     self.setHorizontalSpan(x1, x2, y, solid_color);
                 }
             }
@@ -1013,10 +1013,10 @@ pub fn Canvas(comptime T: type) type {
             const u = 1 - t;
             const uu = u * u;
             const tt = t * t;
-            return .{
-                .x = uu * p0.x + 2 * u * t * p1.x + tt * p2.x,
-                .y = uu * p0.y + 2 * u * t * p1.y + tt * p2.y,
-            };
+            return Point2d(f32).init2d(
+                uu * p0.x() + 2 * u * t * p1.x() + tt * p2.x(),
+                uu * p0.y() + 2 * u * t * p1.y() + tt * p2.y(),
+            );
         }
 
         /// Evaluates a cubic Bézier curve at parameter t.
@@ -1028,10 +1028,10 @@ pub fn Canvas(comptime T: type) type {
             const uuu = uu * u;
             const tt = t * t;
             const ttt = tt * t;
-            return .{
-                .x = uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
-                .y = uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y,
-            };
+            return Point2d(f32).init2d(
+                uuu * p0.x() + 3 * uu * t * p1.x() + 3 * u * tt * p2.x() + ttt * p3.x(),
+                uuu * p0.y() + 3 * uu * t * p1.y() + 3 * u * tt * p2.y() + ttt * p3.y(),
+            );
         }
 
         /// Estimates the length of a quadratic Bézier curve segment.
@@ -1127,14 +1127,14 @@ pub fn Canvas(comptime T: type) type {
         fn calculateSmoothControlPoints(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), tension: f32) struct { cp1: Point2d(f32), cp2: Point2d(f32) } {
             const tension_factor = 1 - @max(0, @min(1, tension));
             return .{
-                .cp1 = .{
-                    .x = p0.x + (p1.x - p0.x) * tension_factor,
-                    .y = p0.y + (p1.y - p0.y) * tension_factor,
-                },
-                .cp2 = .{
-                    .x = p1.x - (p2.x - p1.x) * tension_factor,
-                    .y = p1.y - (p2.y - p1.y) * tension_factor,
-                },
+                .cp1 = Point2d(f32).init2d(
+                    p0.x() + (p1.x() - p0.x()) * tension_factor,
+                    p0.y() + (p1.y() - p0.y()) * tension_factor,
+                ),
+                .cp2 = Point2d(f32).init2d(
+                    p1.x() - (p2.x() - p1.x()) * tension_factor,
+                    p1.y() - (p2.y() - p1.y()) * tension_factor,
+                ),
             };
         }
     };
@@ -1175,47 +1175,47 @@ const md5_checksums = [_]DrawTestCase{
 // Test drawing functions for MD5 checksums
 fn drawLineHorizontal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    canvas.drawLine(.{ .x = 10, .y = 50 }, .{ .x = 90, .y = 50 }, color, 1, .fast);
+    canvas.drawLine(Point2d(f32).init2d(10, 50), Point2d(f32).init2d(90, 50), color, 1, .fast);
 }
 
 fn drawLineVertical(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
-    canvas.drawLine(.{ .x = 50, .y = 10 }, .{ .x = 50, .y = 90 }, color, 1, .fast);
+    canvas.drawLine(Point2d(f32).init2d(50, 10), Point2d(f32).init2d(50, 90), color, 1, .fast);
 }
 
 fn drawLineDiagonal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
-    canvas.drawLine(.{ .x = 10, .y = 10 }, .{ .x = 90, .y = 90 }, color, 1, .fast);
+    canvas.drawLine(Point2d(f32).init2d(10, 10), Point2d(f32).init2d(90, 90), color, 1, .fast);
 }
 
 fn drawLineThick(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 128, .b = 0, .a = 255 };
-    canvas.drawLine(.{ .x = 20, .y = 20 }, .{ .x = 80, .y = 80 }, color, 5, .soft);
+    canvas.drawLine(Point2d(f32).init2d(20, 20), Point2d(f32).init2d(80, 80), color, 5, .soft);
 }
 
 fn drawCircleFilledSolid(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 0, .b = 128, .a = 255 };
-    canvas.fillCircle(.{ .x = 50, .y = 50 }, 30, color, .fast);
+    canvas.fillCircle(Point2d(f32).init2d(50, 50), 30, color, .fast);
 }
 
 fn drawCircleFilledSmooth(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 128, .b = 128, .a = 255 };
-    canvas.fillCircle(.{ .x = 50, .y = 50 }, 25, color, .soft);
+    canvas.fillCircle(Point2d(f32).init2d(50, 50), 25, color, .soft);
 }
 
 fn drawCircleOutline(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
-    canvas.drawCircle(.{ .x = 50, .y = 50 }, 35, color, 3, .soft);
+    canvas.drawCircle(Point2d(f32).init2d(50, 50), 35, color, 3, .soft);
 }
 
 fn drawRectangleFilled(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 64, .g = 128, .b = 192, .a = 255 };
     const rect = Rectangle(f32){ .l = 20, .t = 30, .r = 80, .b = 70 };
     const corners = [_]Point2d(f32){
-        .{ .x = rect.l, .y = rect.t },
-        .{ .x = rect.r, .y = rect.t },
-        .{ .x = rect.r, .y = rect.b },
-        .{ .x = rect.l, .y = rect.b },
+        Point2d(f32).init2d(rect.l, rect.t),
+        Point2d(f32).init2d(rect.r, rect.t),
+        Point2d(f32).init2d(rect.r, rect.b),
+        Point2d(f32).init2d(rect.l, rect.b),
     };
     canvas.fillPolygon(&corners, color, .fast) catch unreachable;
 }
@@ -1229,9 +1229,9 @@ fn drawRectangleOutline(canvas: Canvas(Rgba)) void {
 fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 192, .b = 128, .a = 255 };
     const triangle = [_]Point2d(f32){
-        .{ .x = 50, .y = 20 },
-        .{ .x = 80, .y = 80 },
-        .{ .x = 20, .y = 80 },
+        Point2d(f32).init2d(50, 20),
+        Point2d(f32).init2d(80, 80),
+        Point2d(f32).init2d(20, 80),
     };
     canvas.fillPolygon(&triangle, color, .soft) catch unreachable;
 }
@@ -1239,10 +1239,10 @@ fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
 fn drawBezierCubic(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 192, .b = 255, .a = 255 };
     canvas.drawCubicBezier(
-        .{ .x = 10, .y = 50 },
-        .{ .x = 30, .y = 10 },
-        .{ .x = 70, .y = 90 },
-        .{ .x = 90, .y = 50 },
+        Point2d(f32).init2d(10, 50),
+        Point2d(f32).init2d(30, 10),
+        Point2d(f32).init2d(70, 90),
+        Point2d(f32).init2d(90, 50),
         color,
         2,
         .fast,
@@ -1252,9 +1252,9 @@ fn drawBezierCubic(canvas: Canvas(Rgba)) void {
 fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 128, .b = 192, .a = 255 };
     canvas.drawQuadraticBezier(
-        .{ .x = 20, .y = 80 },
-        .{ .x = 50, .y = 20 },
-        .{ .x = 80, .y = 80 },
+        Point2d(f32).init2d(20, 80),
+        Point2d(f32).init2d(50, 20),
+        Point2d(f32).init2d(80, 80),
         color,
         3,
         .soft,
@@ -1264,14 +1264,14 @@ fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
 fn drawPolygonComplex(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 255, .b = 128, .a = 255 };
     const polygon = [_]Point2d(f32){
-        .{ .x = 50, .y = 10 },
-        .{ .x = 70, .y = 30 },
-        .{ .x = 90, .y = 40 },
-        .{ .x = 70, .y = 60 },
-        .{ .x = 50, .y = 90 },
-        .{ .x = 30, .y = 60 },
-        .{ .x = 10, .y = 40 },
-        .{ .x = 30, .y = 30 },
+        Point2d(f32).init2d(50, 10),
+        Point2d(f32).init2d(70, 30),
+        Point2d(f32).init2d(90, 40),
+        Point2d(f32).init2d(70, 60),
+        Point2d(f32).init2d(50, 90),
+        Point2d(f32).init2d(30, 60),
+        Point2d(f32).init2d(10, 40),
+        Point2d(f32).init2d(30, 30),
     };
     canvas.fillPolygon(&polygon, color, .soft) catch unreachable;
 }
@@ -1279,12 +1279,12 @@ fn drawPolygonComplex(canvas: Canvas(Rgba)) void {
 fn drawSplinePolygon(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 192, .g = 128, .b = 255, .a = 255 };
     const polygon = [_]Point2d(f32){
-        .{ .x = 50, .y = 20 },
-        .{ .x = 80, .y = 35 },
-        .{ .x = 80, .y = 65 },
-        .{ .x = 50, .y = 80 },
-        .{ .x = 20, .y = 65 },
-        .{ .x = 20, .y = 35 },
+        Point2d(f32).init2d(50, 20),
+        Point2d(f32).init2d(80, 35),
+        Point2d(f32).init2d(80, 65),
+        Point2d(f32).init2d(50, 80),
+        Point2d(f32).init2d(20, 65),
+        Point2d(f32).init2d(20, 35),
     };
     canvas.drawSplinePolygon(&polygon, color, 2, 0.5, .soft);
 }
@@ -1343,10 +1343,10 @@ test "line endpoints are connected" {
 
     // Test various line directions
     const test_cases = [_]struct { p1: Point2d(f32), p2: Point2d(f32) }{
-        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 90, .y = 10 } }, // horizontal
-        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 10, .y = 90 } }, // vertical
-        .{ .p1 = .{ .x = 10, .y = 10 }, .p2 = .{ .x = 90, .y = 90 } }, // diagonal
-        .{ .p1 = .{ .x = 90, .y = 10 }, .p2 = .{ .x = 10, .y = 90 } }, // reverse diagonal
+        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(90, 10) }, // horizontal
+        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(10, 90) }, // vertical
+        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(90, 90) }, // diagonal
+        .{ .p1 = Point2d(f32).init2d(90, 10), .p2 = Point2d(f32).init2d(10, 90) }, // reverse diagonal
     };
 
     for (test_cases) |tc| {
@@ -1365,10 +1365,10 @@ test "line endpoints are connected" {
         // Check 3x3 area around endpoints
         for (0..3) |dy| {
             for (0..3) |dx| {
-                const y1 = @as(i32, @intFromFloat(tc.p1.y)) + @as(i32, @intCast(dy)) - 1;
-                const x1 = @as(i32, @intFromFloat(tc.p1.x)) + @as(i32, @intCast(dx)) - 1;
-                const y2 = @as(i32, @intFromFloat(tc.p2.y)) + @as(i32, @intCast(dy)) - 1;
-                const x2 = @as(i32, @intFromFloat(tc.p2.x)) + @as(i32, @intCast(dx)) - 1;
+                const y1 = @as(i32, @intFromFloat(tc.p1.y())) + @as(i32, @intCast(dy)) - 1;
+                const x1 = @as(i32, @intFromFloat(tc.p1.x())) + @as(i32, @intCast(dx)) - 1;
+                const y2 = @as(i32, @intFromFloat(tc.p2.y())) + @as(i32, @intCast(dy)) - 1;
+                const x2 = @as(i32, @intFromFloat(tc.p2.x())) + @as(i32, @intCast(dx)) - 1;
 
                 if (y1 >= 0 and y1 < height and x1 >= 0 and x1 < width) {
                     const idx1 = @as(usize, @intCast(y1)) * width + @as(usize, @intCast(x1));
@@ -1408,7 +1408,7 @@ test "thick lines have correct width" {
 
         // Draw horizontal line in the middle
         const y = @as(f32, @floatFromInt(height / 2));
-        canvas.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, color, line_width, .fast);
+        canvas.drawLine(Point2d(f32).init2d(50, y), Point2d(f32).init2d(150, y), color, line_width, .fast);
 
         // Measure actual width at several points along the line
         var measured_widths: [3]usize = .{ 0, 0, 0 };
@@ -1449,7 +1449,7 @@ test "filled circle has correct radius" {
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const test_radii = [_]f32{ 5, 10, 20, 30, 40 };
-    const center = Point2d(f32){ .x = 100, .y = 100 };
+    const center = Point2d(f32).init2d(100, 100);
 
     for (test_radii) |radius| {
         // Clear image
@@ -1466,8 +1466,8 @@ test "filled circle has correct radius" {
 
         for (0..height) |y| {
             for (0..width) |x| {
-                const dx = @as(f32, @floatFromInt(x)) - center.x;
-                const dy = @as(f32, @floatFromInt(y)) - center.y;
+                const dx = @as(f32, @floatFromInt(x)) - center.x();
+                const dy = @as(f32, @floatFromInt(y)) - center.y();
                 const dist = @sqrt(dx * dx + dy * dy);
                 const idx = y * width + x;
                 const is_black = img.data[idx].r == 0;
@@ -1504,7 +1504,7 @@ test "circle outline has correct thickness" {
     const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
-    const center = Point2d(f32){ .x = 100, .y = 100 };
+    const center = Point2d(f32).init2d(100, 100);
     const radius: f32 = 40;
     const line_widths = [_]usize{ 1, 3, 5, 10 };
 
@@ -1525,8 +1525,8 @@ test "circle outline has correct thickness" {
             // Count black pixels along this radius
             var r: f32 = 0;
             while (r < radius * 2) : (r += 0.5) {
-                const x = center.x + r * @cos(angle);
-                const y = center.y + r * @sin(angle);
+                const x = center.x() + r * @cos(angle);
+                const y = center.y() + r * @sin(angle);
 
                 if (x >= 0 and x < width and y >= 0 and y < height) {
                     const idx = @as(usize, @intFromFloat(y)) * width + @as(usize, @intFromFloat(x));
@@ -1563,10 +1563,10 @@ test "filled rectangle has correct area" {
     }
 
     const corners = [_]Point2d(f32){
-        .{ .x = rect.l, .y = rect.t },
-        .{ .x = rect.r, .y = rect.t },
-        .{ .x = rect.r, .y = rect.b },
-        .{ .x = rect.l, .y = rect.b },
+        Point2d(f32).init2d(rect.l, rect.t),
+        Point2d(f32).init2d(rect.r, rect.t),
+        Point2d(f32).init2d(rect.r, rect.b),
+        Point2d(f32).init2d(rect.l, rect.b),
     };
     try canvas.fillPolygon(&corners, color, .fast);
 
@@ -1594,9 +1594,9 @@ test "polygon fill respects convexity" {
 
     // Test convex polygon (triangle)
     const triangle = [_]Point2d(f32){
-        .{ .x = 100, .y = 30 },
-        .{ .x = 170, .y = 150 },
-        .{ .x = 30, .y = 150 },
+        Point2d(f32).init2d(100, 30),
+        Point2d(f32).init2d(170, 150),
+        Point2d(f32).init2d(30, 150),
     };
 
     for (img.data) |*pixel| {
@@ -1607,17 +1607,17 @@ test "polygon fill respects convexity" {
 
     // Check that points inside triangle are filled
     const test_points = [_]struct { p: Point2d(f32), inside: bool }{
-        .{ .p = .{ .x = 100, .y = 100 }, .inside = true }, // centroid
-        .{ .p = .{ .x = 100, .y = 50 }, .inside = true }, // near top
-        .{ .p = .{ .x = 50, .y = 140 }, .inside = true }, // near bottom left
-        .{ .p = .{ .x = 150, .y = 140 }, .inside = true }, // near bottom right
-        .{ .p = .{ .x = 20, .y = 20 }, .inside = false }, // outside
-        .{ .p = .{ .x = 180, .y = 180 }, .inside = false }, // outside
+        .{ .p = Point2d(f32).init2d(100, 100), .inside = true }, // centroid
+        .{ .p = Point2d(f32).init2d(100, 50), .inside = true }, // near top
+        .{ .p = Point2d(f32).init2d(50, 140), .inside = true }, // near bottom left
+        .{ .p = Point2d(f32).init2d(150, 140), .inside = true }, // near bottom right
+        .{ .p = Point2d(f32).init2d(20, 20), .inside = false }, // outside
+        .{ .p = Point2d(f32).init2d(180, 180), .inside = false }, // outside
     };
 
     for (test_points) |tp| {
-        const x = @as(usize, @intFromFloat(tp.p.x));
-        const y = @as(usize, @intFromFloat(tp.p.y));
+        const x = @as(usize, @intFromFloat(tp.p.x()));
+        const y = @as(usize, @intFromFloat(tp.p.y()));
         if (x < width and y < height) {
             const idx = y * width + x;
             const is_black = img.data[idx].r == 0;
@@ -1646,7 +1646,7 @@ test "antialiased vs solid fill coverage" {
     }
 
     // Draw same circle with different modes
-    const center = Point2d(f32){ .x = 50, .y = 50 };
+    const center = Point2d(f32).init2d(50, 50);
     const radius: f32 = 20;
 
     canvas_solid.fillCircle(center, radius, color, .fast);
@@ -1683,10 +1683,10 @@ test "bezier curve smoothness" {
     }
 
     // Draw cubic bezier
-    const p0 = Point2d(f32){ .x = 20, .y = 100 };
-    const p1 = Point2d(f32){ .x = 60, .y = 20 };
-    const p2 = Point2d(f32){ .x = 140, .y = 180 };
-    const p3 = Point2d(f32){ .x = 180, .y = 100 };
+    const p0 = Point2d(f32).init2d(20, 100);
+    const p1 = Point2d(f32).init2d(60, 20);
+    const p2 = Point2d(f32).init2d(140, 180);
+    const p3 = Point2d(f32).init2d(180, 100);
 
     canvas.drawCubicBezier(p0, p1, p2, p3, color, 2, .fast);
 
@@ -1697,10 +1697,10 @@ test "bezier curve smoothness" {
     // Check 3x3 area around endpoints
     for (0..3) |dy| {
         for (0..3) |dx| {
-            const y0 = @as(i32, @intFromFloat(p0.y)) + @as(i32, @intCast(dy)) - 1;
-            const x0 = @as(i32, @intFromFloat(p0.x)) + @as(i32, @intCast(dx)) - 1;
-            const y3 = @as(i32, @intFromFloat(p3.y)) + @as(i32, @intCast(dy)) - 1;
-            const x3 = @as(i32, @intFromFloat(p3.x)) + @as(i32, @intCast(dx)) - 1;
+            const y0 = @as(i32, @intFromFloat(p0.y())) + @as(i32, @intCast(dy)) - 1;
+            const x0 = @as(i32, @intFromFloat(p0.x())) + @as(i32, @intCast(dx)) - 1;
+            const y3 = @as(i32, @intFromFloat(p3.y())) + @as(i32, @intCast(dy)) - 1;
+            const x3 = @as(i32, @intFromFloat(p3.x())) + @as(i32, @intCast(dx)) - 1;
 
             if (y0 >= 0 and y0 < height and x0 >= 0 and x0 < width) {
                 const idx0 = @as(usize, @intCast(y0)) * width + @as(usize, @intCast(x0));

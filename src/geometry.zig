@@ -4,7 +4,7 @@
 //! Each geometric type is implemented as a separate file using Zig's file-as-struct pattern.
 
 // Import points from geometry subdirectory
-const points = @import("geometry/points.zig");
+const points = @import("geometry/Point.zig");
 pub const Point2d = points.Point2d;
 pub const Point3d = points.Point3d;
 

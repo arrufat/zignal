@@ -37,7 +37,8 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Canvas = zignal.Canvas;
 const Image = zignal.Image;
-const Rgba = zignal.color.Rgba;
+const Point2d = zignal.Point2d;
+const Rgba = zignal.Rgba;
 const savePng = zignal.savePng;
 
 pub fn main() !void {
@@ -51,13 +52,16 @@ pub fn main() !void {
     const canvas: Canvas(Rgba) = .init(allocator, image);
     canvas.fill(Rgba.white);
 
-    // Draw shapes
     const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    canvas.drawLine(.{.x = 50, .y = 50}, .{.x = 750, .y = 100}, red, 5, .soft);
-    canvas.drawCircle(.{.x = 400, .y = 300}, 100, red, 3, .soft);
+    const start: Point2d(f32) = .init2d(50, 50);
+    const end: Point2d(f32) = .init2d(750, 100);
+    const center: Point2d(f32) = .init2d(400, 300);
+
+    canvas.drawLine(start, end, red, 5, .soft);
+    canvas.drawCircle(center, 100, red, 3, .soft);
 
     // Save the result to a PNG file
-    try savePng(Rgba, allocator, image, "drawing_example.png");
+    try savePng(Rgba, allocator, image, "drawing.png");
 }
 ```
 
@@ -68,13 +72,22 @@ However, we hope that it can be a foundation from which we can build a high qual
 
 Current features include:
 
-- color space conversions
-- simple matrix struct with common linear algebra operations
-- singular value decomposition (SVD) ported from dlib
+- **Principal Component Analysis (PCA)** with generic SIMD-accelerated implementation
+  - works on arbitrary-dimensional data (colors, spatial features, etc.)
+  - automatic color-to-point conversion using reflection
+  - image-to-points utilities for computer vision applications
+  - efficient batch processing and reconstruction
+- **color space conversions** (RGB, HSL, HSV, Lab, XYZ, Oklab, Oklch, etc.)
+- **matrix operations** with common linear algebra functions
+- **singular value decomposition (SVD)** ported from dlib
 - geometry
-  - points and rectangles
+  - unified Point system with SIMD acceleration supporting arbitrary dimensions
+  - 2D/3D/4D points with convenient accessors (x(), y(), z(), w())
+  - vector operations (add, subtract, scale, dot product, norm, distance)
+  - dimension conversion and projection methods
+  - rectangles and geometric primitives
   - projective, affine and similarity transforms
-  - convex hull
+  - convex hull algorithms
 - simple image struct with common operations
   - resize
   - rotate

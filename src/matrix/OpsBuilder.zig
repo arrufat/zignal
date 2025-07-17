@@ -197,6 +197,54 @@ pub fn OpsBuilder(comptime T: type) type {
             self.result = new_result;
         }
 
+        /// Compute Gram matrix: X * X^T
+        /// Useful for kernel methods and when rows < columns
+        /// The resulting matrix is rows × rows
+        pub fn gram(self: *Self) !void {
+            const rows = self.result.rows;
+            const cols = self.result.cols;
+            
+            var gram_matrix = try Matrix(T).init(self.allocator, rows, rows);
+            
+            // Compute X * X^T
+            for (0..rows) |i| {
+                for (0..rows) |j| {
+                    var sum: T = 0;
+                    for (0..cols) |k| {
+                        sum += self.result.at(i, k).* * self.result.at(j, k).*;
+                    }
+                    gram_matrix.at(i, j).* = sum;
+                }
+            }
+            
+            self.result.deinit();
+            self.result = gram_matrix;
+        }
+
+        /// Compute covariance matrix: X^T * X
+        /// Useful for statistical analysis and when rows > columns
+        /// The resulting matrix is columns × columns
+        pub fn covariance(self: *Self) !void {
+            const rows = self.result.rows;
+            const cols = self.result.cols;
+            
+            var cov_matrix = try Matrix(T).init(self.allocator, cols, cols);
+            
+            // Compute X^T * X
+            for (0..cols) |i| {
+                for (0..cols) |j| {
+                    var sum: T = 0;
+                    for (0..rows) |k| {
+                        sum += self.result.at(k, i).* * self.result.at(k, j).*;
+                    }
+                    cov_matrix.at(i, j).* = sum;
+                }
+            }
+            
+            self.result.deinit();
+            self.result = cov_matrix;
+        }
+
         /// Transfer ownership of the result to the caller
         pub fn toOwned(self: *Self) Matrix(T) {
             const final_result = self.result;
@@ -313,6 +361,50 @@ test "row and column extraction with OpsBuilder" {
     try expectEqual(@as(f32, 2.0), dynamic_col.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), dynamic_col.at(1, 0).*);
     try expectEqual(@as(f32, 6.0), dynamic_col.at(2, 0).*);
+}
+
+test "OpsBuilder gram and covariance matrices" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Create test matrix (3 samples × 2 features)
+    var data = try Matrix(f64).init(arena.allocator(), 3, 2);
+    data.at(0, 0).* = 1.0;
+    data.at(0, 1).* = 2.0;
+    data.at(1, 0).* = 3.0;
+    data.at(1, 1).* = 4.0;
+    data.at(2, 0).* = 5.0;
+    data.at(2, 1).* = 6.0;
+
+    // Test Gram matrix (X * X^T) - should be 3×3
+    var gram_ops = try OpsBuilder(f64).init(arena.allocator(), data);
+    try gram_ops.gram();
+    const gram_result = gram_ops.toOwned();
+
+    try expectEqual(@as(usize, 3), gram_result.rows);
+    try expectEqual(@as(usize, 3), gram_result.cols);
+
+    // Verify gram matrix values
+    // First row: [1*1+2*2, 1*3+2*4, 1*5+2*6] = [5, 11, 17]
+    try expectEqual(@as(f64, 5.0), gram_result.at(0, 0).*);
+    try expectEqual(@as(f64, 11.0), gram_result.at(0, 1).*);
+    try expectEqual(@as(f64, 17.0), gram_result.at(0, 2).*);
+
+    // Test Covariance matrix (X^T * X) - should be 2×2
+    var cov_ops = try OpsBuilder(f64).init(arena.allocator(), data);
+    try cov_ops.covariance();
+    const cov_result = cov_ops.toOwned();
+
+    try expectEqual(@as(usize, 2), cov_result.rows);
+    try expectEqual(@as(usize, 2), cov_result.cols);
+
+    // Verify covariance matrix values
+    // First row: [1*1+3*3+5*5, 1*2+3*4+5*6] = [35, 44]
+    try expectEqual(@as(f64, 35.0), cov_result.at(0, 0).*);
+    try expectEqual(@as(f64, 44.0), cov_result.at(0, 1).*);
+    // Second row: [2*1+4*3+6*5, 2*2+4*4+6*6] = [44, 56]
+    try expectEqual(@as(f64, 44.0), cov_result.at(1, 0).*);
+    try expectEqual(@as(f64, 56.0), cov_result.at(1, 1).*);
 }
 
 test "OpsBuilder matrix operations: add, sub, scale, transpose" {

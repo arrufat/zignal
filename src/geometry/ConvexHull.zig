@@ -4,7 +4,7 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
-const Point2d = @import("points.zig").Point2d;
+const Point2d = @import("Point.zig").Point2d;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
@@ -33,10 +33,10 @@ pub fn ConvexHull(comptime T: type) type {
 
         /// Returns the orientation of the three points.
         fn computeOrientation(a: Point2d(T), b: Point2d(T), c: Point2d(T)) Orientation {
-            const v: T = a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y);
+            const v: T = a.x() * (b.y() - c.y()) + b.x() * (c.y() - a.y()) + c.x() * (a.y() - b.y());
             // Due to floating point precision errors, compute the reverse orientation, and
             // if any of those is collinear, then return collinear.
-            const w: T = a.x * (c.y - b.y) + c.x * (b.y - a.y) + b.x * (a.y - c.y);
+            const w: T = a.x() * (c.y() - b.y()) + c.x() * (b.y() - a.y()) + b.x() * (a.y() - c.y());
             if (v * w == 0) return .collinear;
             if (v < 0) return .clockwise;
             if (v > 0) return .counter_clockwise;
@@ -66,7 +66,7 @@ pub fn ConvexHull(comptime T: type) type {
             var lowest_idx: usize = 0;
             for (self.points.items[1..], 1..) |p, i| {
                 const current = self.points.items[lowest_idx];
-                if (p.y < current.y or (p.y == current.y and p.x < current.x)) {
+                if (p.y() < current.y() or (p.y() == current.y() and p.x() < current.x())) {
                     lowest_idx = i;
                 }
             }
@@ -108,13 +108,13 @@ pub fn ConvexHull(comptime T: type) type {
 
 test "convex hull" {
     const points: []const Point2d(f32) = &.{
-        .{ .x = 0.0, .y = 0.0 },
-        .{ .x = 1.0, .y = 1.0 },
-        .{ .x = 2.0, .y = 2.0 },
-        .{ .x = 3.0, .y = 1.0 },
-        .{ .x = 4.0, .y = 0.0 },
-        .{ .x = 2.0, .y = 4.0 },
-        .{ .x = 1.0, .y = 3.0 },
+        Point2d(f32).init2d(0.0, 0.0),
+        Point2d(f32).init2d(1.0, 1.0),
+        Point2d(f32).init2d(2.0, 2.0),
+        Point2d(f32).init2d(3.0, 1.0),
+        Point2d(f32).init2d(4.0, 0.0),
+        Point2d(f32).init2d(2.0, 4.0),
+        Point2d(f32).init2d(1.0, 3.0),
     };
     var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
     defer convex_hull.deinit();
@@ -141,9 +141,9 @@ test "computeOrientation" {
     defer convex_hull.deinit();
     const computeOrientation = ConvexHull(f32).computeOrientation;
     // These three points can have different orientations due to floating point precision.
-    const a: Point2d(f32) = .{ .x = 4.9171928e-1, .y = 6.473901e-1 };
-    const b: Point2d(f32) = .{ .x = 3.6271343e-1, .y = 9.712454e-1 };
-    const c: Point2d(f32) = .{ .x = 3.9276862e-1, .y = 8.9579517e-1 };
+    const a: Point2d(f32) = Point2d(f32).init2d(4.9171928e-1, 6.473901e-1);
+    const b: Point2d(f32) = Point2d(f32).init2d(3.6271343e-1, 9.712454e-1);
+    const c: Point2d(f32) = Point2d(f32).init2d(3.9276862e-1, 8.9579517e-1);
     const orientation_abc = computeOrientation(a, b, c);
     const orientation_acb = computeOrientation(a, c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);
