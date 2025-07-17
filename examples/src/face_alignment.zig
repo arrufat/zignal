@@ -42,39 +42,38 @@ pub fn extractAlignedFace(
     // These are the normalized coordinates of the aligned landmarks
     // taken from dlib.
     var from_points: [5]Point2d = .{
-        .{ .x = 0.8595674595992, .y = 0.2134981538014 },
-        .{ .x = 0.6460604764104, .y = 0.2289674387677 },
-        .{ .x = 0.1205750620789, .y = 0.2137274526848 },
-        .{ .x = 0.3340850613712, .y = 0.2290642403242 },
-        .{ .x = 0.4901123135679, .y = 0.6277975316475 },
+        Point2d.init2d(0.8595674595992, 0.2134981538014),
+        Point2d.init2d(0.6460604764104, 0.2289674387677),
+        Point2d.init2d(0.1205750620789, 0.2137274526848),
+        Point2d.init2d(0.3340850613712, 0.2290642403242),
+        Point2d.init2d(0.4901123135679, 0.6277975316475),
     };
     const fcols: f32 = @floatFromInt(image.cols);
     const frows: f32 = @floatFromInt(image.rows);
 
     // These are the detected points from MediaPipe.
     const to_points: [5]Point2d = .{
-        landmarks[alignment[0]].scale(fcols, frows),
-        landmarks[alignment[1]].scale(fcols, frows),
-        landmarks[alignment[2]].scale(fcols, frows),
-        landmarks[alignment[3]].scale(fcols, frows),
-        landmarks[alignment[4]].scale(fcols, frows),
+        landmarks[alignment[0]].scaleEach(.{ fcols, frows }),
+        landmarks[alignment[1]].scaleEach(.{ fcols, frows }),
+        landmarks[alignment[2]].scaleEach(.{ fcols, frows }),
+        landmarks[alignment[3]].scaleEach(.{ fcols, frows }),
+        landmarks[alignment[4]].scaleEach(.{ fcols, frows }),
     };
     assert(from_points.len == to_points.len);
     assert(out.cols == out.rows);
     assert(out.cols > 0);
     const side: f32 = @floatFromInt(out.cols);
     for (&from_points) |*p| {
-        p.x = (padding + p.x) / (2 * padding + 1) * side;
-        p.y = (padding + p.y) / (2 * padding + 1) * side;
+        p.* = Point2d.init2d((padding + p.x()) / (2 * padding + 1) * side, (padding + p.y()) / (2 * padding + 1) * side);
     }
 
     // Find the transforms that maps the points between the canonical landmarks
     // and the detected landmarks.
     const transform: SimilarityTransform = .init(&from_points, &to_points);
-    const p = transform.project(.{ .x = 1, .y = 0 }).sub(transform.bias.toPoint2d());
-    const angle = std.math.atan2(p.y, p.x);
+    const p = transform.project(Point2d.init2d(1, 0)).sub(transform.bias.toPoint2d());
+    const angle = std.math.atan2(p.y(), p.x());
     const scale = p.norm();
-    const center = transform.project(.{ .x = side / 2, .y = side / 2 });
+    const center = transform.project(Point2d.init2d(side / 2, side / 2));
 
     // Rotate the image first to align the face.
     var rotated: Image(Rgba) = .empty;
@@ -82,18 +81,15 @@ pub fn extractAlignedFace(
     defer rotated.deinit(allocator);
 
     // Draw the rectangle on the input image.
-    var rect: Rectangle = .initCenter(center.x, center.y, side * scale, side * scale);
+    var rect: Rectangle = .initCenter(center.x(), center.y(), side * scale, side * scale);
     const canvas: Canvas(T) = .init(allocator, image);
     canvas.drawRectangle(rect, Hsv{ .h = 0, .s = 100, .v = 100 }, 1, .fast);
 
     // Calculate where the center point ended up in the rotated image.
-    const offset: Point2d = .{
-        .x = (@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2,
-        .y = (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2,
-    };
+    const offset = Point2d.init2d((@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2, (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2);
 
     // Adjust the rectangle to crop from the rotated image (it has been resized not to be clipped).
-    rect = .initCenter(center.x + offset.x, center.y + offset.y, side * scale, side * scale);
+    rect = .initCenter(center.x() + offset.x(), center.y() + offset.y(), side * scale, side * scale);
     var chip: Image(Rgba) = .empty;
     try rotated.crop(allocator, rect, &chip);
     defer chip.deinit(allocator);

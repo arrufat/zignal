@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 
 const as = @import("meta.zig").as;
 const color = @import("color.zig");
-const Point2d = @import("geometry/points.zig").Point2d;
+const Point2d = @import("geometry/Point.zig").Point2d;
 const is4xu8Struct = @import("meta.zig").is4xu8Struct;
 const isScalar = @import("meta.zig").isScalar;
 const isStruct = @import("meta.zig").isStruct;
@@ -171,10 +171,10 @@ pub fn Image(comptime T: type) type {
         /// try image.rotate(allocator, image.getCenter(), angle, &rotated);
         /// ```
         pub fn getCenter(self: Self) Point2d(f32) {
-            return .{
-                .x = @as(f32, @floatFromInt(self.cols)) / 2.0,
-                .y = @as(f32, @floatFromInt(self.rows)) / 2.0,
-            };
+            return Point2d(f32).init2d(
+                @as(f32, @floatFromInt(self.cols)) / 2.0,
+                @as(f32, @floatFromInt(self.rows)) / 2.0,
+            );
         }
 
         /// Returns an image view with boundaries defined by `rect` within the image boundaries.
@@ -489,8 +489,8 @@ pub fn Image(comptime T: type) type {
             const offset_y: f32 = (@as(f32, @floatFromInt(actual_rows)) - @as(f32, @floatFromInt(self.rows))) / 2;
 
             // The rotation center in the output image space
-            const rotated_center_x = center.x + offset_x;
-            const rotated_center_y = center.y + offset_y;
+            const rotated_center_x = center.x() + offset_x;
+            const rotated_center_y = center.y() + offset_y;
 
             for (0..actual_rows) |r| {
                 const y: f32 = @floatFromInt(r);
@@ -503,8 +503,8 @@ pub fn Image(comptime T: type) type {
                     const dy = y - rotated_center_y;
                     const rotated_dx = cos * dx - sin * dy;
                     const rotated_dy = sin * dx + cos * dy;
-                    const src_x = rotated_dx + center.x;
-                    const src_y = rotated_dy + center.y;
+                    const src_x = rotated_dx + center.x();
+                    const src_y = rotated_dy + center.y();
 
                     rotated.at(r, c).* = if (self.interpolateBilinear(src_x, src_y)) |val| val else std.mem.zeroes(T);
                 }

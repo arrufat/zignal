@@ -11,7 +11,7 @@
 //! - **Color Spaces**: RGB, HSL, HSV, XYZ, Lab, LCh, LMS, Oklab, Oklch, XYB conversions
 //! - **Geometry**: 2D/3D points, rectangles, transforms (affine, projective, similarity)
 //! - **Matrix Operations**: Linear algebra with SVD decomposition support
-//! - **Computer Vision**: Feature distribution matching, convex hull algorithms
+//! - **Computer Vision**: Feature distribution matching, convex hull algorithms, PCA
 //! - **Procedural Generation**: Perlin noise for textures and effects
 //!
 //! ## Architecture
@@ -81,8 +81,15 @@ const perlin_mod = @import("perlin.zig");
 pub const perlin = perlin_mod.perlin;
 pub const PerlinOptions = perlin_mod.PerlinOptions;
 
-pub const Point2d = geometry.Point2d;
-pub const Point3d = geometry.Point3d;
+// New unified Point system with arbitrary dimensions and SIMD acceleration
+const point_module = @import("geometry/Point.zig");
+pub const Point = point_module.Point;
+pub const Point1d = point_module.Point1d;
+pub const Point2d = point_module.Point2d;
+pub const Point3d = point_module.Point3d;
+pub const Point4d = point_module.Point4d;
+pub const makePoint = point_module.makePoint;
+
 pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;
 
@@ -92,3 +99,18 @@ pub const SvdOptions = @import("svd.zig").SvdOptions;
 pub const SvdResult = @import("svd.zig").SvdResult;
 
 pub const featureDistributionMatch = @import("fdm.zig").featureDistributionMatch;
+
+// PCA (Principal Component Analysis) system
+const pca = @import("pca.zig");
+pub const PrincipalComponentAnalysis = pca.PrincipalComponentAnalysis; // Legacy alias
+
+// Color conversion utilities
+pub const colorToPoint = pca.colorToPoint;
+pub const pointToColor = pca.pointToColor;
+
+// Image-to-points conversion functions
+pub const imageToColorPoints = pca.imageToColorPoints;
+pub const colorPointsToImage = pca.colorPointsToImage;
+pub const imageToIntensityPoints = pca.imageToIntensityPoints;
+pub const intensityPointsToImage = pca.intensityPointsToImage;
+
