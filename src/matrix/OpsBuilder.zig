@@ -76,21 +76,7 @@ pub fn OpsBuilder(comptime T: type) type {
 
         /// Matrix multiplication (dot product) - changes dimensions
         pub fn dot(self: *Self, other: Matrix(T)) !void {
-            assert(self.result.cols == other.rows);
-            var new_result = try Matrix(T).init(self.allocator, self.result.rows, other.cols);
-
-            for (0..self.result.rows) |r| {
-                for (0..other.cols) |c| {
-                    var accum: T = 0;
-                    for (0..self.result.cols) |k| {
-                        accum += self.result.at(r, k).* * other.at(k, c).*;
-                    }
-                    new_result.at(r, c).* = accum;
-                }
-            }
-
-            self.result.deinit();
-            self.result = new_result;
+            try self.gemm(other, false, false, 1.0, 0.0, null);
         }
 
         /// Computes the determinant of the matrix (only for square matrices up to 3x3)
@@ -201,48 +187,105 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
         pub fn gram(self: *Self) !void {
-            const rows = self.result.rows;
-            const cols = self.result.cols;
-            
-            var gram_matrix = try Matrix(T).init(self.allocator, rows, rows);
-            
-            // Compute X * X^T
-            for (0..rows) |i| {
-                for (0..rows) |j| {
-                    var sum: T = 0;
-                    for (0..cols) |k| {
-                        sum += self.result.at(i, k).* * self.result.at(j, k).*;
-                    }
-                    gram_matrix.at(i, j).* = sum;
-                }
-            }
-            
-            self.result.deinit();
-            self.result = gram_matrix;
+            try self.gemm(self.result, false, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
         pub fn covariance(self: *Self) !void {
-            const rows = self.result.rows;
-            const cols = self.result.cols;
-            
-            var cov_matrix = try Matrix(T).init(self.allocator, cols, cols);
-            
-            // Compute X^T * X
-            for (0..cols) |i| {
-                for (0..cols) |j| {
-                    var sum: T = 0;
-                    for (0..rows) |k| {
-                        sum += self.result.at(k, i).* * self.result.at(k, j).*;
+            try self.gemm(self.result, true, false, 1.0, 0.0, null);
+        }
+
+        /// General Matrix Multiply (GEMM): C = α * op(A) * op(B) + β * C
+        ///
+        /// This is the fundamental matrix operation that unifies many matrix computations:
+        /// - op(A) = A if trans_a is false, A^T if trans_a is true
+        /// - op(B) = B if trans_b is false, B^T if trans_b is true
+        /// - α (alpha) scales the product op(A) * op(B)
+        /// - β (beta) scales the existing matrix C before adding the product
+        /// - If c_matrix is null, it defaults to zero matrix
+        ///
+        /// Examples:
+        /// - Matrix multiplication: gemm(B, false, false, 1.0, 0.0, null)
+        /// - Gram matrix: gemm(self, false, true, 1.0, 0.0, null) -> A * A^T
+        /// - Covariance: gemm(self, true, false, 1.0, 0.0, null) -> A^T * A
+        /// - Scaled product: gemm(B, false, false, 2.0, 0.0, null) -> 2 * A * B
+        /// - Accumulation: gemm(B, false, false, 1.0, 1.0, C) -> A * B + C
+        pub fn gemm(
+            self: *Self,
+            other: Matrix(T),
+            trans_a: bool,
+            trans_b: bool,
+            alpha: T,
+            beta: T,
+            c_matrix: ?Matrix(T),
+        ) !void {
+            // Determine dimensions after potential transposition
+            const a_rows = if (trans_a) self.result.cols else self.result.rows;
+            const a_cols = if (trans_a) self.result.rows else self.result.cols;
+            const b_rows = if (trans_b) other.cols else other.rows;
+            const b_cols = if (trans_b) other.rows else other.cols;
+
+            // Verify matrix multiplication compatibility
+            assert(a_cols == b_rows);
+
+            var result = try Matrix(T).init(self.allocator, a_rows, b_cols);
+
+            // Initialize with scaled C matrix if provided
+            if (c_matrix) |c| {
+                assert(c.rows == a_rows and c.cols == b_cols);
+                if (beta != 0) {
+                    for (0..a_rows) |i| {
+                        for (0..b_cols) |j| {
+                            result.at(i, j).* = beta * c.at(i, j).*;
+                        }
                     }
-                    cov_matrix.at(i, j).* = sum;
+                }
+            } else {
+                // Initialize to zero
+                for (0..result.items.len) |i| {
+                    result.items[i] = 0;
                 }
             }
-            
+
+            // Skip computation if alpha is zero
+            if (alpha != 0) {
+                // Perform matrix multiplication with optional transpositions
+                for (0..a_rows) |i| {
+                    for (0..b_cols) |j| {
+                        var accumulator: T = 0;
+                        for (0..a_cols) |k| {
+                            // Get elements with potential transposition
+                            const a_val = if (trans_a) self.result.at(k, i).* else self.result.at(i, k).*;
+                            const b_val = if (trans_b) other.at(j, k).* else other.at(k, j).*;
+                            accumulator += a_val * b_val;
+                        }
+                        result.at(i, j).* += alpha * accumulator;
+                    }
+                }
+            }
+
             self.result.deinit();
-            self.result = cov_matrix;
+            self.result = result;
+        }
+
+        /// Scaled matrix multiplication: α * A * B
+        /// Convenience method for common GEMM use case
+        pub fn scaledDot(self: *Self, other: Matrix(T), alpha: T) !void {
+            try self.gemm(other, false, false, alpha, 0.0, null);
+        }
+
+        /// Matrix multiplication with transpose: A * B^T
+        /// Convenience method for common GEMM use case
+        pub fn dotTranspose(self: *Self, other: Matrix(T)) !void {
+            try self.gemm(other, false, true, 1.0, 0.0, null);
+        }
+
+        /// Transpose matrix multiplication: A^T * B
+        /// Convenience method for common GEMM use case
+        pub fn transposeDot(self: *Self, other: Matrix(T)) !void {
+            try self.gemm(other, true, false, 1.0, 0.0, null);
         }
 
         /// Transfer ownership of the result to the caller
@@ -405,6 +448,80 @@ test "OpsBuilder gram and covariance matrices" {
     // Second row: [2*1+4*3+6*5, 2*2+4*4+6*6] = [44, 56]
     try expectEqual(@as(f64, 44.0), cov_result.at(1, 0).*);
     try expectEqual(@as(f64, 56.0), cov_result.at(1, 1).*);
+}
+
+test "OpsBuilder GEMM operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Create test matrices
+    var a = try Matrix(f32).init(arena.allocator(), 2, 3);
+    a.at(0, 0).* = 1.0;
+    a.at(0, 1).* = 2.0;
+    a.at(0, 2).* = 3.0;
+    a.at(1, 0).* = 4.0;
+    a.at(1, 1).* = 5.0;
+    a.at(1, 2).* = 6.0;
+
+    var b = try Matrix(f32).init(arena.allocator(), 3, 2);
+    b.at(0, 0).* = 7.0;
+    b.at(0, 1).* = 8.0;
+    b.at(1, 0).* = 9.0;
+    b.at(1, 1).* = 10.0;
+    b.at(2, 0).* = 11.0;
+    b.at(2, 1).* = 12.0;
+
+    var c = try Matrix(f32).init(arena.allocator(), 2, 2);
+    c.at(0, 0).* = 1.0;
+    c.at(0, 1).* = 1.0;
+    c.at(1, 0).* = 1.0;
+    c.at(1, 1).* = 1.0;
+
+    // Test basic matrix multiplication: A * B
+    var ops1 = try OpsBuilder(f32).init(arena.allocator(), a);
+    try ops1.gemm(b, false, false, 1.0, 0.0, null);
+    const result1 = ops1.toOwned();
+
+    try expectEqual(@as(f32, 58.0), result1.at(0, 0).*); // 1*7 + 2*9 + 3*11
+    try expectEqual(@as(f32, 64.0), result1.at(0, 1).*); // 1*8 + 2*10 + 3*12
+    try expectEqual(@as(f32, 139.0), result1.at(1, 0).*); // 4*7 + 5*9 + 6*11
+    try expectEqual(@as(f32, 154.0), result1.at(1, 1).*); // 4*8 + 5*10 + 6*12
+
+    // Test scaled multiplication: 2 * A * B
+    var ops2 = try OpsBuilder(f32).init(arena.allocator(), a);
+    try ops2.gemm(b, false, false, 2.0, 0.0, null);
+    const result2 = ops2.toOwned();
+
+    try expectEqual(@as(f32, 116.0), result2.at(0, 0).*); // 2 * 58
+    try expectEqual(@as(f32, 128.0), result2.at(0, 1).*); // 2 * 64
+
+    // Test accumulation: A * B + C
+    var ops3 = try OpsBuilder(f32).init(arena.allocator(), a);
+    try ops3.gemm(b, false, false, 1.0, 1.0, c);
+    const result3 = ops3.toOwned();
+
+    try expectEqual(@as(f32, 59.0), result3.at(0, 0).*); // 58 + 1
+    try expectEqual(@as(f32, 65.0), result3.at(0, 1).*); // 64 + 1
+
+    // Test Gram matrix using GEMM: A * A^T
+    var ops4 = try OpsBuilder(f32).init(arena.allocator(), a);
+    try ops4.gemm(a, false, true, 1.0, 0.0, null);
+    const gram = ops4.toOwned();
+
+    try expectEqual(@as(usize, 2), gram.rows);
+    try expectEqual(@as(usize, 2), gram.cols);
+    try expectEqual(@as(f32, 14.0), gram.at(0, 0).*); // 1*1 + 2*2 + 3*3
+    try expectEqual(@as(f32, 32.0), gram.at(0, 1).*); // 1*4 + 2*5 + 3*6
+
+    // Test covariance using GEMM: A^T * A
+    var ops5 = try OpsBuilder(f32).init(arena.allocator(), a);
+    try ops5.gemm(a, true, false, 1.0, 0.0, null);
+    const cov = ops5.toOwned();
+
+    try expectEqual(@as(usize, 3), cov.rows);
+    try expectEqual(@as(usize, 3), cov.cols);
+    try expectEqual(@as(f32, 17.0), cov.at(0, 0).*); // 1*1 + 4*4
+    try expectEqual(@as(f32, 22.0), cov.at(0, 1).*); // 1*2 + 4*5
 }
 
 test "OpsBuilder matrix operations: add, sub, scale, transpose" {

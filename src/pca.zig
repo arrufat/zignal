@@ -173,14 +173,15 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
         /// Example: For 1000 RGB images (1000×3 matrix), we compute a 3×3 covariance
         /// matrix instead of a 1000×1000 Gram matrix, making it much more efficient.
         fn computeComponentsFromCovariance(self: *Self, data_matrix: *Matrix(T), num_components: usize) !void {
-            // Compute covariance matrix (X^T * X) / (n-1)
+            // Compute scaled covariance matrix (X^T * X) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
             
             var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
             defer ops.deinit();
-            try ops.covariance();
-            try ops.scale(scale);
+            // Use GEMM directly: scale * (X^T * X) + 0 * C
+            // This combines matrix multiplication and scaling in one optimized operation
+            try ops.gemm(data_matrix.*, true, false, scale, 0.0, null);
             var cov_matrix = ops.toOwned();
             defer cov_matrix.deinit();
 
@@ -246,14 +247,15 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
         /// Example: For 10 high-dimensional vectors (10×1000 matrix), we compute a
         /// 10×10 Gram matrix instead of a 1000×1000 covariance matrix.
         fn computeComponentsFromGram(self: *Self, data_matrix: *Matrix(T), num_components: usize) !void {
-            // Compute Gram matrix (X * X^T) / (n-1)
+            // Compute scaled Gram matrix (X * X^T) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
             
             var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
             defer ops.deinit();
-            try ops.gram();
-            try ops.scale(scale);
+            // Use GEMM directly: scale * (X * X^T) + 0 * C
+            // This combines matrix multiplication and scaling in one optimized operation
+            try ops.gemm(data_matrix.*, false, true, scale, 0.0, null);
             var gram_matrix = ops.toOwned();
             defer gram_matrix.deinit();
 
