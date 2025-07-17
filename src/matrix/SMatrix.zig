@@ -2,10 +2,12 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const formatting = @import("formatting.zig");
+const expectEqual = std.testing.expectEqual;
+const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point2d = @import("../geometry/Point.zig").Point2d;
 const Point3d = @import("../geometry/Point.zig").Point3d;
+const formatting = @import("formatting.zig");
 
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
@@ -43,24 +45,16 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         pub fn initAll(value: T) Self {
             var result: Self = .{};
             for (0..rows) |r| {
-                for (0..cols) |c| {
-                    result.items[r][c] = value;
-                }
+                @memset(&result.items[r], value);
             }
             return result;
         }
 
         /// Returns an identity-like matrix.
         pub fn identity() Self {
-            var result: Self = .{};
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    if (r == c) {
-                        result.items[r][c] = 1;
-                    } else {
-                        result.items[r][c] = 0;
-                    }
-                }
+            var result: Self = .initAll(0);
+            for (0..@min(rows, cols)) |i| {
+                result.items[i][i] = 1;
             }
             return result;
         }
@@ -302,7 +296,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
             // Check if c_matrix is null or not (comptime detection)
             const has_c_matrix = @TypeOf(c_matrix) != @TypeOf(null);
-            
+
             // Initialize with scaled C matrix if provided
             if (has_c_matrix) {
                 assert(c_matrix.rows == a_rows and c_matrix.cols == b_cols);
@@ -314,11 +308,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
                     }
                 } else {
                     // Beta is 0, so initialize to zero
-                    for (0..a_rows) |i| {
-                        for (0..b_cols) |j| {
-                            result.items[i][j] = 0;
-                        }
-                    }
+                    result = .initAll(0);
                 }
             } else {
                 // Initialize to zero
@@ -327,16 +317,39 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
             // Skip computation if alpha is zero
             if (alpha != 0) {
-                // Perform matrix multiplication with optional transpositions
+                const vec_len = std.simd.suggestVectorLength(T) orelse 1;
+                const VecType = @Vector(vec_len, T);
+
                 for (0..a_rows) |i| {
                     for (0..b_cols) |j| {
                         var accumulator: T = 0;
-                        for (0..a_cols) |k| {
-                            // Get elements with potential transposition
+
+                        // SIMD loop - process vec_len elements at once
+                        var k: usize = 0;
+                        while (k + vec_len <= a_cols) : (k += vec_len) {
+                            var a_vec: VecType = undefined;
+                            var b_vec: VecType = undefined;
+
+                            // Load vectors with appropriate indexing based on transpose flags
+                            for (0..vec_len) |v| {
+                                const a_val = if (trans_a) self.items[k + v][i] else self.items[i][k + v];
+                                const b_val = if (trans_b) other.items[j][k + v] else other.items[k + v][j];
+                                a_vec[v] = a_val;
+                                b_vec[v] = b_val;
+                            }
+
+                            // Vectorized multiply-accumulate
+                            const prod_vec = a_vec * b_vec;
+                            accumulator += @reduce(.Add, prod_vec);
+                        }
+
+                        // Handle remainder elements with scalar code
+                        while (k < a_cols) : (k += 1) {
                             const a_val = if (trans_a) self.items[k][i] else self.items[i][k];
                             const b_val = if (trans_b) other.items[j][k] else other.items[k][j];
                             accumulator += a_val * b_val;
                         }
+
                         result.items[i][j] += alpha * accumulator;
                     }
                 }
@@ -344,8 +357,6 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
             return result;
         }
-
-
 
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
@@ -534,10 +545,6 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
     };
 }
 
-// Tests for SMatrix functionality
-const expectEqual = std.testing.expectEqual;
-const expectEqualDeep = std.testing.expectEqualDeep;
-
 test "SMatrix identity" {
     const eye: SMatrix(f32, 3, 3) = .identity();
     try expectEqual(eye.sum(), 3);
@@ -667,7 +674,7 @@ test "SMatrix inverse" {
 
 test "SMatrix row and column extraction" {
     // Test data
-    const test_matrix = SMatrix(f32, 3, 2).init(.{
+    const test_matrix: SMatrix(f32, 3, 2) = .init(.{
         .{ 1.0, 2.0 },
         .{ 3.0, 4.0 },
         .{ 5.0, 6.0 },
@@ -685,11 +692,11 @@ test "SMatrix row and column extraction" {
 
 test "SMatrix matrix multiplication (dot product)" {
     // Test matrices
-    const static_a = SMatrix(f32, 2, 3).init(.{
+    const static_a: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
         .{ 4.0, 5.0, 6.0 },
     });
-    const static_b = SMatrix(f32, 3, 2).init(.{
+    const static_b: SMatrix(f32, 3, 2) = .init(.{
         .{ 7.0, 8.0 },
         .{ 9.0, 10.0 },
         .{ 11.0, 12.0 },
@@ -705,13 +712,13 @@ test "SMatrix matrix multiplication (dot product)" {
 
 test "SMatrix operations: add, sub, scale, transpose" {
     // Test data
-    const static_matrix = SMatrix(f32, 2, 3).init(.{
+    const static_matrix: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
         .{ 4.0, 5.0, 6.0 },
     });
 
     // Test operand matrix for add/sub operations
-    const static_operand = SMatrix(f32, 2, 3).init(.{
+    const static_operand: SMatrix(f32, 2, 3) = .init(.{
         .{ 0.5, 1.0, 1.5 },
         .{ 2.0, 2.5, 3.0 },
     });
@@ -736,7 +743,7 @@ test "SMatrix operations: add, sub, scale, transpose" {
 
 test "SMatrix gram and covariance matrices" {
     // Create test matrix (3 samples × 2 features)
-    const data = SMatrix(f64, 3, 2).init(.{
+    const data: SMatrix(f64, 3, 2) = .init(.{
         .{ 1.0, 2.0 },
         .{ 3.0, 4.0 },
         .{ 5.0, 6.0 },
@@ -769,16 +776,16 @@ test "SMatrix gram and covariance matrices" {
 
 test "SMatrix GEMM operations" {
     // Test matrices
-    const a = SMatrix(f32, 2, 3).init(.{
+    const a: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
         .{ 4.0, 5.0, 6.0 },
     });
-    const b = SMatrix(f32, 3, 2).init(.{
+    const b: SMatrix(f32, 3, 2) = .init(.{
         .{ 7.0, 8.0 },
         .{ 9.0, 10.0 },
         .{ 11.0, 12.0 },
     });
-    const c = SMatrix(f32, 2, 2).init(.{
+    const c: SMatrix(f32, 2, 2) = .init(.{
         .{ 1.0, 1.0 },
         .{ 1.0, 1.0 },
     });
