@@ -176,7 +176,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             // Compute scaled covariance matrix (X^T * X) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
-            
+
             var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
             defer ops.deinit();
             // Use GEMM directly: scale * (X^T * X) + 0 * C
@@ -250,7 +250,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             // Compute scaled Gram matrix (X * X^T) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
-            
+
             var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
             defer ops.deinit();
             // Use GEMM directly: scale * (X * X^T) + 0 * C
@@ -416,7 +416,6 @@ pub fn intensityPointsToImage(allocator: Allocator, points: []const @Vector(1, f
 
     return image;
 }
-
 
 // Tests
 

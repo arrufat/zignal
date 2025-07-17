@@ -44,24 +44,16 @@ pub fn Matrix(comptime T: type) type {
 
         /// Returns a matrix with all elements set to value.
         pub fn initAll(allocator: std.mem.Allocator, rows: usize, cols: usize, value: T) !Self {
-            var result = try init(allocator, rows, cols);
-            for (0..rows * cols) |i| {
-                result.items[i] = value;
-            }
+            const result = try init(allocator, rows, cols);
+            @memset(result.items, value);
             return result;
         }
 
         /// Returns an identity-like matrix.
         pub fn identity(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
-            var result = try init(allocator, rows, cols);
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    if (r == c) {
-                        result.set(r, c, 1);
-                    } else {
-                        result.set(r, c, 0);
-                    }
-                }
+            var result = try initAll(allocator, rows, cols, 0);
+            for (0..@min(rows, cols)) |i| {
+                result.at(i, i).* = 1;
             }
             return result;
         }
