@@ -1,2 +1,48 @@
+# Zig build artifacts
 .zig-cache/
 zig-out/
+
+# Python bindings build artifacts
+bindings/python/build/
+bindings/python/dist/
+bindings/python/*.egg-info/
+bindings/python/.eggs/
+
+# Built Python extensions
+bindings/python/zignal/*.so
+bindings/python/zignal/*.dylib
+bindings/python/zignal/*.pyd
+bindings/python/zignal/*.dll
+
+# Python cache and bytecode
+bindings/python/**/__pycache__/
+bindings/python/**/*.pyc
+bindings/python/**/*.pyo
+bindings/python/**/*.pyd
+
+# Virtual environments (if created in project)
+bindings/python/venv/
+bindings/python/.venv/
+bindings/python/env/
+
+# Testing artifacts
+bindings/python/.coverage
+bindings/python/htmlcov/
+bindings/python/.pytest_cache/
+bindings/python/.tox/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

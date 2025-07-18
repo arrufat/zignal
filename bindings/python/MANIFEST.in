@@ -1,0 +1,2 @@
+# Note: This package requires building from the full zignal project directory
+# to access build.zig and source files. No pre-built libraries are included.
