@@ -2,10 +2,22 @@ name: Build Python Wheels
 
 on:
   push:
-    branches: [ master, python ]
+    branches: [ master ]
     tags: [ 'v*' ]
+    paths:
+      - 'bindings/python/**'
+      - 'src/**'
+      - 'build.zig'
+      - 'build.zig.zon'
+      - '.github/workflows/python.yml'
   pull_request:
     branches: [ master ]
+    paths:
+      - 'bindings/python/**'
+      - 'src/**'
+      - 'build.zig'
+      - 'build.zig.zon'
+      - '.github/workflows/python.yml'
   workflow_dispatch:
 
 jobs:
@@ -161,8 +173,8 @@ jobs:
     name: Upload to TestPyPI
     needs: [build_wheels, build_sdist] 
     runs-on: ubuntu-latest
-    # Upload to TestPyPI on every push to python branch
-    if: github.ref == 'refs/heads/python'
+    # Upload to TestPyPI on every push to master (non-tag)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && !startsWith(github.ref, 'refs/tags/v')
     environment:
       name: testpypi
       url: https://test.pypi.org/p/zignal-processing
