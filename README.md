@@ -4,7 +4,7 @@
 
 <img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400>
 
-Zignal is zero-dependency image processing library heavily inspired by the amazing [dlib](http://dlib.net).
+Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](http://dlib.net).
 
 ## Disclaimer
 
