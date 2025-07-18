@@ -1,0 +1,188 @@
+name: Build Python Wheels
+
+on:
+  push:
+    branches: [ master, python ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }} - Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-13, macos-14]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Zig
+      uses: mlugg/setup-zig@v2
+      with:
+        version: master
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+
+    - name: Create virtual environment
+      run: |
+        uv venv
+
+    - name: Install build dependencies
+      run: |
+        uv pip install --upgrade setuptools wheel build
+
+    - name: Build wheel (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        source .venv/bin/activate
+        cd bindings/python
+        python build_wheels.py --optimize ReleaseFast
+      env:
+        ZIG_OPTIMIZE: ReleaseFast
+
+    - name: Build wheel (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        .venv\Scripts\Activate.ps1
+        cd bindings/python
+        python build_wheels.py --optimize ReleaseFast
+      env:
+        ZIG_OPTIMIZE: ReleaseFast
+
+    - name: Test wheel (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        source .venv/bin/activate
+        wheel=$(find bindings/python/dist -name "*.whl" | head -1)
+        echo "Installing wheel: $wheel"
+        uv pip install "$wheel"
+        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print(f'Hex: {red.to_hex():#08x}'); print('All tests passed!')"
+
+    - name: Test wheel (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        .venv\Scripts\Activate.ps1
+        $wheel = Get-ChildItem bindings/python/dist/*.whl | Select-Object -First 1
+        Write-Host "Installing wheel: $wheel"
+        uv pip install "$wheel"
+        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print(f'Hex: {red.to_hex():#08x}'); print('All tests passed!')"
+
+    - name: Upload wheels as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: bindings/python/dist/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Zig
+      uses: mlugg/setup-zig@v2
+      with:
+        version: master
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+
+    - name: Create virtual environment
+      run: |
+        uv venv
+
+    - name: Install build dependencies
+      run: |
+        uv pip install --upgrade setuptools wheel build
+
+    - name: Build sdist
+      run: |
+        source .venv/bin/activate
+        cd bindings/python
+        python update_version.py
+        python -m build --sdist
+
+    - name: Upload sdist as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sdist
+        path: bindings/python/dist/*.tar.gz
+
+  upload_pypi:
+    name: Upload to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    # Only upload on tag pushes to master
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/zignal-processing
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: "*"
+        merge-multiple: true
+        path: dist/
+
+    - name: List downloaded files
+      run: ls -la dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        attestations: false
+        verbose: true
+
+  upload_test_pypi:
+    name: Upload to TestPyPI
+    needs: [build_wheels, build_sdist] 
+    runs-on: ubuntu-latest
+    # Upload to TestPyPI on every push to python branch
+    if: github.ref == 'refs/heads/python'
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/zignal-processing
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: "*"
+        merge-multiple: true
+        path: dist/
+
+    - name: List downloaded files
+      run: ls -la dist/
+
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository-url: https://test.pypi.org/legacy/
+        attestations: false
+        verbose: true

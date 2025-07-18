@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zignal-processing"
+version = "0.2.0.dev16"
+description = "Zero-dependency image processing library"
+readme = "README.md"
+authors = [{name = "zignal contributors"}]
+license = "MIT"
+requires-python = ">=3.9"
+keywords = ["image-processing", "computer-vision", "zig", "native"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/bfactory-ai/zignal"
+Repository = "https://github.com/bfactory-ai/zignal"
+Documentation = "https://github.com/bfactory-ai/zignal"
+Issues = "https://github.com/bfactory-ai/zignal/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "mypy"]
+
+[tool.cibuildwheel]
+# Only build CPython wheels
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+# Skip 32-bit builds and musl for now
+skip = ["*-win32", "*-musllinux*"]
+
+[tool.cibuildwheel.linux]
+before-build = "yum install -y wget && curl -L https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2495+10bb6c883.tar.xz | tar -xJ -C /usr/local --strip-components=1"
+
+[tool.cibuildwheel.macos]
+before-build = "curl -L https://ziglang.org/builds/zig-macos-x86_64-0.14.0-dev.2495+10bb6c883.tar.xz | tar -xJ -C /usr/local --strip-components=1"
+
+[tool.cibuildwheel.windows]
+before-build = "curl -L https://ziglang.org/builds/zig-windows-x86_64-0.14.0-dev.2495+10bb6c883.zip -o zig.zip && powershell Expand-Archive zig.zip C:/zig && set PATH=C:/zig/zig-windows-x86_64-0.14.0-dev.2495+10bb6c883;%PATH%"
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "twine>=6.1.0",
+]

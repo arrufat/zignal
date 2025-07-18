@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const zignal_version = std.SemanticVersion.parse(@import("build.zig.zon").version) catch unreachable;
 const min_zig_version = std.SemanticVersion.parse(@import("build.zig.zon").minimum_zig_version) catch unreachable;
 
 pub fn build(b: *Build) void {
@@ -82,6 +83,125 @@ pub fn build(b: *Build) void {
     // Set default behavior
     b.default_step.dependOn(docs_step);
     b.default_step.dependOn(fmt_step);
+
+    // Version info step
+    const version_info_step = b.step("version", "Print the resolved version information");
+    const version_info_exe = b.addExecutable(.{
+        .name = "version",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/version.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+    });
+
+    // Add build options to version info executable
+    const version_options = b.addOptions();
+    // Resolve version once to avoid duplicate option declarations
+    const version = resolveVersion(b);
+    version_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
+    version_info_exe.root_module.addOptions("build_options", version_options);
+
+    const version_info_run = b.addRunArtifact(version_info_exe);
+    version_info_step.dependOn(&version_info_run.step);
+
+    // Python bindings
+    const py_bindings_step = b.step("python-bindings", "Build the python bindings");
+    const py_module = b.addLibrary(.{
+        .name = "zignal",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bindings/python/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    // Link against libc for Python headers
+    py_module.linkLibC();
+
+    // Add Python include directory if provided via environment variable
+    if (std.process.getEnvVarOwned(b.allocator, "PYTHON_INCLUDE_DIR")) |python_include| {
+        py_module.addIncludePath(.{ .cwd_relative = python_include });
+    } else |_| {
+        // No Python include directory specified - will rely on system default paths
+    }
+
+    // Add zignal module as dependency
+    py_module.root_module.addImport("zignal", b.addModule("zignal", .{
+        .root_source_file = b.path("src/root.zig"),
+    }));
+
+    // Add build options to python bindings
+    const py_options = b.addOptions();
+    py_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
+    py_module.root_module.addOptions("build_options", py_options);
+
+    // Add platform-specific python libraries and flags
+    const target_info = target.result;
+    switch (target_info.os.tag) {
+        .windows => {
+            // On Windows, link against the Python library
+            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+                py_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+
+                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                    // Remove the .lib extension for linkSystemLibrary
+                    const lib_name_no_ext = if (std.mem.endsWith(u8, lib_name, ".lib"))
+                        lib_name[0 .. lib_name.len - 4]
+                    else
+                        lib_name;
+                    py_module.linkSystemLibrary(lib_name_no_ext);
+                } else |_| {
+                    // Fallback - try to link against a common Python library name
+                    py_module.linkSystemLibrary("python3");
+                }
+            } else |_| {
+                // No Python library path provided - try system default
+                py_module.linkSystemLibrary("python3");
+            }
+        },
+        .macos => {
+            // On macOS, try to link against specific Python library if provided
+            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+                py_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+
+                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                    py_module.linkSystemLibrary(lib_name);
+                } else |_| {
+                    // Fallback to default
+                    py_module.linkSystemLibrary("python3");
+                }
+            } else |_| {
+                // No specific Python library path - use system default
+                py_module.linkSystemLibrary("python3");
+            }
+            py_module.linkSystemLibrary("dl");
+            py_module.linkSystemLibrary("m");
+        },
+        .linux => {
+            py_module.linkSystemLibrary("python3");
+            py_module.linkSystemLibrary("dl");
+            py_module.linkSystemLibrary("m");
+        },
+        else => {
+            // Try the default for other platforms
+            py_module.linkSystemLibrary("python3");
+            py_module.linkSystemLibrary("dl");
+            py_module.linkSystemLibrary("m");
+        },
+    }
+
+    // Determine output file extension based on target platform
+    const extension = switch (target_info.os.tag) {
+        .windows => ".pyd",
+        .macos => ".dylib",
+        else => ".so",
+    };
+
+    const output_name = b.fmt("lib/_zignal{s}", .{extension});
+    const install_py_module = b.addInstallFile(py_module.getEmittedBin(), output_name);
+    py_bindings_step.dependOn(&install_py_module.step);
 }
 
 const Build = blk: {
@@ -96,3 +216,74 @@ const Build = blk: {
         break :blk std.Build;
     }
 };
+
+/// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` fails.
+fn resolveVersion(b: *std.Build) std.SemanticVersion {
+    const version_string = b.option([]const u8, "version-string", "Override the version of this build");
+    if (version_string) |semver_string| {
+        return std.SemanticVersion.parse(semver_string) catch |err| {
+            std.debug.panic("Expected -Dversion-string={s} to be a semantic version: {}", .{ semver_string, err });
+        };
+    }
+
+    // Always check git state to determine if we're on a clean tag or ahead of it
+    // if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
+
+    var code: u8 = undefined;
+    const git_describe_raw = b.runAllowFail(&.{ "git", "describe", "--tags" }, &code, .Ignore) catch {
+        // If git describe fails (no tags), try to get commit count from git log
+        const git_count_raw = b.runAllowFail(&.{ "git", "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
+        const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
+
+        const git_hash_raw = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
+        const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
+
+        return .{
+            .major = zignal_version.major,
+            .minor = zignal_version.minor,
+            .patch = zignal_version.patch,
+            .pre = b.fmt("dev.{s}", .{commit_count}),
+            .build = commit_hash,
+        };
+    };
+    const git_describe = std.mem.trim(u8, git_describe_raw, " \n\r");
+
+    switch (std.mem.count(u8, git_describe, "-")) {
+        0 => {
+            // Tagged release version (e.g. 0.1.0).
+            std.debug.assert(std.mem.eql(u8, git_describe, b.fmt("{f}", .{zignal_version})));
+            return zignal_version;
+        },
+        2 => {
+            // Untagged development build (e.g. 2.0.1-57-g9b7de08de).
+            var it = std.mem.splitScalar(u8, git_describe, '-');
+            const previous_tag = it.first();
+            const commit_count = it.next().?;
+            const commit_ghash = it.next().?;
+
+            const previous_version = std.SemanticVersion.parse(previous_tag) catch unreachable;
+
+            // lviton_version must be greater than its previous version.
+            if (zignal_version.order(previous_version) != .gt) {
+                std.log.err("LViton version {f} must newer than {f}", .{
+                    zignal_version,
+                    previous_version,
+                });
+                std.process.exit(1);
+            }
+            std.debug.assert(std.mem.startsWith(u8, commit_ghash, "g"));
+
+            return .{
+                .major = zignal_version.major,
+                .minor = zignal_version.minor,
+                .patch = zignal_version.patch,
+                .pre = b.fmt("dev.{s}", .{commit_count}),
+                .build = commit_ghash[1..],
+            };
+        },
+        else => {
+            std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
+            std.process.exit(1);
+        },
+    }
+}
