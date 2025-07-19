@@ -376,7 +376,7 @@ test "extended color space round trips" {
 }
 
 /// List of color types to test. This is the only thing to update when adding a new color space.
-const ColorTypes = .{ Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
+const color_types = .{ Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
 
 /// Strips all type names to their unqualified base names.
 fn getSimpleTypeName(comptime T: type) []const u8 {
@@ -388,9 +388,9 @@ fn getSimpleTypeName(comptime T: type) []const u8 {
 }
 
 /// Generates the list of conversion methods based on the color type names.
-fn generateConversionMethods() [ColorTypes.len][]const u8 {
-    var methods: [ColorTypes.len][]const u8 = undefined;
-    inline for (ColorTypes, 0..) |ColorType, i| {
+fn generateConversionMethods() [color_types.len][]const u8 {
+    var methods: [color_types.len][]const u8 = undefined;
+    inline for (color_types, 0..) |ColorType, i| {
         const simple_name = getSimpleTypeName(ColorType);
         methods[i] = "to" ++ simple_name;
     }
@@ -422,7 +422,7 @@ test "comprehensive color conversion method validation and round-trip testing" {
 
     // Use metaprogramming to verify all color types have expected conversion methods
     // and test round-trip accuracy for each conversion
-    inline for (ColorTypes) |ColorType| {
+    inline for (color_types) |ColorType| {
         inline for (comptime generateConversionMethods()) |method_name| {
             // Skip self-conversion and special cases
             if (comptime shouldSkipMethod(ColorType, method_name)) continue;
