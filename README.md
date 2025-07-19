@@ -4,7 +4,7 @@
 
 <img src="https://github.com/bfactory-ai/zignal/blob/master/assets/liza.jpg" width=400>
 
-Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](http://dlib.net).
+Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](https://dlib.net).
 
 ## Disclaimer
 
@@ -95,7 +95,7 @@ Current features include:
   - blur
   - sharpen
   - views (called `sub_image` in dlib or `roi` in OpenCV.)
-- Canvas drawing API with consistent parameter ordering
+- Canvas drawing API
   - lines with variable width and antialiasing
   - circles (filled and outlined) with soft edges
   - polygons (filled and outlined)
@@ -121,6 +121,6 @@ Currently, there are examples for:
 
 First of all, this project would not have been possible without the existence of [dlib](http://dlib.net).
 In fact, the first version of the virtual makeup try on was written in C++ with dlib and Emscripten.
-However, we decided to give Zig a go, even if that meant rewriting the world, but we have no dependencies now.
+However, we decided to give Zig a go, even if that meant rewriting everything. As a result, we have no dependencies now.
 
 Finally, [B factory, Inc](https://www.bfactory.ai/), which is my employer and graciously agreed to release this library to the public.
