@@ -99,7 +99,8 @@ fn imagergb_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) 
 fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var file_path: [*c]const u8 = undefined;
 
-    if (c.PyArg_ParseTuple(args, "s", &file_path) == 0) {
+    const format = comptime std.fmt.comptimePrint("s", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
         return null;
     }
 
@@ -234,7 +235,8 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     _ = type_obj;
     var array_obj: ?*c.PyObject = undefined;
 
-    if (c.PyArg_ParseTuple(args, "O", &array_obj) == 0) {
+    const format = comptime std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &array_obj) == 0) {
         return null;
     }
 

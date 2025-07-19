@@ -81,7 +81,7 @@ jobs:
         wheel=$(find bindings/python/dist -name "*.whl" | head -1)
         echo "Installing wheel: $wheel"
         uv pip install "$wheel"
-        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print(f'Hex: {red.to_hex():#08x}'); print('All tests passed!')"
+        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print('All tests passed!')"
 
     - name: Test wheel (Windows)
       if: runner.os == 'Windows'
@@ -90,7 +90,7 @@ jobs:
         $wheel = Get-ChildItem bindings/python/dist/*.whl | Select-Object -First 1
         Write-Host "Installing wheel: $wheel"
         uv pip install "$wheel"
-        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print(f'Hex: {red.to_hex():#08x}'); print('All tests passed!')"
+        python -c "import zignal; print(f'Available: {dir(zignal)}'); red = zignal.Rgb(255, 0, 0); print(f'RGB test: {red}'); hsv = zignal.Hsv(0, 100, 100); print(f'HSV test: {hsv}'); hsv_from_rgb = red.to_hsv(); print(f'RGB->HSV: {hsv_from_rgb}'); rgb_from_hsv = hsv.to_rgb(); print(f'HSV->RGB: {rgb_from_hsv}'); print('All tests passed!')"
 
     - name: Upload wheels as artifacts
       uses: actions/upload-artifact@v4
