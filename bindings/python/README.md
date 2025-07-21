@@ -93,6 +93,31 @@ print(f"Chroma: {oklch.c}")
 print(f"Hue: {oklch.h}")
 ```
 
+### NumPy Integration (Optional)
+
+If NumPy is installed, you can work with image arrays:
+
+```python
+import numpy as np
+import zignal
+
+# Create numpy array (must be uint8, shape (H, W, 3))
+arr = np.zeros((100, 200, 3), dtype=np.uint8)
+arr[50, 100] = [255, 0, 0]  # Red pixel
+
+# Convert to ImageRgb (zero-copy when possible)
+img = zignal.ImageRgb.from_numpy(arr)
+
+# Convert back to numpy (zero-copy)
+arr2 = img.to_numpy()
+
+# Load and save images
+img = zignal.ImageRgb.load("input.png")
+img.save("output.png")
+```
+
+Note: NumPy is not required for basic color operations.
+
 ## Building from Source
 
 Requires Zig compiler:

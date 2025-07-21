@@ -18,6 +18,8 @@ const ImageRgbObject = extern struct {
     ob_base: c.PyObject,
     // Store pointer to heap-allocated image data (optional)
     image_ptr: ?*zignal.Image(zignal.Rgb),
+    // Store reference to NumPy array if created from numpy (for zero-copy)
+    numpy_ref: ?*c.PyObject,
 };
 
 fn imagergb_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -28,6 +30,7 @@ fn imagergb_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     if (self) |obj| {
         // Initialize to null pointer to avoid undefined behavior
         obj.image_ptr = null;
+        obj.numpy_ref = null;
     }
     return @as(?*c.PyObject, @ptrCast(self));
 }
@@ -50,9 +53,21 @@ fn imagergb_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 
     // Free the image data if it was allocated
     if (self.image_ptr) |ptr| {
-        const allocator = gpa.allocator();
-        ptr.deinit(allocator);
-        allocator.destroy(ptr);
+        // Only free if we allocated it (not if it's from numpy)
+        if (self.numpy_ref == null) {
+            const allocator = gpa.allocator();
+            ptr.deinit(allocator);
+            allocator.destroy(ptr);
+        } else {
+            // Just destroy the pointer wrapper, not the data
+            const allocator = gpa.allocator();
+            allocator.destroy(ptr);
+        }
+    }
+
+    // Release reference to NumPy array if we have one
+    if (self.numpy_ref) |ref| {
+        c.Py_XDECREF(ref);
     }
 
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
@@ -161,6 +176,11 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
 
     if (self.image_ptr) |ptr| {
+        // If created from numpy, return the original array (true zero-copy roundtrip)
+        if (self.numpy_ref) |numpy_array| {
+            c.Py_INCREF(numpy_array);
+            return numpy_array;
+        }
         // Import numpy
         const np_module = c.PyImport_ImportModule("numpy") orelse {
             c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
@@ -232,7 +252,6 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
 
 // Create ImageRgb from numpy array
 fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = type_obj;
     var array_obj: ?*c.PyObject = undefined;
 
     const format = comptime std.fmt.comptimePrint("O", .{});
@@ -240,11 +259,87 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
         return null;
     }
 
-    // For debugging, just return an error for now
-    if (array_obj != null) {
-        c.PyErr_SetString(c.PyExc_NotImplementedError, "from_numpy is temporarily disabled for debugging");
+    if (array_obj == null or array_obj == c.Py_None()) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Array cannot be None");
+        return null;
     }
-    return null;
+
+    // Get buffer interface from the array
+    var buffer: c.Py_buffer = undefined;
+    buffer = std.mem.zeroes(c.Py_buffer);
+
+    // Request buffer with strides info
+    const flags: c_int = 0x001c; // PyBUF_ND | PyBUF_STRIDES | PyBUF_FORMAT
+    if (c.PyObject_GetBuffer(array_obj, &buffer, flags) != 0) {
+        // Error already set by PyObject_GetBuffer
+        return null;
+    }
+    defer c.PyBuffer_Release(&buffer);
+
+    // Validate buffer format if available (should be 'B' for uint8)
+    // Note: format might be null if PyBUF_FORMAT wasn't requested
+    if (buffer.format != null and (buffer.format[0] != 'B' or buffer.format[1] != 0)) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Array must have dtype uint8");
+        return null;
+    }
+
+    // Validate dimensions (should be 3D with shape (rows, cols, 3))
+    if (buffer.ndim != 3) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3)");
+        return null;
+    }
+
+    // Get shape information
+    const shape = @as([*]c.Py_ssize_t, @ptrCast(buffer.shape));
+    const rows = @as(usize, @intCast(shape[0]));
+    const cols = @as(usize, @intCast(shape[1]));
+    const channels = @as(usize, @intCast(shape[2]));
+
+    if (channels != 3) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB)");
+        return null;
+    }
+
+    // Check if array is C-contiguous
+    // For C-contiguous, strides should be: (cols*3, 3, 1)
+    const strides = @as([*]c.Py_ssize_t, @ptrCast(buffer.strides));
+    const expected_stride_2 = buffer.itemsize; // Should be 1 for uint8
+    const expected_stride_1 = expected_stride_2 * @as(c.Py_ssize_t, @intCast(channels)); // Should be 3
+    const expected_stride_0 = expected_stride_1 * @as(c.Py_ssize_t, @intCast(cols)); // Should be cols * 3
+
+    if (strides[0] != expected_stride_0 or strides[1] != expected_stride_1 or strides[2] != expected_stride_2) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array is not C-contiguous. Use numpy.ascontiguousarray() first.");
+        return null;
+    }
+
+    // Create new Python object
+    const self = @as(?*ImageRgbObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+    if (self == null) {
+        return null;
+    }
+
+    // Allocate space for the image struct on heap
+    const allocator = gpa.allocator();
+    const image_ptr = allocator.create(zignal.Image(zignal.Rgb)) catch {
+        c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+
+    // Zero-copy: create image that points to NumPy's data
+    // Note: We only get here if the array is C-contiguous
+    const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
+    const data_slice = data_ptr[0..@intCast(buffer.len)];
+
+    // Use initFromBytes to reinterpret the data as RGB pixels
+    image_ptr.* = zignal.Image(zignal.Rgb).initFromBytes(rows, cols, data_slice);
+
+    // Keep a reference to the NumPy array to prevent deallocation
+    c.Py_INCREF(array_obj.?);
+    self.?.numpy_ref = array_obj;
+
+    self.?.image_ptr = image_ptr;
+    return @as(?*c.PyObject, @ptrCast(self));
 }
 
 // Save image to PNG file
@@ -295,7 +390,17 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
 
 var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = imagergb_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an RGB image from file" },
-    .{ .ml_name = "from_numpy", .ml_meth = imagergb_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Create ImageRgb from NumPy array with shape (rows, cols, 3) and dtype uint8" },
+    .{ .ml_name = "from_numpy", .ml_meth = imagergb_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
+    \\Create ImageRgb from NumPy array with shape (rows, cols, 3) and dtype uint8.
+    \\
+    \\Note: The array must be C-contiguous. If your array is not C-contiguous
+    \\(e.g., from slicing or transposing), use np.ascontiguousarray() first:
+    \\
+    \\    arr = np.ascontiguousarray(arr)
+    \\    img = ImageRgb.from_numpy(arr)
+    \\
+    \\When possible, zero-copy is used for C-contiguous arrays.
+    },
     .{ .ml_name = "to_numpy", .ml_meth = imagergb_to_numpy, .ml_flags = c.METH_NOARGS, .ml_doc = "Convert image to NumPy array with shape (rows, cols, 3) without copying data" },
     .{ .ml_name = "save", .ml_meth = imagergb_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
