@@ -176,19 +176,13 @@ pub fn build(b: *Build) void {
                 // No specific Python library path - use system default
                 py_module.linkSystemLibrary("python3");
             }
-            py_module.linkSystemLibrary("dl");
-            py_module.linkSystemLibrary("m");
         },
         .linux => {
             py_module.linkSystemLibrary("python3");
-            py_module.linkSystemLibrary("dl");
-            py_module.linkSystemLibrary("m");
         },
         else => {
             // Try the default for other platforms
             py_module.linkSystemLibrary("python3");
-            py_module.linkSystemLibrary("dl");
-            py_module.linkSystemLibrary("m");
         },
     }
 
