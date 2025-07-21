@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const isPacked = zignal.meta.isPacked;
 
 const color_types = @import("color_registry.zig").color_types;
 const ConversionError = @import("py_utils.zig").ConversionError;
@@ -25,6 +26,7 @@ pub fn createColorBinding(
     comptime ZigColorType: type,
 ) type {
     const fields = @typeInfo(ZigColorType).@"struct".fields;
+    const is_packed = isPacked(ZigColorType);
 
     // Create the Python object type manually (avoiding @Type complexity)
     const ObjectType = switch (fields.len) {
@@ -278,32 +280,87 @@ pub fn createColorBinding(
 
         /// Convert Python object to Zig color
         fn objectToZigColor(obj: *ObjectType) ZigColorType {
-            var zig_color: ZigColorType = undefined;
-
-            inline for (fields, 0..) |field, i| {
-                const field_value = switch (i) {
-                    0 => obj.field0,
-                    1 => obj.field1,
-                    2 => obj.field2,
-                    3 => obj.field3,
-                    else => unreachable,
+            if (comptime is_packed) {
+                // For packed structs, create a temporary unpacked representation
+                // then use @bitCast to convert to packed layout
+                return switch (fields.len) {
+                    4 => blk: {
+                        // Create array of bytes for packed struct
+                        const bytes = [4]u8{ obj.field0, obj.field1, obj.field2, obj.field3 };
+                        break :blk @bitCast(bytes);
+                    },
+                    3 => blk: {
+                        // Create array of bytes for packed struct
+                        const bytes = [3]u8{ obj.field0, obj.field1, obj.field2 };
+                        break :blk @bitCast(bytes);
+                    },
+                    2 => blk: {
+                        // Create array of bytes for packed struct
+                        const bytes = [2]u8{ obj.field0, obj.field1 };
+                        break :blk @bitCast(bytes);
+                    },
+                    1 => blk: {
+                        // Single field packed struct
+                        break :blk @bitCast([1]u8{obj.field0});
+                    },
+                    else => @compileError("Unsupported field count for packed struct"),
                 };
-                @field(zig_color, field.name) = field_value;
-            }
+            } else {
+                // Regular struct - use field-by-field assignment
+                var zig_color: ZigColorType = undefined;
 
-            return zig_color;
+                inline for (fields, 0..) |field, i| {
+                    const field_value = switch (i) {
+                        0 => obj.field0,
+                        1 => obj.field1,
+                        2 => obj.field2,
+                        3 => obj.field3,
+                        else => unreachable,
+                    };
+                    @field(zig_color, field.name) = field_value;
+                }
+
+                return zig_color;
+            }
         }
 
         /// Convert Zig color to Python object fields
         fn zigColorToObject(zig_color: ZigColorType, obj: *ObjectType) void {
-            inline for (fields, 0..) |field, i| {
-                const field_value = @field(zig_color, field.name);
-                switch (i) {
-                    0 => obj.field0 = field_value,
-                    1 => obj.field1 = field_value,
-                    2 => obj.field2 = field_value,
-                    3 => obj.field3 = field_value,
-                    else => unreachable,
+            if (comptime is_packed) {
+                // For packed structs, convert to byte array using @bitCast
+                const bytes: [fields.len]u8 = @bitCast(zig_color);
+                switch (fields.len) {
+                    4 => {
+                        obj.field0 = bytes[0];
+                        obj.field1 = bytes[1];
+                        obj.field2 = bytes[2];
+                        obj.field3 = bytes[3];
+                    },
+                    3 => {
+                        obj.field0 = bytes[0];
+                        obj.field1 = bytes[1];
+                        obj.field2 = bytes[2];
+                    },
+                    2 => {
+                        obj.field0 = bytes[0];
+                        obj.field1 = bytes[1];
+                    },
+                    1 => {
+                        obj.field0 = bytes[0];
+                    },
+                    else => @compileError("Unsupported field count for packed struct"),
+                }
+            } else {
+                // Regular struct - use field-by-field assignment
+                inline for (fields, 0..) |field, i| {
+                    const field_value = @field(zig_color, field.name);
+                    switch (i) {
+                        0 => obj.field0 = field_value,
+                        1 => obj.field1 = field_value,
+                        2 => obj.field2 = field_value,
+                        3 => obj.field3 = field_value,
+                        else => unreachable,
+                    }
                 }
             }
         }
