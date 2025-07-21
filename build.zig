@@ -114,6 +114,7 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path("bindings/python/main.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = optimize != .Debug,
         }),
     });
 
