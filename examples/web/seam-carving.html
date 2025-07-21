@@ -11,11 +11,9 @@
       <h1>Seam Carving</h1>
       <p>Content-aware image resizing by removing low-energy vertical seams from images</p>
     </div>
-
     <div class="instructions">
       Drop an image to load it, then click "Remove seam" to intelligently resize the image.
     </div>
-
     <div id="image-container">
       <fieldset class="settings-container">
         <legend style="color:black;font-weight:bold;font-family:sans-serif;">Settings</legend>
@@ -24,7 +22,10 @@
         </div>
         <p id="size"></p>
       </fieldset>
-      <canvas id="canvas-seam"></canvas>
+      <div id="canvas-container">
+        <canvas id="canvas-seam"></canvas>
+        <svg id="seam-overlay"></svg>
+      </div>
       <script src="seam-carving.js"></script>
     </div>
   </body>

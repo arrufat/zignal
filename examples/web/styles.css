@@ -164,10 +164,29 @@ canvas:hover {
   border: 1px solid black;
 }
 
+#canvas-container {
+  position: relative;
+  display: inline-block;
+}
+
 #canvas-seam{
   border: 1px solid black;
+  max-width: 90vw;
+  max-height: 80vh;
   width: auto;
-  height: 640px;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+#seam-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* Button styles - unified across all examples (excluding copy buttons) */
@@ -264,7 +283,7 @@ input {
     gap: 15px;
     padding: 15px;
   }
-  
+
   .example-card {
     padding: 15px;
   }
