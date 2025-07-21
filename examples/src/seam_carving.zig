@@ -70,11 +70,31 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
     assert(image.rows == seam.len);
     const size = image.rows * image.cols;
     var pos: usize = 0;
+
     for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            if (c == seam[r]) continue;
-            image.data[pos] = image.at(r, c).*;
-            pos += 1;
+        const seam_col = seam[r];
+        const row_start = r * image.cols;
+
+        // Copy left segment (columns 0 to seam_col-1)
+        if (seam_col > 0) {
+            const left_bytes = seam_col * @sizeOf(T);
+            @memmove(
+                @as([*]u8, @ptrCast(&image.data[pos]))[0..left_bytes],
+                @as([*]const u8, @ptrCast(&image.data[row_start]))[0..left_bytes],
+            );
+            pos += seam_col;
+        }
+
+        // Copy right segment (columns seam_col+1 to cols-1)
+        const right_start = seam_col + 1;
+        if (right_start < image.cols) {
+            const right_count = image.cols - right_start;
+            const right_bytes = right_count * @sizeOf(T);
+            @memmove(
+                @as([*]u8, @ptrCast(&image.data[pos]))[0..right_bytes],
+                @as([*]const u8, @ptrCast(&image.data[row_start + right_start]))[0..right_bytes],
+            );
+            pos += right_count;
         }
     }
 
