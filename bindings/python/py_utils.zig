@@ -66,7 +66,6 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
     };
 }
 
-
 /// Generate a property getter function for any field type
 pub fn makeFieldGetter(comptime ObjectType: type, comptime field_name: []const u8) fn ([*c]c.PyObject, ?*anyopaque) callconv(.c) [*c]c.PyObject {
     return struct {
@@ -192,6 +191,68 @@ pub fn convertFromPython(comptime T: type, py_obj: ?*c.PyObject) ConversionError
         },
         else => ConversionError.unsupported_type,
     };
+}
+
+/// Convert Python object to Zig type with comprehensive error handling
+/// This is a general-purpose utility for safe Python argument parsing
+pub fn convertPythonArgument(comptime T: type, py_obj: ?*c.PyObject, field_name: []const u8) ConversionError!T {
+    const converted = convertFromPython(T, py_obj) catch |err| {
+        switch (err) {
+            ConversionError.not_integer => {
+                c.PyErr_SetString(c.PyExc_TypeError, "Expected integer value");
+                return err;
+            },
+            ConversionError.integer_out_of_range => {
+                // Generate helpful range message for integer types
+                if (@typeInfo(T) == .int) {
+                    const min_val = std.math.minInt(T);
+                    const max_val = std.math.maxInt(T);
+                    var buffer: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrintZ(&buffer, "{s} value is out of range for {s} (valid range: {} to {})", .{ field_name, @typeName(T), min_val, max_val }) catch "Value out of range";
+                    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                } else {
+                    c.PyErr_SetString(c.PyExc_ValueError, "Value out of range");
+                }
+                return err;
+            },
+            ConversionError.not_float => {
+                c.PyErr_SetString(c.PyExc_TypeError, "Expected float value");
+                return err;
+            },
+            else => {
+                c.PyErr_SetString(c.PyExc_TypeError, "Unsupported value type");
+                return err;
+            },
+        }
+    };
+
+    return converted;
+}
+
+/// Convert Python object to Zig type with optional custom validation
+/// This provides a flexible foundation for domain-specific argument parsing
+pub fn convertWithValidation(
+    comptime T: type,
+    py_obj: ?*c.PyObject,
+    field_name: []const u8,
+    comptime validator: ?*const fn (field_name: []const u8, value: anytype) bool,
+    error_message: ?[]const u8,
+) ConversionError!T {
+    // First do the basic type conversion
+    const converted = convertPythonArgument(T, py_obj, field_name) catch |err| {
+        return err;
+    };
+
+    // Then apply custom validation if provided
+    if (validator) |validate_fn| {
+        if (!validate_fn(field_name, converted)) {
+            const msg = error_message orelse "Validation failed";
+            c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+            return ConversionError.integer_out_of_range; // Reuse existing error type
+        }
+    }
+
+    return converted;
 }
 
 /// Method descriptor for automatic generation
