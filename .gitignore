@@ -31,6 +31,9 @@ bindings/python/htmlcov/
 bindings/python/.pytest_cache/
 bindings/python/.tox/
 
+# Documentation
+bindings/python/docs/
+
 # IDE and editor files
 .vscode/
 .idea/

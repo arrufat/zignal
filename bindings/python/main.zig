@@ -4,6 +4,7 @@ const build_options = @import("build_options");
 const color = @import("color.zig");
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");
+const fdm = @import("fdm.zig");
 
 const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
@@ -26,6 +27,12 @@ var zignal_module = c.PyModuleDef{
 };
 
 var zignal_methods = [_]c.PyMethodDef{
+    .{ 
+        .ml_name = "feature_distribution_match", 
+        .ml_meth = @ptrCast(&fdm.feature_distribution_match), 
+        .ml_flags = c.METH_VARARGS, 
+        .ml_doc = fdm.feature_distribution_match_doc 
+    },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
@@ -33,15 +40,15 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     const m = c.PyModule_Create(&zignal_module);
     if (m == null) return null;
 
-    // Register all color types from the registry
-    color.registerAllColorTypes(@ptrCast(m)) catch |err| {
-        std.log.err("Failed to register color types: {}", .{err});
+    // Register ImageRgb type
+    py_utils.registerType(@ptrCast(m), "ImageRgb", @ptrCast(&image.ImageRgbType)) catch {
         c.Py_DECREF(m);
         return null;
     };
 
-    // Register ImageRgb type
-    py_utils.registerType(@ptrCast(m), "ImageRgb", @ptrCast(&image.ImageRgbType)) catch {
+    // Register all color types from the registry
+    color.registerAllColorTypes(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register color types: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

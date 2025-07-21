@@ -14,7 +14,7 @@ const c = @cImport({
 // IMAGERGB TYPE
 // ============================================================================
 
-const ImageRgbObject = extern struct {
+pub const ImageRgbObject = extern struct {
     ob_base: c.PyObject,
     // Store pointer to heap-allocated image data (optional)
     image_ptr: ?*zignal.Image(zignal.Rgb),
