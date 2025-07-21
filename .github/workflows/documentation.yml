@@ -15,13 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
+  build-zig-docs:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,10 +35,69 @@ jobs:
           zig build -Dtarget=wasm32-freestanding --release
           mv zig-out ../zig-out/docs/examples
 
-      - name: Upload Artifact
+      - name: Upload Zig docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: zig-docs
+          path: 'zig-out/docs'
+
+  build-python-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.0-dev.1149+4e6a04929
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Generate Python documentation
+        run: |
+          cd bindings/python
+          uv run --extra docs python generate_docs.py
+
+      - name: Upload Python docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-docs
+          path: 'bindings/python/docs'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    needs: [build-zig-docs, build-python-docs]
+
+    steps:
+      - name: Download Zig docs
+        uses: actions/download-artifact@v4
+        with:
+          name: zig-docs
+          path: docs-combined
+
+      - name: Download Python docs
+        uses: actions/download-artifact@v4
+        with:
+          name: python-docs
+          path: docs-combined/python
+
+      - name: Upload combined docs
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'zig-out/docs'
+          path: 'docs-combined'
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4

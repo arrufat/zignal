@@ -1,5 +1,8 @@
 """Zignal Python bindings - zero-dependency image processing library."""
 
+# Configure pdoc to use NumPy-style docstring parsing
+__docformat__ = "numpy"
+
 import importlib.util
 import os
 
@@ -47,6 +50,12 @@ except ImportError as e:
             f"All extension files: {all_extensions}. "
             f"All files: {all_files}"
         ) from e
+
+# Get version from the native module
+try:
+    from ._zignal import __version__
+except ImportError:
+    __version__ = "unknown"
 
 # Dynamically populate __all__ from the native module
 __all__ = [name for name in globals() if not name.startswith('_') and name not in ['importlib', 'os', 'sys', 'spec', 'module']]
