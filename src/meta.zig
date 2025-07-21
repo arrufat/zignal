@@ -39,6 +39,13 @@ pub inline fn isStruct(comptime T: type) bool {
     return @typeInfo(T) == .@"struct";
 }
 
+/// Returns true if and only if T is a packed struct.
+/// Useful for determining memory layout and conversion strategies.
+pub inline fn isPacked(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    return type_info == .@"struct" and type_info.@"struct".layout == .@"packed";
+}
+
 /// Returns true if and only if T is a struct with exactly 4 u8 fields.
 /// This is used to identify pixel types suitable for SIMD optimization (e.g., RGBA, BGRA).
 pub inline fn is4xu8Struct(comptime T: type) bool {
