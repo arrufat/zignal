@@ -247,10 +247,57 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     return null;
 }
 
+// Save image to PNG file
+fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+
+    // Parse file path argument
+    var file_path: [*c]const u8 = undefined;
+    const format = comptime std.fmt.comptimePrint("s", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
+        return null;
+    }
+
+    // Convert C string to Zig slice
+    const path_slice = std.mem.span(file_path);
+
+    // Validate file extension
+    if (!std.mem.endsWith(u8, path_slice, ".png") and
+        !std.mem.endsWith(u8, path_slice, ".PNG"))
+    {
+        c.PyErr_SetString(c.PyExc_ValueError, "File must have .png extension. Currently only PNG format is supported.");
+        return null;
+    }
+
+    // Get allocator and save PNG
+    const allocator = gpa.allocator();
+    zignal.savePng(zignal.Rgb, allocator, self.image_ptr.?.*, path_slice) catch |err| {
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
+            error.AccessDenied => c.PyErr_SetString(c.PyExc_PermissionError, "Permission denied"),
+            error.FileNotFound => c.PyErr_SetString(c.PyExc_FileNotFoundError, "Directory not found"),
+            else => c.PyErr_SetString(c.PyExc_IOError, "Failed to save image"),
+        }
+        return null;
+    };
+
+    // Return None
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
 var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = imagergb_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an RGB image from file" },
     .{ .ml_name = "from_numpy", .ml_meth = imagergb_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Create ImageRgb from NumPy array with shape (rows, cols, 3) and dtype uint8" },
     .{ .ml_name = "to_numpy", .ml_meth = imagergb_to_numpy, .ml_flags = c.METH_NOARGS, .ml_doc = "Convert image to NumPy array with shape (rows, cols, 3) without copying data" },
+    .{ .ml_name = "save", .ml_meth = imagergb_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
