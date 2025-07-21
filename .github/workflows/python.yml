@@ -81,7 +81,10 @@ jobs:
         wheel=$(find bindings/python/dist -name "*.whl" | head -1)
         echo "Installing wheel: $wheel"
         uv pip install "$wheel"
-        cd bindings/python
+        # Run tests from a temp directory to avoid importing local source code
+        mkdir -p /tmp/wheel_test
+        cp -r bindings/python/tests /tmp/wheel_test/
+        cd /tmp/wheel_test
         pytest tests/ -v
 
     - name: Test wheel (Windows)
@@ -91,7 +94,10 @@ jobs:
         $wheel = Get-ChildItem bindings/python/dist/*.whl | Select-Object -First 1
         Write-Host "Installing wheel: $wheel"
         uv pip install "$wheel"
-        cd bindings/python
+        # Run tests from a temp directory to avoid importing local source code
+        New-Item -ItemType Directory -Force -Path C:\temp\wheel_test
+        Copy-Item -Recurse bindings/python/tests C:\temp\wheel_test\
+        Set-Location C:\temp\wheel_test
         pytest tests/ -v
 
     - name: Upload wheels as artifacts
