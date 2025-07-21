@@ -29,7 +29,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: 0.15.0-dev.1149+4e6a04929
 
       - name: Build Docs
         run: zig build docs
