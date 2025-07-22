@@ -56,7 +56,7 @@ jobs:
       run: |
         source .venv/bin/activate
         cd bindings/python
-        python build_wheels.py --optimize ReleaseFast
+        python scripts/build_wheels.py --optimize ReleaseFast
       env:
         ZIG_OPTIMIZE: ReleaseFast
 
@@ -65,7 +65,7 @@ jobs:
       run: |
         .venv\Scripts\Activate.ps1
         cd bindings/python
-        python build_wheels.py --optimize ReleaseFast
+        python scripts/build_wheels.py --optimize ReleaseFast
       env:
         ZIG_OPTIMIZE: ReleaseFast
 
@@ -136,7 +136,7 @@ jobs:
       run: |
         source .venv/bin/activate
         cd bindings/python
-        python update_version.py
+        python scripts/update_version.py
         python -m build --sdist
 
     - name: Upload sdist as artifact

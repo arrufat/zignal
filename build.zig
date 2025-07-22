@@ -111,7 +111,7 @@ pub fn build(b: *Build) void {
         .name = "zignal",
         .linkage = .dynamic,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bindings/python/main.zig"),
+            .root_source_file = b.path("bindings/python/src/main.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
@@ -199,7 +199,7 @@ pub fn build(b: *Build) void {
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bindings/python/generate_stubs.zig"),
+            .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
             .target = target,
             .optimize = .Debug,
         }),
