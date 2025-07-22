@@ -14,7 +14,10 @@ const c = @cImport({
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 // Documentation for the feature_distribution_match function
-pub const feature_distribution_match_doc = 
+pub const feature_distribution_match_doc =
+    \\feature_distribution_match(source, reference, /)
+    \\--
+    \\
     \\Apply Feature Distribution Matching (FDM) to transfer color/style from reference to source image.
     \\
     \\This function modifies the source image in-place to match the color distribution

@@ -194,8 +194,32 @@ pub fn build(b: *Build) void {
         else => ".so",
     };
 
+    // Python type stub generation
+    const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
+    const stub_generator = b.addExecutable(.{
+        .name = "python_stubs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bindings/python/generate_stubs.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+    });
+
+    // Add zignal module as dependency for stub generator
+    stub_generator.root_module.addImport("zignal", b.addModule("zignal", .{
+        .root_source_file = b.path("src/root.zig"),
+    }));
+
+    // Run stub generator in the python bindings directory
+    const run_stub_generator = b.addRunArtifact(stub_generator);
+    run_stub_generator.cwd = b.path("bindings/python/zignal");
+    python_stubs_step.dependOn(&run_stub_generator.step);
+
     const output_name = b.fmt("lib/_zignal{s}", .{extension});
     const install_py_module = b.addInstallFile(py_module.getEmittedBin(), output_name);
+    
+    // Make python-bindings depend on stub generation so stubs are always up to date
+    py_bindings_step.dependOn(&run_stub_generator.step);
     py_bindings_step.dependOn(&install_py_module.step);
 }
 
