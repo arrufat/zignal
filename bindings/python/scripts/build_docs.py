@@ -19,7 +19,8 @@ def main():
     """Generate documentation for zignal Python bindings."""
     # Get the directory containing this script
     script_dir = Path(__file__).parent
-    project_root = script_dir.parent.parent
+    bindings_dir = script_dir.parent
+    project_root = bindings_dir.parent
 
     # Ensure we're in the right directory
     os.chdir(project_root)
@@ -44,16 +45,16 @@ def main():
     # Install the package in development mode
     print("Installing zignal package in development mode...")
     # Check if we're in a uv environment
-    if os.environ.get("UV_PROJECT_ROOT") or Path(script_dir / ".venv").exists():
+    if os.environ.get("UV_PROJECT_ROOT") or Path(bindings_dir / ".venv").exists():
         # Use uv pip for installation
         result = subprocess.run(
-            ["uv", "pip", "install", "-e", str(script_dir)],
+            ["uv", "pip", "install", "-e", str(bindings_dir)],
             capture_output=True
         )
     else:
         # Fall back to regular pip
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", str(script_dir)],
+            [sys.executable, "-m", "pip", "install", "-e", str(bindings_dir)],
             capture_output=True
         )
 
@@ -72,7 +73,7 @@ def main():
         sys.exit(1)
 
     # Create docs directory if it doesn't exist
-    docs_dir = script_dir / "docs"
+    docs_dir = bindings_dir / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate documentation
