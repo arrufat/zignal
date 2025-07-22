@@ -181,7 +181,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             defer ops.deinit();
             // Use GEMM directly: scale * (X^T * X) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            try ops.gemm(data_matrix.*, true, false, scale, 0.0, null);
+            try ops.gemm(true, data_matrix.*, false, scale, 0.0, null);
             var cov_matrix = ops.toOwned();
             defer cov_matrix.deinit();
 
@@ -255,7 +255,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             defer ops.deinit();
             // Use GEMM directly: scale * (X * X^T) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            try ops.gemm(data_matrix.*, false, true, scale, 0.0, null);
+            try ops.gemm(false, data_matrix.*, true, scale, 0.0, null);
             var gram_matrix = ops.toOwned();
             defer gram_matrix.deinit();
 

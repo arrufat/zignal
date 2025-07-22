@@ -83,7 +83,7 @@ pub fn OpsBuilder(comptime T: type) type {
 
         /// Matrix multiplication (dot product) - changes dimensions
         pub fn dot(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(other, false, false, 1.0, 0.0, null);
+            try self.gemm(false, other, false, 1.0, 0.0, null);
         }
 
         /// Computes the determinant of the matrix using analytical formulas for small matrices
@@ -291,14 +291,14 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
         pub fn gram(self: *Self) !void {
-            try self.gemm(self.result, false, true, 1.0, 0.0, null);
+            try self.gemm(false, self.result, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
         pub fn covariance(self: *Self) !void {
-            try self.gemm(self.result, true, false, 1.0, 0.0, null);
+            try self.gemm(true, self.result, false, 1.0, 0.0, null);
         }
 
         /// Helper function for optimized SIMD GEMM kernel
@@ -348,22 +348,22 @@ pub fn OpsBuilder(comptime T: type) type {
         /// - op(B) = B if trans_b is false, B^T if trans_b is true
         /// - α (alpha) scales the product op(A) * op(B)
         /// - β (beta) scales the existing matrix C before adding the product
-        /// - If c_matrix is null, it defaults to zero matrix
+        /// - If c is null, it defaults to zero matrix
         ///
         /// Examples:
-        /// - Matrix multiplication: gemm(B, false, false, 1.0, 0.0, null)
-        /// - Gram matrix: gemm(self, false, true, 1.0, 0.0, null) -> A * A^T
-        /// - Covariance: gemm(self, true, false, 1.0, 0.0, null) -> A^T * A
-        /// - Scaled product: gemm(B, false, false, 2.0, 0.0, null) -> 2 * A * B
-        /// - Accumulation: gemm(B, false, false, 1.0, 1.0, C) -> A * B + C
+        /// - Matrix multiplication: gemm(false, B, false, 1.0, 0.0, null)
+        /// - Gram matrix: gemm(false, self, true, 1.0, 0.0, null) -> A * A^T
+        /// - Covariance: gemm(true, self, false, 1.0, 0.0, null) -> A^T * A
+        /// - Scaled product: gemm(false, B, false, 2.0, 0.0, null) -> 2 * A * B
+        /// - Accumulation: gemm(false, B, false, 1.0, 1.0, C) -> A * B + C
         pub fn gemm(
             self: *Self,
-            other: Matrix(T),
             trans_a: bool,
+            other: Matrix(T),
             trans_b: bool,
             alpha: T,
             beta: T,
-            c_matrix: ?Matrix(T),
+            c: ?Matrix(T),
         ) !void {
             // Determine dimensions after potential transposition
             const a_rows = if (trans_a) self.result.cols else self.result.rows;
@@ -377,12 +377,12 @@ pub fn OpsBuilder(comptime T: type) type {
             var result: Matrix(T) = try .init(self.allocator, a_rows, b_cols);
 
             // Initialize with scaled C matrix if provided
-            if (c_matrix) |c| {
-                assert(c.rows == a_rows and c.cols == b_cols);
+            if (c) |c_mat| {
+                assert(c_mat.rows == a_rows and c_mat.cols == b_cols);
                 if (beta != 0) {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {
-                            result.at(i, j).* = beta * c.at(i, j).*;
+                            result.at(i, j).* = beta * c_mat.at(i, j).*;
                         }
                     }
                 }
@@ -526,19 +526,19 @@ pub fn OpsBuilder(comptime T: type) type {
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
         pub fn scaledDot(self: *Self, other: Matrix(T), alpha: T) !void {
-            try self.gemm(other, false, false, alpha, 0.0, null);
+            try self.gemm(false, other, false, alpha, 0.0, null);
         }
 
         /// Matrix multiplication with transpose: A * B^T
         /// Convenience method for common GEMM use case
         pub fn dotTranspose(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(other, false, true, 1.0, 0.0, null);
+            try self.gemm(false, other, true, 1.0, 0.0, null);
         }
 
         /// Transpose matrix multiplication: A^T * B
         /// Convenience method for common GEMM use case
         pub fn transposeDot(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(other, true, false, 1.0, 0.0, null);
+            try self.gemm(true, other, false, 1.0, 0.0, null);
         }
 
         /// Result of LU decomposition
