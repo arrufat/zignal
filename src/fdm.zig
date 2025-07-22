@@ -112,12 +112,8 @@ pub fn featureDistributionMatch(
         _ = centerImage(&feature_mat_src, 3);
         const reference_mean = centerImage(&feature_mat_ref, 3);
 
-        // 3.) whitening: cov(feature_mat_src) = I
-        var feature_mat_src_white = try whitening(gpa, feature_mat_src, src_size);
-        defer feature_mat_src_white.deinit();
-
-        // 4.) transform covariance: make cov(feature_mat_src_transformed) = cov(feature_mat_ref)
-        var feature_mat_src_transformed = try covarianceTransformation(gpa, feature_mat_src_white, feature_mat_ref, ref_size);
+        // 3-4.) Combined whitening and covariance transformation: X_result = X_centered * W
+        var feature_mat_src_transformed = try applyColorTransform(gpa, feature_mat_src, feature_mat_ref, src_size, ref_size);
         defer feature_mat_src_transformed.deinit();
 
         // 5.) Add reference mean + 6.) Reshape
@@ -165,142 +161,110 @@ fn centerImage(matrix: *Matrix(f64), comptime channels: usize) [3]f64 {
     return means;
 }
 
-/// Step 3: Whitening - make cov(feature_mat_src) = I
-fn whitening(
+/// Steps 3-4: Apply color transformation from source to reference distribution
+/// Computes X_result = X_centered * W where W = U_src * Σ_src^(-1/2) * Σ_ref^(1/2) * U_ref^T
+fn applyColorTransform(
     gpa: std.mem.Allocator,
-    feature_matrix: Matrix(f64),
-    matrix_size: usize,
-) !Matrix(f64) {
-    // Compute covariance matrix and SVD decomposition
-    var ops = try OpsBuilder(f64).init(gpa, feature_matrix);
-    defer ops.deinit();
-    try ops.transpose();
-    try ops.dot(feature_matrix);
-    try ops.scale(1.0 / @as(f64, @floatFromInt(matrix_size)));
-    var cov_matrix = ops.toOwned();
-    defer cov_matrix.deinit();
-
-    var cov: SMatrix(f64, 3, 3) = .{};
-    for (0..cov.cols) |c| {
-        for (0..cov.rows) |r| {
-            cov.items[r][c] = cov_matrix.at(r, c).*;
-        }
-    }
-
-    const res = svd(f64, cov.rows, cov.cols, cov, .{
-        .with_u = true,
-        .with_v = false,
-        .mode = .skinny_u,
-    });
-
-    var u_matrix = try Matrix(f64).init(gpa, res.u.rows, res.u.cols);
-    defer u_matrix.deinit();
-    for (0..u_matrix.rows) |r| {
-        for (0..u_matrix.cols) |c| {
-            u_matrix.at(r, c).* = res.u.items[r][c];
-        }
-    }
-
-    // Create whitening matrix (Σ^(-1/2))
-    var whitening_matrix = try Matrix(f64).init(gpa, 3, 3);
-    defer whitening_matrix.deinit();
-    for (0..whitening_matrix.rows) |r| {
-        for (0..whitening_matrix.cols) |c| {
-            if (r == c) {
-                const eigenval = res.s.items[r][0];
-                // Avoid division by zero or very small numbers
-                if (eigenval > 1e-10) {
-                    whitening_matrix.at(r, c).* = 1 / @sqrt(eigenval);
-                } else {
-                    whitening_matrix.at(r, c).* = 0;
-                }
-            } else {
-                whitening_matrix.at(r, c).* = 0;
-            }
-        }
-    }
-
-    // Apply whitening: X_white = X * U * Σ^(-1/2)
-    var whitening_ops = try OpsBuilder(f64).init(gpa, feature_matrix);
-    defer whitening_ops.deinit();
-    try whitening_ops.dot(u_matrix);
-    try whitening_ops.dot(whitening_matrix);
-    return whitening_ops.toOwned();
-}
-
-/// Step 4: Covariance transformation - transform to match reference covariance
-fn covarianceTransformation(
-    gpa: std.mem.Allocator,
-    whitened_src: Matrix(f64),
+    src_feature_matrix: Matrix(f64),
     ref_feature_matrix: Matrix(f64),
+    src_size: usize,
     ref_size: usize,
 ) !Matrix(f64) {
-    // Compute reference covariance and decomposition
-    var ref_ops = try OpsBuilder(f64).init(gpa, ref_feature_matrix);
-    defer ref_ops.deinit();
-    try ref_ops.transpose();
-    try ref_ops.dot(ref_feature_matrix);
-    try ref_ops.scale(1.0 / @as(f64, @floatFromInt(ref_size)));
-    var ref_cov_matrix = ref_ops.toOwned();
-    defer ref_cov_matrix.deinit();
+    // Step 1: Compute source covariance using GEMM: (1/n) * A^T * A
+    var src_cov_ops = try OpsBuilder(f64).init(gpa, src_feature_matrix);
+    defer src_cov_ops.deinit();
+    try src_cov_ops.gemm(
+        src_feature_matrix, // B matrix
+        true, // trans_a = true (self^T)
+        false, // trans_b = false (B)
+        1.0 / @as(f64, @floatFromInt(src_size)), // alpha = 1/n
+        0.0, // beta = 0
+        null, // no C matrix
+    );
+    var src_cov_matrix = src_cov_ops.toOwned();
+    defer src_cov_matrix.deinit();
 
-    var ref_cov: SMatrix(f64, 3, 3) = .{};
-    for (0..ref_cov.cols) |c| {
-        for (0..ref_cov.rows) |r| {
-            ref_cov.items[r][c] = ref_cov_matrix.at(r, c).*;
-        }
-    }
+    const src_cov = src_cov_matrix.toSMatrix(3, 3);
 
-    const ref_res = svd(f64, ref_cov.rows, ref_cov.cols, ref_cov, .{
+    const src_svd = svd(f64, 3, 3, src_cov, .{
         .with_u = true,
         .with_v = false,
         .mode = .skinny_u,
     });
 
-    var ref_u = try Matrix(f64).init(gpa, ref_res.u.rows, ref_res.u.cols);
-    defer ref_u.deinit();
-    for (0..ref_u.rows) |r| {
-        for (0..ref_u.cols) |c| {
-            ref_u.at(r, c).* = ref_res.u.items[r][c];
+    // Step 2: Compute reference covariance using GEMM: (1/n) * A^T * A
+    var ref_cov_ops = try OpsBuilder(f64).init(gpa, ref_feature_matrix);
+    defer ref_cov_ops.deinit();
+    try ref_cov_ops.gemm(
+        ref_feature_matrix, // B matrix
+        true, // trans_a = true (self^T)
+        false, // trans_b = false (B)
+        1.0 / @as(f64, @floatFromInt(ref_size)), // alpha = 1/n
+        0.0, // beta = 0
+        null, // no C matrix
+    );
+    var ref_cov_matrix = ref_cov_ops.toOwned();
+    defer ref_cov_matrix.deinit();
+
+    const ref_cov = ref_cov_matrix.toSMatrix(3, 3);
+
+    const ref_svd = svd(f64, 3, 3, ref_cov, .{
+        .with_u = true,
+        .with_v = false,
+        .mode = .skinny_u,
+    });
+
+    // Step 3: Pre-compute transformation matrix W = U_src * Σ_src^(-1/2) * Σ_ref^(1/2) * U_ref^T
+    var transform_matrix = try Matrix(f64).init(gpa, 3, 3);
+    defer transform_matrix.deinit();
+
+    // Create Σ_src^(-1/2) * Σ_ref^(1/2) diagonal matrix
+    var sigma_combined: Matrix(f64) = try .init(gpa, 3, 3);
+    defer sigma_combined.deinit();
+    @memset(sigma_combined.items, 0);
+
+    for (0..3) |i| {
+        const src_eigenval = src_svd.s.items[i][0];
+        const ref_eigenval = ref_svd.s.items[i][0];
+
+        if (src_eigenval > 1e-10 and ref_eigenval > std.math.floatEps(f64)) {
+            sigma_combined.at(i, i).* = @sqrt(ref_eigenval / src_eigenval);
+        } else {
+            sigma_combined.at(i, i).* = 0;
         }
     }
 
-    // Create reference transformation matrix (Σ_ref^(1/2))
-    var ref_transform = try Matrix(f64).init(gpa, 3, 3);
-    defer ref_transform.deinit();
-    for (0..ref_transform.rows) |r| {
-        for (0..ref_transform.cols) |c| {
-            if (r == c) {
-                const ref_eigenval = ref_res.s.items[r][0];
-                // Protect against non-positive eigenvalues
-                if (ref_eigenval > std.math.floatEps(f64)) {
-                    ref_transform.at(r, c).* = @sqrt(ref_eigenval);
-                } else {
-                    ref_transform.at(r, c).* = 0;
-                }
-            } else {
-                ref_transform.at(r, c).* = 0;
-            }
+    // Create U_src matrix
+    var u_src: Matrix(f64) = try .fromSMatrix(gpa, src_svd.u);
+    defer u_src.deinit();
+
+    // Create U_ref^T matrix
+    var u_ref_t: Matrix(f64) = try .fromSMatrix(gpa, ref_svd.u.transpose());
+    defer u_ref_t.deinit();
+
+    // Compute W = U_src * Σ_combined * U_ref^T
+    var w_ops: OpsBuilder(f64) = try .init(gpa, u_src);
+    defer w_ops.deinit();
+
+    // Apply diagonal matrix multiplication in-place (more efficient than full matrix multiply)
+    for (0..3) |r| {
+        for (0..3) |c| {
+            w_ops.result.at(r, c).* *= sigma_combined.at(c, c).*;
         }
     }
 
-    // Create U_ref^T
-    var ref_u_ops = try OpsBuilder(f64).init(gpa, ref_u);
-    defer ref_u_ops.deinit();
-    try ref_u_ops.transpose();
-    var ref_u_transposed = ref_u_ops.toOwned();
-    defer ref_u_transposed.deinit();
+    try w_ops.dot(u_ref_t);
+    var w_matrix = w_ops.toOwned();
+    defer w_matrix.deinit();
 
-    // Apply transformation: X_transformed = X_white * Σ_ref^(1/2) * U_ref^T
-    var transform_ops = try OpsBuilder(f64).init(gpa, whitened_src);
-    defer transform_ops.deinit();
-    try transform_ops.dot(ref_transform);
-    try transform_ops.dot(ref_u_transposed);
-    return transform_ops.toOwned();
+    // Step 4: Apply transformation X_result = X_src * W
+    var result_ops = try OpsBuilder(f64).init(gpa, src_feature_matrix);
+    defer result_ops.deinit();
+    try result_ops.dot(w_matrix);
+    return result_ops.toOwned();
 }
 
-/// Step 6: Reshape back to original image shape
-/// Note: Step 5 (add reference mean) is implicitly done here
+/// Steps 5-6: Reshape back to original image shape and add reference mean
 fn reshapeToImage(comptime T: type, matrix: Matrix(f64), image: Image(T), reference_mean: [3]f64, is_grayscale: bool) void {
     var i: usize = 0;
     for (0..image.rows) |r| {

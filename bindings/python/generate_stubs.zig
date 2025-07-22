@@ -226,13 +226,13 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     // Re-export all types from _zignal
     try stub.write("# Re-export all types from _zignal\n");
     try stub.write("from ._zignal import (\n");
-    
+
     // Auto-generate import list from color types
     inline for (color_registry.color_types) |ColorType| {
         const class_name = getClassNameFromType(ColorType);
         try stub.writef("    {s} as {s},\n", .{ class_name, class_name });
     }
-    
+
     // Add ImageRgb and function
     try stub.write("    ImageRgb as ImageRgb,\n");
     try stub.write("    feature_distribution_match as feature_distribution_match,\n");
@@ -247,7 +247,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
 
 /// Main function to generate and write all stub files
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

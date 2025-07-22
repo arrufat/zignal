@@ -3,6 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 
 const py_utils = @import("py_utils.zig");
+const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 
 const c = @cImport({
@@ -45,9 +46,6 @@ fn imagergb_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     return -1;
 }
 
-// Global allocator for the module
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-
 fn imagergb_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
 
@@ -55,13 +53,12 @@ fn imagergb_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     if (self.image_ptr) |ptr| {
         // Only free if we allocated it (not if it's from numpy)
         if (self.numpy_ref == null) {
-            const allocator = gpa.allocator();
-            ptr.deinit(allocator);
-            allocator.destroy(ptr);
+            // Full deallocation: image data + pointer wrapper
+            ptr.deinit(py_utils.allocator);
+            py_utils.allocator.destroy(ptr);
         } else {
-            // Just destroy the pointer wrapper, not the data
-            const allocator = gpa.allocator();
-            allocator.destroy(ptr);
+            // NumPy owns the data, just destroy the pointer wrapper
+            py_utils.allocator.destroy(ptr);
         }
     }
 
@@ -118,9 +115,6 @@ fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
         return null;
     }
-
-    // Use global allocator
-    const allocator = gpa.allocator();
 
     // Convert C string to Zig slice
     const path_slice = std.mem.span(file_path);
@@ -319,7 +313,6 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     }
 
     // Allocate space for the image struct on heap
-    const allocator = gpa.allocator();
     const image_ptr = allocator.create(zignal.Image(zignal.Rgb)) catch {
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
@@ -371,7 +364,6 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     }
 
     // Get allocator and save PNG
-    const allocator = gpa.allocator();
     zignal.savePng(zignal.Rgb, allocator, self.image_ptr.?.*, path_slice) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),

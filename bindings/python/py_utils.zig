@@ -4,9 +4,15 @@ const c = @cImport({
     @cInclude("Python.h");
 });
 
-// ============================================================================
-// GENERAL PYTHON C API UTILITIES
-// ============================================================================
+/// Creates an arena allocator optimized for Python C API integration.
+/// Uses c_allocator as backing since we're already linking with libc.
+pub fn createArenaAllocator() std.heap.ArenaAllocator {
+    return std.heap.ArenaAllocator.init(std.heap.c_allocator);
+}
+
+/// Direct access to the optimal allocator for Python bindings.
+/// Use this for simple allocations that don't need arena batching.
+pub const allocator = std.heap.c_allocator;
 
 /// Helper to register a type with a module
 pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.PyTypeObject) !void {
