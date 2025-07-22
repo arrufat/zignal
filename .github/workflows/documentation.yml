@@ -65,7 +65,9 @@ jobs:
       - name: Build Python docs
         run: |
           cd bindings/python
-          uv run --extra docs python scripts/build_docs.py
+          uv venv
+          uv pip install -e ".[docs]"
+          uv run python scripts/build_docs.py
 
       - name: Upload Python docs
         uses: actions/upload-artifact@v4
