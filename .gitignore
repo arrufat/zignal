@@ -19,6 +19,7 @@ bindings/python/**/__pycache__/
 bindings/python/**/*.pyc
 bindings/python/**/*.pyo
 bindings/python/**/*.pyd
+bindings/python/**/*.pyi
 
 # Virtual environments (if created in project)
 bindings/python/venv/
