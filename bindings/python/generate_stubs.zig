@@ -71,8 +71,8 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
         try stub.writef("{c}", .{lower_char});
     }
 
-    // Use empty parameter list since these methods only take self
-    try stub.writef("() -> {s}: ...\n", .{target_class});
+    // Include self parameter for proper LSP support
+    try stub.writef("(self) -> {s}: ...\n", .{target_class});
 }
 
 /// Convert color.Rgb or zignal.Rgb -> "Rgb"
@@ -212,20 +212,76 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     return try stub.content.toOwnedSlice();
 }
 
-/// Main function to generate and write stub file
+/// Generate __init__.pyi stub file for the main package
+fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
+    var stub = GeneratedStub.init(allocator);
+    defer stub.deinit();
+
+    // Header
+    try stub.write("# Type stubs for zignal package\n");
+    try stub.write("# This file helps LSPs understand the module structure\n\n");
+    try stub.write("from typing import Any\n");
+    try stub.write("import numpy as np\n\n");
+
+    // Re-export all types from _zignal
+    try stub.write("# Re-export all types from _zignal\n");
+    try stub.write("from ._zignal import (\n");
+    
+    // Auto-generate import list from color types
+    inline for (color_registry.color_types) |ColorType| {
+        const class_name = getClassNameFromType(ColorType);
+        try stub.writef("    {s} as {s},\n", .{ class_name, class_name });
+    }
+    
+    // Add ImageRgb and function
+    try stub.write("    ImageRgb as ImageRgb,\n");
+    try stub.write("    feature_distribution_match as feature_distribution_match,\n");
+    try stub.write(")\n\n");
+
+    // Module metadata
+    try stub.write("__version__: str\n");
+    try stub.write("__all__: list[str]\n");
+
+    return try stub.content.toOwnedSlice();
+}
+
+/// Main function to generate and write all stub files
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const stub_content = try generateStubFile(allocator);
-    defer allocator.free(stub_content);
+    // Generate main comprehensive stub file
+    const main_stub_content = try generateStubFile(allocator);
+    defer allocator.free(main_stub_content);
 
-    // Write to zignal.pyi
-    const file = try std.fs.cwd().createFile("zignal.pyi", .{});
-    defer file.close();
+    // Generate __init__.pyi stub file
+    const init_stub_content = try generateInitStub(allocator);
+    defer allocator.free(init_stub_content);
 
-    try file.writeAll(stub_content);
+    // Write zignal.pyi (comprehensive stub file)
+    {
+        const file = try std.fs.cwd().createFile("zignal.pyi", .{});
+        defer file.close();
+        try file.writeAll(main_stub_content);
+    }
 
-    std.debug.print("Generated zignal.pyi with {} bytes\n", .{stub_content.len});
+    // Write _zignal.pyi (copy of comprehensive stub file for C extension)
+    {
+        const file = try std.fs.cwd().createFile("_zignal.pyi", .{});
+        defer file.close();
+        try file.writeAll(main_stub_content);
+    }
+
+    // Write __init__.pyi (package-level stub file)
+    {
+        const file = try std.fs.cwd().createFile("__init__.pyi", .{});
+        defer file.close();
+        try file.writeAll(init_stub_content);
+    }
+
+    std.debug.print("Generated stub files:\n", .{});
+    std.debug.print("  zignal.pyi: {} bytes\n", .{main_stub_content.len});
+    std.debug.print("  _zignal.pyi: {} bytes\n", .{main_stub_content.len});
+    std.debug.print("  __init__.pyi: {} bytes\n", .{init_stub_content.len});
 }
