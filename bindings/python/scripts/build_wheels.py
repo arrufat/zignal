@@ -87,7 +87,7 @@ def update_version_from_zig() -> str:
 def get_current_version() -> str:
     """Get the current version from pyproject.toml."""
     script_dir = Path(__file__).parent
-    pyproject_path = script_dir / "pyproject.toml"
+    pyproject_path = script_dir.parent / "pyproject.toml"
     
     if not pyproject_path.exists():
         return "unknown"
@@ -194,16 +194,17 @@ def create_wheel(
 def build_all_wheels(platforms: List[Tuple[str, str, str]]) -> List[Path]:
     """Build wheels for all specified platforms."""
     script_dir = Path(__file__).parent
+    bindings_dir = script_dir.parent
     
     # Prepare clean build environment
-    prepare_clean_build_env(script_dir)
+    prepare_clean_build_env(bindings_dir)
     
     wheels = []
     
     for zig_target, platform_tag, expected_ext in platforms:
         try:
             # Create the wheel (setup.py will build the Zig extension automatically)
-            wheel_path = create_wheel(zig_target, platform_tag, expected_ext, script_dir)
+            wheel_path = create_wheel(zig_target, platform_tag, expected_ext, bindings_dir)
             wheels.append(wheel_path)
             
         except Exception as e:

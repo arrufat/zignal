@@ -17,8 +17,8 @@ from pathlib import Path
 def get_zig_version() -> str:
     """Get the resolved version from Zig build system."""
     try:
-        # Run from the project root (two levels up from this script)
-        project_root = Path(__file__).parent.parent.parent
+        # Run from the project root (three levels up from this script)
+        project_root = Path(__file__).parent.parent.parent.parent
         result = subprocess.run(
             ["zig", "build", "version"],
             cwd=project_root,
@@ -75,7 +75,7 @@ def zig_to_python_version(zig_version: str) -> str:
 
 def update_pyproject_toml(new_version: str) -> None:
     """Update the version field in pyproject.toml."""
-    pyproject_path = Path(__file__).parent / "pyproject.toml"
+    pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
 
     if not pyproject_path.exists():
         print(f"Error: pyproject.toml not found at {pyproject_path}", file=sys.stderr)
