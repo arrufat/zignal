@@ -174,8 +174,8 @@ fn applyColorTransform(
     var src_cov_ops = try OpsBuilder(f64).init(gpa, src_feature_matrix);
     defer src_cov_ops.deinit();
     try src_cov_ops.gemm(
-        src_feature_matrix, // B matrix
         true, // trans_a = true (self^T)
+        src_feature_matrix, // B matrix
         false, // trans_b = false (B)
         1.0 / @as(f64, @floatFromInt(src_size)), // alpha = 1/n
         0.0, // beta = 0
@@ -196,8 +196,8 @@ fn applyColorTransform(
     var ref_cov_ops = try OpsBuilder(f64).init(gpa, ref_feature_matrix);
     defer ref_cov_ops.deinit();
     try ref_cov_ops.gemm(
-        ref_feature_matrix, // B matrix
         true, // trans_a = true (self^T)
+        ref_feature_matrix, // B matrix
         false, // trans_b = false (B)
         1.0 / @as(f64, @floatFromInt(ref_size)), // alpha = 1/n
         0.0, // beta = 0

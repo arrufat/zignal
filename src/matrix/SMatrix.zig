@@ -191,7 +191,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
         /// Performs the dot (or internal product) of two matrices.
         pub fn dot(self: Self, other: anytype) SMatrix(T, rows, other.cols) {
-            return self.gemm(other, false, false, 1.0, 0.0, null);
+            return self.gemm(false, other, false, 1.0, 0.0, null);
         }
 
         /// Adds a matrix.
@@ -242,14 +242,14 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
         pub fn gram(self: Self) SMatrix(T, rows, rows) {
-            return self.gemm(self, false, true, 1.0, 0.0, null);
+            return self.gemm(false, self, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
         pub fn covariance(self: Self) SMatrix(T, cols, cols) {
-            return self.gemm(self, true, false, 1.0, 0.0, null);
+            return self.gemm(true, self, false, 1.0, 0.0, null);
         }
 
         /// General Matrix Multiply (GEMM): C = α * op(A) * op(B) + β * C
@@ -259,22 +259,22 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         /// - op(B) = B if trans_b is false, B^T if trans_b is true
         /// - α (alpha) scales the product op(A) * op(B)
         /// - β (beta) scales the existing matrix C before adding the product
-        /// - If c_matrix is null, it defaults to zero matrix
+        /// - If c is null, it defaults to zero matrix
         ///
         /// Examples:
-        /// - Matrix multiplication: gemm(B, false, false, 1.0, 0.0, null)
-        /// - Gram matrix: gemm(self, false, true, 1.0, 0.0, null) -> A * A^T
-        /// - Covariance: gemm(self, true, false, 1.0, 0.0, null) -> A^T * A
-        /// - Scaled product: gemm(B, false, false, 2.0, 0.0, null) -> 2 * A * B
-        /// - Accumulation: gemm(B, false, false, 1.0, 1.0, C) -> A * B + C
+        /// - Matrix multiplication: gemm(false, B, false, 1.0, 0.0, null)
+        /// - Gram matrix: gemm(false, self, true, 1.0, 0.0, null) -> A * A^T
+        /// - Covariance: gemm(true, self, false, 1.0, 0.0, null) -> A^T * A
+        /// - Scaled product: gemm(false, B, false, 2.0, 0.0, null) -> 2 * A * B
+        /// - Accumulation: gemm(false, B, false, 1.0, 1.0, C) -> A * B + C
         pub fn gemm(
             self: Self,
-            other: anytype,
             comptime trans_a: bool,
+            other: anytype,
             comptime trans_b: bool,
             alpha: T,
             beta: T,
-            c_matrix: anytype,
+            c: anytype,
         ) blk: {
             // Determine dimensions after potential transposition
             const a_rows = if (trans_a) cols else rows;
@@ -294,16 +294,16 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
             var result: SMatrix(T, a_rows, b_cols) = undefined;
 
-            // Check if c_matrix is null or not (comptime detection)
-            const has_c_matrix = @TypeOf(c_matrix) != @TypeOf(null);
+            // Check if c is null or not (comptime detection)
+            const has_c = @TypeOf(c) != @TypeOf(null);
 
             // Initialize with scaled C matrix if provided
-            if (has_c_matrix) {
-                assert(c_matrix.rows == a_rows and c_matrix.cols == b_cols);
+            if (has_c) {
+                assert(c.rows == a_rows and c.cols == b_cols);
                 if (beta != 0) {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {
-                            result.items[i][j] = beta * c_matrix.items[i][j];
+                            result.items[i][j] = beta * c.items[i][j];
                         }
                     }
                 } else {
@@ -361,19 +361,19 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
         pub fn scaledDot(self: Self, other: anytype, alpha: T) SMatrix(T, rows, other.cols) {
-            return self.gemm(other, false, false, alpha, 0.0, null);
+            return self.gemm(false, other, false, alpha, 0.0, null);
         }
 
         /// Matrix multiplication with transpose: A * B^T
         /// Convenience method for common GEMM use case
         pub fn dotTranspose(self: Self, other: anytype) SMatrix(T, rows, other.rows) {
-            return self.gemm(other, false, true, 1.0, 0.0, null);
+            return self.gemm(false, other, true, 1.0, 0.0, null);
         }
 
         /// Transpose matrix multiplication: A^T * B
         /// Convenience method for common GEMM use case
         pub fn transposeDot(self: Self, other: anytype) SMatrix(T, cols, other.cols) {
-            return self.gemm(other, true, false, 1.0, 0.0, null);
+            return self.gemm(true, other, false, 1.0, 0.0, null);
         }
 
         /// Returns a new matrix which is a copy of the specified rectangular region of `self`.
@@ -791,38 +791,38 @@ test "SMatrix GEMM operations" {
     });
 
     // Test basic matrix multiplication: A * B
-    const result1 = a.gemm(b, false, false, 1.0, 0.0, null);
+    const result1 = a.gemm(false, b, false, 1.0, 0.0, null);
     try expectEqual(@as(f32, 58.0), result1.at(0, 0).*); // 1*7 + 2*9 + 3*11
     try expectEqual(@as(f32, 64.0), result1.at(0, 1).*); // 1*8 + 2*10 + 3*12
     try expectEqual(@as(f32, 139.0), result1.at(1, 0).*); // 4*7 + 5*9 + 6*11
     try expectEqual(@as(f32, 154.0), result1.at(1, 1).*); // 4*8 + 5*10 + 6*12
 
     // Test scaled multiplication: 2 * A * B
-    const result2 = a.gemm(b, false, false, 2.0, 0.0, null);
+    const result2 = a.gemm(false, b, false, 2.0, 0.0, null);
     try expectEqual(@as(f32, 116.0), result2.at(0, 0).*); // 2 * 58
     try expectEqual(@as(f32, 128.0), result2.at(0, 1).*); // 2 * 64
 
     // Test accumulation: A * B + C
-    const result3 = a.gemm(b, false, false, 1.0, 1.0, c);
+    const result3 = a.gemm(false, b, false, 1.0, 1.0, c);
     try expectEqual(@as(f32, 59.0), result3.at(0, 0).*); // 58 + 1
     try expectEqual(@as(f32, 65.0), result3.at(0, 1).*); // 64 + 1
 
     // Test Gram matrix using GEMM: A * A^T
-    const gram = a.gemm(a, false, true, 1.0, 0.0, null);
+    const gram = a.gemm(false, a, true, 1.0, 0.0, null);
     try expectEqual(@as(usize, 2), gram.rows);
     try expectEqual(@as(usize, 2), gram.cols);
     try expectEqual(@as(f32, 14.0), gram.at(0, 0).*); // 1*1 + 2*2 + 3*3
     try expectEqual(@as(f32, 32.0), gram.at(0, 1).*); // 1*4 + 2*5 + 3*6
 
     // Test covariance using GEMM: A^T * A
-    const cov = a.gemm(a, true, false, 1.0, 0.0, null);
+    const cov = a.gemm(true, a, false, 1.0, 0.0, null);
     try expectEqual(@as(usize, 3), cov.rows);
     try expectEqual(@as(usize, 3), cov.cols);
     try expectEqual(@as(f32, 17.0), cov.at(0, 0).*); // 1*1 + 4*4
     try expectEqual(@as(f32, 22.0), cov.at(0, 1).*); // 1*2 + 4*5
 
     // Test alpha = 0 (should return zero matrix)
-    const zero_result = a.gemm(b, false, false, 0.0, 0.0, null);
+    const zero_result = a.gemm(false, b, false, 0.0, 0.0, null);
     try expectEqual(@as(f32, 0.0), zero_result.at(0, 0).*);
     try expectEqual(@as(f32, 0.0), zero_result.at(1, 1).*);
 }

@@ -86,7 +86,7 @@ test "OpsBuilder GEMM operations" {
 
     // Test basic matrix multiplication: A * B using gemm() method
     var ops1: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops1.gemm(b, false, false, 1.0, 0.0, null);
+    try ops1.gemm(false, b, false, 1.0, 0.0, null);
     const result1 = ops1.toOwned();
 
     try expectEqual(@as(f32, 58.0), result1.at(0, 0).*); // 1*7 + 2*9 + 3*11
@@ -96,7 +96,7 @@ test "OpsBuilder GEMM operations" {
 
     // Test scaled multiplication: 2 * A * B
     var ops2: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops2.gemm(b, false, false, 2.0, 0.0, null);
+    try ops2.gemm(false, b, false, 2.0, 0.0, null);
     const result2 = ops2.toOwned();
 
     try expectEqual(@as(f32, 116.0), result2.at(0, 0).*); // 2 * 58
@@ -104,7 +104,7 @@ test "OpsBuilder GEMM operations" {
 
     // Test accumulation: A * B + C
     var ops3: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops3.gemm(b, false, false, 1.0, 1.0, c);
+    try ops3.gemm(false, b, false, 1.0, 1.0, c);
     const result3 = ops3.toOwned();
 
     try expectEqual(@as(f32, 59.0), result3.at(0, 0).*); // 58 + 1
@@ -112,7 +112,7 @@ test "OpsBuilder GEMM operations" {
 
     // Test Gram matrix using GEMM: A * A^T
     var ops4: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops4.gemm(a, false, true, 1.0, 0.0, null);
+    try ops4.gemm(false, a, true, 1.0, 0.0, null);
     const gram = ops4.toOwned();
 
     try expectEqual(@as(usize, 2), gram.rows);
@@ -122,7 +122,7 @@ test "OpsBuilder GEMM operations" {
 
     // Test covariance using GEMM: A^T * A
     var ops5: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops5.gemm(a, true, false, 1.0, 0.0, null);
+    try ops5.gemm(true, a, false, 1.0, 0.0, null);
     const cov = ops5.toOwned();
 
     try expectEqual(@as(usize, 3), cov.rows);
@@ -184,7 +184,7 @@ test "OpsBuilder SIMD case 2: A^T * B with same matrix (covariance)" {
 
     // Also test direct GEMM call with same matrix
     var ops2: OpsBuilder(f32) = try .init(arena.allocator(), data);
-    try ops2.gemm(data, true, false, 1.0, 0.0, null);
+    try ops2.gemm(true, data, false, 1.0, 0.0, null);
     const direct_result = ops2.toOwned();
 
     // Verify direct GEMM gives same result
@@ -218,7 +218,7 @@ test "OpsBuilder GEMM all transpose cases with same matrix" {
 
     // Case 1: A * A (SIMD same-matrix handling)
     var ops1: OpsBuilder(f32) = try .init(arena.allocator(), square_a);
-    try ops1.gemm(square_a, false, false, 1.0, 0.0, null);
+    try ops1.gemm(false, square_a, false, 1.0, 0.0, null);
     const result1 = ops1.toOwned();
 
     // Expected: A * A = [[1*1+2*3, 1*2+2*4], [3*1+4*3, 3*2+4*4]] = [[7, 10], [15, 22]]
@@ -231,7 +231,7 @@ test "OpsBuilder GEMM all transpose cases with same matrix" {
 
     // Case 2: A^T * A (covariance - SIMD same-matrix handling)
     var ops2: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops2.gemm(a, true, false, 1.0, 0.0, null);
+    try ops2.gemm(true, a, false, 1.0, 0.0, null);
     const result2 = ops2.toOwned();
 
     // Expected: A^T * A (3x2 -> 2x2 result)
@@ -246,7 +246,7 @@ test "OpsBuilder GEMM all transpose cases with same matrix" {
 
     // Case 3: A * A^T (gram matrix - SIMD same-matrix handling)
     var ops3: OpsBuilder(f32) = try .init(arena.allocator(), a);
-    try ops3.gemm(a, false, true, 1.0, 0.0, null);
+    try ops3.gemm(false, a, true, 1.0, 0.0, null);
     const result3 = ops3.toOwned();
 
     // Expected: A * A^T (3x2 -> 3x3 result)
@@ -266,7 +266,7 @@ test "OpsBuilder GEMM all transpose cases with same matrix" {
 
     // Case 4: A^T * A^T (both transposed - SIMD same-matrix handling)
     var ops4: OpsBuilder(f32) = try .init(arena.allocator(), square_a);
-    try ops4.gemm(square_a, true, true, 1.0, 0.0, null);
+    try ops4.gemm(true, square_a, true, 1.0, 0.0, null);
     const result4 = ops4.toOwned();
 
     // Expected: A^T * A^T where A^T = [[1,3], [2,4]]
@@ -295,7 +295,7 @@ test "OpsBuilder SIMD 9x9 matrix with known values" {
 
     // Test Case 1: A * A (should use SIMD same-matrix optimization)
     var ops1: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
-    try ops1.gemm(test_matrix, false, false, 1.0, 0.0, null);
+    try ops1.gemm(false, test_matrix, false, 1.0, 0.0, null);
     const result1 = ops1.toOwned();
 
     // Verify Case 1: A * A (uses SIMD same-matrix optimization)
@@ -307,7 +307,7 @@ test "OpsBuilder SIMD 9x9 matrix with known values" {
 
     // Test Case 2: A^T * A (covariance)
     var ops2: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
-    try ops2.gemm(test_matrix, true, false, 1.0, 0.0, null);
+    try ops2.gemm(true, test_matrix, false, 1.0, 0.0, null);
     const result2 = ops2.toOwned();
 
     // Verify Case 2: A^T * A (covariance, uses SIMD same-matrix optimization)
@@ -318,7 +318,7 @@ test "OpsBuilder SIMD 9x9 matrix with known values" {
 
     // Test Case 3: A * A^T (gram matrix)
     var ops3: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
-    try ops3.gemm(test_matrix, false, true, 1.0, 0.0, null);
+    try ops3.gemm(false, test_matrix, true, 1.0, 0.0, null);
     const result3 = ops3.toOwned();
 
     // Verify Case 3: A * A^T (gram matrix, uses SIMD same-matrix optimization)
@@ -330,7 +330,7 @@ test "OpsBuilder SIMD 9x9 matrix with known values" {
 
     // Test Case 4: A^T * A^T
     var ops4: OpsBuilder(f32) = try .init(arena.allocator(), test_matrix);
-    try ops4.gemm(test_matrix, true, true, 1.0, 0.0, null);
+    try ops4.gemm(true, test_matrix, true, 1.0, 0.0, null);
     const result4 = ops4.toOwned();
 
     // Verify Case 4: A^T * A^T (uses SIMD same-matrix optimization)
