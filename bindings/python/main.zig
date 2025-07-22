@@ -27,11 +27,11 @@ var zignal_module = c.PyModuleDef{
 };
 
 var zignal_methods = [_]c.PyMethodDef{
-    .{ 
-        .ml_name = "feature_distribution_match", 
-        .ml_meth = @ptrCast(&fdm.feature_distribution_match), 
-        .ml_flags = c.METH_VARARGS, 
-        .ml_doc = fdm.feature_distribution_match_doc 
+    .{
+        .ml_name = "feature_distribution_match",
+        .ml_meth = @ptrCast(&fdm.feature_distribution_match),
+        .ml_flags = c.METH_VARARGS,
+        .ml_doc = fdm.feature_distribution_match_doc,
     },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };

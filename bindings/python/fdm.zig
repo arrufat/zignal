@@ -10,9 +10,6 @@ const c = @cImport({
     @cInclude("Python.h");
 });
 
-// Global allocator for FDM operations
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-
 // Documentation for the feature_distribution_match function
 pub const feature_distribution_match_doc =
     \\feature_distribution_match(source, reference, /)
@@ -80,8 +77,9 @@ pub fn feature_distribution_match(self: ?*c.PyObject, args: ?*c.PyObject) callco
         return null;
     }
 
-    // Get allocator
-    const allocator = gpa.allocator();
+    var arena = py_utils.createArenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     // Call the FDM function
     zignal.featureDistributionMatch(zignal.Rgb, allocator, src_img_obj.image_ptr.?.*, ref_img_obj.image_ptr.?.*) catch |err| {
