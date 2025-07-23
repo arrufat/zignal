@@ -380,6 +380,62 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     return none;
 }
 
+// Format image for display with format specifiers
+fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+
+    // Parse format_spec argument
+    var format_spec: [*c]const u8 = undefined;
+    const format = comptime std.fmt.comptimePrint("s", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
+        return null;
+    }
+
+    // Convert C string to Zig slice
+    const spec_slice = std.mem.span(format_spec);
+
+    // If empty format spec, return default repr
+    if (spec_slice.len == 0) {
+        return imagergb_repr(self_obj);
+    }
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+
+    // Determine display format based on spec
+    const display_format: zignal.DisplayFormat = if (std.mem.eql(u8, spec_slice, "ansi"))
+        .ansi
+    else if (std.mem.eql(u8, spec_slice, "sixel"))
+        .{ .sixel = .default }
+    else if (std.mem.eql(u8, spec_slice, "auto"))
+        .auto
+    else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'sixel', or 'auto'");
+        return null;
+    };
+
+    // Create formatter
+    const formatter = self.image_ptr.?.display(display_format);
+
+    // Capture formatted output using std.fmt.format
+    var buffer: std.ArrayList(u8) = .init(allocator);
+    defer buffer.deinit();
+
+    // Use std.fmt.format to invoke the formatter's format method properly
+    std.fmt.format(buffer.writer(), "{f}", .{formatter}) catch |err| {
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
+        }
+        return null;
+    };
+
+    // Create Python string from buffer
+    return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
+}
+
 var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = imagergb_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an RGB image from file" },
     .{ .ml_name = "from_numpy", .ml_meth = imagergb_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
@@ -395,6 +451,18 @@ var imagergb_methods = [_]c.PyMethodDef{
     },
     .{ .ml_name = "to_numpy", .ml_meth = imagergb_to_numpy, .ml_flags = c.METH_NOARGS, .ml_doc = "Convert image to NumPy array with shape (rows, cols, 3) without copying data" },
     .{ .ml_name = "save", .ml_meth = imagergb_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
+    .{ .ml_name = "__format__", .ml_meth = imagergb_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
+    \\Format image for display. Supports format specifiers:
+    \\  '' (empty): Returns text representation (e.g., 'ImageRgb(800x600)')
+    \\  'ansi': Display using ANSI escape codes (colored blocks)
+    \\  'sixel': Display using sixel graphics protocol
+    \\  'auto': Auto-detect best format (sixel if supported, otherwise ANSI)
+    \\
+    \\Example:
+    \\  print(f"{img}")        # ImageRgb(800x600)
+    \\  print(f"{img:ansi}")   # Display with ANSI colors
+    \\  print(f"{img:sixel}")  # Display with sixel graphics
+    },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 

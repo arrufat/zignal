@@ -4,6 +4,7 @@
 //! which is supported by various terminal emulators for displaying graphics.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const expect = std.testing.expect;
 
@@ -840,68 +841,203 @@ pub const SixelDetectionOptions = struct {
     timeout_ms: u64 = 100,
 };
 
-/// Terminal control and detection utilities
+// Windows API declarations and constants (conditionally compiled)
+const win_api = if (builtin.os.tag == .windows) struct {
+    // Console mode constants
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+    const ENABLE_LINE_INPUT: u32 = 0x0002;
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+
+    // Standard handle constants
+    const STD_INPUT_HANDLE: i32 = -10;
+    const STD_OUTPUT_HANDLE: i32 = -11;
+
+    // API functions
+    extern "kernel32" fn GetStdHandle(nStdHandle: i32) callconv(.c) ?*anyopaque;
+    extern "kernel32" fn GetConsoleMode(hConsoleHandle: ?*anyopaque, lpMode: *u32) callconv(.c) i32;
+    extern "kernel32" fn SetConsoleMode(hConsoleHandle: ?*anyopaque, dwMode: u32) callconv(.c) i32;
+    extern "msvcrt" fn _kbhit() callconv(.c) c_int;
+    extern "msvcrt" fn _getch() callconv(.c) c_int;
+} else void;
+
+/// Terminal state for restoration
+const TerminalState = union(enum) {
+    windows: struct {
+        output_mode: u32,
+        input_mode: u32,
+    },
+    posix: std.posix.termios,
+};
+
+/// Terminal control and detection utilities (cross-platform)
 const TerminalDetector = struct {
     stdin: std.fs.File,
     stdout: std.fs.File,
     stderr: std.fs.File,
-    original_termios: std.posix.termios,
+    original_state: TerminalState,
 
     fn init() !TerminalDetector {
         const stdin = std.fs.File.stdin();
         const stdout = std.fs.File.stdout();
         const stderr = std.fs.File.stderr();
 
-        // Get current terminal settings
-        const original = try std.posix.tcgetattr(stdin.handle);
+        if (builtin.os.tag == .windows) {
+            // Windows-specific initialization
+            const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
+            const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
 
-        return TerminalDetector{
-            .stdin = stdin,
-            .stdout = stdout,
-            .stderr = stderr,
-            .original_termios = original,
-        };
+            // Save original console modes
+            var original_output_mode: u32 = 0;
+            var original_input_mode: u32 = 0;
+
+            if (win_api.GetConsoleMode(stdout_handle, &original_output_mode) == 0) {
+                return error.ConsoleError;
+            }
+            if (win_api.GetConsoleMode(stdin_handle, &original_input_mode) == 0) {
+                return error.ConsoleError;
+            }
+
+            // Enable Virtual Terminal Processing for ANSI sequences
+            const new_output_mode = original_output_mode | win_api.ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            if (win_api.SetConsoleMode(stdout_handle, new_output_mode) == 0) {
+                return error.ConsoleError;
+            }
+
+            // Set input mode for raw reading
+            const raw_input_mode = original_input_mode & ~(win_api.ENABLE_LINE_INPUT | win_api.ENABLE_ECHO_INPUT);
+            _ = win_api.SetConsoleMode(stdin_handle, raw_input_mode);
+
+            return TerminalDetector{
+                .stdin = stdin,
+                .stdout = stdout,
+                .stderr = stderr,
+                .original_state = .{ .windows = .{
+                    .output_mode = original_output_mode,
+                    .input_mode = original_input_mode,
+                } },
+            };
+        } else {
+            // POSIX: Get current terminal settings
+            const original = try std.posix.tcgetattr(stdin.handle);
+
+            return TerminalDetector{
+                .stdin = stdin,
+                .stdout = stdout,
+                .stderr = stderr,
+                .original_state = .{ .posix = original },
+            };
+        }
     }
 
     fn deinit(self: *TerminalDetector) void {
-        // Restore original terminal settings
-        std.posix.tcsetattr(self.stdin.handle, .FLUSH, self.original_termios) catch {};
+        switch (self.original_state) {
+            .windows => |win_state| {
+                if (builtin.os.tag == .windows) {
+                    // Restore original console modes
+                    const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
+                    const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
+                    _ = win_api.SetConsoleMode(stdout_handle, win_state.output_mode);
+                    _ = win_api.SetConsoleMode(stdin_handle, win_state.input_mode);
+                }
+            },
+            .posix => |termios| {
+                if (builtin.os.tag != .windows) {
+                    // Restore original terminal settings
+                    std.posix.tcsetattr(self.stdin.handle, .FLUSH, termios) catch {};
+                }
+            },
+        }
     }
 
     fn enterRawMode(self: *TerminalDetector) !void {
-        var raw = self.original_termios;
+        switch (self.original_state) {
+            .windows => {
+                // Already in raw mode from init
+            },
+            .posix => |original| {
+                if (builtin.os.tag != .windows) {
+                    var raw = original;
 
-        // Disable canonical mode and echo
-        raw.lflag.ICANON = false;
-        raw.lflag.ECHO = false;
+                    // Disable canonical mode and echo
+                    raw.lflag.ICANON = false;
+                    raw.lflag.ECHO = false;
 
-        // Set minimum characters and timeout
-        raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-        raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout
+                    // Set minimum characters and timeout
+                    raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+                    raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout
 
-        try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
+                    try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
+                }
+            },
+        }
+    }
+
+    fn readWithTimeout(self: *TerminalDetector, buffer: []u8, timeout_ms: u64) !usize {
+        if (builtin.os.tag == .windows) {
+            const start_time = std.time.milliTimestamp();
+            var total_read: usize = 0;
+
+            while (std.time.milliTimestamp() - start_time < timeout_ms) {
+                // Check if console has input available
+                if (win_api._kbhit() != 0) {
+                    // Read one character
+                    const ch = win_api._getch();
+                    if (ch >= 0 and ch <= 255) {
+                        buffer[total_read] = @intCast(ch);
+                        total_read += 1;
+
+                        if (total_read >= buffer.len) break;
+
+                        // Check for response terminators
+                        const char: u8 = @intCast(ch);
+                        if ((char == 'c' or char == 'R' or char == '\\' or char == ';') and total_read > 3) {
+                            break;
+                        }
+                    }
+                }
+
+                // Small delay to prevent busy waiting
+                std.Thread.sleep(1_000_000); // 1ms
+            }
+
+            return total_read;
+        } else {
+            // POSIX: Use the existing termios timeout mechanism
+            return try self.stdin.read(buffer);
+        }
     }
 
     fn query(self: *TerminalDetector, sequence: []const u8, buffer: []u8, timeout_ms: u64) ![]const u8 {
-        _ = timeout_ms; // Will use termios timeout for now
-
         // Enter raw mode
         try self.enterRawMode();
-        defer std.posix.tcsetattr(self.stdin.handle, .FLUSH, self.original_termios) catch {};
+        defer {
+            // Restore terminal state
+            switch (self.original_state) {
+                .windows => {},
+                .posix => |termios| {
+                    if (builtin.os.tag != .windows) {
+                        std.posix.tcsetattr(self.stdin.handle, .FLUSH, termios) catch {};
+                    }
+                },
+            }
+        }
 
         // Clear any pending input
-        // TODO: tcflush not available in current Zig version
-        // std.posix.tcflush(self.stdin.handle, .I) catch {};
-
-        // Alternative: consume any pending input
-        var discard_buf: [response_buffer_size]u8 = undefined;
-        _ = self.stdin.read(&discard_buf) catch 0;
+        if (builtin.os.tag == .windows) {
+            // Consume any pending input
+            while (win_api._kbhit() != 0) {
+                _ = win_api._getch();
+            }
+        } else {
+            var discard_buf: [response_buffer_size]u8 = undefined;
+            _ = self.stdin.read(&discard_buf) catch 0;
+        }
 
         // Send query sequence
         _ = try self.stdout.write(sequence);
 
-        // Read response
-        const n = try self.stdin.read(buffer);
+        // Read response with timeout
+        const n = try self.readWithTimeout(buffer, timeout_ms);
 
         if (n == 0) return error.NoResponse;
 
@@ -996,14 +1132,12 @@ fn detectTerminalSixelCapability(options: SixelDetectionOptions) !bool {
 /// Checks if the terminal supports sixel graphics
 pub fn isSixelSupported() !bool {
     // Check if we're connected to a terminal
-    const stdin = std.fs.File.stdin();
+    const stdout = std.fs.File.stdout();
 
-    // Try to get terminal attributes - if this fails with NotATerminal,
-    // we're redirected to a file/pipe, so allow sixel output
-    _ = std.posix.tcgetattr(stdin.handle) catch |err| switch (err) {
-        error.NotATerminal => return true, // Not a TTY, allow sixel for file output
-        else => return err,
-    };
+    if (!stdout.isTty()) {
+        // Not a TTY, allow sixel for file output
+        return true;
+    }
 
     // We're in a terminal, so perform actual detection
     const options = SixelDetectionOptions{};

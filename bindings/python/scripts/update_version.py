@@ -127,7 +127,7 @@ def main():
     # Update pyproject.toml
     update_pyproject_toml(python_version)
 
-    print("✅ Version synchronization complete!")
+    print("Version synchronization complete!")
 
 
 if __name__ == "__main__":
