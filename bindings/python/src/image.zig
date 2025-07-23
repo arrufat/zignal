@@ -407,7 +407,11 @@ fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 
     // Determine display format based on spec
     const display_format: zignal.DisplayFormat = if (std.mem.eql(u8, spec_slice, "ansi"))
+        .ansi_basic
+    else if (std.mem.eql(u8, spec_slice, "blocks"))
         .ansi_blocks
+    else if (std.mem.eql(u8, spec_slice, "braille"))
+        .{ .braille = .{ .threshold = 0.5 } }
     else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
     else if (std.mem.eql(u8, spec_slice, "auto"))
@@ -454,14 +458,18 @@ var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = "__format__", .ml_meth = imagergb_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
     \\Format image for display. Supports format specifiers:
     \\  '' (empty): Returns text representation (e.g., 'ImageRgb(800x600)')
-    \\  'ansi': Display using ANSI escape codes (colored blocks)
+    \\  'auto': Auto-detect best format (sixel if supported, otherwise blocks)
+    \\  'ansi': Display using ANSI escape codes (spaces with background)
+    \\  'blocks': Display using ANSI escape codes (half colored blocks with background: 2x vertical resolution)
+    \\  'braille': Display using Braille patterns (good for monochrome images)
     \\  'sixel': Display using sixel graphics protocol
-    \\  'auto': Auto-detect best format (sixel if supported, otherwise ANSI)
     \\
     \\Example:
-    \\  print(f"{img}")        # ImageRgb(800x600)
-    \\  print(f"{img:ansi}")   # Display with ANSI colors
-    \\  print(f"{img:sixel}")  # Display with sixel graphics
+    \\  print(f"{img}")         # ImageRgb(800x600)
+    \\  print(f"{img:ansi}")    # Display with ANSI colors
+    \\  print(f"{img:blocks}")  # Display with ANSI colors using unicode blocks (double vertical resolution, better aspect ratio)
+    \\  print(f"{img:braille}") # Display with ANSI colors using braille patterns (good for monochrome images)
+    \\  print(f"{img:sixel}")   # Display with sixel graphics
     },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
