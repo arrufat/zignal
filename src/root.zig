@@ -65,6 +65,16 @@ pub fn loadImage(comptime T: type, allocator: Allocator, file_path: []const u8) 
     return Image(T).load(allocator, file_path);
 }
 pub const ImageFormat = @import("image.zig").ImageFormat;
+pub const DisplayFormat = @import("image.zig").DisplayFormat;
+
+// Sixel graphics support
+const sixel = @import("sixel.zig");
+pub const imageToSixel = sixel.imageToSixel;
+pub const isSixelSupported = sixel.isSixelSupported;
+pub const SixelOptions = sixel.SixelOptions;
+pub const PaletteMode = sixel.PaletteMode;
+pub const DitherMode = sixel.DitherMode;
+
 const png = @import("png.zig");
 pub const savePng = png.savePng;
 pub const loadPng = png.loadPng;

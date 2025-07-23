@@ -17,6 +17,7 @@ const isStruct = @import("meta.zig").isStruct;
 const jpeg = @import("jpeg.zig");
 const png = @import("png.zig");
 const Rectangle = @import("geometry.zig").Rectangle;
+const sixel = @import("sixel.zig");
 
 /// Supported image formats for automatic detection and loading
 pub const ImageFormat = enum {
@@ -56,6 +57,77 @@ pub const ImageFormat = enum {
         return detectFromBytes(header[0..bytes_read]);
     }
 };
+
+/// Display format options
+pub const DisplayFormat = union(enum) {
+    /// Automatically detect the best format (sixel if supported, ANSI otherwise)
+    auto,
+    /// Force ANSI escape codes output
+    ansi,
+    /// Force sixel output with specific options
+    sixel: sixel.SixelOptions,
+};
+
+/// Formatter struct for terminal display with progressive degradation
+pub fn DisplayFormatter(comptime T: type) type {
+    return struct {
+        image: *const Image(T),
+        display_format: DisplayFormat,
+
+        const Self = @This();
+
+        pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            const Rgb = @import("color.zig").Rgb;
+
+            // Determine if we can fallback to ANSI
+            const can_fallback = self.display_format == .auto;
+
+            fmt: switch (self.display_format) {
+                .ansi => {
+                    for (0..self.image.rows) |r| {
+                        for (0..self.image.cols) |c| {
+                            const pixel = self.image.at(r, c).*;
+                            const rgb = color.convertColor(Rgb, pixel);
+                            try writer.print("\x1b[48;2;{d};{d};{d}m \x1b[0m", .{ rgb.r, rgb.g, rgb.b });
+                        }
+                        if (r < self.image.rows - 1) {
+                            try writer.print("\n", .{});
+                        }
+                    }
+                },
+                .auto => {
+                    if (!(sixel.isSixelSupported() catch false)) continue :fmt .ansi;
+                    continue :fmt .{ .sixel = .default };
+                },
+                .sixel => |options| {
+                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+                    defer arena.deinit();
+                    const allocator = arena.allocator();
+
+                    // Try to convert to sixel
+                    const sixel_data = sixel.imageToSixel(T, self.image.*, allocator, options) catch |err| blk: {
+                        // On OutOfMemory, try without dithering
+                        if (err == error.OutOfMemory) {
+                            break :blk sixel.imageToSixel(T, self.image.*, allocator, .fallback) catch null;
+                        } else {
+                            break :blk null;
+                        }
+                    };
+
+                    if (sixel_data) |data| {
+                        try writer.writeAll(data);
+                    } else if (can_fallback) {
+                        continue :fmt .ansi;
+                    } else {
+                        // Output minimal sixel sequence to indicate failure
+                        // This ensures we always output valid sixel when explicitly requested
+                        try writer.writeAll("\x1bPq\x1b\\");
+                    }
+                },
+            }
+        }
+    };
+}
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -257,21 +329,28 @@ pub fn Image(comptime T: type) type {
             return &self.data[row * self.stride + col];
         }
 
-        /// Formats the image as a grid of colored spaces, where each pixel is represented by a space
-        /// with the appropriate background color. This provides a visual representation of the image
-        /// in terminal output.
-        pub fn format(self: Self, writer: *std.Io.Writer) !void {
-            const Rgb = @import("color.zig").Rgb;
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const pixel = self.at(r, c).*;
-                    const rgb = color.convertColor(Rgb, pixel);
-                    try writer.print("\x1b[48;2;{d};{d};{d}m \x1b[0m", .{ rgb.r, rgb.g, rgb.b });
-                }
-                if (r < self.rows - 1) {
-                    try writer.print("\n", .{});
-                }
-            }
+        /// Creates a formatter for terminal display with custom options.
+        /// Provides fine-grained control over output format, palette modes, and dithering.
+        /// Will still gracefully degrade from sixel to ANSI if needed.
+        ///
+        /// Example:
+        /// ```zig
+        /// const img = try Image(Rgb).load(allocator, "test.png");
+        /// std.debug.print("{f}", .{img.display(.ansi)});
+        /// std.debug.print("{f}", .{img.display(.{ .sixel = .{ .palette_mode = .adaptive } })});
+        /// ```
+        pub fn display(self: *const Self, display_format: DisplayFormat) DisplayFormatter(T) {
+            return DisplayFormatter(T){
+                .image = self,
+                .display_format = display_format,
+            };
+        }
+
+        /// Formats the image using the best available terminal format.
+        /// Automatically tries sixel with sensible defaults, falling back to ANSI blocks if needed.
+        /// For explicit control over output format, use the display() method instead.
+        pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try self.display(.auto).format(writer);
         }
 
         /// Returns the optional value at row, col in the image.
@@ -1961,7 +2040,8 @@ test "image format function" {
     var buffer: [256]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image});
+    // Force ANSI format for testing
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi)});
     const result = stream.getWritten();
 
     // The expected output should be:
