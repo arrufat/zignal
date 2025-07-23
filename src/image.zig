@@ -62,8 +62,11 @@ pub const ImageFormat = enum {
 pub const DisplayFormat = union(enum) {
     /// Automatically detect the best format (sixel if supported, ANSI otherwise)
     auto,
-    /// Force ANSI escape codes output
-    ansi,
+    /// Force ANSI escape codes output with spaces (universally compatible)
+    ansi_basic,
+    /// ANSI with Unicode half-block characters for 2x vertical resolution
+    /// Requires a monospace font with Unicode block element support (U+2580)
+    ansi_blocks,
     /// Force sixel output with specific options
     sixel: sixel.SixelOptions,
 };
@@ -83,7 +86,7 @@ pub fn DisplayFormatter(comptime T: type) type {
             const can_fallback = self.display_format == .auto;
 
             fmt: switch (self.display_format) {
-                .ansi => {
+                .ansi_basic => {
                     for (0..self.image.rows) |r| {
                         for (0..self.image.cols) |c| {
                             const pixel = self.image.at(r, c).*;
@@ -95,8 +98,31 @@ pub fn DisplayFormatter(comptime T: type) type {
                         }
                     }
                 },
+                .ansi_blocks => {
+                    // Process image in 2-row chunks for half-block characters
+                    const row_pairs = (self.image.rows + 1) / 2;
+
+                    for (0..row_pairs) |pair_idx| {
+                        for (0..self.image.cols) |col| {
+                            const row1 = pair_idx * 2;
+                            const row2 = if (row1 + 1 < self.image.rows) row1 + 1 else row1;
+
+                            const upper_pixel = self.image.at(row1, col).*;
+                            const lower_pixel = self.image.at(row2, col).*;
+
+                            const rgb_upper = color.convertColor(Rgb, upper_pixel);
+                            const rgb_lower = color.convertColor(Rgb, lower_pixel);
+
+                            // Use upper half block (▀) with foreground=upper, background=lower
+                            try writer.print("\x1b[38;2;{d};{d};{d};48;2;{d};{d};{d}m▀\x1b[0m", .{ rgb_upper.r, rgb_upper.g, rgb_upper.b, rgb_lower.r, rgb_lower.g, rgb_lower.b });
+                        }
+                        if (pair_idx < row_pairs - 1) {
+                            try writer.print("\n", .{});
+                        }
+                    }
+                },
                 .auto => {
-                    if (!(sixel.isSixelSupported() catch false)) continue :fmt .ansi;
+                    if (!(sixel.isSixelSupported() catch false)) continue :fmt .ansi_blocks;
                     continue :fmt .{ .sixel = .default };
                 },
                 .sixel => |options| {
@@ -117,7 +143,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (sixel_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .ansi;
+                        continue :fmt .ansi_basic;
                     } else {
                         // Output minimal sixel sequence to indicate failure
                         // This ensures we always output valid sixel when explicitly requested
@@ -333,10 +359,18 @@ pub fn Image(comptime T: type) type {
         /// Provides fine-grained control over output format, palette modes, and dithering.
         /// Will still gracefully degrade from sixel to ANSI if needed.
         ///
+        /// Display modes:
+        /// - `.ansi`: Uses background colors with spaces (universally compatible)
+        /// - `.ansi_blocks`: Uses Unicode half-block characters for 2x vertical resolution
+        ///   (requires monospace font with U+2580 and U+2584 support)
+        /// - `.sixel`: Uses sixel graphics protocol if supported
+        /// - `.auto`: Automatically selects best available format
+        ///
         /// Example:
         /// ```zig
         /// const img = try Image(Rgb).load(allocator, "test.png");
-        /// std.debug.print("{f}", .{img.display(.ansi)});
+        /// std.debug.print("{f}", .{img.display(.ansi)});           // Basic ANSI
+        /// std.debug.print("{f}", .{img.display(.ansi_blocks)});    // Enhanced resolution
         /// std.debug.print("{f}", .{img.display(.{ .sixel = .{ .palette_mode = .adaptive } })});
         /// ```
         pub fn display(self: *const Self, display_format: DisplayFormat) DisplayFormatter(T) {
@@ -2041,13 +2075,72 @@ test "image format function" {
     var stream = std.io.fixedBufferStream(&buffer);
 
     // Force ANSI format for testing
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi)});
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_basic)});
     const result = stream.getWritten();
 
     // The expected output should be:
     // Row 0: red_bg + green_bg + newline
     // Row 1: blue_bg + white_bg
     const expected = "\x1b[48;2;255;0;0m \x1b[0m\x1b[48;2;0;255;0m \x1b[0m\n\x1b[48;2;0;0;255m \x1b[0m\x1b[48;2;255;255;255m \x1b[0m";
+
+    try expectEqualStrings(expected, result);
+}
+
+test "image format ansi_blocks" {
+    const Rgb = @import("color.zig").Rgb;
+
+    // Create a small 2x2 RGB image
+    var image = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    defer image.deinit(std.testing.allocator);
+
+    // Set up a pattern: red, green, blue, white
+    image.at(0, 0).* = Rgb.red;
+    image.at(0, 1).* = Rgb.green;
+    image.at(1, 0).* = Rgb.blue;
+    image.at(1, 1).* = Rgb.white;
+
+    // Test ansi_blocks format
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_blocks)});
+    const result = stream.getWritten();
+
+    // The expected output should combine two rows into one using half-block character
+    // First char: upper=red (fg), lower=blue (bg) with ▀
+    // Second char: upper=green (fg), lower=white (bg) with ▀
+    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[0m\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m";
+
+    try expectEqualStrings(expected, result);
+}
+
+test "image format ansi_blocks odd rows" {
+    const Rgb = @import("color.zig").Rgb;
+
+    // Create a 3x2 RGB image (odd number of rows)
+    var image = try Image(Rgb).initAlloc(std.testing.allocator, 3, 2);
+    defer image.deinit(std.testing.allocator);
+
+    // Set up colors
+    image.at(0, 0).* = Rgb.red;
+    image.at(0, 1).* = Rgb.green;
+    image.at(1, 0).* = Rgb.blue;
+    image.at(1, 1).* = Rgb.white;
+    image.at(2, 0).* = Rgb.black;
+    image.at(2, 1).* = Rgb{ .r = 128, .g = 128, .b = 128 }; // gray
+
+    // Test ansi_blocks format with odd rows
+    var buffer: [512]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_blocks)});
+    const result = stream.getWritten();
+
+    // Expected: 2 lines (3 rows compressed to 2 using half-blocks)
+    // Line 1: red/blue, green/white
+    // Line 2: black/black, gray/gray (last row repeated for odd case)
+    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[0m\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m\n" ++
+        "\x1b[38;2;0;0;0;48;2;0;0;0m▀\x1b[0m\x1b[38;2;128;128;128;48;2;128;128;128m▀\x1b[0m";
 
     try expectEqualStrings(expected, result);
 }

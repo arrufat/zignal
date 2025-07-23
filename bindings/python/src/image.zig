@@ -407,7 +407,7 @@ fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 
     // Determine display format based on spec
     const display_format: zignal.DisplayFormat = if (std.mem.eql(u8, spec_slice, "ansi"))
-        .ansi
+        .ansi_blocks
     else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
     else if (std.mem.eql(u8, spec_slice, "auto"))
