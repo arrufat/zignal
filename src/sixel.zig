@@ -90,6 +90,7 @@ pub fn imageToSixel(
     allocator: Allocator,
     options: SixelOptions,
 ) ![]u8 {
+
     // Calculate scaling if needed
     var width = image.cols;
     var height = image.rows;
@@ -435,13 +436,11 @@ const ColorLookupTable = struct {
 
     fn build(self: *ColorLookupTable, palette: []const Rgb, palette_size: usize) void {
         const LUT_SIZE = @as(usize, 1) << color_quantize_bits;
-        // For each cell in 32x32x32 grid
         for (0..LUT_SIZE) |r| {
             for (0..LUT_SIZE) |g| {
                 for (0..LUT_SIZE) |b| {
-                    // Find nearest palette color to this grid cell
                     const rgb = Rgb{
-                        .r = @intCast(r << (8 - color_quantize_bits) | (r >> (2 * color_quantize_bits - 8))), // Convert 5-bit to 8-bit
+                        .r = @intCast(r << (8 - color_quantize_bits) | (r >> (2 * color_quantize_bits - 8))),
                         .g = @intCast(g << (8 - color_quantize_bits) | (g >> (2 * color_quantize_bits - 8))),
                         .b = @intCast(b << (8 - color_quantize_bits) | (b >> (2 * color_quantize_bits - 8))),
                     };
@@ -660,8 +659,19 @@ fn generateAdaptivePalette(
     }
 
     const palette_size = @min(@min(color_list.items.len, max_colors), palette.len);
+
     if (palette_size == 0) {
         return error.NoPaletteColors;
+    }
+
+    // Special case: if we only have one color, just return it
+    if (color_list.items.len == 1) {
+        palette[0] = .{
+            .r = color_list.items[0].r,
+            .g = color_list.items[0].g,
+            .b = color_list.items[0].b,
+        };
+        return 1;
     }
 
     // Initialize first box with all colors
@@ -694,11 +704,16 @@ fn generateAdaptivePalette(
 
     // Median cut algorithm
     while (boxes.items.len < palette_size) {
-        // Find box with largest volume * population
-        var largest_idx: usize = 0;
+
+        // Find box with largest volume * population that can be split
+        var largest_idx: ?usize = null;
         var largest_score: u64 = 0;
 
         for (boxes.items, 0..) |box, i| {
+            // Skip boxes that can't be split (no range in any dimension)
+            if (box.colors.len <= 1) continue;
+            if (box.r_max <= box.r_min and box.g_max <= box.g_min and box.b_max <= box.b_min) continue;
+
             const score = @as(u64, box.volume()) * @as(u64, box.population);
             if (score > largest_score) {
                 largest_score = score;
@@ -706,16 +721,12 @@ fn generateAdaptivePalette(
             }
         }
 
-        if (largest_score == 0) break; // No more splittable boxes
+        if (largest_idx == null) {
+            break; // No more splittable boxes
+        }
 
         // Split the largest box
-        var box_to_split = boxes.orderedRemove(largest_idx);
-
-        // Check if box can be split (has different colors)
-        if (box_to_split.colors.len <= 1) {
-            try boxes.append(box_to_split);
-            continue;
-        }
+        var box_to_split = boxes.orderedRemove(largest_idx.?);
 
         const dim = box_to_split.largestDimension();
 
@@ -795,8 +806,13 @@ fn generateAdaptivePalette(
             box2.population += c.count;
         }
 
-        if (box1.colors.len > 0 and box1.r_max >= box1.r_min) try boxes.append(box1);
-        if (box2.colors.len > 0 and box2.r_max >= box2.r_min) try boxes.append(box2);
+        if (box1.colors.len > 0 and box1.r_max >= box1.r_min) {
+            try boxes.append(box1);
+        }
+
+        if (box2.colors.len > 0 and box2.r_max >= box2.r_min) {
+            try boxes.append(box2);
+        }
     }
 
     // Generate final palette from boxes (weighted average)
