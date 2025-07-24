@@ -364,7 +364,7 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     }
 
     // Get allocator and save PNG
-    zignal.savePng(zignal.Rgb, allocator, self.image_ptr.?.*, path_slice) catch |err| {
+    self.image_ptr.?.save(allocator, path_slice) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
             error.AccessDenied => c.PyErr_SetString(c.PyExc_PermissionError, "Permission denied"),
