@@ -318,9 +318,18 @@ pub fn Image(comptime T: type) type {
             const image_format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
-                .png => png.loadPng(T, allocator, file_path),
-                .jpeg => jpeg.loadJpeg(T, allocator, file_path),
+                .png => png.load(T, allocator, file_path),
+                .jpeg => jpeg.load(T, allocator, file_path),
             };
+        }
+
+        /// Saves the image to a file in PNG format.
+        /// Returns an error if the file path doesn't end in `.png` or `.PNG`.
+        pub fn save(self: Self, allocator: Allocator, file_path: []const u8) !void {
+            if (!std.mem.endsWith(u8, file_path, ".png") and !std.mem.endsWith(u8, file_path, ".PNG")) {
+                return error.UnsupportedImageFormat;
+            }
+            try png.save(T, allocator, self, file_path);
         }
 
         /// Returns the image data reinterpreted as a slice of bytes.

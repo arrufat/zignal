@@ -50,7 +50,7 @@ pub fn imageToKitty(
     options: KittyOptions,
 ) ![]u8 {
     // First, encode the image as PNG
-    const png_data = try png.encodeImage(T, allocator, image);
+    const png_data = try png.encodeImage(T, allocator, image, .default);
     defer allocator.free(png_data);
 
     // Calculate base64 encoded size

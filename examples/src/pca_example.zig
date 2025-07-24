@@ -244,6 +244,6 @@ pub fn main() !void {
     std.log.info("PCA Analysis completed successfully", .{});
 
     // Save images if not running in WASM
-    try zignal.savePng(Rgb, gpa, original_image, "pca_original.png");
-    try zignal.savePng(Rgb, gpa, aligned_image, "pca_aligned.png");
+    try original_image.save(gpa, "pca_original.png");
+    try original_image.save(gpa, "pca_aligned.png");
 }
