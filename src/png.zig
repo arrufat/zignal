@@ -859,10 +859,10 @@ pub const EncodeOptions = struct {
     pub const default: EncodeOptions = .{ .filter_mode = .adaptive };
 };
 
-pub const FilterMode = enum {
+pub const FilterMode = union(enum) {
     none, // No filtering
     adaptive, // Select best filter per row
-    fixed, // Use a fixed filter type
+    fixed: FilterType, // Use a specific filter type
 };
 
 // Helper function to map pixel types to PNG ColorType
@@ -901,7 +901,7 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
     const filtered_data = switch (options.filter_mode) {
         .none => try filterScanlines(allocator, image_data, header, .none),
         .adaptive => try filterScanlinesAdaptive(allocator, image_data, header),
-        .fixed => try filterScanlines(allocator, image_data, header, .none), // TODO: support other fixed filters
+        .fixed => |filter_type| try filterScanlines(allocator, image_data, header, filter_type),
     };
     defer allocator.free(filtered_data);
 
