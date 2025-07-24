@@ -59,6 +59,7 @@ pub const SimilarityTransform = geometry.SimilarityTransform;
 pub const ConvexHull = geometry.ConvexHull;
 
 pub const Image = @import("image.zig").Image;
+pub const InterpolationMethod = @import("image.zig").InterpolationMethod;
 
 /// Load an image with automatic format detection (PNG, JPEG)
 pub fn loadImage(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
