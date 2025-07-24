@@ -7,11 +7,11 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const convertColor = @import("color.zig").convertColor;
+const deflate = @import("deflate.zig");
 const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
-const convertColor = @import("color.zig").convertColor;
-const deflate = @import("deflate.zig");
 
 /// PNG signature: 8 bytes that identify a PNG file
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -856,6 +856,8 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
 // PNG encoding options
 pub const EncodeOptions = struct {
     filter_mode: FilterMode = .adaptive,
+    gamma: ?f32 = null,
+    srgb_intent: ?SrgbRenderingIntent = null,
     pub const default: EncodeOptions = .{ .filter_mode = .adaptive };
 };
 
@@ -896,6 +898,20 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
 
     const ihdr_data = try createIHDR(header);
     try writer.writeChunk("IHDR".*, &ihdr_data);
+
+    // Write color management chunks if specified
+    if (options.srgb_intent) |intent| {
+        // sRGB chunk - must come before PLTE and IDAT
+        const srgb_data = [_]u8{@intFromEnum(intent)};
+        try writer.writeChunk("sRGB".*, &srgb_data);
+    } else if (options.gamma) |g| {
+        // gAMA chunk - must come before PLTE and IDAT
+        // Store gamma * 100000 as big-endian u32
+        const gamma_int: u32 = @intFromFloat(g * 100000.0);
+        var gama_data: [4]u8 = undefined;
+        std.mem.writeInt(u32, &gama_data, gamma_int, .big);
+        try writer.writeChunk("gAMA".*, &gama_data);
+    }
 
     // Apply row filtering based on options
     const filtered_data = switch (options.filter_mode) {
@@ -1466,22 +1482,17 @@ fn deinterlaceAdam7Palette(allocator: Allocator, comptime T: type, decompressed:
 }
 
 // Apply gamma correction to a color value
-inline fn applyGammaCorrection(value: u8, color_info: ColorInfo) u8 {
-    // sRGB overrides gAMA chunk when present
-    if (color_info.srgb_intent != null) {
-        // Apply sRGB transfer function (simplified approximation: gamma 2.2)
-        const normalized = @as(f32, @floatFromInt(value)) / 255.0;
-        const corrected = std.math.pow(f32, normalized, 1.0 / 2.2);
-        return @as(u8, @intFromFloat(@min(255.0, @max(0.0, corrected * 255.0))));
-    }
-
-    if (color_info.gamma) |g| {
-        if (g != 1.0) {
-            const normalized = @as(f32, @floatFromInt(value)) / 255.0;
-            const corrected = std.math.pow(f32, normalized, g);
-            return @as(u8, @intFromFloat(@min(255.0, @max(0.0, corrected * 255.0))));
-        }
-    }
+inline fn applyGammaCorrection(value: u8, config: PixelExtractionConfig) u8 {
+    // PNG gamma handling:
+    // - gAMA chunk indicates the encoding gamma of the file
+    // - sRGB chunk indicates the file is in sRGB color space
+    // - For display purposes, files are already gamma-encoded and should be displayed as-is
+    // - Gamma correction should only be applied when converting to linear space for processing
+    //
+    // Since zignal is primarily used for display and image manipulation (not linear color
+    // processing), we don't apply gamma correction by default. This matches the behavior
+    // of most image viewers and libraries.
+    _ = config;
     return value;
 }
 
@@ -1522,7 +1533,7 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
     } else false;
 
     // Apply gamma correction
-    const corrected_value = applyGammaCorrection(pixel_value, config.color_info);
+    const corrected_value = applyGammaCorrection(pixel_value, config);
 
     return switch (T) {
         u8 => corrected_value,
@@ -1578,9 +1589,9 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
     } else false;
 
     // Apply gamma correction to RGB channels
-    const corrected_r = applyGammaCorrection(r, config.color_info);
-    const corrected_g = applyGammaCorrection(g, config.color_info);
-    const corrected_b = applyGammaCorrection(b, config.color_info);
+    const corrected_r = applyGammaCorrection(r, config);
+    const corrected_g = applyGammaCorrection(g, config);
+    const corrected_b = applyGammaCorrection(b, config);
 
     return switch (T) {
         u8 => @as(u8, @intCast((@as(u16, corrected_r) + @as(u16, corrected_g) + @as(u16, corrected_b)) / 3)),
@@ -1620,9 +1631,9 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
         src_row[offset + 3];
 
     // Apply gamma correction to RGB channels (not alpha)
-    const corrected_r = applyGammaCorrection(r, config.color_info);
-    const corrected_g = applyGammaCorrection(g, config.color_info);
-    const corrected_b = applyGammaCorrection(b, config.color_info);
+    const corrected_r = applyGammaCorrection(r, config);
+    const corrected_g = applyGammaCorrection(g, config);
+    const corrected_b = applyGammaCorrection(b, config);
 
     return switch (T) {
         u8 => @as(u8, @intCast((@as(u16, corrected_r) + @as(u16, corrected_g) + @as(u16, corrected_b)) / 3)),
@@ -1806,6 +1817,61 @@ test "PNG bit unpacking - 4-bit grayscale" {
     // Expected: 15,5 -> 255,85
     try std.testing.expectEqual(@as(u8, 255), dst_row[0]);
     try std.testing.expectEqual(@as(u8, 85), dst_row[1]);
+}
+
+test "PNG encode with color management chunks" {
+    const allocator = std.testing.allocator;
+
+    // Create test image
+    var test_data = [_]Rgb{
+        Rgb{ .r = 255, .g = 0, .b = 0 }, Rgb{ .r = 0, .g = 255, .b = 0 },
+        Rgb{ .r = 0, .g = 0, .b = 255 }, Rgb{ .r = 255, .g = 255, .b = 0 },
+    };
+    const test_image = Image(Rgb).init(2, 2, &test_data);
+
+    // Test encoding with sRGB chunk
+    const srgb_options: EncodeOptions = .{ .srgb_intent = .perceptual };
+    const srgb_png = try encodeImage(Rgb, allocator, test_image, srgb_options);
+    defer allocator.free(srgb_png);
+
+    // Verify sRGB chunk is present
+    var found_srgb = false;
+    var offset: usize = 8; // Skip PNG signature
+    while (offset + 8 < srgb_png.len) {
+        const chunk_length = std.mem.readInt(u32, srgb_png[offset .. offset + 4][0..4], .big);
+        const chunk_type = srgb_png[offset + 4 .. offset + 8];
+        if (std.mem.eql(u8, chunk_type, "sRGB")) {
+            found_srgb = true;
+            try std.testing.expectEqual(@as(u32, 1), chunk_length);
+            try std.testing.expectEqual(@as(u8, 0), srgb_png[offset + 8]); // perceptual intent
+            break;
+        }
+        offset += 12 + chunk_length; // length(4) + type(4) + data + crc(4)
+    }
+    try std.testing.expect(found_srgb);
+
+    // Test encoding with gAMA chunk
+    const gamma_options: EncodeOptions = .{ .gamma = 1.0 / 2.2 };
+    const gamma_png = try encodeImage(Rgb, allocator, test_image, gamma_options);
+    defer allocator.free(gamma_png);
+
+    // Verify gAMA chunk is present
+    var found_gama = false;
+    offset = 8; // Skip PNG signature
+    while (offset + 8 < gamma_png.len) {
+        const chunk_length = std.mem.readInt(u32, gamma_png[offset .. offset + 4][0..4], .big);
+        const chunk_type = gamma_png[offset + 4 .. offset + 8];
+        if (std.mem.eql(u8, chunk_type, "gAMA")) {
+            found_gama = true;
+            try std.testing.expectEqual(@as(u32, 4), chunk_length);
+            const gamma_int = std.mem.readInt(u32, gamma_png[offset + 8 .. offset + 12][0..4], .big);
+            const expected_gamma_int: u32 = @intFromFloat((1.0 / 2.2) * 100000.0);
+            try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(gamma_int)), @as(f32, @floatFromInt(expected_gamma_int)), 1.0);
+            break;
+        }
+        offset += 12 + chunk_length;
+    }
+    try std.testing.expect(found_gama);
 }
 
 test "PNG CRC validation" {
@@ -2194,28 +2260,25 @@ test "PNG 16-bit transparency" {
 }
 
 test "PNG gamma correction" {
-    // Test gamma correction math
-    const color_info_gamma = ColorInfo{ .gamma = 2.2, .srgb_intent = null };
+    // Test that gamma correction is NOT applied for display purposes
+    // PNG files are already gamma-encoded and should be displayed as-is
+    const color_info_gamma = ColorInfo{ .gamma = 0.45455, .srgb_intent = null };
     const color_info_srgb = ColorInfo{ .gamma = null, .srgb_intent = .perceptual };
     const color_info_none = ColorInfo.empty;
 
     // Test gamma correction
     const input_value: u8 = 128;
-    const gamma_corrected = applyGammaCorrection(input_value, color_info_gamma);
-    const srgb_corrected = applyGammaCorrection(input_value, color_info_srgb);
-    const no_correction = applyGammaCorrection(input_value, color_info_none);
+    const gamma_config = PixelExtractionConfig{ .color_info = color_info_gamma };
+    const srgb_config = PixelExtractionConfig{ .color_info = color_info_srgb };
+    const none_config = PixelExtractionConfig{ .color_info = color_info_none };
+    const gamma_result = applyGammaCorrection(input_value, gamma_config);
+    const srgb_result = applyGammaCorrection(input_value, srgb_config);
+    const no_correction = applyGammaCorrection(input_value, none_config);
 
-    // Verify no correction returns original value
+    // All should return the original value (no correction applied)
+    try std.testing.expectEqual(input_value, gamma_result);
+    try std.testing.expectEqual(input_value, srgb_result);
     try std.testing.expectEqual(input_value, no_correction);
-
-    // Verify gamma and sRGB correction modify the value
-    try std.testing.expect(gamma_corrected != input_value);
-    try std.testing.expect(srgb_corrected != input_value);
-
-    // sRGB should override gamma when both are present (shouldn't happen in real PNG files)
-    const both_present = ColorInfo{ .gamma = 1.8, .srgb_intent = .perceptual };
-    const both_corrected = applyGammaCorrection(input_value, both_present);
-    try std.testing.expectEqual(srgb_corrected, both_corrected);
 }
 
 test "PNG gAMA chunk parsing" {
@@ -2315,11 +2378,11 @@ test "PNG pixel extraction config convenience" {
     const pixel_with_trans = extractRgbPixel(Rgba, &rgb_src, 0, header, transparency_config);
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 }, pixel_with_trans);
 
-    // Test config with gamma correction
+    // Test config with gamma correction (now gamma is ignored for display)
     const gamma_config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = 2.2, .srgb_intent = null } };
-    // With gamma 2.2, value 255 should become 255 (at ceiling), but 128 should be different
     const test_src = [_]u8{ 128, 128, 128 }; // middle gray value
     const pixel_gamma_test = extractRgbPixel(Rgb, &test_src, 0, header, gamma_config);
     const pixel_no_gamma = extractRgbPixel(Rgb, &test_src, 0, header, default_config);
-    try std.testing.expect(!std.meta.eql(pixel_gamma_test, pixel_no_gamma));
+    // Gamma correction is not applied for display, so both should be equal
+    try std.testing.expectEqual(pixel_gamma_test, pixel_no_gamma);
 }
