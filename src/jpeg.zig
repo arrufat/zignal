@@ -1797,7 +1797,7 @@ pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Im
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidJpegFile, UnsupportedJpegFormat, OutOfMemory, and various JPEG parsing errors
-pub fn loadJpeg(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
 

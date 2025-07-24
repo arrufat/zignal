@@ -714,7 +714,7 @@ fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
-pub fn loadPng(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
     const png_data = try std.fs.cwd().readFileAlloc(allocator, file_path, 100 * 1024 * 1024);
     defer allocator.free(png_data);
 
@@ -853,6 +853,18 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
     return filtered_data;
 }
 
+// PNG encoding options
+pub const EncodeOptions = struct {
+    filter_mode: FilterMode = .adaptive,
+    pub const default: EncodeOptions = .{ .filter_mode = .adaptive };
+};
+
+pub const FilterMode = enum {
+    none, // No filtering
+    adaptive, // Select best filter per row
+    fixed, // Use a fixed filter type
+};
+
 // Helper function to map pixel types to PNG ColorType
 fn getColorType(comptime T: type) ColorType {
     return switch (T) {
@@ -864,7 +876,7 @@ fn getColorType(comptime T: type) ColorType {
 }
 
 // Encode Image data to PNG format
-pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8) ![]u8 {
+pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
     var writer = ChunkWriter.init(allocator);
     defer writer.deinit();
 
@@ -885,8 +897,12 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
     const ihdr_data = try createIHDR(header);
     try writer.writeChunk("IHDR".*, &ihdr_data);
 
-    // Apply row filtering (using 'none' filter for simplicity)
-    const filtered_data = try filterScanlines(allocator, image_data, header, .none);
+    // Apply row filtering based on options
+    const filtered_data = switch (options.filter_mode) {
+        .none => try filterScanlines(allocator, image_data, header, .none),
+        .adaptive => try filterScanlinesAdaptive(allocator, image_data, header),
+        .fixed => try filterScanlines(allocator, image_data, header, .none), // TODO: support other fixed filters
+    };
     defer allocator.free(filtered_data);
 
     // Compress filtered data with zlib format (required for PNG IDAT) using static Huffman
@@ -902,17 +918,15 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
     return writer.toOwnedSlice();
 }
 
-// PNG API functions
-
 /// Generic PNG encoding function that works with any supported pixel type
-pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T)) ![]u8 {
+pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     const color_type = getColorType(T);
 
     switch (T) {
         u8, Rgb, Rgba => {
             // Direct support - use image as-is
             const image_bytes = image.asBytes();
-            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8);
+            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
         },
         else => {
             // Convert unsupported type to RGB
@@ -925,7 +939,7 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T)) ![]u
             }
 
             const image_bytes = rgb_image.asBytes();
-            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8);
+            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
         },
     }
 }
@@ -941,8 +955,8 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T)) ![]u
 /// - file_path: Output PNG file path
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
-pub fn savePng(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encodeImage(T, allocator, image);
+pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+    const png_data = try encodeImage(T, allocator, image, .default);
     defer allocator.free(png_data);
 
     const file = try std.fs.cwd().createFile(file_path, .{});
@@ -1031,10 +1045,9 @@ fn filterRow(
         },
         .sub => {
             // Subtract the byte to the left
-            @memcpy(current_row, original_row);
-            var i: usize = bytes_per_pixel;
-            while (i < current_row.len) : (i += 1) {
-                current_row[i] = current_row[i] -% current_row[i - bytes_per_pixel];
+            for (current_row, original_row, 0..) |*filtered, orig, i| {
+                const left: u8 = if (i >= bytes_per_pixel) original_row[i - bytes_per_pixel] else 0;
+                filtered.* = orig -% left;
             }
         },
         .up => {
@@ -1068,6 +1081,91 @@ fn filterRow(
             }
         },
     }
+}
+
+// Calculate the sum of absolute differences for filtered data
+fn calculateFilterCost(filtered_data: []const u8) u64 {
+    var cost: u64 = 0;
+    for (filtered_data) |byte| {
+        // Use sum of absolute values as cost metric
+        // Smaller values compress better
+        if (byte > 127) {
+            cost += @as(u64, 256) - @as(u64, byte);
+        } else {
+            cost += byte;
+        }
+    }
+    return cost;
+}
+
+// Select the best filter type for a scanline
+fn selectBestFilter(
+    src_row: []const u8,
+    previous_row: ?[]const u8,
+    bytes_per_pixel: u8,
+    temp_buffer: []u8,
+) FilterType {
+    const filter_types = [_]FilterType{ .none, .sub, .up, .average, .paeth };
+    var best_filter = FilterType.none;
+    var best_cost: u64 = std.math.maxInt(u64);
+
+    for (filter_types) |filter_type| {
+        // Skip 'up' filters for first row
+        if (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth)) {
+            continue;
+        }
+
+        // Apply filter to temp buffer
+        filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
+
+        // Calculate cost
+        const cost = calculateFilterCost(temp_buffer);
+
+        if (cost < best_cost) {
+            best_cost = cost;
+            best_filter = filter_type;
+        }
+    }
+
+    return best_filter;
+}
+
+// Apply adaptive PNG row filtering to scanlines
+fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Header) ![]u8 {
+    const scanline_bytes = header.scanlineBytes();
+    const bytes_per_pixel = header.bytesPerPixel();
+    const filtered_size = header.height * (scanline_bytes + 1); // +1 for filter byte
+
+    var filtered_data = try allocator.alloc(u8, filtered_size);
+
+    // Allocate temp buffer for filter testing
+    const temp_buffer = try allocator.alloc(u8, scanline_bytes);
+    defer allocator.free(temp_buffer);
+
+    var y: u32 = 0;
+    while (y < header.height) : (y += 1) {
+        const src_row_start = y * scanline_bytes;
+        const dst_row_start = y * (scanline_bytes + 1);
+
+        const src_row = data[src_row_start .. src_row_start + scanline_bytes];
+        const dst_row = filtered_data[dst_row_start + 1 .. dst_row_start + 1 + scanline_bytes];
+
+        const previous_row = if (y > 0)
+            data[(y - 1) * scanline_bytes .. (y - 1) * scanline_bytes + scanline_bytes]
+        else
+            null;
+
+        // Select best filter for this row
+        const best_filter = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp_buffer);
+
+        // Set filter type byte
+        filtered_data[dst_row_start] = @intFromEnum(best_filter);
+
+        // Apply the selected filter
+        filterRow(best_filter, dst_row, src_row, previous_row, bytes_per_pixel);
+    }
+
+    return filtered_data;
 }
 
 // Apply defiltering to all scanlines after deflate decompression
@@ -1504,7 +1602,7 @@ test "PNG round-trip encoding/decoding" {
     const original_image = Image(Rgb).init(height, width, owned_data);
 
     // Encode to PNG
-    const png_data = try encodeImage(Rgb, allocator, original_image);
+    const png_data = try encodeImage(Rgb, allocator, original_image, .default);
     defer allocator.free(png_data);
 
     // Verify PNG signature

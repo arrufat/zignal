@@ -84,11 +84,8 @@ pub const imageToKitty = kitty.imageToKitty;
 pub const isKittySupported = kitty.isKittySupported;
 pub const KittyOptions = kitty.KittyOptions;
 
-const png = @import("png.zig");
-pub const savePng = png.savePng;
-pub const loadPng = png.loadPng;
+pub const png = @import("png.zig");
 pub const jpeg = @import("jpeg.zig");
-pub const loadJpeg = jpeg.loadJpeg;
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;

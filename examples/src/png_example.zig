@@ -5,8 +5,8 @@ const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Rgba = zignal.Rgba;
 const Hsl = zignal.Hsl;
-const savePng = zignal.savePng;
-const loadPng = zignal.loadPng;
+const savePng = zignal.png.save;
+const loadPng = zignal.png.load;
 
 pub const std_options = std.Options{
     .log_level = .info,
