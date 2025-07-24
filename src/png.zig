@@ -1137,7 +1137,6 @@ fn selectBestFilter(
     bytes_per_pixel: u8,
     temp_buffer: []u8,
 ) FilterType {
-    const filter_types = [_]FilterType{ .none, .sub, .up, .average, .paeth };
     var best_filter = FilterType.none;
     var best_cost: f32 = std.math.floatMax(f32);
 
@@ -1148,30 +1147,40 @@ fn selectBestFilter(
     }
     const horizontal_similarity = @as(f32, @floatFromInt(same_count)) / @as(f32, @floatFromInt(src_row.len - bytes_per_pixel));
 
-    // If very horizontal, prioritize sub filter
-    const prioritized_filters = if (horizontal_similarity > 0.7)
-        [_]FilterType{ .sub, .none, .average, .up, .paeth }
-    else
-        filter_types;
-
-    for (prioritized_filters) |filter_type| {
-        // Skip 'up' filters for first row
-        if (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth)) {
-            continue;
+    // Try filters in smart order based on heuristics
+    // First try the most likely filter based on content
+    if (horizontal_similarity > 0.7) {
+        // High horizontal similarity - sub filter likely best
+        filterRow(.sub, temp_buffer, src_row, previous_row, bytes_per_pixel);
+        const sub_cost = calculateFilterCost(temp_buffer);
+        if (sub_cost < best_cost) {
+            best_cost = sub_cost;
+            best_filter = .sub;
+            if (sub_cost < 1.0) return .sub; // Early exit for excellent result
         }
+    }
 
-        // Apply filter to temp buffer
-        filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
+    inline for (std.meta.fields(FilterType)) |field| {
+        const filter_type = @field(FilterType, field.name);
 
-        // Calculate cost
-        const cost = calculateFilterCost(temp_buffer);
+        // Check if we should process this filter
+        const already_tested = (horizontal_similarity > 0.7 and filter_type == .sub);
+        const invalid_for_first_row = (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth));
 
-        if (cost < best_cost) {
-            best_cost = cost;
-            best_filter = filter_type;
+        if (!already_tested and !invalid_for_first_row) {
+            // Apply filter to temp buffer
+            filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
 
-            // Early termination if cost is very low
-            if (cost < 1.0) break;
+            // Calculate cost
+            const cost = calculateFilterCost(temp_buffer);
+
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_filter = filter_type;
+
+                // Early termination if cost is very low
+                if (cost < 1.0) return best_filter;
+            }
         }
     }
 
