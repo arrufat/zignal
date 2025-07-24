@@ -13,10 +13,10 @@ const Rgba = @import("color.zig").Rgba;
 const convertColor = @import("color.zig").convertColor;
 const deflate = @import("deflate.zig");
 
-// PNG signature: 8 bytes that identify a PNG file
+/// PNG signature: 8 bytes that identify a PNG file
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
-// PNG color types
+/// PNG color types
 pub const ColorType = enum(u8) {
     grayscale = 0,
     rgb = 2,
@@ -42,7 +42,7 @@ pub const ColorType = enum(u8) {
     }
 };
 
-// PNG filter types for row filtering
+/// PNG filter types for row filtering
 pub const FilterType = enum(u8) {
     none = 0,
     sub = 1,
@@ -51,7 +51,7 @@ pub const FilterType = enum(u8) {
     paeth = 4,
 };
 
-// sRGB rendering intent values
+/// sRGB rendering intent values
 pub const SrgbRenderingIntent = enum(u8) {
     perceptual = 0,
     relative_colorimetric = 1,
@@ -59,7 +59,7 @@ pub const SrgbRenderingIntent = enum(u8) {
     absolute_colorimetric = 3,
 };
 
-// Color management information
+/// Color management information
 const ColorInfo = struct {
     gamma: ?f32,
     srgb_intent: ?SrgbRenderingIntent,
@@ -67,13 +67,13 @@ const ColorInfo = struct {
     const empty = ColorInfo{ .gamma = null, .srgb_intent = null };
 };
 
-// Configuration for pixel extraction functions
+/// Configuration for pixel extraction functions
 const PixelExtractionConfig = struct {
     transparency: ?[]const u8 = null,
     color_info: ColorInfo = ColorInfo.empty,
 };
 
-// PNG chunk structure
+/// PNG chunk structure
 pub const Chunk = struct {
     length: u32,
     type: [4]u8,
@@ -81,7 +81,7 @@ pub const Chunk = struct {
     crc: u32,
 };
 
-// PNG IHDR (header) chunk data
+/// PNG IHDR (header) chunk data
 pub const Header = struct {
     width: u32,
     height: u32,
@@ -104,7 +104,7 @@ pub const Header = struct {
     }
 };
 
-// Adam7 interlacing constants
+/// Adam7 interlacing constants
 const Adam7Pass = struct {
     x_start: u32,
     y_start: u32,
@@ -122,7 +122,7 @@ const adam7_passes = [7]Adam7Pass{
     .{ .x_start = 0, .y_start = 1, .x_step = 1, .y_step = 2 },
 };
 
-// Calculate sub-image dimensions for Adam7 pass
+/// Calculate sub-image dimensions for Adam7 pass
 fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, height: u32 } {
     if (pass >= 7) return .{ .width = 0, .height = 0 };
 
@@ -139,7 +139,7 @@ fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, h
     return .{ .width = pass_width, .height = pass_height };
 }
 
-// Calculate total scanline data size for interlaced image
+/// Calculate total scanline data size for interlaced image
 fn adam7TotalSize(header: Header) usize {
     var total_size: usize = 0;
     const channels = header.channels();
@@ -155,7 +155,7 @@ fn adam7TotalSize(header: Header) usize {
     return total_size;
 }
 
-// PNG decoder/encoder state
+/// PNG decoder/encoder state
 pub const PngImage = struct {
     header: Header,
     palette: ?[][3]u8 = null,
@@ -257,7 +257,7 @@ pub const ChunkReader = struct {
     }
 };
 
-// Parse IHDR chunk
+/// Parse IHDR chunk
 fn parseHeader(chunk: Chunk) !Header {
     if (!std.mem.eql(u8, &chunk.type, "IHDR")) {
         return error.InvalidHeader;
@@ -425,7 +425,7 @@ pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
     return png_image;
 }
 
-// Convert PNG image data to its most natural Zignal Image type
+/// Convert PNG image data to its most natural Zignal Image type
 fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
@@ -794,7 +794,7 @@ pub const ChunkWriter = struct {
     }
 };
 
-// Create IHDR chunk data
+/// Create IHDR chunk data
 fn createIHDR(header: Header) ![13]u8 {
     var ihdr_data: [13]u8 = undefined;
 
@@ -822,7 +822,7 @@ fn createIHDR(header: Header) ![13]u8 {
     return ihdr_data;
 }
 
-// Apply PNG row filtering to scanlines
+/// Apply PNG row filtering to scanlines
 fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filter_type: FilterType) ![]u8 {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
@@ -865,7 +865,7 @@ pub const FilterMode = union(enum) {
     fixed: FilterType, // Use a specific filter type
 };
 
-// Helper function to map pixel types to PNG ColorType
+/// Helper function to map pixel types to PNG ColorType
 fn getColorType(comptime T: type) ColorType {
     return switch (T) {
         u8 => .grayscale,
@@ -965,7 +965,7 @@ pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: 
     try file.writeAll(png_data);
 }
 
-// PNG row filtering and defiltering functions
+/// PNG row filtering and defiltering functions
 fn paethPredictor(a: i32, b: i32, c: i32) u8 {
     const p = a + b - c;
     const pa = @abs(p - a);
@@ -1083,8 +1083,8 @@ fn filterRow(
     }
 }
 
-// Calculate entropy-based cost for filtered data
-// Lower entropy means better compression
+/// Calculate entropy-based cost for filtered data
+/// Lower entropy means better compression
 fn calculateFilterCost(filtered_data: []const u8) f32 {
     // Count byte frequencies
     var freq = [_]u32{0} ** 256;
@@ -1130,7 +1130,7 @@ fn calculateFilterCost(filtered_data: []const u8) f32 {
     return entropy - (run_bonus / len_f32);
 }
 
-// Select the best filter type for a scanline
+/// Select the best filter type for a scanline
 fn selectBestFilter(
     src_row: []const u8,
     previous_row: ?[]const u8,
@@ -1168,17 +1168,11 @@ fn selectBestFilter(
         const invalid_for_first_row = (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth));
 
         if (!already_tested and !invalid_for_first_row) {
-            // Apply filter to temp buffer
             filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
-
-            // Calculate cost
             const cost = calculateFilterCost(temp_buffer);
-
             if (cost < best_cost) {
                 best_cost = cost;
                 best_filter = filter_type;
-
-                // Early termination if cost is very low
                 if (cost < 1.0) return best_filter;
             }
         }
@@ -1187,7 +1181,7 @@ fn selectBestFilter(
     return best_filter;
 }
 
-// Apply adaptive PNG row filtering to scanlines
+/// Apply adaptive PNG row filtering to scanlines
 fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Header) ![]u8 {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
@@ -1247,7 +1241,7 @@ fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Heade
     return filtered_data;
 }
 
-// Apply defiltering to all scanlines after deflate decompression
+/// Apply defiltering to all scanlines after deflate decompression
 fn defilterScanlines(data: []u8, header: Header) !void {
     if (header.interlace_method == 1) {
         // Interlaced image - use Adam7 defiltering
@@ -1258,7 +1252,7 @@ fn defilterScanlines(data: []u8, header: Header) !void {
     }
 }
 
-// Apply defiltering to standard (non-interlaced) scanlines
+/// Apply defiltering to standard (non-interlaced) scanlines
 fn defilterStandardScanlines(data: []u8, header: Header) !void {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
@@ -1290,7 +1284,7 @@ fn defilterStandardScanlines(data: []u8, header: Header) !void {
     }
 }
 
-// Apply defiltering to Adam7 interlaced scanlines
+/// Apply defiltering to Adam7 interlaced scanlines
 fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
     const expected_size = adam7TotalSize(header);
 
@@ -1332,7 +1326,7 @@ fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
     }
 }
 
-// Deinterlace Adam7 data and convert to requested pixel format
+/// Deinterlace Adam7 data and convert to requested pixel format
 fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, config: PixelExtractionConfig) !Image(T) {
     const total_pixels = @as(u64, header.width) * @as(u64, header.height);
     if (total_pixels > std.math.maxInt(usize)) {
@@ -1385,7 +1379,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
     };
 }
 
-// Deinterlace Adam7 palette data and convert to RGB or RGBA
+/// Deinterlace Adam7 palette data and convert to RGB or RGBA
 fn deinterlaceAdam7Palette(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, palette: [][3]u8, transparency: ?[]u8) !Image(T) {
     const total_pixels = @as(u64, header.width) * @as(u64, header.height);
     if (total_pixels > std.math.maxInt(usize)) {
@@ -1491,7 +1485,7 @@ inline fn applyGammaCorrection(value: u8, color_info: ColorInfo) u8 {
     return value;
 }
 
-// Extract grayscale pixel from Adam7 pass data with optional transparency
+/// Extract grayscale pixel from Adam7 pass data with optional transparency
 fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
     const pixel_value = switch (header.bit_depth) {
         8 => if (header.color_type == .grayscale_alpha) src_row[pass_x * 2] else src_row[pass_x],
@@ -1538,7 +1532,7 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
     };
 }
 
-// Extract RGB pixel from Adam7 pass data with optional transparency
+/// Extract RGB pixel from Adam7 pass data with optional transparency
 fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
     const offset = pass_x * 3;
     if (offset + 2 >= src_row.len) {
@@ -1596,7 +1590,7 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
     };
 }
 
-// Extract RGBA pixel from Adam7 pass data
+/// Extract RGBA pixel from Adam7 pass data
 fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
     const offset = pass_x * 4;
     if (offset + 3 >= src_row.len) {
