@@ -414,6 +414,8 @@ fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
         .{ .braille = .{ .threshold = 0.5 } }
     else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
+    else if (std.mem.eql(u8, spec_slice, "kitty"))
+        .{ .kitty = .default }
     else if (std.mem.eql(u8, spec_slice, "auto"))
         .auto
     else {
@@ -458,11 +460,12 @@ var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = "__format__", .ml_meth = imagergb_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
     \\Format image for display. Supports format specifiers:
     \\  '' (empty): Returns text representation (e.g., 'ImageRgb(800x600)')
-    \\  'auto': Auto-detect best format (sixel if supported, otherwise blocks)
+    \\  'auto': Auto-detect best format with progressive degradation: kitty -> sixel -> blocks
     \\  'ansi': Display using ANSI escape codes (spaces with background)
-    \\  'blocks': Display using ANSI escape codes (half colored blocks with background: 2x vertical resolution)
+    \\  'blocks': Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
     \\  'braille': Display using Braille patterns (good for monochrome images)
-    \\  'sixel': Display using sixel graphics protocol
+    \\  'sixel': Display using sixel graphics protocol (up to 256 colors)
+    \\  'kitty': Display using kitty graphics protocol (24-bit color)
     \\
     \\Example:
     \\  print(f"{img}")         # ImageRgb(800x600)
@@ -470,6 +473,7 @@ var imagergb_methods = [_]c.PyMethodDef{
     \\  print(f"{img:blocks}")  # Display with ANSI colors using unicode blocks (double vertical resolution, better aspect ratio)
     \\  print(f"{img:braille}") # Display with ANSI colors using braille patterns (good for monochrome images)
     \\  print(f"{img:sixel}")   # Display with sixel graphics
+    \\  print(f"{img:kitty}")   # Display with kitty graphics
     },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
