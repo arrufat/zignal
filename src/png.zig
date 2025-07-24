@@ -1083,19 +1083,51 @@ fn filterRow(
     }
 }
 
-// Calculate the sum of absolute differences for filtered data
-fn calculateFilterCost(filtered_data: []const u8) u64 {
-    var cost: u64 = 0;
+// Calculate entropy-based cost for filtered data
+// Lower entropy means better compression
+fn calculateFilterCost(filtered_data: []const u8) f32 {
+    // Count byte frequencies
+    var freq = [_]u32{0} ** 256;
     for (filtered_data) |byte| {
-        // Use sum of absolute values as cost metric
-        // Smaller values compress better
-        if (byte > 127) {
-            cost += @as(u64, 256) - @as(u64, byte);
-        } else {
-            cost += byte;
+        freq[byte] += 1;
+    }
+
+    // Calculate entropy
+    var entropy: f32 = 0.0;
+    const len_f32 = @as(f32, @floatFromInt(filtered_data.len));
+
+    for (freq) |count| {
+        if (count > 0) {
+            const p = @as(f32, @floatFromInt(count)) / len_f32;
+            entropy -= p * @log2(p);
         }
     }
-    return cost;
+
+    // Also consider run lengths for better cost estimation
+    var run_bonus: f32 = 0.0;
+    var last_byte = filtered_data[0];
+    var run_length: u32 = 1;
+
+    for (filtered_data[1..]) |byte| {
+        if (byte == last_byte) {
+            run_length += 1;
+        } else {
+            if (run_length > 3) {
+                // Bonus for long runs (they compress well)
+                run_bonus += @log2(@as(f32, @floatFromInt(run_length)));
+            }
+            last_byte = byte;
+            run_length = 1;
+        }
+    }
+
+    // Final run
+    if (run_length > 3) {
+        run_bonus += @log2(@as(f32, @floatFromInt(run_length)));
+    }
+
+    // Lower score is better (subtract run bonus)
+    return entropy - (run_bonus / len_f32);
 }
 
 // Select the best filter type for a scanline
@@ -1107,9 +1139,22 @@ fn selectBestFilter(
 ) FilterType {
     const filter_types = [_]FilterType{ .none, .sub, .up, .average, .paeth };
     var best_filter = FilterType.none;
-    var best_cost: u64 = std.math.maxInt(u64);
+    var best_cost: f32 = std.math.floatMax(f32);
 
-    for (filter_types) |filter_type| {
+    // Quick heuristic: check if row has many repeated values
+    var same_count: u32 = 0;
+    for (src_row[bytes_per_pixel..], 0..) |byte, i| {
+        if (byte == src_row[i]) same_count += 1;
+    }
+    const horizontal_similarity = @as(f32, @floatFromInt(same_count)) / @as(f32, @floatFromInt(src_row.len - bytes_per_pixel));
+
+    // If very horizontal, prioritize sub filter
+    const prioritized_filters = if (horizontal_similarity > 0.7)
+        [_]FilterType{ .sub, .none, .average, .up, .paeth }
+    else
+        filter_types;
+
+    for (prioritized_filters) |filter_type| {
         // Skip 'up' filters for first row
         if (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth)) {
             continue;
@@ -1124,6 +1169,9 @@ fn selectBestFilter(
         if (cost < best_cost) {
             best_cost = cost;
             best_filter = filter_type;
+
+            // Early termination if cost is very low
+            if (cost < 1.0) break;
         }
     }
 
@@ -1142,6 +1190,11 @@ fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Heade
     const temp_buffer = try allocator.alloc(u8, scanline_bytes);
     defer allocator.free(temp_buffer);
 
+    // Adaptive sampling: analyze every Nth row for large images
+    const sample_rate: u32 = if (header.height > 512) 8 else 1;
+    var last_filter = FilterType.none;
+    var filter_streak: u32 = 0;
+
     var y: u32 = 0;
     while (y < header.height) : (y += 1) {
         const src_row_start = y * scanline_bytes;
@@ -1155,8 +1208,25 @@ fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Heade
         else
             null;
 
-        // Select best filter for this row
-        const best_filter = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp_buffer);
+        // Decide whether to analyze this row
+        const should_analyze = (y % sample_rate == 0) or
+            (filter_streak == 0) or
+            (y < 3) or // Always analyze first few rows
+            (y >= header.height - 3); // And last few rows
+
+        const best_filter = if (should_analyze) blk: {
+            const filter = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp_buffer);
+
+            // Track filter consistency
+            if (filter == last_filter) {
+                filter_streak = @min(filter_streak + 1, sample_rate);
+            } else {
+                filter_streak = 0;
+                last_filter = filter;
+            }
+
+            break :blk filter;
+        } else last_filter; // Reuse last filter
 
         // Set filter type byte
         filtered_data[dst_row_start] = @intFromEnum(best_filter);
