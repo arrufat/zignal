@@ -56,7 +56,7 @@ pub const DitherMode = enum {
 };
 
 /// Options for sixel encoding
-pub const SixelOptions = struct {
+pub const Options = struct {
     /// Palette generation mode
     palette_mode: PaletteMode,
     /// Dithering algorithm to use
@@ -67,14 +67,14 @@ pub const SixelOptions = struct {
     max_height: u32,
 
     /// Default options for automatic formatting
-    pub const default: SixelOptions = .{
+    pub const default: Options = .{
         .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
         .dither_mode = .auto,
         .max_width = 800,
         .max_height = 600,
     };
     /// Fallback options without dithering
-    pub const fallback: SixelOptions = .{
+    pub const fallback: Options = .{
         .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
         .dither_mode = .none,
         .max_width = 800,
@@ -85,11 +85,11 @@ pub const SixelOptions = struct {
 // ========== Main Entry Point ==========
 
 /// Converts an image to sixel format
-pub fn imageToSixel(
+pub fn fromImage(
     comptime T: type,
     image: Image(T),
     allocator: Allocator,
-    options: SixelOptions,
+    options: Options,
 ) ![]u8 {
 
     // Calculate scaling if needed
@@ -851,7 +851,7 @@ fn generateAdaptivePalette(
 }
 
 /// Checks if the terminal supports sixel graphics
-pub fn isSixelSupported() bool {
+pub fn isSupported() bool {
     // Check if we're connected to a terminal
     if (!TerminalSupport.isStdoutTty()) {
         // Not a TTY, allow sixel for file output
@@ -877,7 +877,7 @@ test "basic sixel encoding - 2x2 image" {
     img.at(1, 0).* = .{ .r = 0, .g = 0, .b = 255 }; // Blue
     img.at(1, 1).* = .{ .r = 255, .g = 255, .b = 0 }; // Yellow
 
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .fixed_6x7x6,
         .dither_mode = .none,
         .max_width = 100,
@@ -909,7 +909,7 @@ test "basic sixel encoding - verify palette format" {
         }
     }
 
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .{ .adaptive = .{ .max_colors = 16 } },
         .dither_mode = .none,
         .max_width = 100,
@@ -933,7 +933,7 @@ test "palette mode - fixed 6x7x6 color mapping" {
     img.at(0, 1).* = .{ .r = 255, .g = 255, .b = 255 }; // White - last index
     img.at(0, 2).* = .{ .r = 255, .g = 0, .b = 0 }; // Red
 
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .fixed_6x7x6,
         .dither_mode = .none,
         .max_width = 100,
@@ -976,7 +976,7 @@ test "palette mode - adaptive with color reduction" {
     }
 
     // Test with max_colors = 4 (force color reduction)
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .{ .adaptive = .{ .max_colors = 4 } },
         .dither_mode = .none,
         .max_width = 100,
@@ -998,7 +998,7 @@ test "edge case - single pixel image" {
 
     img.at(0, 0).* = .{ .r = 128, .g = 128, .b = 128 };
 
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .fixed_web216,
         .dither_mode = .none,
         .max_width = 100,
@@ -1026,7 +1026,7 @@ test "edge case - uniform color image" {
         }
     }
 
-    const sixel_data = try imageToSixel(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
         .dither_mode = .none,
         .max_width = 100,
