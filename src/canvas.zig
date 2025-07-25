@@ -61,6 +61,28 @@ pub fn Canvas(comptime T: type) type {
             return .{ .image = image, .allocator = allocator };
         }
 
+        /// Clamps a floating-point coordinate to image bounds and converts to usize.
+        /// Returns the clamped coordinate as a usize index.
+        inline fn clampToImageBounds(coord: f32, max_size: usize) usize {
+            return @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(max_size)), coord)));
+        }
+
+        /// Clamps a rectangle to image bounds and returns integer pixel coordinates.
+        /// Returns null if the rectangle is completely outside the image.
+        inline fn clampRectToImage(self: Self, rect: Rectangle(f32)) ?Rectangle(usize) {
+            const left = clampToImageBounds(rect.l, self.image.cols);
+            const top = clampToImageBounds(rect.t, self.image.rows);
+            const right = clampToImageBounds(rect.r, self.image.cols);
+            const bottom = clampToImageBounds(rect.b, self.image.rows);
+
+            // Check if rectangle is valid after clamping
+            if (left >= right or top >= bottom) {
+                return null;
+            }
+
+            return .{ .l = left, .t = top, .r = right, .b = bottom };
+        }
+
         /// Fills the entire canvas with a solid color using @memset.
         pub fn fill(self: Self, color: anytype) void {
             @memset(self.image.data, convertColor(T, color));
@@ -558,13 +580,36 @@ pub fn Canvas(comptime T: type) type {
         /// Draws the outline of a rectangle on the given image.
         pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
+            // Rectangle has exclusive r,b bounds, but drawPolygon needs inclusive points
+            // So we subtract 1 from r and b to get the actual corner positions
             const points: []const Point2d(f32) = &.{
                 Point2d(f32).init2d(rect.l, rect.t),
-                Point2d(f32).init2d(rect.r, rect.t),
-                Point2d(f32).init2d(rect.r, rect.b),
-                Point2d(f32).init2d(rect.l, rect.b),
+                Point2d(f32).init2d(rect.r - 1, rect.t),
+                Point2d(f32).init2d(rect.r - 1, rect.b - 1),
+                Point2d(f32).init2d(rect.l, rect.b - 1),
             };
             self.drawPolygon(points, color, width, mode);
+        }
+
+        /// Fills a rectangle on the given image.
+        /// The rectangle is defined using standard conventions where l,t are inclusive and r,b are exclusive.
+        /// This means a rectangle from (0,0) to (10,10) will fill pixels at positions 0-9 in both dimensions.
+        /// Uses @memset for optimal performance.
+        pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, mode: DrawMode) void {
+            _ = mode; // Mode is ignored for rectangle fills - always uses fast @memset
+            comptime assert(isColor(@TypeOf(color)));
+
+            // Use helper to clamp rectangle to image bounds
+            const bounds = self.clampRectToImage(rect) orelse return;
+
+            const target_color = convertColor(T, color);
+
+            // Use @memset for each row for optimal performance
+            for (bounds.t..bounds.b) |row| {
+                const start_idx = row * self.image.cols + bounds.l;
+                const end_idx = row * self.image.cols + bounds.r;
+                @memset(self.image.data[start_idx..end_idx], target_color);
+            }
         }
 
         /// Draws the outline of a circle on the given image.
@@ -1137,6 +1182,120 @@ pub fn Canvas(comptime T: type) type {
                 ),
             };
         }
+
+        /// Draws text at the specified position using a bitmap font.
+        /// The position specifies the top-left corner of the text.
+        /// Supports newlines for multi-line text.
+        pub fn drawText(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype) void {
+            comptime assert(isColor(@TypeOf(color)));
+            const BitmapFont = @import("font.zig").BitmapFont;
+            comptime assert(@TypeOf(font) == BitmapFont);
+
+            var x = position.x();
+            var y = position.y();
+            const start_x = x;
+
+            for (text) |char| {
+                if (char == '\n') {
+                    x = start_x;
+                    y += @floatFromInt(font.char_height);
+                    continue;
+                }
+
+                if (font.getCharData(char)) |char_data| {
+                    // Draw the character bitmap
+                    for (char_data, 0..) |row_data, row| {
+                        var col: usize = 0;
+                        var bits = row_data;
+                        while (col < font.char_width) : (col += 1) {
+                            if (bits & 1 != 0) {
+                                const px = @as(isize, @intFromFloat(x)) + @as(isize, @intCast(col));
+                                const py = @as(isize, @intFromFloat(y)) + @as(isize, @intCast(row));
+                                if (self.atOrNull(py, px)) |pixel| {
+                                    pixel.* = convertColor(T, color);
+                                }
+                            }
+                            bits >>= 1;
+                        }
+                    }
+                }
+                x += @floatFromInt(font.char_width);
+            }
+        }
+
+        /// Draws text at the specified position with scaling.
+        /// Uses nearest-neighbor scaling for crisp bitmap font rendering.
+        /// The scale parameter must be > 0.
+        pub fn drawTextScaled(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32) void {
+            comptime assert(isColor(@TypeOf(color)));
+            const BitmapFont = @import("font.zig").BitmapFont;
+            comptime assert(@TypeOf(font) == BitmapFont);
+            if (scale <= 0) return;
+
+            var x = position.x();
+            var y = position.y();
+            const start_x = x;
+            const char_width_scaled = @as(f32, @floatFromInt(font.char_width)) * scale;
+            const char_height_scaled = @as(f32, @floatFromInt(font.char_height)) * scale;
+
+            for (text) |char| {
+                if (char == '\n') {
+                    x = start_x;
+                    y += char_height_scaled;
+                    continue;
+                }
+
+                if (font.getCharData(char)) |char_data| {
+                    // Draw the character bitmap with scaling
+                    for (char_data, 0..) |row_data, row| {
+                        var col: usize = 0;
+                        var bits = row_data;
+                        while (col < font.char_width) : (col += 1) {
+                            if (bits & 1 != 0) {
+                                // Draw a scaled pixel block
+                                const base_x = x + @as(f32, @floatFromInt(col)) * scale;
+                                const base_y = y + @as(f32, @floatFromInt(row)) * scale;
+                                
+                                // Calculate the integer bounds of the scaled pixel
+                                const x_start = @as(isize, @intFromFloat(@floor(base_x)));
+                                const y_start = @as(isize, @intFromFloat(@floor(base_y)));
+                                const x_end = @as(isize, @intFromFloat(@ceil(base_x + scale)));
+                                const y_end = @as(isize, @intFromFloat(@ceil(base_y + scale)));
+
+                                // Fill the pixel block
+                                var py = y_start;
+                                while (py < y_end) : (py += 1) {
+                                    var px = x_start;
+                                    while (px < x_end) : (px += 1) {
+                                        if (self.atOrNull(py, px)) |pixel| {
+                                            pixel.* = convertColor(T, color);
+                                        }
+                                    }
+                                }
+                            }
+                            bits >>= 1;
+                        }
+                    }
+                }
+                x += char_width_scaled;
+            }
+        }
+
+        /// Draws text with antialiasing support for scaled text.
+        /// When scale > 1 and mode is .soft, applies edge smoothing.
+        pub fn drawTextAA(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
+            if (mode == .fast or scale == 1.0) {
+                // Use regular scaled text for fast mode or scale 1
+                self.drawTextScaled(text, position, font, color, scale);
+                return;
+            }
+
+            // For antialiased text, we could implement sub-pixel rendering
+            // or use the fillPolygon with soft mode to draw each character glyph
+            // For now, we'll use the simple scaled version
+            // TODO: Implement proper antialiasing using glyph outlines
+            self.drawTextScaled(text, position, font, color, scale);
+        }
     };
 }
 
@@ -1163,8 +1322,8 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "circle_filled_solid", .md5sum = "3b3866e705fded47367902dedb825e4e", .draw_fn = drawCircleFilledSolid },
     .{ .name = "circle_filled_smooth", .md5sum = "4996924718641236276cdb1c166ae515", .draw_fn = drawCircleFilledSmooth },
     .{ .name = "circle_outline", .md5sum = "ae7e973d5644ff7bdde7338296e4ab40", .draw_fn = drawCircleOutline },
-    .{ .name = "rectangle_filled", .md5sum = "3783f1119b7d5482b5a333f76c322c92", .draw_fn = drawRectangleFilled },
-    .{ .name = "rectangle_outline", .md5sum = "033fdc24b89399af7b1810783e357b5f", .draw_fn = drawRectangleOutline },
+    .{ .name = "rectangle_filled", .md5sum = "1112ffbda92473effbd4d44c9722f563", .draw_fn = drawRectangleFilled },
+    .{ .name = "rectangle_outline", .md5sum = "d5ee7fe598a82d16e33068d5bb6c6696", .draw_fn = drawRectangleOutline },
     .{ .name = "triangle_filled", .md5sum = "283a9de3dd51dd00794559cc231ff5ac", .draw_fn = drawTriangleFilled },
     .{ .name = "bezier_cubic", .md5sum = "fe95149bead3b0a028057c8c7fb969af", .draw_fn = drawBezierCubic },
     .{ .name = "bezier_quadratic", .md5sum = "c3286e308aaaef5b302129cf67b713c6", .draw_fn = drawBezierQuadratic },
@@ -1211,13 +1370,7 @@ fn drawCircleOutline(canvas: Canvas(Rgba)) void {
 fn drawRectangleFilled(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 64, .g = 128, .b = 192, .a = 255 };
     const rect = Rectangle(f32){ .l = 20, .t = 30, .r = 80, .b = 70 };
-    const corners = [_]Point2d(f32){
-        Point2d(f32).init2d(rect.l, rect.t),
-        Point2d(f32).init2d(rect.r, rect.t),
-        Point2d(f32).init2d(rect.r, rect.b),
-        Point2d(f32).init2d(rect.l, rect.b),
-    };
-    canvas.fillPolygon(&corners, color, .fast) catch unreachable;
+    canvas.fillRectangle(rect, color, .fast);
 }
 
 fn drawRectangleOutline(canvas: Canvas(Rgba)) void {

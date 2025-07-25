@@ -105,6 +105,11 @@ pub const SvdResult = @import("svd.zig").SvdResult;
 
 pub const featureDistributionMatch = @import("fdm.zig").featureDistributionMatch;
 
+// Font system
+const font = @import("font.zig");
+pub const BitmapFont = font.BitmapFont;
+pub const default_font_8x8 = font.default_font_8x8;
+
 // PCA (Principal Component Analysis) system
 const pca = @import("pca.zig");
 pub const PrincipalComponentAnalysis = pca.PrincipalComponentAnalysis; // Legacy alias

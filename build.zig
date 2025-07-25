@@ -44,7 +44,7 @@ pub fn build(b: *Build) void {
     for ([_][]const u8{
         "color",  "image", "geometry", "matrix", "svd",  "perlin",
         "canvas", "png",   "deflate",  "fdm",    "jpeg", "pca",
-        "sixel",  "kitty",
+        "sixel",  "kitty", "font",
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
