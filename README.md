@@ -13,6 +13,8 @@ As a result, the API might change often.
 
 ## Installation
 
+### Zig
+
 ```console
 zig fetch --save git+https://github.com/bfactory-ai/zignal
 ```
@@ -24,6 +26,12 @@ const zignal = b.dependency("zignal", .{ .target = target, .optimize = optimize 
 exe.root_module.addImport("zignal", zignal.module("zignal"));
 // If you're creating a `module` using b.createModule, then:
 module.addImport("zignal", zignal.module("zignal"));
+```
+
+### Python
+
+```console
+pip install zignal-processing
 ```
 
 ## Motivation
