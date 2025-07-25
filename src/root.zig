@@ -70,20 +70,8 @@ pub const DisplayFormat = @import("image.zig").DisplayFormat;
 
 // Terminal support utilities
 pub const TerminalSupport = @import("TerminalSupport.zig");
-
-// Sixel graphics support
-const sixel = @import("sixel.zig");
-pub const imageToSixel = sixel.imageToSixel;
-pub const isSixelSupported = sixel.isSixelSupported;
-pub const SixelOptions = sixel.SixelOptions;
-pub const PaletteMode = sixel.PaletteMode;
-pub const DitherMode = sixel.DitherMode;
-
-// Kitty graphics protocol
-const kitty = @import("kitty.zig");
-pub const imageToKitty = kitty.imageToKitty;
-pub const isKittySupported = kitty.isKittySupported;
-pub const KittyOptions = kitty.KittyOptions;
+pub const sixel = @import("sixel.zig");
+pub const kitty = @import("kitty.zig");
 
 pub const png = @import("png.zig");
 pub const jpeg = @import("jpeg.zig");

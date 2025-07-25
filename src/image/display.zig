@@ -28,9 +28,9 @@ pub const DisplayFormat = union(enum) {
         pub const default: @This() = .{ .threshold = 0.5 };
     },
     /// Force sixel output with specific options
-    sixel: sixel.SixelOptions,
+    sixel: sixel.Options,
     /// Kitty graphics protocol with options
-    kitty: kitty.KittyOptions,
+    kitty: kitty.Options,
 };
 
 /// Formatter struct for terminal display with progressive degradation
@@ -149,9 +149,9 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .auto => {
-                    if (kitty.isKittySupported()) {
+                    if (kitty.isSupported()) {
                         continue :fmt .{ .kitty = .default };
-                    } else if (sixel.isSixelSupported()) {
+                    } else if (sixel.isSupported()) {
                         continue :fmt .{ .sixel = .default };
                     } else {
                         continue :fmt .ansi_blocks;
@@ -163,10 +163,10 @@ pub fn DisplayFormatter(comptime T: type) type {
                     const allocator = arena.allocator();
 
                     // Try to convert to sixel
-                    const sixel_data = sixel.imageToSixel(T, self.image.*, allocator, options) catch |err| blk: {
+                    const sixel_data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
                         // On OutOfMemory, try without dithering
                         if (err == error.OutOfMemory) {
-                            break :blk sixel.imageToSixel(T, self.image.*, allocator, .fallback) catch null;
+                            break :blk sixel.fromImage(T, self.image.*, allocator, .fallback) catch null;
                         } else {
                             break :blk null;
                         }
@@ -188,10 +188,10 @@ pub fn DisplayFormatter(comptime T: type) type {
                     const allocator = arena.allocator();
 
                     // Try to convert to Kitty format
-                    const kitty_data = kitty.imageToKitty(T, self.image.*, allocator, options) catch |err| blk: {
+                    const kitty_data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
                         // On error, try with default options
                         if (err == error.OutOfMemory) {
-                            break :blk kitty.imageToKitty(T, self.image.*, allocator, .default) catch null;
+                            break :blk kitty.fromImage(T, self.image.*, allocator, .default) catch null;
                         } else {
                             break :blk null;
                         }

@@ -20,7 +20,7 @@ const TerminalSupport = @import("TerminalSupport.zig");
 const max_chunk_size: usize = 4096; // Maximum payload size per escape sequence
 
 /// Options for Kitty graphics protocol encoding
-pub const KittyOptions = struct {
+pub const Options = struct {
     /// Suppress terminal responses (0=normal, 1=suppress OK, 2=suppress all)
     quiet: u2 = 1,
     /// Image placement ID (optional, for referencing the image later)
@@ -33,7 +33,7 @@ pub const KittyOptions = struct {
     enable_chunking: bool = false,
 
     /// Default options for automatic formatting
-    pub const default: KittyOptions = .{
+    pub const default: Options = .{
         .quiet = 1,
         .image_id = null,
         .placement_id = null,
@@ -43,11 +43,11 @@ pub const KittyOptions = struct {
 };
 
 /// Converts an image to Kitty graphics protocol format
-pub fn imageToKitty(
+pub fn fromImage(
     comptime T: type,
     image: Image(T),
     allocator: Allocator,
-    options: KittyOptions,
+    options: Options,
 ) ![]u8 {
     // First, encode the image as PNG
     const png_data = try png.encodeImage(T, allocator, image, .default);
@@ -164,7 +164,7 @@ pub fn imageToKitty(
 }
 
 /// Detects if the terminal supports Kitty graphics protocol
-pub fn isKittySupported() bool {
+pub fn isSupported() bool {
     // Check if we're connected to a terminal
     if (!TerminalSupport.isStdoutTty()) {
         // Not a TTY, don't support Kitty for file output
@@ -200,7 +200,7 @@ test "imageToKitty basic functionality" {
     img.at(1, 1).* = Rgb{ .r = 255, .g = 255, .b = 255 };
 
     // Convert to Kitty format
-    const kitty_data = try imageToKitty(Rgb, img, allocator, .default);
+    const kitty_data = try fromImage(Rgb, img, allocator, .default);
     defer allocator.free(kitty_data);
 
     // Basic validation - should start with Kitty escape sequence
@@ -226,14 +226,14 @@ test "imageToKitty with options" {
     img.at(0, 0).* = 128;
 
     // Test with custom options
-    const options = KittyOptions{
+    const options = Options{
         .quiet = 2,
         .image_id = 42,
         .placement_id = 7,
         .delete_after = true,
     };
 
-    const kitty_data = try imageToKitty(u8, img, allocator, options);
+    const kitty_data = try fromImage(u8, img, allocator, options);
     defer allocator.free(kitty_data);
 
     // Check that options are included
