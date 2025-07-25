@@ -1,9 +1,56 @@
-# Zignal 0.1.0
+# Changelog
 
-## Core Features
+## [0.2.0] - 2025-07-25
+
+### Added
+
+#### Image Processing
+- **Image Interpolation**: Comprehensive interpolation methods for high-quality image resizing
+  - Nearest neighbor, bilinear, bicubic algorithms
+  - Catmull-Rom, Lanczos, and Mitchell filters
+  - SIMD-optimized kernels for RGBA operations (2-5x performance improvement)
+- **Display Formats**: Multiple terminal graphics protocols
+  - ANSI full/half-block display for wide terminal compatibility
+  - Sixel graphics protocol with adaptive palette generation
+  - Kitty graphics protocol for native terminal rendering
+  - Braille pattern display for monochrome graphics
+
+#### Architecture
+- **Module Refactoring**: Split monolithic `image.zig` into organized sub-modules
+  - `image/image.zig` - Core image functionality
+  - `image/interpolation.zig` - Interpolation algorithms
+  - `image/display.zig` - Display format implementations
+  - `image/format.zig` - Format detection and handling
+  - Comprehensive test modules for each component
+
+#### PNG Enhancements
+- Color management with proper color space encoding support
+- Optimized adaptive filter selection for better compression
+- Fixed filter mode for specialized use cases
+- Performance improvements in encoding pipeline
+
+### Changed
+- Image saving now uses object methods: `image.save(path)` instead of static functions
+- Matrix GEMM parameters reordered for clarity
+- Exposed `InterpolationMethod` type for public API use
+- PNG comments updated to Zig doc comment style
+
+### Fixed
+- Sixel adaptive palette generation for better color accuracy
+- Seam carving edge cases with memmove optimization
+
+### Performance
+- SIMD kernels for 4xu8 (RGBA) interpolation operations
+- Optimized PNG filter selection with adaptive sampling
+- Reduced allocations in feature distribution matching
+- Memory-efficient seam carving implementation
+
+## [0.1.0] - 2025-07-21
+
+### Core Features
 
 ### Image Processing
-- **Native Image Type**: Generic `Image(T)` supporting any pixel type (u8, f32, RGB, RGBA, etc.)
+- **Native Image Type**: Generic `Image(T)` supporting any pixel type (u8, RGB, RGBA, etc.)
 - **Memory-Efficient Views**: Sub-images that share memory with parent images (zero-copy)
 - **Image I/O**: Native codecs with no external dependencies
   - **PNG**: Full codec with comprehensive format support
@@ -67,11 +114,3 @@ Comprehensive matrix operations:
 - **Configurable**: Adjustable frequency, amplitude, and octaves
 - **2D/3D Support**: Generate noise in multiple dimensions
 
-## Python Bindings
-
-**Current Features (0.1.0)**
-- **Complete Color Space Support**: All 12 color spaces with full conversion matrix
-- **Image Loading**: Load JPEG and PNG images with native codecs
-- **Type Safety**: Proper validation and error handling
-- **Pythonic API**: Natural property access and method calls
-- **High Performance**: Zero-copy operations where possible
