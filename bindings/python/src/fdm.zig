@@ -22,9 +22,9 @@ pub const feature_distribution_match_doc =
     \\
     \\Parameters
     \\----------
-    \\source : ImageRgb
+    \\source : Image
     \\    Source image to be modified (modified in-place)
-    \\reference : ImageRgb
+    \\reference : Image
     \\    Reference image providing target color distribution
     \\
     \\Returns
@@ -34,8 +34,8 @@ pub const feature_distribution_match_doc =
     \\
     \\Examples
     \\--------
-    \\>>> src_img = ImageRgb.load("source.png")
-    \\>>> ref_img = ImageRgb.load("reference.png")
+    \\>>> src_img = Image.load("source.png")
+    \\>>> ref_img = Image.load("reference.png")
     \\>>> zignal.feature_distribution_match(src_img, ref_img)
     \\>>> src_img.save("result.png")
 ;
@@ -46,25 +46,25 @@ pub fn feature_distribution_match(self: ?*c.PyObject, args: ?*c.PyObject) callco
     var src_obj: ?*c.PyObject = undefined;
     var ref_obj: ?*c.PyObject = undefined;
 
-    const format = comptime std.fmt.comptimePrint("OO", .{});
+    const format = std.fmt.comptimePrint("OO", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &src_obj, &ref_obj) == 0) {
         return null;
     }
 
-    // Check if both arguments are ImageRgb objects
-    if (c.PyObject_IsInstance(src_obj, @ptrCast(&image.ImageRgbType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "First argument must be an ImageRgb object");
+    // Check if both arguments are Image objects
+    if (c.PyObject_IsInstance(src_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "First argument must be an Image object");
         return null;
     }
 
-    if (c.PyObject_IsInstance(ref_obj, @ptrCast(&image.ImageRgbType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Second argument must be an ImageRgb object");
+    if (c.PyObject_IsInstance(ref_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Second argument must be an Image object");
         return null;
     }
 
-    // Cast to ImageRgbObject
-    const src_img_obj = @as(*image.ImageRgbObject, @ptrCast(src_obj.?));
-    const ref_img_obj = @as(*image.ImageRgbObject, @ptrCast(ref_obj.?));
+    // Cast to ImageObject
+    const src_img_obj = @as(*image.ImageObject, @ptrCast(src_obj.?));
+    const ref_img_obj = @as(*image.ImageObject, @ptrCast(ref_obj.?));
 
     // Check if images are initialized
     if (src_img_obj.image_ptr == null) {
@@ -82,7 +82,7 @@ pub fn feature_distribution_match(self: ?*c.PyObject, args: ?*c.PyObject) callco
     const allocator = arena.allocator();
 
     // Call the FDM function
-    zignal.featureDistributionMatch(zignal.Rgb, allocator, src_img_obj.image_ptr.?.*, ref_img_obj.image_ptr.?.*) catch |err| {
+    zignal.featureDistributionMatch(zignal.Rgba, allocator, src_img_obj.image_ptr.?.*, ref_img_obj.image_ptr.?.*) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during feature distribution matching"),
         }

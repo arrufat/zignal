@@ -130,10 +130,10 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     try stub.write("    def __str__(self) -> str: ...\n");
 }
 
-/// Generate ImageRgb class stub - comprehensive method coverage
+/// Generate Image class stub - comprehensive method coverage
 fn generateImageClass(stub: *GeneratedStub) !void {
-    try stub.write("\nclass ImageRgb:\n");
-    try stub.write("    \"\"\"RGB image with load/save and NumPy integration capabilities\"\"\"\n");
+    try stub.write("\nclass Image:\n");
+    try stub.write("    \"\"\"Image class with RGBA storage for SIMD-optimized operations\"\"\"\n");
 
     // Constructor
     try stub.write("    def __init__(self) -> None: ...\n");
@@ -141,10 +141,13 @@ fn generateImageClass(stub: *GeneratedStub) !void {
     // All methods that are known to exist in the Python bindings
     // These are defined in the actual Python binding implementation
     try stub.write("    @classmethod\n");
-    try stub.write("    def load(cls, path: str) -> ImageRgb: ...\n");
+    try stub.write("    def load(cls, path: str) -> Image: ...\n");
+    try stub.write("    @classmethod\n");
+    try stub.write("    def from_numpy(cls, array: np.ndarray[Any, np.dtype[np.uint8]]) -> Image: ...\n");
+    try stub.write("    @staticmethod\n");
+    try stub.write("    def add_alpha(array: np.ndarray[Any, np.dtype[np.uint8]], alpha: int = 255) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
     try stub.write("    def save(self, path: str) -> None: ...\n");
-    try stub.write("    def to_numpy(self) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
-    try stub.write("    def from_numpy(self, array: np.ndarray[Any, np.dtype[np.uint8]]) -> None: ...\n");
+    try stub.write("    def to_numpy(self, include_alpha: bool = True) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
     try stub.write("    @property\n");
     try stub.write("    def rows(self) -> int: ...\n");
     try stub.write("    @property\n");
@@ -158,7 +161,7 @@ fn generateImageClass(stub: *GeneratedStub) !void {
 fn generateModuleFunctions(stub: *GeneratedStub) !void {
     // Check for known functions that should be exposed to Python
     if (@hasDecl(zignal, "featureDistributionMatch")) {
-        try stub.write("\ndef feature_distribution_match(source: ImageRgb, reference: ImageRgb) -> None:\n");
+        try stub.write("\ndef feature_distribution_match(source: Image, reference: Image) -> None:\n");
         try stub.write("    \"\"\"Apply Feature Distribution Matching (FDM) to transfer color/style from reference to source image.\n");
         try stub.write("    \n");
         try stub.write("    This function modifies the source image in-place to match the color distribution\n");
@@ -166,9 +169,9 @@ fn generateModuleFunctions(stub: *GeneratedStub) !void {
         try stub.write("    \n");
         try stub.write("    Parameters\n");
         try stub.write("    ----------\n");
-        try stub.write("    source : ImageRgb\n");
+        try stub.write("    source : Image\n");
         try stub.write("        Source image to be modified (modified in-place)\n");
-        try stub.write("    reference : ImageRgb\n");
+        try stub.write("    reference : Image\n");
         try stub.write("        Reference image providing target color distribution\n");
         try stub.write("    \n");
         try stub.write("    Returns\n");
@@ -199,7 +202,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         try generateColorClass(&stub, ColorType);
     }
 
-    // Generate ImageRgb class
+    // Generate Image class
     try generateImageClass(&stub);
 
     // Auto-discover and generate all module-level functions
@@ -233,8 +236,8 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
         try stub.writef("    {s} as {s},\n", .{ class_name, class_name });
     }
 
-    // Add ImageRgb and function
-    try stub.write("    ImageRgb as ImageRgb,\n");
+    // Add Image and function
+    try stub.write("    Image as Image,\n");
     try stub.write("    feature_distribution_match as feature_distribution_match,\n");
     try stub.write(")\n\n");
 

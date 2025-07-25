@@ -12,22 +12,22 @@ const c = @cImport({
 });
 
 // ============================================================================
-// IMAGERGB TYPE
+// IMAGE TYPE (uses RGBA internally for SIMD performance)
 // ============================================================================
 
-pub const ImageRgbObject = extern struct {
+pub const ImageObject = extern struct {
     ob_base: c.PyObject,
     // Store pointer to heap-allocated image data (optional)
-    image_ptr: ?*zignal.Image(zignal.Rgb),
+    image_ptr: ?*zignal.Image(zignal.Rgba),
     // Store reference to NumPy array if created from numpy (for zero-copy)
     numpy_ref: ?*c.PyObject,
 };
 
-fn imagergb_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     _ = kwds;
 
-    const self = @as(?*ImageRgbObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
     if (self) |obj| {
         // Initialize to null pointer to avoid undefined behavior
         obj.image_ptr = null;
@@ -36,18 +36,18 @@ fn imagergb_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return @as(?*c.PyObject, @ptrCast(self));
 }
 
-fn imagergb_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
+fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = self_obj;
     _ = args;
     _ = kwds;
 
     // For now, don't allow direct instantiation
-    c.PyErr_SetString(c.PyExc_TypeError, "ImageRgb cannot be instantiated directly. Use ImageRgb.load() instead.");
+    c.PyErr_SetString(c.PyExc_TypeError, "Image cannot be instantiated directly. Use Image.load() instead.");
     return -1;
 }
 
-fn imagergb_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Free the image data if it was allocated
     if (self.image_ptr) |ptr| {
@@ -70,22 +70,22 @@ fn imagergb_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
-fn imagergb_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.image_ptr) |ptr| {
         var buffer: [64]u8 = undefined;
-        const formatted = std.fmt.bufPrintZ(&buffer, "ImageRgb({d}x{d})", .{ ptr.rows, ptr.cols }) catch return null;
+        const formatted = std.fmt.bufPrintZ(&buffer, "Image({d}x{d})", .{ ptr.rows, ptr.cols }) catch return null;
         return c.PyUnicode_FromString(formatted.ptr);
     } else {
-        return c.PyUnicode_FromString("ImageRgb(uninitialized)");
+        return c.PyUnicode_FromString("Image(uninitialized)");
     }
 }
 
 // Property getters
-fn imagergb_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.image_ptr) |ptr| {
         return c.PyLong_FromLong(@intCast(ptr.rows));
@@ -95,9 +95,9 @@ fn imagergb_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) 
     }
 }
 
-fn imagergb_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.image_ptr) |ptr| {
         return c.PyLong_FromLong(@intCast(ptr.cols));
@@ -108,10 +108,10 @@ fn imagergb_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) 
 }
 
 // Class methods
-fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var file_path: [*c]const u8 = undefined;
 
-    const format = comptime std.fmt.comptimePrint("s", .{});
+    const format = std.fmt.comptimePrint("s", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
         return null;
     }
@@ -130,8 +130,8 @@ fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
         }
     };
 
-    // Load the image
-    const image = zignal.Image(zignal.Rgb).load(allocator, path_slice) catch |err| {
+    // Load the image as RGBA for SIMD optimization benefits
+    const image = zignal.Image(zignal.Rgba).load(allocator, path_slice) catch |err| {
         switch (err) {
             error.FileNotFound => c.PyErr_SetString(c.PyExc_FileNotFoundError, "Image file not found"),
             error.UnsupportedImageFormat => c.PyErr_SetString(c.PyExc_ValueError, "Unsupported image format"),
@@ -142,7 +142,7 @@ fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     };
 
     // Create new Python object
-    const self = @as(?*ImageRgbObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+    const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
     if (self == null) {
         var img = image;
         img.deinit(allocator);
@@ -150,7 +150,7 @@ fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     }
 
     // Allocate space for the image on heap and move it there
-    const image_ptr = allocator.create(zignal.Image(zignal.Rgb)) catch {
+    const image_ptr = allocator.create(zignal.Image(zignal.Rgba)) catch {
         var img = image;
         img.deinit(allocator);
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
@@ -164,16 +164,29 @@ fn imagergb_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     return @as(?*c.PyObject, @ptrCast(self));
 }
 
-// Convert image to numpy array (zero-copy)
-fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+// Convert image to numpy array (zero-copy when possible)
+fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments - include_alpha defaults to true
+    var include_alpha: c_int = 1;
+    var kwlist = [_:null]?[*:0]u8{ @constCast("include_alpha"), null };
+    const format = std.fmt.comptimePrint("|p", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &include_alpha) == 0) {
+        return null;
+    }
 
     if (self.image_ptr) |ptr| {
-        // If created from numpy, return the original array (true zero-copy roundtrip)
+        // If created from numpy and include_alpha matches, return the original array
         if (self.numpy_ref) |numpy_array| {
-            c.Py_INCREF(numpy_array);
-            return numpy_array;
+            // Check if numpy array has the right number of channels
+            // For now, just return it if include_alpha is true (4 channels)
+            if (include_alpha != 0) {
+                c.Py_INCREF(numpy_array);
+                return numpy_array;
+            }
+            // If include_alpha is false and we have a 4-channel array, we need to slice it
+            // Fall through to create a new view
         }
         // Import numpy
         const np_module = c.PyImport_ImportModule("numpy") orelse {
@@ -186,7 +199,7 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
         var buffer = c.Py_buffer{
             .buf = @ptrCast(ptr.data.ptr),
             .obj = self_obj,
-            .len = @intCast(ptr.rows * ptr.cols * @sizeOf(zignal.Rgb)),
+            .len = @intCast(ptr.rows * ptr.cols * @sizeOf(zignal.Rgba)),
             .itemsize = 1,
             .readonly = 0,
             .ndim = 1,
@@ -218,14 +231,14 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
         // Call numpy.frombuffer
         const flat_array = c.PyObject_Call(frombuffer, args_tuple, kwargs) orelse return null;
 
-        // Reshape to (rows, cols, 3)
+        // Always reshape to (rows, cols, 4) since internal storage is RGBA
         const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse {
             c.Py_DECREF(flat_array);
             return null;
         };
         defer c.Py_DECREF(reshape_method);
 
-        const shape_tuple = c.Py_BuildValue("(III)", ptr.rows, ptr.cols, @as(c_uint, 3)) orelse {
+        const shape_tuple = c.Py_BuildValue("(III)", ptr.rows, ptr.cols, @as(c_uint, 4)) orelse {
             c.Py_DECREF(flat_array);
             return null;
         };
@@ -237,6 +250,37 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
         };
 
         c.Py_DECREF(flat_array);
+
+        // If include_alpha is false, slice to get only RGB channels
+        if (include_alpha == 0) {
+            // array[:, :, :3]
+            const slice_obj = c.PySlice_New(c.Py_None(), c.Py_None(), c.Py_None()) orelse {
+                c.Py_DECREF(reshaped_array);
+                return null;
+            };
+            defer c.Py_DECREF(slice_obj);
+
+            const three = c.PyLong_FromLong(3) orelse {
+                c.Py_DECREF(reshaped_array);
+                return null;
+            };
+            defer c.Py_DECREF(three);
+
+            const slice_tuple = c.Py_BuildValue("(OOO)", slice_obj, slice_obj, c.PySlice_New(c.Py_None(), three, c.Py_None())) orelse {
+                c.Py_DECREF(reshaped_array);
+                return null;
+            };
+            defer c.Py_DECREF(slice_tuple);
+
+            const sliced_array = c.PyObject_GetItem(reshaped_array, slice_tuple) orelse {
+                c.Py_DECREF(reshaped_array);
+                return null;
+            };
+
+            c.Py_DECREF(reshaped_array);
+            return sliced_array;
+        }
+
         return reshaped_array;
     } else {
         c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -244,11 +288,11 @@ fn imagergb_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     }
 }
 
-// Create ImageRgb from numpy array
-fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+// Create Image from numpy array
+fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var array_obj: ?*c.PyObject = undefined;
 
-    const format = comptime std.fmt.comptimePrint("O", .{});
+    const format = std.fmt.comptimePrint("O", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &array_obj) == 0) {
         return null;
     }
@@ -277,9 +321,9 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
         return null;
     }
 
-    // Validate dimensions (should be 3D with shape (rows, cols, 3))
+    // Validate dimensions (should be 3D with shape (rows, cols, 3 or 4))
     if (buffer.ndim != 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3)");
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3) or (rows, cols, 4)");
         return null;
     }
 
@@ -289,17 +333,17 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     const cols = @as(usize, @intCast(shape[1]));
     const channels = @as(usize, @intCast(shape[2]));
 
-    if (channels != 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB)");
+    if (channels != 3 and channels != 4) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB) or 4 channels (RGBA)");
         return null;
     }
 
     // Check if array is C-contiguous
-    // For C-contiguous, strides should be: (cols*3, 3, 1)
+    // For C-contiguous, strides should be: (cols*channels, channels, 1)
     const strides = @as([*]c.Py_ssize_t, @ptrCast(buffer.strides));
     const expected_stride_2 = buffer.itemsize; // Should be 1 for uint8
-    const expected_stride_1 = expected_stride_2 * @as(c.Py_ssize_t, @intCast(channels)); // Should be 3
-    const expected_stride_0 = expected_stride_1 * @as(c.Py_ssize_t, @intCast(cols)); // Should be cols * 3
+    const expected_stride_1 = expected_stride_2 * @as(c.Py_ssize_t, @intCast(channels)); // Should be 3 or 4
+    const expected_stride_0 = expected_stride_1 * @as(c.Py_ssize_t, @intCast(cols)); // Should be cols * channels
 
     if (strides[0] != expected_stride_0 or strides[1] != expected_stride_1 or strides[2] != expected_stride_2) {
         c.PyErr_SetString(c.PyExc_ValueError, "Array is not C-contiguous. Use numpy.ascontiguousarray() first.");
@@ -307,37 +351,65 @@ fn imagergb_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     }
 
     // Create new Python object
-    const self = @as(?*ImageRgbObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+    const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
     if (self == null) {
         return null;
     }
 
     // Allocate space for the image struct on heap
-    const image_ptr = allocator.create(zignal.Image(zignal.Rgb)) catch {
+    const image_ptr = allocator.create(zignal.Image(zignal.Rgba)) catch {
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return null;
     };
 
-    // Zero-copy: create image that points to NumPy's data
-    // Note: We only get here if the array is C-contiguous
-    const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
-    const data_slice = data_ptr[0..@intCast(buffer.len)];
+    if (channels == 4) {
+        // Zero-copy: create image that points to NumPy's data directly
+        const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
+        const data_slice = data_ptr[0..@intCast(buffer.len)];
 
-    // Use initFromBytes to reinterpret the data as RGB pixels
-    image_ptr.* = zignal.Image(zignal.Rgb).initFromBytes(rows, cols, data_slice);
+        // Use initFromBytes to reinterpret the data as RGBA pixels
+        image_ptr.* = zignal.Image(zignal.Rgba).initFromBytes(rows, cols, data_slice);
 
-    // Keep a reference to the NumPy array to prevent deallocation
-    c.Py_INCREF(array_obj.?);
-    self.?.numpy_ref = array_obj;
+        // Keep a reference to the NumPy array to prevent deallocation
+        c.Py_INCREF(array_obj.?);
+        self.?.numpy_ref = array_obj;
+    } else {
+        // 3 channels - need to allocate and convert to RGBA
+        var rgba_image = zignal.Image(zignal.Rgba).initAlloc(allocator, rows, cols) catch {
+            allocator.destroy(image_ptr);
+            c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate RGBA image");
+            return null;
+        };
+
+        // Copy RGB data and set alpha to 255
+        const rgb_data = @as([*]const u8, @ptrCast(buffer.buf));
+        for (0..rows) |r| {
+            for (0..cols) |col| {
+                const src_idx = (r * cols + col) * 3;
+                const dst_idx = r * cols + col;
+                rgba_image.data[dst_idx] = zignal.Rgba{
+                    .r = rgb_data[src_idx],
+                    .g = rgb_data[src_idx + 1],
+                    .b = rgb_data[src_idx + 2],
+                    .a = 255,
+                };
+            }
+        }
+
+        image_ptr.* = rgba_image;
+        // No numpy_ref since we allocated new memory
+        self.?.numpy_ref = null;
+    }
 
     self.?.image_ptr = image_ptr;
     return @as(?*c.PyObject, @ptrCast(self));
 }
 
 // Save image to PNG file
-fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Check if image is initialized
     if (self.image_ptr == null) {
@@ -347,7 +419,7 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
 
     // Parse file path argument
     var file_path: [*c]const u8 = undefined;
-    const format = comptime std.fmt.comptimePrint("s", .{});
+    const format = std.fmt.comptimePrint("s", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
         return null;
     }
@@ -380,13 +452,91 @@ fn imagergb_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     return none;
 }
 
+// Static method to add alpha channel to RGB array for zero-copy usage
+fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = type_obj;
+    var array_obj: ?*c.PyObject = undefined;
+    var alpha_value: c_int = 255;
+
+    const format = std.fmt.comptimePrint("O|i", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &array_obj, &alpha_value) == 0) {
+        return null;
+    }
+
+    if (array_obj == null or array_obj == c.Py_None()) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Array cannot be None");
+        return null;
+    }
+
+    // Import numpy if not already imported
+    const np_module = c.PyImport_ImportModule("numpy") orelse {
+        c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+        return null;
+    };
+    defer c.Py_DECREF(np_module);
+
+    // Get array shape
+    const shape_attr = c.PyObject_GetAttrString(array_obj, "shape") orelse {
+        c.PyErr_SetString(c.PyExc_TypeError, "Input must be a numpy array");
+        return null;
+    };
+    defer c.Py_DECREF(shape_attr);
+
+    // Check if shape is (h, w, 3)
+    var h: c.Py_ssize_t = 0;
+    var w: c.Py_ssize_t = 0;
+    var c_var: c.Py_ssize_t = 0;
+    if (c.PyArg_ParseTuple(shape_attr, "nnn", &h, &w, &c_var) == 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3)");
+        return null;
+    }
+
+    if (c_var != 3) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB)");
+        return null;
+    }
+
+    // Create alpha array: np.full((h, w, 1), alpha_value, dtype=np.uint8)
+    const full_func = c.PyObject_GetAttrString(np_module, "full") orelse return null;
+    defer c.Py_DECREF(full_func);
+
+    const shape_tuple = c.Py_BuildValue("((nnn)i)", h, w, @as(c.Py_ssize_t, 1), alpha_value) orelse return null;
+    defer c.Py_DECREF(shape_tuple);
+
+    const kwargs = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
+    defer c.Py_DECREF(kwargs);
+
+    const alpha_array = c.PyObject_Call(full_func, shape_tuple, kwargs) orelse return null;
+    defer c.Py_DECREF(alpha_array);
+
+    // Concatenate: np.concatenate([array, alpha_array], axis=2)
+    const concatenate_func = c.PyObject_GetAttrString(np_module, "concatenate") orelse return null;
+    defer c.Py_DECREF(concatenate_func);
+
+    const arrays_list = c.PyList_New(2) orelse return null;
+    defer c.Py_DECREF(arrays_list);
+
+    c.Py_INCREF(array_obj.?);
+    _ = c.PyList_SetItem(arrays_list, 0, array_obj.?);
+    c.Py_INCREF(alpha_array);
+    _ = c.PyList_SetItem(arrays_list, 1, alpha_array);
+
+    const concat_args = c.Py_BuildValue("(O)", arrays_list) orelse return null;
+    defer c.Py_DECREF(concat_args);
+
+    const concat_kwargs = c.Py_BuildValue("{s:i}", "axis", @as(c_int, 2)) orelse return null;
+    defer c.Py_DECREF(concat_kwargs);
+
+    return c.PyObject_Call(concatenate_func, concat_args, concat_kwargs);
+}
+
 // Format image for display with format specifiers
-fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageRgbObject, @ptrCast(self_obj.?));
+fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse format_spec argument
     var format_spec: [*c]const u8 = undefined;
-    const format = comptime std.fmt.comptimePrint("s", .{});
+    const format = std.fmt.comptimePrint("s", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
         return null;
     }
@@ -396,7 +546,7 @@ fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 
     // If empty format spec, return default repr
     if (spec_slice.len == 0) {
-        return imagergb_repr(self_obj);
+        return image_repr(self_obj);
     }
 
     // Check if image is initialized
@@ -442,24 +592,50 @@ fn imagergb_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
 }
 
-var imagergb_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "load", .ml_meth = imagergb_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an RGB image from file" },
-    .{ .ml_name = "from_numpy", .ml_meth = imagergb_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
-    \\Create ImageRgb from NumPy array with shape (rows, cols, 3) and dtype uint8.
+var image_methods = [_]c.PyMethodDef{
+    .{ .ml_name = "load", .ml_meth = image_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an image from file (PNG/JPEG)" },
+    .{ .ml_name = "from_numpy", .ml_meth = image_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
+    \\Create Image from NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
     \\
     \\Note: The array must be C-contiguous. If your array is not C-contiguous
     \\(e.g., from slicing or transposing), use np.ascontiguousarray() first:
     \\
     \\    arr = np.ascontiguousarray(arr)
-    \\    img = ImageRgb.from_numpy(arr)
+    \\    img = Image.from_numpy(arr)
     \\
-    \\When possible, zero-copy is used for C-contiguous arrays.
+    \\For 4-channel arrays, zero-copy is used. For 3-channel arrays, the data is
+    \\converted to RGBA format with alpha=255 (requires allocation).
+    \\To enable zero-copy for RGB arrays, use Image.add_alpha() first.
     },
-    .{ .ml_name = "to_numpy", .ml_meth = imagergb_to_numpy, .ml_flags = c.METH_NOARGS, .ml_doc = "Convert image to NumPy array with shape (rows, cols, 3) without copying data" },
-    .{ .ml_name = "save", .ml_meth = imagergb_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
-    .{ .ml_name = "__format__", .ml_meth = imagergb_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
+    .{ .ml_name = "add_alpha", .ml_meth = image_add_alpha, .ml_flags = c.METH_VARARGS | c.METH_STATIC, .ml_doc = 
+    \\Add alpha channel to a 3-channel RGB numpy array.
+    \\
+    \\Parameters:
+    \\    array: numpy array with shape (rows, cols, 3) and dtype uint8
+    \\    alpha: alpha value to use (default: 255)
+    \\
+    \\Returns:
+    \\    New numpy array with shape (rows, cols, 4) suitable for zero-copy usage
+    \\
+    \\Example:
+    \\    rgb_array = np.array(..., shape=(h,w,3), dtype=np.uint8)
+    \\    rgba_array = Image.add_alpha(rgb_array)
+    \\    img = Image.from_numpy(rgba_array)  # Zero-copy!
+    },
+    .{ .ml_name = "to_numpy", .ml_meth = @ptrCast(&image_to_numpy), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = 
+    \\Convert image to NumPy array.
+    \\
+    \\Parameters:
+    \\    include_alpha: If True (default), returns shape (rows, cols, 4).
+    \\                   If False, returns shape (rows, cols, 3) without alpha channel.
+    \\
+    \\Returns:
+    \\    NumPy array view of the image data (zero-copy when possible)
+    },
+    .{ .ml_name = "save", .ml_meth = image_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
+    .{ .ml_name = "__format__", .ml_meth = image_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
     \\Format image for display. Supports format specifiers:
-    \\  '' (empty): Returns text representation (e.g., 'ImageRgb(800x600)')
+    \\  '' (empty): Returns text representation (e.g., 'Image(800x600)')
     \\  'auto': Auto-detect best format with progressive degradation: kitty -> sixel -> blocks
     \\  'ansi': Display using ANSI escape codes (spaces with background)
     \\  'blocks': Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
@@ -468,7 +644,7 @@ var imagergb_methods = [_]c.PyMethodDef{
     \\  'kitty': Display using kitty graphics protocol (24-bit color)
     \\
     \\Example:
-    \\  print(f"{img}")         # ImageRgb(800x600)
+    \\  print(f"{img}")         # Image(800x600)
     \\  print(f"{img:ansi}")    # Display with ANSI colors
     \\  print(f"{img:blocks}")  # Display with ANSI colors using unicode blocks (double vertical resolution, better aspect ratio)
     \\  print(f"{img:braille}") # Display with ANSI colors using braille patterns (good for monochrome images)
@@ -478,25 +654,25 @@ var imagergb_methods = [_]c.PyMethodDef{
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var imagergb_getset = [_]c.PyGetSetDef{
-    .{ .name = "rows", .get = imagergb_get_rows, .set = null, .doc = "Number of rows (height) in the image", .closure = null },
-    .{ .name = "cols", .get = imagergb_get_cols, .set = null, .doc = "Number of columns (width) in the image", .closure = null },
+var image_getset = [_]c.PyGetSetDef{
+    .{ .name = "rows", .get = image_get_rows, .set = null, .doc = "Number of rows (height) in the image", .closure = null },
+    .{ .name = "cols", .get = image_get_cols, .set = null, .doc = "Number of columns (width) in the image", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var ImageRgbType = c.PyTypeObject{
+pub var ImageType = c.PyTypeObject{
     .ob_base = .{
         .ob_base = .{},
         .ob_size = 0,
     },
-    .tp_name = "zignal.ImageRgb",
-    .tp_basicsize = @sizeOf(ImageRgbObject),
-    .tp_dealloc = imagergb_dealloc,
-    .tp_repr = imagergb_repr,
+    .tp_name = "zignal.Image",
+    .tp_basicsize = @sizeOf(ImageObject),
+    .tp_dealloc = image_dealloc,
+    .tp_repr = image_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "RGB image class",
-    .tp_methods = &imagergb_methods,
-    .tp_getset = &imagergb_getset,
-    .tp_init = imagergb_init,
-    .tp_new = imagergb_new,
+    .tp_doc = "Image class with RGBA storage for SIMD-optimized operations",
+    .tp_methods = &image_methods,
+    .tp_getset = &image_getset,
+    .tp_init = image_init,
+    .tp_new = image_new,
 };

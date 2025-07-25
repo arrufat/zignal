@@ -101,20 +101,29 @@ If NumPy is installed, you can work with image arrays:
 import numpy as np
 import zignal
 
-# Create numpy array (must be uint8, shape (H, W, 3))
-arr = np.zeros((100, 200, 3), dtype=np.uint8)
-arr[50, 100] = [255, 0, 0]  # Red pixel
+# Create numpy array (supports both RGB and RGBA)
+arr_rgb = np.zeros((100, 200, 3), dtype=np.uint8)
+arr_rgb[50, 100] = [255, 0, 0]  # Red pixel
 
-# Convert to ImageRgb (zero-copy when possible)
-img = zignal.ImageRgb.from_numpy(arr)
+# Convert to Image (allocates RGBA internally for SIMD performance)
+img = zignal.Image.from_numpy(arr_rgb)
 
-# Convert back to numpy (zero-copy)
-arr2 = img.to_numpy()
+# For zero-copy with 4-channel arrays, use the helper:
+arr_rgba = zignal.Image.add_alpha(arr_rgb)  # Adds alpha=255
+img = zignal.Image.from_numpy(arr_rgba)  # Zero-copy!
+
+# Convert back to numpy
+arr2 = img.to_numpy()  # Returns RGBA (4 channels) by default
+arr3 = img.to_numpy(include_alpha=False)  # Returns RGB (3 channels)
 
 # Load and save images
-img = zignal.ImageRgb.load("input.png")
+img = zignal.Image.load("input.png")  # Supports PNG and JPEG
 img.save("output.png")
 ```
+
+**Performance Note**: The Image class uses RGBA storage internally for SIMD-optimized operations.
+This provides 2-5x performance improvements for resize and interpolation operations.
+When using 3-channel RGB arrays, they are automatically converted to RGBA with alpha=255.
 
 Note: NumPy is not required for basic color operations.
 

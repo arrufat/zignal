@@ -40,8 +40,8 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     const m = c.PyModule_Create(&zignal_module);
     if (m == null) return null;
 
-    // Register ImageRgb type
-    py_utils.registerType(@ptrCast(m), "ImageRgb", @ptrCast(&image.ImageRgbType)) catch {
+    // Register Image type
+    py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch {
         c.Py_DECREF(m);
         return null;
     };

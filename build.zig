@@ -240,13 +240,37 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     // if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
 
     var code: u8 = undefined;
+
+    // Get current branch name
+    const git_branch_raw = b.runAllowFail(&.{ "git", "branch", "--show-current" }, &code, .Ignore) catch "";
+    const git_branch = std.mem.trim(u8, git_branch_raw, " \n\r");
+    const is_master = std.mem.eql(u8, git_branch, "master");
+
+    // Get commit hash (used in all cases)
+    const git_hash_raw = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
+    const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
+
+    // For non-master branches, always use total commit count
+    if (!is_master) {
+        const git_count_raw = b.runAllowFail(&.{ "git", "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
+        const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
+
+        const dev_prefix = if (git_branch.len > 0) git_branch else "dev";
+
+        return .{
+            .major = zignal_version.major,
+            .minor = zignal_version.minor,
+            .patch = zignal_version.patch,
+            .pre = b.fmt("{s}.{s}", .{ dev_prefix, commit_count }),
+            .build = commit_hash,
+        };
+    }
+
+    // For master branch, use git describe
     const git_describe_raw = b.runAllowFail(&.{ "git", "describe", "--tags" }, &code, .Ignore) catch {
         // If git describe fails (no tags), try to get commit count from git log
         const git_count_raw = b.runAllowFail(&.{ "git", "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
         const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
-
-        const git_hash_raw = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
-        const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
 
         return .{
             .major = zignal_version.major,
@@ -273,9 +297,9 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
 
             const previous_version = std.SemanticVersion.parse(previous_tag) catch unreachable;
 
-            // lviton_version must be greater than its previous version.
+            // zignal_version must be greater than its previous version.
             if (zignal_version.order(previous_version) != .gt) {
-                std.log.err("LViton version {f} must newer than {f}", .{
+                std.log.err("Zignal version {f} must be newer than {f}", .{
                     zignal_version,
                     previous_version,
                 });
