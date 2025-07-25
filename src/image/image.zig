@@ -1127,3 +1127,24 @@ pub fn Image(comptime T: type) type {
         }
     };
 }
+
+test "Image load error handling" {
+    const allocator = std.testing.allocator;
+    
+    // Test 1: Loading a non-existent file should return FileNotFound
+    const result1 = Image(color.Rgb).load(allocator, "this_file_does_not_exist.png");
+    try std.testing.expectError(error.FileNotFound, result1);
+    
+    // Test 2: Create a text file and try to load it as an image
+    const test_file = "test_not_an_image.txt";
+    {
+        const file = try std.fs.cwd().createFile(test_file, .{});
+        defer file.close();
+        _ = try file.write("This is not an image file");
+    }
+    defer std.fs.cwd().deleteFile(test_file) catch {};
+    
+    // Loading a non-image file should return UnsupportedImageFormat
+    const result2 = Image(color.Rgb).load(allocator, test_file);
+    try std.testing.expectError(error.UnsupportedImageFormat, result2);
+}

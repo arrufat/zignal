@@ -31,10 +31,7 @@ pub const ImageFormat = enum {
 
     /// Detect image format from file path by reading the first few bytes
     pub fn detectFromPath(_: Allocator, file_path: []const u8) !?ImageFormat {
-        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => return null,
-            else => return err,
-        };
+        const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         var header: [8]u8 = undefined;
