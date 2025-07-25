@@ -277,7 +277,12 @@ pub fn Image(comptime T: type) type {
         /// Automatically tries sixel with sensible defaults, falling back to ANSI blocks if needed.
         /// For explicit control over output format, use the display() method instead.
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            try self.display(.auto).format(writer);
+            const type_name: []const u8 = @typeName(T);
+            if (std.mem.lastIndexOfScalar(u8, type_name, '.')) |pos| {
+                try writer.print("Image({s}){{ .rows = {d}, .cols = {d} }}", .{ type_name[pos + 1 ..], self.rows, self.cols });
+            } else {
+                try writer.print("Image({s}){{ .rows = {d}, .cols = {d} }}", .{ type_name, self.rows, self.cols });
+            }
         }
 
         /// Flips an image from left to right (mirror effect).
@@ -1130,11 +1135,11 @@ pub fn Image(comptime T: type) type {
 
 test "Image load error handling" {
     const allocator = std.testing.allocator;
-    
+
     // Test 1: Loading a non-existent file should return FileNotFound
     const result1 = Image(color.Rgb).load(allocator, "this_file_does_not_exist.png");
     try std.testing.expectError(error.FileNotFound, result1);
-    
+
     // Test 2: Create a text file and try to load it as an image
     const test_file = "test_not_an_image.txt";
     {
@@ -1143,7 +1148,7 @@ test "Image load error handling" {
         _ = try file.write("This is not an image file");
     }
     defer std.fs.cwd().deleteFile(test_file) catch {};
-    
+
     // Loading a non-image file should return UnsupportedImageFormat
     const result2 = Image(color.Rgb).load(allocator, test_file);
     try std.testing.expectError(error.UnsupportedImageFormat, result2);
