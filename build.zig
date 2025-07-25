@@ -241,6 +241,19 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
 
     var code: u8 = undefined;
 
+    // Check if we're on an exact tag by running git describe early
+    const git_describe_check = b.runAllowFail(&.{ "git", "describe", "--tags" }, &code, .Ignore) catch "";
+    if (git_describe_check.len > 0) {
+        const describe_output = std.mem.trim(u8, git_describe_check, " \n\r");
+        // If git describe returns just a tag (no dashes), we're on an exact tag
+        if (std.mem.count(u8, describe_output, "-") == 0) {
+            // If tag matches version, return clean version
+            if (std.mem.eql(u8, describe_output, b.fmt("{f}", .{zignal_version}))) {
+                return zignal_version;
+            }
+        }
+    }
+
     // Get current branch name
     const git_branch_raw = b.runAllowFail(&.{ "git", "branch", "--show-current" }, &code, .Ignore) catch "";
     const git_branch = std.mem.trim(u8, git_branch_raw, " \n\r");
