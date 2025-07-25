@@ -1186,47 +1186,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws text at the specified position using a bitmap font.
         /// The position specifies the top-left corner of the text.
         /// Supports newlines for multi-line text.
-        pub fn drawText(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype) void {
-            comptime assert(isColor(@TypeOf(color)));
-            const BitmapFont = @import("font.zig").BitmapFont;
-            comptime assert(@TypeOf(font) == BitmapFont);
-
-            var x = position.x();
-            var y = position.y();
-            const start_x = x;
-
-            for (text) |char| {
-                if (char == '\n') {
-                    x = start_x;
-                    y += @floatFromInt(font.char_height);
-                    continue;
-                }
-
-                if (font.getCharData(char)) |char_data| {
-                    // Draw the character bitmap
-                    for (char_data, 0..) |row_data, row| {
-                        var col: usize = 0;
-                        var bits = row_data;
-                        while (col < font.char_width) : (col += 1) {
-                            if (bits & 1 != 0) {
-                                const px = @as(isize, @intFromFloat(x)) + @as(isize, @intCast(col));
-                                const py = @as(isize, @intFromFloat(y)) + @as(isize, @intCast(row));
-                                if (self.atOrNull(py, px)) |pixel| {
-                                    pixel.* = convertColor(T, color);
-                                }
-                            }
-                            bits >>= 1;
-                        }
-                    }
-                }
-                x += @floatFromInt(font.char_width);
-            }
-        }
-
-        /// Draws text at the specified position with scaling.
-        /// Uses nearest-neighbor scaling for crisp bitmap font rendering.
-        /// The scale parameter must be > 0.
-        pub fn drawTextScaled(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32) void {
+        pub fn drawText(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             const BitmapFont = @import("font.zig").BitmapFont;
             comptime assert(@TypeOf(font) == BitmapFont);
@@ -1235,66 +1195,178 @@ pub fn Canvas(comptime T: type) type {
             var x = position.x();
             var y = position.y();
             const start_x = x;
+
+            // For scale 1.0, use simple pixel-by-pixel drawing
+            if (scale == 1.0) {
+                for (text) |char| {
+                    if (char == '\n') {
+                        x = start_x;
+                        y += @floatFromInt(font.char_height);
+                        continue;
+                    }
+
+                    if (font.getCharData(char)) |char_data| {
+                        // Draw the character bitmap
+                        for (char_data, 0..) |row_data, row| {
+                            var col: usize = 0;
+                            var bits = row_data;
+                            while (col < font.char_width) : (col += 1) {
+                                if (bits & 1 != 0) {
+                                    const px = @as(isize, @intFromFloat(x)) + @as(isize, @intCast(col));
+                                    const py = @as(isize, @intFromFloat(y)) + @as(isize, @intCast(row));
+                                    if (self.atOrNull(py, px)) |pixel| {
+                                        pixel.* = convertColor(T, color);
+                                    }
+                                }
+                                bits >>= 1;
+                            }
+                        }
+                    }
+                    x += @floatFromInt(font.char_width);
+                }
+                return;
+            }
+
+            // For fast mode or exact integer scales, use nearest-neighbor scaling
             const char_width_scaled = @as(f32, @floatFromInt(font.char_width)) * scale;
             const char_height_scaled = @as(f32, @floatFromInt(font.char_height)) * scale;
 
-            for (text) |char| {
-                if (char == '\n') {
-                    x = start_x;
-                    y += char_height_scaled;
-                    continue;
-                }
+            switch (mode) {
+                .fast => {
+                    for (text) |char| {
+                        if (char == '\n') {
+                            x = start_x;
+                            y += char_height_scaled;
+                            continue;
+                        }
 
-                if (font.getCharData(char)) |char_data| {
-                    // Draw the character bitmap with scaling
-                    for (char_data, 0..) |row_data, row| {
-                        var col: usize = 0;
-                        var bits = row_data;
-                        while (col < font.char_width) : (col += 1) {
-                            if (bits & 1 != 0) {
-                                // Draw a scaled pixel block
-                                const base_x = x + @as(f32, @floatFromInt(col)) * scale;
-                                const base_y = y + @as(f32, @floatFromInt(row)) * scale;
-                                
-                                // Calculate the integer bounds of the scaled pixel
-                                const x_start = @as(isize, @intFromFloat(@floor(base_x)));
-                                const y_start = @as(isize, @intFromFloat(@floor(base_y)));
-                                const x_end = @as(isize, @intFromFloat(@ceil(base_x + scale)));
-                                const y_end = @as(isize, @intFromFloat(@ceil(base_y + scale)));
+                        if (font.getCharData(char)) |char_data| {
+                            // Draw the character bitmap with scaling
+                            for (char_data, 0..) |row_data, row| {
+                                var col: usize = 0;
+                                var bits = row_data;
+                                while (col < font.char_width) : (col += 1) {
+                                    if (bits & 1 != 0) {
+                                        // Draw a scaled pixel block
+                                        const base_x = x + @as(f32, @floatFromInt(col)) * scale;
+                                        const base_y = y + @as(f32, @floatFromInt(row)) * scale;
 
-                                // Fill the pixel block
-                                var py = y_start;
-                                while (py < y_end) : (py += 1) {
-                                    var px = x_start;
-                                    while (px < x_end) : (px += 1) {
-                                        if (self.atOrNull(py, px)) |pixel| {
-                                            pixel.* = convertColor(T, color);
+                                        // Calculate the integer bounds of the scaled pixel
+                                        const x_start = @as(isize, @intFromFloat(@floor(base_x)));
+                                        const y_start = @as(isize, @intFromFloat(@floor(base_y)));
+                                        const x_end = @as(isize, @intFromFloat(@ceil(base_x + scale)));
+                                        const y_end = @as(isize, @intFromFloat(@ceil(base_y + scale)));
+
+                                        // Fill the pixel block
+                                        var py = y_start;
+                                        while (py < y_end) : (py += 1) {
+                                            var px = x_start;
+                                            while (px < x_end) : (px += 1) {
+                                                if (self.atOrNull(py, px)) |pixel| {
+                                                    pixel.* = convertColor(T, color);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    bits >>= 1;
+                                }
+                            }
+                        }
+                        x += char_width_scaled;
+                    }
+                },
+                .soft => {
+                    for (text) |char| {
+                        if (char == '\n') {
+                            x = start_x;
+                            y += char_height_scaled;
+                            continue;
+                        }
+
+                        if (font.getCharData(char)) |char_data| {
+                            // Work in f32 throughout to minimize casts
+                            const font_width_f = @as(f32, @floatFromInt(font.char_width));
+                            const font_height_f = @as(f32, @floatFromInt(font.char_height));
+                            const dest_width = @ceil(char_width_scaled);
+                            const dest_height = @ceil(char_height_scaled);
+
+                            var dy: f32 = 0;
+                            while (dy < dest_height) : (dy += 1) {
+                                var dx: f32 = 0;
+                                while (dx < dest_width) : (dx += 1) {
+                                    const dest_x = x + dx;
+                                    const dest_y = y + dy;
+
+                                    if (self.atOrNull(@intFromFloat(dest_y), @intFromFloat(dest_x))) |_| {
+                                        // Calculate which part of the source we're sampling
+                                        const src_x = dx / scale;
+                                        const src_y = dy / scale;
+
+                                        // Box filter: sample a box around the source position
+                                        const sample_radius = 0.5 / scale; // Half pixel in source space
+                                        const x0 = src_x - sample_radius;
+                                        const x1 = src_x + sample_radius;
+                                        const y0 = src_y - sample_radius;
+                                        const y1 = src_y + sample_radius;
+
+                                        var total_coverage: f32 = 0;
+
+                                        // Sample the font bitmap - clamp to valid range
+                                        const row_start_f = @max(0, @floor(y0));
+                                        const row_end_f = @min(font_height_f - 1, @ceil(y1));
+                                        const col_start_f = @max(0, @floor(x0));
+                                        const col_end_f = @min(font_width_f - 1, @ceil(x1));
+
+                                        var row_f = row_start_f;
+                                        while (row_f <= row_end_f) : (row_f += 1) {
+                                            var col_f = col_start_f;
+                                            while (col_f <= col_end_f) : (col_f += 1) {
+                                                // Convert to indices only when needed
+                                                const row_idx = @as(usize, @intFromFloat(row_f));
+                                                const col_idx = @as(usize, @intFromFloat(col_f));
+
+                                                // Check if this pixel is on in the font
+                                                const bit_on = (char_data[row_idx] >> @intCast(col_idx)) & 1;
+                                                if (bit_on != 0) {
+                                                    // Calculate how much this pixel contributes
+                                                    const px0 = col_f;
+                                                    const px1 = col_f + 1;
+                                                    const py0 = row_f;
+                                                    const py1 = row_f + 1;
+
+                                                    const overlap_x = @max(0, @min(x1, px1) - @max(x0, px0));
+                                                    const overlap_y = @max(0, @min(y1, py1) - @max(y0, py0));
+                                                    total_coverage += overlap_x * overlap_y;
+                                                }
+                                            }
+                                        }
+
+                                        // Normalize coverage by the box area
+                                        const box_area = (x1 - x0) * (y1 - y0);
+                                        const normalized_coverage = total_coverage / box_area;
+
+                                        if (normalized_coverage > 0) {
+                                            const src_color = convertColor(Rgba, color);
+                                            const src_alpha_f = @as(f32, @floatFromInt(src_color.a));
+                                            const alpha = @as(u8, @intFromFloat(@min(255, normalized_coverage * src_alpha_f)));
+
+                                            const blended_color = Rgba{
+                                                .r = src_color.r,
+                                                .g = src_color.g,
+                                                .b = src_color.b,
+                                                .a = alpha,
+                                            };
+
+                                            self.setPixel(.init2d(dest_x, dest_y), blended_color);
                                         }
                                     }
                                 }
                             }
-                            bits >>= 1;
                         }
+                        x += char_width_scaled;
                     }
-                }
-                x += char_width_scaled;
+                },
             }
-        }
-
-        /// Draws text with antialiasing support for scaled text.
-        /// When scale > 1 and mode is .soft, applies edge smoothing.
-        pub fn drawTextAA(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
-            if (mode == .fast or scale == 1.0) {
-                // Use regular scaled text for fast mode or scale 1
-                self.drawTextScaled(text, position, font, color, scale);
-                return;
-            }
-
-            // For antialiased text, we could implement sub-pixel rendering
-            // or use the fillPolygon with soft mode to draw each character glyph
-            // For now, we'll use the simple scaled version
-            // TODO: Implement proper antialiasing using glyph outlines
-            self.drawTextScaled(text, position, font, color, scale);
         }
     };
 }

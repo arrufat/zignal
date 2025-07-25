@@ -438,7 +438,6 @@ test "Text rendering on canvas" {
     const allocator = testing.allocator;
     const Rgb = @import("color.zig").Rgb;
     const Canvas = @import("canvas.zig").Canvas;
-    const Point2d = @import("geometry/Point.zig").Point2d;
 
     // Create a small test image
     var img = try Image(Rgb).initAlloc(allocator, 40, 80);
@@ -449,7 +448,7 @@ test "Text rendering on canvas" {
     canvas.fill(Rgb{ .r = 0, .g = 0, .b = 0 });
 
     // Draw white 'A' at position (10, 10)
-    canvas.drawText("A", Point2d(f32).init2d(10, 10), default_font_8x8, Rgb{ .r = 255, .g = 255, .b = 255 });
+    canvas.drawText("A", .init2d(10, 10), default_font_8x8, Rgb{ .r = 255, .g = 255, .b = 255 }, 1, .fast);
 
     // Verify some pixels are white (character 'A' should have set pixels)
     var white_pixels: usize = 0;
@@ -464,7 +463,7 @@ test "Text rendering on canvas" {
 
     // Test scaled text
     canvas.fill(Rgb{ .r = 0, .g = 0, .b = 0 });
-    canvas.drawTextScaled("B", Point2d(f32).init2d(10, 10), default_font_8x8, Rgb{ .r = 255, .g = 0, .b = 0 }, 2);
+    canvas.drawText("B", .init2d(10, 10), default_font_8x8, Rgb{ .r = 255, .g = 0, .b = 0 }, 2, .fast);
 
     var red_pixels: usize = 0;
     for (img.data) |pixel| {
