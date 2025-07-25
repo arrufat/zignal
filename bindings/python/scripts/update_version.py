@@ -56,18 +56,12 @@ def zig_to_python_version(zig_version: str) -> str:
     commit_hash = match.group(4)   # "abc123" or None
     
     if prerelease:
-        if prerelease in ["dev", "python"]:
-            # Convert to Python dev format
-            if dev_number:
-                return f"{base_version}.dev{dev_number}"
-            else:
-                return f"{base_version}.dev0"
+        # Always convert any pre-release to dev format for PEP 440 compatibility
+        # This handles "dev", "python", branch names like "feature-xyz", etc.
+        if dev_number:
+            return f"{base_version}.dev{dev_number}"
         else:
-            # Other prerelease formats, keep as-is but convert separator
-            if dev_number:
-                return f"{base_version}.{prerelease}{dev_number}"
-            else:
-                return f"{base_version}.{prerelease}0"
+            return f"{base_version}.dev0"
     else:
         # No prerelease, just return base version
         return base_version
