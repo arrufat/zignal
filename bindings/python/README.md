@@ -4,7 +4,7 @@ Zero-dependency image processing library written in Zig with Python bindings.
 
 ## Installation
 
-```bash
+```console
 pip install zignal-processing
 ```
 
