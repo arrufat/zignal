@@ -24,7 +24,8 @@ pub const DisplayFormat = union(enum) {
     /// Color images are binarized with threshold
     braille: struct {
         /// Brightness threshold for on/off (0.0-1.0)
-        threshold: f32 = 0.5,
+        threshold: f32,
+        pub const default: @This() = .{ .threshold = 0.5 };
     },
     /// Force sixel output with specific options
     sixel: sixel.SixelOptions,

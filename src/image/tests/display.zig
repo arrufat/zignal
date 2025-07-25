@@ -121,7 +121,7 @@ test "image format braille" {
     var buffer: [256]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .{} })});
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .default })});
     const result = stream.getWritten();
 
     // Expected pattern: dots 2, 4, 6, 8 are on (white pixels)
@@ -189,7 +189,7 @@ test "image format braille large image" {
     var buffer: [256]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .{} })});
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .default })});
     const result = stream.getWritten();
 
     // Expected: checkerboard pattern creates same pattern in all blocks
