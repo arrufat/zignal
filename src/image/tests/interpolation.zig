@@ -5,7 +5,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const Image = @import("../image.zig").Image;
-const InterpolationMethod = @import("../image.zig").InterpolationMethod;
+const InterpolationMethod = @import("../interpolation.zig").InterpolationMethod;
 const color = @import("../../color.zig");
 
 // Helper function to create a simple gradient test image
@@ -466,10 +466,10 @@ test "nearest neighbor discontinuity" {
     // Test discontinuity at boundary
     const val_before = img.interpolate(0.49, 0, .nearest_neighbor);
     const val_after = img.interpolate(0.51, 0, .nearest_neighbor);
-    
-    try expectEqual(@as(u8, 0), val_before.?);   // rounds to (0, 0)
-    try expectEqual(@as(u8, 255), val_after.?);  // rounds to (1, 0)
-    
+
+    try expectEqual(@as(u8, 0), val_before.?); // rounds to (0, 0)
+    try expectEqual(@as(u8, 255), val_after.?); // rounds to (1, 0)
+
     // Verify sharp transition
     try std.testing.expect(val_after.? - val_before.? == 255);
 }
@@ -526,7 +526,7 @@ test "mitchell parameter effects" {
     try std.testing.expect(val_default != null);
     try std.testing.expect(val_bspline != null);
     try std.testing.expect(val_sharp != null);
-    
+
     // They should produce different results (at least some of them)
     // Due to the nature of the pattern and kernel, some might be equal
     const all_equal = val_default.? == val_bspline.? and val_default.? == val_sharp.?;

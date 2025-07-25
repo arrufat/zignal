@@ -12,7 +12,7 @@
 pub const Image = @import("image/image.zig").Image;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
-pub const InterpolationMethod = @import("image/image.zig").InterpolationMethod;
+pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 // Run all tests
 test {
