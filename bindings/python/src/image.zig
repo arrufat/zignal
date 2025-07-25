@@ -561,7 +561,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     else if (std.mem.eql(u8, spec_slice, "blocks"))
         .ansi_blocks
     else if (std.mem.eql(u8, spec_slice, "braille"))
-        .{ .braille = .{ .threshold = 0.5 } }
+        .{ .braille = .default }
     else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
     else if (std.mem.eql(u8, spec_slice, "kitty"))
