@@ -24,6 +24,7 @@ const DisplayFormatter = @import("display.zig").DisplayFormatter;
 const ImageFormat = @import("format.zig").ImageFormat;
 const interpolation = @import("interpolation.zig");
 const InterpolationMethod = interpolation.InterpolationMethod;
+const PixelIterator = @import("PixelIterator.zig").PixelIterator;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -1129,6 +1130,16 @@ pub fn Image(comptime T: type) type {
                     out.at(r, c).* = @intFromFloat(@max(0, @min(255, @sqrt(@as(f32, @floatFromInt(horz_temp * horz_temp + vert_temp * vert_temp))))));
                 }
             }
+        }
+
+        /// Returns an iterator over all pixels in the image
+        pub fn pixels(self: Self) PixelIterator(T) {
+            return .{
+                .data = self.data,
+                .cols = self.cols,
+                .stride = self.stride,
+                .rows = self.rows,
+            };
         }
     };
 }

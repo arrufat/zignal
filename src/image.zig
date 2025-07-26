@@ -10,6 +10,7 @@
 
 // Re-export all public types
 pub const Image = @import("image/image.zig").Image;
+pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
@@ -17,6 +18,7 @@ pub const InterpolationMethod = @import("image/interpolation.zig").Interpolation
 // Run all tests
 test {
     _ = @import("image/image.zig");
+    _ = @import("image/PixelIterator.zig");
     _ = @import("image/format.zig");
     _ = @import("image/display.zig");
     _ = @import("image/tests/integral.zig");
