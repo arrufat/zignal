@@ -1,4 +1,4 @@
-name: release
+name: python
 
 on:
   release:
@@ -181,7 +181,7 @@ jobs:
     # Upload to TestPyPI on PRs for testing
     if: github.event_name == 'pull_request'
     environment:
-      name: testpypi
+      name: test-pypi
       url: https://test.pypi.org/p/zignal-processing
 
     steps:
