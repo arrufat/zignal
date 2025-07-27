@@ -159,7 +159,7 @@ def get_zig_optimize():
 
 if __name__ == "__main__":
     setup(
-        packages=find_packages(),
+        packages=find_packages(exclude=["tests", "tests.*"]),
         ext_modules=[ZigExtension("zignal._zignal", get_zig_target(), get_zig_optimize())],
         cmdclass={"build_ext": ZigBuildExt},
         distclass=BinaryDistribution,
