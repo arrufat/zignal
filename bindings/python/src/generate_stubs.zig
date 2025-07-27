@@ -148,6 +148,7 @@ fn generateImageClass(stub: *GeneratedStub) !void {
     try stub.write("    def add_alpha(array: np.ndarray[Any, np.dtype[np.uint8]], alpha: int = 255) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
     try stub.write("    def save(self, path: str) -> None: ...\n");
     try stub.write("    def to_numpy(self, include_alpha: bool = True) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
+    try stub.write("    def resize(self, size: Union[float, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
     try stub.write("    @property\n");
     try stub.write("    def rows(self) -> int: ...\n");
     try stub.write("    @property\n");
@@ -155,6 +156,18 @@ fn generateImageClass(stub: *GeneratedStub) !void {
 
     // Standard Python methods
     try stub.write("    def __repr__(self) -> str: ...\n");
+}
+
+/// Generate InterpolationMethod enum
+fn generateInterpolationMethod(stub: *GeneratedStub) !void {
+    try stub.write("\nclass InterpolationMethod(IntEnum):\n");
+    try stub.write("    \"\"\"Interpolation methods for image resizing\"\"\"\n");
+    try stub.write("    NEAREST_NEIGHBOR = 0\n");
+    try stub.write("    BILINEAR = 1\n");
+    try stub.write("    BICUBIC = 2\n");
+    try stub.write("    CATMULL_ROM = 3\n");
+    try stub.write("    MITCHELL = 4\n");
+    try stub.write("    LANCZOS = 5\n");
 }
 
 /// Auto-discover and generate known module-level functions
@@ -194,13 +207,17 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Auto-generated Python type stubs for zignal\n");
     try stub.write("# Generated from Zig source code using compile-time reflection\n");
     try stub.write("# Do not modify manually - regenerate using: zig build generate-stubs\n\n");
-    try stub.write("from typing import Any\n");
+    try stub.write("from typing import Any, Union, Tuple\n");
+    try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n");
 
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
         try generateColorClass(&stub, ColorType);
     }
+
+    // Generate InterpolationMethod enum
+    try generateInterpolationMethod(&stub);
 
     // Generate Image class
     try generateImageClass(&stub);
@@ -223,7 +240,8 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     // Header
     try stub.write("# Type stubs for zignal package\n");
     try stub.write("# This file helps LSPs understand the module structure\n\n");
-    try stub.write("from typing import Any\n");
+    try stub.write("from typing import Any, Union, Tuple\n");
+    try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n\n");
 
     // Re-export all types from _zignal
@@ -238,6 +256,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
 
     // Add Image and function
     try stub.write("    Image as Image,\n");
+    try stub.write("    InterpolationMethod as InterpolationMethod,\n");
     try stub.write("    feature_distribution_match as feature_distribution_match,\n");
     try stub.write(")\n\n");
 

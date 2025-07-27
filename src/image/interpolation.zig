@@ -47,14 +47,13 @@ const isStruct = @import("../meta.zig").isStruct;
 /// | Bilinear    | ★★☆☆☆   | ★★★★☆ | Real-time, preview  | No        |
 /// | Bicubic     | ★★★☆☆   | ★★★☆☆ | General purpose     | Yes       |
 /// | Catmull-Rom | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
-/// | Lanczos3    | ★★★★★   | ★★☆☆☆ | High-quality resize | Yes       |
 /// | Mitchell    | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
+/// | Lanczos3    | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
 pub const InterpolationMethod = union(enum) {
     nearest_neighbor,
     bilinear,
     bicubic,
     catmull_rom,
-    lanczos,
     mitchell: struct {
         /// Blur parameter (controls blur vs sharpness)
         /// Common values: 1/3 (Mitchell), 1 (B-spline), 0 (Catmull-Rom-like)
@@ -64,6 +63,7 @@ pub const InterpolationMethod = union(enum) {
         c: f32,
         pub const default: @This() = .{ .b = 1 / 3, .c = 1 / 3 };
     },
+    lanczos,
 };
 
 /// Sample a single pixel from an image using the specified interpolation method

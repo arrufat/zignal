@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const InterpolationMethod = zignal.InterpolationMethod;
 
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
@@ -592,6 +593,221 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
 }
 
+// Convert Python enum value to Zig InterpolationMethod
+fn pythonToZigInterpolation(py_value: c_long) !InterpolationMethod {
+    return switch (py_value) {
+        0 => .nearest_neighbor,
+        1 => .bilinear,
+        2 => .bicubic,
+        3 => .catmull_rom,
+        4 => .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } }, // Default Mitchell parameters
+        5 => .lanczos,
+        else => return error.InvalidInterpolationMethod,
+    };
+}
+
+// Internal function to scale image by a factor
+fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*ImageObject {
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return error.ImageNotInitialized;
+    }
+
+    const src_image = self.image_ptr.?;
+
+    // Calculate new dimensions
+    const new_rows = @max(1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(src_image.rows)) * scale))));
+    const new_cols = @max(1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(src_image.cols)) * scale))));
+
+    // Create new image
+    const new_image = allocator.create(zignal.Image(zignal.Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return error.OutOfMemory;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = zignal.Image(zignal.Rgba).initAlloc(allocator, new_rows, new_cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return error.OutOfMemory;
+    };
+
+    // Perform resize
+    src_image.resize(new_image.*, method);
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return error.OutOfMemory;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+
+    return result;
+}
+
+// Internal function to resize image to specific dimensions
+fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return error.ImageNotInitialized;
+    }
+
+    const src_image = self.image_ptr.?;
+
+    // Create new image
+    const new_image = allocator.create(zignal.Image(zignal.Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return error.OutOfMemory;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = zignal.Image(zignal.Rgba).initAlloc(allocator, rows, cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return error.OutOfMemory;
+    };
+
+    // Perform resize
+    src_image.resize(new_image.*, method);
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return error.OutOfMemory;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+
+    return result;
+}
+
+// Documentation for the resize method
+pub const resize_doc =
+    \\resize(size, method=InterpolationMethod.BILINEAR, /)
+    \\--
+    \\
+    \\Resize the image using the specified interpolation method.
+    \\
+    \\Parameters
+    \\----------
+    \\size : float or tuple[int, int]
+    \\    Either a scale factor (float) or target dimensions (rows, cols).
+    \\    - If float: Image will be scaled by this factor (e.g., 2.0 doubles the size)
+    \\    - If tuple: Image will be resized to exactly (rows, cols) dimensions
+    \\method : InterpolationMethod, optional
+    \\    Interpolation method to use. Default is InterpolationMethod.BILINEAR.
+    \\    Available methods: NEAREST_NEIGHBOR, BILINEAR, BICUBIC, CATMULL_ROM, MITCHELL, LANCZOS
+    \\
+    \\Returns
+    \\-------
+    \\Image
+    \\    A new resized Image object
+    \\
+    \\Raises
+    \\------
+    \\ValueError
+    \\    If scale factor is <= 0, or if target dimensions contain zero or negative values
+    \\TypeError
+    \\    If size is neither a float nor a tuple of two integers
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> # Scale by factor
+    \\>>> img2x = img.resize(2.0)  # Double the size
+    \\>>> img_half = img.resize(0.5)  # Half the size
+    \\>>> # Resize to specific dimensions
+    \\>>> thumbnail = img.resize((64, 64))
+    \\>>> # Use different interpolation
+    \\>>> smooth = img.resize(2.0, method=InterpolationMethod.LANCZOS)
+;
+
+// Python-facing resize method that handles both scale and dimensions
+fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var shape_or_scale: ?*c.PyObject = null;
+    var method_value: c_long = 1; // Default to BILINEAR
+
+    var kwlist = [_:null]?[*:0]u8{ @constCast("size"), @constCast("method"), null };
+    const format = std.fmt.comptimePrint("O|l", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &shape_or_scale, &method_value) == 0) {
+        return null;
+    }
+
+    if (shape_or_scale == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "resize() missing required argument: 'size' (pos 1)");
+        return null;
+    }
+
+    // Convert method value to Zig enum
+    const method = pythonToZigInterpolation(method_value) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
+    };
+
+    // Check if argument is a number (scale) or tuple (dimensions)
+    if (c.PyFloat_Check(shape_or_scale) != 0 or c.PyLong_Check(shape_or_scale) != 0) {
+        // It's a scale factor
+        const scale = c.PyFloat_AsDouble(shape_or_scale);
+        if (scale == -1.0 and c.PyErr_Occurred() != null) {
+            return null;
+        }
+        if (scale <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Scale factor must be positive");
+            return null;
+        }
+
+        const result = image_scale(self, @floatCast(scale), method) catch return null;
+        return @ptrCast(result);
+    } else if (c.PyTuple_Check(shape_or_scale) != 0) {
+        // It's a tuple of dimensions
+        if (c.PyTuple_Size(shape_or_scale) != 2) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Size must be a 2-tuple of (rows, cols)");
+            return null;
+        }
+
+        const rows_obj = c.PyTuple_GetItem(shape_or_scale, 0);
+        const cols_obj = c.PyTuple_GetItem(shape_or_scale, 1);
+
+        const rows = c.PyLong_AsLong(rows_obj);
+        if (rows == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+            return null;
+        }
+        if (rows <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Rows must be positive");
+            return null;
+        }
+
+        const cols = c.PyLong_AsLong(cols_obj);
+        if (cols == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+            return null;
+        }
+        if (cols <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Cols must be positive");
+            return null;
+        }
+
+        const result = image_reshape(self, @intCast(rows), @intCast(cols), method) catch return null;
+        return @ptrCast(result);
+    } else {
+        c.PyErr_SetString(c.PyExc_TypeError, "resize() argument must be a number (scale) or tuple (rows, cols)");
+        return null;
+    }
+}
+
 var image_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = image_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an image from file (PNG/JPEG)" },
     .{ .ml_name = "from_numpy", .ml_meth = image_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
@@ -632,7 +848,51 @@ var image_methods = [_]c.PyMethodDef{
     \\Returns:
     \\    NumPy array view of the image data (zero-copy when possible)
     },
-    .{ .ml_name = "save", .ml_meth = image_save, .ml_flags = c.METH_VARARGS, .ml_doc = "Save image to PNG file. File must have .png extension." },
+    .{ .ml_name = "save", .ml_meth = image_save, .ml_flags = c.METH_VARARGS, .ml_doc = 
+    \\save(path, /)
+    \\--
+    \\
+    \\Save image to PNG file. File must have .png extension.
+    },
+    .{ .ml_name = "resize", .ml_meth = @ptrCast(&image_resize), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = 
+    \\resize(size, method=InterpolationMethod.BILINEAR, /)
+    \\--
+    \\
+    \\Resize the image using the specified interpolation method.
+    \\
+    \\Parameters
+    \\----------
+    \\size : float or tuple[int, int]
+    \\    Either a scale factor (float) or target dimensions (rows, cols).
+    \\    - If float: Image will be scaled by this factor (e.g., 2.0 doubles the size)
+    \\    - If tuple: Image will be resized to exactly (rows, cols) dimensions
+    \\method : InterpolationMethod, optional
+    \\    Interpolation method to use. Default is InterpolationMethod.BILINEAR.
+    \\    Available methods: NEAREST_NEIGHBOR, BILINEAR, BICUBIC, CATMULL_ROM, MITCHELL, LANCZOS
+    \\
+    \\Returns
+    \\-------
+    \\Image
+    \\    A new resized Image object
+    \\
+    \\Raises
+    \\------
+    \\ValueError
+    \\    If scale factor is <= 0, or if target dimensions contain zero or negative values
+    \\TypeError
+    \\    If size is neither a float nor a tuple of two integers
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> # Scale by factor
+    \\>>> img2x = img.resize(2.0)  # Double the size
+    \\>>> img_half = img.resize(0.5)  # Half the size
+    \\>>> # Resize to specific dimensions
+    \\>>> thumbnail = img.resize((64, 64))
+    \\>>> # Use different interpolation
+    \\>>> smooth = img.resize(2.0, method=InterpolationMethod.LANCZOS)
+    },
     .{ .ml_name = "__format__", .ml_meth = image_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
     \\Format image for display. Supports format specifiers:
     \\  '' (empty): Returns text representation (e.g., 'Image(800x600)')
