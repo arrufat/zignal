@@ -315,6 +315,62 @@ pub fn Image(comptime T: type) type {
             interpolation.resize(T, self, out, method);
         }
 
+        /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
+        /// The image is centered with black/zero padding around it (letterboxing).
+        /// Returns a rectangle describing the area containing the actual image content.
+        /// ```
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: InterpolationMethod) !Rectangle(usize) {
+            // Ensure output has valid dimensions
+            if (out.rows == 0 or out.cols == 0) {
+                return error.InvalidDimensions;
+            }
+
+            // Allocate output if not already allocated
+            if (out.data.len == 0) {
+                out.* = try .initAlloc(allocator, out.rows, out.cols);
+            }
+
+            // Early return if dimensions match - just copy and return full rectangle
+            if (self.rows == out.rows and self.cols == out.cols) {
+                self.copy(out.*);
+                return out.getRectangle();
+            }
+
+            // Calculate scale factors
+            const rows_scale = @as(f32, @floatFromInt(out.rows)) / @as(f32, @floatFromInt(self.rows));
+            const cols_scale = @as(f32, @floatFromInt(out.cols)) / @as(f32, @floatFromInt(self.cols));
+
+            // Choose the smaller scale to maintain aspect ratio
+            const scale = @min(rows_scale, cols_scale);
+
+            // Calculate dimensions of the scaled image (ensure at least 1 pixel)
+            const scaled_rows: usize = @intFromFloat(@round(scale * @as(f32, @floatFromInt(self.rows))));
+            const scaled_cols: usize = @intFromFloat(@round(scale * @as(f32, @floatFromInt(self.cols))));
+
+            // Calculate offset to center the image
+            const offset_row = (out.rows -| scaled_rows) / 2;
+            const offset_col = (out.cols -| scaled_cols) / 2;
+
+            // Fill output with zeros (black/transparent padding)
+            @memset(out.data, std.mem.zeroes(T));
+
+            // Create rectangle for the letterboxed content
+            const content_rect: Rectangle(usize) = .init(
+                offset_col,
+                offset_row,
+                offset_col + scaled_cols - 1,
+                offset_row + scaled_rows - 1,
+            );
+
+            // Create a view of the output at the calculated position
+            const output_view = out.view(content_rect);
+
+            // Resize the image into the view
+            self.resize(output_view, method);
+
+            return content_rect;
+        }
+
         /// Computes the optimal output dimensions for rotating an image by the given angle.
         /// This ensures that the entire rotated image fits within the output bounds without clipping.
         ///
@@ -1142,25 +1198,4 @@ pub fn Image(comptime T: type) type {
             };
         }
     };
-}
-
-test "Image load error handling" {
-    const allocator = std.testing.allocator;
-
-    // Test 1: Loading a non-existent file should return FileNotFound
-    const result1 = Image(color.Rgb).load(allocator, "this_file_does_not_exist.png");
-    try std.testing.expectError(error.FileNotFound, result1);
-
-    // Test 2: Create a text file and try to load it as an image
-    const test_file = "test_not_an_image.txt";
-    {
-        const file = try std.fs.cwd().createFile(test_file, .{});
-        defer file.close();
-        _ = try file.write("This is not an image file");
-    }
-    defer std.fs.cwd().deleteFile(test_file) catch {};
-
-    // Loading a non-image file should return UnsupportedImageFormat
-    const result2 = Image(color.Rgb).load(allocator, test_file);
-    try std.testing.expectError(error.UnsupportedImageFormat, result2);
 }

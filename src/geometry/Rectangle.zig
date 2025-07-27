@@ -20,7 +20,7 @@ pub fn Rectangle(comptime T: type) type {
 
         /// Initialize a rectangle by giving its four sides.
         pub fn init(l: T, t: T, r: T, b: T) Self {
-            assert(r > l and b > t);
+            assert(r >= l and b >= t);
             return .{ .l = l, .t = t, .r = r, .b = b };
         }
 

@@ -161,6 +161,185 @@ def test_resize_errors():
         img.resize((10, 20, 30))  # Too many dimensions
 
 
+def test_letterbox_square():
+    """Test letterboxing to square dimensions."""
+
+    # Create a 3:2 aspect ratio image (wider than tall)
+    arr = np.zeros((20, 30, 4), dtype=np.uint8)
+    arr[:, :] = [100, 150, 200, 255]  # Light blue
+    img = zignal.Image.from_numpy(arr)
+
+    # Letterbox to square - should add padding top and bottom
+    square = img.letterbox(40)
+    assert square.rows == 40
+    assert square.cols == 40
+
+    # Check that the image was scaled to fit width
+    square_arr = square.to_numpy()
+
+    # The original 20x30 image scaled to fit 40x40 should be 27x40 (rounded)
+    # So padding should be approximately (40-27)/2 = 6-7 rows on top and bottom
+
+    # Check top padding is black
+    assert np.all(square_arr[0, :, :3] == 0)  # First row should be black
+
+    # Check bottom padding is black
+    assert np.all(square_arr[-1, :, :3] == 0)  # Last row should be black
+
+    # Check middle has the original color
+    mid_row = square.rows // 2
+    assert np.all(square_arr[mid_row, 20, :3] == [100, 150, 200])
+
+
+def test_letterbox_custom_dimensions():
+    """Test letterboxing to custom dimensions."""
+
+    # Create a square image
+    arr = np.zeros((30, 30, 4), dtype=np.uint8)
+    arr[:] = [255, 100, 50, 255]  # Orange
+    img = zignal.Image.from_numpy(arr)
+
+    # Letterbox to wide format - should add padding left and right
+    wide = img.letterbox((20, 60))
+    assert wide.rows == 20
+    assert wide.cols == 60
+
+    wide_arr = wide.to_numpy()
+
+    # The 30x30 image scaled to fit 20x60 should be 20x20
+    # So padding should be (60-20)/2 = 20 columns on each side
+
+    # Check left padding is black
+    assert np.all(wide_arr[:, 0, :3] == 0)
+
+    # Check right padding is black
+    assert np.all(wide_arr[:, -1, :3] == 0)
+
+    # Check middle has the original color
+    mid_col = wide.cols // 2
+    assert np.all(wide_arr[10, mid_col, :3] == [255, 100, 50])
+
+    # Letterbox to tall format - should add padding top and bottom
+    tall = img.letterbox((60, 20))
+    assert tall.rows == 60
+    assert tall.cols == 20
+
+    tall_arr = tall.to_numpy()
+
+    # Check top and bottom padding
+    assert np.all(tall_arr[0, :, :3] == 0)
+    assert np.all(tall_arr[-1, :, :3] == 0)
+
+
+def test_letterbox_no_padding_needed():
+    """Test letterbox when aspect ratio already matches."""
+
+    # Create image with 2:1 aspect ratio
+    arr = np.ones((50, 100, 4), dtype=np.uint8) * 128
+    img = zignal.Image.from_numpy(arr)
+
+    # Letterbox to same aspect ratio - should just resize
+    result = img.letterbox((100, 200))
+    assert result.rows == 100
+    assert result.cols == 200
+
+    # Should be uniformly gray (no black padding)
+    result_arr = result.to_numpy()
+    assert np.all(result_arr[:, :, :3] == 128)
+
+
+def test_letterbox_interpolation_methods():
+    """Test letterbox with different interpolation methods."""
+
+    # Create a small test image
+    arr = np.zeros((10, 15, 4), dtype=np.uint8)
+    arr[5, 7] = [255, 255, 255, 255]  # Single white pixel
+    img = zignal.Image.from_numpy(arr)
+
+    methods = [
+        zignal.InterpolationMethod.NEAREST_NEIGHBOR,
+        zignal.InterpolationMethod.BILINEAR,
+        zignal.InterpolationMethod.BICUBIC,
+        zignal.InterpolationMethod.LANCZOS,
+    ]
+
+    for method in methods:
+        # Should not raise any errors
+        result = img.letterbox(50, method=method)
+        assert result.rows == 50
+        assert result.cols == 50
+
+
+def test_letterbox_errors():
+    """Test letterbox error handling."""
+
+    arr = np.zeros((10, 10, 4), dtype=np.uint8)
+    img = zignal.Image.from_numpy(arr)
+
+    # Invalid size (0 or negative)
+    with pytest.raises(ValueError):
+        img.letterbox(0)
+
+    with pytest.raises(ValueError):
+        img.letterbox(-10)
+
+    # Invalid dimensions
+    with pytest.raises(ValueError):
+        img.letterbox((0, 10))
+
+    with pytest.raises(ValueError):
+        img.letterbox((10, -5))
+
+    # Invalid argument type
+    with pytest.raises(TypeError):
+        img.letterbox("invalid")
+
+    # Invalid tuple size
+    with pytest.raises((TypeError, ValueError)):
+        img.letterbox((10,))  # Only one dimension
+
+    with pytest.raises((TypeError, ValueError)):
+        img.letterbox((10, 20, 30))  # Too many dimensions
+
+
+def test_letterbox_preserves_aspect_ratio():
+    """Test that letterbox correctly preserves aspect ratio."""
+
+    # Create distinct pattern to verify aspect ratio preservation
+    arr = np.zeros((40, 60, 4), dtype=np.uint8)
+    # Create a circle in the center
+    center_y, center_x = 20, 30
+    radius = 15
+    for y in range(40):
+        for x in range(60):
+            if (y - center_y)**2 + (x - center_x)**2 <= radius**2:
+                arr[y, x] = [255, 255, 255, 255]
+
+    img = zignal.Image.from_numpy(arr)
+
+    # Letterbox to different sizes
+    small_square = img.letterbox(30)
+    large_square = img.letterbox(100)
+    wide = img.letterbox((50, 200))
+
+    # Convert back to numpy
+    small_arr = small_square.to_numpy()
+    large_arr = large_square.to_numpy()
+    wide_arr = wide.to_numpy()
+
+    # In all cases, the circle should remain circular (not stretched)
+    # We can't easily verify the exact shape, but we can check that
+    # there's padding where expected
+
+    # Small square should have top/bottom padding
+    assert np.any(small_arr[0, :, :3] == 0)  # Top row has black
+    assert np.any(small_arr[-1, :, :3] == 0)  # Bottom row has black
+
+    # Wide format should have left/right padding
+    assert np.any(wide_arr[:, 0, :3] == 0)  # Left column has black
+    assert np.any(wide_arr[:, -1, :3] == 0)  # Right column has black
+
+
 def test_resize_preserves_content():
     """Test that resize preserves image content reasonably."""
 

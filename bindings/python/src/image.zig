@@ -808,6 +808,171 @@ fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     }
 }
 
+// Internal function to letterbox image into square dimensions
+fn image_letterbox_square(self: *ImageObject, size: usize, method: InterpolationMethod) !*ImageObject {
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return error.ImageNotInitialized;
+    }
+
+    const src_image = self.image_ptr.?;
+
+    // Create new image for letterbox output
+    const new_image = allocator.create(zignal.Image(zignal.Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return error.OutOfMemory;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = zignal.Image(zignal.Rgba).initAlloc(allocator, size, size) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return error.OutOfMemory;
+    };
+
+    // Perform letterbox
+    _ = src_image.letterbox(allocator, new_image, method) catch |err| {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
+            error.InvalidDimensions => c.PyErr_SetString(c.PyExc_ValueError, "Invalid dimensions"),
+        }
+        return err;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return error.OutOfMemory;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return result;
+}
+
+// Internal function to letterbox image to specific dimensions
+fn image_letterbox_dims(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return error.ImageNotInitialized;
+    }
+
+    const src_image = self.image_ptr.?;
+
+    // Create new image for letterbox output
+    const new_image = allocator.create(zignal.Image(zignal.Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return error.OutOfMemory;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = zignal.Image(zignal.Rgba).initAlloc(allocator, rows, cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return error.OutOfMemory;
+    };
+
+    // Perform letterbox
+    _ = src_image.letterbox(allocator, new_image, method) catch |err| {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
+            error.InvalidDimensions => c.PyErr_SetString(c.PyExc_ValueError, "Invalid dimensions"),
+        }
+        return err;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return error.OutOfMemory;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return result;
+}
+
+// Python-facing letterbox method that handles both square and custom dimensions
+fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var size: ?*c.PyObject = null;
+    var method_value: c_long = 1; // Default to BILINEAR
+    var kwlist = [_:null]?[*:0]u8{ @constCast("size"), @constCast("method"), null };
+    const format = std.fmt.comptimePrint("O|l", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &size, &method_value) == 0) {
+        return null;
+    }
+
+    if (size == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "letterbox() missing required argument: 'size' (pos 1)");
+        return null;
+    }
+
+    // Convert method value to Zig enum
+    const method = pythonToZigInterpolation(method_value) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
+    };
+
+    // Check if argument is a number (square) or tuple (dimensions)
+    if (c.PyLong_Check(size) != 0) {
+        // It's an integer for square letterbox
+        const square_size = c.PyLong_AsLong(size);
+        if (square_size == -1 and c.PyErr_Occurred() != null) {
+            return null;
+        }
+        if (square_size <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Size must be positive");
+            return null;
+        }
+        const result = image_letterbox_square(self, @intCast(square_size), method) catch return null;
+        return @ptrCast(result);
+    } else if (c.PyTuple_Check(size) != 0) {
+        // It's a tuple for dimensions
+        if (c.PyTuple_Size(size) != 2) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Dimensions must be a tuple of 2 integers (rows, cols)");
+            return null;
+        }
+
+        const rows_obj = c.PyTuple_GetItem(size, 0);
+        const cols_obj = c.PyTuple_GetItem(size, 1);
+
+        if (c.PyLong_Check(rows_obj) == 0 or c.PyLong_Check(cols_obj) == 0) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Dimensions must be integers");
+            return null;
+        }
+
+        const rows = c.PyLong_AsLong(rows_obj);
+        const cols = c.PyLong_AsLong(cols_obj);
+
+        if ((rows == -1 or cols == -1) and c.PyErr_Occurred() != null) {
+            return null;
+        }
+
+        if (rows <= 0 or cols <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Dimensions must be positive");
+            return null;
+        }
+
+        const result = image_letterbox_dims(self, @intCast(rows), @intCast(cols), method) catch return null;
+        return @ptrCast(result);
+    } else {
+        c.PyErr_SetString(c.PyExc_TypeError, "letterbox() argument must be an integer (square) or tuple (rows, cols)");
+        return null;
+    }
+}
+
 var image_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = image_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an image from file (PNG/JPEG)" },
     .{ .ml_name = "from_numpy", .ml_meth = image_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
@@ -892,6 +1057,45 @@ var image_methods = [_]c.PyMethodDef{
     \\>>> thumbnail = img.resize((64, 64))
     \\>>> # Use different interpolation
     \\>>> smooth = img.resize(2.0, method=InterpolationMethod.LANCZOS)
+    },
+    .{ .ml_name = "letterbox", .ml_meth = @ptrCast(&image_letterbox), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = 
+    \\letterbox(size, method=InterpolationMethod.BILINEAR, /)
+    \\--
+    \\
+    \\Letterbox the image to fit within specified dimensions while preserving aspect ratio.
+    \\The image is centered with black padding around it.
+    \\
+    \\Parameters
+    \\----------
+    \\size : int or tuple[int, int]
+    \\    Either a single integer for square letterbox or target dimensions (rows, cols).
+    \\    - If int: Creates a square letterbox with that size (e.g., 500 creates 500x500)
+    \\    - If tuple: Creates letterbox with (rows, cols) dimensions
+    \\method : InterpolationMethod, optional
+    \\    Interpolation method to use. Default is InterpolationMethod.BILINEAR.
+    \\    Available methods: NEAREST_NEIGHBOR, BILINEAR, BICUBIC, CATMULL_ROM, MITCHELL, LANCZOS
+    \\
+    \\Returns
+    \\-------
+    \\Image
+    \\    A new letterboxed Image object with padding
+    \\
+    \\Raises
+    \\------
+    \\ValueError
+    \\    If size is <= 0, or if target dimensions contain zero or negative values
+    \\TypeError
+    \\    If size is neither an integer nor a tuple of two integers
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> # Square letterbox
+    \\>>> square = img.letterbox(500)  # 500x500 with padding
+    \\>>> # Custom dimensions
+    \\>>> wide = img.letterbox((400, 800))  # 400x800 letterbox
+    \\>>> # Different interpolation
+    \\>>> smooth = img.letterbox(500, method=InterpolationMethod.LANCZOS)
     },
     .{ .ml_name = "__format__", .ml_meth = image_format, .ml_flags = c.METH_VARARGS, .ml_doc = 
     \\Format image for display. Supports format specifiers:

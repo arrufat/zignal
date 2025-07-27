@@ -26,4 +26,5 @@ test {
     _ = @import("image/tests/transforms.zig");
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");
+    _ = @import("image/tests/letterbox.zig");
 }
