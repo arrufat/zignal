@@ -189,6 +189,31 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return count;
         }
 
+        /// Computes the "element-wise" matrix norm of the matrix.
+        pub fn norm(self: Self, p: T) T {
+            if (p == std.math.inf(T)) {
+                return self.maxNorm();
+            } else if (p == -std.math.inf(T)) {
+                return self.minNorm();
+            }
+            assert(p >= 0);
+            if (p == 0) {
+                return self.sparseNorm();
+            } else if (p == 1) {
+                return self.nuclearNorm();
+            } else if (p == 2) {
+                return self.frobeniusNorm();
+            } else {
+                var result: T = 0;
+                for (self.items) |row_data| {
+                    for (row_data) |value| {
+                        result += if (value == 0) 0 else std.math.pow(T, @abs(value), p);
+                    }
+                }
+                return std.math.pow(T, result, 1 / p);
+            }
+        }
+
         /// Performs the dot (or internal product) of two matrices.
         pub fn dot(self: Self, other: anytype) SMatrix(T, rows, other.cols) {
             return self.gemm(false, other, false, 1.0, 0.0, null);
@@ -624,6 +649,13 @@ test "SMatrix norm" {
 
     matrix.at(2, 3).* = 0;
     try expectEqual(matrix.sparseNorm(), 11);
+
+    // Test general norm function
+    try expectEqual(matrix.norm(0), matrix.sparseNorm());
+    try expectEqual(matrix.norm(1), matrix.nuclearNorm());
+    try expectEqual(matrix.norm(2), matrix.frobeniusNorm());
+    try expectEqual(matrix.norm(std.math.inf(f32)), matrix.maxNorm());
+    try expectEqual(matrix.norm(-std.math.inf(f32)), matrix.minNorm());
 }
 
 test "SMatrix sum" {
