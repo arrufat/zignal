@@ -87,6 +87,15 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
     }
     c.Py_DECREF(doc_str);
 
+    // Set __module__ attribute to help pdoc recognize it as a top-level class
+    const module_name = c.PyUnicode_FromString("zignal") orelse return error.ModuleNameFailed;
+    if (c.PyObject_SetAttrString(interpolation_method, "__module__", module_name) < 0) {
+        c.Py_DECREF(module_name);
+        c.Py_DECREF(interpolation_method);
+        return error.ModuleSetFailed;
+    }
+    c.Py_DECREF(module_name);
+
     // Add to module
     if (c.PyModule_AddObject(module, "InterpolationMethod", interpolation_method) < 0) {
         c.Py_DECREF(interpolation_method);
