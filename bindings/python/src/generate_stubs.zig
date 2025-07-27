@@ -149,6 +149,7 @@ fn generateImageClass(stub: *GeneratedStub) !void {
     try stub.write("    def save(self, path: str) -> None: ...\n");
     try stub.write("    def to_numpy(self, include_alpha: bool = True) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
     try stub.write("    def resize(self, size: Union[float, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
+    try stub.write("    def letterbox(self, size: Union[int, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
     try stub.write("    @property\n");
     try stub.write("    def rows(self) -> int: ...\n");
     try stub.write("    @property\n");
