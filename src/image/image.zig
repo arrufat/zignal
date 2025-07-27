@@ -340,6 +340,12 @@ pub fn Image(comptime T: type) type {
             const rows_scale = @as(f32, @floatFromInt(out.rows)) / @as(f32, @floatFromInt(self.rows));
             const cols_scale = @as(f32, @floatFromInt(out.cols)) / @as(f32, @floatFromInt(self.cols));
 
+            // If scale factors are exactly equal, aspect ratios match - skip letterboxing
+            if (rows_scale == cols_scale) {
+                self.resize(out.*, method);
+                return out.getRectangle();
+            }
+
             // Choose the smaller scale to maintain aspect ratio
             const scale = @min(rows_scale, cols_scale);
 
