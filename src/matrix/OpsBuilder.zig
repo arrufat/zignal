@@ -658,26 +658,58 @@ pub fn OpsBuilder(comptime T: type) type {
         }
 
         pub const QrResult = struct {
-            q: Matrix(T), // Orthogonal matrix (Q^T Q = I)
-            r: Matrix(T), // Upper triangular matrix
+            q: Matrix(T), // Orthogonal matrix (m×n)
+            r: Matrix(T), // Upper triangular matrix (n×n)
+            perm: []usize, // Column permutation indices (length n)
+            rank: usize, // Numerical rank of the matrix
+            col_norms: []T, // Final column norms after pivoting (diagnostic)
+            allocator: std.mem.Allocator,
 
             pub fn deinit(self: *@This()) void {
                 self.q.deinit();
                 self.r.deinit();
+                self.allocator.free(self.perm);
+                self.allocator.free(self.col_norms);
+            }
+
+            /// Get the permutation as a matrix if needed
+            /// Since perm[j] tells us which original column is at position j,
+            /// the permutation matrix P should satisfy: A*P has column perm[j] of A at position j
+            pub fn permutationMatrix(self: *const @This()) !Matrix(T) {
+                const n = self.perm.len;
+                var p: Matrix(T) = try .initAll(self.allocator, n, n, 0);
+                // P[i,j] = 1 if original column i is at position j
+                // Since perm[j] = i means original column i is at position j
+                for (0..n) |j| {
+                    p.at(self.perm[j], j).* = 1;
+                }
+                return p;
             }
         };
 
-        /// Compute QR decomposition using Modified Gram-Schmidt algorithm
-        /// Returns Q, R matrices such that A = QR where Q is orthogonal and R is upper triangular
+        /// Compute QR decomposition with column pivoting using Modified Gram-Schmidt algorithm
+        /// Returns Q, R matrices and permutation such that A*P = Q*R where Q is orthogonal and R is upper triangular
+        /// Also computes the numerical rank of the matrix
         pub fn qr(self: *Self) !QrResult {
             const m = self.result.rows;
             const n = self.result.cols;
 
-            // Initialize Q and R matrices
+            // Initialize matrices
             var q: Matrix(T) = try .init(self.allocator, m, n);
             errdefer q.deinit();
             var r: Matrix(T) = try .init(self.allocator, n, n);
             errdefer r.deinit();
+
+            // Initialize permutation and column norms
+            const perm = try self.allocator.alloc(usize, n);
+            errdefer self.allocator.free(perm);
+            const col_norms = try self.allocator.alloc(T, n);
+            errdefer self.allocator.free(col_norms);
+
+            // Initialize permutation as identity
+            for (0..n) |i| {
+                perm[i] = i;
+            }
 
             // Copy A to Q (will be modified in-place)
             @memcpy(q.items, self.result.items);
@@ -685,46 +717,125 @@ pub fn OpsBuilder(comptime T: type) type {
             // Initialize R as zero
             @memset(r.items, 0);
 
-            // Modified Gram-Schmidt algorithm
+            // Compute initial column norms
             for (0..n) |j| {
-                // Compute R[j,j] = ||Q[:,j]||
                 var norm_sq: T = 0;
                 for (0..m) |i| {
                     const val = q.at(i, j).*;
                     norm_sq += val * val;
                 }
-                r.at(j, j).* = @sqrt(norm_sq);
+                col_norms[j] = norm_sq;
+            }
 
-                // Check for linear dependence
-                if (r.at(j, j).* < std.math.floatEps(T) * 100) {
-                    return error.LinearlyDependent;
+            // Compute tolerance for rank determination
+            // Find maximum initial column norm for scaling
+            var max_norm: T = 0;
+            for (0..n) |j| {
+                max_norm = @max(max_norm, @sqrt(col_norms[j]));
+            }
+            const eps = std.math.floatEps(T);
+            // Use a practical tolerance that accounts for accumulated rounding errors
+            // Standard practice is to use sqrt(eps) * norm for rank determination
+            const sqrt_eps = @sqrt(eps);
+            const tol = sqrt_eps * @as(T, @floatFromInt(@max(m, n))) * max_norm;
+
+            var computed_rank: usize = 0;
+
+            // Modified Gram-Schmidt with column pivoting
+            for (0..n) |k| {
+
+                // Find column with maximum norm from k to n-1
+                var max_col = k;
+                var max_col_norm = col_norms[k];
+                for (k + 1..n) |j| {
+                    if (col_norms[j] > max_col_norm) {
+                        max_col_norm = col_norms[j];
+                        max_col = j;
+                    }
                 }
 
-                // Normalize Q[:,j]
-                const inv_norm = 1.0 / r.at(j, j).*;
+                // Swap columns if needed
+                if (max_col != k) {
+                    // Swap in Q
+                    for (0..m) |i| {
+                        const temp = q.at(i, k).*;
+                        q.at(i, k).* = q.at(i, max_col).*;
+                        q.at(i, max_col).* = temp;
+                    }
+                    // Swap in R (for already computed rows)
+                    for (0..k) |i| {
+                        const temp = r.at(i, k).*;
+                        r.at(i, k).* = r.at(i, max_col).*;
+                        r.at(i, max_col).* = temp;
+                    }
+                    // Swap in permutation
+                    const temp_perm = perm[k];
+                    perm[k] = perm[max_col];
+                    perm[max_col] = temp_perm;
+                    // Swap column norms
+                    const temp_norm = col_norms[k];
+                    col_norms[k] = col_norms[max_col];
+                    col_norms[max_col] = temp_norm;
+                }
+
+                // Compute R[k,k] = ||Q[:,k]||
+                r.at(k, k).* = @sqrt(col_norms[k]);
+
+                // Check for rank deficiency
+                if (r.at(k, k).* <= tol) {
+                    // Set remaining diagonal elements to zero
+                    for (k..n) |j| {
+                        r.at(j, j).* = 0;
+                        col_norms[j] = 0;
+                    }
+                    break;
+                }
+
+                // Count this as a non-zero pivot
+                computed_rank += 1;
+
+                // Normalize Q[:,k]
+                const inv_norm = 1.0 / r.at(k, k).*;
                 for (0..m) |i| {
-                    q.at(i, j).* *= inv_norm;
+                    q.at(i, k).* *= inv_norm;
                 }
 
                 // Orthogonalize remaining columns
-                for (j + 1..n) |k| {
-                    // Compute R[j,k] = Q[:,j]^T * Q[:,k]
+                for (k + 1..n) |j| {
+                    // Compute R[k,j] = Q[:,k]^T * Q[:,j]
                     var dot_product: T = 0;
                     for (0..m) |i| {
-                        dot_product += q.at(i, j).* * q.at(i, k).*;
+                        dot_product += q.at(i, k).* * q.at(i, j).*;
                     }
-                    r.at(j, k).* = dot_product;
+                    r.at(k, j).* = dot_product;
 
-                    // Q[:,k] = Q[:,k] - R[j,k] * Q[:,j]
+                    // Q[:,j] = Q[:,j] - R[k,j] * Q[:,k]
                     for (0..m) |i| {
-                        q.at(i, k).* -= r.at(j, k).* * q.at(i, j).*;
+                        q.at(i, j).* -= r.at(k, j).* * q.at(i, k).*;
+                    }
+
+                    // Update column norm efficiently
+                    // ||v - proj||^2 = ||v||^2 - ||proj||^2
+                    col_norms[j] -= dot_product * dot_product;
+                    // Ensure non-negative due to rounding
+                    if (col_norms[j] < 0) {
+                        col_norms[j] = 0;
                     }
                 }
             }
 
-            return QrResult{
+            // Store final column norms (after orthogonalization)
+            for (0..n) |j| {
+                col_norms[j] = @sqrt(col_norms[j]);
+            }
+
+            return .{
                 .q = q,
                 .r = r,
+                .perm = perm,
+                .rank = computed_rank,
+                .col_norms = col_norms,
+                .allocator = self.allocator,
             };
         }
 
@@ -825,6 +936,19 @@ pub fn OpsBuilder(comptime T: type) type {
                 sum_diag += self.result.at(i, i).*;
             }
             return sum_diag;
+        }
+
+        /// Compute the numerical rank of the matrix
+        /// Uses QR decomposition with column pivoting
+        /// The rank is determined by counting non-zero diagonal elements in R
+        /// above a tolerance based on machine precision and matrix norm
+        pub fn rank(self: *Self) !usize {
+            // Compute QR decomposition with column pivoting
+            var qr_result = try self.qr();
+            defer qr_result.deinit();
+
+            // The rank is already computed by the QR algorithm
+            return qr_result.rank;
         }
 
         /// Add scalar to all elements
