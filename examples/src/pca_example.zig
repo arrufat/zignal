@@ -245,5 +245,5 @@ pub fn main() !void {
 
     // Save images if not running in WASM
     try original_image.save(gpa, "pca_original.png");
-    try original_image.save(gpa, "pca_aligned.png");
+    try aligned_canvas.image.save(gpa, "pca_aligned.png");
 }

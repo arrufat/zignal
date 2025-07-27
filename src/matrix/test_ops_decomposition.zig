@@ -1,9 +1,8 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
-const OpsBuilder = @import("OpsBuilder.zig").OpsBuilder;
 
-test "OpsBuilder LU decomposition" {
+test "Matrix LU decomposition" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -19,11 +18,9 @@ test "OpsBuilder LU decomposition" {
     mat.at(2, 1).* = 7.0;
     mat.at(2, 2).* = 9.0;
 
-    var ops: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    defer ops.deinit();
 
     // Compute LU decomposition
-    var lu_result = try ops.lu();
+    var lu_result = try mat.lu();
     defer lu_result.deinit();
 
     // Verify dimensions
@@ -79,7 +76,7 @@ test "OpsBuilder LU decomposition" {
     }
 }
 
-test "OpsBuilder QR decomposition simple" {
+test "Matrix QR decomposition simple" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -95,10 +92,8 @@ test "OpsBuilder QR decomposition simple" {
     mat.at(2, 1).* = 0.0;
     mat.at(2, 2).* = 4.0;
 
-    var ops: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    defer ops.deinit();
 
-    var qr_result = try ops.qr();
+    var qr_result = try mat.qr();
     defer qr_result.deinit();
 
     // Remove debug print
@@ -107,7 +102,7 @@ test "OpsBuilder QR decomposition simple" {
     try expectEqual(@as(usize, 2), qr_result.perm[0]);
 }
 
-test "OpsBuilder QR decomposition" {
+test "Matrix QR decomposition" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -123,11 +118,9 @@ test "OpsBuilder QR decomposition" {
     mat.at(2, 1).* = 24.0;
     mat.at(2, 2).* = -41.0;
 
-    var ops: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    defer ops.deinit();
 
     // Compute QR decomposition
-    var qr_result = try ops.qr();
+    var qr_result = try mat.qr();
     defer qr_result.deinit();
 
     // Verify dimensions
@@ -256,10 +249,8 @@ test "OpsBuilder QR decomposition" {
     rect_mat.at(3, 1).* = 1.0;
     rect_mat.at(3, 2).* = 2.0;
 
-    var rect_ops = try OpsBuilder(f64).init(arena.allocator(), rect_mat);
-    defer rect_ops.deinit();
 
-    var rect_qr = try rect_ops.qr();
+    var rect_qr = try rect_mat.qr();
     defer rect_qr.deinit();
 
     // Verify dimensions for rectangular matrix
@@ -309,7 +300,7 @@ test "OpsBuilder QR decomposition" {
     try expectEqual(@as(usize, 3), rect_qr.rank);
 }
 
-test "OpsBuilder QR decomposition with rank-deficient matrix" {
+test "Matrix QR decomposition with rank-deficient matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -329,10 +320,7 @@ test "OpsBuilder QR decomposition with rank-deficient matrix" {
     mat.at(3, 1).* = 5.0;
     mat.at(3, 2).* = 9.0; // 4 + 5
 
-    var ops = try OpsBuilder(f64).init(arena.allocator(), mat);
-    defer ops.deinit();
-
-    var qr_result = try ops.qr();
+    var qr_result = try mat.qr();
     defer qr_result.deinit();
 
     // Verify rank is 2
@@ -385,17 +373,15 @@ test "OpsBuilder QR decomposition with rank-deficient matrix" {
     // Test with zero matrix (rank 0)
     const zero_mat = try Matrix(f64).initAll(arena.allocator(), 3, 3, 0);
 
-    var zero_ops = try OpsBuilder(f64).init(arena.allocator(), zero_mat);
-    defer zero_ops.deinit();
 
-    var zero_qr = try zero_ops.qr();
+    var zero_qr = try zero_mat.qr();
     defer zero_qr.deinit();
 
     // Verify rank is 0
     try expectEqual(@as(usize, 0), zero_qr.rank);
 }
 
-test "OpsBuilder rank method" {
+test "Matrix rank computation" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -411,9 +397,7 @@ test "OpsBuilder rank method" {
     full_rank.at(2, 1).* = 8.0;
     full_rank.at(2, 2).* = 10.0; // Made it 10 instead of 9 to ensure full rank
 
-    var ops1 = try OpsBuilder(f64).init(arena.allocator(), full_rank);
-    defer ops1.deinit();
-    try expectEqual(@as(usize, 3), try ops1.rank());
+    try expectEqual(@as(usize, 3), try full_rank.rank());
 
     // Test 2: Rank deficient matrix (rank 1)
     // All columns are multiples of the first column
@@ -428,9 +412,7 @@ test "OpsBuilder rank method" {
     rank_1.at(2, 1).* = 6.0; // 2 * col0
     rank_1.at(2, 2).* = 9.0; // 3 * col0
 
-    var ops2 = try OpsBuilder(f64).init(arena.allocator(), rank_1);
-    defer ops2.deinit();
-    try expectEqual(@as(usize, 1), try ops2.rank());
+    try expectEqual(@as(usize, 1), try rank_1.rank());
 
     // Test 2b: Rank 2 matrix
     var rank_2 = try Matrix(f64).init(arena.allocator(), 3, 3);
@@ -444,15 +426,11 @@ test "OpsBuilder rank method" {
     rank_2.at(2, 1).* = 0.0;
     rank_2.at(2, 2).* = 0.0; // col2 = col0
 
-    var ops2b = try OpsBuilder(f64).init(arena.allocator(), rank_2);
-    defer ops2b.deinit();
-    try expectEqual(@as(usize, 2), try ops2b.rank());
+    try expectEqual(@as(usize, 2), try rank_2.rank());
 
     // Test 3: Zero matrix (rank 0)
     const zero_mat = try Matrix(f64).initAll(arena.allocator(), 4, 3, 0);
-    var ops3 = try OpsBuilder(f64).init(arena.allocator(), zero_mat);
-    defer ops3.deinit();
-    try expectEqual(@as(usize, 0), try ops3.rank());
+    try expectEqual(@as(usize, 0), try zero_mat.rank());
 
     // Test 4: Rectangular matrix with rank deficiency
     var rect_mat = try Matrix(f64).init(arena.allocator(), 5, 3);
@@ -473,31 +451,23 @@ test "OpsBuilder rank method" {
     rect_mat.at(4, 1).* = 1.0;
     rect_mat.at(4, 2).* = 3.0; // col0 + col1
 
-    var ops4 = try OpsBuilder(f64).init(arena.allocator(), rect_mat);
-    defer ops4.deinit();
-    try expectEqual(@as(usize, 2), try ops4.rank());
+    try expectEqual(@as(usize, 2), try rect_mat.rank());
 
     // Test 5: Single element matrix
     const single = try Matrix(f64).initAll(arena.allocator(), 1, 1, 5.0);
-    var ops5 = try OpsBuilder(f64).init(arena.allocator(), single);
-    defer ops5.deinit();
-    try expectEqual(@as(usize, 1), try ops5.rank());
+    try expectEqual(@as(usize, 1), try single.rank());
 
     // Test 6: Column vector
     var col_vec = try Matrix(f64).init(arena.allocator(), 5, 1);
     for (0..5) |i| {
         col_vec.at(i, 0).* = @floatFromInt(i + 1);
     }
-    var ops6 = try OpsBuilder(f64).init(arena.allocator(), col_vec);
-    defer ops6.deinit();
-    try expectEqual(@as(usize, 1), try ops6.rank());
+    try expectEqual(@as(usize, 1), try col_vec.rank());
 
     // Test 7: Row vector
     var row_vec = try Matrix(f64).init(arena.allocator(), 1, 5);
     for (0..5) |i| {
         row_vec.at(0, i).* = @floatFromInt(i + 1);
     }
-    var ops7 = try OpsBuilder(f64).init(arena.allocator(), row_vec);
-    defer ops7.deinit();
-    try expectEqual(@as(usize, 1), try ops7.rank());
+    try expectEqual(@as(usize, 1), try row_vec.rank());
 }

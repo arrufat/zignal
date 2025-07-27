@@ -1,32 +1,27 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
-const OpsBuilder = @import("OpsBuilder.zig").OpsBuilder;
 
-test "OpsBuilder determinant - small matrices" {
+test "Matrix determinant - small matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
     // Test 1x1 matrix
-    var mat1: Matrix(f64) = try .init(arena.allocator(), 1, 1);
+    const mat1: Matrix(f64) = try .init(arena.allocator(), 1, 1);
     mat1.at(0, 0).* = 5.0;
-    var ops1: OpsBuilder(f64) = try .init(arena.allocator(), mat1);
-    defer ops1.deinit();
-    try expectEqual(@as(f64, 5.0), try ops1.determinant());
+    try expectEqual(@as(f64, 5.0), try mat1.determinant());
 
     // Test 2x2 matrix
-    var mat2: Matrix(f64) = try .init(arena.allocator(), 2, 2);
+    const mat2: Matrix(f64) = try .init(arena.allocator(), 2, 2);
     mat2.at(0, 0).* = 4.0;
     mat2.at(0, 1).* = 7.0;
     mat2.at(1, 0).* = 2.0;
     mat2.at(1, 1).* = 6.0;
-    var ops2: OpsBuilder(f64) = try .init(arena.allocator(), mat2);
-    defer ops2.deinit();
     // det = 4*6 - 7*2 = 24 - 14 = 10
-    try expectEqual(@as(f64, 10.0), try ops2.determinant());
+    try expectEqual(@as(f64, 10.0), try mat2.determinant());
 
     // Test 3x3 matrix
-    var mat3: Matrix(f64) = try .init(arena.allocator(), 3, 3);
+    const mat3: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     mat3.at(0, 0).* = 1.0;
     mat3.at(0, 1).* = 2.0;
     mat3.at(0, 2).* = 3.0;
@@ -36,15 +31,13 @@ test "OpsBuilder determinant - small matrices" {
     mat3.at(2, 0).* = 5.0;
     mat3.at(2, 1).* = 6.0;
     mat3.at(2, 2).* = 0.0;
-    var ops3: OpsBuilder(f64) = try .init(arena.allocator(), mat3);
-    defer ops3.deinit();
     // det = 1*(1*0 - 4*6) - 2*(0*0 - 4*5) + 3*(0*6 - 1*5)
     //     = 1*(-24) - 2*(-20) + 3*(-5)
     //     = -24 + 40 - 15 = 1
-    try expectEqual(@as(f64, 1.0), try ops3.determinant());
+    try expectEqual(@as(f64, 1.0), try mat3.determinant());
 }
 
-test "OpsBuilder determinant - large matrices using LU" {
+test "Matrix determinant - large matrices using LU" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -67,9 +60,7 @@ test "OpsBuilder determinant - large matrices using LU" {
     mat4.at(3, 2).* = 0.0;
     mat4.at(3, 3).* = 4.0;
 
-    var ops4: OpsBuilder(f64) = try .init(arena.allocator(), mat4);
-    defer ops4.deinit();
-    const det4 = try ops4.determinant();
+    const det4 = try mat4.determinant();
 
     // This matrix should have a non-zero determinant
     try std.testing.expect(@abs(det4) > 1e-10);
@@ -93,9 +84,7 @@ test "OpsBuilder determinant - large matrices using LU" {
     sing.at(3, 2).* = 8.0;
     sing.at(3, 3).* = 10.0;
 
-    var ops_sing: OpsBuilder(f64) = try .init(arena.allocator(), sing);
-    defer ops_sing.deinit();
-    const det_sing = try ops_sing.determinant();
+    const det_sing = try sing.determinant();
 
     // Singular matrix should have determinant 0
     try std.testing.expect(@abs(det_sing) < 1e-10);
@@ -107,9 +96,7 @@ test "OpsBuilder determinant - large matrices using LU" {
         identity5.at(i, i).* = 1.0;
     }
 
-    var ops_id: OpsBuilder(f64) = try .init(arena.allocator(), identity5);
-    defer ops_id.deinit();
-    const det_id = try ops_id.determinant();
+    const det_id = try identity5.determinant();
 
     try expectEqual(@as(f64, 1.0), det_id);
 }
