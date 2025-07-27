@@ -173,10 +173,19 @@ pub fn createColorBinding(
             }.setter;
         }
 
-        /// Generate methods array - automatically create conversion methods for all color types
-        pub fn generateMethods() [color_types.len]c.PyMethodDef {
-            var methods: [color_types.len]c.PyMethodDef = undefined;
+        /// Generate methods array - automatically create conversion methods for all color types + __format__
+        pub fn generateMethods() [color_types.len + 1]c.PyMethodDef {
+            var methods: [color_types.len + 1]c.PyMethodDef = undefined;
             var index: usize = 0;
+
+            // Add __format__ method
+            methods[index] = c.PyMethodDef{
+                .ml_name = "__format__",
+                .ml_meth = @ptrCast(&formatMethod),
+                .ml_flags = c.METH_VARARGS,
+                .ml_doc = "Format the color object with optional format specifier (e.g., 'ansi' for terminal colors)",
+            };
+            index += 1;
 
             // Generate conversion methods for each color type
             inline for (color_types) |TargetColorType| {
@@ -519,6 +528,84 @@ pub fn createColorBinding(
             };
 
             return @ptrCast(c.PyUnicode_FromString(formatted.ptr));
+        }
+
+        /// __format__ method implementation
+        pub fn formatMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self = @as(*ObjectType, @ptrCast(self_obj));
+
+            // Parse format_spec argument
+            var format_spec: [*c]const u8 = undefined;
+            const format = std.fmt.comptimePrint("s", .{});
+            if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
+                return null;
+            }
+
+            // Convert C string to Zig slice
+            const format_str = std.mem.span(format_spec);
+            if (std.mem.eql(u8, format_str, "ansi")) {
+                // Convert to Zig color
+                const zig_color = objectToZigColor(self);
+
+                // Use zignal's public API
+                const convertColor = zignal.convertColor;
+                const Rgb = zignal.Rgb;
+                const Oklab = zignal.Oklab;
+
+                // Convert to RGB for ANSI display
+                const rgb = convertColor(Rgb, zig_color);
+
+                // Determine text color based on background darkness
+                const fg: u8 = if (convertColor(Oklab, rgb).l < 0.5) 255 else 0;
+
+                // Build ANSI formatted string with Python-style repr
+                var buffer: [512]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buffer);
+                const writer = stream.writer();
+
+                // Start with ANSI escape codes and type name
+                writer.print(
+                    "\x1b[1m\x1b[38;2;{d};{d};{d}m\x1b[48;2;{d};{d};{d}m{s}(",
+                    .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, name },
+                ) catch return null;
+
+                // Print each field in Python style (field=value)
+                inline for (fields, 0..) |field, i| {
+                    writer.print("{s}=", .{field.name}) catch return null;
+
+                    // Format the field value appropriately
+                    const value = switch (i) {
+                        0 => self.field0,
+                        1 => self.field1,
+                        2 => self.field2,
+                        3 => self.field3,
+                        else => unreachable,
+                    };
+
+                    switch (field.type) {
+                        u8 => writer.print("{d}", .{value}) catch return null,
+                        f64 => writer.print("{d}", .{value}) catch return null,
+                        else => writer.print("{any}", .{value}) catch return null,
+                    }
+
+                    if (i < fields.len - 1) {
+                        writer.print(", ", .{}) catch return null;
+                    }
+                }
+
+                // Close parenthesis and reset ANSI codes
+                writer.print(")\x1b[0m", .{}) catch return null;
+
+                const formatted = stream.getWritten();
+                return @ptrCast(c.PyUnicode_FromStringAndSize(formatted.ptr, @intCast(formatted.len)));
+            } else if (format_str.len == 0) {
+                // Empty format spec - use repr
+                return repr(self_obj);
+            } else {
+                // Unknown format spec
+                _ = c.PyErr_Format(c.PyExc_ValueError, "Unknown format code '%s' for object of type '%s'", format_spec, name.ptr);
+                return null;
+            }
         }
     };
 }
