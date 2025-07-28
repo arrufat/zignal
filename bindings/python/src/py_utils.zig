@@ -4,6 +4,9 @@ const c = @cImport({
     @cInclude("Python.h");
 });
 
+const zignal = @import("zignal");
+const Point2d = zignal.Point2d;
+
 /// Creates an arena allocator optimized for Python C API integration.
 /// Uses c_allocator as backing since we're already linking with libc.
 pub fn createArenaAllocator() std.heap.ArenaAllocator {
@@ -259,6 +262,207 @@ pub fn convertWithValidation(
     }
 
     return converted;
+}
+
+/// Parse a Python color - either a tuple (RGB/RGBA) or a color object
+/// Returns a zignal.Rgba color with values in range 0-255
+pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
+    if (color_obj == null) {
+        return error.InvalidColor;
+    }
+
+    // First check if it's a tuple
+    if (c.PyTuple_Check(color_obj) != 0) {
+        return parseColorTuple(color_obj);
+    }
+
+    // Otherwise, check if it has a to_rgba method (duck typing)
+    const to_rgba_str = c.PyUnicode_FromString("to_rgba");
+    defer c.Py_DECREF(to_rgba_str);
+
+    if (c.PyObject_HasAttr(color_obj, to_rgba_str) != 0) {
+        // Call to_rgba() method
+        const rgba_obj = c.PyObject_CallMethodObjArgs(color_obj, to_rgba_str, @as(?*c.PyObject, null));
+        if (rgba_obj == null) {
+            return error.InvalidColor;
+        }
+        defer c.Py_DECREF(rgba_obj);
+
+        // Extract r, g, b, a attributes from the returned Rgba object
+        const r_attr = c.PyObject_GetAttrString(rgba_obj, "r");
+        if (r_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(r_attr);
+
+        const g_attr = c.PyObject_GetAttrString(rgba_obj, "g");
+        if (g_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(g_attr);
+
+        const b_attr = c.PyObject_GetAttrString(rgba_obj, "b");
+        if (b_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(b_attr);
+
+        const a_attr = c.PyObject_GetAttrString(rgba_obj, "a");
+        if (a_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(a_attr);
+
+        const r = c.PyLong_AsLong(r_attr);
+        const g = c.PyLong_AsLong(g_attr);
+        const b = c.PyLong_AsLong(b_attr);
+        const a = c.PyLong_AsLong(a_attr);
+
+        if (c.PyErr_Occurred() != null) {
+            return error.InvalidColor;
+        }
+
+        return zignal.Rgba{
+            .r = @intCast(r),
+            .g = @intCast(g),
+            .b = @intCast(b),
+            .a = @intCast(a),
+        };
+    }
+
+    // Check if it's an Rgba object directly (no conversion needed)
+    const r_attr = c.PyObject_GetAttrString(color_obj, "r");
+    if (r_attr != null) {
+        defer c.Py_DECREF(r_attr);
+
+        const g_attr = c.PyObject_GetAttrString(color_obj, "g");
+        if (g_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(g_attr);
+
+        const b_attr = c.PyObject_GetAttrString(color_obj, "b");
+        if (b_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(b_attr);
+
+        const a_attr = c.PyObject_GetAttrString(color_obj, "a");
+        if (a_attr == null) return error.InvalidColor;
+        defer c.Py_DECREF(a_attr);
+
+        const r = c.PyLong_AsLong(r_attr);
+        const g = c.PyLong_AsLong(g_attr);
+        const b = c.PyLong_AsLong(b_attr);
+        const a = c.PyLong_AsLong(a_attr);
+
+        if (c.PyErr_Occurred() != null) {
+            return error.InvalidColor;
+        }
+
+        return zignal.Rgba{
+            .r = @intCast(r),
+            .g = @intCast(g),
+            .b = @intCast(b),
+            .a = @intCast(a),
+        };
+    }
+
+    c.PyErr_SetString(c.PyExc_TypeError, "Color must be a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgba() method");
+    return error.InvalidColor;
+}
+
+/// Parse a Python tuple representing a color (RGB or RGBA)
+/// Returns a zignal.Rgba color with values in range 0-255
+/// This is now a helper function used by parseColor
+fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
+    if (color_obj == null) {
+        return error.InvalidColor;
+    }
+
+    const size = c.PyTuple_Size(color_obj);
+    if (size != 3 and size != 4) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Color tuple must have 3 or 4 elements");
+        return error.InvalidColor;
+    }
+
+    // Extract color components
+    var r: c_long = 0;
+    var g: c_long = 0;
+    var b: c_long = 0;
+    var a: c_long = 255;
+
+    // Get R
+    const r_obj = c.PyTuple_GetItem(color_obj, 0);
+    r = c.PyLong_AsLong(r_obj);
+    if (r == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
+        return error.InvalidColor;
+    }
+
+    // Get G
+    const g_obj = c.PyTuple_GetItem(color_obj, 1);
+    g = c.PyLong_AsLong(g_obj);
+    if (g == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
+        return error.InvalidColor;
+    }
+
+    // Get B
+    const b_obj = c.PyTuple_GetItem(color_obj, 2);
+    b = c.PyLong_AsLong(b_obj);
+    if (b == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
+        return error.InvalidColor;
+    }
+
+    // Get A if present
+    if (size == 4) {
+        const a_obj = c.PyTuple_GetItem(color_obj, 3);
+        a = c.PyLong_AsLong(a_obj);
+        if (a == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
+            return error.InvalidColor;
+        }
+    }
+
+    // Validate range
+    if (r < 0 or r > 255 or g < 0 or g > 255 or b < 0 or b > 255 or a < 0 or a > 255) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Color components must be in range 0-255");
+        return error.InvalidColor;
+    }
+
+    return zignal.Rgba{
+        .r = @intCast(r),
+        .g = @intCast(g),
+        .b = @intCast(b),
+        .a = @intCast(a),
+    };
+}
+
+/// Parse a Python tuple representing a 2D point (x, y)
+/// Returns a Point2d(f32) for use with drawing operations
+pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point2d(f32) {
+    if (point_obj == null) {
+        return error.InvalidPoint;
+    }
+
+    // Check if it's a tuple
+    if (c.PyTuple_Check(point_obj) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Point must be a tuple of (x, y)");
+        return error.InvalidPoint;
+    }
+
+    const size = c.PyTuple_Size(point_obj);
+    if (size != 2) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Point tuple must have exactly 2 elements");
+        return error.InvalidPoint;
+    }
+
+    // Extract x and y coordinates
+    const x_obj = c.PyTuple_GetItem(point_obj, 0);
+    const x = c.PyFloat_AsDouble(x_obj);
+    if (x == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Point coordinates must be numbers");
+        return error.InvalidPoint;
+    }
+
+    const y_obj = c.PyTuple_GetItem(point_obj, 1);
+    const y = c.PyFloat_AsDouble(y_obj);
+    if (y == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Point coordinates must be numbers");
+        return error.InvalidPoint;
+    }
+
+    return Point2d(f32).init2d(@floatCast(x), @floatCast(y));
 }
 
 /// Method descriptor for automatic generation

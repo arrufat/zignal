@@ -24,7 +24,7 @@ def get_zig_version() -> str:
             cwd=project_root,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
@@ -33,7 +33,10 @@ def get_zig_version() -> str:
         print(f"stderr: {e.stderr}", file=sys.stderr)
         sys.exit(1)
     except FileNotFoundError:
-        print("Error: 'zig' command not found. Make sure Zig is installed and in PATH.", file=sys.stderr)
+        print(
+            "Error: 'zig' command not found. Make sure Zig is installed and in PATH.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
@@ -41,20 +44,20 @@ def zig_to_python_version(zig_version: str) -> str:
     """Convert Zig version format to Python PEP 440 format."""
     # Convert Zig's "0.2.0-dev.13+abc123" to Python's "0.2.0.dev13"
     # Also handle simple "0.2.0-dev" case
-    
+
     # Pattern to match Zig version format
-    pattern = r'^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?(?:\+(.+))?$'
+    pattern = r"^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?(?:\+(.+))?$"
     match = re.match(pattern, zig_version)
-    
+
     if not match:
         # If it doesn't match expected format, return as-is
         return zig_version
-    
+
     base_version = match.group(1)  # "0.2.0"
-    prerelease = match.group(2)    # "dev" or "python" etc.
-    dev_number = match.group(3)    # "13" or None
-    commit_hash = match.group(4)   # "abc123" or None
-    
+    prerelease = match.group(2)  # "dev" or "python" etc.
+    dev_number = match.group(3)  # "13" or None
+    commit_hash = match.group(4)  # "abc123" or None
+
     if prerelease:
         # Always convert any pre-release to dev format for PEP 440 compatibility
         # This handles "dev", "python", branch names like "feature-xyz", etc.
@@ -89,7 +92,9 @@ def update_pyproject_toml(new_version: str) -> None:
         print("Error: Could not find version field in pyproject.toml", file=sys.stderr)
         sys.exit(1)
     elif count > 1:
-        print("Warning: Multiple version fields found in pyproject.toml", file=sys.stderr)
+        print(
+            "Warning: Multiple version fields found in pyproject.toml", file=sys.stderr
+        )
 
     # Write back the updated content
     pyproject_path.write_text(new_content)

@@ -3,6 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
+const Point2d = zignal.Point2d;
 
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
@@ -118,78 +119,6 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     }
 }
 
-// Helper function to convert Python color tuple to Rgba
-fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
-    if (color_obj == null) {
-        return error.InvalidColor;
-    }
-
-    // Check if it's a tuple
-    if (c.PyTuple_Check(color_obj) == 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color must be a tuple of (r, g, b) or (r, g, b, a)");
-        return error.InvalidColor;
-    }
-
-    const size = c.PyTuple_Size(color_obj);
-    if (size != 3 and size != 4) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Color tuple must have 3 or 4 elements");
-        return error.InvalidColor;
-    }
-
-    // Extract color components
-    var r: c_long = 0;
-    var g: c_long = 0;
-    var b: c_long = 0;
-    var a: c_long = 255;
-
-    // Get R
-    const r_obj = c.PyTuple_GetItem(color_obj, 0);
-    r = c.PyLong_AsLong(r_obj);
-    if (r == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
-
-    // Get G
-    const g_obj = c.PyTuple_GetItem(color_obj, 1);
-    g = c.PyLong_AsLong(g_obj);
-    if (g == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
-
-    // Get B
-    const b_obj = c.PyTuple_GetItem(color_obj, 2);
-    b = c.PyLong_AsLong(b_obj);
-    if (b == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
-
-    // Get A if present
-    if (size == 4) {
-        const a_obj = c.PyTuple_GetItem(color_obj, 3);
-        a = c.PyLong_AsLong(a_obj);
-        if (a == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-            return error.InvalidColor;
-        }
-    }
-
-    // Validate range
-    if (r < 0 or r > 255 or g < 0 or g > 255 or b < 0 or b > 255 or a < 0 or a > 255) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Color components must be in range 0-255");
-        return error.InvalidColor;
-    }
-
-    return zignal.Rgba{
-        .r = @intCast(r),
-        .g = @intCast(g),
-        .b = @intCast(b),
-        .a = @intCast(a),
-    };
-}
-
 // Fill the entire canvas with a color
 fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*CanvasObject, @ptrCast(self_obj.?));
@@ -207,11 +136,64 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
         return null;
     }
 
-    // Convert color tuple to Rgba
-    const color = parseColorTuple(color_obj) catch return null;
+    // Convert color to Rgba
+    const color = py_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
 
     // Use the stored Canvas directly
     self.canvas_ptr.?.fill(color);
+
+    // Return None
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
+// Draw a line between two points
+fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+
+    // Check if canvas is initialized
+    if (self.canvas_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Canvas not initialized");
+        return null;
+    }
+
+    // Parse arguments - p1, p2, color are required; width and mode are optional
+    var p1_obj: ?*c.PyObject = undefined;
+    var p2_obj: ?*c.PyObject = undefined;
+    var color_obj: ?*c.PyObject = undefined;
+    var width: c_long = 1;
+    var mode: c_long = 0; // DrawMode.FAST
+
+    const kwlist = [_][*c]const u8{ "p1", "p2", "color", "width", "mode", null };
+    const format = std.fmt.comptimePrint("OOO|ll", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
+        return null;
+    }
+
+    // Validate width
+    if (width < 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Width must be non-negative");
+        return null;
+    }
+
+    // Validate mode
+    if (mode != 0 and mode != 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Mode must be DrawMode.FAST (0) or DrawMode.SOFT (1)");
+        return null;
+    }
+
+    // Convert Python objects to Zig types
+    const p1 = py_utils.parsePointTuple(@ptrCast(p1_obj)) catch return null;
+    const p2 = py_utils.parsePointTuple(@ptrCast(p2_obj)) catch return null;
+    const color = py_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
+
+    // Convert mode to DrawMode enum
+    const draw_mode: DrawMode = if (mode == 0) .fast else .soft;
+
+    // Draw the line
+    self.canvas_ptr.?.drawLine(p1, p2, color, @intCast(width), draw_mode);
 
     // Return None
     const none = c.Py_None();
@@ -266,16 +248,51 @@ var canvas_methods = [_]c.PyMethodDef{
     \\
     \\Parameters
     \\----------
-    \\color : tuple[int, int, int] or tuple[int, int, int, int]
-    \\    RGB or RGBA color tuple with values in range 0-255.
+    \\color : tuple[int, int, int] or tuple[int, int, int, int] or any color object
+    \\    RGB or RGBA color tuple with values in range 0-255, or any zignal color object
+    \\    (Rgb, Hsl, Hsv, Lab, Oklab, etc.). Color objects are automatically converted to RGBA.
     \\    If only RGB is provided, alpha defaults to 255 (fully opaque).
     \\
     \\Examples
     \\--------
     \\>>> img = Image.load("photo.png")
     \\>>> canvas = img.canvas()
-    \\>>> canvas.fill((255, 0, 0))      # Fill with red
+    \\>>> canvas.fill((255, 0, 0))      # Fill with red tuple
     \\>>> canvas.fill((0, 255, 0, 128)) # Fill with semi-transparent green
+    \\>>> canvas.fill(zignal.Rgb(255, 0, 0))  # Fill with red color object
+    \\>>> canvas.fill(zignal.Hsl(120, 100, 50))  # Fill with green HSL color
+    },
+    .{ .ml_name = "draw_line", .ml_meth = @ptrCast(&canvas_draw_line), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = 
+    \\draw_line(p1, p2, color, width=1, mode=DrawMode.FAST)
+    \\--
+    \\
+    \\Draw a line between two points.
+    \\
+    \\Parameters
+    \\----------
+    \\p1 : tuple[float, float]
+    \\    Starting point (x, y) coordinates.
+    \\p2 : tuple[float, float]
+    \\    Ending point (x, y) coordinates.
+    \\color : tuple[int, int, int] or tuple[int, int, int, int] or any color object
+    \\    RGB or RGBA color tuple with values in range 0-255, or any zignal color object
+    \\    (Rgb, Hsl, Hsv, Lab, Oklab, etc.). Color objects are automatically converted to RGBA.
+    \\    If only RGB is provided, alpha defaults to 255 (fully opaque).
+    \\width : int, optional
+    \\    Line width in pixels (default: 1).
+    \\mode : DrawMode, optional
+    \\    Rendering quality mode (default: DrawMode.FAST).
+    \\    Use DrawMode.SOFT for antialiased lines.
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> canvas = img.canvas()
+    \\>>> canvas.draw_line((10, 10), (100, 100), (255, 0, 0))  # Red diagonal line
+    \\>>> canvas.draw_line((0, 50), (200, 50), (0, 255, 0), width=3)  # Thick green horizontal line
+    \\>>> canvas.draw_line((50, 0), (50, 200), (0, 0, 255), width=2, mode=DrawMode.SOFT)  # Antialiased blue vertical line
+    \\>>> canvas.draw_line((0, 0), (100, 100), zignal.Rgb(255, 0, 0))  # Using color object
+    \\>>> canvas.draw_line((0, 0), (100, 100), zignal.Lab(53.24, 80.09, 67.20))  # Red in Lab color space
     },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
