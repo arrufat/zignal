@@ -48,7 +48,6 @@ const Canvas = zignal.Canvas;
 const Image = zignal.Image;
 const Point2d = zignal.Point2d;
 const Rgba = zignal.Rgba;
-const savePng = zignal.savePng;
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -70,7 +69,7 @@ pub fn main() !void {
     canvas.drawCircle(center, 100, red, 3, .soft);
 
     // Save the result to a PNG file
-    try savePng(Rgba, allocator, image, "drawing.png");
+    try image.save(allocator, "drawing.png");
 }
 ```
 
