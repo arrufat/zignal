@@ -7,6 +7,8 @@ const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 
+const canvas = @import("canvas.zig");
+
 const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
     @cInclude("Python.h");
@@ -973,6 +975,50 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 }
 
+// Create a Canvas for drawing operations on this image
+fn image_canvas(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args; // No arguments expected
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+
+    // Create new Canvas object
+    const canvas_obj = @as(?*canvas.CanvasObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(&canvas.CanvasType), 0)));
+    if (canvas_obj == null) {
+        return null;
+    }
+
+    // Keep reference to parent Image to prevent garbage collection
+    c.Py_INCREF(self_obj.?);
+    canvas_obj.?.image_ref = @ptrCast(self_obj);
+
+    // Create and store the Canvas struct
+    const canvas_ptr = allocator.create(canvas.Canvas(zignal.Rgba)) catch {
+        c.Py_DECREF(self_obj.?);
+        c.Py_DECREF(@as(*c.PyObject, @ptrCast(canvas_obj)));
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Canvas");
+        return null;
+    };
+
+    // Initialize the Canvas
+    if (self.image_ptr) |img_ptr| {
+        canvas_ptr.* = canvas.Canvas(zignal.Rgba).init(allocator, img_ptr.*);
+    } else {
+        allocator.destroy(canvas_ptr);
+        c.Py_DECREF(self_obj.?);
+        c.Py_DECREF(@as(*c.PyObject, @ptrCast(canvas_obj)));
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+    canvas_obj.?.canvas_ptr = canvas_ptr;
+
+    return @as(?*c.PyObject, @ptrCast(canvas_obj));
+}
+
 var image_methods = [_]c.PyMethodDef{
     .{ .ml_name = "load", .ml_meth = image_load, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = "Load an image from file (PNG/JPEG)" },
     .{ .ml_name = "from_numpy", .ml_meth = image_from_numpy, .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = 
@@ -1114,6 +1160,23 @@ var image_methods = [_]c.PyMethodDef{
     \\  print(f"{img:braille}") # Display with ANSI colors using braille patterns (good for monochrome images)
     \\  print(f"{img:sixel}")   # Display with sixel graphics
     \\  print(f"{img:kitty}")   # Display with kitty graphics
+    },
+    .{ .ml_name = "canvas", .ml_meth = image_canvas, .ml_flags = c.METH_NOARGS, .ml_doc = 
+    \\canvas(/)
+    \\--
+    \\
+    \\Create a Canvas object for drawing operations on this image.
+    \\
+    \\Returns
+    \\-------
+    \\Canvas
+    \\    A new Canvas object that can be used to draw on this image.
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> canvas = img.canvas()
+    \\>>> canvas.fill((255, 0, 0))  # Fill entire image with red
     },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };

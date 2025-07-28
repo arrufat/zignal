@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 
 const color = @import("color.zig");
 const image = @import("image.zig");
+const canvas = @import("canvas.zig");
 const py_utils = @import("py_utils.zig");
 const fdm = @import("fdm.zig");
 const interpolation = @import("interpolation.zig");
@@ -44,6 +45,20 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register Image type
     py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch |err| {
         std.log.err("Failed to register Image: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register Canvas type
+    py_utils.registerType(@ptrCast(m), "Canvas", @ptrCast(&canvas.CanvasType)) catch |err| {
+        std.log.err("Failed to register Canvas: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register DrawMode enum
+    canvas.registerDrawMode(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register DrawMode: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
