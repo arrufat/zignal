@@ -31,7 +31,9 @@ def main():
     except ImportError:
         print("Error: pdoc is not installed.")
         print("Install it with: cd bindings/python && uv pip install -e '.[docs]'")
-        print("Or run with: cd bindings/python && uv run --extra docs python build_docs.py")
+        print(
+            "Or run with: cd bindings/python && uv run --extra docs python build_docs.py"
+        )
         sys.exit(1)
 
     # Build the Python bindings first
@@ -48,14 +50,13 @@ def main():
     if os.environ.get("UV_PROJECT_ROOT") or Path(bindings_dir / ".venv").exists():
         # Use uv pip for installation
         result = subprocess.run(
-            ["uv", "pip", "install", "-e", str(bindings_dir)],
-            capture_output=True
+            ["uv", "pip", "install", "-e", str(bindings_dir)], capture_output=True
         )
     else:
         # Fall back to regular pip
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "-e", str(bindings_dir)],
-            capture_output=True
+            capture_output=True,
         )
 
     if result.returncode != 0:
@@ -66,6 +67,7 @@ def main():
     # Import to verify it works
     try:
         import zignal
+
         print(f"Successfully imported zignal version {zignal.__version__}")
     except ImportError as e:
         print(f"Error importing zignal: {e}")
@@ -79,12 +81,17 @@ def main():
     # Generate documentation
     print(f"Generating documentation in {docs_dir}...")
     cmd = [
-        sys.executable, "-m", "pdoc",
-        "--output-directory", str(docs_dir),
+        sys.executable,
+        "-m",
+        "pdoc",
+        "--output-directory",
+        str(docs_dir),
         "--no-show",  # Don't open browser
         "--no-show-source",  # Don't show C extension source (enables stub file usage)
-        "-d", "numpy",  # Use numpy docstring format
-        "zignal", "zignal._zignal"  # Document multiple modules to enable search
+        "-d",
+        "numpy",  # Use numpy docstring format
+        "zignal",
+        "zignal._zignal",  # Document multiple modules to enable search
     ]
 
     result = subprocess.run(cmd, capture_output=True)
