@@ -236,40 +236,22 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
         };
     }
 
-    // Always check git state to determine if we're on a clean tag or ahead of it
-    // if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
+    if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
+
+    const zignal_dir = b.pathFromRoot(".");
 
     var code: u8 = undefined;
-
-    // Check if we're on an exact tag by running git describe early
-    const git_describe_check = b.runAllowFail(&.{ "git", "describe", "--tags" }, &code, .Ignore) catch "";
-    if (git_describe_check.len > 0) {
-        const describe_output = std.mem.trim(u8, git_describe_check, " \n\r");
-        // If git describe returns just a tag (no dashes), we're on an exact tag
-        if (std.mem.count(u8, describe_output, "-") == 0) {
-            // If tag matches version, return clean version
-            if (std.mem.eql(u8, describe_output, b.fmt("{f}", .{zignal_version}))) {
-                return zignal_version;
-            }
-        }
-    }
-
-    // Get current branch name
-    const git_branch_raw = b.runAllowFail(&.{ "git", "branch", "--show-current" }, &code, .Ignore) catch "";
-    const git_branch = std.mem.trim(u8, git_branch_raw, " \n\r");
-    const is_master = std.mem.eql(u8, git_branch, "master");
-
-    // Get commit hash (used in all cases)
-    const git_hash_raw = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
+    const git_hash_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
     const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
+    const git_branch_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "branch", "--show-current" }, &code, .Ignore) catch return zignal_version;
+    const git_branch = std.mem.trim(u8, git_branch_raw, " \n\r");
 
     // For non-master branches, always use total commit count
+    const is_master = std.mem.eql(u8, git_branch, "master");
     if (!is_master) {
-        const git_count_raw = b.runAllowFail(&.{ "git", "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
+        const git_count_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
         const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
-
         const dev_prefix = if (git_branch.len > 0) git_branch else "dev";
-
         return .{
             .major = zignal_version.major,
             .minor = zignal_version.minor,
@@ -280,11 +262,10 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     }
 
     // For master branch, use git describe
-    const git_describe_raw = b.runAllowFail(&.{ "git", "describe", "--tags" }, &code, .Ignore) catch {
+    const git_describe_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "describe", "--tags" }, &code, .Ignore) catch {
         // If git describe fails (no tags), try to get commit count from git log
-        const git_count_raw = b.runAllowFail(&.{ "git", "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
+        const git_count_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
         const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
-
         return .{
             .major = zignal_version.major,
             .minor = zignal_version.minor,
