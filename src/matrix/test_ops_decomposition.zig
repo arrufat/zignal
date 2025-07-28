@@ -18,7 +18,6 @@ test "Matrix LU decomposition" {
     mat.at(2, 1).* = 7.0;
     mat.at(2, 2).* = 9.0;
 
-
     // Compute LU decomposition
     var lu_result = try mat.lu();
     defer lu_result.deinit();
@@ -92,7 +91,6 @@ test "Matrix QR decomposition simple" {
     mat.at(2, 1).* = 0.0;
     mat.at(2, 2).* = 4.0;
 
-
     var qr_result = try mat.qr();
     defer qr_result.deinit();
 
@@ -117,7 +115,6 @@ test "Matrix QR decomposition" {
     mat.at(2, 0).* = -4.0;
     mat.at(2, 1).* = 24.0;
     mat.at(2, 2).* = -41.0;
-
 
     // Compute QR decomposition
     var qr_result = try mat.qr();
@@ -249,7 +246,6 @@ test "Matrix QR decomposition" {
     rect_mat.at(3, 1).* = 1.0;
     rect_mat.at(3, 2).* = 2.0;
 
-
     var rect_qr = try rect_mat.qr();
     defer rect_qr.deinit();
 
@@ -372,7 +368,6 @@ test "Matrix QR decomposition with rank-deficient matrix" {
 
     // Test with zero matrix (rank 0)
     const zero_mat = try Matrix(f64).initAll(arena.allocator(), 3, 3, 0);
-
 
     var zero_qr = try zero_mat.qr();
     defer zero_qr.deinit();
