@@ -8,7 +8,7 @@ const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");
 
 // Import Image type directly - Zig's lazy compilation handles circular imports
-const Image = @import("image.zig").Image;
+const Image = @import("Image.zig").Image;
 
 /// Display format options
 pub const DisplayFormat = union(enum) {

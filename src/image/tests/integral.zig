@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
-const Image = @import("../image.zig").Image;
+const Image = @import("../Image.zig").Image;
 const color = @import("../../color.zig");
 
 test "integral image scalar" {

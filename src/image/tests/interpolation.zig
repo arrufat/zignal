@@ -4,7 +4,7 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-const Image = @import("../image.zig").Image;
+const Image = @import("../Image.zig").Image;
 const InterpolationMethod = @import("../interpolation.zig").InterpolationMethod;
 const color = @import("../../color.zig");
 
