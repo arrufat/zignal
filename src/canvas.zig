@@ -85,7 +85,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Fills the entire canvas with a solid color using @memset.
         pub fn fill(self: Self, color: anytype) void {
-            @memset(self.image.data, convertColor(T, color));
+            self.image.fill(color);
         }
 
         /// Gets a reference to the pixel at the given coordinates.

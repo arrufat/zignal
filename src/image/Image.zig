@@ -8,7 +8,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const Allocator = std.mem.Allocator;
 
-const color = @import("../color.zig");
+const convertColor = @import("../color.zig").convertColor;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point2d = @import("../geometry/Point.zig").Point2d;
 const jpeg = @import("../jpeg.zig");
@@ -79,6 +79,11 @@ pub fn Image(comptime T: type) type {
                 .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
                 .stride = cols,
             };
+        }
+
+        /// Fills the entire image with a solid color using @memset.
+        pub fn fill(self: Self, color: anytype) void {
+            @memset(self.data, convertColor(T, color));
         }
 
         /// Returns the image data reinterpreted as a slice of bytes.
@@ -222,7 +227,7 @@ pub fn Image(comptime T: type) type {
             // Convert each pixel using the color conversion system
             var result = try Image(TargetType).initAlloc(allocator, self.rows, self.cols);
             for (self.data, 0..) |pixel, i| {
-                result.data[i] = color.convertColor(TargetType, pixel);
+                result.data[i] = convertColor(TargetType, pixel);
             }
             return result;
         }
@@ -1183,7 +1188,7 @@ pub fn Image(comptime T: type) type {
                         for (0..vert_filter[0].len) |n| {
                             const px: isize = ic - 1 + @as(isize, @intCast(n));
                             if (self.atOrNull(py, px)) |val| {
-                                const p: i32 = @intCast(color.convertColor(u8, val.*));
+                                const p: i32 = @intCast(convertColor(u8, val.*));
                                 horz_temp += p * horz_filter[m][n];
                                 vert_temp += p * vert_filter[m][n];
                             }
