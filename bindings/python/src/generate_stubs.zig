@@ -150,6 +150,7 @@ fn generateImageClass(stub: *GeneratedStub) !void {
     try stub.write("    def to_numpy(self, include_alpha: bool = True) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
     try stub.write("    def resize(self, size: Union[float, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
     try stub.write("    def letterbox(self, size: Union[int, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
+    try stub.write("    def canvas(self) -> Canvas: ...\n");
     try stub.write("    @property\n");
     try stub.write("    def rows(self) -> int: ...\n");
     try stub.write("    @property\n");
@@ -169,6 +170,37 @@ fn generateInterpolationMethod(stub: *GeneratedStub) !void {
     try stub.write("    CATMULL_ROM = 3\n");
     try stub.write("    MITCHELL = 4\n");
     try stub.write("    LANCZOS = 5\n");
+}
+
+/// Generate Canvas class stub
+fn generateCanvasClass(stub: *GeneratedStub) !void {
+    try stub.write("\nclass Canvas:\n");
+    try stub.write("    \"\"\"Canvas for drawing operations on images\"\"\"\n");
+
+    // Constructor
+    try stub.write("    def __init__(self, image: Image) -> None: ...\n");
+
+    // Methods
+    try stub.write("    def fill(self, color: Union[Tuple[int, int, int], Tuple[int, int, int, int]]) -> None: ...\n");
+
+    // Properties
+    try stub.write("    @property\n");
+    try stub.write("    def rows(self) -> int: ...\n");
+    try stub.write("    @property\n");
+    try stub.write("    def cols(self) -> int: ...\n");
+    try stub.write("    @property\n");
+    try stub.write("    def image(self) -> Image: ...\n");
+
+    // Standard Python methods
+    try stub.write("    def __repr__(self) -> str: ...\n");
+}
+
+/// Generate DrawMode enum
+fn generateDrawModeEnum(stub: *GeneratedStub) !void {
+    try stub.write("\nclass DrawMode(IntEnum):\n");
+    try stub.write("    \"\"\"Rendering quality mode for drawing operations\"\"\"\n");
+    try stub.write("    FAST = 0\n");
+    try stub.write("    SOFT = 1\n");
 }
 
 /// Auto-discover and generate known module-level functions
@@ -220,8 +252,14 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     // Generate InterpolationMethod enum
     try generateInterpolationMethod(&stub);
 
+    // Generate DrawMode enum
+    try generateDrawModeEnum(&stub);
+
     // Generate Image class
     try generateImageClass(&stub);
+
+    // Generate Canvas class
+    try generateCanvasClass(&stub);
 
     // Auto-discover and generate all module-level functions
     try generateModuleFunctions(&stub);
