@@ -3,18 +3,12 @@ const std = @import("std");
 const zignal = @import("zignal");
 const InterpolationMethod = zignal.InterpolationMethod;
 
+const canvas = @import("canvas.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
-
-const canvas = @import("canvas.zig");
+const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
-const metadata_converter = @import("metadata_converter.zig");
-
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
 
 // ============================================================================
 // IMAGE TYPE (uses RGBA internally for SIMD performance)
@@ -1299,7 +1293,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var image_methods = metadata_converter.toPyMethodDefArray(&image_methods_metadata);
+var image_methods = stub_metadata.toPyMethodDefArray(&image_methods_metadata);
 
 pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     .{
@@ -1318,7 +1312,7 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-var image_getset = metadata_converter.toPyGetSetDefArray(&image_properties_metadata);
+var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 
 pub var ImageType = c.PyTypeObject{
     .ob_base = .{

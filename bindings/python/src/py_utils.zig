@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @cImport({
+pub const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
     @cInclude("Python.h");
 });

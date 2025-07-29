@@ -8,13 +8,8 @@ const Point2d = zignal.Point2d;
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
+const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
-const metadata_converter = @import("metadata_converter.zig");
-
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
 
 pub const CanvasObject = extern struct {
     ob_base: c.PyObject,
@@ -318,7 +313,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var canvas_methods = metadata_converter.toPyMethodDefArray(&canvas_methods_metadata);
+var canvas_methods = stub_metadata.toPyMethodDefArray(&canvas_methods_metadata);
 
 pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     .{
@@ -344,7 +339,7 @@ pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-var canvas_getset = metadata_converter.toPyGetSetDefArray(&canvas_properties_metadata);
+var canvas_getset = stub_metadata.toPyGetSetDefArray(&canvas_properties_metadata);
 
 pub var CanvasType = c.PyTypeObject{
     .ob_base = .{
