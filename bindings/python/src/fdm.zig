@@ -4,12 +4,8 @@ const zignal = @import("zignal");
 
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");
+const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
-
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
 
 // Documentation for feature_distribution_match function
 const feature_distribution_match_doc =

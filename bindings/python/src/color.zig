@@ -2,17 +2,14 @@
 // This file is now much simpler - all color types are defined in color_registry.zig
 
 const std = @import("std");
+
 const zignal = @import("zignal");
+
 const color_factory = @import("color_factory.zig");
 const color_registry = @import("color_registry.zig");
 const py_utils = @import("py_utils.zig");
-
 pub const registerType = py_utils.registerType;
-
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+const c = py_utils.c;
 
 // For each color type in the registry, we generate:
 // 1. The binding type (e.g., RgbBinding)

@@ -2,12 +2,10 @@
 // This file defines which color types to expose to Python and their configurations
 
 const std = @import("std");
+
 const zignal = @import("zignal");
 
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+const c = @import("py_utils.zig").c;
 
 /// Complete list of all color types available in the system
 /// This serves as the single source of truth for auto-generation

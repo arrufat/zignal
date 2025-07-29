@@ -3,6 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 const isPacked = zignal.meta.isPacked;
 
+const c = @import("py_utils.zig").c;
 const color_types = @import("color_registry.zig").color_types;
 const ConversionError = @import("py_utils.zig").ConversionError;
 const convertFromPython = @import("py_utils.zig").convertFromPython;
@@ -14,11 +15,6 @@ const getValidationErrorMessage = @import("color_registry.zig").getValidationErr
 const isSupportedColor = @import("color_registry.zig").isSupportedColor;
 const registerType = @import("py_utils.zig").registerType;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
-
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
 
 /// Generate a color binding with automatic property getters and validation
 pub fn createColorBinding(

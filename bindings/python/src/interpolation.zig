@@ -1,16 +1,10 @@
 const std = @import("std");
-const py_utils = @import("py_utils.zig");
-const stub_metadata = @import("stub_metadata.zig");
+
 const zignal = @import("zignal");
 
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
-
-// ============================================================================
-// INTERPOLATION METHOD ENUM
-// ============================================================================
+const py_utils = @import("py_utils.zig");
+const c = py_utils.c;
+const stub_metadata = @import("stub_metadata.zig");
 
 // Python object for InterpolationMethod (empty, it's just an enum)
 pub const InterpolationMethodObject = extern struct {
