@@ -325,14 +325,7 @@ pub fn main() !void {
     const init_stub_content = try generateInitStub(allocator);
     defer allocator.free(init_stub_content);
 
-    // Write zignal.pyi (comprehensive stub file)
-    {
-        const file = try std.fs.cwd().createFile("zignal.pyi", .{});
-        defer file.close();
-        try file.writeAll(main_stub_content);
-    }
-
-    // Write _zignal.pyi (copy of comprehensive stub file for C extension)
+    // Write _zignal.pyi (stub file for C extension)
     {
         const file = try std.fs.cwd().createFile("_zignal.pyi", .{});
         defer file.close();
@@ -347,7 +340,6 @@ pub fn main() !void {
     }
 
     std.debug.print("Generated stub files:\n", .{});
-    std.debug.print("  zignal.pyi: {} bytes\n", .{main_stub_content.len});
     std.debug.print("  _zignal.pyi: {} bytes\n", .{main_stub_content.len});
     std.debug.print("  __init__.pyi: {} bytes\n", .{init_stub_content.len});
 }

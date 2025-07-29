@@ -31,24 +31,19 @@ Documentation = "https://bfactory-ai.github.io/zignal/python"
 Issues = "https://github.com/bfactory-ai/zignal/issues"
 
 [project.optional-dependencies]
-dev = ["pytest", "uv", "ruff"]
 test = ["pytest", "numpy"]
 docs = ["pdoc"]
-
-[dependency-groups]
-dev = [
-    "build>=1.2.2.post1",
-    "twine>=6.1.0",
-]
 
 [tool.uv]
 dev-dependencies = [
     "pytest",
     "ruff",
+    "numpy",
+    "pdoc",
 ]
 
 [tool.ruff]
-line-length = 88
+line-length = 99
 target-version = "py39"
 
 [tool.ruff.lint]
@@ -58,7 +53,6 @@ select = [
     "F",  # pyflakes
     "I",  # isort
 ]
-ignore = []
 
 [tool.ruff.format]
 quote-style = "double"
