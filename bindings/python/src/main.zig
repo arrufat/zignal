@@ -7,6 +7,8 @@ const canvas = @import("canvas.zig");
 const py_utils = @import("py_utils.zig");
 const fdm = @import("fdm.zig");
 const interpolation = @import("interpolation.zig");
+const stub_metadata = @import("stub_metadata.zig");
+const metadata_converter = @import("metadata_converter.zig");
 
 const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
@@ -21,22 +23,20 @@ var zignal_module = c.PyModuleDef{
     .m_name = "zignal",
     .m_doc = "zero dependency image processing library",
     .m_size = -1,
-    .m_methods = &zignal_methods,
+    .m_methods = @ptrCast(&zignal_methods),
     .m_slots = null,
     .m_traverse = null,
     .m_clear = null,
     .m_free = null,
 };
 
-var zignal_methods = [_]c.PyMethodDef{
-    .{
-        .ml_name = "feature_distribution_match",
-        .ml_meth = @ptrCast(&fdm.feature_distribution_match),
-        .ml_flags = c.METH_VARARGS,
-        .ml_doc = fdm.feature_distribution_match_doc,
-    },
-    .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
+// Module function metadata
+pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{
+    fdm.fdm_metadata,
 };
+
+// Generate PyMethodDef array at compile time
+var zignal_methods = metadata_converter.functionsToPyMethodDefArray(&module_functions_metadata);
 
 pub export fn PyInit__zignal() ?*c.PyObject {
     const m = c.PyModule_Create(&zignal_module);

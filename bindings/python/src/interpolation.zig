@@ -1,5 +1,7 @@
 const std = @import("std");
 const py_utils = @import("py_utils.zig");
+const stub_metadata = @import("stub_metadata.zig");
+const zignal = @import("zignal");
 
 const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
@@ -102,3 +104,13 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
         return error.ModuleAddFailed;
     }
 }
+
+// ============================================================================
+// INTERPOLATION METHOD STUB GENERATION METADATA
+// ============================================================================
+
+pub const interpolation_enum_info = stub_metadata.EnumInfo{
+    .name = "InterpolationMethod",
+    .doc = "Interpolation methods for image resizing",
+    .zig_type = zignal.InterpolationMethod,
+};

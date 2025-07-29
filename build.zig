@@ -109,15 +109,9 @@ pub fn build(b: *Build) void {
         }),
     });
 
-    // Link against libc for Python headers
-    py_module.linkLibC();
-
-    // Add Python include directory if provided via environment variable
-    if (std.process.getEnvVarOwned(b.allocator, "PYTHON_INCLUDE_DIR")) |python_include| {
-        py_module.addIncludePath(.{ .cwd_relative = python_include });
-    } else |_| {
-        // No Python include directory specified - will rely on system default paths
-    }
+    // Link Python for shared library
+    const target_info = target.result;
+    linkPython(b, py_module, "python3", target.result);
 
     // Add zignal module as dependency
     py_module.root_module.addImport("zignal", b.addModule("zignal", .{
@@ -128,55 +122,6 @@ pub fn build(b: *Build) void {
     const py_options = b.addOptions();
     py_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
     py_module.root_module.addOptions("build_options", py_options);
-
-    // Add platform-specific python libraries and flags
-    const target_info = target.result;
-    switch (target_info.os.tag) {
-        .windows => {
-            // On Windows, link against the Python library
-            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
-                py_module.addLibraryPath(.{ .cwd_relative = libs_dir });
-
-                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
-                    // Remove the .lib extension for linkSystemLibrary
-                    const lib_name_no_ext = if (std.mem.endsWith(u8, lib_name, ".lib"))
-                        lib_name[0 .. lib_name.len - 4]
-                    else
-                        lib_name;
-                    py_module.linkSystemLibrary(lib_name_no_ext);
-                } else |_| {
-                    // Fallback - try to link against a common Python library name
-                    py_module.linkSystemLibrary("python3");
-                }
-            } else |_| {
-                // No Python library path provided - try system default
-                py_module.linkSystemLibrary("python3");
-            }
-        },
-        .macos => {
-            // On macOS, try to link against specific Python library if provided
-            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
-                py_module.addLibraryPath(.{ .cwd_relative = libs_dir });
-
-                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
-                    py_module.linkSystemLibrary(lib_name);
-                } else |_| {
-                    // Fallback to default
-                    py_module.linkSystemLibrary("python3");
-                }
-            } else |_| {
-                // No specific Python library path - use system default
-                py_module.linkSystemLibrary("python3");
-            }
-        },
-        .linux => {
-            py_module.linkSystemLibrary("python3");
-        },
-        else => {
-            // Try the default for other platforms
-            py_module.linkSystemLibrary("python3");
-        },
-    }
 
     // Determine output file extension based on target platform
     const extension = switch (target_info.os.tag) {
@@ -196,10 +141,18 @@ pub fn build(b: *Build) void {
         }),
     });
 
+    // Link Python for executable
+    linkPython(b, stub_generator, "python3-embed", target_info);
+
     // Add zignal module as dependency for stub generator
     stub_generator.root_module.addImport("zignal", b.addModule("zignal", .{
         .root_source_file = b.path("src/root.zig"),
     }));
+
+    // Add build options for version info
+    const stub_options = b.addOptions();
+    stub_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
+    stub_generator.root_module.addOptions("build_options", stub_options);
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -312,6 +265,70 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
         else => {
             std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
             std.process.exit(1);
+        },
+    }
+}
+
+/// Helper function to link Python to an artifact
+/// @param artifact: The build artifact (library or executable) to link Python to
+/// @param python_lib: The Python library name ("python3" for shared libs, "python3-embed" for executables)
+/// @param target_info: Target platform information for platform-specific linking
+fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, target_info: std.Target) void {
+    // Link against libc for Python headers
+    artifact.root_module.link_libc = true;
+
+    // Add Python include directory if provided via environment variable
+    if (std.process.getEnvVarOwned(b.allocator, "PYTHON_INCLUDE_DIR")) |python_include| {
+        artifact.addIncludePath(.{ .cwd_relative = python_include });
+    } else |_| {
+        // No Python include directory specified - will rely on system default paths
+    }
+
+    // Add platform-specific python libraries and flags
+    switch (target_info.os.tag) {
+        .windows => {
+            // On Windows, link against the Python library
+            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+                artifact.addLibraryPath(.{ .cwd_relative = libs_dir });
+
+                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                    // Remove the .lib extension for linkSystemLibrary
+                    const lib_name_no_ext = if (std.mem.endsWith(u8, lib_name, ".lib"))
+                        lib_name[0 .. lib_name.len - 4]
+                    else
+                        lib_name;
+                    artifact.linkSystemLibrary(lib_name_no_ext);
+                } else |_| {
+                    // Fallback - try to link against a common Python library name
+                    artifact.linkSystemLibrary(python_lib);
+                }
+            } else |_| {
+                // No Python library path provided - try system default
+                artifact.linkSystemLibrary(python_lib);
+            }
+        },
+        .macos => {
+            // On macOS, try to link against specific Python library if provided
+            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+                artifact.addLibraryPath(.{ .cwd_relative = libs_dir });
+
+                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                    artifact.linkSystemLibrary(lib_name);
+                } else |_| {
+                    // Fallback to default
+                    artifact.linkSystemLibrary(python_lib);
+                }
+            } else |_| {
+                // No specific Python library path - use system default
+                artifact.linkSystemLibrary(python_lib);
+            }
+        },
+        .linux => {
+            artifact.linkSystemLibrary(python_lib);
+        },
+        else => {
+            // Try the default for other platforms
+            artifact.linkSystemLibrary(python_lib);
         },
     }
 }
