@@ -9,7 +9,7 @@ const stub_metadata = @import("stub_metadata.zig");
 
 // Documentation for feature_distribution_match function
 const feature_distribution_match_doc =
-    \\feature_distribution_match(source, reference, /)
+    \\feature_distribution_match(source, reference)
     \\--
     \\
     \\Apply Feature Distribution Matching (FDM) to transfer color/style from reference to source image.
@@ -21,10 +21,10 @@ const feature_distribution_match_doc =
     \\
     \\Parameters
     \\----------
-    \\source : Image
+    \\source : `Image`
     \\    Source image to be modified (modified in-place). The structure and content
     \\    of this image will be preserved, but its colors will be adjusted.
-    \\reference : Image
+    \\reference : `Image`
     \\    Reference image providing the target color distribution. This image's color
     \\    statistics (mean and covariance) will be matched by the source image.
     \\

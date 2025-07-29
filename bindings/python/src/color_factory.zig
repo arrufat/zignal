@@ -252,7 +252,9 @@ pub fn createColorBinding(
             // Extract the color space name (everything after the last dot)
             if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
                 const color_space = type_name[dot_index + 1 ..];
-                return "Convert to " ++ color_space ++ " color space";
+                const method_name = "to_" ++ comptimeLowercase(color_space);
+                return method_name ++ "()\n--\n\nConvert to " ++ color_space ++ " color space.\n\nReturns\n-------\n`" ++
+                    color_space ++ "`\n    Color in `" ++ color_space ++ "` color space";
             } else {
                 @compileError("Expected zignal.ColorName format, got: " ++ type_name);
             }

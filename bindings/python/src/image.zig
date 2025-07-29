@@ -106,7 +106,7 @@ fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c
 }
 
 const image_load_doc =
-    \\load(path, /)
+    \\load(path)
     \\--
     \\
     \\Load an image from file (PNG/JPEG).
@@ -118,7 +118,7 @@ const image_load_doc =
     \\
     \\Returns
     \\-------
-    \\Image
+    \\`Image`
     \\    Loaded image object
     \\
     \\Raises
@@ -194,7 +194,7 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 const image_to_numpy_doc =
-    \\to_numpy(include_alpha=True, /)
+    \\to_numpy(include_alpha=True)
     \\--
     \\
     \\Convert the image to a NumPy array.
@@ -343,7 +343,7 @@ fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 const image_from_numpy_doc =
-    \\from_numpy(array, /)
+    \\from_numpy(array)
     \\--
     \\
     \\Create Image from NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
@@ -360,7 +360,7 @@ const image_from_numpy_doc =
     \\
     \\Returns
     \\-------
-    \\Image
+    \\`Image`
     \\    New Image object from the array data
     \\
     \\Raises
@@ -505,7 +505,7 @@ fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 }
 
 const image_save_doc =
-    \\save(path, /)
+    \\save(path)
     \\--
     \\
     \\Save the image to a PNG file.
@@ -581,7 +581,7 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 const image_add_alpha_doc =
-    \\add_alpha(array, alpha=255, /)
+    \\add_alpha(array, alpha=255)
     \\--
     \\
     \\Add alpha channel to a 3-channel RGB numpy array.
@@ -687,7 +687,7 @@ fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 }
 
 const image_format_doc =
-    \\__format__(format_spec, /)
+    \\__format__(format_spec)
     \\--
     \\
     \\Format image for display using various terminal graphics protocols.
@@ -876,7 +876,7 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
 }
 
 const image_resize_doc =
-    \\resize(size, method=InterpolationMethod.BILINEAR, /)
+    \\resize(size, method=1)
     \\--
     \\
     \\Resize the image to the specified size.
@@ -886,12 +886,12 @@ const image_resize_doc =
     \\size : float or tuple[int, int]
     \\    If float: scale factor (e.g., 0.5 for half size, 2.0 for double size)
     \\    If tuple: target dimensions as (rows, cols)
-    \\method : InterpolationMethod, optional
-    \\    Interpolation method to use. Default is BILINEAR.
+    \\method : `InterpolationMethod`, optional
+    \\    Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
     \\
     \\Returns
     \\-------
-    \\Image
+    \\`Image`
     \\    New resized image
 ;
 
@@ -1062,7 +1062,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: I
 }
 
 const image_letterbox_doc =
-    \\letterbox(size, method=InterpolationMethod.BILINEAR, /)
+    \\letterbox(size, method=1)
     \\--
     \\
     \\Resize image to fit within the specified size while preserving aspect ratio.
@@ -1075,12 +1075,12 @@ const image_letterbox_doc =
     \\size : int or tuple[int, int]
     \\    If int: creates a square output of size x size
     \\    If tuple: target dimensions as (rows, cols)
-    \\method : InterpolationMethod, optional
-    \\    Interpolation method to use. Default is BILINEAR.
+    \\method : `InterpolationMethod`, optional
+    \\    Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
     \\
     \\Returns
     \\-------
-    \\Image
+    \\`Image`
     \\    New letterboxed image with the exact specified dimensions
 ;
 
@@ -1157,14 +1157,14 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 const image_canvas_doc =
-    \\canvas(/)
+    \\canvas()
     \\--
     \\
     \\Create a Canvas object for drawing operations on this image.
     \\
     \\Returns
     \\-------
-    \\Canvas
+    \\`Canvas`
     \\    Canvas object that can be used to draw on this image
     \\
     \\Examples
