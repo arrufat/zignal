@@ -254,6 +254,11 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .bases = &.{},
     });
 
+    // Add special methods for Image class (pixel access)
+    try stub.write("    def __len__(self) -> int: ...\n");
+    try stub.write("    def __getitem__(self, key: Tuple[int, int]) -> Rgba: ...\n");
+    try stub.write("    def __setitem__(self, key: Tuple[int, int], value: Union[Tuple[int, int, int], Tuple[int, int, int, int], Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr]) -> None: ...\n");
+
     // Generate Canvas class from metadata
     const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
     const canvas_properties = stub_metadata.extractPropertyInfo(&canvas_module.canvas_properties_metadata);

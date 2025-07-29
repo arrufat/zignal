@@ -30,9 +30,7 @@ class TestColorAvailability:
 
         for color_type in expected_types:
             assert hasattr(zignal, color_type), f"Missing color type: {color_type}"
-            assert callable(getattr(zignal, color_type)), (
-                f"{color_type} is not callable"
-            )
+            assert callable(getattr(zignal, color_type)), f"{color_type} is not callable"
 
     def test_color_type_signatures(self):
         """Test that color types accept the correct number of arguments."""

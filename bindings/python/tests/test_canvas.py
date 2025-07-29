@@ -136,9 +136,7 @@ class TestDrawLineBinding:
         canvas.draw_line((0, 20), (50, 20), (0, 255, 0), mode=zignal.DrawMode.SOFT)
 
         # Test both
-        canvas.draw_line(
-            (0, 30), (50, 30), (0, 0, 255), width=5, mode=zignal.DrawMode.FAST
-        )
+        canvas.draw_line((0, 30), (50, 30), (0, 0, 255), width=5, mode=zignal.DrawMode.FAST)
 
         # All should work without errors
         result = img.to_numpy()
