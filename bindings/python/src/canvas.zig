@@ -8,15 +8,13 @@ const Point2d = zignal.Point2d;
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
+const stub_metadata = @import("stub_metadata.zig");
+const metadata_converter = @import("metadata_converter.zig");
 
 const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
     @cInclude("Python.h");
 });
-
-// ============================================================================
-// CANVAS TYPE
-// ============================================================================
 
 pub const CanvasObject = extern struct {
     ob_base: c.PyObject,
@@ -119,7 +117,32 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     }
 }
 
-// Fill the entire canvas with a color
+const canvas_fill_doc =
+    \\fill(color, /)
+    \\--
+    \\
+    \\Fill the entire canvas with a color.
+    \\
+    \\Parameters
+    \\----------
+    \\color : tuple or color object
+    \\    Color to fill the canvas with. Can be:
+    \\    - RGB tuple: (r, g, b) with values 0-255
+    \\    - RGBA tuple: (r, g, b, a) with values 0-255
+    \\    - Any color object: Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr
+    \\
+    \\Returns
+    \\-------
+    \\None
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> canvas = img.canvas()
+    \\>>> canvas.fill((255, 0, 0))  # Fill with red
+    \\>>> canvas.fill(Rgb(0, 255, 0))  # Fill with green using Rgb object
+;
+
 fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*CanvasObject, @ptrCast(self_obj.?));
 
@@ -148,7 +171,42 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
     return none;
 }
 
-// Draw a line between two points
+const canvas_draw_line_doc =
+    \\draw_line(p1, p2, color, width=1, mode=DrawMode.FAST, /)
+    \\--
+    \\
+    \\Draw a line between two points.
+    \\
+    \\Parameters
+    \\----------
+    \\p1 : tuple[float, float]
+    \\    Starting point coordinates (x, y)
+    \\p2 : tuple[float, float]
+    \\    Ending point coordinates (x, y)
+    \\color : tuple or color object
+    \\    Color of the line. Can be:
+    \\    - RGB tuple: (r, g, b) with values 0-255
+    \\    - RGBA tuple: (r, g, b, a) with values 0-255
+    \\    - Any color object: Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr
+    \\width : int, optional
+    \\    Line width in pixels (default: 1)
+    \\mode : DrawMode, optional
+    \\    Drawing mode - DrawMode.FAST or DrawMode.SOFT (default: DrawMode.FAST)
+    \\
+    \\Returns
+    \\-------
+    \\None
+    \\
+    \\Examples
+    \\--------
+    \\>>> img = Image.load("photo.png")
+    \\>>> canvas = img.canvas()
+    \\>>> # Draw a red line from top-left to bottom-right
+    \\>>> canvas.draw_line((0, 0), (100, 100), (255, 0, 0))
+    \\>>> # Draw a thick blue line with antialiasing
+    \\>>> canvas.draw_line((50, 50), (150, 50), (0, 0, 255), width=5, mode=DrawMode.SOFT)
+;
+
 fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*CanvasObject, @ptrCast(self_obj.?));
 
@@ -168,6 +226,7 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const kwlist = [_][*c]const u8{ "p1", "p2", "color", "width", "mode", null };
     const format = std.fmt.comptimePrint("OOO|ll", .{});
 
+    // TODO: remove @constCast once we only use Python >= 3.13
     if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
         return null;
     }
@@ -201,7 +260,6 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return none;
 }
 
-// Property getters
 fn canvas_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = @as(*CanvasObject, @ptrCast(self_obj.?));
@@ -239,70 +297,54 @@ fn canvas_get_image(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?
     }
 }
 
-var canvas_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "fill", .ml_meth = canvas_fill, .ml_flags = c.METH_VARARGS, .ml_doc = 
-    \\fill(color, /)
-    \\--
-    \\
-    \\Fill the entire canvas with a solid color.
-    \\
-    \\Parameters
-    \\----------
-    \\color : tuple[int, int, int] or tuple[int, int, int, int] or any color object
-    \\    RGB or RGBA color tuple with values in range 0-255, or any zignal color object
-    \\    (Rgb, Hsl, Hsv, Lab, Oklab, etc.). Color objects are automatically converted to RGBA.
-    \\    If only RGB is provided, alpha defaults to 255 (fully opaque).
-    \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> canvas = img.canvas()
-    \\>>> canvas.fill((255, 0, 0))      # Fill with red tuple
-    \\>>> canvas.fill((0, 255, 0, 128)) # Fill with semi-transparent green
-    \\>>> canvas.fill(zignal.Rgb(255, 0, 0))  # Fill with red color object
-    \\>>> canvas.fill(zignal.Hsl(120, 100, 50))  # Fill with green HSL color
+const colors = "'Rgb', 'Rgba', 'Hsl', 'Hsv', 'Lab', 'Lch', 'Lms', 'Oklab', 'Oklch', 'Xyb', 'Xyz', 'Ycbcr'";
+
+pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+    .{
+        .name = "fill",
+        .meth = @ptrCast(&canvas_fill),
+        .flags = c.METH_VARARGS,
+        .doc = canvas_fill_doc,
+        .params = "self, color: Union[Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "]",
+        .returns = "None",
     },
-    .{ .ml_name = "draw_line", .ml_meth = @ptrCast(&canvas_draw_line), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = 
-    \\draw_line(p1, p2, color, width=1, mode=DrawMode.FAST)
-    \\--
-    \\
-    \\Draw a line between two points.
-    \\
-    \\Parameters
-    \\----------
-    \\p1 : tuple[float, float]
-    \\    Starting point (x, y) coordinates.
-    \\p2 : tuple[float, float]
-    \\    Ending point (x, y) coordinates.
-    \\color : tuple[int, int, int] or tuple[int, int, int, int] or any color object
-    \\    RGB or RGBA color tuple with values in range 0-255, or any zignal color object
-    \\    (Rgb, Hsl, Hsv, Lab, Oklab, etc.). Color objects are automatically converted to RGBA.
-    \\    If only RGB is provided, alpha defaults to 255 (fully opaque).
-    \\width : int, optional
-    \\    Line width in pixels (default: 1).
-    \\mode : DrawMode, optional
-    \\    Rendering quality mode (default: DrawMode.FAST).
-    \\    Use DrawMode.SOFT for antialiased lines.
-    \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> canvas = img.canvas()
-    \\>>> canvas.draw_line((10, 10), (100, 100), (255, 0, 0))  # Red diagonal line
-    \\>>> canvas.draw_line((0, 50), (200, 50), (0, 255, 0), width=3)  # Thick green horizontal line
-    \\>>> canvas.draw_line((50, 0), (50, 200), (0, 0, 255), width=2, mode=DrawMode.SOFT)  # Antialiased blue vertical line
-    \\>>> canvas.draw_line((0, 0), (100, 100), zignal.Rgb(255, 0, 0))  # Using color object
-    \\>>> canvas.draw_line((0, 0), (100, 100), zignal.Lab(53.24, 80.09, 67.20))  # Red in Lab color space
+    .{
+        .name = "draw_line",
+        .meth = @ptrCast(&canvas_draw_line),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_line_doc,
+        .params = "self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .returns = "None",
     },
-    .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var canvas_getset = [_]c.PyGetSetDef{
-    .{ .name = "rows", .get = canvas_get_rows, .set = null, .doc = "Number of rows (height) in the canvas", .closure = null },
-    .{ .name = "cols", .get = canvas_get_cols, .set = null, .doc = "Number of columns (width) in the canvas", .closure = null },
-    .{ .name = "image", .get = canvas_get_image, .set = null, .doc = "The Image object this canvas draws on", .closure = null },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
+var canvas_methods = metadata_converter.toPyMethodDefArray(&canvas_methods_metadata);
+
+pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+    .{
+        .name = "rows",
+        .get = @ptrCast(&canvas_get_rows),
+        .set = null,
+        .doc = "Number of rows in the canvas",
+        .type = "int",
+    },
+    .{
+        .name = "cols",
+        .get = @ptrCast(&canvas_get_cols),
+        .set = null,
+        .doc = "Number of columns in the canvas",
+        .type = "int",
+    },
+    .{
+        .name = "image",
+        .get = @ptrCast(&canvas_get_image),
+        .set = null,
+        .doc = "Parent Image object",
+        .type = "Image",
+    },
 };
+
+var canvas_getset = metadata_converter.toPyGetSetDefArray(&canvas_properties_metadata);
 
 pub var CanvasType = c.PyTypeObject{
     .ob_base = .{
@@ -315,15 +357,11 @@ pub var CanvasType = c.PyTypeObject{
     .tp_repr = canvas_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
     .tp_doc = "Canvas for drawing operations on images",
-    .tp_methods = &canvas_methods,
-    .tp_getset = &canvas_getset,
+    .tp_methods = @ptrCast(&canvas_methods),
+    .tp_getset = @ptrCast(&canvas_getset),
     .tp_init = canvas_init,
     .tp_new = canvas_new,
 };
-
-// ============================================================================
-// DRAWMODE ENUM
-// ============================================================================
 
 pub fn registerDrawMode(module: *c.PyObject) !void {
     // Create the enum type

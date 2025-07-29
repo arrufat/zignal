@@ -14,10 +14,6 @@ const c = @cImport({
     @cInclude("Python.h");
 });
 
-// ============================================================================
-// GENERATE ALL COLOR BINDINGS FROM REGISTRY
-// ============================================================================
-
 // For each color type in the registry, we generate:
 // 1. The binding type (e.g., RgbBinding)
 // 2. The getset and methods arrays

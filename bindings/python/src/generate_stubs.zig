@@ -4,6 +4,12 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const color_registry = @import("color_registry.zig");
+const stub_metadata = @import("stub_metadata.zig");
+
+// Import modules that contain metadata
+const image_module = @import("image.zig");
+const canvas_module = @import("canvas.zig");
+const main_module = @import("main.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -130,106 +136,77 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     try stub.write("    def __str__(self) -> str: ...\n");
 }
 
-/// Generate Image class stub - comprehensive method coverage
-fn generateImageClass(stub: *GeneratedStub) !void {
-    try stub.write("\nclass Image:\n");
-    try stub.write("    \"\"\"Image class with RGBA storage for SIMD-optimized operations\"\"\"\n");
+/// Generate class from metadata
+fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.ClassInfo) !void {
+    try stub.writef("\nclass {s}:\n", .{class_info.name});
+    try stub.writef("    \"\"\"{s}\"\"\"\n", .{class_info.doc});
 
-    // Constructor
-    try stub.write("    def __init__(self) -> None: ...\n");
+    // Generate methods
+    for (class_info.methods) |method| {
+        // Add decorator if needed
+        if (method.is_classmethod) {
+            try stub.write("    @classmethod\n");
+        } else if (method.is_staticmethod) {
+            try stub.write("    @staticmethod\n");
+        }
 
-    // All methods that are known to exist in the Python bindings
-    // These are defined in the actual Python binding implementation
-    try stub.write("    @classmethod\n");
-    try stub.write("    def load(cls, path: str) -> Image: ...\n");
-    try stub.write("    @classmethod\n");
-    try stub.write("    def from_numpy(cls, array: np.ndarray[Any, np.dtype[np.uint8]]) -> Image: ...\n");
-    try stub.write("    @staticmethod\n");
-    try stub.write("    def add_alpha(array: np.ndarray[Any, np.dtype[np.uint8]], alpha: int = 255) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
-    try stub.write("    def save(self, path: str) -> None: ...\n");
-    try stub.write("    def to_numpy(self, include_alpha: bool = True) -> np.ndarray[Any, np.dtype[np.uint8]]: ...\n");
-    try stub.write("    def resize(self, size: Union[float, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
-    try stub.write("    def letterbox(self, size: Union[int, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR) -> Image: ...\n");
-    try stub.write("    def canvas(self) -> Canvas: ...\n");
-    try stub.write("    @property\n");
-    try stub.write("    def rows(self) -> int: ...\n");
-    try stub.write("    @property\n");
-    try stub.write("    def cols(self) -> int: ...\n");
-
-    // Standard Python methods
-    try stub.write("    def __repr__(self) -> str: ...\n");
-}
-
-/// Generate InterpolationMethod enum
-fn generateInterpolationMethod(stub: *GeneratedStub) !void {
-    try stub.write("\nclass InterpolationMethod(IntEnum):\n");
-    try stub.write("    \"\"\"Interpolation methods for image resizing\"\"\"\n");
-    try stub.write("    NEAREST_NEIGHBOR = 0\n");
-    try stub.write("    BILINEAR = 1\n");
-    try stub.write("    BICUBIC = 2\n");
-    try stub.write("    CATMULL_ROM = 3\n");
-    try stub.write("    MITCHELL = 4\n");
-    try stub.write("    LANCZOS = 5\n");
-}
-
-/// Generate Canvas class stub
-fn generateCanvasClass(stub: *GeneratedStub) !void {
-    try stub.write("\nclass Canvas:\n");
-    try stub.write("    \"\"\"Canvas for drawing operations on images\"\"\"\n");
-
-    // Constructor
-    try stub.write("    def __init__(self, image: Image) -> None: ...\n");
-
-    // Methods
-    try stub.write("    def fill(self, color: Union[Tuple[int, int, int], Tuple[int, int, int, int], 'Rgb', 'Rgba', 'Hsl', 'Hsv', 'Lab', 'Lch', 'Lms', 'Oklab', 'Oklch', 'Xyb', 'Xyz', 'Ycbcr']) -> None: ...\n");
-    try stub.write("    def draw_line(self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[Tuple[int, int, int], Tuple[int, int, int, int], 'Rgb', 'Rgba', 'Hsl', 'Hsv', 'Lab', 'Lch', 'Lms', 'Oklab', 'Oklch', 'Xyb', 'Xyz', 'Ycbcr'], width: int = 1, mode: DrawMode = ...) -> None: ...\n");
-
-    // Properties
-    try stub.write("    @property\n");
-    try stub.write("    def rows(self) -> int: ...\n");
-    try stub.write("    @property\n");
-    try stub.write("    def cols(self) -> int: ...\n");
-    try stub.write("    @property\n");
-    try stub.write("    def image(self) -> Image: ...\n");
-
-    // Standard Python methods
-    try stub.write("    def __repr__(self) -> str: ...\n");
-}
-
-/// Generate DrawMode enum
-fn generateDrawModeEnum(stub: *GeneratedStub) !void {
-    try stub.write("\nclass DrawMode(IntEnum):\n");
-    try stub.write("    \"\"\"Rendering quality mode for drawing operations\"\"\"\n");
-    try stub.write("    FAST = 0\n");
-    try stub.write("    SOFT = 1\n");
-}
-
-/// Auto-discover and generate known module-level functions
-fn generateModuleFunctions(stub: *GeneratedStub) !void {
-    // Check for known functions that should be exposed to Python
-    if (@hasDecl(zignal, "featureDistributionMatch")) {
-        try stub.write("\ndef feature_distribution_match(source: Image, reference: Image) -> None:\n");
-        try stub.write("    \"\"\"Apply Feature Distribution Matching (FDM) to transfer color/style from reference to source image.\n");
-        try stub.write("    \n");
-        try stub.write("    This function modifies the source image in-place to match the color distribution\n");
-        try stub.write("    (mean and covariance) of the reference image while preserving the structure of the source.\n");
-        try stub.write("    \n");
-        try stub.write("    Parameters\n");
-        try stub.write("    ----------\n");
-        try stub.write("    source : Image\n");
-        try stub.write("        Source image to be modified (modified in-place)\n");
-        try stub.write("    reference : Image\n");
-        try stub.write("        Reference image providing target color distribution\n");
-        try stub.write("    \n");
-        try stub.write("    Returns\n");
-        try stub.write("    -------\n");
-        try stub.write("    None\n");
-        try stub.write("        This function modifies the source image in-place\n");
-        try stub.write("    \"\"\"\n");
-        try stub.write("    ...\n");
+        // Write method signature
+        try stub.writef("    def {s}({s}) -> {s}: ...\n", .{
+            method.name,
+            method.params,
+            method.returns,
+        });
     }
 
-    // Could add more function discovery here as needed
+    // Generate properties
+    for (class_info.properties) |prop| {
+        try stub.write("    @property\n");
+        try stub.writef("    def {s}(self) -> {s}: ...\n", .{ prop.name, prop.type });
+
+        // Add setter if not readonly
+        if (!prop.readonly) {
+            try stub.writef("    @{s}.setter\n", .{prop.name});
+            try stub.writef("    def {s}(self, value: {s}) -> None: ...\n", .{ prop.name, prop.type });
+        }
+    }
+}
+
+/// Generate enum from Zig type metadata
+fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumInfo) !void {
+    const type_info = @typeInfo(enum_info.zig_type);
+
+    // Handle both enum and union(enum) types
+    const enum_type_info = switch (type_info) {
+        .@"enum" => |e| e,
+        .@"union" => |u| blk: {
+            // For union(enum), we want to extract the enum tag type
+            if (u.tag_type) |tag_type| {
+                const tag_info = @typeInfo(tag_type);
+                if (tag_info == .@"enum") {
+                    break :blk tag_info.@"enum";
+                }
+            }
+            @compileError("Type " ++ @typeName(enum_info.zig_type) ++ " is not an enum or union(enum)");
+        },
+        else => @compileError("Type " ++ @typeName(enum_info.zig_type) ++ " is not an enum or union(enum)"),
+    };
+
+    try stub.writef("\nclass {s}({s}):\n", .{ enum_info.name, enum_info.base });
+    try stub.writef("    \"\"\"{s}\"\"\"\n", .{enum_info.doc});
+
+    // Generate enum values
+    inline for (enum_type_info.fields) |field| {
+        try stub.writef("    {s} = {d}\n", .{ field.name, field.value });
+    }
+}
+
+/// Generate module-level functions from metadata
+fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const stub_metadata.FunctionInfo) !void {
+    for (functions) |func| {
+        try stub.writef("\ndef {s}({s}) -> {s}:\n", .{ func.name, func.params, func.returns });
+        try stub.writef("    \"\"\"{s}\"\"\"\n", .{func.doc});
+        try stub.write("    ...\n");
+    }
 }
 
 /// Generate complete stub file
@@ -251,19 +228,46 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     }
 
     // Generate InterpolationMethod enum
-    try generateInterpolationMethod(&stub);
+    try generateEnumFromMetadata(&stub, .{
+        .name = "InterpolationMethod",
+        .base = "IntEnum",
+        .doc = "Interpolation methods for image resizing",
+        .zig_type = zignal.InterpolationMethod,
+    });
 
     // Generate DrawMode enum
-    try generateDrawModeEnum(&stub);
+    try generateEnumFromMetadata(&stub, .{
+        .name = "DrawMode",
+        .base = "IntEnum",
+        .doc = "Rendering quality mode for drawing operations",
+        .zig_type = zignal.DrawMode,
+    });
 
-    // Generate Image class
-    try generateImageClass(&stub);
+    // Generate Image class from metadata
+    const image_methods = stub_metadata.extractMethodInfo(&image_module.image_methods_metadata);
+    const image_properties = stub_metadata.extractPropertyInfo(&image_module.image_properties_metadata);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Image",
+        .doc = "Image class with RGBA storage for SIMD-optimized operations",
+        .methods = &image_methods,
+        .properties = &image_properties,
+        .bases = &.{},
+    });
 
-    // Generate Canvas class
-    try generateCanvasClass(&stub);
+    // Generate Canvas class from metadata
+    const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
+    const canvas_properties = stub_metadata.extractPropertyInfo(&canvas_module.canvas_properties_metadata);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Canvas",
+        .doc = "Canvas for drawing operations on images",
+        .methods = &canvas_methods,
+        .properties = &canvas_properties,
+        .bases = &.{},
+    });
 
-    // Auto-discover and generate all module-level functions
-    try generateModuleFunctions(&stub);
+    // Generate module-level functions from metadata
+    const module_functions = stub_metadata.extractFunctionInfo(&main_module.module_functions_metadata);
+    try generateModuleFunctionsFromMetadata(&stub, &module_functions);
 
     // Module metadata
     try stub.write("\n__version__: str\n");
