@@ -113,7 +113,7 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 const canvas_fill_doc =
-    \\fill(color, /)
+    \\fill(color)
     \\--
     \\
     \\Fill the entire canvas with a color.
@@ -124,7 +124,7 @@ const canvas_fill_doc =
     \\    Color to fill the canvas with. Can be:
     \\    - RGB tuple: (r, g, b) with values 0-255
     \\    - RGBA tuple: (r, g, b, a) with values 0-255
-    \\    - Any color object: Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr
+    \\    - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
     \\
     \\Returns
     \\-------
@@ -167,7 +167,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
 }
 
 const canvas_draw_line_doc =
-    \\draw_line(p1, p2, color, width=1, mode=DrawMode.FAST, /)
+    \\draw_line(p1, p2, color, width=1, mode=0)
     \\--
     \\
     \\Draw a line between two points.
@@ -182,11 +182,11 @@ const canvas_draw_line_doc =
     \\    Color of the line. Can be:
     \\    - RGB tuple: (r, g, b) with values 0-255
     \\    - RGBA tuple: (r, g, b, a) with values 0-255
-    \\    - Any color object: Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr
+    \\    - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
     \\width : int, optional
     \\    Line width in pixels (default: 1)
-    \\mode : DrawMode, optional
-    \\    Drawing mode - DrawMode.FAST or DrawMode.SOFT (default: DrawMode.FAST)
+    \\mode : `DrawMode`, optional
+    \\    Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
     \\
     \\Returns
     \\-------
@@ -388,13 +388,31 @@ pub fn registerDrawMode(module: *c.PyObject) !void {
     const doc_str = c.PyUnicode_FromString(
         \\Rendering quality mode for drawing operations.
         \\
-        \\Values:
-        \\    FAST: Fast rendering with hard edges, maximum performance
-        \\    SOFT: Soft rendering with antialiased edges, better quality
+        \\Attributes
+        \\----------
+        \\FAST : int
+        \\    Fast rendering without antialiasing (value: 0)
+        \\SOFT : int
+        \\    High-quality rendering with antialiasing (value: 1)
+        \\
+        \\Notes
+        \\-----
+        \\- FAST mode provides pixel-perfect rendering with sharp edges
+        \\- SOFT mode provides smooth, antialiased edges for better visual quality
+        \\- Default mode is FAST for performance
     ) orelse return error.OutOfMemory;
     defer c.Py_DECREF(doc_str);
 
     if (c.PyObject_SetAttrString(draw_mode_type, "__doc__", doc_str) < 0) {
+        c.Py_DECREF(draw_mode_type);
+        return error.Failed;
+    }
+
+    // Set __module__ attribute to help pdoc recognize it as a top-level class
+    const module_name = c.PyUnicode_FromString("zignal") orelse return error.OutOfMemory;
+    defer c.Py_DECREF(module_name);
+
+    if (c.PyObject_SetAttrString(draw_mode_type, "__module__", module_name) < 0) {
         c.Py_DECREF(draw_mode_type);
         return error.Failed;
     }

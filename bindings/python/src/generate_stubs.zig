@@ -196,7 +196,16 @@ fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumI
 
     // Generate enum values
     inline for (enum_type_info.fields) |field| {
-        try stub.writef("    {s} = {d}\n", .{ field.name, field.value });
+        // Convert field name to uppercase for Python convention
+        var uppercase_name: [128]u8 = undefined;
+        const name_len = field.name.len;
+        if (name_len > uppercase_name.len) {
+            return error.NameTooLong;
+        }
+        for (field.name, 0..) |c, i| {
+            uppercase_name[i] = std.ascii.toUpper(c);
+        }
+        try stub.writef("    {s} = {d}\n", .{ uppercase_name[0..name_len], field.value });
     }
 }
 
@@ -306,6 +315,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     // Add Image and function
     try stub.write("    Image as Image,\n");
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
+    try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    feature_distribution_match as feature_distribution_match,\n");
     try stub.write(")\n\n");
 
