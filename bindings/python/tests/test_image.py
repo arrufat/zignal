@@ -243,5 +243,177 @@ class TestNumpyIntegration:
         assert np.all(arr_rgba2[:, :, 3] == 128)
 
 
+class TestPixelAccess:
+    """Test pixel access functionality (getitem/setitem)."""
+
+    def test_getitem_returns_rgba(self):
+        """Test that __getitem__ returns an Rgba object."""
+        # Create test image
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        arr[5, 10] = [100, 150, 200, 255]
+        img = zignal.Image.from_numpy(arr)
+
+        # Get pixel
+        pixel = img[5, 10]
+        assert isinstance(pixel, zignal.Rgba)
+        assert pixel.r == 100
+        assert pixel.g == 150
+        assert pixel.b == 200
+        assert pixel.a == 255
+
+    def test_getitem_bounds_checking(self):
+        """Test that __getitem__ raises IndexError for out-of-bounds access."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Out of bounds row
+        with pytest.raises(IndexError, match="Row index out of bounds"):
+            _ = img[10, 5]
+
+        # Negative row
+        with pytest.raises(IndexError, match="Row index out of bounds"):
+            _ = img[-1, 5]
+
+        # Out of bounds col
+        with pytest.raises(IndexError, match="Column index out of bounds"):
+            _ = img[5, 20]
+
+        # Negative col
+        with pytest.raises(IndexError, match="Column index out of bounds"):
+            _ = img[5, -1]
+
+    def test_getitem_type_errors(self):
+        """Test that __getitem__ handles type errors properly."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Not a tuple
+        with pytest.raises(TypeError, match="must be a tuple"):
+            _ = img[5]
+
+        # Wrong number of indices
+        with pytest.raises(ValueError, match="exactly 2 integers"):
+            _ = img[5, 10, 2]
+
+        # Non-integer indices
+        with pytest.raises(TypeError, match="must be an integer"):
+            _ = img["5", 10]
+
+    def test_setitem_with_tuple(self):
+        """Test setting pixels with RGB/RGBA tuples."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Set with RGB tuple
+        img[5, 10] = (100, 150, 200)
+        pixel = img[5, 10]
+        assert pixel.r == 100
+        assert pixel.g == 150
+        assert pixel.b == 200
+        assert pixel.a == 255  # Default alpha
+
+        # Set with RGBA tuple
+        img[5, 11] = (50, 75, 100, 128)
+        pixel = img[5, 11]
+        assert pixel.r == 50
+        assert pixel.g == 75
+        assert pixel.b == 100
+        assert pixel.a == 128
+
+    def test_setitem_with_color_objects(self):
+        """Test setting pixels with various color objects."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Set with Rgba object
+        img[0, 0] = zignal.Rgba(255, 0, 0, 255)
+        pixel = img[0, 0]
+        assert pixel.r == 255
+        assert pixel.g == 0
+        assert pixel.b == 0
+        assert pixel.a == 255
+
+        # Set with Rgb object (should convert to RGBA)
+        img[0, 1] = zignal.Rgb(0, 255, 0)
+        pixel = img[0, 1]
+        assert pixel.r == 0
+        assert pixel.g == 255
+        assert pixel.b == 0
+        assert pixel.a == 255
+
+        # Set with Hsl object (should convert to RGBA)
+        img[0, 2] = zignal.Hsl(0, 100, 50)  # Red in HSL
+        pixel = img[0, 2]
+        assert pixel.r == 255
+        assert pixel.g == 0
+        assert pixel.b == 0
+        assert pixel.a == 255
+
+    def test_setitem_bounds_checking(self):
+        """Test that __setitem__ raises IndexError for out-of-bounds access."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Out of bounds row
+        with pytest.raises(IndexError, match="Row index out of bounds"):
+            img[10, 5] = (255, 0, 0)
+
+        # Out of bounds col
+        with pytest.raises(IndexError, match="Column index out of bounds"):
+            img[5, 20] = (255, 0, 0)
+
+    def test_setitem_type_errors(self):
+        """Test that __setitem__ handles type errors properly."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Invalid color value
+        with pytest.raises(TypeError):
+            img[5, 10] = "red"  # String not supported
+
+        # Invalid tuple size
+        with pytest.raises(ValueError):
+            img[5, 10] = (255,)  # Too few values
+
+        with pytest.raises(ValueError):
+            img[5, 10] = (255, 0, 0, 255, 128)  # Too many values
+
+    def test_pixel_modification_reflected_in_numpy(self):
+        """Test that pixel modifications are reflected in numpy array (zero-copy)."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Modify pixel
+        img[5, 10] = (100, 150, 200, 255)
+
+        # Check if reflected in numpy array (zero-copy behavior)
+        np_view = img.to_numpy()
+        assert np_view[5, 10, 0] == 100
+        assert np_view[5, 10, 1] == 150
+        assert np_view[5, 10, 2] == 200
+        assert np_view[5, 10, 3] == 255
+
+    def test_len_returns_total_pixels(self):
+        """Test that len() returns the total number of pixels."""
+        # Test various sizes
+        test_cases = [
+            (10, 20),  # 200 pixels
+            (100, 100),  # 10000 pixels
+            (1, 1),  # 1 pixel
+            (480, 640),  # 307200 pixels
+        ]
+
+        for rows, cols in test_cases:
+            arr = np.zeros((rows, cols, 4), dtype=np.uint8)
+            img = zignal.Image.from_numpy(arr)
+            assert len(img) == rows * cols
+
+    def test_len_uninitialized_image(self):
+        """Test that len() raises ValueError for uninitialized image."""
+        # This test would require creating an uninitialized image,
+        # but since Image() constructor doesn't allow direct instantiation,
+        # we can't test this case directly from Python
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

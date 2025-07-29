@@ -1218,6 +1218,146 @@ fn image_canvas(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     return @as(?*c.PyObject, @ptrCast(canvas_obj));
 }
 
+fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+
+    // Parse the key - expecting a tuple of (row, col)
+    if (c.PyTuple_Check(key) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Image indices must be a tuple of (row, col)");
+        return null;
+    }
+
+    if (c.PyTuple_Size(key) != 2) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image indices must be a tuple of exactly 2 integers");
+        return null;
+    }
+
+    // Extract row and col
+    const row_obj = c.PyTuple_GetItem(key, 0);
+    const col_obj = c.PyTuple_GetItem(key, 1);
+
+    const row = c.PyLong_AsLong(row_obj);
+    if (row == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Row index must be an integer");
+        return null;
+    }
+
+    const col = c.PyLong_AsLong(col_obj);
+    if (col == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Column index must be an integer");
+        return null;
+    }
+
+    // Bounds checking
+    const img = self.image_ptr.?;
+    if (row < 0 or row >= img.rows) {
+        c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
+        return null;
+    }
+    if (col < 0 or col >= img.cols) {
+        c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
+        return null;
+    }
+
+    // Get the pixel value
+    const pixel = img.at(@intCast(row), @intCast(col)).*;
+
+    // Import color module to get RgbaType
+    const color_module = @import("color.zig");
+
+    // Create and return an Rgba object
+    const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0);
+    if (rgba_obj == null) {
+        return null;
+    }
+
+    const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
+    rgba.field0 = pixel.r;
+    rgba.field1 = pixel.g;
+    rgba.field2 = pixel.b;
+    rgba.field3 = pixel.a;
+
+    return rgba_obj;
+}
+
+fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject) callconv(.c) c_int {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return -1;
+    }
+
+    // Parse the key - expecting a tuple of (row, col)
+    if (c.PyTuple_Check(key) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Image indices must be a tuple of (row, col)");
+        return -1;
+    }
+
+    if (c.PyTuple_Size(key) != 2) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image indices must be a tuple of exactly 2 integers");
+        return -1;
+    }
+
+    // Extract row and col
+    const row_obj = c.PyTuple_GetItem(key, 0);
+    const col_obj = c.PyTuple_GetItem(key, 1);
+
+    const row = c.PyLong_AsLong(row_obj);
+    if (row == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Row index must be an integer");
+        return -1;
+    }
+
+    const col = c.PyLong_AsLong(col_obj);
+    if (col == -1 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Column index must be an integer");
+        return -1;
+    }
+
+    // Bounds checking
+    const img = self.image_ptr.?;
+    if (row < 0 or row >= img.rows) {
+        c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
+        return -1;
+    }
+    if (col < 0 or col >= img.cols) {
+        c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
+        return -1;
+    }
+
+    // Parse the color value using parseColorToRgba
+    const color = py_utils.parseColorToRgba(value) catch {
+        // Error already set by parseColorToRgba
+        return -1;
+    };
+
+    // Set the pixel value
+    img.at(@intCast(row), @intCast(col)).* = color;
+
+    return 0;
+}
+
+fn image_len(self_obj: ?*c.PyObject) callconv(.c) c.Py_ssize_t {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Check if image is initialized
+    if (self.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return -1;
+    }
+
+    const img = self.image_ptr.?;
+    return @intCast(img.rows * img.cols);
+}
+
 pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
         .name = "load",
@@ -1314,6 +1454,12 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
 
 var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 
+var image_as_mapping = c.PyMappingMethods{
+    .mp_length = image_len,
+    .mp_subscript = image_getitem,
+    .mp_ass_subscript = image_setitem,
+};
+
 pub var ImageType = c.PyTypeObject{
     .ob_base = .{
         .ob_base = .{},
@@ -1327,6 +1473,7 @@ pub var ImageType = c.PyTypeObject{
     .tp_doc = "Image class with RGBA storage for SIMD-optimized operations",
     .tp_methods = @ptrCast(&image_methods),
     .tp_getset = @ptrCast(&image_getset),
+    .tp_as_mapping = @ptrCast(&image_as_mapping),
     .tp_init = image_init,
     .tp_new = image_new,
 };
