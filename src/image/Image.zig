@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
 const Rectangle = @import("../geometry.zig").Rectangle;
-const Point2d = @import("../geometry/Point.zig").Point2d;
+const Point = @import("../geometry/Point.zig").Point;
 const jpeg = @import("../jpeg.zig");
 const kitty = @import("../kitty.zig");
 const as = @import("../meta.zig").as;
@@ -146,18 +146,18 @@ pub fn Image(comptime T: type) type {
             return .{ .l = 0, .t = 0, .r = self.cols - 1, .b = self.rows - 1 };
         }
 
-        /// Returns the center point of the image as a Point2d(f32).
+        /// Returns the center point of the image as a Point(2, f32).
         /// This is commonly used as the rotation center for image rotation.
         ///
         /// Example usage:
         /// ```zig
         /// try image.rotate(allocator, image.getCenter(), angle, &rotated);
         /// ```
-        pub fn getCenter(self: Self) Point2d(f32) {
-            return Point2d(f32).init2d(
+        pub fn getCenter(self: Self) Point(2, f32) {
+            return .point(.{
                 @as(f32, @floatFromInt(self.cols)) / 2.0,
                 @as(f32, @floatFromInt(self.rows)) / 2.0,
-            );
+            });
         }
 
         /// Returns an image view with boundaries defined by `rect` within the image boundaries.
@@ -448,13 +448,13 @@ pub fn Image(comptime T: type) type {
         ///
         /// Parameters:
         /// - `allocator`: The allocator to use for the rotated image's data.
-        /// - `center`: The `Point2d(f32)` around which to rotate.
+        /// - `center`: The `Point(2, f32)` around which to rotate.
         /// - `angle`: The rotation angle in radians.
         /// - `rotated`: An out-parameter pointer to an `Image(T)`. If `rotated.rows` and `rotated.cols`
         ///   are both 0, optimal dimensions will be computed automatically. Otherwise, the specified
         ///   dimensions will be used. The function will initialize `rotated` with the rotated image data.
         ///   The caller is responsible for deallocating `rotated.data` if it was allocated by this function.
-        pub fn rotateAround(self: Self, allocator: Allocator, center: Point2d(f32), angle: f32, rotated: *Self) !void {
+        pub fn rotateAround(self: Self, allocator: Allocator, center: Point(2, f32), angle: f32, rotated: *Self) !void {
             // Auto-compute optimal bounds if dimensions are 0
             const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
                 const bounds = self.rotateBounds(angle);

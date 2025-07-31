@@ -6,8 +6,7 @@ const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Canvas = zignal.Canvas;
 const PCA = zignal.PrincipalComponentAnalysis;
-const Point2d = zignal.Point2d;
-const makePoint = zignal.makePoint;
+const Point = zignal.Point;
 
 /// Bounds structure for point clouds
 const Bounds = struct { min: @Vector(2, f64), max: @Vector(2, f64) };
@@ -51,7 +50,7 @@ fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) ![]@Vecto
 
 /// Convert world coordinates to canvas coordinates with uniform scaling to preserve angles
 /// Note: Y axis is flipped since image coordinates have Y=0 at top
-fn worldToCanvas(world_point: @Vector(2, f64), canvas_size: f32, world_bounds: Bounds) Point2d(f32) {
+fn worldToCanvas(world_point: @Vector(2, f64), canvas_size: f32, world_bounds: Bounds) Point(2, f32) {
     const world_size = world_bounds.max - world_bounds.min;
     const margin = canvas_size * 0.1; // 10% margin
     const draw_size = canvas_size - 2 * margin;
@@ -69,7 +68,7 @@ fn worldToCanvas(world_point: @Vector(2, f64), canvas_size: f32, world_bounds: B
     const canvas_x = @as(f32, @floatCast(centered_point[0])) * scale + canvas_center;
     const canvas_y = -@as(f32, @floatCast(centered_point[1])) * scale + canvas_center; // Flip Y axis
 
-    return Point2d(f32).init2d(canvas_x, canvas_y);
+    return Point(2, f32).point(.{ canvas_x, canvas_y });
 }
 
 /// Find bounding box of point cloud
@@ -145,14 +144,14 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: PCA(f64, 2), bounds: Bounds) !void {
             const norm_dir_x = dir_x / length;
             const norm_dir_y = dir_y / length;
 
-            const arrow1: Point2d(f32) = .init2d(
+            const arrow1: Point(2, f32) = .point(.{
                 end_canvas.x() - arrow_size * (norm_dir_x + norm_dir_y * 0.5),
                 end_canvas.y() - arrow_size * (norm_dir_y - norm_dir_x * 0.5),
-            );
-            const arrow2: Point2d(f32) = .init2d(
+            });
+            const arrow2: Point(2, f32) = .point(.{
                 end_canvas.x() - arrow_size * (norm_dir_x - norm_dir_y * 0.5),
                 end_canvas.y() - arrow_size * (norm_dir_y + norm_dir_x * 0.5),
-            );
+            });
 
             canvas.drawLine(end_canvas, arrow1, axis_color, 2, .soft);
             canvas.drawLine(end_canvas, arrow2, axis_color, 2, .soft);

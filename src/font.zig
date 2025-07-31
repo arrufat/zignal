@@ -33,3 +33,7 @@ pub const FontFormat = @import("font/format.zig").FontFormat;
 
 // BDF font support
 pub const bdf = @import("font/bdf.zig");
+
+test {
+    _ = bdf;
+}

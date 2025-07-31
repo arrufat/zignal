@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
-const Point2d = @import("../geometry/Point.zig").Point2d;
+const Point = @import("../geometry/Point.zig").Point;
 const Point3d = @import("../geometry/Point.zig").Point3d;
 const formatting = @import("formatting.zig");
 
@@ -467,10 +467,14 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return result;
         }
 
-        /// Converts a column matrix into a Point2d.
-        pub fn toPoint2d(self: Self) Point2d(T) {
-            comptime assert(rows >= 2 and cols == 1);
-            return Point2d(T).init2d(self.items[0][0], self.items[1][0]);
+        /// Converts a column matrix into a Point with the specified dimension.
+        pub fn toPoint(self: Self, comptime dim: usize) Point(dim, T) {
+            comptime assert(rows >= dim and cols == 1);
+            var components: [dim]T = undefined;
+            inline for (0..dim) |i| {
+                components[i] = self.items[i][0];
+            }
+            return .fromArray(components);
         }
 
         /// Computes the trace (sum of diagonal elements) of a square matrix.

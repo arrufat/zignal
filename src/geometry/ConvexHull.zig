@@ -4,13 +4,13 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
-const Point2d = @import("Point.zig").Point2d;
+const Point = @import("Point.zig").Point;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
     return struct {
-        points: std.ArrayList(Point2d(T)),
-        hull: std.ArrayList(Point2d(T)),
+        points: std.ArrayList(Point(2, T)),
+        hull: std.ArrayList(Point(2, T)),
 
         const Self = @This();
         pub fn init(allocator: std.mem.Allocator) Self {
@@ -32,7 +32,7 @@ pub fn ConvexHull(comptime T: type) type {
         };
 
         /// Returns the orientation of the three points.
-        fn computeOrientation(a: Point2d(T), b: Point2d(T), c: Point2d(T)) Orientation {
+        fn computeOrientation(a: Point(2, T), b: Point(2, T), c: Point(2, T)) Orientation {
             const v: T = a.x() * (b.y() - c.y()) + b.x() * (c.y() - a.y()) + c.x() * (a.y() - b.y());
             // Due to floating point precision errors, compute the reverse orientation, and
             // if any of those is collinear, then return collinear.
@@ -44,7 +44,7 @@ pub fn ConvexHull(comptime T: type) type {
         }
 
         /// Compares the points by polar angle in clockwise order.
-        fn clockwiseOrder(p: Point2d(T), a: Point2d(T), b: Point2d(T)) bool {
+        fn clockwiseOrder(p: Point(2, T), a: Point(2, T), b: Point(2, T)) bool {
             return switch (computeOrientation(p, a, b)) {
                 .clockwise => true,
                 .counter_clockwise => false,
@@ -53,7 +53,7 @@ pub fn ConvexHull(comptime T: type) type {
         }
 
         /// Returns the convex hull of a set of points using the Graham's scan algorithm.
-        pub fn find(self: *Self, points: []const Point2d(T)) !?[]Point2d(T) {
+        pub fn find(self: *Self, points: []const Point(2, T)) !?[]Point(2, T) {
             // We need at least 3 points to compute a hull.
             if (points.len < 3) {
                 return null;
@@ -73,12 +73,12 @@ pub fn ConvexHull(comptime T: type) type {
 
             // Swap the pivot point to the beginning
             if (lowest_idx != 0) {
-                std.mem.swap(Point2d(T), &self.points.items[0], &self.points.items[lowest_idx]);
+                std.mem.swap(Point(2, T), &self.points.items[0], &self.points.items[lowest_idx]);
             }
             const lowest = self.points.items[0];
 
             // Sort remaining points by polar angle in clockwise order
-            std.mem.sort(Point2d(T), self.points.items[1..], lowest, clockwiseOrder);
+            std.mem.sort(Point(2, T), self.points.items[1..], lowest, clockwiseOrder);
 
             self.hull.clearRetainingCapacity();
             try self.hull.append(lowest); // Add pivot first
@@ -107,14 +107,14 @@ pub fn ConvexHull(comptime T: type) type {
 }
 
 test "convex hull" {
-    const points: []const Point2d(f32) = &.{
-        Point2d(f32).init2d(0.0, 0.0),
-        Point2d(f32).init2d(1.0, 1.0),
-        Point2d(f32).init2d(2.0, 2.0),
-        Point2d(f32).init2d(3.0, 1.0),
-        Point2d(f32).init2d(4.0, 0.0),
-        Point2d(f32).init2d(2.0, 4.0),
-        Point2d(f32).init2d(1.0, 3.0),
+    const points: []const Point(2, f32) = &.{
+        .point(.{ 0.0, 0.0 }),
+        .point(.{ 1.0, 1.0 }),
+        .point(.{ 2.0, 2.0 }),
+        .point(.{ 3.0, 1.0 }),
+        .point(.{ 4.0, 0.0 }),
+        .point(.{ 2.0, 4.0 }),
+        .point(.{ 1.0, 3.0 }),
     };
     var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
     defer convex_hull.deinit();
@@ -141,9 +141,9 @@ test "computeOrientation" {
     defer convex_hull.deinit();
     const computeOrientation = ConvexHull(f32).computeOrientation;
     // These three points can have different orientations due to floating point precision.
-    const a: Point2d(f32) = Point2d(f32).init2d(4.9171928e-1, 6.473901e-1);
-    const b: Point2d(f32) = Point2d(f32).init2d(3.6271343e-1, 9.712454e-1);
-    const c: Point2d(f32) = Point2d(f32).init2d(3.9276862e-1, 8.9579517e-1);
+    const a: Point(2, f32) = .point(.{ 4.9171928e-1, 6.473901e-1 });
+    const b: Point(2, f32) = .point(.{ 3.6271343e-1, 9.712454e-1 });
+    const c: Point(2, f32) = .point(.{ 3.9276862e-1, 8.9579517e-1 });
     const orientation_abc = computeOrientation(a, b, c);
     const orientation_acb = computeOrientation(a, c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);

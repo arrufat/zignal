@@ -5,8 +5,7 @@
 
 // Import points from geometry subdirectory
 const points = @import("geometry/Point.zig");
-pub const Point2d = points.Point2d;
-pub const Point3d = points.Point3d;
+pub const Point = points.Point;
 
 // Import Rectangle
 pub const Rectangle = @import("geometry/Rectangle.zig").Rectangle;
