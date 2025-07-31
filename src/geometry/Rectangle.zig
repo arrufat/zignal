@@ -133,6 +133,21 @@ pub fn Rectangle(comptime T: type) type {
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
+
+        /// Returns the intersection of two rectangles, or null if they don't overlap.
+        pub fn intersect(self: Self, other: Self) ?Self {
+            const l = @max(self.l, other.l);
+            const t = @max(self.t, other.t);
+            const r = @min(self.r, other.r);
+            const b = @min(self.b, other.b);
+
+            // Check if the intersection is empty
+            return switch (@typeInfo(T)) {
+                .int => if (l > r or t > b) null else Self.init(l, t, r, b),
+                .float => if (l >= r or t >= b) null else Self.init(l, t, r, b),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+        }
     };
 }
 
@@ -157,4 +172,36 @@ test "Rectangle grow and shrink" {
     try expectEqualDeep(rect2, Rectangle(i32){ .l = 40, .t = 15, .r = 110, .b = 110 });
     rect2 = rect2.shrink(10);
     try expectEqualDeep(rect, rect2);
+}
+
+test "Rectangle intersect" {
+    // Test integer rectangles
+    const rect1 = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 };
+    const rect2 = Rectangle(i32){ .l = 50, .t = 50, .r = 150, .b = 150 };
+    const rect3 = Rectangle(i32){ .l = 200, .t = 200, .r = 250, .b = 250 };
+
+    // Overlapping rectangles
+    const intersection1 = rect1.intersect(rect2);
+    try expectEqualDeep(intersection1, Rectangle(i32){ .l = 50, .t = 50, .r = 100, .b = 100 });
+
+    // Non-overlapping rectangles
+    const intersection2 = rect1.intersect(rect3);
+    try expectEqual(intersection2, null);
+
+    // Test float rectangles
+    const frect1 = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 100.0, .b = 100.0 };
+    const frect2 = Rectangle(f32){ .l = 50.0, .t = 50.0, .r = 150.0, .b = 150.0 };
+    const frect3 = Rectangle(f32){ .l = 100.0, .t = 100.0, .r = 200.0, .b = 200.0 };
+
+    // Overlapping float rectangles
+    const fintersection1 = frect1.intersect(frect2);
+    try expectEqualDeep(fintersection1, Rectangle(f32){ .l = 50.0, .t = 50.0, .r = 100.0, .b = 100.0 });
+
+    // Touching edges (no overlap for floats)
+    const fintersection2 = frect1.intersect(frect3);
+    try expectEqual(fintersection2, null);
+
+    // Self intersection
+    const self_intersection = rect1.intersect(rect1);
+    try expectEqualDeep(self_intersection, rect1);
 }
