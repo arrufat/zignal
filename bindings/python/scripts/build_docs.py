@@ -88,8 +88,6 @@ def main():
         str(docs_dir),
         "--no-show",  # Don't open browser
         "--no-show-source",  # Don't show C extension source (enables stub file usage)
-        "-d",
-        "numpy",  # Use numpy docstring format
         "zignal",
         "zignal._zignal",  # Document multiple modules to enable search
     ]

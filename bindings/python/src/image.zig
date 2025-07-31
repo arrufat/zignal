@@ -111,30 +111,23 @@ const image_load_doc =
     \\
     \\Load an image from file (PNG/JPEG).
     \\
-    \\Parameters
-    \\----------
-    \\path : str
-    \\    Path to the image file to load
+    \\## Parameters
+    \\- `path` (`str`): Path to the image file to load
     \\
-    \\Returns
-    \\-------
-    \\`Image`
-    \\    Loaded image object
+    \\## Returns
+    \\- `Image`: Loaded image object
     \\
-    \\Raises
-    \\------
-    \\FileNotFoundError
-    \\    If the image file is not found
-    \\ValueError
-    \\    If the image format is not supported
-    \\MemoryError
-    \\    If allocation fails
+    \\## Raises
+    \\- `FileNotFoundError`: If the image file is not found
+    \\- `ValueError`: If the image format is not supported
+    \\- `MemoryError`: If allocation fails
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> print(img.rows, img.cols)
-    \\512 768
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\print(img.rows, img.cols)
+    \\# Output: 512 768
+    \\```
 ;
 
 fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -199,24 +192,21 @@ const image_to_numpy_doc =
     \\
     \\Convert the image to a NumPy array.
     \\
-    \\Parameters
-    \\----------
-    \\include_alpha : bool, optional
-    \\    If True (default), returns array with shape (rows, cols, 4).
-    \\    If False, returns array with shape (rows, cols, 3).
+    \\## Parameters
+    \\- `include_alpha` (bool, optional): If True (default), returns array with shape (rows, cols, 4).
+    \\  If False, returns array with shape (rows, cols, 3).
     \\
-    \\Returns
-    \\-------
-    \\np.ndarray
-    \\    NumPy array view of the image data (zero-copy when possible)
+    \\## Returns
+    \\- `np.ndarray`: NumPy array view of the image data (zero-copy when possible)
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> arr_rgba = img.to_numpy()  # Include alpha
-    \\>>> arr_rgb = img.to_numpy(include_alpha=False)  # RGB only
-    \\>>> print(arr_rgba.shape, arr_rgb.shape)
-    \\(512, 768, 4) (512, 768, 3)
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\arr_rgba = img.to_numpy()  # Include alpha
+    \\arr_rgb = img.to_numpy(include_alpha=False)  # RGB only
+    \\print(arr_rgba.shape, arr_rgb.shape)
+    \\# Output: (512, 768, 4) (512, 768, 3)
+    \\```
 ;
 
 fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -352,38 +342,33 @@ const image_from_numpy_doc =
     \\converted to RGBA format with alpha=255 (requires allocation).
     \\To enable zero-copy for RGB arrays, use Image.add_alpha() first.
     \\
-    \\Parameters
-    \\----------
-    \\array : np.ndarray
-    \\    NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
-    \\    Must be C-contiguous.
+    \\## Parameters
+    \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
+    \\  Must be C-contiguous.
     \\
-    \\Returns
-    \\-------
-    \\`Image`
-    \\    New Image object from the array data
+    \\## Returns
+    \\- `Image`: New Image object from the array data
     \\
-    \\Raises
-    \\------
-    \\TypeError
-    \\    If array is None or has wrong dtype
-    \\ValueError
-    \\    If array has wrong shape or is not C-contiguous
+    \\## Raises
+    \\- `TypeError`: If array is None or has wrong dtype
+    \\- `ValueError`: If array has wrong shape or is not C-contiguous
     \\
-    \\Notes
-    \\-----
+    \\## Notes
     \\The array must be C-contiguous. If your array is not C-contiguous
     \\(e.g., from slicing or transposing), use np.ascontiguousarray() first:
     \\
-    \\    arr = np.ascontiguousarray(arr)
-    \\    img = Image.from_numpy(arr)
+    \\```python
+    \\arr = np.ascontiguousarray(arr)
+    \\img = Image.from_numpy(arr)
+    \\```
     \\
-    \\Examples
-    \\--------
-    \\>>> arr = np.zeros((100, 200, 3), dtype=np.uint8)
-    \\>>> img = Image.from_numpy(arr)
-    \\>>> print(img.rows, img.cols)
-    \\100 200
+    \\## Examples
+    \\```python
+    \\arr = np.zeros((100, 200, 3), dtype=np.uint8)
+    \\img = Image.from_numpy(arr)
+    \\print(img.rows, img.cols)
+    \\# Output: 100 200
+    \\```
 ;
 
 fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -510,30 +495,23 @@ const image_save_doc =
     \\
     \\Save the image to a PNG file.
     \\
-    \\Parameters
-    \\----------
-    \\path : str
-    \\    Path where the PNG file will be saved. Must have .png extension.
+    \\## Parameters
+    \\- `path` (str): Path where the PNG file will be saved. Must have .png extension.
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Raises
-    \\------
-    \\ValueError
-    \\    If the file does not have .png extension
-    \\MemoryError
-    \\    If allocation fails during save
-    \\PermissionError
-    \\    If write permission is denied
-    \\FileNotFoundError
-    \\    If the directory does not exist
+    \\## Raises
+    \\- `ValueError`: If the file does not have .png extension
+    \\- `MemoryError`: If allocation fails during save
+    \\- `PermissionError`: If write permission is denied
+    \\- `FileNotFoundError`: If the directory does not exist
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("input.png")
-    \\>>> img.save("output.png")
+    \\## Examples
+    \\```python
+    \\img = Image.load("input.png")
+    \\img.save("output.png")
+    \\```
 ;
 
 fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -588,25 +566,21 @@ const image_add_alpha_doc =
     \\
     \\This is useful for enabling zero-copy when creating Images from RGB arrays.
     \\
-    \\Parameters
-    \\----------
-    \\array : np.ndarray
-    \\    NumPy array with shape (rows, cols, 3) and dtype uint8
-    \\alpha : int, optional
-    \\    Alpha value to use for all pixels (default: 255)
+    \\## Parameters
+    \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) and dtype uint8
+    \\- `alpha` (int, optional): Alpha value to use for all pixels (default: 255)
     \\
-    \\Returns
-    \\-------
-    \\np.ndarray
-    \\    New array with shape (rows, cols, 4)
+    \\## Returns
+    \\- `np.ndarray`: New array with shape (rows, cols, 4)
     \\
-    \\Examples
-    \\--------
-    \\>>> rgb_arr = np.zeros((100, 200, 3), dtype=np.uint8)
-    \\>>> rgba_arr = Image.add_alpha(rgb_arr)
-    \\>>> print(rgba_arr.shape)
-    \\(100, 200, 4)
-    \\>>> img = Image.from_numpy(rgba_arr)  # Zero-copy creation
+    \\## Examples
+    \\```python
+    \\rgb_arr = np.zeros((100, 200, 3), dtype=np.uint8)
+    \\rgba_arr = Image.add_alpha(rgb_arr)
+    \\print(rgba_arr.shape)
+    \\# Output: (100, 200, 4)
+    \\img = Image.from_numpy(rgba_arr)  # Zero-copy creation
+    \\```
 ;
 
 fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -692,32 +666,29 @@ const image_format_doc =
     \\
     \\Format image for display using various terminal graphics protocols.
     \\
-    \\Parameters
-    \\----------
-    \\format_spec : str
-    \\    Format specifier for display:
-    \\    - '' (empty): Returns text representation (e.g., 'Image(800x600)')
-    \\    - 'auto': Auto-detect best format with progressive degradation: kitty -> sixel -> blocks
-    \\    - 'ansi': Display using ANSI escape codes (spaces with background)
-    \\    - 'blocks': Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
-    \\    - 'braille': Display using Braille patterns (good for monochrome images)
-    \\    - 'sixel': Display using sixel graphics protocol (up to 256 colors)
-    \\    - 'kitty': Display using kitty graphics protocol (24-bit color)
+    \\## Parameters
+    \\- `format_spec` (str): Format specifier for display:
+    \\  - `''` (empty): Returns text representation (e.g., 'Image(800x600)')
+    \\  - `'auto'`: Auto-detect best format with progressive degradation: kitty → sixel → blocks
+    \\  - `'ansi'`: Display using ANSI escape codes (spaces with background)
+    \\  - `'blocks'`: Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
+    \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
+    \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
+    \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
     \\
-    \\Returns
-    \\-------
-    \\str
-    \\    Formatted string for display
+    \\## Returns
+    \\- `str`: Formatted string for display
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> print(f"{img}")         # Image(800x600)
-    \\>>> print(f"{img:ansi}")    # Display with ANSI colors
-    \\>>> print(f"{img:blocks}")  # Display with unicode blocks
-    \\>>> print(f"{img:braille}") # Display with braille patterns
-    \\>>> print(f"{img:sixel}")   # Display with sixel graphics
-    \\>>> print(f"{img:kitty}")   # Display with kitty graphics
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\print(f"{img}")         # Image(800x600)
+    \\print(f"{img:ansi}")    # Display with ANSI colors
+    \\print(f"{img:blocks}")  # Display with unicode blocks
+    \\print(f"{img:braille}") # Display with braille patterns
+    \\print(f"{img:sixel}")   # Display with sixel graphics
+    \\print(f"{img:kitty}")   # Display with kitty graphics
+    \\```
 ;
 
 fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -881,18 +852,14 @@ const image_resize_doc =
     \\
     \\Resize the image to the specified size.
     \\
-    \\Parameters
-    \\----------
-    \\size : float or tuple[int, int]
-    \\    If float: scale factor (e.g., 0.5 for half size, 2.0 for double size)
-    \\    If tuple: target dimensions as (rows, cols)
-    \\method : `InterpolationMethod`, optional
-    \\    Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\## Parameters
+    \\- `size` (float or tuple[int, int]):
+    \\  - If float: scale factor (e.g., 0.5 for half size, 2.0 for double size)
+    \\  - If tuple: target dimensions as (rows, cols)
+    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
     \\
-    \\Returns
-    \\-------
-    \\`Image`
-    \\    New resized image
+    \\## Returns
+    \\- `Image`: New resized image
 ;
 
 fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1070,18 +1037,14 @@ const image_letterbox_doc =
     \\The image is scaled to fit within the target dimensions and centered with
     \\black borders (letterboxing) to maintain the original aspect ratio.
     \\
-    \\Parameters
-    \\----------
-    \\size : int or tuple[int, int]
-    \\    If int: creates a square output of size x size
-    \\    If tuple: target dimensions as (rows, cols)
-    \\method : `InterpolationMethod`, optional
-    \\    Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\## Parameters
+    \\- `size` (int or tuple[int, int]):
+    \\  - If int: creates a square output of size x size
+    \\  - If tuple: target dimensions as (rows, cols)
+    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
     \\
-    \\Returns
-    \\-------
-    \\`Image`
-    \\    New letterboxed image with the exact specified dimensions
+    \\## Returns
+    \\- `Image`: New letterboxed image with the exact specified dimensions
 ;
 
 fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1162,17 +1125,16 @@ const image_canvas_doc =
     \\
     \\Create a Canvas object for drawing operations on this image.
     \\
-    \\Returns
-    \\-------
-    \\`Canvas`
-    \\    Canvas object that can be used to draw on this image
+    \\## Returns
+    \\- `Canvas`: Canvas object that can be used to draw on this image
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> canvas = img.canvas()
-    \\>>> canvas.fill((255, 0, 0))  # Fill with red
-    \\>>> canvas.draw_line((0, 0), (100, 100), (0, 255, 0))  # Draw green line
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\canvas = img.canvas()
+    \\canvas.fill((255, 0, 0))  # Fill with red
+    \\canvas.draw_line((0, 0), (100, 100), (0, 255, 0))  # Draw green line
+    \\```
 ;
 
 fn image_canvas(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {

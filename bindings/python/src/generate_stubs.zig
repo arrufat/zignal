@@ -5,6 +5,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 const color_registry = @import("color_registry.zig");
 const stub_metadata = @import("stub_metadata.zig");
+const color_factory = @import("color_factory.zig");
 
 // Import modules that contain metadata
 const image_module = @import("image.zig");
@@ -61,7 +62,7 @@ fn generatePropertySetter(stub: *GeneratedStub, field_name: []const u8, field_ty
     try stub.writef("    def {s}(self, value: {s}) -> None: ...\n", .{ field_name, python_type });
 }
 
-/// Generate conversion method signature
+/// Generate conversion method signature with documentation
 fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, comptime TargetType: type) !void {
     // Skip self-conversion
     if (SourceType == TargetType) return;
@@ -79,7 +80,14 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
     }
 
     // Include self parameter for proper LSP support
-    try stub.writef("(self) -> {s}: ...\n", .{target_class});
+    try stub.writef("(self) -> {s}:\n", .{target_class});
+
+    // Add docstring using the documentation from color_factory
+    const doc = color_factory.getConversionMethodDoc(TargetType);
+    try stub.write("        \"\"\"");
+    try stub.write(doc);
+    try stub.write("\"\"\"\n");
+    try stub.write("        ...\n");
 }
 
 /// Convert color.Rgb or zignal.Rgb -> "Rgb"

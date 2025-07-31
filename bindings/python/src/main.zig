@@ -43,6 +43,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
+    // Register InterpolationMethod enum
+    interpolation.registerInterpolationMethod(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register InterpolationMethod: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
     // Register Canvas type
     py_utils.registerType(@ptrCast(m), "Canvas", @ptrCast(&canvas.CanvasType)) catch |err| {
         std.log.err("Failed to register Canvas: {}", .{err});
@@ -57,9 +64,9 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register InterpolationMethod enum
-    interpolation.registerInterpolationMethod(@ptrCast(m)) catch |err| {
-        std.log.err("Failed to register InterpolationMethod: {}", .{err});
+    // Register FeatureDistributionMatching type
+    py_utils.registerType(@ptrCast(m), "FeatureDistributionMatching", @ptrCast(&fdm.FeatureDistributionMatchingType)) catch |err| {
+        std.log.err("Failed to register FeatureDistributionMatching: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
@@ -67,13 +74,6 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register all color types from the registry
     color.registerAllColorTypes(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register color types: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register FeatureDistributionMatching type
-    py_utils.registerType(@ptrCast(m), "FeatureDistributionMatching", @ptrCast(&fdm.FeatureDistributionMatchingType)) catch |err| {
-        std.log.err("Failed to register FeatureDistributionMatching: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
