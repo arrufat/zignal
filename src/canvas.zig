@@ -1307,9 +1307,11 @@ pub fn Canvas(comptime T: type) type {
                                             const y_end = @as(usize, @intFromFloat(@min(y_end_f, clip_rect.b)));
 
                                             // Fill the pixel block
-                                            for (y_start..y_end) |py| {
-                                                for (x_start..x_end) |px| {
-                                                    self.setPixel(.point(.{ @as(f32, @floatFromInt(px)), @as(f32, @floatFromInt(py)) }), color);
+                                            if (x_start < x_end and y_start < y_end) {
+                                                for (y_start..y_end) |py| {
+                                                    for (x_start..x_end) |px| {
+                                                        self.setPixel(.point(.{ @as(f32, @floatFromInt(px)), @as(f32, @floatFromInt(py)) }), color);
+                                                    }
                                                 }
                                             }
                                         }
