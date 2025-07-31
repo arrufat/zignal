@@ -10,6 +10,7 @@ const stub_metadata = @import("stub_metadata.zig");
 const image_module = @import("image.zig");
 const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
+const fdm_module = @import("fdm.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -151,11 +152,20 @@ fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.Cla
         }
 
         // Write method signature
-        try stub.writef("    def {s}({s}) -> {s}: ...\n", .{
+        try stub.writef("    def {s}({s}) -> {s}:", .{
             method.name,
             method.params,
             method.returns,
         });
+
+        // Add docstring if available
+        if (method.doc) |doc| {
+            try stub.write("\n");
+            try stub.writef("        \"\"\"{s}\"\"\"\n", .{doc});
+            try stub.write("        ...\n");
+        } else {
+            try stub.write(" ...\n");
+        }
     }
 
     // Generate properties
@@ -255,9 +265,10 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     // Generate Image class from metadata
     const image_methods = stub_metadata.extractMethodInfo(&image_module.image_methods_metadata);
     const image_properties = stub_metadata.extractPropertyInfo(&image_module.image_properties_metadata);
+    const image_doc = std.mem.span(image_module.ImageType.tp_doc);
     try generateClassFromMetadata(&stub, .{
         .name = "Image",
-        .doc = "Image class with RGBA storage for SIMD-optimized operations",
+        .doc = image_doc,
         .methods = &image_methods,
         .properties = &image_properties,
         .bases = &.{},
@@ -271,11 +282,23 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     // Generate Canvas class from metadata
     const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
     const canvas_properties = stub_metadata.extractPropertyInfo(&canvas_module.canvas_properties_metadata);
+    const canvas_doc = std.mem.span(canvas_module.CanvasType.tp_doc);
     try generateClassFromMetadata(&stub, .{
         .name = "Canvas",
-        .doc = "Canvas for drawing operations on images",
+        .doc = canvas_doc,
         .methods = &canvas_methods,
         .properties = &canvas_properties,
+        .bases = &.{},
+    });
+
+    // Generate FeatureDistributionMatching class from metadata
+    const fdm_methods = stub_metadata.extractMethodInfo(&fdm_module.fdm_methods_metadata);
+    const fdm_doc = std.mem.span(fdm_module.FeatureDistributionMatchingType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "FeatureDistributionMatching",
+        .doc = fdm_doc,
+        .methods = &fdm_methods,
+        .properties = &[_]stub_metadata.PropertyInfo{},
         .bases = &.{},
     });
 
@@ -312,11 +335,12 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
         try stub.writef("    {s} as {s},\n", .{ class_name, class_name });
     }
 
-    // Add Image and function
+    // Add Image and classes
     try stub.write("    Image as Image,\n");
+    try stub.write("    Canvas as Canvas,\n");
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
     try stub.write("    DrawMode as DrawMode,\n");
-    try stub.write("    feature_distribution_match as feature_distribution_match,\n");
+    try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write(")\n\n");
 
     // Module metadata
