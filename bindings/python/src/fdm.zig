@@ -4,133 +4,421 @@ const zignal = @import("zignal");
 
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");
+const allocator = py_utils.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-// Documentation for feature_distribution_match function
-const feature_distribution_match_doc =
-    \\feature_distribution_match(source, reference)
+// FeatureDistributionMatching Python object
+pub const FeatureDistributionMatchingObject = extern struct {
+    ob_base: c.PyObject,
+    // Store a pointer to the heap-allocated FDM struct
+    fdm_ptr: ?*zignal.FeatureDistributionMatching(zignal.Rgba),
+};
+
+fn fdm_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    _ = kwds;
+
+    const self = @as(?*FeatureDistributionMatchingObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    if (self) |obj| {
+        obj.fdm_ptr = null;
+    }
+    return @as(?*c.PyObject, @ptrCast(self));
+}
+
+fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
+    _ = args;
+    _ = kwds;
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    // Create and store the FDM struct
+    const fdm_ptr = allocator.create(zignal.FeatureDistributionMatching(zignal.Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate FeatureDistributionMatching");
+        return -1;
+    };
+
+    // Initialize the FDM instance
+    fdm_ptr.* = zignal.FeatureDistributionMatching(zignal.Rgba).init(allocator);
+    self.fdm_ptr = fdm_ptr;
+
+    return 0;
+}
+
+fn fdm_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    // Free the FDM struct
+    if (self.fdm_ptr) |ptr| {
+        ptr.deinit();
+        allocator.destroy(ptr);
+    }
+
+    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+}
+
+fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = self_obj;
+    return c.PyUnicode_FromString("FeatureDistributionMatching()");
+}
+
+// set_target method
+const set_target_doc =
+    \\set_target(image)
     \\--
     \\
-    \\Apply Feature Distribution Matching (FDM) to transfer color/style from reference to source image.
+    \\Set the target image whose distribution will be matched.
     \\
-    \\This function modifies the source image in-place to match the color distribution
-    \\(mean and covariance) of the reference image while preserving the structure of the source.
-    \\The algorithm works by transforming the color distribution of the source image to match
-    \\that of the reference image using statistical moments.
+    \\This method computes and stores the target distribution statistics (mean and covariance)
+    \\for reuse across multiple source images. This is more efficient than recomputing
+    \\the statistics for each image when applying the same style to multiple images.
     \\
     \\Parameters
     \\----------
-    \\source : `Image`
-    \\    Source image to be modified (modified in-place). The structure and content
-    \\    of this image will be preserved, but its colors will be adjusted.
-    \\reference : `Image`
-    \\    Reference image providing the target color distribution. This image's color
-    \\    statistics (mean and covariance) will be matched by the source image.
+    \\image : Image
+    \\    Target image providing the color distribution to match
     \\
     \\Returns
     \\-------
     \\None
-    \\    This function modifies the source image in-place
-    \\
-    \\Raises
-    \\------
-    \\TypeError
-    \\    If either source or reference is not an Image object
-    \\ValueError
-    \\    If either image is not initialized
-    \\MemoryError
-    \\    If the algorithm runs out of memory during processing
-    \\
-    \\Notes
-    \\-----
-    \\FDM is particularly useful for:
-    \\- Color transfer between images
-    \\- Style matching for consistent look across image sets
-    \\- Histogram matching with preservation of image structure
-    \\- Color grading and correction
-    \\
-    \\The algorithm preserves the structure of the source image while only
-    \\modifying its color distribution, making it ideal for artistic style
-    \\transfer applications.
     \\
     \\Examples
     \\--------
-    \\>>> # Basic color transfer
-    \\>>> src_img = Image.load("portrait.png")
-    \\>>> ref_img = Image.load("sunset.png")
-    \\>>> zignal.feature_distribution_match(src_img, ref_img)
-    \\>>> src_img.save("portrait_sunset_colors.png")
-    \\
-    \\>>> # Batch processing with consistent color grading
-    \\>>> reference = Image.load("color_reference.png")
-    \\>>> for filename in image_files:
-    \\...     img = Image.load(filename)
-    \\...     zignal.feature_distribution_match(img, reference)
-    \\...     img.save(f"graded_{filename}")
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> target = Image.load("sunset.png")
+    \\>>> fdm.set_target(target)
 ;
 
-pub fn feature_distribution_match(self: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = self;
+fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
 
-    var src_obj: ?*c.PyObject = undefined;
-    var ref_obj: ?*c.PyObject = undefined;
-
-    const format = std.fmt.comptimePrint("OO", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &src_obj, &ref_obj) == 0) {
+    if (self.fdm_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
         return null;
     }
 
-    // Check if both arguments are Image objects
-    if (c.PyObject_IsInstance(src_obj, @ptrCast(&image.ImageType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "First argument must be an Image object");
+    var target_obj: ?*c.PyObject = undefined;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &target_obj) == 0) {
         return null;
     }
 
-    if (c.PyObject_IsInstance(ref_obj, @ptrCast(&image.ImageType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Second argument must be an Image object");
+    // Check if argument is an Image object
+    if (c.PyObject_IsInstance(target_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image object");
         return null;
     }
 
-    // Cast to ImageObject
-    const src_img_obj = @as(*image.ImageObject, @ptrCast(src_obj.?));
-    const ref_img_obj = @as(*image.ImageObject, @ptrCast(ref_obj.?));
+    const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
 
-    // Check if images are initialized
-    if (src_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Source image is not initialized");
+    // Check if image is initialized
+    if (target_img_obj.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Target image is not initialized");
         return null;
     }
 
-    if (ref_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Reference image is not initialized");
-        return null;
-    }
-
-    var arena = py_utils.createArenaAllocator();
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    // Call the FDM function
-    zignal.featureDistributionMatch(zignal.Rgba, allocator, src_img_obj.image_ptr.?.*, ref_img_obj.image_ptr.?.*) catch |err| {
+    // Set the target
+    self.fdm_ptr.?.setTarget(target_img_obj.image_ptr.?.*) catch |err| {
         switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during feature distribution matching"),
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting target"),
         }
         return null;
     };
 
-    // Return None
     const none = c.Py_None();
     c.Py_INCREF(none);
     return none;
 }
 
-// FDM function metadata
-pub const fdm_metadata = stub_metadata.FunctionWithMetadata{
-    .name = "feature_distribution_match",
-    .meth = @ptrCast(&feature_distribution_match),
-    .flags = c.METH_VARARGS,
-    .doc = feature_distribution_match_doc,
-    .params = "source: Image, reference: Image",
-    .returns = "None",
+// set_source method
+const set_source_doc =
+    \\set_source(image)
+    \\--
+    \\
+    \\Set the source image to be transformed.
+    \\
+    \\The source image will be modified in-place when update() is called.
+    \\
+    \\Parameters
+    \\----------
+    \\image : Image
+    \\    Source image to be modified
+    \\
+    \\Returns
+    \\-------
+    \\None
+    \\
+    \\Examples
+    \\--------
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> source = Image.load("portrait.png")
+    \\>>> fdm.set_source(source)
+;
+
+fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    if (self.fdm_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
+        return null;
+    }
+
+    var source_obj: ?*c.PyObject = undefined;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &source_obj) == 0) {
+        return null;
+    }
+
+    // Check if argument is an Image object
+    if (c.PyObject_IsInstance(source_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image object");
+        return null;
+    }
+
+    const source_img_obj = @as(*image.ImageObject, @ptrCast(source_obj.?));
+
+    // Check if image is initialized
+    if (source_img_obj.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Source image is not initialized");
+        return null;
+    }
+
+    // Set the source
+    self.fdm_ptr.?.setSource(source_img_obj.image_ptr.?.*) catch |err| {
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting source"),
+        }
+        return null;
+    };
+
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
+// match method
+const match_doc =
+    \\match(source, target)
+    \\--
+    \\
+    \\Set both source and target images and apply the transformation.
+    \\
+    \\This is a convenience method that combines set_source(), set_target(), and update()
+    \\into a single call. The source image is modified in-place.
+    \\
+    \\Parameters
+    \\----------
+    \\source : Image
+    \\    Source image to be modified
+    \\target : Image
+    \\    Target image providing the color distribution to match
+    \\
+    \\Returns
+    \\-------
+    \\None
+    \\
+    \\Examples
+    \\--------
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> source = Image.load("portrait.png")
+    \\>>> target = Image.load("sunset.png")
+    \\>>> fdm.match(source, target)  # source is now modified
+    \\>>> source.save("portrait_sunset.png")
+;
+
+fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    if (self.fdm_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
+        return null;
+    }
+
+    var source_obj: ?*c.PyObject = undefined;
+    var target_obj: ?*c.PyObject = undefined;
+
+    const format = std.fmt.comptimePrint("OO", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &source_obj, &target_obj) == 0) {
+        return null;
+    }
+
+    // Check if both arguments are Image objects
+    if (c.PyObject_IsInstance(source_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "First argument must be an Image object");
+        return null;
+    }
+
+    if (c.PyObject_IsInstance(target_obj, @ptrCast(&image.ImageType)) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Second argument must be an Image object");
+        return null;
+    }
+
+    // Cast to ImageObject
+    const source_img_obj = @as(*image.ImageObject, @ptrCast(source_obj.?));
+    const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
+
+    // Check if images are initialized
+    if (source_img_obj.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Source image is not initialized");
+        return null;
+    }
+
+    if (target_img_obj.image_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Target image is not initialized");
+        return null;
+    }
+
+    // Call match (which now includes update)
+    self.fdm_ptr.?.match(source_img_obj.image_ptr.?.*, target_img_obj.image_ptr.?.*) catch |err| {
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during match"),
+            error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set"),
+            error.NoSourceSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No source image set"),
+        }
+        return null;
+    };
+
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
+// update method
+const update_doc =
+    \\update()
+    \\--
+    \\
+    \\Apply the feature distribution matching transformation.
+    \\
+    \\This method modifies the source image in-place to match the target distribution.
+    \\Both source and target must be set before calling this method.
+    \\
+    \\Returns
+    \\-------
+    \\None
+    \\
+    \\Raises
+    \\------
+    \\RuntimeError
+    \\    If source or target has not been set
+    \\
+    \\Examples
+    \\--------
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> fdm.match(source, target)
+    \\>>> fdm.update()  # source is now modified
+    \\
+    \\>>> # Batch processing
+    \\>>> fdm.set_target(style_image)
+    \\>>> for img in images:
+    \\...     fdm.set_source(img)
+    \\...     fdm.update()  # Each img is modified in-place
+;
+
+fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    if (self.fdm_ptr == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
+        return null;
+    }
+
+    // Apply the transformation
+    self.fdm_ptr.?.update() catch |err| {
+        switch (err) {
+            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during update"),
+            error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set. Call set_target() or match() first"),
+            error.NoSourceSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No source image set. Call set_source() or match() first"),
+        }
+        return null;
+    };
+
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
+// Method definitions with metadata
+pub const fdm_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+    .{
+        .name = "set_target",
+        .meth = @ptrCast(&fdm_set_target),
+        .flags = c.METH_VARARGS,
+        .doc = set_target_doc,
+        .params = "self, image: Image",
+        .returns = "None",
+    },
+    .{
+        .name = "set_source",
+        .meth = @ptrCast(&fdm_set_source),
+        .flags = c.METH_VARARGS,
+        .doc = set_source_doc,
+        .params = "self, image: Image",
+        .returns = "None",
+    },
+    .{
+        .name = "match",
+        .meth = @ptrCast(&fdm_match),
+        .flags = c.METH_VARARGS,
+        .doc = match_doc,
+        .params = "self, source: Image, target: Image",
+        .returns = "None",
+    },
+    .{
+        .name = "update",
+        .meth = @ptrCast(&fdm_update),
+        .flags = c.METH_NOARGS,
+        .doc = update_doc,
+        .params = "self",
+        .returns = "None",
+    },
+};
+
+// Generate PyMethodDef array from metadata
+var fdm_methods = stub_metadata.toPyMethodDefArray(&fdm_methods_metadata);
+
+// Class documentation
+const fdm_class_doc =
+    \\Feature Distribution Matching for image style transfer.
+    \\
+    \\This class implements Feature Distribution Matching (FDM), which transfers
+    \\the color distribution from a target image to a source image while preserving
+    \\the structure of the source. The algorithm matches the mean and covariance
+    \\of pixel distributions.
+    \\
+    \\The class supports efficient batch processing by computing target statistics
+    \\once and reusing them for multiple source images.
+    \\
+    \\Examples
+    \\--------
+    \\>>> # Single image transformation
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> source = Image.load("portrait.png")
+    \\>>> target = Image.load("sunset.png")
+    \\>>> fdm.match(source, target)  # source is modified in-place
+    \\>>> source.save("portrait_sunset.png")
+    \\
+    \\>>> # Batch processing with same style
+    \\>>> fdm = FeatureDistributionMatching()
+    \\>>> style = Image.load("style_reference.png")
+    \\>>> fdm.set_target(style)
+    \\>>> for filename in image_files:
+    \\...     img = Image.load(filename)
+    \\...     fdm.set_source(img)
+    \\...     fdm.update()
+    \\...     img.save(f"styled_{filename}")
+;
+
+// PyTypeObject definition
+pub var FeatureDistributionMatchingType = c.PyTypeObject{
+    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
+    .tp_name = "zignal.FeatureDistributionMatching",
+    .tp_basicsize = @sizeOf(FeatureDistributionMatchingObject),
+    .tp_dealloc = fdm_dealloc,
+    .tp_repr = fdm_repr,
+    .tp_flags = c.Py_TPFLAGS_DEFAULT,
+    .tp_doc = fdm_class_doc,
+    .tp_methods = @ptrCast(&fdm_methods),
+    .tp_init = fdm_init,
+    .tp_new = fdm_new,
 };

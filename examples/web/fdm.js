@@ -70,7 +70,7 @@
     displayImage(canvasSrc, ctxSrc, file, true);
   });
 
-  // File input for reference image
+  // File input for target image
   const fileInput2 = document.createElement("input");
   fileInput2.type = "file";
   fileInput2.style.display = "none";
@@ -98,7 +98,7 @@
     displayImage(canvasSrc, ctxSrc, file, true);
   };
 
-  // Drag and drop for reference image
+  // Drag and drop for target image
   canvasRef.ondragover = function (event) {
     event.preventDefault();
   };
@@ -111,7 +111,7 @@
 
   matchButton.addEventListener("click", function () {
     if (!srcImage || !refImage) {
-      alert("Please load both source and reference images first");
+      alert("Please load both source and target images first");
       return;
     }
 

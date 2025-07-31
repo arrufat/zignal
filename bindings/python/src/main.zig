@@ -26,10 +26,8 @@ var zignal_module = c.PyModuleDef{
     .m_free = null,
 };
 
-// Module function metadata
-pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{
-    fdm.fdm_metadata,
-};
+// Module function metadata - empty now since we removed the function
+pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{};
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);
@@ -69,6 +67,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register all color types from the registry
     color.registerAllColorTypes(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register color types: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register FeatureDistributionMatching type
+    py_utils.registerType(@ptrCast(m), "FeatureDistributionMatching", @ptrCast(&fdm.FeatureDistributionMatchingType)) catch |err| {
+        std.log.err("Failed to register FeatureDistributionMatching: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

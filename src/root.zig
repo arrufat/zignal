@@ -94,7 +94,7 @@ pub const SvdMode = @import("svd.zig").SvdMode;
 pub const SvdOptions = @import("svd.zig").SvdOptions;
 pub const SvdResult = @import("svd.zig").SvdResult;
 
-pub const featureDistributionMatch = @import("fdm.zig").featureDistributionMatch;
+pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
 // Font system
 pub const font = @import("font.zig");
