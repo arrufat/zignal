@@ -72,20 +72,18 @@ const set_target_doc =
     \\for reuse across multiple source images. This is more efficient than recomputing
     \\the statistics for each image when applying the same style to multiple images.
     \\
-    \\Parameters
-    \\----------
-    \\image : Image
-    \\    Target image providing the color distribution to match
+    \\## Parameters
+    \\- `image` (`Image`): Target image providing the color distribution to match
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Examples
-    \\--------
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> target = Image.load("sunset.png")
-    \\>>> fdm.set_target(target)
+    \\## Examples
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\target = Image.load("sunset.png")
+    \\fdm.set_target(target)
+    \\```
 ;
 
 fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -138,20 +136,18 @@ const set_source_doc =
     \\
     \\The source image will be modified in-place when update() is called.
     \\
-    \\Parameters
-    \\----------
-    \\image : Image
-    \\    Source image to be modified
+    \\## Parameters
+    \\- `image` (`Image`): Source image to be modified
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Examples
-    \\--------
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> source = Image.load("portrait.png")
-    \\>>> fdm.set_source(source)
+    \\## Examples
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\source = Image.load("portrait.png")
+    \\fdm.set_source(source)
+    \\```
 ;
 
 fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -205,24 +201,21 @@ const match_doc =
     \\This is a convenience method that combines set_source(), set_target(), and update()
     \\into a single call. The source image is modified in-place.
     \\
-    \\Parameters
-    \\----------
-    \\source : Image
-    \\    Source image to be modified
-    \\target : Image
-    \\    Target image providing the color distribution to match
+    \\## Parameters
+    \\- `source` (`Image`): Source image to be modified
+    \\- `target` (`Image`): Target image providing the color distribution to match
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Examples
-    \\--------
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> source = Image.load("portrait.png")
-    \\>>> target = Image.load("sunset.png")
-    \\>>> fdm.match(source, target)  # source is now modified
-    \\>>> source.save("portrait_sunset.png")
+    \\## Examples
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\source = Image.load("portrait.png")
+    \\target = Image.load("sunset.png")
+    \\fdm.match(source, target)  # source is now modified
+    \\source.save("portrait_sunset.png")
+    \\```
 ;
 
 fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -292,26 +285,27 @@ const update_doc =
     \\This method modifies the source image in-place to match the target distribution.
     \\Both source and target must be set before calling this method.
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Raises
-    \\------
-    \\RuntimeError
-    \\    If source or target has not been set
+    \\## Raises
+    \\- `RuntimeError`: If source or target has not been set
     \\
-    \\Examples
-    \\--------
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> fdm.match(source, target)
-    \\>>> fdm.update()  # source is now modified
+    \\## Examples
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\fdm.set_target(target)
+    \\fdm.set_source(source)
+    \\fdm.update()  # source is now modified
+    \\```
     \\
-    \\>>> # Batch processing
-    \\>>> fdm.set_target(style_image)
-    \\>>> for img in images:
-    \\...     fdm.set_source(img)
-    \\...     fdm.update()  # Each img is modified in-place
+    \\### Batch processing
+    \\```python
+    \\fdm.set_target(style_image)
+    \\for img in images:
+    \\    fdm.set_source(img)
+    \\    fdm.update()  # Each img is modified in-place
+    \\```
 ;
 
 fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -389,24 +383,28 @@ const fdm_class_doc =
     \\The class supports efficient batch processing by computing target statistics
     \\once and reusing them for multiple source images.
     \\
-    \\Examples
-    \\--------
-    \\>>> # Single image transformation
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> source = Image.load("portrait.png")
-    \\>>> target = Image.load("sunset.png")
-    \\>>> fdm.match(source, target)  # source is modified in-place
-    \\>>> source.save("portrait_sunset.png")
+    \\## Examples
     \\
-    \\>>> # Batch processing with same style
-    \\>>> fdm = FeatureDistributionMatching()
-    \\>>> style = Image.load("style_reference.png")
-    \\>>> fdm.set_target(style)
-    \\>>> for filename in image_files:
-    \\...     img = Image.load(filename)
-    \\...     fdm.set_source(img)
-    \\...     fdm.update()
-    \\...     img.save(f"styled_{filename}")
+    \\### Single image transformation
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\source = Image.load("portrait.png")
+    \\target = Image.load("sunset.png")
+    \\fdm.match(source, target)  # source is modified in-place
+    \\source.save("portrait_sunset.png")
+    \\```
+    \\
+    \\### Batch processing with same style
+    \\```python
+    \\fdm = FeatureDistributionMatching()
+    \\style = Image.load("style_reference.png")
+    \\fdm.set_target(style)
+    \\for filename in image_files:
+    \\    img = Image.load(filename)
+    \\    fdm.set_source(img)
+    \\    fdm.update()
+    \\    img.save(f"styled_{filename}")
+    \\```
 ;
 
 // PyTypeObject definition

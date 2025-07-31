@@ -16,6 +16,30 @@ const isSupportedColor = @import("color_registry.zig").isSupportedColor;
 const registerType = @import("py_utils.zig").registerType;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 
+/// Convert string to lowercase at comptime
+pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
+    comptime var result: [input.len]u8 = undefined;
+    inline for (input, 0..) |char, i| {
+        result[i] = std.ascii.toLower(char);
+    }
+    return result[0..];
+}
+
+/// Automatically generate documentation from type name for color conversion methods
+pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
+    const type_name = @typeName(TargetColorType);
+
+    // Extract the color space name (everything after the last dot)
+    if (comptime std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
+        const color_space = comptime type_name[dot_index + 1 ..];
+        const method_name = comptime "to_" ++ comptimeLowercase(color_space);
+        return comptime method_name ++ "()\n--\n\nConvert to " ++ color_space ++ " color space.\n\n## Returns\n- `" ++
+            color_space ++ "`: Color in " ++ color_space ++ " color space";
+    } else {
+        @compileError("Expected zignal.ColorName format, got: " ++ type_name);
+    }
+}
+
 /// Generate a color binding with automatic property getters and validation
 pub fn createColorBinding(
     comptime name: []const u8,
@@ -208,15 +232,6 @@ pub fn createColorBinding(
             return methods;
         }
 
-        /// Convert string to lowercase at comptime
-        fn comptimeLowercase(comptime input: []const u8) []const u8 {
-            comptime var result: [input.len]u8 = undefined;
-            inline for (input, 0..) |char, i| {
-                result[i] = std.ascii.toLower(char);
-            }
-            return result[0..];
-        }
-
         /// Automatically generate Python method name from type name
         /// e.g., zignal.Rgb -> "to_rgb", zignal.Oklab -> "to_oklab"
         fn getConversionMethodName(comptime TargetColorType: type) []const u8 {
@@ -240,21 +255,6 @@ pub fn createColorBinding(
             if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
                 const base_name = type_name[dot_index + 1 ..];
                 return "to" ++ base_name;
-            } else {
-                @compileError("Expected zignal.ColorName format, got: " ++ type_name);
-            }
-        }
-
-        /// Automatically generate documentation from type name
-        fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
-            const type_name = @typeName(TargetColorType);
-
-            // Extract the color space name (everything after the last dot)
-            if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
-                const color_space = type_name[dot_index + 1 ..];
-                const method_name = "to_" ++ comptimeLowercase(color_space);
-                return method_name ++ "()\n--\n\nConvert to " ++ color_space ++ " color space.\n\nReturns\n-------\n`" ++
-                    color_space ++ "`\n    Color in `" ++ color_space ++ "` color space";
             } else {
                 @compileError("Expected zignal.ColorName format, got: " ++ type_name);
             }

@@ -1,8 +1,5 @@
 """Zignal Python bindings - zero-dependency image processing library."""
 
-# Configure pdoc to use NumPy-style docstring parsing
-__docformat__ = "numpy"
-
 import importlib.util
 import os
 
@@ -22,7 +19,9 @@ except ImportError as e:
     # Find the actual extension file
     zignal_path = None
     for file in all_files:
-        if file.startswith("_zignal") and (file.endswith(".so") or file.endswith(".pyd") or file.endswith(".dylib")):
+        if file.startswith("_zignal") and (
+            file.endswith(".so") or file.endswith(".pyd") or file.endswith(".dylib")
+        ):
             zignal_path = os.path.join(pkg_dir, file)
             break
 
@@ -34,7 +33,7 @@ except ImportError as e:
                 spec.loader.exec_module(module)
                 # Import everything from the module
                 for name in dir(module):
-                    if not name.startswith('_'):
+                    if not name.startswith("_"):
                         globals()[name] = getattr(module, name)
             else:
                 raise ImportError("Could not create module spec")
@@ -58,4 +57,8 @@ except ImportError:
     __version__ = "unknown"
 
 # Dynamically populate __all__ from the native module
-__all__ = [name for name in globals() if not name.startswith('_') and name not in ['importlib', 'os', 'sys', 'spec', 'module']]
+__all__ = [
+    name
+    for name in globals()
+    if not name.startswith("_") and name not in ["importlib", "os", "sys", "spec", "module"]
+]

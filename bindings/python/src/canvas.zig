@@ -118,24 +118,22 @@ const canvas_fill_doc =
     \\
     \\Fill the entire canvas with a color.
     \\
-    \\Parameters
-    \\----------
-    \\color : tuple or color object
-    \\    Color to fill the canvas with. Can be:
-    \\    - RGB tuple: (r, g, b) with values 0-255
-    \\    - RGBA tuple: (r, g, b, a) with values 0-255
-    \\    - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
+    \\## Parameters
+    \\- `color` (tuple or color object): Color to fill the canvas with. Can be:
+    \\  - RGB tuple: `(r, g, b)` with values 0-255
+    \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
+    \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> canvas = img.canvas()
-    \\>>> canvas.fill((255, 0, 0))  # Fill with red
-    \\>>> canvas.fill(Rgb(0, 255, 0))  # Fill with green using Rgb object
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\canvas = img.canvas()
+    \\canvas.fill((255, 0, 0))  # Fill with red
+    \\canvas.fill(Rgb(0, 255, 0))  # Fill with green using Rgb object
+    \\```
 ;
 
 fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -172,34 +170,28 @@ const canvas_draw_line_doc =
     \\
     \\Draw a line between two points.
     \\
-    \\Parameters
-    \\----------
-    \\p1 : tuple[float, float]
-    \\    Starting point coordinates (x, y)
-    \\p2 : tuple[float, float]
-    \\    Ending point coordinates (x, y)
-    \\color : tuple or color object
-    \\    Color of the line. Can be:
-    \\    - RGB tuple: (r, g, b) with values 0-255
-    \\    - RGBA tuple: (r, g, b, a) with values 0-255
-    \\    - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
-    \\width : int, optional
-    \\    Line width in pixels (default: 1)
-    \\mode : `DrawMode`, optional
-    \\    Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\## Parameters
+    \\- `p1` (tuple[float, float]): Starting point coordinates (x, y)
+    \\- `p2` (tuple[float, float]): Ending point coordinates (x, y)
+    \\- `color` (tuple or color object): Color of the line. Can be:
+    \\  - RGB tuple: `(r, g, b)` with values 0-255
+    \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
+    \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
+    \\- `width` (int, optional): Line width in pixels (default: 1)
+    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
     \\
-    \\Returns
-    \\-------
-    \\None
+    \\## Returns
+    \\- `None`
     \\
-    \\Examples
-    \\--------
-    \\>>> img = Image.load("photo.png")
-    \\>>> canvas = img.canvas()
-    \\>>> # Draw a red line from top-left to bottom-right
-    \\>>> canvas.draw_line((0, 0), (100, 100), (255, 0, 0))
-    \\>>> # Draw a thick blue line with antialiasing
-    \\>>> canvas.draw_line((50, 50), (150, 50), (0, 0, 255), width=5, mode=DrawMode.SOFT)
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\canvas = img.canvas()
+    \\# Draw a red line from top-left to bottom-right
+    \\canvas.draw_line((0, 0), (100, 100), (255, 0, 0))
+    \\# Draw a thick blue line with antialiasing
+    \\canvas.draw_line((50, 50), (150, 50), (0, 0, 255), width=5, mode=DrawMode.SOFT)
+    \\```
 ;
 
 fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -388,15 +380,11 @@ pub fn registerDrawMode(module: *c.PyObject) !void {
     const doc_str = c.PyUnicode_FromString(
         \\Rendering quality mode for drawing operations.
         \\
-        \\Attributes
-        \\----------
-        \\FAST : int
-        \\    Fast rendering without antialiasing (value: 0)
-        \\SOFT : int
-        \\    High-quality rendering with antialiasing (value: 1)
+        \\## Attributes
+        \\- `FAST` (int): Fast rendering without antialiasing (value: 0)
+        \\- `SOFT` (int): High-quality rendering with antialiasing (value: 1)
         \\
-        \\Notes
-        \\-----
+        \\## Notes
         \\- FAST mode provides pixel-perfect rendering with sharp edges
         \\- SOFT mode provides smooth, antialiased edges for better visual quality
         \\- Default mode is FAST for performance
