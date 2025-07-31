@@ -15,7 +15,7 @@
 //! const reconstructed = try pca_2d.reconstruct(coeffs);
 //!
 //! // Convert Points to vectors if needed
-//! const point = Point2d(f64).init2d(1.0, 2.0);
+//! const point = Point(2, f64).point(.{ 1.0, 2.0 });
 //! const coeffs = try pca_2d.project(point.asVector());
 //! ```
 

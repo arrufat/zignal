@@ -12,7 +12,7 @@ const convertColor = @import("color.zig").convertColor;
 const Hsv = @import("color.zig").Hsv;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
-const Point2d = @import("geometry/Point.zig").Point2d;
+const Point = @import("geometry/Point.zig").Point;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Rgba = @import("color.zig").Rgba;
 
@@ -162,7 +162,7 @@ pub fn Canvas(comptime T: type) type {
         /// - color: Any color type (Rgba colors support alpha blending)
         /// - width: Line thickness in pixels (0 = no drawing)
         /// - mode: .fast (performance) or .soft (quality with antialiasing)
-        pub fn drawLine(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -175,7 +175,7 @@ pub fn Canvas(comptime T: type) type {
         /// Internal dispatcher for fast (non-antialiased) line rendering.
         /// - Width 1: Uses Bresenham's algorithm for pixel-perfect precision
         /// - Width >1: Uses rectangle-based approach with circular end caps
-        fn drawLineFast(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
+        fn drawLineFast(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
             if (width == 1) {
                 // Use Bresenham's algorithm for 1px lines - fast and precise
                 self.drawLineBresenham(p1, p2, color);
@@ -187,7 +187,7 @@ pub fn Canvas(comptime T: type) type {
         /// Internal dispatcher for soft (antialiased) line rendering.
         /// - Width 1: Uses Xiaolin Wu's algorithm for optimal thin line antialiasing
         /// - Width >1: Uses distance-based algorithm for superior thick line quality
-        fn drawLineSoft(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
+        fn drawLineSoft(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
             if (width == 1) {
                 // Use Wu's algorithm for 1px lines - optimal antialiasing and performance
                 self.drawLineXiaolinWu(p1, p2, color);
@@ -201,7 +201,7 @@ pub fn Canvas(comptime T: type) type {
         /// Classic rasterization algorithm using integer arithmetic for maximum speed.
         /// Produces pixel-perfect lines with hard edges and no antialiasing.
         /// Optimal for grid-aligned graphics and when performance is critical.
-        fn drawLineBresenham(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
+        fn drawLineBresenham(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype) void {
             var x1: i32 = @intFromFloat(p1.x());
             var y1: i32 = @intFromFloat(p1.y());
             const x2: i32 = @intFromFloat(p2.x());
@@ -260,7 +260,7 @@ pub fn Canvas(comptime T: type) type {
         /// Uses fractional coverage to create smooth line edges with alpha blending.
         /// Handles steep vs. shallow lines optimally by swapping coordinates.
         /// Provides the best quality-to-performance ratio for thin antialiased lines.
-        fn drawLineXiaolinWu(self: Self, p1: Point2d(f32), p2: Point2d(f32), color: anytype) void {
+        fn drawLineXiaolinWu(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype) void {
             const c2 = convertColor(Rgba, color);
 
             var x1 = p1.x();
@@ -281,7 +281,7 @@ pub fn Canvas(comptime T: type) type {
                 // Left endpoint antialiasing
                 if (min_x > left_x) {
                     const alpha = min_x - left_x;
-                    self.setPixel(Point2d(f32).init2d(left_x, y), c2.fade(alpha));
+                    self.setPixel(.point(.{ left_x, y }), c2.fade(alpha));
                 }
 
                 // Middle solid part - use fillHorizontalSpan for performance
@@ -294,7 +294,7 @@ pub fn Canvas(comptime T: type) type {
                 // Right endpoint antialiasing
                 if (max_x < right_x) {
                     const alpha = right_x - max_x;
-                    self.setPixel(Point2d(f32).init2d(right_x, y), c2.fade(alpha));
+                    self.setPixel(.point(.{ right_x, y }), c2.fade(alpha));
                 }
 
                 return;
@@ -320,11 +320,11 @@ pub fn Canvas(comptime T: type) type {
             var x_gap = rfpart(x1 + 0.5);
 
             if (steep) {
-                self.setPixel(Point2d(f32).init2d(y_end, x_end), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(Point2d(f32).init2d(y_end + 1, x_end), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ y_end, x_end }), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(.point(.{ y_end + 1, x_end }), c2.fade(fpart(y_end) * x_gap));
             } else {
-                self.setPixel(Point2d(f32).init2d(x_end, y_end), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(Point2d(f32).init2d(x_end, y_end + 1), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ x_end, y_end }), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(.point(.{ x_end, y_end + 1 }), c2.fade(fpart(y_end) * x_gap));
             }
             var intery = y_end + gradient;
 
@@ -334,11 +334,11 @@ pub fn Canvas(comptime T: type) type {
             x_gap = fpart(x2 + 0.5);
 
             if (steep) {
-                self.setPixel(Point2d(f32).init2d(y_end, x_end), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(Point2d(f32).init2d(y_end + 1, x_end), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ y_end, x_end }), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(.point(.{ y_end + 1, x_end }), c2.fade(fpart(y_end) * x_gap));
             } else {
-                self.setPixel(Point2d(f32).init2d(x_end, y_end), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(Point2d(f32).init2d(x_end, y_end + 1), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ x_end, y_end }), c2.fade(rfpart(y_end) * x_gap));
+                self.setPixel(.point(.{ x_end, y_end + 1 }), c2.fade(fpart(y_end) * x_gap));
             }
 
             // Main loop
@@ -347,11 +347,11 @@ pub fn Canvas(comptime T: type) type {
             var x = x_px1 + 1;
             while (x < x_px2) : (x += 1) {
                 if (steep) {
-                    self.setPixel(Point2d(f32).init2d(intery, x), c2.fade(rfpart(intery)));
-                    self.setPixel(Point2d(f32).init2d(intery + 1, x), c2.fade(fpart(intery)));
+                    self.setPixel(.point(.{ intery, x }), c2.fade(rfpart(intery)));
+                    self.setPixel(.point(.{ intery + 1, x }), c2.fade(fpart(intery)));
                 } else {
-                    self.setPixel(Point2d(f32).init2d(x, intery), c2.fade(rfpart(intery)));
-                    self.setPixel(Point2d(f32).init2d(x, intery + 1), c2.fade(fpart(intery)));
+                    self.setPixel(.point(.{ x, intery }), c2.fade(rfpart(intery)));
+                    self.setPixel(.point(.{ x, intery + 1 }), c2.fade(fpart(intery)));
                 }
                 intery += gradient;
             }
@@ -361,7 +361,7 @@ pub fn Canvas(comptime T: type) type {
         /// Constructs a filled rectangle perpendicular to the line direction,
         /// then adds circular end caps for smooth line termination.
         /// Handles zero-length lines by drawing a single filled circle.
-        fn drawLineRectangle(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
+        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
             const solid_color = convertColor(T, color);
 
             // For thick lines, draw as a filled rectangle
@@ -382,11 +382,11 @@ pub fn Canvas(comptime T: type) type {
             const perp_y = dx / line_length * half_width;
 
             // Create rectangle corners
-            const corners = [_]Point2d(f32){
-                Point2d(f32).init2d(p1.x() - perp_x, p1.y() - perp_y),
-                Point2d(f32).init2d(p1.x() + perp_x, p1.y() + perp_y),
-                Point2d(f32).init2d(p2.x() + perp_x, p2.y() + perp_y),
-                Point2d(f32).init2d(p2.x() - perp_x, p2.y() - perp_y),
+            const corners = [_]Point(2, f32){
+                .point(.{ p1.x() - perp_x, p1.y() - perp_y }),
+                .point(.{ p1.x() + perp_x, p1.y() + perp_y }),
+                .point(.{ p2.x() + perp_x, p2.y() + perp_y }),
+                .point(.{ p2.x() - perp_x, p2.y() - perp_y }),
             };
 
             // Fill rectangle using scanline algorithm (no anti-aliasing)
@@ -402,7 +402,7 @@ pub fn Canvas(comptime T: type) type {
         /// applying smooth alpha falloff at edges for superior visual quality.
         /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
         /// More expensive than rectangle-based approach but produces better results.
-        fn drawLineDistance(self: Self, p1: Point2d(f32), p2: Point2d(f32), width: usize, color: anytype) void {
+        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
@@ -460,7 +460,7 @@ pub fn Canvas(comptime T: type) type {
                             var x = x1;
                             while (x <= x2) : (x += 1) {
                                 if (x >= 0 and x < fcols) {
-                                    self.setPixel(Point2d(f32).init2d(x, py), c2);
+                                    self.setPixel(.point(.{ x, py }), c2);
                                 }
                             }
                         } else {
@@ -516,7 +516,7 @@ pub fn Canvas(comptime T: type) type {
                         }
 
                         if (alpha > 0) {
-                            self.setPixel(Point2d(f32).init2d(px, py), c2.fade(alpha));
+                            self.setPixel(.point(.{ px, py }), c2.fade(alpha));
                         }
                     }
                 }
@@ -528,7 +528,7 @@ pub fn Canvas(comptime T: type) type {
         /// Provides bounds checking and handles coordinate conversion.
         /// Coordinates are truncated to integers for pixel placement.
         /// For Rgba colors, uses the color's alpha channel; for other colors, treats as opaque.
-        pub fn setPixel(self: Self, point: Point2d(f32), color: anytype) void {
+        pub fn setPixel(self: Self, point: Point(2, f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
             if (self.atOrNull(@intFromFloat(point.y()), @intFromFloat(point.x()))) |pixel| {
@@ -567,7 +567,7 @@ pub fn Canvas(comptime T: type) type {
         /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
         /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
         /// Round joints are added at vertices to ensure smooth connections.
-        pub fn drawPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -582,11 +582,11 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             // Rectangle has exclusive r,b bounds, but drawPolygon needs inclusive points
             // So we subtract 1 from r and b to get the actual corner positions
-            const points: []const Point2d(f32) = &.{
-                Point2d(f32).init2d(rect.l, rect.t),
-                Point2d(f32).init2d(rect.r - 1, rect.t),
-                Point2d(f32).init2d(rect.r - 1, rect.b - 1),
-                Point2d(f32).init2d(rect.l, rect.b - 1),
+            const points: []const Point(2, f32) = &.{
+                .point(.{ rect.l, rect.t }),
+                .point(.{ rect.r - 1, rect.t }),
+                .point(.{ rect.r - 1, rect.b - 1 }),
+                .point(.{ rect.l, rect.b - 1 }),
             };
             self.drawPolygon(points, color, width, mode);
         }
@@ -614,7 +614,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Draws the outline of a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for fast aliased edges.
-        pub fn drawCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
@@ -625,7 +625,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing solid (aliased) circle outlines.
-        fn drawCircleFast(self: Self, center: Point2d(f32), radius: f32, width: usize, color: anytype) void {
+        fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: usize, color: anytype) void {
             if (width == 1) {
                 // Use fast Bresenham for 1-pixel width
                 const cx = @round(center.x());
@@ -635,15 +635,15 @@ pub fn Canvas(comptime T: type) type {
                 var y: f32 = 0;
                 var err: f32 = 0;
                 while (x >= y) {
-                    const points = [_]Point2d(f32){
-                        Point2d(f32).init2d(cx + x, cy + y),
-                        Point2d(f32).init2d(cx - x, cy + y),
-                        Point2d(f32).init2d(cx + x, cy - y),
-                        Point2d(f32).init2d(cx - x, cy - y),
-                        Point2d(f32).init2d(cx + y, cy + x),
-                        Point2d(f32).init2d(cx - y, cy + x),
-                        Point2d(f32).init2d(cx + y, cy - x),
-                        Point2d(f32).init2d(cx - y, cy - x),
+                    const points = [_]Point(2, f32){
+                        .point(.{ cx + x, cy + y }),
+                        .point(.{ cx - x, cy + y }),
+                        .point(.{ cx + x, cy - y }),
+                        .point(.{ cx - x, cy - y }),
+                        .point(.{ cx + y, cy + x }),
+                        .point(.{ cx - y, cy + x }),
+                        .point(.{ cx + y, cy - x }),
+                        .point(.{ cx - y, cy - x }),
                     };
                     for (points) |p| {
                         self.setPixel(p, color);
@@ -690,7 +690,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing smooth (anti-aliased) circle outlines.
-        fn drawCircleSoft(self: Self, center: Point2d(f32), radius: f32, width: usize, color: anytype) void {
+        fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: usize, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const line_width: f32 = @floatFromInt(width);
@@ -728,7 +728,7 @@ pub fn Canvas(comptime T: type) type {
                         alpha = @max(0, @min(1, alpha));
 
                         if (alpha > 0) {
-                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), c2.fade(alpha));
+                            self.setPixel(.point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), c2.fade(alpha));
                         }
                     }
                 }
@@ -741,7 +741,7 @@ pub fn Canvas(comptime T: type) type {
         /// **Rendering Modes:**
         /// - **DrawMode.fast**: Hard edges, maximum performance with @memset optimization
         /// - **DrawMode.soft**: Antialiased edges, uses alpha blending (no @memset)
-        pub fn fillPolygon(self: Self, polygon: []const Point2d(f32), color: anytype, mode: DrawMode) !void {
+        pub fn fillPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
@@ -839,7 +839,7 @@ pub fn Canvas(comptime T: type) type {
                                 alpha = @max(0, @min(1, alpha));
 
                                 if (alpha > 0) {
-                                    self.setPixel(Point2d(f32).init2d(x, y), c2.fade(alpha));
+                                    self.setPixel(.point(.{ x, y }), c2.fade(alpha));
                                 }
                             }
                         },
@@ -854,7 +854,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Fills a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for hard edges.
-        pub fn fillCircle(self: Self, center: Point2d(f32), radius: f32, color: anytype, mode: DrawMode) void {
+        pub fn fillCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0) return;
 
@@ -865,7 +865,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for filling smooth (anti-aliased) circles.
-        fn fillCircleSoft(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
+        fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const left: usize = @intFromFloat(@round(@max(0, center.x() - radius)));
@@ -885,10 +885,10 @@ pub fn Canvas(comptime T: type) type {
                             // Edge antialiasing
                             const edge_alpha = radius - dist;
                             const rgba_color = convertColor(Rgba, color);
-                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), rgba_color.fade(edge_alpha));
+                            self.setPixel(.point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), rgba_color.fade(edge_alpha));
                         } else {
                             // Full opacity in the center - direct assignment
-                            self.setPixel(Point2d(f32).init2d(@floatFromInt(c), @floatFromInt(r)), color);
+                            self.setPixel(.point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), color);
                         }
                     }
                 }
@@ -896,7 +896,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for filling solid (non-anti-aliased) circles.
-        fn fillCircleFast(self: Self, center: Point2d(f32), radius: f32, color: anytype) void {
+        fn fillCircleFast(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
             const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
             const top = @max(0, center.y() - radius);
@@ -918,9 +918,9 @@ pub fn Canvas(comptime T: type) type {
         /// Draws a quadratic Bézier curve with specified width and fill mode.
         pub fn drawQuadraticBezier(
             self: Self,
-            p0: Point2d(f32),
-            p1: Point2d(f32),
-            p2: Point2d(f32),
+            p0: Point(2, f32),
+            p1: Point(2, f32),
+            p2: Point(2, f32),
             color: anytype,
             width: usize,
             mode: DrawMode,
@@ -946,10 +946,10 @@ pub fn Canvas(comptime T: type) type {
         /// The curve is adaptively subdivided for optimal quality and performance.
         pub fn drawCubicBezier(
             self: Self,
-            p0: Point2d(f32),
-            p1: Point2d(f32),
-            p2: Point2d(f32),
-            p3: Point2d(f32),
+            p0: Point(2, f32),
+            p1: Point(2, f32),
+            p2: Point(2, f32),
+            p3: Point(2, f32),
             color: anytype,
             width: usize,
             mode: DrawMode,
@@ -975,7 +975,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws a spline polygon outline with Bézier curves connecting vertices.
         /// The polygon's edges are rendered as cubic Bézier splines for smooth, curved appearance.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn drawSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, width: usize, tension: f32, mode: DrawMode) void {
+        pub fn drawSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: usize, tension: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
 
@@ -991,12 +991,12 @@ pub fn Canvas(comptime T: type) type {
         /// Fills a spline polygon with Bézier curves connecting vertices.
         /// The polygon's outline is defined by Bézier splines for smooth, curved edges.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn fillSplinePolygon(self: Self, polygon: []const Point2d(f32), color: anytype, tension: f32, mode: DrawMode) !void {
+        pub fn fillSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, tension: f32, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
             // Stack buffer for common cases (up to 50 segments per curve, 8 curves)
-            var stack_buffer: [spline_polygon_stack_buffer_size]Point2d(f32) = undefined;
+            var stack_buffer: [spline_polygon_stack_buffer_size]Point(2, f32) = undefined;
             var total_points: usize = 0;
 
             // First pass: calculate total points needed
@@ -1012,14 +1012,14 @@ pub fn Canvas(comptime T: type) type {
             }
 
             // Use stack buffer if possible, otherwise allocate
-            var points_buffer: []Point2d(f32) = undefined;
-            var heap_buffer: ?[]Point2d(f32) = null;
+            var points_buffer: []Point(2, f32) = undefined;
+            var heap_buffer: ?[]Point(2, f32) = null;
             defer if (heap_buffer) |h| self.allocator.free(h);
 
             if (total_points <= spline_polygon_stack_buffer_size) {
                 points_buffer = stack_buffer[0..total_points];
             } else {
-                heap_buffer = try self.allocator.alloc(Point2d(f32), total_points);
+                heap_buffer = try self.allocator.alloc(Point(2, f32), total_points);
                 points_buffer = heap_buffer.?;
             }
 
@@ -1054,35 +1054,35 @@ pub fn Canvas(comptime T: type) type {
         /// Evaluates a quadratic Bézier curve at parameter t.
         /// Uses the standard quadratic Bézier formula: (1-t)²P₀ + 2t(1-t)P₁ + t²P₂
         /// Parameter t is in range [0, 1] where 0=start point, 1=end point.
-        fn evalQuadraticBezier(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), t: f32) Point2d(f32) {
+        fn evalQuadraticBezier(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), t: f32) Point(2, f32) {
             const u = 1 - t;
             const uu = u * u;
             const tt = t * t;
-            return Point2d(f32).init2d(
+            return .point(.{
                 uu * p0.x() + 2 * u * t * p1.x() + tt * p2.x(),
                 uu * p0.y() + 2 * u * t * p1.y() + tt * p2.y(),
-            );
+            });
         }
 
         /// Evaluates a cubic Bézier curve at parameter t.
         /// Uses the standard cubic Bézier formula: (1-t)³P₀ + 3t(1-t)²P₁ + 3t²(1-t)P₂ + t³P₃
         /// Parameter t is in range [0, 1] where 0=start point, 1=end point.
-        fn evalCubicBezier(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), p3: Point2d(f32), t: f32) Point2d(f32) {
+        fn evalCubicBezier(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), p3: Point(2, f32), t: f32) Point(2, f32) {
             const u = 1 - t;
             const uu = u * u;
             const uuu = uu * u;
             const tt = t * t;
             const ttt = tt * t;
-            return Point2d(f32).init2d(
+            return .point(.{
                 uuu * p0.x() + 3 * uu * t * p1.x() + 3 * u * tt * p2.x() + ttt * p3.x(),
                 uuu * p0.y() + 3 * uu * t * p1.y() + 3 * u * tt * p2.y() + ttt * p3.y(),
-            );
+            });
         }
 
         /// Estimates the length of a quadratic Bézier curve segment.
         /// Uses chord + control polygon approximation for fast, reasonably accurate estimation.
         /// The estimate is (chord_length + control_polygon_length) / 2.
-        fn estimateQuadraticBezierLength(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32)) f32 {
+        fn estimateQuadraticBezierLength(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32)) f32 {
             // Use chord + control polygon approximation
             const chord = p0.distance(p2);
             const control_net = p0.distance(p1) + p1.distance(p2);
@@ -1092,7 +1092,7 @@ pub fn Canvas(comptime T: type) type {
         /// Estimates the length of a cubic Bézier curve segment.
         /// Uses chord + control polygon approximation for fast, reasonably accurate estimation.
         /// The estimate is (chord_length + control_polygon_length) / 2.
-        fn estimateCubicBezierLength(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), p3: Point2d(f32)) f32 {
+        fn estimateCubicBezierLength(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), p3: Point(2, f32)) f32 {
             // Use chord + control polygon approximation
             const chord = p0.distance(p3);
             const control_net = p0.distance(p1) + p1.distance(p2) + p2.distance(p3);
@@ -1116,7 +1116,7 @@ pub fn Canvas(comptime T: type) type {
             max_segments: usize,
             comptime evalFn: anytype,
             evalArgs: anytype,
-            buffer: []Point2d(f32),
+            buffer: []Point(2, f32),
         ) usize {
             const segments = @max(min_segments, @min(max_segments, @as(usize, @intFromFloat(estimated_length / pixels_per_segment))));
             const actual_segments = @min(segments, buffer.len);
@@ -1141,7 +1141,7 @@ pub fn Canvas(comptime T: type) type {
             width: usize,
             mode: DrawMode,
         ) void {
-            var stack_buffer: [bezier_max_segments_count]Point2d(f32) = undefined;
+            var stack_buffer: [bezier_max_segments_count]Point(2, f32) = undefined;
 
             const actual_segments = tessellateBezier(
                 estimated_length,
@@ -1169,17 +1169,17 @@ pub fn Canvas(comptime T: type) type {
         /// - tension: Curve tension (0=sharp corners, 1=maximum smoothness)
         ///
         /// Returns control points for cubic Bézier: cp1 (outgoing from p0), cp2 (incoming to p1).
-        fn calculateSmoothControlPoints(p0: Point2d(f32), p1: Point2d(f32), p2: Point2d(f32), tension: f32) struct { cp1: Point2d(f32), cp2: Point2d(f32) } {
+        fn calculateSmoothControlPoints(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), tension: f32) struct { cp1: Point(2, f32), cp2: Point(2, f32) } {
             const tension_factor = 1 - @max(0, @min(1, tension));
             return .{
-                .cp1 = Point2d(f32).init2d(
+                .cp1 = .point(.{
                     p0.x() + (p1.x() - p0.x()) * tension_factor,
                     p0.y() + (p1.y() - p0.y()) * tension_factor,
-                ),
-                .cp2 = Point2d(f32).init2d(
+                }),
+                .cp2 = .point(.{
                     p1.x() - (p2.x() - p1.x()) * tension_factor,
                     p1.y() - (p2.y() - p1.y()) * tension_factor,
-                ),
+                }),
             };
         }
 
@@ -1206,7 +1206,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws text at the specified position using a bitmap font.
         /// The position specifies the top-left corner of the text.
         /// Supports newlines for multi-line text.
-        pub fn drawText(self: Self, text: []const u8, position: Point2d(f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
+        pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             const font_module = @import("font.zig");
             const BitmapFont = font_module.BitmapFont;
@@ -1255,7 +1255,7 @@ pub fn Canvas(comptime T: type) type {
                                     if (getGlyphBit(char_data, row, col, bitmap_bytes_per_row) != 0) {
                                         const px = x + @as(f32, @floatFromInt(col)) + @as(f32, @floatFromInt(glyph_info.x_offset));
                                         const py = y + @as(f32, @floatFromInt(row)) + @as(f32, @floatFromInt(glyph_info.y_offset));
-                                        self.setPixel(.init2d(px, py), color);
+                                        self.setPixel(.point(.{ px, py }), color);
                                     }
                                 }
                             }
@@ -1309,7 +1309,7 @@ pub fn Canvas(comptime T: type) type {
                                             // Fill the pixel block
                                             for (y_start..y_end) |py| {
                                                 for (x_start..x_end) |px| {
-                                                    self.setPixel(.init2d(@floatFromInt(px), @floatFromInt(py)), color);
+                                                    self.setPixel(.point(.{ @as(f32, @floatFromInt(px)), @as(f32, @floatFromInt(py)) }), color);
                                                 }
                                             }
                                         }
@@ -1376,7 +1376,7 @@ pub fn Canvas(comptime T: type) type {
                                             const normalized_coverage = total_coverage / box_area;
 
                                             if (normalized_coverage > 0) {
-                                                self.setPixel(.init2d(dest_x, dest_y), rgba_color.fade(normalized_coverage));
+                                                self.setPixel(.point(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage));
                                             }
                                         }
                                     }
@@ -1428,37 +1428,37 @@ const md5_checksums = [_]DrawTestCase{
 // Test drawing functions for MD5 checksums
 fn drawLineHorizontal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    canvas.drawLine(Point2d(f32).init2d(10, 50), Point2d(f32).init2d(90, 50), color, 1, .fast);
+    canvas.drawLine(.point(.{ 10, 50 }), .point(.{ 90, 50 }), color, 1, .fast);
 }
 
 fn drawLineVertical(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
-    canvas.drawLine(Point2d(f32).init2d(50, 10), Point2d(f32).init2d(50, 90), color, 1, .fast);
+    canvas.drawLine(.point(.{ 50, 10 }), .point(.{ 50, 90 }), color, 1, .fast);
 }
 
 fn drawLineDiagonal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
-    canvas.drawLine(Point2d(f32).init2d(10, 10), Point2d(f32).init2d(90, 90), color, 1, .fast);
+    canvas.drawLine(.point(.{ 10, 10 }), .point(.{ 90, 90 }), color, 1, .fast);
 }
 
 fn drawLineThick(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 128, .b = 0, .a = 255 };
-    canvas.drawLine(Point2d(f32).init2d(20, 20), Point2d(f32).init2d(80, 80), color, 5, .soft);
+    canvas.drawLine(.point(.{ 20, 20 }), .point(.{ 80, 80 }), color, 5, .soft);
 }
 
 fn drawCircleFilledSolid(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 0, .b = 128, .a = 255 };
-    canvas.fillCircle(Point2d(f32).init2d(50, 50), 30, color, .fast);
+    canvas.fillCircle(.point(.{ 50, 50 }), 30, color, .fast);
 }
 
 fn drawCircleFilledSmooth(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 128, .b = 128, .a = 255 };
-    canvas.fillCircle(Point2d(f32).init2d(50, 50), 25, color, .soft);
+    canvas.fillCircle(.point(.{ 50, 50 }), 25, color, .soft);
 }
 
 fn drawCircleOutline(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
-    canvas.drawCircle(Point2d(f32).init2d(50, 50), 35, color, 3, .soft);
+    canvas.drawCircle(.point(.{ 50, 50 }), 35, color, 3, .soft);
 }
 
 fn drawRectangleFilled(canvas: Canvas(Rgba)) void {
@@ -1475,10 +1475,10 @@ fn drawRectangleOutline(canvas: Canvas(Rgba)) void {
 
 fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 192, .b = 128, .a = 255 };
-    const triangle = [_]Point2d(f32){
-        Point2d(f32).init2d(50, 20),
-        Point2d(f32).init2d(80, 80),
-        Point2d(f32).init2d(20, 80),
+    const triangle = [_]Point(2, f32){
+        .point(.{ 50, 20 }),
+        .point(.{ 80, 80 }),
+        .point(.{ 20, 80 }),
     };
     canvas.fillPolygon(&triangle, color, .soft) catch unreachable;
 }
@@ -1486,10 +1486,10 @@ fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
 fn drawBezierCubic(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 192, .b = 255, .a = 255 };
     canvas.drawCubicBezier(
-        Point2d(f32).init2d(10, 50),
-        Point2d(f32).init2d(30, 10),
-        Point2d(f32).init2d(70, 90),
-        Point2d(f32).init2d(90, 50),
+        .point(.{ 10, 50 }),
+        .point(.{ 30, 10 }),
+        .point(.{ 70, 90 }),
+        .point(.{ 90, 50 }),
         color,
         2,
         .fast,
@@ -1499,9 +1499,9 @@ fn drawBezierCubic(canvas: Canvas(Rgba)) void {
 fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 128, .b = 192, .a = 255 };
     canvas.drawQuadraticBezier(
-        Point2d(f32).init2d(20, 80),
-        Point2d(f32).init2d(50, 20),
-        Point2d(f32).init2d(80, 80),
+        .point(.{ 20, 80 }),
+        .point(.{ 50, 20 }),
+        .point(.{ 80, 80 }),
         color,
         3,
         .soft,
@@ -1510,28 +1510,28 @@ fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
 
 fn drawPolygonComplex(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 255, .b = 128, .a = 255 };
-    const polygon = [_]Point2d(f32){
-        Point2d(f32).init2d(50, 10),
-        Point2d(f32).init2d(70, 30),
-        Point2d(f32).init2d(90, 40),
-        Point2d(f32).init2d(70, 60),
-        Point2d(f32).init2d(50, 90),
-        Point2d(f32).init2d(30, 60),
-        Point2d(f32).init2d(10, 40),
-        Point2d(f32).init2d(30, 30),
+    const polygon = [_]Point(2, f32){
+        .point(.{ 50, 10 }),
+        .point(.{ 70, 30 }),
+        .point(.{ 90, 40 }),
+        .point(.{ 70, 60 }),
+        .point(.{ 50, 90 }),
+        .point(.{ 30, 60 }),
+        .point(.{ 10, 40 }),
+        .point(.{ 30, 30 }),
     };
     canvas.fillPolygon(&polygon, color, .soft) catch unreachable;
 }
 
 fn drawSplinePolygon(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 192, .g = 128, .b = 255, .a = 255 };
-    const polygon = [_]Point2d(f32){
-        Point2d(f32).init2d(50, 20),
-        Point2d(f32).init2d(80, 35),
-        Point2d(f32).init2d(80, 65),
-        Point2d(f32).init2d(50, 80),
-        Point2d(f32).init2d(20, 65),
-        Point2d(f32).init2d(20, 35),
+    const polygon = [_]Point(2, f32){
+        .point(.{ 50, 20 }),
+        .point(.{ 80, 35 }),
+        .point(.{ 80, 65 }),
+        .point(.{ 50, 80 }),
+        .point(.{ 20, 65 }),
+        .point(.{ 20, 35 }),
     };
     canvas.drawSplinePolygon(&polygon, color, 2, 0.5, .soft);
 }
@@ -1589,11 +1589,11 @@ test "line endpoints are connected" {
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test various line directions
-    const test_cases = [_]struct { p1: Point2d(f32), p2: Point2d(f32) }{
-        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(90, 10) }, // horizontal
-        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(10, 90) }, // vertical
-        .{ .p1 = Point2d(f32).init2d(10, 10), .p2 = Point2d(f32).init2d(90, 90) }, // diagonal
-        .{ .p1 = Point2d(f32).init2d(90, 10), .p2 = Point2d(f32).init2d(10, 90) }, // reverse diagonal
+    const test_cases = [_]struct { p1: Point(2, f32), p2: Point(2, f32) }{
+        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 90, 10 }) }, // horizontal
+        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 10, 90 }) }, // vertical
+        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 90, 90 }) }, // diagonal
+        .{ .p1 = .point(.{ 90, 10 }), .p2 = .point(.{ 10, 90 }) }, // reverse diagonal
     };
 
     for (test_cases) |tc| {
@@ -1655,7 +1655,7 @@ test "thick lines have correct width" {
 
         // Draw horizontal line in the middle
         const y = @as(f32, @floatFromInt(height / 2));
-        canvas.drawLine(Point2d(f32).init2d(50, y), Point2d(f32).init2d(150, y), color, line_width, .fast);
+        canvas.drawLine(.point(.{ 50, y }), .point(.{ 150, y }), color, line_width, .fast);
 
         // Measure actual width at several points along the line
         var measured_widths: [3]usize = .{ 0, 0, 0 };
@@ -1696,7 +1696,7 @@ test "filled circle has correct radius" {
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const test_radii = [_]f32{ 5, 10, 20, 30, 40 };
-    const center = Point2d(f32).init2d(100, 100);
+    const center: Point(2, f32) = .point(.{ 100, 100 });
 
     for (test_radii) |radius| {
         // Clear image
@@ -1751,7 +1751,7 @@ test "circle outline has correct thickness" {
     const canvas = Canvas(Rgba).init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
-    const center = Point2d(f32).init2d(100, 100);
+    const center: Point(2, f32) = .point(.{ 100, 100 });
     const radius: f32 = 40;
     const line_widths = [_]usize{ 1, 3, 5, 10 };
 
@@ -1809,11 +1809,11 @@ test "filled rectangle has correct area" {
         pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
     }
 
-    const corners = [_]Point2d(f32){
-        Point2d(f32).init2d(rect.l, rect.t),
-        Point2d(f32).init2d(rect.r, rect.t),
-        Point2d(f32).init2d(rect.r, rect.b),
-        Point2d(f32).init2d(rect.l, rect.b),
+    const corners = [_]Point(2, f32){
+        .point(.{ rect.l, rect.t }),
+        .point(.{ rect.r, rect.t }),
+        .point(.{ rect.r, rect.b }),
+        .point(.{ rect.l, rect.b }),
     };
     try canvas.fillPolygon(&corners, color, .fast);
 
@@ -1840,10 +1840,10 @@ test "polygon fill respects convexity" {
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test convex polygon (triangle)
-    const triangle = [_]Point2d(f32){
-        Point2d(f32).init2d(100, 30),
-        Point2d(f32).init2d(170, 150),
-        Point2d(f32).init2d(30, 150),
+    const triangle = [_]Point(2, f32){
+        .point(.{ 100, 30 }),
+        .point(.{ 170, 150 }),
+        .point(.{ 30, 150 }),
     };
 
     for (img.data) |*pixel| {
@@ -1853,13 +1853,13 @@ test "polygon fill respects convexity" {
     try canvas.fillPolygon(&triangle, color, .fast);
 
     // Check that points inside triangle are filled
-    const test_points = [_]struct { p: Point2d(f32), inside: bool }{
-        .{ .p = Point2d(f32).init2d(100, 100), .inside = true }, // centroid
-        .{ .p = Point2d(f32).init2d(100, 50), .inside = true }, // near top
-        .{ .p = Point2d(f32).init2d(50, 140), .inside = true }, // near bottom left
-        .{ .p = Point2d(f32).init2d(150, 140), .inside = true }, // near bottom right
-        .{ .p = Point2d(f32).init2d(20, 20), .inside = false }, // outside
-        .{ .p = Point2d(f32).init2d(180, 180), .inside = false }, // outside
+    const test_points = [_]struct { p: Point(2, f32), inside: bool }{
+        .{ .p = .point(.{ 100, 100 }), .inside = true }, // centroid
+        .{ .p = .point(.{ 100, 50 }), .inside = true }, // near top
+        .{ .p = .point(.{ 50, 140 }), .inside = true }, // near bottom left
+        .{ .p = .point(.{ 150, 140 }), .inside = true }, // near bottom right
+        .{ .p = .point(.{ 20, 20 }), .inside = false }, // outside
+        .{ .p = .point(.{ 180, 180 }), .inside = false }, // outside
     };
 
     for (test_points) |tp| {
@@ -1893,7 +1893,7 @@ test "antialiased vs solid fill coverage" {
     }
 
     // Draw same circle with different modes
-    const center = Point2d(f32).init2d(50, 50);
+    const center: Point(2, f32) = .point(.{ 50, 50 });
     const radius: f32 = 20;
 
     canvas_solid.fillCircle(center, radius, color, .fast);
@@ -1930,10 +1930,10 @@ test "bezier curve smoothness" {
     }
 
     // Draw cubic bezier
-    const p0 = Point2d(f32).init2d(20, 100);
-    const p1 = Point2d(f32).init2d(60, 20);
-    const p2 = Point2d(f32).init2d(140, 180);
-    const p3 = Point2d(f32).init2d(180, 100);
+    const p0: Point(2, f32) = .point(.{ 20, 100 });
+    const p1: Point(2, f32) = .point(.{ 60, 20 });
+    const p2: Point(2, f32) = .point(.{ 140, 180 });
+    const p3: Point(2, f32) = .point(.{ 180, 100 });
 
     canvas.drawCubicBezier(p0, p1, p2, p3, color, 2, .fast);
 

@@ -5,7 +5,7 @@ pub const c = @cImport({
 });
 
 const zignal = @import("zignal");
-const Point2d = zignal.Point2d;
+const Point = zignal.Point;
 
 /// Creates an arena allocator optimized for Python C API integration.
 /// Uses c_allocator as backing since we're already linking with libc.
@@ -429,8 +429,8 @@ fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
 }
 
 /// Parse a Python tuple representing a 2D point (x, y)
-/// Returns a Point2d(f32) for use with drawing operations
-pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point2d(f32) {
+/// Returns a Point(2, f32) for use with drawing operations
+pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point(2, f32) {
     if (point_obj == null) {
         return error.InvalidPoint;
     }
@@ -462,7 +462,7 @@ pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point2d(f32) {
         return error.InvalidPoint;
     }
 
-    return Point2d(f32).init2d(@floatCast(x), @floatCast(y));
+    return .point(.{ @as(f32, @floatCast(x)), @as(f32, @floatCast(y)) });
 }
 
 /// Method descriptor for automatic generation

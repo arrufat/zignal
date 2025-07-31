@@ -85,11 +85,6 @@ pub const PerlinOptions = perlin_mod.PerlinOptions;
 // New unified Point system with arbitrary dimensions and SIMD acceleration
 const point = @import("geometry/Point.zig");
 pub const Point = point.Point;
-pub const Point1d = point.Point1d;
-pub const Point2d = point.Point2d;
-pub const Point3d = point.Point3d;
-pub const Point4d = point.Point4d;
-pub const makePoint = point.makePoint;
 
 pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;

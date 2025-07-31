@@ -8,7 +8,7 @@ const Rgba = zignal.Rgba;
 const Hsv = zignal.Hsv;
 const Canvas = zignal.Canvas;
 
-const Point2d = zignal.Point2d(f32);
+const Point = zignal.Point;
 const SimilarityTransform = zignal.SimilarityTransform(f32);
 const Rectangle = zignal.Rectangle(f32);
 
@@ -34,25 +34,25 @@ pub fn extractAlignedFace(
     comptime T: type,
     allocator: std.mem.Allocator,
     image: Image(T),
-    landmarks: []const Point2d,
+    landmarks: []const Point(2, f32),
     padding: f32,
     blurring: i32,
     out: *Image(T),
 ) !void {
     // These are the normalized coordinates of the aligned landmarks
     // taken from dlib.
-    var from_points: [5]Point2d = .{
-        Point2d.init2d(0.8595674595992, 0.2134981538014),
-        Point2d.init2d(0.6460604764104, 0.2289674387677),
-        Point2d.init2d(0.1205750620789, 0.2137274526848),
-        Point2d.init2d(0.3340850613712, 0.2290642403242),
-        Point2d.init2d(0.4901123135679, 0.6277975316475),
+    var from_points: [5]Point(2, f32) = .{
+        Point(2, f32).point(.{ 0.8595674595992, 0.2134981538014 }),
+        Point(2, f32).point(.{ 0.6460604764104, 0.2289674387677 }),
+        Point(2, f32).point(.{ 0.1205750620789, 0.2137274526848 }),
+        Point(2, f32).point(.{ 0.3340850613712, 0.2290642403242 }),
+        Point(2, f32).point(.{ 0.4901123135679, 0.6277975316475 }),
     };
     const fcols: f32 = @floatFromInt(image.cols);
     const frows: f32 = @floatFromInt(image.rows);
 
     // These are the detected points from MediaPipe.
-    const to_points: [5]Point2d = .{
+    const to_points: [5]Point(2, f32) = .{
         landmarks[alignment[0]].scaleEach(.{ fcols, frows }),
         landmarks[alignment[1]].scaleEach(.{ fcols, frows }),
         landmarks[alignment[2]].scaleEach(.{ fcols, frows }),
@@ -64,16 +64,16 @@ pub fn extractAlignedFace(
     assert(out.cols > 0);
     const side: f32 = @floatFromInt(out.cols);
     for (&from_points) |*p| {
-        p.* = Point2d.init2d((padding + p.x()) / (2 * padding + 1) * side, (padding + p.y()) / (2 * padding + 1) * side);
+        p.* = Point(2, f32).point(.{ (padding + p.x()) / (2 * padding + 1) * side, (padding + p.y()) / (2 * padding + 1) * side });
     }
 
     // Find the transforms that maps the points between the canonical landmarks
     // and the detected landmarks.
     const transform: SimilarityTransform = .init(&from_points, &to_points);
-    const p = transform.project(Point2d.init2d(1, 0)).sub(transform.bias.toPoint2d());
+    const p = transform.project(Point(2, f32).point(.{ 1, 0 })).sub(transform.bias.toPoint(2));
     const angle = std.math.atan2(p.y(), p.x());
     const scale = p.norm();
-    const center = transform.project(Point2d.init2d(side / 2, side / 2));
+    const center = transform.project(Point(2, f32).point(.{ side / 2, side / 2 }));
 
     // Rotate the image first to align the face.
     var rotated: Image(Rgba) = .empty;
@@ -86,7 +86,7 @@ pub fn extractAlignedFace(
     canvas.drawRectangle(rect, Hsv{ .h = 0, .s = 100, .v = 100 }, 1, .fast);
 
     // Calculate where the center point ended up in the rotated image.
-    const offset = Point2d.init2d((@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2, (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2);
+    const offset = Point(2, f32).point(.{ (@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2, (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2 });
 
     // Adjust the rectangle to crop from the rotated image (it has been resized not to be clipped).
     rect = .initCenter(center.x() + offset.x(), center.y() + offset.y(), side * scale, side * scale);
@@ -119,7 +119,7 @@ pub export fn extract_aligned_face(
     out_cols: usize,
     padding: f32,
     blurring: i32,
-    landmarks_ptr: [*]const Point2d,
+    landmarks_ptr: [*]const Point(2, f32),
     landmarks_len: usize,
     extra_ptr: ?[*]u8,
     extra_len: usize,
@@ -143,8 +143,8 @@ pub export fn extract_aligned_face(
 
     const image: Image(Rgba) = .init(rows, cols, rgba_ptr[0 .. rows * cols]);
 
-    const landmarks: []Point2d = blk: {
-        var array: std.ArrayList(Point2d) = .init(allocator);
+    const landmarks: []const Point(2, f32) = blk: {
+        var array: std.ArrayList(Point(2, f32)) = .init(allocator);
         array.resize(landmarks_len) catch {
             std.log.err("Ran out of memory while resizing landmarks ArrayList", .{});
             @panic("OOM");

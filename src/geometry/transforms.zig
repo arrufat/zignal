@@ -5,7 +5,7 @@ const SMatrix = @import("../matrix.zig").SMatrix;
 const Matrix = @import("../matrix.zig").Matrix;
 const OpsBuilder = @import("../matrix.zig").OpsBuilder;
 const svd = @import("../svd.zig").svd;
-const Point2d = @import("Point.zig").Point2d;
+const Point = @import("Point.zig").Point;
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
@@ -17,25 +17,25 @@ pub fn SimilarityTransform(comptime T: type) type {
         pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best similarity transform that maps between the two given sets of points.
-        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+        pub fn init(from_points: []const Point(2, T), to_points: []const Point(2, T)) Self {
             var transform: SimilarityTransform(T) = .identity;
             transform.find(from_points, to_points);
             return transform;
         }
 
         /// Projects the given point using the similarity transform.
-        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+        pub fn project(self: Self, point: Point(2, T)) Point(2, T) {
             const src: SMatrix(T, 2, 1) = .init(.{ .{point.x()}, .{point.y()} });
-            return self.matrix.dot(src).add(self.bias).toPoint2d();
+            return self.matrix.dot(src).add(self.bias).toPoint(2);
         }
 
         /// Finds the best similarity transform that maps between the two given sets of points.
-        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+        pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) void {
             assert(from_points.len >= 2);
             assert(from_points.len == to_points.len);
             const num_points: T = @floatFromInt(from_points.len);
-            var mean_from: Point2d(T) = .origin;
-            var mean_to: Point2d(T) = .origin;
+            var mean_from: Point(2, T) = .origin;
+            var mean_to: Point(2, T) = .origin;
             var sigma_from: T = 0;
             var sigma_to: T = 0;
             var cov: SMatrix(T, 2, 2) = .initAll(0);
@@ -105,7 +105,7 @@ pub fn AffineTransform(comptime T: type) type {
         allocator: std.mem.Allocator,
 
         /// Finds the best affine transform that maps between the two given sets of points.
-        pub fn init(allocator: std.mem.Allocator, from_points: []const Point2d(T), to_points: []const Point2d(T)) !Self {
+        pub fn init(allocator: std.mem.Allocator, from_points: []const Point(2, T), to_points: []const Point(2, T)) !Self {
             var transform: AffineTransform(T) = .{
                 .matrix = SMatrix(T, 2, 2).identity(),
                 .bias = SMatrix(T, 2, 1).initAll(0),
@@ -116,13 +116,13 @@ pub fn AffineTransform(comptime T: type) type {
         }
 
         /// Projects the given point using the affine transform.
-        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+        pub fn project(self: Self, point: Point(2, T)) Point(2, T) {
             const src: SMatrix(T, 2, 1) = .init(.{ .{point.x()}, .{point.y()} });
-            return self.matrix.dot(src).add(self.bias).toPoint2d();
+            return self.matrix.dot(src).add(self.bias).toPoint(2);
         }
 
         /// Finds the best affine transform that maps between the two given sets of points.
-        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) !void {
+        pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len == to_points.len);
             assert(from_points.len >= 3);
             var p = try Matrix(T).init(self.allocator, 3, from_points.len);
@@ -181,20 +181,20 @@ pub fn ProjectiveTransform(comptime T: type) type {
         pub const identity: Self = .{ .matrix = .identity() };
 
         /// Finds the best projective transform that maps between the two given sets of points.
-        pub fn init(from_points: []const Point2d(T), to_points: []const Point2d(T)) Self {
+        pub fn init(from_points: []const Point(2, T), to_points: []const Point(2, T)) Self {
             var transform: ProjectiveTransform(T) = .identity;
             transform.find(from_points, to_points);
             return transform;
         }
 
         /// Projects the given point using the projective transform
-        pub fn project(self: Self, point: Point2d(T)) Point2d(T) {
+        pub fn project(self: Self, point: Point(2, T)) Point(2, T) {
             const src: SMatrix(T, 3, 1) = .init(.{ .{point.x()}, .{point.y()}, .{1} });
             var dst = self.matrix.dot(src);
             if (dst.at(2, 0).* != 0) {
                 dst = dst.scale(1 / dst.at(2, 0).*);
             }
-            return dst.toPoint2d();
+            return dst.toPoint(2);
         }
 
         /// Returns the inverse of the current projective transform.
@@ -203,7 +203,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
         }
 
         /// Finds the best projective transform that maps between the two given sets of points.
-        pub fn find(self: *Self, from_points: []const Point2d(T), to_points: []const Point2d(T)) void {
+        pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
             var accum: SMatrix(T, 9, 9) = .initAll(0);
@@ -246,15 +246,15 @@ pub fn ProjectiveTransform(comptime T: type) type {
 
 test "affine3" {
     const T = f64;
-    const from_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(0, 0),
-        Point2d(T).init2d(0, 1),
-        Point2d(T).init2d(1, 1),
+    const from_points: []const Point(2, T) = &.{
+        .point(.{ 0, 0 }),
+        .point(.{ 0, 1 }),
+        .point(.{ 1, 1 }),
     };
-    const to_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(0, 1),
-        Point2d(T).init2d(1, 1),
-        Point2d(T).init2d(1, 0),
+    const to_points: []const Point(2, T) = &.{
+        .point(.{ 0, 1 }),
+        .point(.{ 1, 1 }),
+        .point(.{ 1, 0 }),
     };
     const tf = try AffineTransform(f64).init(std.testing.allocator, from_points[0..3], to_points[0..3]);
     const matrix: SMatrix(T, 2, 2) = .init(.{ .{ 0, 1 }, .{ -1, 0 } });
@@ -272,17 +272,17 @@ test "affine3" {
 test "projection4" {
     const T = f64;
     const tol = 1e-5;
-    const from_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(199.67754364, 200.17905235),
-        Point2d(T).init2d(167.90229797, 175.55920601),
-        Point2d(T).init2d(270.33649445, 207.96521187),
-        Point2d(T).init2d(267.53637314, 188.24442387),
+    const from_points: []const Point(2, T) = &.{
+        .point(.{ 199.67754364, 200.17905235 }),
+        .point(.{ 167.90229797, 175.55920601 }),
+        .point(.{ 270.33649445, 207.96521187 }),
+        .point(.{ 267.53637314, 188.24442387 }),
     };
-    const to_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(440.68012238, 275.45248032),
-        Point2d(T).init2d(429.62512970, 262.64307976),
-        Point2d(T).init2d(484.23328400, 279.44332123),
-        Point2d(T).init2d(488.08315277, 272.79547691),
+    const to_points: []const Point(2, T) = &.{
+        .point(.{ 440.68012238, 275.45248032 }),
+        .point(.{ 429.62512970, 262.64307976 }),
+        .point(.{ 484.23328400, 279.44332123 }),
+        .point(.{ 488.08315277, 272.79547691 }),
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix: SMatrix(T, 3, 3) = .init(.{
@@ -316,26 +316,26 @@ test "projection4" {
 
 test "projection8" {
     const T = f64;
-    const from_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(319.48406982, 240.21486282),
-        Point2d(T).init2d(268.64367676, 210.67104721),
-        Point2d(T).init2d(432.53839111, 249.55825424),
-        Point2d(T).init2d(428.05819702, 225.89330864),
-        Point2d(T).init2d(687.00787354, 240.97020721),
-        Point2d(T).init2d(738.32287598, 208.32876205),
-        Point2d(T).init2d(574.62890625, 250.60971451),
-        Point2d(T).init2d(579.63378906, 225.37580109),
+    const from_points: []const Point(2, T) = &.{
+        .point(.{ 319.48406982, 240.21486282 }),
+        .point(.{ 268.64367676, 210.67104721 }),
+        .point(.{ 432.53839111, 249.55825424 }),
+        .point(.{ 428.05819702, 225.89330864 }),
+        .point(.{ 687.00787354, 240.97020721 }),
+        .point(.{ 738.32287598, 208.32876205 }),
+        .point(.{ 574.62890625, 250.60971451 }),
+        .point(.{ 579.63378906, 225.37580109 }),
     };
 
-    const to_points: []const Point2d(T) = &.{
-        Point2d(T).init2d(330.48120117, 408.22596359),
-        Point2d(T).init2d(317.55538940, 393.26282501),
-        Point2d(T).init2d(356.74267578, 411.06428146),
-        Point2d(T).init2d(349.94784546, 400.26379395),
-        Point2d(T).init2d(438.15582275, 411.75442886),
-        Point2d(T).init2d(452.01367188, 398.08815765),
-        Point2d(T).init2d(398.66107178, 413.83139420),
-        Point2d(T).init2d(395.29974365, 401.73685455),
+    const to_points: []const Point(2, T) = &.{
+        .point(.{ 330.48120117, 408.22596359 }),
+        .point(.{ 317.55538940, 393.26282501 }),
+        .point(.{ 356.74267578, 411.06428146 }),
+        .point(.{ 349.94784546, 400.26379395 }),
+        .point(.{ 438.15582275, 411.75442886 }),
+        .point(.{ 452.01367188, 398.08815765 }),
+        .point(.{ 398.66107178, 413.83139420 }),
+        .point(.{ 395.29974365, 401.73685455 }),
     };
     const transform: ProjectiveTransform(T) = .init(from_points, to_points);
     const matrix: SMatrix(T, 3, 3) = .init(.{
