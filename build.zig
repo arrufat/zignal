@@ -308,20 +308,30 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
             }
         },
         .macos => {
-            // On macOS, try to link against specific Python library if provided
+            // On macOS, we need to handle Python linking carefully
+            // During build, we need the library path, but for distribution
+            // we'll use delocate to make the wheel portable
+
+            // Add library path if provided (needed during build)
             if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
                 artifact.addLibraryPath(.{ .cwd_relative = libs_dir });
-
-                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
-                    artifact.linkSystemLibrary(lib_name);
-                } else |_| {
-                    // Fallback to default
-                    artifact.linkSystemLibrary(python_lib);
-                }
             } else |_| {
-                // No specific Python library path - use system default
+                // No specific library path provided
+            }
+
+            // Link against Python library
+            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                artifact.linkSystemLibrary(lib_name);
+            } else |_| {
                 artifact.linkSystemLibrary(python_lib);
             }
+
+            // Add rpath for runtime library resolution
+            artifact.root_module.addRPathSpecial("@loader_path");
+
+            // For Python extensions on macOS, we often use -undefined dynamic_lookup
+            // but Zig doesn't have a direct API for this, so we'll rely on
+            // delocate to fix the library dependencies after building
         },
         .linux => {
             artifact.linkSystemLibrary(python_lib);

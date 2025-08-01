@@ -28,7 +28,9 @@ class ZigBuildExt(build_ext):
         if not isinstance(ext, ZigExtension):
             return super().build_extension(ext)
 
-        print(f"Building Zig extension with target: {ext.zig_target}, optimize: {ext.zig_optimize}")
+        print(
+            f"Building Zig extension with target: {ext.zig_target}, optimize: {ext.zig_optimize}"
+        )
 
         # Find the project root (where build.zig is located)
         current_dir = Path(__file__).parent
@@ -47,55 +49,59 @@ class ZigBuildExt(build_ext):
         env = os.environ.copy()
 
         # Get Python include directory
-        python_include = sysconfig.get_path('include')
-        env['PYTHON_INCLUDE_DIR'] = python_include
+        python_include = sysconfig.get_path("include")
+        env["PYTHON_INCLUDE_DIR"] = python_include
         print(f"Setting PYTHON_INCLUDE_DIR={python_include}")
 
         # On Windows and macOS, we need to provide specific Python library information
         if sys.platform == "win32":
             # Get Python library directory (usually in libs subdirectory)
-            python_prefix = sysconfig.get_path('stdlib')  # Usually C:\Python313\Lib
+            python_prefix = sysconfig.get_path("stdlib")  # Usually C:\Python313\Lib
             # Navigate up to get the root, then to libs
             python_root = Path(python_prefix).parent  # C:\Python313
             python_libs_dir = python_root / "libs"
 
             if python_libs_dir.exists():
-                env['PYTHON_LIBS_DIR'] = str(python_libs_dir)
+                env["PYTHON_LIBS_DIR"] = str(python_libs_dir)
                 print(f"Setting PYTHON_LIBS_DIR={python_libs_dir}")
 
                 # Determine the Python library name (e.g., python313.lib)
                 version_info = sys.version_info
                 python_lib_name = f"python{version_info.major}{version_info.minor}.lib"
-                env['PYTHON_LIB_NAME'] = python_lib_name
+                env["PYTHON_LIB_NAME"] = python_lib_name
                 print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
             else:
-                print(f"Warning: Python libs directory not found at {python_libs_dir}", file=sys.stderr)
+                print(
+                    f"Warning: Python libs directory not found at {python_libs_dir}",
+                    file=sys.stderr,
+                )
 
         elif sys.platform == "darwin":
-            # On macOS, Python can be installed as a framework or via package managers
-            # Try to detect the correct library path and name
+            # On macOS, we need to provide library path during build
+            # but delocate will fix it afterward for portability
             version_info = sys.version_info
             python_lib_name = f"python{version_info.major}.{version_info.minor}"
 
-            # Get library directory from sysconfig
-            try:
-                # For framework installations
-                lib_dir = sysconfig.get_config_var('LIBDIR')
-                if lib_dir and Path(lib_dir).exists():
-                    env['PYTHON_LIBS_DIR'] = lib_dir
-                    env['PYTHON_LIB_NAME'] = python_lib_name
-                    print(f"Setting PYTHON_LIBS_DIR={lib_dir}")
-                    print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
-                else:
-                    # Fallback: try common framework path
-                    framework_lib = f"/Library/Frameworks/Python.framework/Versions/{version_info.major}.{version_info.minor}/lib"
-                    if Path(framework_lib).exists():
-                        env['PYTHON_LIBS_DIR'] = framework_lib
-                        env['PYTHON_LIB_NAME'] = python_lib_name
-                        print(f"Setting PYTHON_LIBS_DIR={framework_lib}")
-                        print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
-            except Exception as e:
-                print(f"Warning: Could not detect macOS Python library info: {e}", file=sys.stderr)
+            # Get the Python library directory
+            # First try to get it from sysconfig
+            lib_dir = sysconfig.get_config_var("LIBDIR")
+            if not lib_dir or not Path(lib_dir).exists():
+                # Try to find it relative to the Python executable
+                python_exe = sys.executable
+                python_dir = Path(python_exe).parent.parent
+                lib_dir = python_dir / "lib"
+                if not lib_dir.exists():
+                    # Try without lib subdirectory (some installations)
+                    lib_dir = python_dir
+
+            if lib_dir and Path(lib_dir).exists():
+                env["PYTHON_LIBS_DIR"] = str(lib_dir)
+                print(f"Setting PYTHON_LIBS_DIR={lib_dir}")
+            else:
+                print("Warning: Could not find Python library directory on macOS")
+
+            env["PYTHON_LIB_NAME"] = python_lib_name
+            print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
 
         # Build the Zig library with optimizations
         cmd = ["zig", "build", "python-bindings", f"-Doptimize={ext.zig_optimize}"]
@@ -127,7 +133,9 @@ class ZigBuildExt(build_ext):
                 break
 
         if not library_path:
-            raise RuntimeError(f"Built library not found in {lib_dir}. Available files: {list(lib_dir.glob('*')) if lib_dir.exists() else 'directory does not exist'}")
+            raise RuntimeError(
+                f"Built library not found in {lib_dir}. Available files: {list(lib_dir.glob('*')) if lib_dir.exists() else 'directory does not exist'}"
+            )
 
         # Determine destination path
         dest_dir = Path(self.get_ext_fullpath(ext.name)).parent
@@ -137,7 +145,10 @@ class ZigBuildExt(build_ext):
         dest_path = Path(self.get_ext_fullpath(ext.name))
         print(f"DEBUG: Copying {library_path} -> {dest_path}", file=sys.stderr)
         shutil.copy2(library_path, dest_path)
-        print(f"DEBUG: Copy completed. File exists at destination: {dest_path.exists()}", file=sys.stderr)
+        print(
+            f"DEBUG: Copy completed. File exists at destination: {dest_path.exists()}",
+            file=sys.stderr,
+        )
 
 
 class BinaryDistribution(Distribution):
