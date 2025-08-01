@@ -33,7 +33,7 @@ pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
     if (comptime std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
         const color_space = comptime type_name[dot_index + 1 ..];
         const method_name = comptime "to_" ++ comptimeLowercase(color_space);
-        return comptime method_name ++ "()\n--\n\nConvert to " ++ color_space ++ " color space.\n\n## Returns\n- `" ++
+        return comptime method_name ++ "Convert to `" ++ color_space ++ "` color space.\n\n## Returns\n- `" ++
             color_space ++ "`: Color in " ++ color_space ++ " color space";
     } else {
         @compileError("Expected zignal.ColorName format, got: " ++ type_name);
