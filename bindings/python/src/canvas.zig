@@ -116,7 +116,8 @@ const canvas_fill_doc =
     \\Fill the entire canvas with a color.
     \\
     \\## Parameters
-    \\- `color` (tuple or color object): Color to fill the canvas with. Can be:
+    \\- `color` (int, tuple or color object): Color to fill the canvas with. Can be:
+    \\  - Integer: grayscale value 0-255 (0=black, 255=white)
     \\  - RGB tuple: `(r, g, b)` with values 0-255
     \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
     \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
@@ -128,6 +129,7 @@ const canvas_fill_doc =
     \\```python
     \\img = Image.load("photo.png")
     \\canvas = img.canvas()
+    \\canvas.fill(128)  # Fill with gray
     \\canvas.fill((255, 0, 0))  # Fill with red
     \\canvas.fill(Rgb(0, 255, 0))  # Fill with green using Rgb object
     \\```
@@ -167,7 +169,8 @@ const canvas_draw_line_doc =
     \\## Parameters
     \\- `p1` (tuple[float, float]): Starting point coordinates (x, y)
     \\- `p2` (tuple[float, float]): Ending point coordinates (x, y)
-    \\- `color` (tuple or color object): Color of the line. Can be:
+    \\- `color` (int, tuple or color object): Color of the line. Can be:
+    \\  - Integer: grayscale value 0-255 (0=black, 255=white)
     \\  - RGB tuple: `(r, g, b)` with values 0-255
     \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
     \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
@@ -181,6 +184,8 @@ const canvas_draw_line_doc =
     \\```python
     \\img = Image.load("photo.png")
     \\canvas = img.canvas()
+    \\# Draw a gray line
+    \\canvas.draw_line((0, 0), (100, 100), 128)
     \\# Draw a red line from top-left to bottom-right
     \\canvas.draw_line((0, 0), (100, 100), (255, 0, 0))
     \\# Draw a thick blue line with antialiasing
@@ -286,7 +291,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill),
         .flags = c.METH_VARARGS,
         .doc = canvas_fill_doc,
-        .params = "self, color: Union[Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "]",
+        .params = "self, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "]",
         .returns = "None",
     },
     .{
@@ -294,7 +299,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_line),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_line_doc,
-        .params = "self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
         .returns = "None",
     },
 };

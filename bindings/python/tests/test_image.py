@@ -348,6 +348,35 @@ class TestPixelAccess:
         assert pixel.g == 0
         assert pixel.b == 0
         assert pixel.a == 255
+    
+    def test_setitem_with_grayscale_int(self):
+        """Test setting pixels with grayscale integer values."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Set with grayscale black
+        img[0, 0] = 0
+        pixel = img[0, 0]
+        assert pixel.r == 0
+        assert pixel.g == 0
+        assert pixel.b == 0
+        assert pixel.a == 255  # Default alpha
+
+        # Set with grayscale gray
+        img[0, 1] = 128
+        pixel = img[0, 1]
+        assert pixel.r == 128
+        assert pixel.g == 128
+        assert pixel.b == 128
+        assert pixel.a == 255
+
+        # Set with grayscale white
+        img[0, 2] = 255
+        pixel = img[0, 2]
+        assert pixel.r == 255
+        assert pixel.g == 255
+        assert pixel.b == 255
+        assert pixel.a == 255
 
     def test_setitem_bounds_checking(self):
         """Test that __setitem__ raises IndexError for out-of-bounds access."""
@@ -377,6 +406,13 @@ class TestPixelAccess:
 
         with pytest.raises(ValueError):
             img[5, 10] = (255, 0, 0, 255, 128)  # Too many values
+        
+        # Invalid grayscale values
+        with pytest.raises(ValueError):
+            img[5, 10] = -1  # Negative value
+        
+        with pytest.raises(ValueError):
+            img[5, 10] = 256  # Value too large
 
     def test_pixel_modification_reflected_in_numpy(self):
         """Test that pixel modifications are reflected in numpy array (zero-copy)."""
