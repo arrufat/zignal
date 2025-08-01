@@ -106,9 +106,6 @@ fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c
 }
 
 const image_load_doc =
-    \\load(path)
-    \\--
-    \\
     \\Load an image from file (PNG/JPEG).
     \\
     \\## Parameters
@@ -187,9 +184,6 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 const image_to_numpy_doc =
-    \\to_numpy(include_alpha=True)
-    \\--
-    \\
     \\Convert the image to a NumPy array.
     \\
     \\## Parameters
@@ -333,9 +327,6 @@ fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 const image_from_numpy_doc =
-    \\from_numpy(array)
-    \\--
-    \\
     \\Create Image from NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
     \\
     \\For 4-channel arrays, zero-copy is used. For 3-channel arrays, the data is
@@ -490,9 +481,6 @@ fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 }
 
 const image_save_doc =
-    \\save(path)
-    \\--
-    \\
     \\Save the image to a PNG file.
     \\
     \\## Parameters
@@ -559,9 +547,6 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 const image_add_alpha_doc =
-    \\add_alpha(array, alpha=255)
-    \\--
-    \\
     \\Add alpha channel to a 3-channel RGB numpy array.
     \\
     \\This is useful for enabling zero-copy when creating Images from RGB arrays.
@@ -661,9 +646,6 @@ fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 }
 
 const image_format_doc =
-    \\__format__(format_spec)
-    \\--
-    \\
     \\Format image for display using various terminal graphics protocols.
     \\
     \\## Parameters
@@ -847,9 +829,6 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
 }
 
 const image_resize_doc =
-    \\resize(size, method=1)
-    \\--
-    \\
     \\Resize the image to the specified size.
     \\
     \\## Parameters
@@ -1029,9 +1008,6 @@ fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: I
 }
 
 const image_letterbox_doc =
-    \\letterbox(size, method=1)
-    \\--
-    \\
     \\Resize image to fit within the specified size while preserving aspect ratio.
     \\
     \\The image is scaled to fit within the target dimensions and centered with
@@ -1120,9 +1096,6 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 const image_canvas_doc =
-    \\canvas()
-    \\--
-    \\
     \\Create a Canvas object for drawing operations on this image.
     \\
     \\## Returns
