@@ -264,14 +264,35 @@ pub fn convertWithValidation(
     return converted;
 }
 
-/// Parse a Python color - either a tuple (RGB/RGBA) or a color object
+/// Parse a Python color - either an integer (grayscale), a tuple (RGB/RGBA), or a color object
 /// Returns a zignal.Rgba color with values in range 0-255
 pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
     if (color_obj == null) {
         return error.InvalidColor;
     }
 
-    // First check if it's a tuple
+    // Check if it's an integer (grayscale)
+    if (c.PyLong_Check(color_obj) != 0) {
+        const gray_value = c.PyLong_AsLong(color_obj);
+        if (gray_value == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Grayscale value must be an integer");
+            return error.InvalidColor;
+        }
+
+        if (gray_value < 0 or gray_value > 255) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Grayscale value must be in range 0-255");
+            return error.InvalidColor;
+        }
+
+        return zignal.Rgba{
+            .r = @intCast(gray_value),
+            .g = @intCast(gray_value),
+            .b = @intCast(gray_value),
+            .a = 255,
+        };
+    }
+
+    // Check if it's a tuple
     if (c.PyTuple_Check(color_obj) != 0) {
         return parseColorTuple(color_obj);
     }
@@ -356,7 +377,7 @@ pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
         };
     }
 
-    c.PyErr_SetString(c.PyExc_TypeError, "Color must be a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgba() method");
+    c.PyErr_SetString(c.PyExc_TypeError, "Color must be an integer (0-255), a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgba() method");
     return error.InvalidColor;
 }
 
