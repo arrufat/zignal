@@ -111,9 +111,6 @@ const image_load_doc =
     \\## Parameters
     \\- `path` (`str`): Path to the image file to load
     \\
-    \\## Returns
-    \\- `Image`: Loaded image object
-    \\
     \\## Raises
     \\- `FileNotFoundError`: If the image file is not found
     \\- `ValueError`: If the image format is not supported
@@ -184,14 +181,11 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 const image_to_numpy_doc =
-    \\Convert the image to a NumPy array.
+    \\Convert the image to a NumPy array (zero-copy when possible).
     \\
     \\## Parameters
     \\- `include_alpha` (bool, optional): If True (default), returns array with shape (rows, cols, 4).
     \\  If False, returns array with shape (rows, cols, 3).
-    \\
-    \\## Returns
-    \\- `np.ndarray`: NumPy array view of the image data (zero-copy when possible)
     \\
     \\## Examples
     \\```python
@@ -336,9 +330,6 @@ const image_from_numpy_doc =
     \\## Parameters
     \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
     \\  Must be C-contiguous.
-    \\
-    \\## Returns
-    \\- `Image`: New Image object from the array data
     \\
     \\## Raises
     \\- `TypeError`: If array is None or has wrong dtype
@@ -486,9 +477,6 @@ const image_save_doc =
     \\## Parameters
     \\- `path` (str): Path where the PNG file will be saved. Must have .png extension.
     \\
-    \\## Returns
-    \\- `None`
-    \\
     \\## Raises
     \\- `ValueError`: If the file does not have .png extension
     \\- `MemoryError`: If allocation fails during save
@@ -554,9 +542,6 @@ const image_add_alpha_doc =
     \\## Parameters
     \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) and dtype uint8
     \\- `alpha` (int, optional): Alpha value to use for all pixels (default: 255)
-    \\
-    \\## Returns
-    \\- `np.ndarray`: New array with shape (rows, cols, 4)
     \\
     \\## Examples
     \\```python
@@ -657,9 +642,6 @@ const image_format_doc =
     \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
     \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
     \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
-    \\
-    \\## Returns
-    \\- `str`: Formatted string for display
     \\
     \\## Examples
     \\```python
@@ -836,9 +818,6 @@ const image_resize_doc =
     \\  - If float: scale factor (e.g., 0.5 for half size, 2.0 for double size)
     \\  - If tuple: target dimensions as (rows, cols)
     \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
-    \\
-    \\## Returns
-    \\- `Image`: New resized image
 ;
 
 fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1018,9 +997,6 @@ const image_letterbox_doc =
     \\  - If int: creates a square output of size x size
     \\  - If tuple: target dimensions as (rows, cols)
     \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
-    \\
-    \\## Returns
-    \\- `Image`: New letterboxed image with the exact specified dimensions
 ;
 
 fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1097,9 +1073,6 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
 const image_canvas_doc =
     \\Create a Canvas object for drawing operations on this image.
-    \\
-    \\## Returns
-    \\- `Canvas`: Canvas object that can be used to draw on this image
     \\
     \\## Examples
     \\```python

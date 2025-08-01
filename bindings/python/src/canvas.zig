@@ -122,9 +122,6 @@ const canvas_fill_doc =
     \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
     \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
     \\
-    \\## Returns
-    \\- `None`
-    \\
     \\## Examples
     \\```python
     \\img = Image.load("photo.png")
@@ -176,9 +173,6 @@ const canvas_draw_line_doc =
     \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
-    \\
-    \\## Returns
-    \\- `None`
     \\
     \\## Examples
     \\```python

@@ -72,9 +72,6 @@ const set_target_doc =
     \\## Parameters
     \\- `image` (`Image`): Target image providing the color distribution to match
     \\
-    \\## Returns
-    \\- `None`
-    \\
     \\## Examples
     \\```python
     \\fdm = FeatureDistributionMatching()
@@ -132,9 +129,6 @@ const set_source_doc =
     \\
     \\## Parameters
     \\- `image` (`Image`): Source image to be modified
-    \\
-    \\## Returns
-    \\- `None`
     \\
     \\## Examples
     \\```python
@@ -195,9 +189,6 @@ const match_doc =
     \\## Parameters
     \\- `source` (`Image`): Source image to be modified
     \\- `target` (`Image`): Target image providing the color distribution to match
-    \\
-    \\## Returns
-    \\- `None`
     \\
     \\## Examples
     \\```python
@@ -272,9 +263,6 @@ const update_doc =
     \\
     \\This method modifies the source image in-place to match the target distribution.
     \\Both source and target must be set before calling this method.
-    \\
-    \\## Returns
-    \\- `None`
     \\
     \\## Raises
     \\- `RuntimeError`: If source or target has not been set
