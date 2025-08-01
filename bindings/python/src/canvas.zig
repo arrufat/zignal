@@ -113,9 +113,6 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 const canvas_fill_doc =
-    \\fill(color)
-    \\--
-    \\
     \\Fill the entire canvas with a color.
     \\
     \\## Parameters
@@ -165,9 +162,6 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
 }
 
 const canvas_draw_line_doc =
-    \\draw_line(p1, p2, color, width=1, mode=0)
-    \\--
-    \\
     \\Draw a line between two points.
     \\
     \\## Parameters

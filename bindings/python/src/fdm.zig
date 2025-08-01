@@ -63,9 +63,6 @@ fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
 // set_target method
 const set_target_doc =
-    \\set_target(image)
-    \\--
-    \\
     \\Set the target image whose distribution will be matched.
     \\
     \\This method computes and stores the target distribution statistics (mean and covariance)
@@ -129,9 +126,6 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
 // set_source method
 const set_source_doc =
-    \\set_source(image)
-    \\--
-    \\
     \\Set the source image to be transformed.
     \\
     \\The source image will be modified in-place when update() is called.
@@ -193,9 +187,6 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
 // match method
 const match_doc =
-    \\match(source, target)
-    \\--
-    \\
     \\Set both source and target images and apply the transformation.
     \\
     \\This is a convenience method that combines set_source(), set_target(), and update()
@@ -277,9 +268,6 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObje
 
 // update method
 const update_doc =
-    \\update()
-    \\--
-    \\
     \\Apply the feature distribution matching transformation.
     \\
     \\This method modifies the source image in-place to match the target distribution.

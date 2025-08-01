@@ -245,6 +245,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Auto-generated Python type stubs for zignal\n");
     try stub.write("# Generated from Zig source code using compile-time reflection\n");
     try stub.write("# Do not modify manually - regenerate using: zig build generate-stubs\n\n");
+    try stub.write("from __future__ import annotations\n");
     try stub.write("from typing import Any, Union, Tuple\n");
     try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n");
@@ -329,6 +330,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     // Header
     try stub.write("# Type stubs for zignal package\n");
     try stub.write("# This file helps LSPs understand the module structure\n\n");
+    try stub.write("from __future__ import annotations\n");
     try stub.write("from typing import Any, Union, Tuple\n");
     try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n\n");
