@@ -92,9 +92,7 @@ def update_pyproject_toml(new_version: str) -> None:
         print("Error: Could not find version field in pyproject.toml", file=sys.stderr)
         sys.exit(1)
     elif count > 1:
-        print(
-            "Warning: Multiple version fields found in pyproject.toml", file=sys.stderr
-        )
+        print("Warning: Multiple version fields found in pyproject.toml", file=sys.stderr)
 
     # Write back the updated content
     pyproject_path.write_text(new_content)

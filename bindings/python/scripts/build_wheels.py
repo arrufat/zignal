@@ -103,9 +103,7 @@ def get_current_version() -> str:
     return "unknown"
 
 
-def run_command(
-    cmd: List[str], cwd: Path = None, env: dict = None
-) -> subprocess.CompletedProcess:
+def run_command(cmd: List[str], cwd: Path = None, env: dict = None) -> subprocess.CompletedProcess:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     if cwd:
@@ -147,9 +145,7 @@ def prepare_clean_build_env(bindings_dir: Path) -> None:
                 full_path.unlink()
 
 
-def create_wheel(
-    zig_target: str, platform_tag: str, extension: str, bindings_dir: Path
-) -> Path:
+def create_wheel(zig_target: str, platform_tag: str, extension: str, bindings_dir: Path) -> Path:
     """Create a wheel for the given platform."""
     print(f"\n=== Creating wheel for {platform_tag} ===")
 
@@ -157,9 +153,7 @@ def create_wheel(
     env = os.environ.copy()
     env["PLAT_NAME"] = platform_tag
     env["ZIG_TARGET"] = zig_target
-    env["ZIG_OPTIMIZE"] = env.get(
-        "ZIG_OPTIMIZE", "ReleaseFast"
-    )  # Default to ReleaseFast
+    env["ZIG_OPTIMIZE"] = env.get("ZIG_OPTIMIZE", "ReleaseFast")  # Default to ReleaseFast
 
     # Use python setup.py directly to build and create wheel
     # The setup.py will automatically build the Zig extension
@@ -210,9 +204,7 @@ def build_all_wheels(platforms: List[Tuple[str, str, str]]) -> List[Path]:
     for zig_target, platform_tag, expected_ext in platforms:
         try:
             # Create the wheel (setup.py will build the Zig extension automatically)
-            wheel_path = create_wheel(
-                zig_target, platform_tag, expected_ext, bindings_dir
-            )
+            wheel_path = create_wheel(zig_target, platform_tag, expected_ext, bindings_dir)
             wheels.append(wheel_path)
 
         except Exception as e:
