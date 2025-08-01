@@ -1,4 +1,4 @@
-"""Zignal Python bindings - zero-dependency image processing library."""
+"""zero-dependency image processing library."""
 
 import importlib.util
 import os
