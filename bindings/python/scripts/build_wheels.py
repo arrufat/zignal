@@ -3,7 +3,7 @@
 
 import argparse
 import os
-import shutil
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +12,6 @@ from typing import List, Tuple
 
 def get_native_platform():
     """Get the platform configuration for the current system."""
-    import platform
 
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -188,6 +187,38 @@ def create_wheel(zig_target: str, platform_tag: str, extension: str, bindings_di
         for name in zf.namelist():
             print(f"  {name}")
 
+    # On macOS, use delocate to fix library dependencies
+    if platform.system() == "Darwin" and "macos" in platform_tag:
+        try:
+            # Try to import delocate
+            subprocess.run(
+                [python_exe, "-m", "delocate", "--version"], capture_output=True, check=True
+            )
+
+            print("Running delocate to fix macOS library dependencies...")
+            # Fix the wheel to make it portable across different Python installations
+            subprocess.run(
+                [
+                    python_exe,
+                    "-m",
+                    "delocate.cmd.delocate_wheel",
+                    "-w",
+                    str(dist_dir),  # Output directory
+                    "-v",  # Verbose
+                    str(latest_wheel),
+                ],
+                check=True,
+            )
+
+            # The fixed wheel replaces the original
+            print(f"Successfully delocated wheel: {latest_wheel}")
+
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print(
+                "Warning: delocate not available. Wheel may not be portable across macOS Python installations."
+            )
+            print("Install with: pip install delocate")
+
     return latest_wheel
 
 
@@ -278,13 +309,13 @@ def main():
 
     wheels = build_all_wheels(platforms_to_build)
 
-    print(f"\n=== Summary ===")
+    print("\n=== Summary ===")
     print(f"Successfully built {len(wheels)} wheel(s):")
     for wheel in wheels:
         print(f"  {wheel}")
 
     if wheels:
-        print(f"\nTo upload to PyPI:")
+        print("\nTo upload to PyPI:")
         print(f"  uv publish {' '.join(str(w) for w in wheels)}")
 
 
