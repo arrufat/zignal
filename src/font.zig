@@ -9,6 +9,11 @@
 
 const std = @import("std");
 
+/// Maximum file size for font files (50MB)
+/// This limit prevents DoS attacks and accidental memory exhaustion
+/// while being large enough for all known font files
+pub const max_file_size = 50 * 1024 * 1024;
+
 // Core font types
 pub const BitmapFont = @import("font/BitmapFont.zig");
 pub const GlyphData = @import("font/GlyphData.zig");
@@ -37,7 +42,11 @@ pub const bdf = @import("font/bdf.zig");
 // PCF font support
 pub const pcf = @import("font/pcf.zig");
 
+// Compression utilities
+pub const compression = @import("font/compression.zig");
+
 test {
     _ = bdf;
     _ = pcf;
+    _ = compression;
 }
