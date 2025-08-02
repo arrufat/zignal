@@ -53,7 +53,7 @@ pub fn load(allocator: Allocator, file_path: []const u8, filter: LoadFilter) !Bi
     const format = try FontFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedFontFormat;
     return switch (format) {
         .bdf => @import("bdf.zig").load(allocator, file_path, filter),
-        .pcf => error.NotImplemented, // TODO: Implement PCF loading
+        .pcf => @import("pcf.zig").load(allocator, file_path, filter),
     };
 }
 
