@@ -36,13 +36,35 @@ class TestCanvasBinding:
         assert canvas.image is img
 
     def test_canvas_methods_exist(self):
-        """Test Canvas methods can be called"""
-        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
+        """Test all Canvas methods can be called"""
+        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
         canvas = img.canvas()
 
-        # Just verify methods can be called without errors
+        # Basic methods
         canvas.fill((128, 128, 128))
         canvas.draw_line((0, 0), (10, 10), (255, 0, 0))
+
+        # Rectangle methods
+        rect = zignal.Rectangle(10, 10, 30, 30)
+        canvas.draw_rectangle(rect, (255, 0, 0))
+        canvas.fill_rectangle(rect, (0, 255, 0))
+
+        # Polygon methods
+        points = [(10, 10), (20, 10), (15, 20)]
+        canvas.draw_polygon(points, (0, 0, 255))
+        canvas.fill_polygon(points, (255, 255, 0))
+
+        # Circle methods
+        canvas.draw_circle((50, 50), 20, (255, 0, 255))
+        canvas.fill_circle((60, 60), 15, (0, 255, 255))
+
+        # Bezier methods
+        canvas.draw_quadratic_bezier((0, 0), (50, 0), (50, 50), (255, 128, 0))
+        canvas.draw_cubic_bezier((0, 0), (25, 0), (25, 50), (50, 50), (128, 255, 0))
+
+        # Spline methods
+        canvas.draw_spline_polygon(points, (128, 0, 255))
+        canvas.fill_spline_polygon(points, (255, 0, 128))
 
         # Verify the canvas modified the image
         result = img.to_numpy()
@@ -186,6 +208,104 @@ class TestErrorHandling:
 
         with pytest.raises(Exception):
             canvas.draw_line("0,0", (10, 10), (255, 0, 0))  # String
+
+
+class TestShapeDrawing:
+    """Test shape drawing and filling methods"""
+
+    def test_drawing_methods(self):
+        """Test all drawing methods accept correct parameters"""
+        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
+        canvas = img.canvas()
+
+        # Rectangle with optional params
+        rect = zignal.Rectangle(5, 5, 25, 25)
+        canvas.draw_rectangle(rect, (255, 0, 0), width=2, mode=zignal.DrawMode.SOFT)
+
+        # Polygon with different sizes
+        triangle = [(10, 10), (30, 10), (20, 30)]
+        canvas.draw_polygon(triangle, (0, 255, 0), width=3)
+
+        pentagon = [(50, 10), (70, 20), (65, 40), (35, 40), (30, 20)]
+        canvas.draw_polygon(pentagon, (0, 0, 255))
+
+        # Circle with different parameters
+        canvas.draw_circle((70, 70), 15.5, (255, 255, 0), width=2)
+
+    def test_fill_methods(self):
+        """Test all fill methods accept correct parameters"""
+        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
+        canvas = img.canvas()
+
+        # Fill methods with mode parameter
+        rect = zignal.Rectangle(10, 10, 40, 40)
+        canvas.fill_rectangle(rect, (255, 0, 0), mode=zignal.DrawMode.SOFT)
+
+        hexagon = [(60, 20), (80, 20), (90, 40), (80, 60), (60, 60), (50, 40)]
+        canvas.fill_polygon(hexagon, (0, 255, 0))
+
+        canvas.fill_circle((25, 75), 20, (0, 0, 255), mode=zignal.DrawMode.FAST)
+
+
+class TestRectangleParameter:
+    """Test Rectangle integration with Canvas"""
+
+    def test_rectangle_usage(self):
+        """Test Rectangle objects work correctly with canvas methods"""
+        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
+        canvas = img.canvas()
+
+        # Create rectangles in different ways
+        rect1 = zignal.Rectangle(5, 5, 20, 20)
+        rect2 = zignal.Rectangle.init_center(35, 35, 20, 20)
+
+        # Use with canvas methods
+        canvas.draw_rectangle(rect1, (255, 0, 0))
+        canvas.fill_rectangle(rect2, (0, 255, 0))
+
+        # Verify image was modified
+        result = img.to_numpy()
+        assert np.any(result[:, :, 0] > 0)  # Red channel modified
+        assert np.any(result[:, :, 1] > 0)  # Green channel modified
+
+
+class TestBezierAndSpline:
+    """Test bezier and spline curve methods"""
+
+    def test_curve_methods(self):
+        """Test bezier and spline methods with correct number of points"""
+        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
+        canvas = img.canvas()
+
+        # Quadratic bezier needs 3 points
+        canvas.draw_quadratic_bezier((10, 10), (50, 5), (90, 10), (255, 0, 0))
+
+        # Cubic bezier needs 4 points
+        canvas.draw_cubic_bezier((10, 30), (30, 20), (70, 20), (90, 30), (0, 255, 0))
+
+        # Spline with tension parameter
+        points = [(10, 50), (30, 70), (50, 50), (70, 70), (90, 50)]
+        canvas.draw_spline_polygon(points, (0, 0, 255), tension=0.3)
+        canvas.fill_spline_polygon(points, (255, 255, 0), tension=0.7)
+
+
+class TestDrawText:
+    """Test text drawing with BitmapFont"""
+
+    def test_draw_text_basic(self):
+        """Test basic text drawing"""
+        img = zignal.Image.from_numpy(np.zeros((100, 200, 4), dtype=np.uint8))
+        canvas = img.canvas()
+        font = zignal.BitmapFont.get_default_font()
+
+        # Draw simple text
+        canvas.draw_text("Hello World", (10, 10), font, (255, 255, 255))
+
+        # Draw with scale
+        canvas.draw_text("Big", (10, 30), font, (255, 0, 0), scale=2.0)
+
+        # Draw with antialiasing
+        canvas.draw_text("Smooth", (10, 60), font, (0, 255, 0), mode=zignal.DrawMode.SOFT)
 
 
 if __name__ == "__main__":
