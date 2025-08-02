@@ -348,7 +348,7 @@ class TestPixelAccess:
         assert pixel.g == 0
         assert pixel.b == 0
         assert pixel.a == 255
-    
+
     def test_setitem_with_grayscale_int(self):
         """Test setting pixels with grayscale integer values."""
         arr = np.zeros((10, 20, 4), dtype=np.uint8)
@@ -406,11 +406,11 @@ class TestPixelAccess:
 
         with pytest.raises(ValueError):
             img[5, 10] = (255, 0, 0, 255, 128)  # Too many values
-        
+
         # Invalid grayscale values
         with pytest.raises(ValueError):
             img[5, 10] = -1  # Negative value
-        
+
         with pytest.raises(ValueError):
             img[5, 10] = 256  # Value too large
 

@@ -12,6 +12,7 @@ const image_module = @import("image.zig");
 const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
 const fdm_module = @import("fdm.zig");
+const rectangle_module = @import("rectangle.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -255,6 +256,30 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         try generateColorClass(&stub, ColorType);
     }
 
+    // Generate Rectangle class from metadata
+    const rectangle_methods = stub_metadata.extractMethodInfo(&rectangle_module.rectangle_methods_metadata);
+    const rectangle_properties = stub_metadata.extractPropertyInfo(&rectangle_module.rectangle_properties_metadata);
+    const rectangle_doc = std.mem.span(rectangle_module.RectangleType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Rectangle",
+        .doc = rectangle_doc,
+        .methods = &rectangle_methods,
+        .properties = &rectangle_properties,
+        .bases = &.{},
+    });
+
+    // Generate BitmapFont class
+    try stub.write("\nclass BitmapFont:\n");
+    try stub.write("    \"\"\"Bitmap font for text rendering\"\"\"\n");
+    try stub.write("    @classmethod\n");
+    try stub.write("    def load(cls, path: str) -> BitmapFont:\n");
+    try stub.write("        \"\"\"Load a bitmap font from file.\"\"\"\n");
+    try stub.write("        ...\n");
+    try stub.write("    @classmethod\n");
+    try stub.write("    def get_default_font(cls) -> BitmapFont:\n");
+    try stub.write("        \"\"\"Get the built-in default 8x8 bitmap font.\"\"\"\n");
+    try stub.write("        ...\n");
+
     // Generate InterpolationMethod enum
     try generateEnumFromMetadata(&stub, .{
         .name = "InterpolationMethod",
@@ -346,6 +371,8 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     }
 
     // Add Image and classes
+    try stub.write("    Rectangle as Rectangle,\n");
+    try stub.write("    BitmapFont as BitmapFont,\n");
     try stub.write("    Image as Image,\n");
     try stub.write("    Canvas as Canvas,\n");
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");

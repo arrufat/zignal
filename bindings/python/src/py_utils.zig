@@ -28,14 +28,11 @@ pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj:
     }
 }
 
-/// Get Python boolean singletons
+/// Get Python boolean singletons using the stable Python C API
 pub fn getPyBool(value: bool) [*c]c.PyObject {
-    const py_true = @extern(*c.PyObject, .{ .name = "_Py_TrueStruct", .linkage = .weak });
-    const py_false = @extern(*c.PyObject, .{ .name = "_Py_FalseStruct", .linkage = .weak });
-
-    const result = if (value) py_true else py_false;
-    c.Py_INCREF(result);
-    return @ptrCast(result);
+    // Use PyBool_FromLong which handles reference counting automatically
+    // and is part of the stable Python C API, working cross-platform
+    return c.PyBool_FromLong(if (value) 1 else 0);
 }
 
 /// Convert a Zig value to Python object
@@ -484,6 +481,81 @@ pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point(2, f32) {
     }
 
     return .point(.{ @as(f32, @floatCast(x)), @as(f32, @floatCast(y)) });
+}
+
+/// Parse a Rectangle object to Zignal Rectangle(f32)
+pub fn parseRectangle(rect_obj: ?*c.PyObject) !zignal.Rectangle(f32) {
+    const rectangle = @import("rectangle.zig");
+
+    if (rect_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle object is null");
+        return error.InvalidRectangle;
+    }
+
+    // Check if it's a Rectangle instance
+    if (c.PyObject_IsInstance(rect_obj, @ptrCast(&rectangle.RectangleType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Object must be a Rectangle instance");
+        return error.InvalidRectangle;
+    }
+
+    const rect = @as(*rectangle.RectangleObject, @ptrCast(rect_obj.?));
+    return zignal.Rectangle(f32).init(rect.left, rect.top, rect.right, rect.bottom);
+}
+
+/// Parse a Python list of point tuples to an allocated slice of Point(2, f32)
+pub fn parsePointList(list_obj: ?*c.PyObject) ![]Point(2, f32) {
+    if (list_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Points list is null");
+        return error.InvalidPointList;
+    }
+
+    // Check if it's a list or tuple
+    const is_list = c.PyList_Check(list_obj) != 0;
+    const is_tuple = c.PyTuple_Check(list_obj) != 0;
+
+    if (!is_list and !is_tuple) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Points must be a list or tuple of (x, y) tuples");
+        return error.InvalidPointList;
+    }
+
+    const size = if (is_list) c.PyList_Size(list_obj) else c.PyTuple_Size(list_obj);
+    if (size < 0) {
+        return error.InvalidPointList;
+    }
+
+    // Allocate memory for points
+    const points = allocator.alloc(Point(2, f32), @intCast(size)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for points");
+        return error.OutOfMemory;
+    };
+    errdefer allocator.free(points);
+
+    // Parse each point
+    for (0..@intCast(size)) |i| {
+        const item = if (is_list)
+            c.PyList_GetItem(list_obj, @intCast(i))
+        else
+            c.PyTuple_GetItem(list_obj, @intCast(i));
+
+        points[i] = parsePointTuple(item) catch {
+            allocator.free(points);
+            return error.InvalidPointList;
+        };
+    }
+
+    return points;
+}
+
+/// Free a point list allocated by parsePointList
+pub fn freePointList(points: []Point(2, f32)) void {
+    allocator.free(points);
+}
+
+/// Helper to return Python None
+pub fn returnNone() ?*c.PyObject {
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
 }
 
 /// Method descriptor for automatic generation
