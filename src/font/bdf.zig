@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
@@ -386,6 +387,7 @@ fn convertToBitmapFont(
                 .data = bitmap_data,
                 .glyph_map = map,
                 .glyph_data = glyph_data_list,
+                .font_ascent = font.font_ascent,
             };
         } else {
             // Fixed-width ASCII font - use simple layout
@@ -426,6 +428,7 @@ fn convertToBitmapFont(
                 .data = contiguous_data,
                 .glyph_map = null,
                 .glyph_data = null,
+                .font_ascent = font.font_ascent,
             };
         }
     } else {
@@ -459,6 +462,7 @@ fn convertToBitmapFont(
             .data = bitmap_data,
             .glyph_map = map,
             .glyph_data = glyph_data_list,
+            .font_ascent = font.font_ascent,
         };
     }
 }
@@ -527,4 +531,268 @@ test "BDF to BitmapFont conversion" {
     // Check bitmap conversion
     try testing.expectEqual(@as(u8, 0x18), char_data.?[0]);
     try testing.expectEqual(@as(u8, 0x24), char_data.?[1]);
+}
+
+test "BDF save and load roundtrip" {
+    // Create a simple font with a few characters
+    const char_width = 8;
+    const char_height = 8;
+    const first_char = 65; // 'A'
+    const last_char = 67; // 'C'
+    const num_chars = last_char - first_char + 1;
+    const bytes_per_char = char_height; // 8 pixels = 1 byte per row
+
+    // Create test bitmap data
+    var bitmap_data = try testing.allocator.alloc(u8, num_chars * bytes_per_char);
+    defer testing.allocator.free(bitmap_data);
+
+    // Character 'A' pattern
+    bitmap_data[0] = 0x18; // 00011000
+    bitmap_data[1] = 0x24; // 00100100
+    bitmap_data[2] = 0x42; // 01000010
+    bitmap_data[3] = 0x42; // 01000010
+    bitmap_data[4] = 0x7E; // 01111110
+    bitmap_data[5] = 0x42; // 01000010
+    bitmap_data[6] = 0x42; // 01000010
+    bitmap_data[7] = 0x00; // 00000000
+
+    // Character 'B' pattern
+    bitmap_data[8] = 0x7C; // 01111100
+    bitmap_data[9] = 0x42; // 01000010
+    bitmap_data[10] = 0x42; // 01000010
+    bitmap_data[11] = 0x7C; // 01111100
+    bitmap_data[12] = 0x42; // 01000010
+    bitmap_data[13] = 0x42; // 01000010
+    bitmap_data[14] = 0x7C; // 01111100
+    bitmap_data[15] = 0x00; // 00000000
+
+    // Character 'C' pattern
+    bitmap_data[16] = 0x3C; // 00111100
+    bitmap_data[17] = 0x42; // 01000010
+    bitmap_data[18] = 0x40; // 01000000
+    bitmap_data[19] = 0x40; // 01000000
+    bitmap_data[20] = 0x40; // 01000000
+    bitmap_data[21] = 0x42; // 01000010
+    bitmap_data[22] = 0x3C; // 00111100
+    bitmap_data[23] = 0x00; // 00000000
+
+    // Duplicate the data since BitmapFont takes ownership
+    const font_data = try testing.allocator.dupe(u8, bitmap_data);
+    var font = BitmapFont{
+        .char_width = char_width,
+        .char_height = char_height,
+        .first_char = first_char,
+        .last_char = last_char,
+        .data = font_data,
+        .glyph_map = null,
+        .glyph_data = null,
+        .font_ascent = 7, // Test with a specific baseline
+    };
+    defer font.deinit(testing.allocator);
+
+    // Save to temporary file
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    // Create path using the dir handle
+    const test_filename = "test_font.bdf";
+
+    // Save the font using the full path through tmp_dir
+    const full_path = try tmp_dir.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(full_path);
+
+    const test_path = try std.fs.path.join(testing.allocator, &.{ full_path, test_filename });
+    defer testing.allocator.free(test_path);
+
+    try font.save(testing.allocator, test_path);
+
+    // Load it back
+    var loaded_font = try BitmapFont.load(testing.allocator, test_path, .all);
+    defer loaded_font.deinit(testing.allocator);
+
+    // Verify metadata
+    try testing.expectEqual(font.char_width, loaded_font.char_width);
+    try testing.expectEqual(font.char_height, loaded_font.char_height);
+    try testing.expectEqual(font.first_char, loaded_font.first_char);
+    try testing.expectEqual(font.last_char, loaded_font.last_char);
+
+    // Verify bitmap data for each character
+    for (first_char..last_char + 1) |char_code| {
+        const original_data = font.getCharData(@intCast(char_code));
+        const loaded_data = loaded_font.getCharData(@intCast(char_code));
+
+        try testing.expect(original_data != null);
+        try testing.expect(loaded_data != null);
+        try testing.expectEqualSlices(u8, original_data.?, loaded_data.?);
+    }
+}
+
+/// Save a BitmapFont to a BDF file
+pub fn save(allocator: Allocator, font: BitmapFont, path: []const u8) !void {
+    // Create buffer for BDF content
+    var bdf_content = std.ArrayList(u8).init(allocator);
+    defer bdf_content.deinit();
+    const writer = bdf_content.writer();
+
+    // Write header
+    try writeBdfHeader(writer, font);
+
+    // Write glyphs
+    if (font.glyph_map) |map| {
+        // Variable-width/Unicode font - collect and sort encodings
+        var encodings = try allocator.alloc(u32, map.count());
+        defer allocator.free(encodings);
+
+        var iter = map.iterator();
+        var idx: usize = 0;
+        while (iter.next()) |entry| : (idx += 1) {
+            encodings[idx] = entry.key_ptr.*;
+        }
+
+        // Sort encodings for consistent output
+        std.mem.sort(u32, encodings, {}, std.sort.asc(u32));
+
+        // Write each glyph
+        for (encodings) |encoding| {
+            if (map.get(encoding)) |glyph_idx| {
+                try writeBdfGlyph(writer, font, encoding, glyph_idx);
+            }
+        }
+    } else {
+        // Fixed-width ASCII font
+        for (font.first_char..font.last_char + 1) |char_code| {
+            const index = char_code - font.first_char;
+            try writeBdfGlyph(writer, font, @intCast(char_code), index);
+        }
+    }
+
+    try writer.writeAll("ENDFONT\n");
+
+    // Write to file
+    const file = try std.fs.cwd().createFile(path, .{});
+    defer file.close();
+    try file.writeAll(bdf_content.items);
+}
+
+/// Write BDF header
+fn writeBdfHeader(writer: anytype, font: BitmapFont) !void {
+    try writer.writeAll("STARTFONT 2.1\n");
+    try writer.writeAll("COMMENT Generated by zignal\n");
+
+    // Use safe defaults for font metrics if they're zero
+    const height = if (font.char_height == 0) 16 else font.char_height;
+    const width = if (font.char_width == 0) 8 else font.char_width;
+
+    try writer.writeAll("FONT -zignal-Unknown-Medium-R-Normal--");
+    try writer.print("{d}-{d}-75-75-P-{d}-ISO10646-1\n", .{ height, @as(u32, height) * 10, @as(u32, width) * 6 });
+    try writer.print("SIZE {d} 75 75\n", .{height});
+
+    // Calculate font bounding box and ascent/descent
+    var min_x_offset: i16 = 0;
+    var min_y_offset: i16 = 0;
+    var max_width: u16 = if (font.char_width == 0) width else font.char_width;
+    var max_height: u16 = if (font.char_height == 0) height else font.char_height;
+
+    // Use stored font_ascent if available, otherwise estimate
+    const font_ascent = font.font_ascent orelse @as(i16, @intCast(height));
+
+    if (font.glyph_data) |glyphs| {
+        // Calculate actual BDF coordinates using the original font_ascent
+        for (glyphs) |glyph| {
+            max_width = @max(max_width, glyph.width);
+            max_height = @max(max_height, glyph.height);
+
+            // Reverse the transformation: bdf_y_offset = font_ascent - (internal_y_offset + height)
+            const bdf_y_offset = font_ascent - (glyph.y_offset + @as(i16, @intCast(glyph.height)));
+            min_y_offset = @min(min_y_offset, bdf_y_offset);
+            min_x_offset = @min(min_x_offset, glyph.x_offset);
+        }
+    }
+
+    const font_descent = -min_y_offset;
+
+    try writer.print("FONTBOUNDINGBOX {d} {d} {d} {d}\n", .{ max_width, max_height, min_x_offset, min_y_offset });
+
+    // Write properties
+    try writer.writeAll("STARTPROPERTIES 2\n");
+    try writer.print("FONT_ASCENT {d}\n", .{font_ascent});
+    try writer.print("FONT_DESCENT {d}\n", .{font_descent});
+    try writer.writeAll("ENDPROPERTIES\n");
+
+    // Count glyphs
+    const glyph_count = if (font.glyph_map) |map| map.count() else (font.last_char - font.first_char + 1);
+    try writer.print("CHARS {d}\n", .{glyph_count});
+}
+
+/// Write a single glyph
+fn writeBdfGlyph(writer: anytype, font: BitmapFont, encoding: u32, glyph_idx: usize) !void {
+    try writer.print("STARTCHAR U+{X:0>4}\n", .{encoding});
+    try writer.print("ENCODING {d}\n", .{encoding});
+
+    // Get glyph info
+    const glyph_info = if (font.glyph_data) |data| data[glyph_idx] else GlyphData{
+        .width = font.char_width,
+        .height = font.char_height,
+        .x_offset = 0,
+        .y_offset = 0,
+        .device_width = @intCast(font.char_width),
+        .bitmap_offset = 0,
+    };
+
+    // Use stored font_ascent if available, otherwise estimate
+    const font_ascent = font.font_ascent orelse @as(i16, @intCast(font.char_height));
+
+    // Reverse the y_offset transformation
+    const bdf_y_offset = font_ascent - (glyph_info.y_offset + @as(i16, @intCast(glyph_info.height)));
+
+    try writer.print("SWIDTH {d} 0\n", .{glyph_info.device_width * 72});
+    try writer.print("DWIDTH {d} 0\n", .{glyph_info.device_width});
+    try writer.print("BBX {d} {d} {d} {d}\n", .{ glyph_info.width, glyph_info.height, glyph_info.x_offset, bdf_y_offset });
+    try writer.writeAll("BITMAP\n");
+
+    // Write bitmap data
+    const glyph_data = if (font.glyph_map != null) blk: {
+        // Variable-width font
+        const glyph_bytes_per_row = (@as(usize, glyph_info.width) + 7) / 8;
+        const glyph_size = @as(usize, glyph_info.height) * glyph_bytes_per_row;
+        break :blk font.data[glyph_info.bitmap_offset .. glyph_info.bitmap_offset + glyph_size];
+    } else blk: {
+        // Fixed-width ASCII font
+        const bytes_per_row = font.bytesPerRow();
+        const bytes_per_char = @as(usize, font.char_height) * bytes_per_row;
+        const offset = glyph_idx * bytes_per_char;
+        break :blk font.data[offset .. offset + bytes_per_char];
+    };
+
+    const glyph_bytes_per_row = (@as(usize, glyph_info.width) + 7) / 8;
+    for (0..glyph_info.height) |row| {
+        const row_start = row * glyph_bytes_per_row;
+        const row_end = row_start + glyph_bytes_per_row;
+        const row_data = glyph_data[row_start..row_end];
+
+        // Convert to BDF hex format
+        try convertBitmapToHex(writer, row_data, glyph_info.width);
+        try writer.writeByte('\n');
+    }
+
+    try writer.writeAll("ENDCHAR\n");
+}
+
+/// Convert bitmap data from LSB-first to MSB-first hex format
+fn convertBitmapToHex(writer: anytype, row_data: []const u8, width: u8) !void {
+    const hex_digits = "0123456789ABCDEF";
+    const bytes_needed = (width + 7) / 8;
+
+    // Process each byte
+    for (0..bytes_needed) |i| {
+        if (i >= row_data.len) break;
+
+        const byte = row_data[i];
+
+        // Reverse bit order: LSB-first to MSB-first
+        const reversed = @bitReverse(byte);
+
+        try writer.writeByte(hex_digits[reversed >> 4]);
+        try writer.writeByte(hex_digits[reversed & 0xF]);
+    }
 }

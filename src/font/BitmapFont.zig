@@ -28,6 +28,8 @@ data: []const u8,
 glyph_map: ?std.AutoHashMap(u32, usize) = null,
 /// Optional: Per-character glyph data (width, offsets, etc.)
 glyph_data: ?[]const GlyphData = null,
+/// Optional: Original font ascent from BDF file (for accurate save)
+font_ascent: ?i16 = null,
 
 /// Load a font from file with automatic format detection
 ///
@@ -288,6 +290,15 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
         },
         .has_pixels = true,
     };
+}
+
+/// Saves the font to a file in BDF format.
+/// Returns an error if the file path doesn't end in `.bdf` or `.BDF`.
+pub fn save(self: BitmapFont, allocator: Allocator, file_path: []const u8) !void {
+    if (!std.mem.endsWith(u8, file_path, ".bdf") and !std.mem.endsWith(u8, file_path, ".BDF")) {
+        return error.UnsupportedFontFormat;
+    }
+    try @import("bdf.zig").save(allocator, self, file_path);
 }
 
 /// Free resources (if owned)
