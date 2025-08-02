@@ -10,11 +10,13 @@
 
 const std = @import("std");
 const testing = std.testing;
+
+const LoadFilter = @import("../font.zig").LoadFilter;
+const max_file_size = @import("../font.zig").max_file_size;
+const compression = @import("../font.zig").compression;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 const unicode = @import("unicode.zig");
-const LoadFilter = @import("../font.zig").LoadFilter;
-const deflate = @import("../deflate.zig");
 
 /// Errors that can occur during PCF parsing
 pub const PcfError = error{
@@ -39,7 +41,6 @@ const PCF_FILE_VERSION = 0x70636601; // "\x01fcp" in little-endian
 /// Maximum reasonable values for sanity checks
 const MAX_TABLE_COUNT = 1024;
 const MAX_GLYPH_COUNT = 65536;
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const MAX_FONT_DIMENSION = 1024; // Maximum reasonable width/height
 
 /// PCF table types as enum for better type safety
@@ -179,58 +180,12 @@ const PropertiesInfo = struct {
 /// - allocator: Memory allocator
 /// - path: Path to PCF file
 /// - filter: Filter for which characters to load
-/// Decompress gzip data
-fn decompressGzip(allocator: std.mem.Allocator, gzip_data: []const u8) ![]u8 {
-    if (gzip_data.len < 18) { // Minimum gzip file size
-        return PcfError.InvalidCompression;
-    }
-
-    // Check gzip magic number
-    if (gzip_data[0] != 0x1f or gzip_data[1] != 0x8b) {
-        return PcfError.InvalidCompression;
-    }
-
-    // Check compression method (must be deflate)
-    if (gzip_data[2] != 8) {
-        return PcfError.InvalidCompression;
-    }
-
-    // Parse header flags
-    const flags = gzip_data[3];
-    var offset: usize = 10; // Fixed header size
-
-    // Skip optional fields based on flags
-    if (flags & 0x04 != 0) { // FEXTRA
-        const extra_len = @as(u16, gzip_data[offset]) | (@as(u16, gzip_data[offset + 1]) << 8);
-        offset += 2 + extra_len;
-    }
-    if (flags & 0x08 != 0) { // FNAME
-        while (offset < gzip_data.len and gzip_data[offset] != 0) : (offset += 1) {}
-        offset += 1;
-    }
-    if (flags & 0x10 != 0) { // FCOMMENT
-        while (offset < gzip_data.len and gzip_data[offset] != 0) : (offset += 1) {}
-        offset += 1;
-    }
-    if (flags & 0x02 != 0) { // FHCRC
-        offset += 2;
-    }
-
-    // Decompress the deflate stream (excluding 8-byte trailer)
-    if (offset + 8 > gzip_data.len) {
-        return PcfError.InvalidCompression;
-    }
-
-    const compressed_data = gzip_data[offset .. gzip_data.len - 8];
-    return deflate.inflate(allocator, compressed_data);
-}
-
 pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
     const is_compressed = std.mem.endsWith(u8, path, ".gz");
 
     // Read file into memory
-    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, MAX_FILE_SIZE);
+    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
     defer allocator.free(raw_file_contents);
 
     // Decompress if needed
@@ -239,7 +194,10 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        decompressed_data = try decompressGzip(allocator, raw_file_contents);
+        decompressed_data = compression.decompressGzip(allocator, raw_file_contents) catch |err| switch (err) {
+            compression.CompressionError.InvalidCompression => return PcfError.InvalidCompression,
+            else => return err,
+        };
         file_contents = decompressed_data.?;
         std.log.info("PCF: Decompressed {s} from {} bytes to {} bytes", .{ path, raw_file_contents.len, file_contents.len });
     } else {
@@ -1001,39 +959,6 @@ test "Metric reading" {
     try testing.expectEqual(@as(i16, 6), metric.character_width);
     try testing.expectEqual(@as(i16, 16), metric.ascent);
     try testing.expectEqual(@as(i16, 2), metric.descent);
-}
-
-test "Gzip decompression" {
-    // Create a simple gzip file with minimal content
-    const gzip_data = [_]u8{
-        0x1f, 0x8b, // Magic number
-        0x08, // Compression method (deflate)
-        0x00, // Flags (no extra fields)
-        0x00, 0x00, 0x00, 0x00, // Modification time
-        0x00, // Extra flags
-        0x03, // OS (Unix)
-        // Compressed data (empty deflate block)
-        0x03,
-        0x00,
-        // CRC32 and size (8 bytes)
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    };
-
-    const allocator = testing.allocator;
-    const result = decompressGzip(allocator, &gzip_data) catch |err| {
-        // This test mainly validates the header parsing
-        // Actual deflate decompression is tested elsewhere
-        if (err == error.EndOfStream) return;
-        return err;
-    };
-    defer allocator.free(result);
 }
 
 test "Properties parsing" {

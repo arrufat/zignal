@@ -5,10 +5,13 @@
 
 const std = @import("std");
 const testing = std.testing;
+
+const max_file_size = @import("../font.zig").max_file_size;
+const LoadFilter = @import("../font.zig").LoadFilter;
+const compression = @import("../font.zig").compression;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 const unicode = @import("unicode.zig");
-const LoadFilter = @import("../font.zig").LoadFilter;
 
 /// Errors that can occur during BDF parsing
 pub const BdfError = error{
@@ -17,6 +20,7 @@ pub const BdfError = error{
     MissingRequired,
     InvalidBitmapData,
     AllocationFailed,
+    InvalidCompression,
 };
 
 /// BDF font metadata
@@ -55,9 +59,28 @@ const BdfParseState = struct {
 /// - path: Path to BDF file
 /// - filter: Filter for which characters to load
 pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
+    // Check if file is gzip compressed
+    const is_compressed = std.mem.endsWith(u8, path, ".gz");
+
     // Read entire file into memory
-    const file_contents = try std.fs.cwd().readFileAlloc(allocator, path, 50 * 1024 * 1024); // 50MB max
-    defer allocator.free(file_contents);
+    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
+    defer allocator.free(raw_file_contents);
+
+    // Decompress if needed
+    var file_contents: []u8 = undefined;
+    var decompressed_data: ?[]u8 = null;
+    defer if (decompressed_data) |data| allocator.free(data);
+
+    if (is_compressed) {
+        decompressed_data = compression.decompressGzip(allocator, raw_file_contents) catch |err| switch (err) {
+            compression.CompressionError.InvalidCompression => return BdfError.InvalidCompression,
+            else => return err,
+        };
+        file_contents = decompressed_data.?;
+        std.log.info("BDF: Decompressed {s} from {} bytes to {} bytes", .{ path, raw_file_contents.len, file_contents.len });
+    } else {
+        file_contents = raw_file_contents;
+    }
 
     // Use arena for temporary allocations
     var arena = std.heap.ArenaAllocator.init(allocator);
