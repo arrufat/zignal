@@ -293,9 +293,12 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
 }
 
 /// Saves the font to a file in BDF format.
-/// Returns an error if the file path doesn't end in `.bdf` or `.BDF`.
+/// Returns an error if the file path doesn't end in `.bdf` or `.bdf.gz` (case-insensitive).
 pub fn save(self: BitmapFont, allocator: Allocator, file_path: []const u8) !void {
-    if (!std.mem.endsWith(u8, file_path, ".bdf") and !std.mem.endsWith(u8, file_path, ".BDF")) {
+    const valid_extension = std.ascii.endsWithIgnoreCase(file_path, ".bdf") or
+        std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz");
+
+    if (!valid_extension) {
         return error.UnsupportedFontFormat;
     }
     try @import("bdf.zig").save(allocator, self, file_path);

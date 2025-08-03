@@ -61,7 +61,7 @@ const BdfParseState = struct {
 /// - filter: Filter for which characters to load
 pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
-    const is_compressed = std.mem.endsWith(u8, path, ".gz");
+    const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Read entire file into memory
     const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
@@ -533,6 +533,90 @@ test "BDF to BitmapFont conversion" {
     try testing.expectEqual(@as(u8, 0x24), char_data.?[1]);
 }
 
+test "BDF save and load compressed roundtrip" {
+    // Create a simple font with a few characters
+    const char_width = 8;
+    const char_height = 8;
+    const first_char = 65; // 'A'
+    const last_char = 67; // 'C'
+    const num_chars = last_char - first_char + 1;
+    const bytes_per_char = char_height; // 8 pixels = 1 byte per row
+
+    // Create test bitmap data
+    var bitmap_data = try testing.allocator.alloc(u8, num_chars * bytes_per_char);
+    defer testing.allocator.free(bitmap_data);
+
+    // Character 'A' pattern
+    bitmap_data[0] = 0x18; // 00011000
+    bitmap_data[1] = 0x24; // 00100100
+    bitmap_data[2] = 0x42; // 01000010
+    bitmap_data[3] = 0x42; // 01000010
+    bitmap_data[4] = 0x7E; // 01111110
+    bitmap_data[5] = 0x42; // 01000010
+    bitmap_data[6] = 0x42; // 01000010
+    bitmap_data[7] = 0x00; // 00000000
+
+    // Character 'B' and 'C' patterns (same as original test)
+    @memcpy(bitmap_data[8..16], &[_]u8{ 0x7C, 0x42, 0x42, 0x7C, 0x42, 0x42, 0x7C, 0x00 });
+    @memcpy(bitmap_data[16..24], &[_]u8{ 0x3C, 0x42, 0x40, 0x40, 0x40, 0x42, 0x3C, 0x00 });
+
+    // Duplicate the data since BitmapFont takes ownership
+    const font_data = try testing.allocator.dupe(u8, bitmap_data);
+    var font = BitmapFont{
+        .char_width = char_width,
+        .char_height = char_height,
+        .first_char = first_char,
+        .last_char = last_char,
+        .data = font_data,
+        .glyph_map = null,
+        .glyph_data = null,
+        .font_ascent = 7,
+    };
+    defer font.deinit(testing.allocator);
+
+    // Save to temporary compressed file
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const test_filename = "test_font.bdf.gz";
+    const full_path = try tmp_dir.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(full_path);
+
+    const test_path = try std.fs.path.join(testing.allocator, &.{ full_path, test_filename });
+    defer testing.allocator.free(test_path);
+
+    // Save compressed
+    try font.save(testing.allocator, test_path);
+
+    // Verify the file is compressed by checking magic number
+    const file = try std.fs.openFileAbsolute(test_path, .{});
+    defer file.close();
+    var header: [2]u8 = undefined;
+    _ = try file.read(&header);
+    try testing.expectEqual(@as(u8, 0x1f), header[0]);
+    try testing.expectEqual(@as(u8, 0x8b), header[1]);
+
+    // Load it back
+    var loaded_font = try BitmapFont.load(testing.allocator, test_path, .all);
+    defer loaded_font.deinit(testing.allocator);
+
+    // Verify metadata
+    try testing.expectEqual(font.char_width, loaded_font.char_width);
+    try testing.expectEqual(font.char_height, loaded_font.char_height);
+    try testing.expectEqual(font.first_char, loaded_font.first_char);
+    try testing.expectEqual(font.last_char, loaded_font.last_char);
+
+    // Verify bitmap data for each character
+    for (first_char..last_char + 1) |char_code| {
+        const original_data = font.getCharData(@intCast(char_code));
+        const loaded_data = loaded_font.getCharData(@intCast(char_code));
+
+        try testing.expect(original_data != null);
+        try testing.expect(loaded_data != null);
+        try testing.expectEqualSlices(u8, original_data.?, loaded_data.?);
+    }
+}
+
 test "BDF save and load roundtrip" {
     // Create a simple font with a few characters
     const char_width = 8;
@@ -668,10 +752,22 @@ pub fn save(allocator: Allocator, font: BitmapFont, path: []const u8) !void {
 
     try writer.writeAll("ENDFONT\n");
 
+    // Check if we should compress the output
+    const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
+
     // Write to file
     const file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
-    try file.writeAll(bdf_content.items);
+
+    if (is_compressed) {
+        // Compress the BDF content
+        const compressed_data = try compression.compressGzip(allocator, bdf_content.items);
+        defer allocator.free(compressed_data);
+        try file.writeAll(compressed_data);
+        std.log.info("BDF: Saved compressed font to {s} ({} bytes compressed from {} bytes)", .{ path, compressed_data.len, bdf_content.items.len });
+    } else {
+        try file.writeAll(bdf_content.items);
+    }
 }
 
 /// Write BDF header
