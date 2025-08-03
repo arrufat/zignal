@@ -11,6 +11,36 @@ pub const CompressionError = error{
     InvalidCompression,
 };
 
+/// CRC32 implementation for gzip
+const crc32_table = blk: {
+    @setEvalBranchQuota(3000); // Increase quota for comptime evaluation
+    var table: [256]u32 = undefined;
+    const polynomial: u32 = 0xEDB88320; // Reversed polynomial
+
+    for (0..256) |i| {
+        var crc: u32 = @intCast(i);
+        for (0..8) |_| {
+            if (crc & 1 != 0) {
+                crc = (crc >> 1) ^ polynomial;
+            } else {
+                crc = crc >> 1;
+            }
+        }
+        table[i] = crc;
+    }
+    break :blk table;
+};
+
+/// Calculate CRC32 checksum
+fn crc32(data: []const u8) u32 {
+    var crc: u32 = 0xFFFFFFFF;
+    for (data) |byte| {
+        const table_idx = (crc ^ byte) & 0xFF;
+        crc = (crc >> 8) ^ crc32_table[table_idx];
+    }
+    return ~crc;
+}
+
 /// Decompress gzip data
 pub fn decompressGzip(allocator: std.mem.Allocator, gzip_data: []const u8) ![]u8 {
     if (gzip_data.len < 18) { // Minimum gzip file size
@@ -80,7 +110,7 @@ pub const LoadedFile = struct {
 /// Load a file and automatically decompress if it's gzip compressed
 pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize) !LoadedFile {
     // Check if file is gzip compressed
-    const is_compressed = std.mem.endsWith(u8, path, ".gz");
+    const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Read entire file into memory
     const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_size);
@@ -104,6 +134,54 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
             .was_compressed = false,
         };
     }
+}
+
+/// Compress data to gzip format
+pub fn compressGzip(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+    // Compress data using deflate
+    const compressed_data = try deflate.deflate(allocator, data, .static_huffman);
+    defer allocator.free(compressed_data);
+
+    // Calculate CRC32 checksum of original data
+    const checksum = crc32(data);
+
+    // Create gzip output
+    var result = std.ArrayList(u8).init(allocator);
+    defer result.deinit();
+
+    // Write gzip header (10 bytes)
+    try result.append(0x1f); // Magic number byte 1
+    try result.append(0x8b); // Magic number byte 2
+    try result.append(0x08); // Compression method (deflate)
+    try result.append(0x00); // Flags (no extra fields)
+
+    // Modification time (4 bytes) - set to 0
+    try result.append(0x00);
+    try result.append(0x00);
+    try result.append(0x00);
+    try result.append(0x00);
+
+    try result.append(0x00); // Extra flags
+    try result.append(0x03); // OS (Unix)
+
+    // Write compressed data
+    try result.appendSlice(compressed_data);
+
+    // Write gzip trailer (8 bytes)
+    // CRC32 (4 bytes, little-endian)
+    try result.append(@intCast(checksum & 0xFF));
+    try result.append(@intCast((checksum >> 8) & 0xFF));
+    try result.append(@intCast((checksum >> 16) & 0xFF));
+    try result.append(@intCast((checksum >> 24) & 0xFF));
+
+    // Uncompressed size (4 bytes, little-endian)
+    const size: u32 = @intCast(data.len & 0xFFFFFFFF);
+    try result.append(@intCast(size & 0xFF));
+    try result.append(@intCast((size >> 8) & 0xFF));
+    try result.append(@intCast((size >> 16) & 0xFF));
+    try result.append(@intCast((size >> 24) & 0xFF));
+
+    return result.toOwnedSlice();
 }
 
 test "gzip decompression" {
@@ -137,4 +215,27 @@ test "gzip decompression" {
         return err;
     };
     defer allocator.free(result);
+}
+
+test "gzip compression and decompression round-trip" {
+    const allocator = std.testing.allocator;
+
+    // Test data
+    const original_data = "Hello, World! This is a test for gzip compression.";
+
+    // Compress
+    const compressed = try compressGzip(allocator, original_data);
+    defer allocator.free(compressed);
+
+    // Verify gzip header
+    try std.testing.expectEqual(@as(u8, 0x1f), compressed[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), compressed[1]);
+    try std.testing.expectEqual(@as(u8, 0x08), compressed[2]);
+
+    // Decompress
+    const decompressed = try decompressGzip(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    // Verify round-trip
+    try std.testing.expectEqualSlices(u8, original_data, decompressed);
 }
