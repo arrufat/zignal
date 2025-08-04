@@ -1,4 +1,4 @@
-//! Letterbox functionality tests
+//! Tests for image resizing operations including resize, scale, and letterbox functionality
 
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
@@ -247,4 +247,46 @@ test "letterbox extreme aspect ratios" {
         // Should have significant horizontal padding
         try expectEqual(@as(usize, 30), rect.l); // (64-4)/2 = 30
     }
+}
+
+test "scale image" {
+    const allocator = std.testing.allocator;
+
+    // Create a test image
+    var img = try Image(u8).initAlloc(allocator, 100, 100);
+    defer img.deinit(allocator);
+
+    // Fill with some pattern
+    for (0..img.rows) |r| {
+        for (0..img.cols) |c| {
+            img.at(r, c).* = @truncate((r + c) % 256);
+        }
+    }
+
+    // Test scaling down
+    var half = try img.scale(allocator, 0.5, .bilinear);
+    defer half.deinit(allocator);
+    try expectEqual(@as(usize, 50), half.rows);
+    try expectEqual(@as(usize, 50), half.cols);
+
+    // Test scaling up
+    var double = try img.scale(allocator, 2.0, .bilinear);
+    defer double.deinit(allocator);
+    try expectEqual(@as(usize, 200), double.rows);
+    try expectEqual(@as(usize, 200), double.cols);
+
+    // Test non-uniform scaling factors
+    var custom = try img.scale(allocator, 1.5, .nearest_neighbor);
+    defer custom.deinit(allocator);
+    try expectEqual(@as(usize, 150), custom.rows);
+    try expectEqual(@as(usize, 150), custom.cols);
+
+    // Test edge cases
+    try expectError(error.InvalidScaleFactor, img.scale(allocator, 0, .bilinear));
+    try expectError(error.InvalidScaleFactor, img.scale(allocator, -1, .bilinear));
+
+    // Test very small scale that would result in 0 dimensions
+    var tiny_img = try Image(u8).initAlloc(allocator, 2, 2);
+    defer tiny_img.deinit(allocator);
+    try expectError(error.InvalidDimensions, tiny_img.scale(allocator, 0.1, .bilinear));
 }

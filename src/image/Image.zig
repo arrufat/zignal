@@ -314,6 +314,22 @@ pub fn Image(comptime T: type) type {
             interpolation.resize(T, self, out, method);
         }
 
+        /// Scales the image by the given factor using the specified interpolation method.
+        /// A factor > 1.0 enlarges the image, < 1.0 shrinks it.
+        /// The caller is responsible for calling deinit() on the returned image.
+        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: InterpolationMethod) !Self {
+            if (factor <= 0) return error.InvalidScaleFactor;
+
+            const new_rows = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor)));
+            const new_cols = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor)));
+
+            if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
+
+            const scaled = try Self.initAlloc(allocator, new_rows, new_cols);
+            self.resize(scaled, method);
+            return scaled;
+        }
+
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
@@ -346,11 +362,11 @@ pub fn Image(comptime T: type) type {
             }
 
             // Choose the smaller scale to maintain aspect ratio
-            const scale = @min(rows_scale, cols_scale);
+            const aspect_scale = @min(rows_scale, cols_scale);
 
             // Calculate dimensions of the scaled image (ensure at least 1 pixel)
-            const scaled_rows: usize = @intFromFloat(@round(scale * @as(f32, @floatFromInt(self.rows))));
-            const scaled_cols: usize = @intFromFloat(@round(scale * @as(f32, @floatFromInt(self.cols))));
+            const scaled_rows: usize = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.rows))));
+            const scaled_cols: usize = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.cols))));
 
             // Calculate offset to center the image
             const offset_row = (out.rows -| scaled_rows) / 2;

@@ -9,11 +9,11 @@
 //! - Views for zero-copy sub-image operations
 
 // Re-export all public types
-pub const Image = @import("image/Image.zig").Image;
-pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
-pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
+pub const ImageFormat = @import("image/format.zig").ImageFormat;
+pub const Image = @import("image/Image.zig").Image;
 pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
+pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 
 // Run all tests
 test {
@@ -26,5 +26,5 @@ test {
     _ = @import("image/tests/transforms.zig");
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");
-    _ = @import("image/tests/letterbox.zig");
+    _ = @import("image/tests/resize.zig");
 }
