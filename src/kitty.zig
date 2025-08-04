@@ -7,12 +7,10 @@
 //! with features like alpha blending, positioning, and scaling.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
 const png = @import("png.zig");
-const convertColor = @import("color.zig").convertColor;
 const Rgb = @import("color.zig").Rgb;
 const TerminalSupport = @import("TerminalSupport.zig");
 

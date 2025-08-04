@@ -29,9 +29,6 @@
 //!
 //! Available on [GitHub](https://github.com/bfactory-ai/zignal).
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-
 pub const Canvas = @import("canvas.zig").Canvas;
 pub const DrawMode = @import("canvas.zig").DrawMode;
 

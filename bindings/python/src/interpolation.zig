@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const zignal = @import("zignal");
 
 const py_utils = @import("py_utils.zig");

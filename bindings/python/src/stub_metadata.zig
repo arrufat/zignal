@@ -1,8 +1,6 @@
-// Metadata types for automatic Python stub generation
-// This file defines structures that describe Python bindings in a way
-// that can be introspected at compile time for stub generation
-
-const std = @import("std");
+//! Metadata types for automatic Python stub generation
+//! This file defines structures that describe Python bindings in a way
+//! that can be introspected at compile time for stub generation
 
 const c = @import("py_utils.zig").c;
 

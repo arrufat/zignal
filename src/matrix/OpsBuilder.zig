@@ -20,10 +20,8 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const expectEqual = std.testing.expectEqual;
 
 const Matrix = @import("Matrix.zig").Matrix;
-const SMatrix = @import("SMatrix.zig").SMatrix;
 
 /// Builder for chaining matrix operations with in-place modifications
 pub fn OpsBuilder(comptime T: type) type {

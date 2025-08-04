@@ -16,7 +16,6 @@ const max_file_size = @import("../font.zig").max_file_size;
 const compression = @import("../font.zig").compression;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
-const unicode = @import("unicode.zig");
 
 /// Errors that can occur during PCF parsing
 pub const PcfError = error{
@@ -36,12 +35,11 @@ pub const PcfError = error{
 };
 
 /// PCF format constants
-const PCF_FILE_VERSION = 0x70636601; // "\x01fcp" in little-endian
+const pcf_file_version = 0x70636601; // "\x01fcp" in little-endian
 
 /// Maximum reasonable values for sanity checks
-const MAX_TABLE_COUNT = 1024;
-const MAX_GLYPH_COUNT = 65536;
-const MAX_FONT_DIMENSION = 1024; // Maximum reasonable width/height
+const max_table_count = 1024;
+const max_glyph_count = 65536;
 
 /// PCF table types as enum for better type safety
 const TableType = enum(u32) {
@@ -215,13 +213,13 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
 
     // Read and verify header
     const header = try reader.readInt(u32, .little);
-    if (header != PCF_FILE_VERSION) {
+    if (header != pcf_file_version) {
         return PcfError.InvalidFormat;
     }
 
     // Read table count
     const table_count = try reader.readInt(u32, .little);
-    if (table_count == 0 or table_count > MAX_TABLE_COUNT) {
+    if (table_count == 0 or table_count > max_table_count) {
         return PcfError.InvalidFormat;
     }
 
@@ -547,7 +545,7 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     const rows = @as(usize, encoding.max_byte1 - encoding.min_byte1 + 1);
     const encodings_count = cols * rows;
 
-    if (encodings_count > MAX_GLYPH_COUNT) {
+    if (encodings_count > max_glyph_count) {
         return PcfError.InvalidEncodingRange;
     }
 
@@ -585,7 +583,7 @@ fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
     if (compressed) {
         // Read compressed metrics count
         const metrics_count = try reader.readInt(u16, byte_order);
-        if (metrics_count > MAX_GLYPH_COUNT) {
+        if (metrics_count > max_glyph_count) {
             return PcfError.InvalidGlyphCount;
         }
         result.glyph_count = metrics_count;
@@ -599,7 +597,7 @@ fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
     } else {
         // Read uncompressed metrics count
         const metrics_count = try reader.readInt(u32, byte_order);
-        if (metrics_count > MAX_GLYPH_COUNT) {
+        if (metrics_count > max_glyph_count) {
             return PcfError.InvalidGlyphCount;
         }
         result.glyph_count = @min(metrics_count, max_glyphs);
@@ -644,7 +642,7 @@ fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
 
     // Read glyph count
     const glyph_count = try reader.readInt(u32, byte_order);
-    if (glyph_count > MAX_GLYPH_COUNT) {
+    if (glyph_count > max_glyph_count) {
         return PcfError.InvalidGlyphCount;
     }
 

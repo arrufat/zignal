@@ -12,7 +12,6 @@ const LoadFilter = @import("../font.zig").LoadFilter;
 const compression = @import("../font.zig").compression;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
-const unicode = @import("unicode.zig");
 
 /// Errors that can occur during BDF parsing
 pub const BdfError = error{

@@ -6,7 +6,6 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("../geometry/Point.zig").Point;
-const Point3d = @import("../geometry/Point.zig").Point3d;
 const formatting = @import("formatting.zig");
 
 /// Creates a static matrix with elements of type T and size rows times cols.

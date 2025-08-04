@@ -4,12 +4,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
 
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
-const Rgba = @import("color.zig").Rgba;
 const Ycbcr = @import("color.zig").Ycbcr;
 
 // JPEG signature: 2 bytes that identify a JPEG file (SOI marker)

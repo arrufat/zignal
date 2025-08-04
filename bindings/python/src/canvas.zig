@@ -3,7 +3,6 @@ const std = @import("std");
 const zignal = @import("zignal");
 pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
-const Point2d = zignal.Point2d;
 
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;

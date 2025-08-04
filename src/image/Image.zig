@@ -3,22 +3,16 @@
 //! filtering (integral image, box blur, sharpen, Sobel edge detection), and pixel access utilities.
 const std = @import("std");
 const assert = std.debug.assert;
-const expectEqual = std.testing.expectEqualDeep;
-const expectEqualDeep = std.testing.expectEqualDeep;
-const expectEqualStrings = std.testing.expectEqualStrings;
 const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const jpeg = @import("../jpeg.zig");
-const kitty = @import("../kitty.zig");
 const as = @import("../meta.zig").as;
 const is4xu8Struct = @import("../meta.zig").is4xu8Struct;
 const isScalar = @import("../meta.zig").isScalar;
-const isStruct = @import("../meta.zig").isStruct;
 const png = @import("../png.zig");
-const sixel = @import("../sixel.zig");
 const DisplayFormat = @import("display.zig").DisplayFormat;
 const DisplayFormatter = @import("display.zig").DisplayFormatter;
 const ImageFormat = @import("format.zig").ImageFormat;

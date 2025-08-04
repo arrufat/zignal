@@ -3,7 +3,6 @@
 //! Zero dependencies - implements deflate compression/decompression internally.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 

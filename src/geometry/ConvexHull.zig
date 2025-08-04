@@ -1,6 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 

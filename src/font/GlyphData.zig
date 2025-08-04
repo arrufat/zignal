@@ -3,10 +3,6 @@
 //! This struct stores the dimensions, offsets, and bitmap location
 //! for individual glyphs in variable-width fonts.
 
-const std = @import("std");
-
-const GlyphData = @This();
-
 /// Width of this specific glyph in pixels
 width: u8,
 /// Height of this specific glyph in pixels
