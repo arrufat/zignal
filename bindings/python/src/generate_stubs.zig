@@ -238,6 +238,9 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
     }
 }
 
+// Use color type from stub_metadata for consistency
+const COLOR_TYPE_UNION = stub_metadata.COLOR_TYPE_UNION;
+
 /// Generate complete stub file
 fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(allocator);
@@ -248,9 +251,13 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Generated from Zig source code using compile-time reflection\n");
     try stub.write("# Do not modify manually - regenerate using: zig build generate-stubs\n\n");
     try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, Union, Tuple\n");
+    try stub.write("from typing import Any, Union, Tuple, overload\n");
     try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n");
+    try stub.write("\n");
+    try stub.write("# Type alias for color values\n");
+    try stub.writef("ColorType = {s}\n", .{COLOR_TYPE_UNION});
+    try stub.write("\n");
 
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
@@ -309,10 +316,14 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .bases = &.{},
     });
 
-    // Add special methods for Image class (pixel access)
+    // Add special methods for Image class
+    try stub.write("    @overload\n");
+    try stub.write("    def __init__(self, rows: int, cols: int, color: Union[ColorType, None] = None) -> None: ...\n");
+    try stub.write("    @overload\n");
+    try stub.write("    def __init__(self, size: Tuple[int, int], color: Union[ColorType, None] = None) -> None: ...\n");
     try stub.write("    def __len__(self) -> int: ...\n");
     try stub.write("    def __getitem__(self, key: Tuple[int, int]) -> Rgba: ...\n");
-    try stub.write("    def __setitem__(self, key: Tuple[int, int], value: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], Rgb, Rgba, Hsl, Hsv, Lab, Lch, Lms, Oklab, Oklch, Xyb, Xyz, Ycbcr]) -> None: ...\n");
+    try stub.write("    def __setitem__(self, key: Tuple[int, int], value: ColorType) -> None: ...\n");
 
     // Generate Canvas class from metadata
     const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
@@ -368,7 +379,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Type stubs for zignal package\n");
     try stub.write("# This file helps LSPs understand the module structure\n\n");
     try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, Union, Tuple\n");
+    try stub.write("from typing import Any, Union, Tuple, overload\n");
     try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n\n");
 

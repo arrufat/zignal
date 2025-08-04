@@ -559,9 +559,29 @@ pub fn returnNone() ?*c.PyObject {
 
 /// Generic range validation that works with both integers and floats
 pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []const u8) !T {
-    const converted = switch (@TypeOf(value)) {
-        c_long => blk: {
-            const info = @typeInfo(T);
+    const ValueType = @TypeOf(value);
+
+    // Special handling for signed to unsigned conversion
+    const info = @typeInfo(T);
+    if (info == .int and info.int.signedness == .unsigned) {
+        // If target is unsigned and value is signed, check for negative first
+        if (ValueType == c_long or ValueType == c_int) {
+            if (value < 0) {
+                var buffer: [256]u8 = undefined;
+                const msg = if (min == 0)
+                    std.fmt.bufPrintZ(&buffer, "{s} must be non-negative", .{name}) catch "Value out of range"
+                else if (min == 1)
+                    std.fmt.bufPrintZ(&buffer, "{s} must be positive", .{name}) catch "Value out of range"
+                else
+                    std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
+                c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                return error.OutOfRange;
+            }
+        }
+    }
+
+    const converted = switch (ValueType) {
+        c_long, c_int => blk: {
             if (info == .float) {
                 break :blk @as(T, @floatFromInt(value));
             } else {
@@ -574,7 +594,22 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
 
     if (converted < min or converted > max) {
         var buffer: [256]u8 = undefined;
-        const msg = std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
+        const msg = blk: {
+            // For infinity or max integer values, simplify the message
+            if (info == .float and std.math.isInf(max)) {
+                break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
+            } else if (info == .int and max == std.math.maxInt(T)) {
+                if (min == 0) {
+                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be non-negative", .{name}) catch "Value out of range";
+                } else if (min == 1) {
+                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be positive", .{name}) catch "Value out of range";
+                } else {
+                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
+                }
+            } else {
+                break :blk std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
+            }
+        };
         c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
         return error.OutOfRange;
     }
