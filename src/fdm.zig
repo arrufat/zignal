@@ -3,16 +3,13 @@ const assert = std.debug.assert;
 const clamp = std.math.clamp;
 const testing = std.testing;
 const expectEqual = testing.expectEqual;
-const expectApproxEqRel = testing.expectApproxEqRel;
 const expectApproxEqAbs = testing.expectApproxEqAbs;
-const builtin = @import("builtin");
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
 const OpsBuilder = @import("matrix.zig").OpsBuilder;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
-const SMatrix = @import("matrix.zig").SMatrix;
 const svd = @import("svd.zig").svd;
 
 /// Feature Distribution Matching struct for stateful image style transfer.

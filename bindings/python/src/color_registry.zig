@@ -5,8 +5,6 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 
-const c = @import("py_utils.zig").c;
-
 /// Complete list of all color types available in the system
 /// This serves as the single source of truth for auto-generation
 pub const color_types = .{

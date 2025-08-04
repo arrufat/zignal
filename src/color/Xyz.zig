@@ -19,7 +19,6 @@ const Oklch = @import("Oklch.zig");
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 const Xyb = @import("Xyb.zig");
-const Xyz = @import("Xyz.zig");
 const Ycbcr = @import("Ycbcr.zig");
 
 x: f64,

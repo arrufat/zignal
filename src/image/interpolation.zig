@@ -31,8 +31,6 @@
 const std = @import("std");
 const as = @import("../meta.zig").as;
 const is4xu8Struct = @import("../meta.zig").is4xu8Struct;
-const isScalar = @import("../meta.zig").isScalar;
-const isStruct = @import("../meta.zig").isStruct;
 
 // ============================================================================
 // Public API

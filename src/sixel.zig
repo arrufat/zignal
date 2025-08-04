@@ -4,7 +4,6 @@
 //! which is supported by various terminal emulators for displaying graphics.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const expect = std.testing.expect;
 
@@ -16,7 +15,6 @@ const TerminalSupport = @import("TerminalSupport.zig");
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
 const max_supported_width: usize = 2048;
 const color_quantize_bits: u5 = 5; // For 32x32x32 color lookup table
-const response_buffer_size: usize = 256;
 
 /// Available palette modes for sixel encoding
 pub const PaletteMode = union(enum) {

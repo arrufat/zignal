@@ -3,8 +3,6 @@
 //! This module provides common Unicode ranges and utilities for specifying
 //! which characters to load from font files.
 
-const std = @import("std");
-
 /// A Unicode character range
 pub const Range = struct {
     start: u21,

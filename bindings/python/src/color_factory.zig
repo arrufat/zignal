@@ -10,10 +10,7 @@ const convertFromPython = @import("py_utils.zig").convertFromPython;
 const convertToPython = @import("py_utils.zig").convertToPython;
 const convertWithValidation = @import("py_utils.zig").convertWithValidation;
 const createColorPyObject = @import("color.zig").createColorPyObject;
-const getFormatString = @import("py_utils.zig").getFormatString;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
-const isSupportedColor = @import("color_registry.zig").isSupportedColor;
-const registerType = @import("py_utils.zig").registerType;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 
 /// Convert string to lowercase at comptime

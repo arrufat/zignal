@@ -1,7 +1,4 @@
-// Color bindings using the automated registry-based approach
-// This file is now much simpler - all color types are defined in color_registry.zig
-
-const std = @import("std");
+//! Color bindings using the automated registry-based approach
 
 const zignal = @import("zignal");
 

@@ -4,8 +4,6 @@
 //! - c: Chroma (chromatic intensity) (0 for achromatic, no upper bound).
 //! - h: Hue angle in degrees (0-360).
 
-const std = @import("std");
-
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");

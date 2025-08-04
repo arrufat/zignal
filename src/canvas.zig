@@ -9,10 +9,9 @@ const expectEqualStrings = testing.expectEqualStrings;
 
 const as = @import("meta.zig").as;
 const convertColor = @import("color.zig").convertColor;
-const Hsv = @import("color.zig").Hsv;
+const Point = @import("geometry/Point.zig").Point;
 const Image = @import("image.zig").Image;
 const isColor = @import("color.zig").isColor;
-const Point = @import("geometry/Point.zig").Point;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Rgba = @import("color.zig").Rgba;
 

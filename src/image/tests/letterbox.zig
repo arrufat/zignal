@@ -3,9 +3,9 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-const Image = @import("../Image.zig").Image;
+
 const color = @import("../../color.zig");
+const Image = @import("../Image.zig").Image;
 
 test "letterbox maintains aspect ratio with padding" {
     const allocator = std.testing.allocator;

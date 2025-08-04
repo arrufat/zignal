@@ -6,7 +6,6 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const Image = @import("../Image.zig").Image;
 const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
-const Point = @import("../../geometry/Point.zig").Point;
 
 test "getRectangle" {
     var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);

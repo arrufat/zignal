@@ -7,8 +7,6 @@
 //!
 //! The font system is organized into subdirectories for better modularity.
 
-const std = @import("std");
-
 /// Maximum file size for font files (50MB)
 /// This limit prevents DoS attacks and accidental memory exhaustion
 /// while being large enough for all known font files
@@ -16,7 +14,6 @@ pub const max_file_size = 50 * 1024 * 1024;
 
 // Core font types
 pub const BitmapFont = @import("font/BitmapFont.zig");
-pub const GlyphData = @import("font/GlyphData.zig");
 
 /// Font loading filter
 pub const LoadFilter = union(enum) {
