@@ -558,6 +558,49 @@ pub fn returnNone() ?*c.PyObject {
     return none;
 }
 
+/// Generic range validation that works with both integers and floats
+pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []const u8) !T {
+    const converted = switch (@TypeOf(value)) {
+        c_long => blk: {
+            const info = @typeInfo(T);
+            if (info == .float) {
+                break :blk @as(T, @floatFromInt(value));
+            } else {
+                break :blk @as(T, @intCast(value));
+            }
+        },
+        f64 => @as(T, @floatCast(value)),
+        else => @compileError("Unsupported value type"),
+    };
+
+    if (converted < min or converted > max) {
+        var buffer: [256]u8 = undefined;
+        const msg = std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
+        c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+        return error.OutOfRange;
+    }
+
+    return converted;
+}
+
+/// Convenience function for non-negative values
+pub fn validateNonNegative(comptime T: type, value: anytype, name: []const u8) !T {
+    const info = @typeInfo(T);
+    const max = if (info == .float) std.math.inf(T) else std.math.maxInt(T);
+    return validateRange(T, value, 0, max, name);
+}
+
+/// Validate that a pointer is not null, with a custom error message
+pub fn validateNonNull(comptime T: type, ptr: ?T, name: []const u8) !T {
+    if (ptr == null) {
+        var buffer: [256]u8 = undefined;
+        const msg = std.fmt.bufPrintZ(&buffer, "{s} not initialized", .{name}) catch "Value is null";
+        c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+        return error.NullPointer;
+    }
+    return ptr.?;
+}
+
 /// Method descriptor for automatic generation
 pub const MethodDescriptor = struct {
     name: []const u8,
