@@ -538,7 +538,6 @@ pub fn parsePointList(list_obj: ?*c.PyObject) ![]Point(2, f32) {
             c.PyTuple_GetItem(list_obj, @intCast(i));
 
         points[i] = parsePointTuple(item) catch {
-            allocator.free(points);
             return error.InvalidPointList;
         };
     }

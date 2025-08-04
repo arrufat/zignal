@@ -13,6 +13,7 @@ const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
 const fdm_module = @import("fdm.zig");
 const rectangle_module = @import("rectangle.zig");
+const convex_hull_module = @import("convex_hull.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -336,6 +337,17 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .bases = &.{},
     });
 
+    // Generate ConvexHull class from metadata
+    const convex_hull_methods = stub_metadata.extractMethodInfo(&convex_hull_module.convex_hull_methods_metadata);
+    const convex_hull_doc = std.mem.span(convex_hull_module.ConvexHullType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "ConvexHull",
+        .doc = convex_hull_doc,
+        .methods = &convex_hull_methods,
+        .properties = &[_]stub_metadata.PropertyInfo{},
+        .bases = &.{},
+    });
+
     // Generate module-level functions from metadata
     const module_functions = stub_metadata.extractFunctionInfo(&main_module.module_functions_metadata);
     try generateModuleFunctionsFromMetadata(&stub, &module_functions);
@@ -378,6 +390,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
     try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
+    try stub.write("    ConvexHull as ConvexHull,\n");
     try stub.write(")\n\n");
 
     // Module metadata
