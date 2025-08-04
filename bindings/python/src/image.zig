@@ -736,24 +736,31 @@ fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*Im
 
     const src_image = self.image_ptr.?;
 
-    // Calculate new dimensions
-    const new_rows = @max(1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(src_image.rows)) * scale))));
-    const new_cols = @max(1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(src_image.cols)) * scale))));
+    var scaled_image = src_image.scale(allocator, scale, method) catch |err| {
+        switch (err) {
+            error.InvalidScaleFactor => {
+                c.PyErr_SetString(c.PyExc_ValueError, "Scale factor must be positive");
+                return error.InvalidScaleFactor;
+            },
+            error.InvalidDimensions => {
+                c.PyErr_SetString(c.PyExc_ValueError, "Resulting image dimensions would be zero");
+                return error.InvalidDimensions;
+            },
+            error.OutOfMemory => {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate scaled image");
+                return error.OutOfMemory;
+            },
+        }
+    };
 
-    // Create new image
+    // Wrap in heap-allocated pointer
     const new_image = allocator.create(zignal.Image(zignal.Rgba)) catch {
+        scaled_image.deinit(allocator);
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return error.OutOfMemory;
     };
     errdefer allocator.destroy(new_image);
-
-    new_image.* = zignal.Image(zignal.Rgba).initAlloc(allocator, new_rows, new_cols) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return error.OutOfMemory;
-    };
-
-    // Perform resize
-    src_image.resize(new_image.*, method);
+    new_image.* = scaled_image;
 
     // Create new Python object
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
