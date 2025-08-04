@@ -1,5 +1,53 @@
 # Python Bindings Changelog
 
+## [0.3.0] - 2025-08-04
+
+### Added
+
+#### Canvas API
+- **Complete Drawing API**: Full-featured Canvas class for 2D graphics
+  - Drawing methods: lines, circles, polygons, rectangles, text
+  - Bézier curves: quadratic and cubic with adaptive subdivision
+  - Spline polygons with tension control
+  - Variable line widths and antialiasing options
+  - Fast and soft drawing modes
+- **Fill Operations**: Comprehensive shape filling
+  - Fill rectangles, circles, and arbitrary polygons
+  - Antialiased edges for smooth rendering
+  - Efficient scanline algorithms
+
+#### Geometry Support
+- **Rectangle Class**: Complete rectangle operations
+- **ConvexHull**: Compute convex hulls from point sets
+
+#### Text Rendering
+- **BitmapFont Class**: Text rendering with bitmap fonts
+  - Load BDF and PCF font files, with automatic decompression
+  - Unicode character support
+
+#### Enhanced Image Class
+- **Expanded API**: Significantly more functionality
+  - New methods for image manipulation
+  - Better integration with Canvas
+  - More efficient memory management
+- **Improved Property Access**: Additional image properties exposed
+
+#### Feature Distribution Matching
+- **Enhanced FDM Module**: Improved API and functionality
+  - More intuitive interface
+  - Better performance
+  - Additional options for color transfer
+
+### Changed
+- Type stubs significantly improved for better IDE support
+- Internal refactoring using comptime to reduce code duplication
+- More comprehensive error messages and validation
+
+### Fixed
+- Various edge cases in color conversions
+- Memory management improvements
+- Better error handling throughout
+
 ## [0.2.0] - 2025-07-25
 
 ### Breaking Changes

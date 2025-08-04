@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.3.0] - 2025-08-04
+
+### Added
+
+#### Font Support
+- **PCF Font Loading**: Complete PCF (Portable Compiled Font) format support
+  - All PCF table types including metrics, bitmaps, encodings
+  - Compressed PCF support with automatic decompression
+  - Efficient glyph lookup and rendering
+- **BDF Font Support**: Comprehensive BDF (Bitmap Distribution Format) implementation
+  - Loading and parsing of BDF font files
+  - Saving fonts back to BDF format
+  - Support for gzipped BDF files (.bdf.gz)
+  - Unicode properties and glyph metadata preservation
+- **Built-in Font**: Default 8x8 bitmap font for immediate text rendering
+- **Text Rendering**: Canvas text drawing with bitmap fonts with optional antialiasing
+
+#### Geometry Enhancements
+- **Unified Point System**: New tuple literal syntax for point construction
+  - Simplified API: `Point(2, f32)` instead of `Point2d(f32)`
+  - Consistent interface across all dimensions
+
+#### Canvas Improvements
+- **Bounds Management**: Improved clipping and bounds checking
+  - Better handling of drawing operations near image edges
+  - Guards against empty fill regions
+  - Optimized rectangle clamping to image bounds
+
+#### Image Features
+- **Image Scaling**: New scaling method for flexible image resizing
+- **PixelIterator**: For sequential pixel traversal
+
+#### Linear Algebra
+- **Matrix Decomposition**: Enhanced decomposition methods
+  - Improved numerical stability
+  - Comprehensive test coverage
+  - Better error handling
+
+### Changed
+- Point types now use unified syntax across the library
+- Canvas drawing methods have improved parameter validation
+- Font module reorganized for better modularity
+
 ## [0.2.0] - 2025-07-25
 
 ### Added
