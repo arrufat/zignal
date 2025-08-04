@@ -4,6 +4,7 @@ const build_options = @import("build_options");
 const bitmap_font = @import("bitmap_font.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
+const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
 const interpolation = @import("interpolation.zig");
@@ -83,6 +84,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register FeatureDistributionMatching type
     py_utils.registerType(@ptrCast(m), "FeatureDistributionMatching", @ptrCast(&fdm.FeatureDistributionMatchingType)) catch |err| {
         std.log.err("Failed to register FeatureDistributionMatching: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register ConvexHull type
+    py_utils.registerType(@ptrCast(m), "ConvexHull", @ptrCast(&convex_hull.ConvexHullType)) catch |err| {
+        std.log.err("Failed to register ConvexHull: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
