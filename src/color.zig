@@ -23,6 +23,7 @@ pub const Rgba = @import("color/Rgba.zig").Rgba;
 pub const Xyb = @import("color/Xyb.zig");
 pub const Xyz = @import("color/Xyz.zig");
 pub const Ycbcr = @import("color/Ycbcr.zig");
+const getSimpleTypeName = @import("meta.zig").getSimpleTypeName;
 
 // ============================================================================
 // TESTS
@@ -377,15 +378,6 @@ test "extended color space round trips" {
 
 /// List of color types to test. This is the only thing to update when adding a new color space.
 const color_types = .{ Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
-
-/// Strips all type names to their unqualified base names.
-fn getSimpleTypeName(comptime T: type) []const u8 {
-    const full_name = @typeName(T);
-    if (std.mem.lastIndexOf(u8, full_name, ".")) |dot_index| {
-        return full_name[dot_index + 1 ..];
-    }
-    return full_name;
-}
 
 /// Generates the list of conversion methods based on the color type names.
 fn generateConversionMethods() [color_types.len][]const u8 {
