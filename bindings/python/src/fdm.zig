@@ -1,6 +1,9 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
+const Rgba = zignal.Rgba;
+const Image = zignal.Image;
 
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");
@@ -12,7 +15,7 @@ const stub_metadata = @import("stub_metadata.zig");
 pub const FeatureDistributionMatchingObject = extern struct {
     ob_base: c.PyObject,
     // Store a pointer to the heap-allocated FDM struct
-    fdm_ptr: ?*zignal.FeatureDistributionMatching(zignal.Rgba),
+    fdm_ptr: ?*FeatureDistributionMatching(Rgba),
 };
 
 fn fdm_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -32,13 +35,13 @@ fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
 
     // Create and store the FDM struct
-    const fdm_ptr = allocator.create(zignal.FeatureDistributionMatching(zignal.Rgba)) catch {
+    const fdm_ptr = allocator.create(FeatureDistributionMatching(Rgba)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate FeatureDistributionMatching");
         return -1;
     };
 
     // Initialize the FDM instance
-    fdm_ptr.* = zignal.FeatureDistributionMatching(zignal.Rgba).init(allocator);
+    fdm_ptr.* = FeatureDistributionMatching(Rgba).init(allocator);
     self.fdm_ptr = fdm_ptr;
 
     return 0;
@@ -57,7 +60,12 @@ fn fdm_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = self_obj;
+    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+
+    if (self.fdm_ptr == null) {
+        return c.PyUnicode_FromString("FeatureDistributionMatching(uninitialized)");
+    }
+
     return c.PyUnicode_FromString("FeatureDistributionMatching()");
 }
 
@@ -83,10 +91,7 @@ const set_target_doc =
 fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
 
-    if (self.fdm_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
-        return null;
-    }
+    const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgba), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
     var target_obj: ?*c.PyObject = undefined;
     const format = std.fmt.comptimePrint("O", .{});
@@ -103,13 +108,10 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
 
     // Check if image is initialized
-    if (target_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Target image is not initialized");
-        return null;
-    }
+    const target_img_ptr = py_utils.validateNonNull(*Image(Rgba), target_img_obj.image_ptr, "Target image") catch return null;
 
     // Set the target
-    self.fdm_ptr.?.setTarget(target_img_obj.image_ptr.?.*) catch |err| {
+    fdm_ptr.setTarget(target_img_ptr.*) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting target"),
         }
@@ -141,10 +143,7 @@ const set_source_doc =
 fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
 
-    if (self.fdm_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
-        return null;
-    }
+    const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgba), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
     var source_obj: ?*c.PyObject = undefined;
     const format = std.fmt.comptimePrint("O", .{});
@@ -161,13 +160,10 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     const source_img_obj = @as(*image.ImageObject, @ptrCast(source_obj.?));
 
     // Check if image is initialized
-    if (source_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Source image is not initialized");
-        return null;
-    }
+    const source_img_ptr = py_utils.validateNonNull(*Image(Rgba), source_img_obj.image_ptr, "Source image") catch return null;
 
     // Set the source
-    self.fdm_ptr.?.setSource(source_img_obj.image_ptr.?.*) catch |err| {
+    fdm_ptr.setSource(source_img_ptr.*) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting source"),
         }
@@ -203,10 +199,7 @@ const match_doc =
 fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
 
-    if (self.fdm_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");
-        return null;
-    }
+    const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgba), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
     var source_obj: ?*c.PyObject = undefined;
     var target_obj: ?*c.PyObject = undefined;
@@ -232,18 +225,11 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObje
     const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
 
     // Check if images are initialized
-    if (source_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Source image is not initialized");
-        return null;
-    }
-
-    if (target_img_obj.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Target image is not initialized");
-        return null;
-    }
+    const source_img_ptr = py_utils.validateNonNull(*Image(Rgba), source_img_obj.image_ptr, "Source image") catch return null;
+    const target_img_ptr = py_utils.validateNonNull(*Image(Rgba), target_img_obj.image_ptr, "Target image") catch return null;
 
     // Call match (which now includes update)
-    self.fdm_ptr.?.match(source_img_obj.image_ptr.?.*, target_img_obj.image_ptr.?.*) catch |err| {
+    fdm_ptr.match(source_img_ptr.*, target_img_ptr.*) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during match"),
             error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set"),
