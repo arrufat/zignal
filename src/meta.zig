@@ -59,3 +59,14 @@ pub inline fn is4xu8Struct(comptime T: type) bool {
         break :blk true;
     };
 }
+
+/// Strips all type names to their unqualified base names.
+/// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
+pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
+    const full_name = @typeName(T);
+    const std = @import("std");
+    if (std.mem.lastIndexOf(u8, full_name, ".")) |dot_index| {
+        return full_name[dot_index + 1 ..];
+    }
+    return full_name;
+}

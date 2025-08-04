@@ -14,10 +14,7 @@ const c = py_utils.c;
 // 3. The PyTypeObject (e.g., RgbType)
 
 // RGB
-pub const RgbBinding = color_factory.createColorBinding(
-    "Rgb",
-    zignal.Rgb,
-);
+pub const RgbBinding = color_factory.createColorBinding(zignal.Rgb);
 var rgb_getset = RgbBinding.generateGetSet();
 var rgb_methods = RgbBinding.generateMethods();
 pub var RgbType = c.PyTypeObject{
@@ -36,10 +33,7 @@ pub var RgbType = c.PyTypeObject{
 };
 
 // RGBA
-pub const RgbaBinding = color_factory.createColorBinding(
-    "Rgba",
-    zignal.Rgba,
-);
+pub const RgbaBinding = color_factory.createColorBinding(zignal.Rgba);
 var rgba_getset = RgbaBinding.generateGetSet();
 var rgba_methods = RgbaBinding.generateMethods();
 pub var RgbaType = c.PyTypeObject{
@@ -58,10 +52,7 @@ pub var RgbaType = c.PyTypeObject{
 };
 
 // HSV
-pub const HsvBinding = color_factory.createColorBinding(
-    "Hsv",
-    zignal.Hsv,
-);
+pub const HsvBinding = color_factory.createColorBinding(zignal.Hsv);
 var hsv_getset = HsvBinding.generateGetSet();
 var hsv_methods = HsvBinding.generateMethods();
 pub var HsvType = c.PyTypeObject{
@@ -80,10 +71,7 @@ pub var HsvType = c.PyTypeObject{
 };
 
 // HSL
-pub const HslBinding = color_factory.createColorBinding(
-    "Hsl",
-    zignal.Hsl,
-);
+pub const HslBinding = color_factory.createColorBinding(zignal.Hsl);
 var hsl_getset = HslBinding.generateGetSet();
 var hsl_methods = HslBinding.generateMethods();
 pub var HslType = c.PyTypeObject{
@@ -102,10 +90,7 @@ pub var HslType = c.PyTypeObject{
 };
 
 // LAB
-pub const LabBinding = color_factory.createColorBinding(
-    "Lab",
-    zignal.Lab,
-);
+pub const LabBinding = color_factory.createColorBinding(zignal.Lab);
 var lab_getset = LabBinding.generateGetSet();
 var lab_methods = LabBinding.generateMethods();
 pub var LabType = c.PyTypeObject{
@@ -124,10 +109,7 @@ pub var LabType = c.PyTypeObject{
 };
 
 // XYZ
-pub const XyzBinding = color_factory.createColorBinding(
-    "Xyz",
-    zignal.Xyz,
-);
+pub const XyzBinding = color_factory.createColorBinding(zignal.Xyz);
 var xyz_getset = XyzBinding.generateGetSet();
 var xyz_methods = XyzBinding.generateMethods();
 pub var XyzType = c.PyTypeObject{
@@ -146,10 +128,7 @@ pub var XyzType = c.PyTypeObject{
 };
 
 // OKLAB
-pub const OklabBinding = color_factory.createColorBinding(
-    "Oklab",
-    zignal.Oklab,
-);
+pub const OklabBinding = color_factory.createColorBinding(zignal.Oklab);
 var oklab_getset = OklabBinding.generateGetSet();
 var oklab_methods = OklabBinding.generateMethods();
 pub var OklabType = c.PyTypeObject{
@@ -168,10 +147,7 @@ pub var OklabType = c.PyTypeObject{
 };
 
 // OKLCH
-pub const OklchBinding = color_factory.createColorBinding(
-    "Oklch",
-    zignal.Oklch,
-);
+pub const OklchBinding = color_factory.createColorBinding(zignal.Oklch);
 var oklch_getset = OklchBinding.generateGetSet();
 var oklch_methods = OklchBinding.generateMethods();
 pub var OklchType = c.PyTypeObject{
@@ -190,10 +166,7 @@ pub var OklchType = c.PyTypeObject{
 };
 
 // LCH
-pub const LchBinding = color_factory.createColorBinding(
-    "Lch",
-    zignal.Lch,
-);
+pub const LchBinding = color_factory.createColorBinding(zignal.Lch);
 var lch_getset = LchBinding.generateGetSet();
 var lch_methods = LchBinding.generateMethods();
 pub var LchType = c.PyTypeObject{
@@ -212,10 +185,7 @@ pub var LchType = c.PyTypeObject{
 };
 
 // LMS
-pub const LmsBinding = color_factory.createColorBinding(
-    "Lms",
-    zignal.Lms,
-);
+pub const LmsBinding = color_factory.createColorBinding(zignal.Lms);
 var lms_getset = LmsBinding.generateGetSet();
 var lms_methods = LmsBinding.generateMethods();
 pub var LmsType = c.PyTypeObject{
@@ -234,10 +204,7 @@ pub var LmsType = c.PyTypeObject{
 };
 
 // XYB
-pub const XybBinding = color_factory.createColorBinding(
-    "Xyb",
-    zignal.Xyb,
-);
+pub const XybBinding = color_factory.createColorBinding(zignal.Xyb);
 var xyb_getset = XybBinding.generateGetSet();
 var xyb_methods = XybBinding.generateMethods();
 pub var XybType = c.PyTypeObject{
@@ -256,10 +223,7 @@ pub var XybType = c.PyTypeObject{
 };
 
 // YCBCR
-pub const YcbcrBinding = color_factory.createColorBinding(
-    "Ycbcr",
-    zignal.Ycbcr,
-);
+pub const YcbcrBinding = color_factory.createColorBinding(zignal.Ycbcr);
 var ycbcr_getset = YcbcrBinding.generateGetSet();
 var ycbcr_methods = YcbcrBinding.generateMethods();
 pub var YcbcrType = c.PyTypeObject{
@@ -304,141 +268,21 @@ pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
 
 /// Create a Python object from any zignal color type
 pub fn createColorPyObject(color: anytype) ?*c.PyObject {
-    return switch (@TypeOf(color)) {
-        zignal.Rgb => createRgbPyObject(color),
-        zignal.Rgba => createRgbaPyObject(color),
-        zignal.Hsv => createHsvPyObject(color),
-        zignal.Hsl => createHslPyObject(color),
-        zignal.Lab => createLabPyObject(color),
-        zignal.Xyz => createXyzPyObject(color),
-        zignal.Oklab => createOklabPyObject(color),
-        zignal.Oklch => createOklchPyObject(color),
-        zignal.Lch => createLchPyObject(color),
-        zignal.Lms => createLmsPyObject(color),
-        zignal.Xyb => createXybPyObject(color),
-        zignal.Ycbcr => createYcbcrPyObject(color),
+    const ColorType = @TypeOf(color);
+
+    return switch (ColorType) {
+        zignal.Rgb => RgbBinding.createPyObject(color, &RgbType),
+        zignal.Rgba => RgbaBinding.createPyObject(color, &RgbaType),
+        zignal.Hsv => HsvBinding.createPyObject(color, &HsvType),
+        zignal.Hsl => HslBinding.createPyObject(color, &HslType),
+        zignal.Lab => LabBinding.createPyObject(color, &LabType),
+        zignal.Xyz => XyzBinding.createPyObject(color, &XyzType),
+        zignal.Oklab => OklabBinding.createPyObject(color, &OklabType),
+        zignal.Oklch => OklchBinding.createPyObject(color, &OklchType),
+        zignal.Lch => LchBinding.createPyObject(color, &LchType),
+        zignal.Lms => LmsBinding.createPyObject(color, &LmsType),
+        zignal.Xyb => XybBinding.createPyObject(color, &XybType),
+        zignal.Ycbcr => YcbcrBinding.createPyObject(color, &YcbcrType),
         else => null,
     };
-}
-
-// Helper functions for each type
-fn createRgbPyObject(rgb: zignal.Rgb) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&RgbType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*RgbBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = rgb.r;
-    py_obj.field1 = rgb.g;
-    py_obj.field2 = rgb.b;
-    return obj;
-}
-
-fn createRgbaPyObject(rgba: zignal.Rgba) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&RgbaType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*RgbaBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = rgba.r;
-    py_obj.field1 = rgba.g;
-    py_obj.field2 = rgba.b;
-    py_obj.field3 = rgba.a;
-    return obj;
-}
-
-fn createHsvPyObject(hsv: zignal.Hsv) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&HsvType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*HsvBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = hsv.h;
-    py_obj.field1 = hsv.s;
-    py_obj.field2 = hsv.v;
-    return obj;
-}
-
-fn createHslPyObject(hsl: zignal.Hsl) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&HslType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*HslBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = hsl.h;
-    py_obj.field1 = hsl.s;
-    py_obj.field2 = hsl.l;
-    return obj;
-}
-
-fn createLabPyObject(lab: zignal.Lab) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&LabType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*LabBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = lab.l;
-    py_obj.field1 = lab.a;
-    py_obj.field2 = lab.b;
-    return obj;
-}
-
-fn createXyzPyObject(xyz: zignal.Xyz) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&XyzType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*XyzBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = xyz.x;
-    py_obj.field1 = xyz.y;
-    py_obj.field2 = xyz.z;
-    return obj;
-}
-
-fn createOklabPyObject(oklab: zignal.Oklab) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&OklabType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*OklabBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = oklab.l;
-    py_obj.field1 = oklab.a;
-    py_obj.field2 = oklab.b;
-    return obj;
-}
-
-fn createOklchPyObject(oklch: zignal.Oklch) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&OklchType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*OklchBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = oklch.l;
-    py_obj.field1 = oklch.c;
-    py_obj.field2 = oklch.h;
-    return obj;
-}
-
-fn createLchPyObject(lch: zignal.Lch) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&LchType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*LchBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = lch.l;
-    py_obj.field1 = lch.c;
-    py_obj.field2 = lch.h;
-    return obj;
-}
-
-fn createLmsPyObject(lms: zignal.Lms) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&LmsType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*LmsBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = lms.l;
-    py_obj.field1 = lms.m;
-    py_obj.field2 = lms.s;
-    return obj;
-}
-
-fn createXybPyObject(xyb: zignal.Xyb) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&XybType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*XybBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = xyb.x;
-    py_obj.field1 = xyb.y;
-    py_obj.field2 = xyb.b;
-    return obj;
-}
-
-fn createYcbcrPyObject(ycbcr: zignal.Ycbcr) ?*c.PyObject {
-    const obj = c.PyType_GenericNew(@ptrCast(&YcbcrType), null, null);
-    if (obj == null) return null;
-    const py_obj = @as(*YcbcrBinding.PyObjectType, @ptrCast(obj));
-    py_obj.field0 = ycbcr.y;
-    py_obj.field1 = ycbcr.cb;
-    py_obj.field2 = ycbcr.cr;
-    return obj;
 }

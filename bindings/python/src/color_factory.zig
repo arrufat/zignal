@@ -2,6 +2,7 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const isPacked = zignal.meta.isPacked;
+const getSimpleTypeName = zignal.meta.getSimpleTypeName;
 
 const c = @import("py_utils.zig").c;
 const color_types = @import("color_registry.zig").color_types;
@@ -37,9 +38,9 @@ pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
 
 /// Generate a color binding with automatic property getters and validation
 pub fn createColorBinding(
-    comptime name: []const u8,
     comptime ZigColorType: type,
 ) type {
+    const name = comptime getSimpleTypeName(ZigColorType);
     const fields = @typeInfo(ZigColorType).@"struct".fields;
     const is_packed = isPacked(ZigColorType);
 
@@ -81,6 +82,15 @@ pub fn createColorBinding(
     return struct {
         pub const PyObjectType = ObjectType;
         pub const ZigType = ZigColorType;
+
+        /// Create a Python object from a Zig color value
+        pub fn createPyObject(zig_color: ZigType, type_obj: *c.PyTypeObject) ?*c.PyObject {
+            const obj = c.PyType_GenericNew(@ptrCast(type_obj), null, null);
+            if (obj == null) return null;
+            const py_obj = @as(*PyObjectType, @ptrCast(obj));
+            zigColorToObject(zig_color, py_obj);
+            return obj;
+        }
 
         /// Generate property getters and setters
         pub fn generateGetSet() [fields.len + 1]c.PyGetSetDef {
@@ -327,7 +337,7 @@ pub fn createColorBinding(
         }
 
         /// Convert Zig color to Python object fields
-        fn zigColorToObject(zig_color: ZigColorType, obj: *ObjectType) void {
+        pub fn zigColorToObject(zig_color: ZigColorType, obj: *ObjectType) void {
             if (comptime is_packed) {
                 // For packed structs, convert to byte array using @bitCast
                 const bytes: [fields.len]u8 = @bitCast(zig_color);
