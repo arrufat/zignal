@@ -4,6 +4,10 @@
 
 const c = @import("py_utils.zig").c;
 
+// Shared color type strings for consistent stub generation
+pub const COLOR_TYPE_LIST = "'Rgb', 'Rgba', 'Hsl', 'Hsv', 'Lab', 'Lch', 'Lms', 'Oklab', 'Oklch', 'Xyb', 'Xyz', 'Ycbcr'";
+pub const COLOR_TYPE_UNION = "Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ COLOR_TYPE_LIST ++ "]";
+
 // Python method flags constants (matching Python C API values)
 pub const METH_CLASS = 0x0010;
 pub const METH_STATIC = 0x0020;

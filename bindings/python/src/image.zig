@@ -38,14 +38,136 @@ fn image_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     return @as(?*c.PyObject, @ptrCast(self));
 }
 
-fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    _ = self_obj;
-    _ = args;
-    _ = kwds;
+const image_init_doc =
+    \\Create a new Image with the specified dimensions and optional fill color.
+    \\
+    \\## Parameters
+    \\Two calling styles are supported:
+    \\
+    \\**Style 1: Separate arguments**
+    \\- `rows` (int): Number of rows (height) of the image
+    \\- `cols` (int): Number of columns (width) of the image
+    \\- `color` (tuple, optional): Fill color
+    \\
+    \\**Style 2: Tuple argument**
+    \\- `size` (tuple[int, int]): Image dimensions as (rows, cols)
+    \\- `color` (tuple, optional): Fill color
+    \\
+    \\Color can be:
+    \\- Integer (0-255) for grayscale
+    \\- RGB tuple (r, g, b)
+    \\- RGBA tuple (r, g, b, a)
+    \\- Any color object (Rgb, Hsl, etc.)
+    \\Defaults to transparent (0, 0, 0, 0).
+    \\
+    \\## Examples
+    \\```python
+    \\# Separate arguments style
+    \\img = Image(100, 200)
+    \\img = Image(100, 200, (255, 0, 0))
+    \\img = Image(100, 200, 128)  # Grayscale
+    \\
+    \\# Tuple style (useful for numpy arrays)
+    \\img = Image((100, 200))
+    \\img = Image(np_array.shape[:2])
+    \\img = Image((100, 200), (0, 0, 255, 128))
+    \\img = Image((100, 200), 255)  # White
+    \\```
+;
 
-    // For now, don't allow direct instantiation
-    c.PyErr_SetString(c.PyExc_TypeError, "Image cannot be instantiated directly. Use Image.load() instead.");
-    return -1;
+fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
+    _ = kwds; // Not used in current implementation
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Check if the image is already initialized (might be from load or from_numpy)
+    if (self.image_ptr != null) {
+        // Already initialized, just return success
+        return 0;
+    }
+
+    // Parse arguments - support both (rows, cols) and ((rows, cols)) syntax
+    var rows: c_int = 0;
+    var cols: c_int = 0;
+    var color_obj: ?*c.PyObject = null;
+
+    // Get argument count
+    const args_size = if (args != null) c.PyTuple_Size(args.?) else 0;
+
+    // Try parsing as separate integers first
+    const format = std.fmt.comptimePrint("ii|O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &rows, &cols, &color_obj) == 0) {
+        // Clear the error and try tuple format
+        c.PyErr_Clear();
+
+        // Check if first argument is a tuple
+        if (args_size >= 1) {
+            const first_arg = c.PyTuple_GetItem(args.?, 0);
+            if (c.PyTuple_Check(first_arg) != 0 and c.PyTuple_Size(first_arg) == 2) {
+                // Parse (rows, cols) from tuple
+                const rows_obj = c.PyTuple_GetItem(first_arg, 0);
+                const cols_obj = c.PyTuple_GetItem(first_arg, 1);
+
+                const rows_long = c.PyLong_AsLong(rows_obj);
+                if (rows_long == -1 and c.PyErr_Occurred() != null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+                    return -1;
+                }
+                rows = @intCast(rows_long);
+
+                const cols_long = c.PyLong_AsLong(cols_obj);
+                if (cols_long == -1 and c.PyErr_Occurred() != null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+                    return -1;
+                }
+                cols = @intCast(cols_long);
+
+                // Get optional color from second argument
+                if (args_size >= 2) {
+                    color_obj = c.PyTuple_GetItem(args.?, 1);
+                }
+            } else {
+                c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols) or ((rows, cols)) as arguments");
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+
+    // Validate dimensions - validateRange now properly handles negative values when converting to usize
+    const validated_rows = py_utils.validateRange(usize, rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
+    const validated_cols = py_utils.validateRange(usize, cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
+
+    // Parse color if provided, otherwise use transparent
+    var fill_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 }; // Default transparent
+    if (color_obj != null and color_obj != c.Py_None()) {
+        fill_color = py_utils.parseColorToRgba(color_obj) catch {
+            // Error already set by parseColorToRgba
+            return -1;
+        };
+    }
+
+    // Create image
+    var image = Image(Rgba).initAlloc(allocator, validated_rows, validated_cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return -1;
+    };
+
+    // Fill with specified color
+    @memset(image.data, fill_color);
+
+    // Store the image
+    const image_ptr = allocator.create(Image(Rgba)) catch {
+        image.deinit(allocator);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return -1;
+    };
+
+    image_ptr.* = image;
+    self.image_ptr = image_ptr;
+    self.numpy_ref = null;
+
+    return 0;
 }
 
 fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
@@ -1340,7 +1462,7 @@ pub var ImageType = c.PyTypeObject{
     .tp_dealloc = image_dealloc,
     .tp_repr = image_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Image class with RGBA storage for SIMD-optimized operations",
+    .tp_doc = image_init_doc,
     .tp_methods = @ptrCast(&image_methods),
     .tp_getset = @ptrCast(&image_getset),
     .tp_as_mapping = @ptrCast(&image_as_mapping),

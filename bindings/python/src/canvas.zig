@@ -766,7 +766,7 @@ const canvas_draw_text_doc =
     \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
 ;
 
-const colors = "'Rgb', 'Rgba', 'Hsl', 'Hsv', 'Lab', 'Lch', 'Lms', 'Oklab', 'Oklch', 'Xyb', 'Xyz', 'Ycbcr'";
+const colors = stub_metadata.COLOR_TYPE_LIST;
 
 pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
