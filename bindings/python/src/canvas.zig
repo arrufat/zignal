@@ -388,7 +388,7 @@ const DrawLine = makeDrawMethodWithWidth(
     \\- `p2` (tuple[float, float]): Ending point coordinates (x, y)
     \\- `color` (int, tuple or color object): Color of the line.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
     ,
 );
 
@@ -405,7 +405,7 @@ const DrawRectangle = makeDrawMethodWithWidth(
     \\- `rect` (Rectangle): Rectangle object defining the bounds
     \\- `color` (int, tuple or color object): Color of the rectangle.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
     ,
 );
 
@@ -422,7 +422,7 @@ const DrawPolygon = makeDrawMethodWithWidth(
     \\- `points` (list[tuple[float, float]]): List of (x, y) coordinates forming the polygon
     \\- `color` (int, tuple or color object): Color of the polygon.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
     ,
 );
 
@@ -440,7 +440,7 @@ const DrawCircle = makeDrawMethodWithWidth(
     \\- `radius` (float): Circle radius
     \\- `color` (int, tuple or color object): Color of the circle.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
     ,
 );
 
@@ -456,7 +456,7 @@ const FillRectangle = makeFillMethod(
     \\## Parameters
     \\- `rect` (Rectangle): Rectangle object defining the bounds
     \\- `color` (int, tuple or color object): Fill color.
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ,
     false,
 );
@@ -473,7 +473,7 @@ const FillPolygon = makeFillMethod(
     \\## Parameters
     \\- `points` (list[tuple[float, float]]): List of (x, y) coordinates forming the polygon
     \\- `color` (int, tuple or color object): Fill color.
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ,
     true,
 );
@@ -491,7 +491,7 @@ const FillCircle = makeFillMethod(
     \\- `center` (tuple[float, float]): Center coordinates (x, y)
     \\- `radius` (float): Circle radius
     \\- `color` (int, tuple or color object): Fill color.
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ,
     false,
 );
@@ -717,7 +717,7 @@ const canvas_draw_quadratic_bezier_doc =
     \\- `p2` (tuple[float, float]): End point (x, y)
     \\- `color` (int, tuple or color object): Color of the curve.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
 const canvas_draw_cubic_bezier_doc =
@@ -730,7 +730,7 @@ const canvas_draw_cubic_bezier_doc =
     \\- `p3` (tuple[float, float]): End point (x, y)
     \\- `color` (int, tuple or color object): Color of the curve.
     \\- `width` (int, optional): Line width in pixels (default: 1)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
 const canvas_draw_spline_polygon_doc =
@@ -741,7 +741,7 @@ const canvas_draw_spline_polygon_doc =
     \\- `color` (int, tuple or color object): Color of the spline.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `tension` (float, optional): Spline tension (0.0 = angular, 0.5 = smooth, default: 0.5)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
 const canvas_fill_spline_polygon_doc =
@@ -751,7 +751,7 @@ const canvas_fill_spline_polygon_doc =
     \\- `points` (list[tuple[float, float]]): List of (x, y) coordinates to interpolate through
     \\- `color` (int, tuple or color object): Fill color.
     \\- `tension` (float, optional): Spline tension (0.0 = angular, 0.5 = smooth, default: 0.5)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
 const canvas_draw_text_doc =
@@ -763,7 +763,7 @@ const canvas_draw_text_doc =
     \\- `font` (BitmapFont): Font object to use for rendering
     \\- `color` (int, tuple or color object): Text color.
     \\- `scale` (float, optional): Text scale factor (default: 1.0)
-    \\- `mode` (`DrawMode`, optional): Drawing mode: `DrawMode.FAST` or `DrawMode.SOFT` (default: `DrawMode.FAST`)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
 const colors = stub_metadata.COLOR_TYPE_LIST;
@@ -782,7 +782,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&DrawLine.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = DrawLine.doc_string,
-        .params = "self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, p1: Tuple[float, float], p2: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -790,7 +790,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&DrawRectangle.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = DrawRectangle.doc_string,
-        .params = "self, rect: Rectangle, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, rect: Rectangle, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -798,7 +798,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&FillRectangle.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = FillRectangle.doc_string,
-        .params = "self, rect: Rectangle, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = ...",
+        .params = "self, rect: Rectangle, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -806,7 +806,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&DrawPolygon.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = DrawPolygon.doc_string,
-        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -814,7 +814,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&FillPolygon.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = FillPolygon.doc_string,
-        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = ...",
+        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -822,7 +822,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&DrawCircle.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = DrawCircle.doc_string,
-        .params = "self, center: Tuple[float, float], radius: float, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, center: Tuple[float, float], radius: float, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -830,7 +830,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&FillCircle.method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = FillCircle.doc_string,
-        .params = "self, center: Tuple[float, float], radius: float, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = ...",
+        .params = "self, center: Tuple[float, float], radius: float, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -838,7 +838,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_quadratic_bezier),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_quadratic_bezier_doc,
-        .params = "self, p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -846,7 +846,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_cubic_bezier),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_cubic_bezier_doc,
-        .params = "self, p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = ...",
+        .params = "self, p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -854,7 +854,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_spline_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_spline_polygon_doc,
-        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, tension: float = 0.5, mode: DrawMode = ...",
+        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], width: int = 1, tension: float = 0.5, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -862,7 +862,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_spline_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_spline_polygon_doc,
-        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], tension: float = 0.5, mode: DrawMode = ...",
+        .params = "self, points: List[Tuple[float, float]], color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], tension: float = 0.5, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -870,7 +870,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_text),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_text_doc,
-        .params = "self, text: str, position: Tuple[float, float], font: BitmapFont, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], scale: float = 1.0, mode: DrawMode = ...",
+        .params = "self, text: str, position: Tuple[float, float], font: BitmapFont, color: Union[int, Tuple[int, int, int], Tuple[int, int, int, int], " ++ colors ++ "], scale: float = 1.0, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
 };
