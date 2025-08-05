@@ -1352,7 +1352,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_resize),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_resize_doc,
-        .params = "self, size: Union[float, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: Union[float, tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -1360,7 +1360,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_letterbox),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_letterbox_doc,
-        .params = "self, size: Union[int, Tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: Union[int, tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -1406,7 +1406,7 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, rows: int, cols: int, color: Union[ColorType, None] = None",
+        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR_TYPE_UNION ++ " | None = None",
         .returns = "None",
         .doc = image_init_doc,
     },
@@ -1417,12 +1417,12 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
     .{
         .name = "__getitem__",
-        .params = "self, key: Tuple[int, int]",
+        .params = "self, key: tuple[int, int]",
         .returns = "Rgba",
     },
     .{
         .name = "__setitem__",
-        .params = "self, key: Tuple[int, int], value: ColorType",
+        .params = "self, key: tuple[int, int], value: " ++ stub_metadata.COLOR_TYPE_UNION,
         .returns = "None",
     },
 };
