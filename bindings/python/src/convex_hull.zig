@@ -158,7 +158,7 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS,
         .doc = convex_hull_find_doc,
         .params = "self, points: list[tuple[float, float]]",
-        .returns = "Optional[list[tuple[float, float]]]",
+        .returns = "list[tuple[float, float]] | None",
     },
 };
 

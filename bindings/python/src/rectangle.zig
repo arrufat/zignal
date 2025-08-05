@@ -429,7 +429,7 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS,
         .doc = rectangle_intersect_doc,
         .params = "self, other: Rectangle",
-        .returns = "Optional[Rectangle]",
+        .returns = "Rectangle | None",
     },
 };
 
