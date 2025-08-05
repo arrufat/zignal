@@ -6,11 +6,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const expect = std.testing.expect;
+const clamp = std.math.clamp;
 
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
 const TerminalSupport = @import("TerminalSupport.zig");
+const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
 const max_supported_width: usize = 2048;
@@ -56,27 +58,31 @@ pub const DitherMode = enum {
 /// Options for sixel encoding
 pub const Options = struct {
     /// Palette generation mode
-    palette_mode: PaletteMode,
+    palette: PaletteMode,
     /// Dithering algorithm to use
-    dither_mode: DitherMode,
+    dither: DitherMode,
     /// Maximum output width (image will be scaled if larger)
     max_width: u32,
     /// Maximum output height (image will be scaled if larger)
     max_height: u32,
+    /// Interpolation method to use when scaling the image
+    interpolation: InterpolationMethod = .nearest_neighbor,
 
     /// Default options for automatic formatting
     pub const default: Options = .{
-        .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
-        .dither_mode = .auto,
+        .palette = .{ .adaptive = .{ .max_colors = 256 } },
+        .dither = .auto,
         .max_width = 800,
         .max_height = 600,
+        .interpolation = .nearest_neighbor,
     };
     /// Fallback options without dithering
     pub const fallback: Options = .{
-        .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
-        .dither_mode = .none,
+        .palette = .{ .adaptive = .{ .max_colors = 256 } },
+        .dither = .none,
         .max_width = 800,
         .max_height = 600,
+        .interpolation = .nearest_neighbor,
     };
 };
 
@@ -111,9 +117,9 @@ pub fn fromImage(
 
     // Prepare palette based on mode
     var palette: [256]Rgb = undefined;
-    var palette_size: usize = options.palette_mode.size();
+    var palette_size: usize = options.palette.size();
 
-    switch (options.palette_mode) {
+    switch (options.palette) {
         .fixed_6x7x6 => {
             generateFixed6x7x6Palette(&palette);
         },
@@ -136,59 +142,36 @@ pub fn fromImage(
     color_lut.build(palette[0..], palette_size);
 
     // Determine dithering mode
-    const dither_mode = switch (options.dither_mode) {
+    const dither_mode = switch (options.dither) {
         .auto => if (palette_size <= 16) DitherMode.atkinson else DitherMode.floyd_steinberg,
-        else => options.dither_mode,
+        else => options.dither,
     };
 
-    // Pre-calculate source pixel mappings for scaling
-    var src_row_map: ?[]usize = null;
-    var src_col_map: ?[]usize = null;
-    if (scale < 1.0) {
-        src_row_map = try allocator.alloc(usize, height);
-        src_col_map = try allocator.alloc(usize, width);
-
-        // Pre-compute all source positions
-        for (0..height) |row| {
-            src_row_map.?[row] = @as(usize, @intFromFloat(@as(f32, @floatFromInt(row)) / scale));
-        }
-        for (0..width) |col| {
-            src_col_map.?[col] = @as(usize, @intFromFloat(@as(f32, @floatFromInt(col)) / scale));
-        }
-    }
-    defer if (src_row_map) |map| allocator.free(map);
-    defer if (src_col_map) |map| allocator.free(map);
-
-    // Prepare working data for dithering if needed
-    var working_data: ?[]u8 = null;
+    // Prepare a scaled Rgb image for dithering if needed
+    var scaled_rgb: ?Image(Rgb) = null;
     if (dither_mode != .none) {
-        working_data = try allocator.alloc(u8, width * height * 3);
+        scaled_rgb = try Image(Rgb).initAlloc(allocator, height, width);
 
-        // Copy scaled image data to working buffer
+        // Copy scaled image data to working image
         for (0..height) |row| {
             for (0..width) |col| {
-                const src_r = if (src_row_map) |map| map[row] else row;
-                const src_c = if (src_col_map) |map| map[col] else col;
+                const src_x = @as(f32, @floatFromInt(col)) / scale;
+                const src_y = @as(f32, @floatFromInt(row)) / scale;
 
-                if (src_r < image.rows and src_c < image.cols) {
-                    const pixel = image.at(src_r, src_c).*;
-                    const rgb = convertColor(Rgb, pixel);
-                    const pos = (row * width + col) * 3;
-                    working_data.?[pos] = rgb.r;
-                    working_data.?[pos + 1] = rgb.g;
-                    working_data.?[pos + 2] = rgb.b;
+                if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
+                    scaled_rgb.?.at(row, col).* = convertColor(Rgb, pixel);
                 }
             }
         }
 
         // Apply dithering
         switch (dither_mode) {
-            .floyd_steinberg => applyErrorDiffusion(working_data.?, width, height, palette[0..palette_size], &color_lut, floyd_steinberg_config),
-            .atkinson => applyErrorDiffusion(working_data.?, width, height, palette[0..palette_size], &color_lut, atkinson_config),
+            .floyd_steinberg => applyErrorDiffusion(scaled_rgb.?, palette[0..palette_size], &color_lut, floyd_steinberg_config),
+            .atkinson => applyErrorDiffusion(scaled_rgb.?, palette[0..palette_size], &color_lut, atkinson_config),
             else => {},
         }
     }
-    defer if (working_data) |data| allocator.free(data);
+    defer if (scaled_rgb) |*img| img.deinit(allocator);
 
     // Pre-allocate output buffer with estimated size
     // Header: ~50 bytes
@@ -215,7 +198,7 @@ pub fn fromImage(
     var palette_buf: [64]u8 = undefined; // Buffer for building palette strings
 
     for (0..palette_size) |i| {
-        const p = if (options.palette_mode == .fixed_6x7x6) blk: {
+        const p = if (options.palette == .fixed_6x7x6) blk: {
             // Calculate 6x7x6 color directly
             const r_idx = i / 42;
             const g_idx = (i % 42) / 6;
@@ -273,22 +256,16 @@ pub fn fromImage(
             for (0..6) |bit| {
                 const pixel_row = row + bit;
                 if (pixel_row < height) {
-                    const color_idx = if (working_data) |data| blk: {
+                    const color_idx = if (scaled_rgb) |img| blk: {
                         // Use dithered data
-                        const pos = (pixel_row * width + col) * 3;
-                        const rgb = Rgb{
-                            .r = data[pos],
-                            .g = data[pos + 1],
-                            .b = data[pos + 2],
-                        };
+                        const rgb = img.at(pixel_row, col).*;
                         break :blk color_lut.lookup(rgb);
                     } else blk: {
                         // Use original data without dithering
-                        const src_r = if (src_row_map) |map| map[pixel_row] else pixel_row;
-                        const src_c = if (src_col_map) |map| map[col] else col;
+                        const src_x = @as(f32, @floatFromInt(col)) / scale;
+                        const src_y = @as(f32, @floatFromInt(pixel_row)) / scale;
 
-                        if (src_r < image.rows and src_c < image.cols) {
-                            const pixel = image.at(src_r, src_c).*;
+                        if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
                             const rgb = convertColor(Rgb, pixel);
 
                             // Use lookup table for all palettes
@@ -494,21 +471,14 @@ const atkinson_config = DitherConfig{
 
 /// Unified error diffusion dithering implementation
 fn applyErrorDiffusion(
-    data: []u8,
-    w: usize,
-    h: usize,
+    img: Image(Rgb),
     pal: []const Rgb,
     lut: *const ColorLookupTable,
     config: DitherConfig,
 ) void {
-    for (0..h) |y| {
-        for (0..w) |x| {
-            const pos = (y * w + x) * 3;
-            const original = Rgb{
-                .r = data[pos],
-                .g = data[pos + 1],
-                .b = data[pos + 2],
-            };
+    for (0..img.rows) |r| {
+        for (0..img.cols) |c| {
+            const original = img.at(r, c).*;
 
             // Find nearest palette color using LUT
             const idx = lut.lookup(original);
@@ -520,23 +490,19 @@ fn applyErrorDiffusion(
             const b_error = @as(i16, original.b) - @as(i16, quantized.b);
 
             // Update pixel to quantized color
-            data[pos] = quantized.r;
-            data[pos + 1] = quantized.g;
-            data[pos + 2] = quantized.b;
+            img.at(r, c).* = quantized;
 
             // Distribute error to neighboring pixels
             for (config.distributions) |dist| {
-                const nx = @as(isize, @intCast(x)) + dist[0];
-                const ny = @as(isize, @intCast(y)) + dist[1];
+                const nc = @as(isize, @intCast(c)) + dist[0];
+                const nr = @as(isize, @intCast(r)) + dist[1];
 
-                if (nx >= 0 and nx < w and ny >= 0 and ny < h) {
-                    const npos = (@as(usize, @intCast(ny)) * w + @as(usize, @intCast(nx))) * 3;
-
-                    // Apply error diffusion for each channel
-                    inline for (.{ r_error, g_error, b_error }, 0..) |err, ch| {
-                        const new_val = @as(i16, data[npos + ch]) + @divTrunc(err * dist[2], dist[3]);
-                        data[npos + ch] = @intCast(@min(@max(new_val, 0), 255));
-                    }
+                if (img.atOrNull(nr, nc)) |neighbor| {
+                    neighbor.* = Rgb{
+                        .r = @intCast(clamp(@as(i16, neighbor.r) + @divTrunc(r_error * dist[2], dist[3]), 0, 255)),
+                        .g = @intCast(clamp(@as(i16, neighbor.g) + @divTrunc(g_error * dist[2], dist[3]), 0, 255)),
+                        .b = @intCast(clamp(@as(i16, neighbor.b) + @divTrunc(b_error * dist[2], dist[3]), 0, 255)),
+                    };
                 }
             }
         }
@@ -876,8 +842,8 @@ test "basic sixel encoding - 2x2 image" {
     img.at(1, 1).* = .{ .r = 255, .g = 255, .b = 0 }; // Yellow
 
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .fixed_6x7x6,
-        .dither_mode = .none,
+        .palette = .fixed_6x7x6,
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
@@ -908,8 +874,8 @@ test "basic sixel encoding - verify palette format" {
     }
 
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .{ .adaptive = .{ .max_colors = 16 } },
-        .dither_mode = .none,
+        .palette = .{ .adaptive = .{ .max_colors = 16 } },
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
@@ -932,8 +898,8 @@ test "palette mode - fixed 6x7x6 color mapping" {
     img.at(0, 2).* = .{ .r = 255, .g = 0, .b = 0 }; // Red
 
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .fixed_6x7x6,
-        .dither_mode = .none,
+        .palette = .fixed_6x7x6,
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
@@ -975,8 +941,8 @@ test "palette mode - adaptive with color reduction" {
 
     // Test with max_colors = 4 (force color reduction)
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .{ .adaptive = .{ .max_colors = 4 } },
-        .dither_mode = .none,
+        .palette = .{ .adaptive = .{ .max_colors = 4 } },
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
@@ -997,8 +963,8 @@ test "edge case - single pixel image" {
     img.at(0, 0).* = .{ .r = 128, .g = 128, .b = 128 };
 
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .fixed_web216,
-        .dither_mode = .none,
+        .palette = .fixed_web216,
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
@@ -1025,8 +991,8 @@ test "edge case - uniform color image" {
     }
 
     const sixel_data = try fromImage(Rgb, img, allocator, .{
-        .palette_mode = .{ .adaptive = .{ .max_colors = 256 } },
-        .dither_mode = .none,
+        .palette = .{ .adaptive = .{ .max_colors = 256 } },
+        .dither = .none,
         .max_width = 100,
         .max_height = 100,
     });
