@@ -164,6 +164,44 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
 
 var convex_hull_methods = stub_metadata.toPyMethodDefArray(&convex_hull_methods_metadata);
 
+// Class documentation - keep it simple
+const convex_hull_class_doc = "Convex hull computation using Graham's scan algorithm.";
+
+// Init documentation - detailed explanation
+pub const convex_hull_init_doc =
+    \\Initialize a new ConvexHull instance.
+    \\
+    \\Creates a new ConvexHull instance that can compute the convex hull of
+    \\2D point sets using Graham's scan algorithm. The algorithm has O(n log n)
+    \\time complexity where n is the number of input points.
+    \\
+    \\## Examples
+    \\```python
+    \\# Create a ConvexHull instance
+    \\hull = ConvexHull()
+    \\
+    \\# Find convex hull of points
+    \\points = [(0, 0), (1, 1), (2, 2), (3, 1), (4, 0), (2, 4), (1, 3)]
+    \\result = hull.find(points)
+    \\# Returns: [(0.0, 0.0), (1.0, 3.0), (2.0, 4.0), (4.0, 0.0)]
+    \\```
+    \\
+    \\## Notes
+    \\- Returns vertices in clockwise order
+    \\- Returns None for degenerate cases (e.g., all points collinear)
+    \\- Requires at least 3 points for a valid hull
+;
+
+// Special methods metadata for stub generation
+pub const convex_hull_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self",
+        .returns = "None",
+        .doc = convex_hull_init_doc,
+    },
+};
+
 pub var ConvexHullType = c.PyTypeObject{
     .ob_base = .{
         .ob_base = .{},
@@ -174,7 +212,7 @@ pub var ConvexHullType = c.PyTypeObject{
     .tp_dealloc = convex_hull_dealloc,
     .tp_repr = convex_hull_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Convex hull computation using Graham's scan algorithm",
+    .tp_doc = convex_hull_class_doc,
     .tp_methods = @ptrCast(&convex_hull_methods),
     .tp_init = convex_hull_init,
     .tp_new = convex_hull_new,

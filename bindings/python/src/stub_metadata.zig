@@ -54,6 +54,8 @@ pub const ClassInfo = struct {
     properties: []const PropertyInfo,
     /// Base classes (optional)
     bases: []const []const u8 = &.{},
+    /// Special methods like __init__, __len__, __getitem__ (optional)
+    special_methods: ?[]const MethodInfo = null,
 };
 
 /// Describes a module-level function

@@ -482,6 +482,49 @@ pub const rectangle_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
 
 var rectangle_getset = stub_metadata.toPyGetSetDefArray(&rectangle_properties_metadata);
 
+// Class documentation - keep it simple
+const rectangle_class_doc = "A rectangle defined by its left, top, right, and bottom coordinates.";
+
+// Init documentation - detailed explanation
+pub const rectangle_init_doc =
+    \\Initialize a Rectangle with specified coordinates.
+    \\
+    \\Creates a rectangle from its bounding coordinates. The rectangle is defined
+    \\by four values: left (x-min), top (y-min), right (x-max), and bottom (y-max).
+    \\
+    \\## Parameters
+    \\- `left` (float): Left edge x-coordinate (minimum x)
+    \\- `top` (float): Top edge y-coordinate (minimum y)
+    \\- `right` (float): Right edge x-coordinate (maximum x)
+    \\- `bottom` (float): Bottom edge y-coordinate (maximum y)
+    \\
+    \\## Examples
+    \\```python
+    \\# Create a rectangle from (10, 20) to (110, 70)
+    \\rect = Rectangle(10, 20, 110, 70)
+    \\print(rect.width)  # 100
+    \\print(rect.height)  # 50
+    \\
+    \\# Create a square
+    \\square = Rectangle(0, 0, 50, 50)
+    \\```
+    \\
+    \\## Notes
+    \\- The constructor validates that right >= left and bottom >= top
+    \\- Use Rectangle.init_center() for center-based construction
+    \\- Coordinates follow image convention: origin at top-left, y increases downward
+;
+
+// Special methods metadata for stub generation
+pub const rectangle_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self, left: float, top: float, right: float, bottom: float",
+        .returns = "None",
+        .doc = rectangle_init_doc,
+    },
+};
+
 pub var RectangleType = c.PyTypeObject{
     .ob_base = .{
         .ob_base = .{},
@@ -492,7 +535,7 @@ pub var RectangleType = c.PyTypeObject{
     .tp_dealloc = rectangle_dealloc,
     .tp_repr = rectangle_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "A rectangle defined by its left, top, right, and bottom coordinates",
+    .tp_doc = rectangle_class_doc,
     .tp_methods = @ptrCast(&rectangle_methods),
     .tp_getset = @ptrCast(&rectangle_getset),
     .tp_init = rectangle_init,

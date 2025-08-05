@@ -189,6 +189,27 @@ fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.Cla
             try stub.writef("    def {s}(self, value: {s}) -> None: ...\n", .{ prop.name, prop.type });
         }
     }
+
+    // Generate special methods if provided
+    if (class_info.special_methods) |special_methods| {
+        for (special_methods) |method| {
+            // Write method signature
+            try stub.writef("    def {s}({s}) -> {s}:", .{
+                method.name,
+                method.params,
+                method.returns,
+            });
+
+            // Add docstring if available
+            if (method.doc) |doc| {
+                try stub.write("\n");
+                try stub.writef("        \"\"\"{s}\"\"\"\n", .{doc});
+                try stub.write("        ...\n");
+            } else {
+                try stub.write(" ...\n");
+            }
+        }
+    }
 }
 
 /// Generate enum from Zig type metadata
@@ -274,6 +295,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .methods = &rectangle_methods,
         .properties = &rectangle_properties,
         .bases = &.{},
+        .special_methods = &rectangle_module.rectangle_special_methods_metadata,
     });
 
     // Generate BitmapFont class
@@ -314,16 +336,8 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .methods = &image_methods,
         .properties = &image_properties,
         .bases = &.{},
+        .special_methods = &image_module.image_special_methods_metadata,
     });
-
-    // Add special methods for Image class
-    try stub.write("    @overload\n");
-    try stub.write("    def __init__(self, rows: int, cols: int, color: Union[ColorType, None] = None) -> None: ...\n");
-    try stub.write("    @overload\n");
-    try stub.write("    def __init__(self, size: Tuple[int, int], color: Union[ColorType, None] = None) -> None: ...\n");
-    try stub.write("    def __len__(self) -> int: ...\n");
-    try stub.write("    def __getitem__(self, key: Tuple[int, int]) -> Rgba: ...\n");
-    try stub.write("    def __setitem__(self, key: Tuple[int, int], value: ColorType) -> None: ...\n");
 
     // Generate Canvas class from metadata
     const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
@@ -335,6 +349,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .methods = &canvas_methods,
         .properties = &canvas_properties,
         .bases = &.{},
+        .special_methods = &canvas_module.canvas_special_methods_metadata,
     });
 
     // Generate FeatureDistributionMatching class from metadata
@@ -346,6 +361,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .methods = &fdm_methods,
         .properties = &[_]stub_metadata.PropertyInfo{},
         .bases = &.{},
+        .special_methods = &fdm_module.fdm_special_methods_metadata,
     });
 
     // Generate ConvexHull class from metadata
@@ -357,6 +373,7 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .methods = &convex_hull_methods,
         .properties = &[_]stub_metadata.PropertyInfo{},
         .bases = &.{},
+        .special_methods = &convex_hull_module.convex_hull_special_methods_metadata,
     });
 
     // Generate module-level functions from metadata

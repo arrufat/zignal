@@ -333,32 +333,29 @@ pub const fdm_methods_metadata = [_]stub_metadata.MethodWithMetadata{
 // Generate PyMethodDef array from metadata
 var fdm_methods = stub_metadata.toPyMethodDefArray(&fdm_methods_metadata);
 
-// Class documentation
-const fdm_class_doc =
-    \\Feature Distribution Matching for image style transfer.
+// Class documentation - keep it simple
+const fdm_class_doc = "Feature Distribution Matching for image style transfer.";
+
+// Init documentation - detailed explanation
+pub const fdm_init_doc =
+    \\Initialize a new FeatureDistributionMatching instance.
     \\
-    \\This class implements Feature Distribution Matching (FDM), which transfers
-    \\the color distribution from a target image to a source image while preserving
-    \\the structure of the source. The algorithm matches the mean and covariance
-    \\of pixel distributions.
-    \\
-    \\The class supports efficient batch processing by computing target statistics
-    \\once and reusing them for multiple source images.
+    \\Creates a new FDM instance that can be used to transfer color distributions
+    \\between images. The instance maintains internal state for efficient batch
+    \\processing of multiple images with the same target distribution.
     \\
     \\## Examples
-    \\
-    \\### Single image transformation
     \\```python
+    \\# Create an FDM instance
     \\fdm = FeatureDistributionMatching()
+    \\
+    \\# Single image transformation
     \\source = Image.load("portrait.png")
     \\target = Image.load("sunset.png")
     \\fdm.match(source, target)  # source is modified in-place
     \\source.save("portrait_sunset.png")
-    \\```
     \\
-    \\### Batch processing with same style
-    \\```python
-    \\fdm = FeatureDistributionMatching()
+    \\# Batch processing with same style
     \\style = Image.load("style_reference.png")
     \\fdm.set_target(style)
     \\for filename in image_files:
@@ -367,7 +364,22 @@ const fdm_class_doc =
     \\    fdm.update()
     \\    img.save(f"styled_{filename}")
     \\```
+    \\
+    \\## Notes
+    \\- The algorithm matches mean and covariance of pixel distributions
+    \\- Target statistics are computed once and can be reused for multiple sources
+    \\- See: https://facebookresearch.github.io/dino/blog/
 ;
+
+// Special methods metadata for stub generation
+pub const fdm_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self",
+        .returns = "None",
+        .doc = fdm_init_doc,
+    },
+};
 
 // PyTypeObject definition
 pub var FeatureDistributionMatchingType = c.PyTypeObject{
