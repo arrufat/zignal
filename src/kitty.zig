@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 const Image = @import("image.zig").Image;
 const png = @import("png.zig");
 const Rgb = @import("color.zig").Rgb;
-const TerminalSupport = @import("TerminalSupport.zig");
+const terminal = @import("terminal.zig");
 
 // Kitty protocol constants
 const max_chunk_size: usize = 4096; // Maximum payload size per escape sequence
@@ -164,22 +164,13 @@ pub fn fromImage(
 /// Detects if the terminal supports Kitty graphics protocol
 pub fn isSupported() bool {
     // Check if we're connected to a terminal
-    if (!TerminalSupport.isStdoutTty()) {
+    if (!terminal.isStdoutTty()) {
         // Not a TTY, don't support Kitty for file output
         return false;
     }
 
     // Try terminal detection first
-    var terminal = TerminalSupport.init() catch {
-        return false;
-    };
-    defer terminal.deinit();
-
-    if (terminal.detectKittySupport() catch false) {
-        return true;
-    } else {
-        return false;
-    }
+    return terminal.isKittySupported() catch false;
 }
 
 // Tests

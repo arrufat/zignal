@@ -11,7 +11,7 @@ const clamp = std.math.clamp;
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
-const TerminalSupport = @import("TerminalSupport.zig");
+const terminal = @import("terminal.zig");
 const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
@@ -817,16 +817,13 @@ fn generateAdaptivePalette(
 /// Checks if the terminal supports sixel graphics
 pub fn isSupported() bool {
     // Check if we're connected to a terminal
-    if (!TerminalSupport.isStdoutTty()) {
+    if (!terminal.isStdoutTty()) {
         // Not a TTY, allow sixel for file output
         return true;
     }
 
     // We're in a terminal, so perform actual detection
-    var terminal = TerminalSupport.init() catch return false;
-    defer terminal.deinit();
-
-    return terminal.detectSixelSupport() catch false;
+    return terminal.isSixelSupported() catch false;
 }
 
 test "basic sixel encoding - 2x2 image" {

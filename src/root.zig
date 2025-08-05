@@ -61,8 +61,7 @@ pub const InterpolationMethod = @import("image.zig").InterpolationMethod;
 pub const ImageFormat = @import("image.zig").ImageFormat;
 pub const DisplayFormat = @import("image.zig").DisplayFormat;
 
-// Terminal support utilities
-pub const TerminalSupport = @import("TerminalSupport.zig");
+// Terminal graphics protocols
 pub const sixel = @import("sixel.zig");
 pub const kitty = @import("kitty.zig");
 
