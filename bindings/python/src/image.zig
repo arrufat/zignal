@@ -697,6 +697,31 @@ fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     return c.PyObject_Call(concatenate_func, concat_args, concat_kwargs);
 }
 
+/// Parse dimension string "WIDTHxHEIGHT" into optional width and height values
+/// Examples: "800x600" -> (800, 600), "800x" -> (800, null), "x600" -> (null, 600)
+fn parseDimensions(dims_str: []const u8) !struct { width: ?u32, height: ?u32 } {
+    const x_pos = std.mem.indexOf(u8, dims_str, "x") orelse
+        return error.InvalidFormat;
+
+    const width_str = dims_str[0..x_pos];
+    const height_str = dims_str[x_pos + 1 ..];
+
+    var width: ?u32 = null;
+    var height: ?u32 = null;
+
+    if (width_str.len > 0) {
+        width = std.fmt.parseInt(u32, width_str, 10) catch
+            return error.InvalidWidth;
+    }
+
+    if (height_str.len > 0) {
+        height = std.fmt.parseInt(u32, height_str, 10) catch
+            return error.InvalidHeight;
+    }
+
+    return .{ .width = width, .height = height };
+}
+
 const image_format_doc =
     \\Format image for display using various terminal graphics protocols.
     \\
@@ -708,10 +733,13 @@ const image_format_doc =
     \\  - `'blocks'`: Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
     \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
     \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
-    \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel with scaling (e.g., 'sixel:800x600')
+    \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel scaled to fit (e.g., 'sixel:800x600')
     \\  - `'sixel:WIDTHx'`: Scale to fit width, maintain aspect ratio (e.g., 'sixel:800x')
     \\  - `'sixel:xHEIGHT'`: Scale to fit height, maintain aspect ratio (e.g., 'sixel:x600')
     \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
+    \\  - `'kitty:WIDTHxHEIGHT'`: Display using kitty scaled to fit (e.g., 'kitty:800x600')
+    \\  - `'kitty:WIDTHx'`: Display with specified width, height auto-calculated (e.g., 'kitty:800x')
+    \\  - `'kitty:xHEIGHT'`: Display with specified height, width auto-calculated (e.g., 'kitty:x600')
     \\
     \\## Examples
     \\```python
@@ -724,7 +752,10 @@ const image_format_doc =
     \\print(f"{img:sixel:800x600}")   # Display with sixel, scaled to fit 800x600
     \\print(f"{img:sixel:800x}")      # Display with sixel, scaled to 800px width
     \\print(f"{img:sixel:x600}")      # Display with sixel, scaled to 600px height
-    \\print(f"{img:kitty}")   # Display with kitty graphics
+    \\print(f"{img:kitty}")           # Display with kitty graphics
+    \\print(f"{img:kitty:800x600}")   # Display with kitty, scaled to fit 800x600
+    \\print(f"{img:kitty:800x}")      # Display with kitty, 800 pixels wide
+    \\print(f"{img:kitty:x600}")      # Display with kitty, 600 pixels tall
     \\```
 ;
 
@@ -762,54 +793,65 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         // Parse sixel with dimensions: "sixel:WIDTHxHEIGHT"
         const dims_str = spec_slice[6..]; // Skip "sixel:"
 
-        // Find the 'x' separator
-        const x_pos = std.mem.indexOf(u8, dims_str, "x");
-        if (x_pos == null) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel:WIDTHxHEIGHT', 'sixel:WIDTHx', or 'sixel:xHEIGHT'");
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid sixel format. Use 'sixel:WIDTHxHEIGHT', 'sixel:WIDTHx', or 'sixel:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in sixel format",
+                error.InvalidHeight => "Invalid height value in sixel format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
             return null;
-        }
-
-        // Parse width and height
-        const width_str = dims_str[0..x_pos.?];
-        const height_str = dims_str[x_pos.? + 1 ..];
-
-        var width: ?u32 = null;
-        var height: ?u32 = null;
-
-        // Parse width if not empty
-        if (width_str.len > 0) {
-            width = std.fmt.parseInt(u32, width_str, 10) catch {
-                c.PyErr_SetString(c.PyExc_ValueError, "Invalid width value in sixel format");
-                return null;
-            };
-        }
-
-        // Parse height if not empty
-        if (height_str.len > 0) {
-            height = std.fmt.parseInt(u32, height_str, 10) catch {
-                c.PyErr_SetString(c.PyExc_ValueError, "Invalid height value in sixel format");
-                return null;
-            };
-        }
+        };
 
         // Create sixel options with custom dimensions
         break :blk .{ .sixel = .{
             .palette = .{ .adaptive = .{ .max_colors = 256 } },
             .dither = .auto,
-            .width = width,
-            .height = height,
+            .width = dims.width,
+            .height = dims.height,
             .interpolation = .nearest_neighbor,
         } };
     } else if (std.mem.eql(u8, spec_slice, "kitty"))
         .{ .kitty = .default }
-    else if (std.mem.eql(u8, spec_slice, "auto"))
+    else if (std.mem.startsWith(u8, spec_slice, "kitty:")) blk: {
+        // Parse kitty with dimensions: "kitty:WIDTHxHEIGHT"
+        const dims_str = spec_slice[6..]; // Skip "kitty:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid kitty format. Use 'kitty:WIDTHxHEIGHT', 'kitty:WIDTHx', or 'kitty:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in kitty format",
+                error.InvalidHeight => "Invalid height value in kitty format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create kitty options with custom dimensions (in pixels)
+        break :blk .{
+            .kitty = .{
+                .quiet = 1,
+                .image_id = null,
+                .placement_id = null,
+                .delete_after = false,
+                .enable_chunking = false,
+                .width = dims.width,
+                .height = dims.height,
+                .interpolation = .bilinear,
+            },
+        };
+    } else if (std.mem.eql(u8, spec_slice, "auto"))
         .auto
     else if (std.mem.startsWith(u8, spec_slice, "sixel")) {
         // Invalid sixel format that doesn't match "sixel" or "sixel:..."
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel' or 'sixel:WIDTHxHEIGHT' (e.g., 'sixel:800x600', 'sixel:800x', 'sixel:x600')");
         return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "kitty")) {
+        // Invalid kitty format that doesn't match "kitty" or "kitty:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid kitty format. Use 'kitty' or 'kitty:WIDTHxHEIGHT' (e.g., 'kitty:800x600', 'kitty:800x', 'kitty:x600')");
+        return null;
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', or 'auto'");
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', or 'auto'");
         return null;
     };
 

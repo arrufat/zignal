@@ -13,6 +13,7 @@ const Image = @import("image.zig").Image;
 const png = @import("png.zig");
 const Rgb = @import("color.zig").Rgb;
 const terminal = @import("terminal.zig");
+const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 // Kitty protocol constants
 const max_chunk_size: usize = 4096; // Maximum payload size per escape sequence
@@ -29,6 +30,14 @@ pub const Options = struct {
     delete_after: bool = false,
     /// Enable chunking for increased reliability (Ghostty doesn't support it)
     enable_chunking: bool = false,
+    /// Display width in pixels
+    /// If null, uses image's natural width
+    width: ?u32 = null,
+    /// Display height in pixels
+    /// If null, uses image's natural height or calculates from width to preserve aspect ratio
+    height: ?u32 = null,
+    /// Interpolation method to use when scaling the image
+    interpolation: InterpolationMethod = .bilinear,
 
     /// Default options for automatic formatting
     pub const default: Options = .{
@@ -37,6 +46,9 @@ pub const Options = struct {
         .placement_id = null,
         .delete_after = false,
         .enable_chunking = false,
+        .width = null,
+        .height = null,
+        .interpolation = .bilinear,
     };
 };
 
@@ -47,8 +59,37 @@ pub fn fromImage(
     allocator: Allocator,
     options: Options,
 ) ![]u8 {
-    // First, encode the image as PNG
-    const png_data = try png.encodeImage(T, allocator, image, .default);
+    var image_to_encode = image;
+    var scaled_image: ?Image(T) = null;
+    defer if (scaled_image) |*img| img.deinit(allocator);
+
+    // Handle scaling if dimensions specified
+    if (options.width != null or options.height != null) {
+        // Calculate scale factor preserving aspect ratio
+        var scale_factor: f32 = 1.0;
+
+        if (options.width != null and options.height != null) {
+            // Both specified: use smaller scale to fit within both
+            const scale_x = @as(f32, @floatFromInt(options.width.?)) / @as(f32, @floatFromInt(image.cols));
+            const scale_y = @as(f32, @floatFromInt(options.height.?)) / @as(f32, @floatFromInt(image.rows));
+            scale_factor = @min(scale_x, scale_y);
+        } else if (options.width != null) {
+            // Only width specified
+            scale_factor = @as(f32, @floatFromInt(options.width.?)) / @as(f32, @floatFromInt(image.cols));
+        } else if (options.height != null) {
+            // Only height specified
+            scale_factor = @as(f32, @floatFromInt(options.height.?)) / @as(f32, @floatFromInt(image.rows));
+        }
+
+        // Only scale if factor is different from 1.0
+        if (@abs(scale_factor - 1.0) > 0.001) {
+            scaled_image = try image.scale(allocator, scale_factor, options.interpolation);
+            image_to_encode = scaled_image.?;
+        }
+    }
+
+    // Encode the (possibly scaled) image as PNG
+    const png_data = try png.encodeImage(T, allocator, image_to_encode, .default);
     defer allocator.free(png_data);
 
     // Calculate base64 encoded size
