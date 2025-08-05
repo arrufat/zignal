@@ -259,9 +259,6 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
     }
 }
 
-// Use color type from stub_metadata for consistency
-const COLOR_TYPE_UNION = stub_metadata.COLOR_TYPE_UNION;
-
 /// Generate complete stub file
 fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(allocator);
@@ -277,7 +274,6 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("import numpy as np\n");
     try stub.write("\n");
     try stub.write("# Type alias for color values\n");
-    try stub.writef("ColorType = {s}\n", .{COLOR_TYPE_UNION});
     try stub.write("\n");
 
     // Generate all color classes
