@@ -639,40 +639,33 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     }
 
-    // Convert text to string
     const text_cstr = c.PyUnicode_AsUTF8(text_obj) orelse {
         c.PyErr_SetString(c.PyExc_TypeError, "text must be a string");
         return null;
     };
     const text = std.mem.span(text_cstr);
 
-    // Parse position
     const position = py_utils.parsePointTuple(position_obj) catch return null;
 
-    // Parse color
     const color = py_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
 
-    // Parse DrawMode
     const mode_val = py_utils.validateRange(u32, mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
 
-    // Check if font is provided or use default
-    if (font_obj == null) {
-        // Use default font directly
-        canvas.drawText(text, position, color, zignal.font.default_font_8x8, @as(f32, @floatCast(scale)), draw_mode);
-    } else {
-        // Validate provided font is a BitmapFont instance
+    if (font_obj) |font| {
         const bitmap_font_module = @import("bitmap_font.zig");
-        if (c.PyObject_IsInstance(font_obj, @ptrCast(&bitmap_font_module.BitmapFontType)) <= 0) {
+        if (c.PyObject_IsInstance(font, @ptrCast(&bitmap_font_module.BitmapFontType)) <= 0) {
             if (c.PyErr_Occurred() == null) {
                 c.PyErr_SetString(c.PyExc_TypeError, "font must be a BitmapFont instance or None");
             }
             return null;
         }
 
-        const font_wrapper = @as(*bitmap_font_module.BitmapFontObject, @ptrCast(font_obj.?));
-        const font = py_utils.validateNonNull(*BitmapFont, font_wrapper.font, "BitmapFont") catch return null;
-        canvas.drawText(text, position, color, font.*, @as(f32, @floatCast(scale)), draw_mode);
+        const font_wrapper = @as(*bitmap_font_module.BitmapFontObject, @ptrCast(font));
+        const font_ptr = py_utils.validateNonNull(*BitmapFont, font_wrapper.font, "BitmapFont") catch return null;
+        canvas.drawText(text, position, color, font_ptr.*, @as(f32, @floatCast(scale)), draw_mode);
+    } else {
+        canvas.drawText(text, position, color, zignal.font.default_font_8x8, @as(f32, @floatCast(scale)), draw_mode);
     }
 
     return py_utils.returnNone();
