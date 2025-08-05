@@ -708,6 +708,9 @@ const image_format_doc =
     \\  - `'blocks'`: Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
     \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
     \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
+    \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel with scaling (e.g., 'sixel:800x600')
+    \\  - `'sixel:WIDTHx'`: Scale to fit width, maintain aspect ratio (e.g., 'sixel:800x')
+    \\  - `'sixel:xHEIGHT'`: Scale to fit height, maintain aspect ratio (e.g., 'sixel:x600')
     \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
     \\
     \\## Examples
@@ -718,6 +721,9 @@ const image_format_doc =
     \\print(f"{img:blocks}")  # Display with unicode blocks
     \\print(f"{img:braille}") # Display with braille patterns
     \\print(f"{img:sixel}")   # Display with sixel graphics
+    \\print(f"{img:sixel:800x600}")   # Display with sixel, scaled to fit 800x600
+    \\print(f"{img:sixel:800x}")      # Display with sixel, scaled to 800px width
+    \\print(f"{img:sixel:x600}")      # Display with sixel, scaled to 600px height
     \\print(f"{img:kitty}")   # Display with kitty graphics
     \\```
 ;
@@ -752,12 +758,58 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         .{ .braille = .default }
     else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
-    else if (std.mem.eql(u8, spec_slice, "kitty"))
+    else if (std.mem.startsWith(u8, spec_slice, "sixel:")) blk: {
+        // Parse sixel with dimensions: "sixel:WIDTHxHEIGHT"
+        const dims_str = spec_slice[6..]; // Skip "sixel:"
+
+        // Find the 'x' separator
+        const x_pos = std.mem.indexOf(u8, dims_str, "x");
+        if (x_pos == null) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel:WIDTHxHEIGHT', 'sixel:WIDTHx', or 'sixel:xHEIGHT'");
+            return null;
+        }
+
+        // Parse width and height
+        const width_str = dims_str[0..x_pos.?];
+        const height_str = dims_str[x_pos.? + 1 ..];
+
+        var width: ?u32 = null;
+        var height: ?u32 = null;
+
+        // Parse width if not empty
+        if (width_str.len > 0) {
+            width = std.fmt.parseInt(u32, width_str, 10) catch {
+                c.PyErr_SetString(c.PyExc_ValueError, "Invalid width value in sixel format");
+                return null;
+            };
+        }
+
+        // Parse height if not empty
+        if (height_str.len > 0) {
+            height = std.fmt.parseInt(u32, height_str, 10) catch {
+                c.PyErr_SetString(c.PyExc_ValueError, "Invalid height value in sixel format");
+                return null;
+            };
+        }
+
+        // Create sixel options with custom dimensions
+        break :blk .{ .sixel = .{
+            .palette = .{ .adaptive = .{ .max_colors = 256 } },
+            .dither = .auto,
+            .width = width,
+            .height = height,
+            .interpolation = .nearest_neighbor,
+        } };
+    } else if (std.mem.eql(u8, spec_slice, "kitty"))
         .{ .kitty = .default }
     else if (std.mem.eql(u8, spec_slice, "auto"))
         .auto
-    else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'sixel', or 'auto'");
+    else if (std.mem.startsWith(u8, spec_slice, "sixel")) {
+        // Invalid sixel format that doesn't match "sixel" or "sixel:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel' or 'sixel:WIDTHxHEIGHT' (e.g., 'sixel:800x600', 'sixel:800x', 'sixel:x600')");
+        return null;
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', or 'auto'");
         return null;
     };
 
@@ -1425,6 +1477,12 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .name = "__setitem__",
         .params = "self, key: tuple[int, int], value: " ++ stub_metadata.COLOR,
         .returns = "None",
+    },
+    .{
+        .name = "__format__",
+        .params = "self, format_spec: str",
+        .returns = "str",
+        .doc = "Format image for display. Supports 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', and 'auto'.",
     },
 };
 

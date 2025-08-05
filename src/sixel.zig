@@ -61,10 +61,12 @@ pub const Options = struct {
     palette: PaletteMode,
     /// Dithering algorithm to use
     dither: DitherMode,
-    /// Maximum output width (image will be scaled if larger)
-    max_width: u32,
-    /// Maximum output height (image will be scaled if larger)
-    max_height: u32,
+    /// Target width (image will be scaled to fit, preserving aspect ratio)
+    /// If null, original width is preserved
+    width: ?u32,
+    /// Target height (image will be scaled to fit, preserving aspect ratio)
+    /// If null, original height is preserved
+    height: ?u32,
     /// Interpolation method to use when scaling the image
     interpolation: InterpolationMethod = .nearest_neighbor,
 
@@ -72,16 +74,16 @@ pub const Options = struct {
     pub const default: Options = .{
         .palette = .{ .adaptive = .{ .max_colors = 256 } },
         .dither = .auto,
-        .max_width = 800,
-        .max_height = 600,
+        .width = null,
+        .height = null,
         .interpolation = .nearest_neighbor,
     };
     /// Fallback options without dithering
     pub const fallback: Options = .{
         .palette = .{ .adaptive = .{ .max_colors = 256 } },
         .dither = .none,
-        .max_width = 800,
-        .max_height = 600,
+        .width = null,
+        .height = null,
         .interpolation = .nearest_neighbor,
     };
 };
@@ -99,18 +101,24 @@ pub fn fromImage(
     // Calculate scaling if needed
     var width = image.cols;
     var height = image.rows;
-    var scale_x: f32 = 1.0;
-    var scale_y: f32 = 1.0;
+    var scale: f32 = 1.0;
 
-    if (width > options.max_width) {
-        scale_x = @as(f32, @floatFromInt(options.max_width)) / @as(f32, @floatFromInt(width));
-    }
-    if (height > options.max_height) {
-        scale_y = @as(f32, @floatFromInt(options.max_height)) / @as(f32, @floatFromInt(height));
-    }
-    const scale = @min(scale_x, scale_y);
+    // Calculate scale based on provided dimensions
+    if (options.width != null or options.height != null) {
+        var scale_x: f32 = 1.0;
+        var scale_y: f32 = 1.0;
 
-    if (scale < 1.0) {
+        if (options.width) |target_width| {
+            scale_x = @as(f32, @floatFromInt(target_width)) / @as(f32, @floatFromInt(width));
+        }
+        if (options.height) |target_height| {
+            scale_y = @as(f32, @floatFromInt(target_height)) / @as(f32, @floatFromInt(height));
+        }
+
+        // Use the smaller scale to ensure image fits within both dimensions
+        scale = @min(scale_x, scale_y);
+
+        // Apply scaling
         width = @intFromFloat(@as(f32, @floatFromInt(width)) * scale);
         height = @intFromFloat(@as(f32, @floatFromInt(height)) * scale);
     }
@@ -841,8 +849,8 @@ test "basic sixel encoding - 2x2 image" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .fixed_6x7x6,
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
@@ -873,8 +881,8 @@ test "basic sixel encoding - verify palette format" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 16 } },
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
@@ -897,8 +905,8 @@ test "palette mode - fixed 6x7x6 color mapping" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .fixed_6x7x6,
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
@@ -940,8 +948,8 @@ test "palette mode - adaptive with color reduction" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 4 } },
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
@@ -962,8 +970,8 @@ test "edge case - single pixel image" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .fixed_web216,
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
@@ -990,8 +998,8 @@ test "edge case - uniform color image" {
     const sixel_data = try fromImage(Rgb, img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 256 } },
         .dither = .none,
-        .max_width = 100,
-        .max_height = 100,
+        .width = 100,
+        .height = 100,
     });
     defer allocator.free(sixel_data);
 
