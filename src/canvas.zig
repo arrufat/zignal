@@ -8,6 +8,7 @@ const expectEqual = testing.expectEqual;
 const expectEqualStrings = testing.expectEqualStrings;
 
 const as = @import("meta.zig").as;
+const BitmapFont = @import("font.zig").BitmapFont;
 const convertColor = @import("color.zig").convertColor;
 const Point = @import("geometry/Point.zig").Point;
 const Image = @import("image.zig").Image;
@@ -1205,12 +1206,8 @@ pub fn Canvas(comptime T: type) type {
         /// Draws text at the specified position using a bitmap font.
         /// The position specifies the top-left corner of the text.
         /// Supports newlines for multi-line text.
-        pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), font: anytype, color: anytype, scale: f32, mode: DrawMode) void {
+        pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: BitmapFont, scale: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
-            const font_module = @import("font.zig");
-            const BitmapFont = font_module.BitmapFont;
-            const FontType = @TypeOf(font);
-            comptime assert(FontType == BitmapFont);
             if (scale <= 0) return;
 
             // Compute text bounding box and early exit if outside image

@@ -299,13 +299,13 @@ class TestDrawText:
         font = zignal.BitmapFont.get_default_font()
 
         # Draw simple text
-        canvas.draw_text("Hello World", (10, 10), font, (255, 255, 255))
+        canvas.draw_text("Hello World", (10, 10), (255, 255, 255), font)
 
         # Draw with scale
-        canvas.draw_text("Big", (10, 30), font, (255, 0, 0), scale=2.0)
+        canvas.draw_text("Big", (10, 30), (255, 0, 0), font, scale=2.0)
 
         # Draw with antialiasing
-        canvas.draw_text("Smooth", (10, 60), font, (0, 255, 0), mode=zignal.DrawMode.SOFT)
+        canvas.draw_text("Smooth", (10, 60), (0, 255, 0), font, mode=zignal.DrawMode.SOFT)
 
 
 if __name__ == "__main__":
