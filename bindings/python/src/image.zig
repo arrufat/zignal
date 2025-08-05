@@ -1406,6 +1406,7 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
+        // .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR_TYPE_UNION ++ " | None = None",
         .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR_TYPE_UNION ++ " | None = None",
         .returns = "None",
         .doc = image_init_doc,
