@@ -1352,7 +1352,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_resize),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_resize_doc,
-        .params = "self, size: Union[float, tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: float | tuple[int, int], method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -1360,7 +1360,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_letterbox),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_letterbox_doc,
-        .params = "self, size: Union[int, tuple[int, int]], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: int | tuple[int, int], method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
