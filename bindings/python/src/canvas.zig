@@ -903,6 +903,47 @@ pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
 
 var canvas_getset = stub_metadata.toPyGetSetDefArray(&canvas_properties_metadata);
 
+// Canvas class documentation - keep it simple
+const canvas_class_doc = "Canvas for drawing operations on images.";
+
+// Canvas init documentation - detailed explanation
+pub const canvas_init_doc =
+    \\Create a Canvas for drawing operations on an Image.
+    \\
+    \\A Canvas provides drawing methods to modify the pixels of an Image. The Canvas
+    \\maintains a reference to the parent Image to prevent it from being garbage collected
+    \\while drawing operations are in progress.
+    \\
+    \\## Parameters
+    \\- `image` (Image): The Image object to draw on. Must be initialized with dimensions.
+    \\
+    \\## Examples
+    \\```python
+    \\# Create an image and get its canvas
+    \\img = Image(100, 100, Rgb(255, 255, 255))
+    \\canvas = Canvas(img)
+    \\
+    \\# Draw on the canvas
+    \\canvas.fill(Rgb(0, 0, 0))
+    \\canvas.draw_circle((50, 50), 20, Rgb(255, 0, 0))
+    \\```
+    \\
+    \\## Notes
+    \\- The Canvas holds a reference to the parent Image
+    \\- All drawing operations modify the original Image pixels
+    \\- Use Image.canvas() method as a convenient way to create a Canvas
+;
+
+// Special methods metadata for stub generation
+pub const canvas_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self, image: Image",
+        .returns = "None",
+        .doc = canvas_init_doc,
+    },
+};
+
 pub var CanvasType = c.PyTypeObject{
     .ob_base = .{
         .ob_base = .{},
@@ -913,7 +954,7 @@ pub var CanvasType = c.PyTypeObject{
     .tp_dealloc = canvas_dealloc,
     .tp_repr = canvas_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Canvas for drawing operations on images",
+    .tp_doc = canvas_class_doc,
     .tp_methods = @ptrCast(&canvas_methods),
     .tp_getset = @ptrCast(&canvas_getset),
     .tp_init = canvas_init,

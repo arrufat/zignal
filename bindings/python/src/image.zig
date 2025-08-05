@@ -13,9 +13,7 @@ pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-// ============================================================================
-// IMAGE TYPE (uses RGBA internally for SIMD performance)
-// ============================================================================
+const image_class_doc = "RGBA image for processing and manipulation.";
 
 pub const ImageObject = extern struct {
     ob_base: c.PyObject,
@@ -42,36 +40,31 @@ const image_init_doc =
     \\Create a new Image with the specified dimensions and optional fill color.
     \\
     \\## Parameters
-    \\Two calling styles are supported:
-    \\
-    \\**Style 1: Separate arguments**
     \\- `rows` (int): Number of rows (height) of the image
     \\- `cols` (int): Number of columns (width) of the image
-    \\- `color` (tuple, optional): Fill color
-    \\
-    \\**Style 2: Tuple argument**
-    \\- `size` (tuple[int, int]): Image dimensions as (rows, cols)
-    \\- `color` (tuple, optional): Fill color
-    \\
-    \\Color can be:
-    \\- Integer (0-255) for grayscale
-    \\- RGB tuple (r, g, b)
-    \\- RGBA tuple (r, g, b, a)
-    \\- Any color object (Rgb, Hsl, etc.)
-    \\Defaults to transparent (0, 0, 0, 0).
+    \\- `color` (optional): Fill color. Can be:
+    \\  - Integer (0-255) for grayscale
+    \\  - RGB tuple (r, g, b) with values 0-255
+    \\  - RGBA tuple (r, g, b, a) with values 0-255
+    \\  - Any color object (Rgb, Hsl, Hsv, etc.)
+    \\  - Defaults to transparent (0, 0, 0, 0)
     \\
     \\## Examples
     \\```python
-    \\# Separate arguments style
+    \\# Create a 100x200 transparent image
     \\img = Image(100, 200)
-    \\img = Image(100, 200, (255, 0, 0))
-    \\img = Image(100, 200, 128)  # Grayscale
     \\
-    \\# Tuple style (useful for numpy arrays)
-    \\img = Image((100, 200))
-    \\img = Image(np_array.shape[:2])
-    \\img = Image((100, 200), (0, 0, 255, 128))
-    \\img = Image((100, 200), 255)  # White
+    \\# Create a 100x200 red image
+    \\img = Image(100, 200, (255, 0, 0))
+    \\
+    \\# Create a 100x200 gray image
+    \\img = Image(100, 200, 128)
+    \\
+    \\# Create an image from numpy array dimensions
+    \\img = Image(*arr.shape[:2])
+    \\
+    \\# Create with semi-transparent blue
+    \\img = Image(100, 200, (0, 0, 255, 128))
     \\```
 ;
 
@@ -85,53 +78,16 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         return 0;
     }
 
-    // Parse arguments - support both (rows, cols) and ((rows, cols)) syntax
+    // Parse arguments
     var rows: c_int = 0;
     var cols: c_int = 0;
     var color_obj: ?*c.PyObject = null;
 
-    // Get argument count
-    const args_size = if (args != null) c.PyTuple_Size(args.?) else 0;
-
-    // Try parsing as separate integers first
+    // Parse as separate integers
     const format = std.fmt.comptimePrint("ii|O", .{});
     if (c.PyArg_ParseTuple(args, format.ptr, &rows, &cols, &color_obj) == 0) {
-        // Clear the error and try tuple format
-        c.PyErr_Clear();
-
-        // Check if first argument is a tuple
-        if (args_size >= 1) {
-            const first_arg = c.PyTuple_GetItem(args.?, 0);
-            if (c.PyTuple_Check(first_arg) != 0 and c.PyTuple_Size(first_arg) == 2) {
-                // Parse (rows, cols) from tuple
-                const rows_obj = c.PyTuple_GetItem(first_arg, 0);
-                const cols_obj = c.PyTuple_GetItem(first_arg, 1);
-
-                const rows_long = c.PyLong_AsLong(rows_obj);
-                if (rows_long == -1 and c.PyErr_Occurred() != null) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
-                    return -1;
-                }
-                rows = @intCast(rows_long);
-
-                const cols_long = c.PyLong_AsLong(cols_obj);
-                if (cols_long == -1 and c.PyErr_Occurred() != null) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
-                    return -1;
-                }
-                cols = @intCast(cols_long);
-
-                // Get optional color from second argument
-                if (args_size >= 2) {
-                    color_obj = c.PyTuple_GetItem(args.?, 1);
-                }
-            } else {
-                c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols) or ((rows, cols)) as arguments");
-                return -1;
-            }
-        } else {
-            return -1;
-        }
+        c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols, color=None) as arguments");
+        return -1;
     }
 
     // Validate dimensions - validateRange now properly handles negative values when converting to usize
@@ -1446,6 +1402,31 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
 
 var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 
+// Special methods metadata for stub generation
+pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self, rows: int, cols: int, color: Union[ColorType, None] = None",
+        .returns = "None",
+        .doc = image_init_doc,
+    },
+    .{
+        .name = "__len__",
+        .params = "self",
+        .returns = "int",
+    },
+    .{
+        .name = "__getitem__",
+        .params = "self, key: Tuple[int, int]",
+        .returns = "Rgba",
+    },
+    .{
+        .name = "__setitem__",
+        .params = "self, key: Tuple[int, int], value: ColorType",
+        .returns = "None",
+    },
+};
+
 var image_as_mapping = c.PyMappingMethods{
     .mp_length = image_len,
     .mp_subscript = image_getitem,
@@ -1462,7 +1443,7 @@ pub var ImageType = c.PyTypeObject{
     .tp_dealloc = image_dealloc,
     .tp_repr = image_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = image_init_doc,
+    .tp_doc = image_class_doc,
     .tp_methods = @ptrCast(&image_methods),
     .tp_getset = @ptrCast(&image_getset),
     .tp_as_mapping = @ptrCast(&image_as_mapping),
