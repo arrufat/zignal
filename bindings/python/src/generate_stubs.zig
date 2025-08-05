@@ -269,17 +269,33 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Generated from Zig source code using compile-time reflection\n");
     try stub.write("# Do not modify manually - regenerate using: zig build generate-stubs\n\n");
     try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, Union, overload\n");
+    try stub.write("from typing import Any, overload, TypeAlias\n");
     try stub.write("from enum import IntEnum\n");
     try stub.write("import numpy as np\n");
+    try stub.write("from numpy.typing import NDArray\n");
     try stub.write("\n");
-    try stub.write("# Type alias for color values\n");
+
+    // Type aliases for common patterns
+    try stub.write("# Type aliases for common patterns\n");
+    try stub.write("Point: TypeAlias = tuple[float, float]\n");
+    try stub.write("Size: TypeAlias = tuple[int, int]\n");
+    try stub.write("RgbTuple: TypeAlias = tuple[int, int, int]\n");
+    try stub.write("RgbaTuple: TypeAlias = tuple[int, int, int, int]\n");
     try stub.write("\n");
 
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
         try generateColorClass(&stub, ColorType);
     }
+
+    // Generate Color type alias with all color types
+    try stub.write("\n# Union type for any color value\n");
+    try stub.write("Color: TypeAlias = int | RgbTuple | RgbaTuple");
+    inline for (color_registry.color_types) |ColorType| {
+        const class_name = getClassNameFromType(ColorType);
+        try stub.writef(" | {s}", .{class_name});
+    }
+    try stub.write("\n");
 
     // Generate Rectangle class from metadata
     const rectangle_methods = stub_metadata.extractMethodInfo(&rectangle_module.rectangle_methods_metadata);
@@ -392,9 +408,10 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("# Type stubs for zignal package\n");
     try stub.write("# This file helps LSPs understand the module structure\n\n");
     try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, Union, overload\n");
+    try stub.write("from typing import Any, overload, TypeAlias\n");
     try stub.write("from enum import IntEnum\n");
-    try stub.write("import numpy as np\n\n");
+    try stub.write("import numpy as np\n");
+    try stub.write("from numpy.typing import NDArray\n\n");
 
     // Re-export all types from _zignal
     try stub.write("# Re-export all types from _zignal\n");
@@ -415,6 +432,12 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");
+    try stub.write("    # Type aliases\n");
+    try stub.write("    Point as Point,\n");
+    try stub.write("    Size as Size,\n");
+    try stub.write("    RgbTuple as RgbTuple,\n");
+    try stub.write("    RgbaTuple as RgbaTuple,\n");
+    try stub.write("    Color as Color,\n");
     try stub.write(")\n\n");
 
     // Module metadata

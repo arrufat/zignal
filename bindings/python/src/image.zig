@@ -398,7 +398,7 @@ const image_from_numpy_doc =
     \\To enable zero-copy for RGB arrays, use Image.add_alpha() first.
     \\
     \\## Parameters
-    \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
+    \\- `array` (NDArray[np.uint8]): NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
     \\  Must be C-contiguous.
     \\
     \\## Raises
@@ -607,7 +607,7 @@ const image_add_alpha_doc =
     \\This is useful for enabling zero-copy when creating Images from RGB arrays.
     \\
     \\## Parameters
-    \\- `array` (np.ndarray): NumPy array with shape (rows, cols, 3) and dtype uint8
+    \\- `array` (NDArray[np.uint8]): NumPy array with shape (rows, cols, 3) and dtype uint8
     \\- `alpha` (int, optional): Alpha value to use for all pixels (default: 255)
     \\
     \\## Examples
@@ -1320,7 +1320,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_from_numpy),
         .flags = c.METH_VARARGS | c.METH_CLASS,
         .doc = image_from_numpy_doc,
-        .params = "cls, array: np.ndarray[Any, np.dtype[np.uint8]]",
+        .params = "cls, array: NDArray[np.uint8]",
         .returns = "Image",
     },
     .{
@@ -1328,8 +1328,8 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_add_alpha),
         .flags = c.METH_VARARGS | c.METH_STATIC,
         .doc = image_add_alpha_doc,
-        .params = "array: np.ndarray[Any, np.dtype[np.uint8]], alpha: int = 255",
-        .returns = "np.ndarray[Any, np.dtype[np.uint8]]",
+        .params = "array: NDArray[np.uint8], alpha: int = 255",
+        .returns = "NDArray[np.uint8]",
     },
     .{
         .name = "to_numpy",
@@ -1337,7 +1337,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_to_numpy_doc,
         .params = "self, include_alpha: bool = True",
-        .returns = "np.ndarray[Any, np.dtype[np.uint8]]",
+        .returns = "NDArray[np.uint8]",
     },
     .{
         .name = "save",
@@ -1406,8 +1406,8 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        // .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR_TYPE_UNION ++ " | None = None",
-        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR_TYPE_UNION ++ " | None = None",
+        // .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None",
+        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None",
         .returns = "None",
         .doc = image_init_doc,
     },
@@ -1423,7 +1423,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
     .{
         .name = "__setitem__",
-        .params = "self, key: tuple[int, int], value: " ++ stub_metadata.COLOR_TYPE_UNION,
+        .params = "self, key: tuple[int, int], value: " ++ stub_metadata.COLOR,
         .returns = "None",
     },
 };
