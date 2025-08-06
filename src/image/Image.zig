@@ -211,17 +211,13 @@ pub fn Image(comptime T: type) type {
         /// defer gray_image.deinit(allocator);
         /// ```
         pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
-            // If types are the same, just return a copy
+            var result: Image(TargetType) = try .initAlloc(allocator, self.rows, self.cols);
             if (T == TargetType) {
-                const result = try Image(TargetType).initAlloc(allocator, self.rows, self.cols);
                 @memcpy(result.data, self.data);
-                return result;
-            }
-
-            // Convert each pixel using the color conversion system
-            var result = try Image(TargetType).initAlloc(allocator, self.rows, self.cols);
-            for (self.data, 0..) |pixel, i| {
-                result.data[i] = convertColor(TargetType, pixel);
+            } else {
+                for (self.data, 0..) |pixel, i| {
+                    result.data[i] = convertColor(TargetType, pixel);
+                }
             }
             return result;
         }
