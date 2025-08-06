@@ -1,5 +1,11 @@
 # Python Bindings Changelog
 
+## [0.4.1] - 2025-08-06
+
+### Fixed
+- **Canvas.fill_rectangle** now properly uses alpha blending in SOFT mode
+- **Canvas.draw_line** has some improvements with 1-width SOFT lines
+
 ## [0.4.0] - 2025-08-06
 
 ### Added

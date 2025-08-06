@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1] - 2025-08-06
+
+### Fixed
+- **Canvas.fillRectangle** now properly uses alpha blending in .soft mode
+- **drawLine** has some fixes in the drawLineXiaolinWu algorithm
+
+### Added
+- **examples** add an example to showcase more drawing stuff
+
 ## [0.4.0] - 2025-08-06
 
 ### Added
