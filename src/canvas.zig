@@ -594,21 +594,32 @@ pub fn Canvas(comptime T: type) type {
         /// Fills a rectangle on the given image.
         /// The rectangle is defined using standard conventions where l,t are inclusive and r,b are exclusive.
         /// This means a rectangle from (0,0) to (10,10) will fill pixels at positions 0-9 in both dimensions.
-        /// Uses @memset for optimal performance.
+        /// - **DrawMode.fast**: Uses @memset for optimal performance (no alpha blending)
+        /// - **DrawMode.soft**: Supports alpha blending by using setPixel for each pixel
         pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, mode: DrawMode) void {
-            _ = mode; // Mode is ignored for rectangle fills - always uses fast @memset
             comptime assert(isColor(@TypeOf(color)));
 
             // Use helper to clamp rectangle to image bounds
             const bounds = self.clampRectToImage(rect) orelse return;
 
-            const target_color = convertColor(T, color);
-
-            // Use @memset for each row for optimal performance
-            for (bounds.t..bounds.b) |row| {
-                const start_idx = row * self.image.cols + bounds.l;
-                const end_idx = row * self.image.cols + bounds.r;
-                @memset(self.image.data[start_idx..end_idx], target_color);
+            switch (mode) {
+                .fast => {
+                    // Fast mode: Use @memset for optimal performance (no alpha blending)
+                    const target_color = convertColor(T, color);
+                    for (bounds.t..bounds.b) |row| {
+                        const start_idx = row * self.image.cols + bounds.l;
+                        const end_idx = row * self.image.cols + bounds.r;
+                        @memset(self.image.data[start_idx..end_idx], target_color);
+                    }
+                },
+                .soft => {
+                    // Soft mode: Support alpha blending by using setPixel for each pixel
+                    for (bounds.t..bounds.b) |row| {
+                        for (bounds.l..bounds.r) |col| {
+                            self.setPixel(.point(.{ @as(f32, @floatFromInt(col)), @as(f32, @floatFromInt(row)) }), color);
+                        }
+                    }
+                },
             }
         }
 
