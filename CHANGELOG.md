@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.0] - 2025-08-06
+
+### Added
+
+#### Terminal Graphics
+- **Image Scaling Support**: Terminal graphics protocols now support image scaling
+  - Sixel: Added optional `width` and `height` fields to `sixel.Options` for image scaling
+  - Kitty: Added optional `width` and `height` fields to `kitty.Options` for image scaling
+  - Allows images to be scaled (perserving aspect-ratio) before transmission to terminal
+
+### Changed
+- **Terminal Architecture**: Refactored terminal state management
+  - Encapsulated state management in new `terminal.zig` module
+  - Replaced `TerminalSupport.zig` with more modular design
+- **Sixel Processing**: Refactored image processing pipeline
+  - Color lookup table now implemented as value type
+  - Optimized image preparation for dithering
+  - Better separation of concerns in processing stages
+
+### Performance
+- Optimized Sixel color quantization and dithering preparation
+- More efficient color lookup table implementation
+
 ## [0.3.0] - 2025-08-04
 
 ### Added
