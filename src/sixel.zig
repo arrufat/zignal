@@ -146,8 +146,7 @@ pub fn fromImage(
     }
 
     // Build lookup table for all palettes
-    var color_lut: ColorLookupTable = undefined;
-    color_lut.build(palette[0..], palette_size);
+    const color_lut = ColorLookupTable.init(palette[0..palette_size]);
 
     // Determine dithering mode
     const dither_mode = switch (options.dither) {
@@ -187,8 +186,8 @@ pub fn fromImage(
 
         // Apply dithering in-place
         switch (dither_mode) {
-            .floyd_steinberg => applyErrorDiffusion(working_img, palette[0..palette_size], &color_lut, floyd_steinberg_config),
-            .atkinson => applyErrorDiffusion(working_img, palette[0..palette_size], &color_lut, atkinson_config),
+            .floyd_steinberg => applyErrorDiffusion(working_img, palette[0..palette_size], color_lut, floyd_steinberg_config),
+            .atkinson => applyErrorDiffusion(working_img, palette[0..palette_size], color_lut, atkinson_config),
             else => {},
         }
 
@@ -411,6 +410,25 @@ const ColorBox = struct {
 const ColorLookupTable = struct {
     table: [32][32][32]u8, // 5-bit per channel lookup
 
+    /// Creates and initializes a color lookup table for the given palette
+    fn init(palette: []const Rgb) ColorLookupTable {
+        var self: ColorLookupTable = undefined;
+        const LUT_SIZE = @as(usize, 1) << color_quantize_bits;
+        for (0..LUT_SIZE) |r| {
+            for (0..LUT_SIZE) |g| {
+                for (0..LUT_SIZE) |b| {
+                    const rgb = Rgb{
+                        .r = @intCast(r << (8 - color_quantize_bits) | (r >> (2 * color_quantize_bits - 8))),
+                        .g = @intCast(g << (8 - color_quantize_bits) | (g >> (2 * color_quantize_bits - 8))),
+                        .b = @intCast(b << (8 - color_quantize_bits) | (b >> (2 * color_quantize_bits - 8))),
+                    };
+                    self.table[r][g][b] = findNearestColor(palette, rgb);
+                }
+            }
+        }
+        return self;
+    }
+
     /// Finds the nearest color in a palette to the target color
     fn findNearestColor(pal: []const Rgb, target: Rgb) u8 {
         var best_idx: u8 = 0;
@@ -432,23 +450,10 @@ const ColorLookupTable = struct {
         return best_idx;
     }
 
-    fn build(self: *ColorLookupTable, palette: []const Rgb, palette_size: usize) void {
-        const LUT_SIZE = @as(usize, 1) << color_quantize_bits;
-        for (0..LUT_SIZE) |r| {
-            for (0..LUT_SIZE) |g| {
-                for (0..LUT_SIZE) |b| {
-                    const rgb = Rgb{
-                        .r = @intCast(r << (8 - color_quantize_bits) | (r >> (2 * color_quantize_bits - 8))),
-                        .g = @intCast(g << (8 - color_quantize_bits) | (g >> (2 * color_quantize_bits - 8))),
-                        .b = @intCast(b << (8 - color_quantize_bits) | (b >> (2 * color_quantize_bits - 8))),
-                    };
-                    self.table[r][g][b] = findNearestColor(palette[0..palette_size], rgb);
-                }
-            }
-        }
-    }
-
-    fn lookup(self: *const ColorLookupTable, rgb: Rgb) u8 {
+    /// Looks up the palette index for the given RGB color.
+    /// The color is quantized to 5-bit precision per channel before lookup.
+    /// Returns the index of the nearest palette color that was precomputed during init.
+    fn lookup(self: ColorLookupTable, rgb: Rgb) u8 {
         // Quantize to 5-bit per channel
         const r5 = rgb.r >> (8 - color_quantize_bits);
         const g5 = rgb.g >> (8 - color_quantize_bits);
@@ -495,7 +500,7 @@ const atkinson_config = DitherConfig{
 fn applyErrorDiffusion(
     img: Image(Rgb),
     pal: []const Rgb,
-    lut: *const ColorLookupTable,
+    lut: ColorLookupTable,
     config: DitherConfig,
 ) void {
     for (0..img.rows) |r| {
