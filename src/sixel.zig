@@ -155,31 +155,45 @@ pub fn fromImage(
         else => options.dither,
     };
 
-    // Prepare a scaled Rgb image for dithering if needed
-    var scaled_rgb: ?Image(Rgb) = null;
+    // Prepare image for dithering if needed
+    var dithered_img: ?Image(Rgb) = null;
+    defer if (dithered_img) |*img| img.deinit(allocator);
+
     if (dither_mode != .none) {
-        scaled_rgb = try Image(Rgb).initAlloc(allocator, height, width);
+        var working_img: Image(Rgb) = undefined;
 
-        // Copy scaled image data to working image
-        for (0..height) |row| {
-            for (0..width) |col| {
-                const src_x = @as(f32, @floatFromInt(col)) / scale;
-                const src_y = @as(f32, @floatFromInt(row)) / scale;
+        if (scale == 1.0) {
+            // No scaling needed - use convert for optimal performance
+            // For Rgb images, this does a direct memcpy
+            // For Rgba images, this efficiently drops the alpha channel
+            // For other types, this handles proper color conversion
+            working_img = try image.convert(Rgb, allocator);
+        } else {
+            // Scaling needed - use interpolation
+            working_img = try Image(Rgb).initAlloc(allocator, height, width);
 
-                if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
-                    scaled_rgb.?.at(row, col).* = convertColor(Rgb, pixel);
+            // Copy scaled image data to working image
+            for (0..height) |row| {
+                for (0..width) |col| {
+                    const src_x = @as(f32, @floatFromInt(col)) / scale;
+                    const src_y = @as(f32, @floatFromInt(row)) / scale;
+
+                    if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
+                        working_img.at(row, col).* = convertColor(Rgb, pixel);
+                    }
                 }
             }
         }
 
-        // Apply dithering
+        // Apply dithering in-place
         switch (dither_mode) {
-            .floyd_steinberg => applyErrorDiffusion(scaled_rgb.?, palette[0..palette_size], &color_lut, floyd_steinberg_config),
-            .atkinson => applyErrorDiffusion(scaled_rgb.?, palette[0..palette_size], &color_lut, atkinson_config),
+            .floyd_steinberg => applyErrorDiffusion(working_img, palette[0..palette_size], &color_lut, floyd_steinberg_config),
+            .atkinson => applyErrorDiffusion(working_img, palette[0..palette_size], &color_lut, atkinson_config),
             else => {},
         }
+
+        dithered_img = working_img; // Transfer ownership
     }
-    defer if (scaled_rgb) |*img| img.deinit(allocator);
 
     // Pre-allocate output buffer with estimated size
     // Header: ~50 bytes
@@ -264,7 +278,7 @@ pub fn fromImage(
             for (0..6) |bit| {
                 const pixel_row = row + bit;
                 if (pixel_row < height) {
-                    const color_idx = if (scaled_rgb) |img| blk: {
+                    const color_idx = if (dithered_img) |img| blk: {
                         // Use dithered data
                         const rgb = img.at(pixel_row, col).*;
                         break :blk color_lut.lookup(rgb);
