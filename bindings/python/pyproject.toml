@@ -26,7 +26,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/bfactory-ai/zignal"
 Repository = "https://github.com/bfactory-ai/zignal"
-Documentation = "https://bfactory-ai.github.io/zignal/python"
+Documentation = "https://bfactory-ai.github.io/zignal/python/zignal.html"
 Issues = "https://github.com/bfactory-ai/zignal/issues"
 
 [project.optional-dependencies]

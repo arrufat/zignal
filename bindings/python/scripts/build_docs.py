@@ -75,15 +75,15 @@ def main():
         shutil.rmtree(docs_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Configuring stubs and dummy module for pdoc...")
+    print("Configuring stubs and empty module for pdoc...")
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Create a dummy module to force pdoc into "site generation" mode,
+        # Create an empty module to force pdoc into "site generation" mode,
         # which is required for the search index to be created.
-        dummy_module_path = temp_path / "dummy_module.py"
-        dummy_module_path.write_text(
-            "'''This is a dummy module to ensure pdoc generates a search index.'''"
+        empty_module_path = temp_path / "empty.py"
+        empty_module_path.write_text(
+            "'''An empty placeholder module used to enable pdoc's search functionality.'''"
         )
 
         # Create the PEP-561 stub package for zignal
@@ -97,12 +97,12 @@ def main():
         env = os.environ.copy()
         env["PYTHONPATH"] = str(temp_path) + os.pathsep + env.get("PYTHONPATH", "")
 
-        # Generate documentation for zignal and the dummy module
+        # Generate documentation for zignal and the empty module
         print("Generating documentation with pdoc...")
         cmd = [
             "pdoc",
             "zignal",
-            "dummy_module",
+            "empty",
             "--output-directory",
             str(docs_dir),
             "--no-show-source",
@@ -115,33 +115,38 @@ def main():
             print(result.stderr)
             sys.exit(1)
 
-    # Verify output and clean up
-    print("Verifying generated files and cleaning up...")
-    generated_html = docs_dir / "zignal.html"
+    # Verify output
+    print("Verifying generated files...")
+    index_html = docs_dir / "index.html"
+    zignal_html = docs_dir / "zignal.html"
+    empty_html = docs_dir / "empty.html"
     generated_search = docs_dir / "search.js"
-    dummy_html = docs_dir / "dummy_module.html"
 
-    if dummy_html.exists():
-        dummy_html.unlink()
+    if not index_html.exists():
+        print("\nError: pdoc did not generate the expected index.html file.")
+        sys.exit(1)
 
-    if not generated_html.exists():
-        print("\nError: pdoc did not generate the expected HTML file.")
+    if not zignal_html.exists():
+        print("\nError: pdoc did not generate the expected zignal.html file.")
+        sys.exit(1)
+
+    if not empty_html.exists():
+        print("\nError: pdoc did not generate the expected empty.html file.")
         sys.exit(1)
 
     if not generated_search.exists() or generated_search.stat().st_size == 0:
         print("\nError: pdoc did not generate a valid search index file.")
         sys.exit(1)
 
-    # Rename zignal.html to index.html
-    target_file = docs_dir / "index.html"
-    generated_html.rename(target_file)
-
     print("\nDocumentation generated successfully!")
     print("Search functionality has been restored.")
     print(f"\nGenerated files:")
-    print(f"  - {target_file.relative_to(docs_dir)}")
-    print(f"  - {generated_search.relative_to(docs_dir)}")
+    print(f"  - index.html (module listing)")
+    print(f"  - zignal.html (module documentation)")
+    print(f"  - empty.html (placeholder for search generation)")
+    print(f"  - search.js (search index)")
     print(f"\nDocumentation is available in {docs_dir}")
+    print("Open index.html to browse the documentation with working search.")
 
 
 if __name__ == "__main__":
