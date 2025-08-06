@@ -314,31 +314,23 @@ pub fn Canvas(comptime T: type) type {
             const dy = y2 - y1;
             const gradient = if (dx == 0) 1.0 else dy / dx;
 
-            // Handle first endpoint
-            var x_end = @round(x1);
-            var y_end = y1 + gradient * (x_end - x1);
-            var x_gap = rfpart(x1 + 0.5);
+            // Handle endpoints
+            const x_end = @round(x1);
+            const y_end = y1 + gradient * (x_end - x1);
 
+            // Draw the actual endpoint pixels at full intensity
             if (steep) {
-                self.setPixel(.point(.{ y_end, x_end }), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.point(.{ y_end + 1, x_end }), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ @round(y1), @round(x1) }), c2);
             } else {
-                self.setPixel(.point(.{ x_end, y_end }), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.point(.{ x_end, y_end + 1 }), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ @round(x1), @round(y1) }), c2);
             }
             var intery = y_end + gradient;
 
-            // Handle second endpoint
-            x_end = @round(x2);
-            y_end = y2 + gradient * (x_end - x2);
-            x_gap = fpart(x2 + 0.5);
-
+            // Draw the actual endpoint pixels at full intensity
             if (steep) {
-                self.setPixel(.point(.{ y_end, x_end }), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.point(.{ y_end + 1, x_end }), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ @round(y2), @round(x2) }), c2);
             } else {
-                self.setPixel(.point(.{ x_end, y_end }), c2.fade(rfpart(y_end) * x_gap));
-                self.setPixel(.point(.{ x_end, y_end + 1 }), c2.fade(fpart(y_end) * x_gap));
+                self.setPixel(.point(.{ @round(x2), @round(y2) }), c2);
             }
 
             // Main loop
@@ -348,10 +340,10 @@ pub fn Canvas(comptime T: type) type {
             while (x < x_px2) : (x += 1) {
                 if (steep) {
                     self.setPixel(.point(.{ intery, x }), c2.fade(rfpart(intery)));
-                    self.setPixel(.point(.{ intery + 1, x }), c2.fade(fpart(intery)));
+                    self.setPixel(.point(.{ @floor(intery) + 1, x }), c2.fade(fpart(intery)));
                 } else {
                     self.setPixel(.point(.{ x, intery }), c2.fade(rfpart(intery)));
-                    self.setPixel(.point(.{ x, intery + 1 }), c2.fade(fpart(intery)));
+                    self.setPixel(.point(.{ x, @floor(intery) + 1 }), c2.fade(fpart(intery)));
                 }
                 intery += gradient;
             }
