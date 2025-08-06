@@ -1,5 +1,31 @@
 # Python Bindings Changelog
 
+## [0.4.0] - 2025-08-06
+
+### Added
+- **Image Instantiation**: Create images directly from Python
+  - `Image(rows, cols)` - Create image with specified dimensions
+  - `Image(rows, cols, color="white")` - Create with initial color
+- **Terminal Image Scaling**: Scale images for terminal display
+  - Sixel format: `format(image, "sixel:800x600")` scales to fit before display
+  - Kitty format: `format(image, "kitty:800x600")` scales to fit before display
+  - Supports partial specifications: `"sixel:800x"` (width only), `"sixel:x600"` (height only)
+
+### Changed
+- **Breaking**: Canvas `drawText` method parameter order changed
+  - Old: `drawText(x, y, text, font, color)`
+  - New: `drawText(x, y, text, color, font)`
+- **Documentation**: Enhanced docstrings and type hints
+  - Added comprehensive `__init__` docstrings for all classes
+  - Modernized type hints using pipe operator (`|`) syntax
+  - Improved IDE autocomplete support
+
+### Internal
+- Simplified font handling in Canvas text drawing
+- Extracted RGBA attribute parsing to shared utilities
+- Better error messages for invalid color types
+- Improved Python stub generation
+
 ## [0.3.0] - 2025-08-04
 
 ### Added
