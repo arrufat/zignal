@@ -1139,6 +1139,87 @@ fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: I
     return result;
 }
 
+const image_rotate_doc =
+    \\Rotate the image by the specified angle around its center.
+    \\
+    \\The output image is automatically sized to fit the entire rotated image without clipping.
+    \\
+    \\## Parameters
+    \\- `angle` (float): Rotation angle in radians. Positive values rotate counter-clockwise.
+    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\
+    \\## Returns
+    \\- New Image with rotated content
+    \\
+    \\## Examples
+    \\```python
+    \\import math
+    \\img = Image.load("photo.png")
+    \\
+    \\# Rotate 45 degrees with default bilinear interpolation
+    \\rotated = img.rotate(math.radians(45))
+    \\
+    \\# Rotate 90 degrees with nearest neighbor (faster, lower quality)
+    \\rotated = img.rotate(math.radians(90), InterpolationMethod.NEAREST_NEIGHBOR)
+    \\
+    \\# Rotate -30 degrees with Lanczos (slower, higher quality)
+    \\rotated = img.rotate(math.radians(-30), InterpolationMethod.LANCZOS)
+    \\```
+;
+
+fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var angle: f64 = 0;
+    var method_value: c_long = 1; // Default to BILINEAR
+    var kwlist = [_:null]?[*:0]u8{ @constCast("angle"), @constCast("method"), null };
+    const format = std.fmt.comptimePrint("d|l", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &angle, &method_value) == 0) {
+        return null;
+    }
+
+    // Convert method value to Zig enum
+    const method = pythonToZigInterpolation(method_value) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
+    };
+
+    // Get the source image
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Create new image for rotated output
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    // Initialize as empty, will be auto-sized by rotate function
+    new_image.* = Image(Rgba).empty;
+
+    // Perform rotation
+    src_image.rotate(allocator, @floatCast(angle), method, new_image) catch {
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+        return null;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
 const image_letterbox_doc =
     \\Resize image to fit within the specified size while preserving aspect ratio.
     \\
@@ -1455,6 +1536,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_letterbox_doc,
         .params = "self, size: int | tuple[int, int], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .returns = "Image",
+    },
+    .{
+        .name = "rotate",
+        .meth = @ptrCast(&image_rotate),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_rotate_doc,
+        .params = "self, angle: float, method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
