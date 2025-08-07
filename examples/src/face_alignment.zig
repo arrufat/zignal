@@ -8,7 +8,7 @@ const Rgba = zignal.Rgba;
 const Hsv = zignal.Hsv;
 const Canvas = zignal.Canvas;
 
-const Point = zignal.Point;
+const Point = zignal.Point(2, f32);
 const SimilarityTransform = zignal.SimilarityTransform(f32);
 const Rectangle = zignal.Rectangle(f32);
 
@@ -34,25 +34,24 @@ pub fn extractAlignedFace(
     comptime T: type,
     allocator: std.mem.Allocator,
     image: Image(T),
-    landmarks: []const Point(2, f32),
+    landmarks: []const Point,
     padding: f32,
     blurring: i32,
     out: *Image(T),
 ) !void {
-    // These are the normalized coordinates of the aligned landmarks
-    // taken from dlib.
-    var from_points: [5]Point(2, f32) = .{
-        Point(2, f32).point(.{ 0.8595674595992, 0.2134981538014 }),
-        Point(2, f32).point(.{ 0.6460604764104, 0.2289674387677 }),
-        Point(2, f32).point(.{ 0.1205750620789, 0.2137274526848 }),
-        Point(2, f32).point(.{ 0.3340850613712, 0.2290642403242 }),
-        Point(2, f32).point(.{ 0.4901123135679, 0.6277975316475 }),
+    // These are the normalized coordinates of the aligned landmarks taken from dlib.
+    var from_points: [5]Point = .{
+        .point(.{ 0.8595674595992, 0.2134981538014 }),
+        .point(.{ 0.6460604764104, 0.2289674387677 }),
+        .point(.{ 0.1205750620789, 0.2137274526848 }),
+        .point(.{ 0.3340850613712, 0.2290642403242 }),
+        .point(.{ 0.4901123135679, 0.6277975316475 }),
     };
     const fcols: f32 = @floatFromInt(image.cols);
     const frows: f32 = @floatFromInt(image.rows);
 
     // These are the detected points from MediaPipe.
-    const to_points: [5]Point(2, f32) = .{
+    const to_points: [5]Point = .{
         landmarks[alignment[0]].scaleEach(.{ fcols, frows }),
         landmarks[alignment[1]].scaleEach(.{ fcols, frows }),
         landmarks[alignment[2]].scaleEach(.{ fcols, frows }),
@@ -63,43 +62,27 @@ pub fn extractAlignedFace(
     assert(out.cols == out.rows);
     assert(out.cols > 0);
     const side: f32 = @floatFromInt(out.cols);
-    for (&from_points) |*p| {
-        p.* = Point(2, f32).point(.{ (padding + p.x()) / (2 * padding + 1) * side, (padding + p.y()) / (2 * padding + 1) * side });
-    }
+    for (&from_points) |*p| p.* = .point(.{
+        (padding + p.x()) / (2 * padding + 1) * side,
+        (padding + p.y()) / (2 * padding + 1) * side,
+    });
 
-    // Find the transforms that maps the points between the canonical landmarks
-    // and the detected landmarks.
+    // Find the transforms that maps the points between the canonical landmarks and the
+    // detected landmarks.
     const transform: SimilarityTransform = .init(&from_points, &to_points);
-    const p = transform.project(Point(2, f32).point(.{ 1, 0 })).sub(transform.bias.toPoint(2));
-    const angle = std.math.atan2(p.y(), p.x());
-    const scale = p.norm();
-    const center = transform.project(Point(2, f32).point(.{ side / 2, side / 2 }));
 
-    // Rotate the image first to align the face.
-    var rotated: Image(Rgba) = .empty;
-    try image.rotateAround(allocator, center, angle, &rotated);
-    defer rotated.deinit(allocator);
+    // For each pixel in the output, find its source using the transform
+    for (0..out.rows) |r| {
+        for (0..out.cols) |c| {
+            // Current pixel in output space
+            const out_point: Point = .point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
 
-    // Draw the rectangle on the input image.
-    var rect: Rectangle = .initCenter(center.x(), center.y(), side * scale, side * scale);
-    const canvas: Canvas(T) = .init(allocator, image);
-    canvas.drawRectangle(rect, Hsv{ .h = 0, .s = 100, .v = 100 }, 1, .fast);
+            // Transform to source image space
+            const src_point = transform.project(out_point);
 
-    // Calculate where the center point ended up in the rotated image.
-    const offset = Point(2, f32).point(.{ (@as(f32, @floatFromInt(rotated.cols)) - fcols) / 2, (@as(f32, @floatFromInt(rotated.rows)) - frows) / 2 });
-
-    // Adjust the rectangle to crop from the rotated image (it has been resized not to be clipped).
-    rect = .initCenter(center.x() + offset.x(), center.y() + offset.y(), side * scale, side * scale);
-    var chip: Image(Rgba) = .empty;
-    try rotated.crop(allocator, rect, &chip);
-    defer chip.deinit(allocator);
-
-    // Resize to the desired size
-    var resized: Image(Rgba) = try .initAlloc(allocator, out.rows, out.cols);
-    defer resized.deinit(allocator);
-    chip.resize(resized, .bilinear);
-    for (out.data, resized.data) |*c, b| {
-        c.* = b;
+            // Sample from source image with interpolation
+            out.at(r, c).* = image.interpolate(src_point.x(), src_point.y(), .bilinear) orelse std.mem.zeroes(T);
+        }
     }
 
     // Perform blurring or sharpening to the aligned face.
@@ -119,7 +102,7 @@ pub export fn extract_aligned_face(
     out_cols: usize,
     padding: f32,
     blurring: i32,
-    landmarks_ptr: [*]const Point(2, f32),
+    landmarks_ptr: [*]const Point,
     landmarks_len: usize,
     extra_ptr: ?[*]u8,
     extra_len: usize,
@@ -129,7 +112,7 @@ pub export fn extract_aligned_face(
             // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
             assert(extra_len >= 9 * rows * cols);
             if (extra_ptr) |ptr| {
-                var fba = std.heap.FixedBufferAllocator.init(ptr[0..extra_len]);
+                var fba: std.heap.FixedBufferAllocator = .init(ptr[0..extra_len]);
                 break :blk fba.allocator();
             } else {
                 @panic("ERROR: extra_ptr can't be null when running in WebAssembly.");
@@ -143,8 +126,8 @@ pub export fn extract_aligned_face(
 
     const image: Image(Rgba) = .init(rows, cols, rgba_ptr[0 .. rows * cols]);
 
-    const landmarks: []const Point(2, f32) = blk: {
-        var array: std.ArrayList(Point(2, f32)) = .init(allocator);
+    const landmarks: []const Point = blk: {
+        var array: std.ArrayList(Point) = .init(allocator);
         array.resize(landmarks_len) catch {
             std.log.err("Ran out of memory while resizing landmarks ArrayList", .{});
             @panic("OOM");
@@ -159,7 +142,7 @@ pub export fn extract_aligned_face(
     };
     defer allocator.free(landmarks);
 
-    var aligned = Image(Rgba).init(out_rows, out_cols, out_ptr[0 .. out_rows * out_cols]);
+    var aligned: Image(Rgba) = .init(out_rows, out_cols, out_ptr[0 .. out_rows * out_cols]);
     extractAlignedFace(Rgba, allocator, image, landmarks, padding, blurring, &aligned) catch {
         std.log.err("Ran out of memory while extracting the aligned face", .{});
         @panic("OOM");
