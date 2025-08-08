@@ -139,7 +139,7 @@ const rectangle_is_empty_doc =
     \\rect1 = Rectangle(0, 0, 100, 100)
     \\print(rect1.is_empty())  # False
     \\
-    \\rect2 = Rectangle(100, 100, 0, 0)  # Invalid: right < left
+    \\rect2 = Rectangle(100, 100, 100, 100)
     \\print(rect2.is_empty())  # True
     \\```
 ;
@@ -177,6 +177,8 @@ fn rectangle_area(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 const rectangle_contains_doc =
     \\Check if a point is inside the rectangle.
     \\
+    \\Uses exclusive bounds for right and bottom edges.
+    \\
     \\## Parameters
     \\- `x` (float): X coordinate to check
     \\- `y` (float): Y coordinate to check
@@ -184,8 +186,10 @@ const rectangle_contains_doc =
     \\## Examples
     \\```python
     \\rect = Rectangle(0, 0, 100, 100)
-    \\print(rect.contains(50, 50))   # True
-    \\print(rect.contains(150, 50))  # False
+    \\print(rect.contains(50, 50))   # True - inside
+    \\print(rect.contains(100, 50))  # False - on right edge (exclusive)
+    \\print(rect.contains(99.9, 99.9))  # True - just inside
+    \\print(rect.contains(150, 50))  # False - outside
     \\```
 ;
 
@@ -203,8 +207,8 @@ fn rectangle_contains(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     const x_f32 = @as(f32, @floatCast(x));
     const y_f32 = @as(f32, @floatCast(y));
 
-    const contains = x_f32 >= self.left and x_f32 <= self.right and
-        y_f32 >= self.top and y_f32 <= self.bottom;
+    const contains = x_f32 >= self.left and x_f32 < self.right and
+        y_f32 >= self.top and y_f32 < self.bottom;
 
     return @ptrCast(py_utils.getPyBool(contains));
 }
@@ -491,28 +495,33 @@ pub const rectangle_init_doc =
     \\
     \\Creates a rectangle from its bounding coordinates. The rectangle is defined
     \\by four values: left (x-min), top (y-min), right (x-max), and bottom (y-max).
+    \\The right and bottom bounds are exclusive.
     \\
     \\## Parameters
-    \\- `left` (float): Left edge x-coordinate (minimum x)
-    \\- `top` (float): Top edge y-coordinate (minimum y)
-    \\- `right` (float): Right edge x-coordinate (maximum x)
-    \\- `bottom` (float): Bottom edge y-coordinate (maximum y)
+    \\- `left` (float): Left edge x-coordinate (inclusive)
+    \\- `top` (float): Top edge y-coordinate (inclusive)
+    \\- `right` (float): Right edge x-coordinate (exclusive)
+    \\- `bottom` (float): Bottom edge y-coordinate (exclusive)
     \\
     \\## Examples
     \\```python
     \\# Create a rectangle from (10, 20) to (110, 70)
     \\rect = Rectangle(10, 20, 110, 70)
-    \\print(rect.width)  # 100
-    \\print(rect.height)  # 50
+    \\print(rect.width)  # 100.0 (110 - 10)
+    \\print(rect.height)  # 50.0 (70 - 20)
+    \\print(rect.contains(109.9, 69.9))  # True
+    \\print(rect.contains(110, 70))  # False
     \\
     \\# Create a square
     \\square = Rectangle(0, 0, 50, 50)
+    \\print(square.width)  # 50.0
     \\```
     \\
     \\## Notes
     \\- The constructor validates that right >= left and bottom >= top
     \\- Use Rectangle.init_center() for center-based construction
     \\- Coordinates follow image convention: origin at top-left, y increases downward
+    \\- Right and bottom bounds are exclusive
 ;
 
 // Special methods metadata for stub generation

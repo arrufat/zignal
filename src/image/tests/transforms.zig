@@ -107,7 +107,50 @@ test "view" {
     const view = image.view(rect);
     try expectEqual(view.isView(), true);
     try expectEqual(image.isView(), false);
-    try expectEqualDeep(rect, view.getRectangle());
+    try expectEqual(view.cols, 8);
+    try expectEqual(view.rows, 10);
+    try expectEqualDeep(Rectangle(usize){ .l = 0, .t = 0, .r = 8, .b = 10 }, view.getRectangle());
+}
+
+test "view with getRectangle returns full image" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 100, 200);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill image with test pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast((r * 7 + c * 3) % 256);
+        }
+    }
+
+    // Get view of the entire image using getRectangle()
+    const full_rect = image.getRectangle();
+    const full_view = image.view(full_rect);
+
+    // Verify the view has same dimensions as original
+    try expectEqual(image.rows, full_view.rows);
+    try expectEqual(image.cols, full_view.cols);
+
+    // When view covers entire image from (0,0), it has same stride as cols
+    // so isView() returns false (this is expected behavior)
+    try expectEqual(false, full_view.isView());
+
+    // Verify all pixels match
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, full_view.at(r, c).*);
+        }
+    }
+
+    // Verify modifying the view affects the original
+    full_view.at(50, 100).* = 255;
+    try expectEqual(@as(u8, 255), image.at(50, 100).*);
+
+    // Verify getRectangle() returns expected bounds
+    try expectEqual(@as(usize, 0), full_rect.l);
+    try expectEqual(@as(usize, 0), full_rect.t);
+    try expectEqual(@as(usize, 200), full_rect.r);
+    try expectEqual(@as(usize, 100), full_rect.b);
 }
 
 test "rotateBounds" {

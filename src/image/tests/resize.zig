@@ -40,7 +40,7 @@ test "letterbox maintains aspect ratio with padding" {
                 try expectEqual(@as(u8, 0), output.at(r, c).*);
             }
         }
-        for (rect.b + 1 .. output.rows) |r| {
+        for (rect.b..output.rows) |r| {
             for (0..output.cols) |c| {
                 try expectEqual(@as(u8, 0), output.at(r, c).*);
             }
@@ -84,7 +84,7 @@ test "letterbox maintains aspect ratio with padding" {
             for (0..rect.l) |c| {
                 try expectEqual(black, output.at(r, c).*);
             }
-            for (rect.r + 1 .. output.cols) |c| {
+            for (rect.r..output.cols) |c| {
                 try expectEqual(black, output.at(r, c).*);
             }
         }
