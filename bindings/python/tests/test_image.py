@@ -44,6 +44,7 @@ class TestImageBinding:
         assert hasattr(img, "resize")
         assert hasattr(img, "letterbox")
         assert hasattr(img, "box_blur")
+        assert hasattr(img, "copy")
         assert hasattr(img, "canvas")
 
     def test_box_blur_basic(self):
@@ -60,6 +61,20 @@ class TestImageBinding:
         out1 = img.box_blur(1)
         assert out1.rows == img.rows
         assert out1.cols == img.cols
+
+    def test_copy_independent(self):
+        """Copy returns independent image memory."""
+        arr = np.zeros((4, 4, 4), dtype=np.uint8)
+        arr[0, 0] = [10, 20, 30, 40]
+        img = zignal.Image.from_numpy(arr)
+
+        cp = img.copy()
+        np.testing.assert_array_equal(cp.to_numpy(), img.to_numpy())
+
+        # Modify original and ensure copy unchanged
+        imgarr = img.to_numpy()
+        imgarr[0, 0] = [1, 2, 3, 4]
+        assert not np.array_equal(cp.to_numpy(), img.to_numpy())
 
     def test_image_save_load(self):
         """Test saving and loading images works."""
