@@ -1145,11 +1145,8 @@ const image_rotate_doc =
     \\The output image is automatically sized to fit the entire rotated image without clipping.
     \\
     \\## Parameters
-    \\- `angle` (float): Rotation angle in radians. Positive values rotate counter-clockwise.
+    \\- `angle` (float): Rotation angle in radians counter-clockwise.
     \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
-    \\
-    \\## Returns
-    \\- New Image with rotated content
     \\
     \\## Examples
     \\```python
@@ -1214,6 +1211,69 @@ fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
         return null;
     }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
+const image_box_blur_doc =
+    \\Apply a box blur to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius in pixels. `0` returns an unmodified copy.
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\soft = img.box_blur(2)
+    \\identity = img.box_blur(0)  # no-op copy
+    \\```
+;
+
+fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var radius_long: c_long = 0;
+    var kwlist = [_:null]?[*:0]u8{ @constCast("radius"), null };
+    const format = std.fmt.comptimePrint("l", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &radius_long) == 0) {
+        return null;
+    }
+
+    if (radius_long < 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "radius must be >= 0");
+        return null;
+    }
+
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Allocate new image wrapper; underlying data will be allocated by boxBlur
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    // Initialize as empty; boxBlur will allocate and size appropriately
+    new_image.* = Image(Rgba).empty;
+
+    src_image.boxBlur(allocator, new_image, @intCast(radius_long)) catch {
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+        return null;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
@@ -1544,6 +1604,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_rotate_doc,
         .params = "self, angle: float, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .returns = "Image",
+    },
+    .{
+        .name = "box_blur",
+        .meth = @ptrCast(&image_box_blur),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_box_blur_doc,
+        .params = "self, radius: int",
         .returns = "Image",
     },
     .{
