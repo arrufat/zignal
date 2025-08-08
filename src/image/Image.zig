@@ -596,6 +596,18 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Internal helper: copies a rectangular region into a pre-allocated output image.
+        /// Used by both `crop` and `extract` (in fast-path).
+        fn copyRect(self: Self, rect_top: isize, rect_left: isize, out: Self) void {
+            for (0..out.rows) |r| {
+                const ir: isize = @intCast(r);
+                for (0..out.cols) |c| {
+                    const ic: isize = @intCast(c);
+                    out.at(r, c).* = if (self.atOrNull(ir + rect_top, ic + rect_left)) |val| val.* else std.mem.zeroes(T);
+                }
+            }
+        }
+
         /// Crops a rectangular region from the image.
         /// If the specified `rectangle` is not fully contained within the image, the out-of-bounds
         /// areas in the output `chip` are filled with zeroed pixels (e.g., black/transparent).
@@ -611,13 +623,7 @@ pub fn Image(comptime T: type) type {
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
             const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
             chip.* = try .initAlloc(allocator, chip_rows, chip_cols);
-            for (0..chip_rows) |r| {
-                const ir: isize = @intCast(r);
-                for (0..chip_cols) |c| {
-                    const ic: isize = @intCast(c);
-                    chip.at(r, c).* = if (self.atOrNull(ir + chip_top, ic + chip_left)) |val| val.* else std.mem.zeroes(T);
-                }
-            }
+            self.copyRect(chip_top, chip_left, chip.*);
         }
 
         /// Extracts a rotated rectangular region from the image and resamples it into `out`.
@@ -632,14 +638,29 @@ pub fn Image(comptime T: type) type {
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
+        /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
         pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: InterpolationMethod) void {
             if (out.rows == 0 or out.cols == 0) return;
 
-            const cx: f32 = (rect.l + rect.r) * 0.5;
-            const cy: f32 = (rect.t + rect.b) * 0.5;
-
             const width: f32 = rect.width();
             const height: f32 = rect.height();
+
+            // Fast path: axis-aligned crop with no resampling
+            const epsilon = 1e-6;
+            if (@abs(angle) < epsilon and
+                @abs(width - @as(f32, @floatFromInt(out.cols))) < epsilon and
+                @abs(height - @as(f32, @floatFromInt(out.rows))) < epsilon)
+            {
+                // Use the same logic as crop
+                const rect_top: isize = @intFromFloat(@round(rect.t));
+                const rect_left: isize = @intFromFloat(@round(rect.l));
+                self.copyRect(rect_top, rect_left, out);
+                return;
+            }
+
+            // General path: rotation and/or resampling
+            const cx: f32 = (rect.l + rect.r) * 0.5;
+            const cy: f32 = (rect.t + rect.b) * 0.5;
 
             const cos_a = @cos(angle);
             const sin_a = @sin(angle);
