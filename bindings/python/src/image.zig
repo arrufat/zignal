@@ -1280,6 +1280,54 @@ fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     return py_obj;
 }
 
+const image_copy_doc =
+    \\Return a deep copy of the image.
+    \\
+    \\The returned image has the same dimensions and pixel data, but its
+    \\memory is independent. Modifying one image does not affect the other.
+    \\
+    \\## Examples
+    \\```python
+    \\img2 = img.copy()
+    \\```
+;
+
+fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args; // No arguments
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Allocate destination image of same size
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return null;
+    };
+
+    // Perform copy
+    src_image.copy(new_image.*);
+
+    // Wrap into Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
 const image_letterbox_doc =
     \\Resize image to fit within the specified size while preserving aspect ratio.
     \\
@@ -1604,6 +1652,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_rotate_doc,
         .params = "self, angle: float, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .returns = "Image",
+    },
+    .{
+        .name = "copy",
+        .meth = @ptrCast(&image_copy),
+        .flags = c.METH_NOARGS,
+        .doc = image_copy_doc,
+        .params = "self",
         .returns = "Image",
     },
     .{
