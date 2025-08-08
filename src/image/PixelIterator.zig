@@ -105,7 +105,7 @@ test "PixelIterator with views" {
     }
 
     // Create a view (2x2 from position 1,1)
-    const view = img.view(Rectangle(usize){ .l = 1, .t = 1, .r = 2, .b = 2 });
+    const view = img.view(Rectangle(usize){ .l = 1, .t = 1, .r = 3, .b = 3 });
 
     // Test that view is indeed a view
     try std.testing.expect(view.isView());
@@ -173,7 +173,7 @@ test "PixelIterator reuse with init" {
     try std.testing.expectEqual(@as(usize, 9), count);
 
     // Verify we can still use it with views
-    const view = img2.view(Rectangle(usize){ .l = 1, .t = 1, .r = 2, .b = 2 });
+    const view = img2.view(Rectangle(usize){ .l = 1, .t = 1, .r = 3, .b = 3 });
     iter.init(view);
     const expected = [_]u8{ 4, 5, 7, 8 };
     count = 0;

@@ -137,7 +137,7 @@ pub fn Image(comptime T: type) type {
 
         /// Returns the bounding rectangle for the current image.
         pub fn getRectangle(self: Self) Rectangle(usize) {
-            return .{ .l = 0, .t = 0, .r = self.cols - 1, .b = self.rows - 1 };
+            return .{ .l = 0, .t = 0, .r = self.cols, .b = self.rows };
         }
 
         /// Returns the center point of the image as a Point(2, f32).
@@ -161,13 +161,13 @@ pub fn Image(comptime T: type) type {
             const bounded = Rectangle(usize){
                 .l = rect.l,
                 .t = rect.t,
-                .r = @min(rect.r, self.cols - 1),
-                .b = @min(rect.b, self.rows - 1),
+                .r = @min(rect.r, self.cols),
+                .b = @min(rect.b, self.rows),
             };
             return .{
                 .rows = bounded.height(),
                 .cols = bounded.width(),
-                .data = self.data[bounded.t * self.stride + bounded.l .. bounded.b * self.stride + bounded.r + 1],
+                .data = self.data[bounded.t * self.stride + bounded.l .. (bounded.b - 1) * self.stride + bounded.r],
                 .stride = self.cols,
             };
         }
@@ -375,8 +375,8 @@ pub fn Image(comptime T: type) type {
             const content_rect: Rectangle(usize) = .init(
                 offset_col,
                 offset_row,
-                offset_col + scaled_cols - 1,
-                offset_row + scaled_rows - 1,
+                offset_col + scaled_cols,
+                offset_row + scaled_rows,
             );
 
             // Create a view of the output at the calculated position

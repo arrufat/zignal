@@ -31,8 +31,8 @@ pub fn Rectangle(comptime T: type) type {
                 .int => {
                     const l = x - @divFloor(w, 2);
                     const t = y - @divFloor(h, 2);
-                    const r = l + w - 1;
-                    const b = t + h - 1;
+                    const r = l + w;
+                    const b = t + h;
                     return .init(l, t, r, b);
                 },
                 .float => {
@@ -59,7 +59,7 @@ pub fn Rectangle(comptime T: type) type {
         /// Checks if a rectangle is ill-formed.
         pub fn isEmpty(self: Self) bool {
             return switch (@typeInfo(T)) {
-                .int => self.t > self.b or self.l > self.r,
+                .int => self.t >= self.b or self.l >= self.r,
                 .float => self.t >= self.b or self.l >= self.r,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
@@ -68,7 +68,7 @@ pub fn Rectangle(comptime T: type) type {
         /// Returns the width of the rectangle.
         pub fn width(self: Self) if (@typeInfo(T) == .int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .int => @intCast(self.r - self.l + 1),
+                .int => @intCast(self.r - self.l),
                 .float => self.r - self.l,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
@@ -77,7 +77,7 @@ pub fn Rectangle(comptime T: type) type {
         /// Returns the height of the rectangle.
         pub fn height(self: Self) if (@typeInfo(T) == .int) usize else T {
             return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
-                .int => @intCast(self.b - self.t + 1),
+                .int => @intCast(self.b - self.t),
                 .float => self.b - self.t,
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
@@ -90,7 +90,7 @@ pub fn Rectangle(comptime T: type) type {
 
         /// Returns true if the point at x, y is inside the rectangle.
         pub fn contains(self: Self, x: T, y: T) bool {
-            if (x < self.l or x > self.r or y < self.t or y > self.b) {
+            if (x < self.l or x >= self.r or y < self.t or y >= self.b) {
                 return false;
             }
             return true;
@@ -143,7 +143,7 @@ pub fn Rectangle(comptime T: type) type {
 
             // Check if the intersection is empty
             return switch (@typeInfo(T)) {
-                .int => if (l > r or t > b) null else Self.init(l, t, r, b),
+                .int => if (l >= r or t >= b) null else Self.init(l, t, r, b),
                 .float => if (l >= r or t >= b) null else Self.init(l, t, r, b),
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
@@ -152,13 +152,13 @@ pub fn Rectangle(comptime T: type) type {
 }
 
 test "Rectangle" {
-    const irect = Rectangle(isize){ .l = 0, .t = 0, .r = 639, .b = 479 };
+    const irect = Rectangle(isize){ .l = 0, .t = 0, .r = 640, .b = 480 };
     try expectEqual(irect.width(), 640);
     try expectEqual(irect.height(), 480);
-    const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 639, .b = 479 };
-    try expectEqual(frect.width(), 639);
-    try expectEqual(frect.height(), 479);
-    try expectEqual(frect.contains(640 / 2, 480 / 2), true);
+    const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 640, .b = 480 };
+    try expectEqual(frect.width(), 640);
+    try expectEqual(frect.height(), 480);
+    try expectEqual(frect.contains(320, 240), true);
     try expectEqual(irect.contains(640, 480), false);
     try expectEqualDeep(frect.cast(isize), irect);
 }
