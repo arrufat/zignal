@@ -620,6 +620,55 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Extracts a rotated rectangular region from the image and resamples it into `out`.
+        ///
+        /// Parameters:
+        /// - `rect`: Axis-aligned rectangle (in source image coordinates) defining the region before rotation.
+        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
+        /// - `out`: Pre-allocated destination image that defines the output size. The extracted content is
+        ///          resampled to exactly fill this image using `method`.
+        /// - `method`: Interpolation method used when sampling from the source.
+        ///
+        /// Notes:
+        /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
+        /// - `out` can be a view; strides are respected via `at()` accessors.
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: InterpolationMethod) void {
+            if (out.rows == 0 or out.cols == 0) return;
+
+            const cx: f32 = (rect.l + rect.r) * 0.5;
+            const cy: f32 = (rect.t + rect.b) * 0.5;
+
+            const width: f32 = rect.width();
+            const height: f32 = rect.height();
+
+            const cos_a = @cos(angle);
+            const sin_a = @sin(angle);
+
+            // Normalized mapping with center sampling when size == 1
+            for (0..out.rows) |r| {
+                const ty: f32 = if (out.rows == 1)
+                    0.5
+                else
+                    @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(out.rows - 1));
+                const y_rect = rect.t + ty * height;
+                for (0..out.cols) |c| {
+                    const tx: f32 = if (out.cols == 1)
+                        0.5
+                    else
+                        @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(out.cols - 1));
+                    const x_rect = rect.l + tx * width;
+
+                    // Rotate around rectangle center by +angle (CCW)
+                    const dx = x_rect - cx;
+                    const dy = y_rect - cy;
+                    const src_x = cx + cos_a * dx - sin_a * dy;
+                    const src_y = cy + sin_a * dx + cos_a * dy;
+
+                    out.at(r, c).* = if (self.interpolate(src_x, src_y, method)) |val| val else std.mem.zeroes(T);
+                }
+            }
+        }
+
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.

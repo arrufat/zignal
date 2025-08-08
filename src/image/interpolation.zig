@@ -126,13 +126,19 @@ pub fn resize(comptime T: type, self: anytype, out: anytype, method: Interpolati
     }
 
     // Fall back to generic implementation
-    const x_scale = @as(f32, @floatFromInt(self.cols - 1)) / @as(f32, @floatFromInt(out.cols - 1));
-    const y_scale = @as(f32, @floatFromInt(self.rows - 1)) / @as(f32, @floatFromInt(out.rows - 1));
+    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
+    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
     for (0..out.rows) |r| {
-        const src_y = @as(f32, @floatFromInt(r)) * y_scale;
+        const src_y: f32 = if (out.rows == 1)
+            0.5 * max_src_y
+        else
+            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
         for (0..out.cols) |c| {
-            const src_x = @as(f32, @floatFromInt(c)) * x_scale;
+            const src_x: f32 = if (out.cols == 1)
+                0.5 * max_src_x
+            else
+                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
             if (interpolate(T, self, src_x, src_y, method)) |val| {
                 out.at(r, c).* = val;
             }
@@ -527,12 +533,15 @@ fn resizeKernel4xu8(
     comptime std.debug.assert(is4xu8Struct(T));
 
     const window_size = window_radius * 2;
-    const x_scale = @as(f32, @floatFromInt(self.cols - 1)) / @as(f32, @floatFromInt(out.cols - 1));
-    const y_scale = @as(f32, @floatFromInt(self.rows - 1)) / @as(f32, @floatFromInt(out.rows - 1));
+    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
+    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
     // Process each output pixel
     for (0..out.rows) |r| {
-        const src_y = @as(f32, @floatFromInt(r)) * y_scale;
+        const src_y: f32 = if (out.rows == 1)
+            0.5 * max_src_y
+        else
+            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
         const iy = @as(isize, @intFromFloat(@floor(src_y)));
         const fy = src_y - @as(f32, @floatFromInt(iy));
 
@@ -540,7 +549,10 @@ fn resizeKernel4xu8(
         if (iy < window_radius - 1 or iy >= self.rows - window_radius) {
             // Fall back to nearest neighbor for edge pixels
             for (0..out.cols) |c| {
-                const src_x = @as(f32, @floatFromInt(c)) * x_scale;
+                const src_x: f32 = if (out.cols == 1)
+                    0.5 * max_src_x
+                else
+                    @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
                 const ix_clamped = @max(0, @min(self.cols - 1, @as(usize, @intFromFloat(@round(src_x)))));
                 const iy_clamped = @max(0, @min(self.rows - 1, @as(usize, @intCast(@max(0, @min(@as(isize, @intCast(self.rows - 1)), iy))))));
                 out.at(r, c).* = self.at(iy_clamped, ix_clamped).*;
@@ -565,7 +577,10 @@ fn resizeKernel4xu8(
         const y_weights = y_weights_array[0..window_size];
 
         for (0..out.cols) |c| {
-            const src_x = @as(f32, @floatFromInt(c)) * x_scale;
+            const src_x: f32 = if (out.cols == 1)
+                0.5 * max_src_x
+            else
+                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
             const ix = @as(isize, @intFromFloat(@floor(src_x)));
             const fx = src_x - @as(f32, @floatFromInt(ix));
 
@@ -760,15 +775,17 @@ fn resize2xUpscale4xu8(comptime T: type, self: anytype, out: anytype) void {
 /// SIMD-optimized nearest neighbor resize for 4xu8 types (RGBA)
 fn resizeNearestNeighbor4xu8(comptime T: type, self: anytype, out: anytype) void {
     std.debug.assert(is4xu8Struct(T));
-
-    const x_scale = @as(f32, @floatFromInt(self.cols)) / @as(f32, @floatFromInt(out.cols));
-    const y_scale = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(out.rows));
+    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
+    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
     // Process 4 output pixels at a time using SIMD
     const vec_size = 4;
 
     for (0..out.rows) |r| {
-        const src_y_f = @as(f32, @floatFromInt(r)) * y_scale;
+        const src_y_f: f32 = if (out.rows == 1)
+            0.5 * max_src_y
+        else
+            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
         const src_y = @min(self.rows - 1, @as(usize, @intFromFloat(@round(src_y_f))));
 
         var c: usize = 0;
@@ -783,7 +800,8 @@ fn resizeNearestNeighbor4xu8(comptime T: type, self: anytype, out: anytype) void
                 @floatFromInt(c + 3),
             };
 
-            const src_x_vec = x_coords * @as(@Vector(4, f32), @splat(x_scale));
+            const scale_x: f32 = if (out.cols == 1) 0.0 else (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
+            const src_x_vec = x_coords * @as(@Vector(4, f32), @splat(scale_x));
 
             // Round to nearest and clamp
             const src_x_indices = @Vector(4, u32){
@@ -802,7 +820,10 @@ fn resizeNearestNeighbor4xu8(comptime T: type, self: anytype, out: anytype) void
 
         // Handle remaining pixels
         while (c < out.cols) : (c += 1) {
-            const src_x_f = @as(f32, @floatFromInt(c)) * x_scale;
+            const src_x_f: f32 = if (out.cols == 1)
+                0.5 * max_src_x
+            else
+                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
             const src_x = @min(self.cols - 1, @as(usize, @intFromFloat(@round(src_x_f))));
             out.at(r, c).* = self.at(src_y, src_x).*;
         }
@@ -812,18 +833,23 @@ fn resizeNearestNeighbor4xu8(comptime T: type, self: anytype, out: anytype) void
 /// SIMD-optimized bilinear resize for 4xu8 types (RGBA) - works for all scales
 fn resizeBilinear4xu8(comptime T: type, self: anytype, out: anytype) void {
     comptime std.debug.assert(is4xu8Struct(T));
-
-    const x_scale = @as(f32, @floatFromInt(self.cols - 1)) / @as(f32, @floatFromInt(out.cols - 1));
-    const y_scale = @as(f32, @floatFromInt(self.rows - 1)) / @as(f32, @floatFromInt(out.rows - 1));
+    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
+    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
     for (0..out.rows) |r| {
-        const src_y = @as(f32, @floatFromInt(r)) * y_scale;
+        const src_y: f32 = if (out.rows == 1)
+            0.5 * max_src_y
+        else
+            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
         const y0 = @as(usize, @intFromFloat(@floor(src_y)));
         const y1 = @min(y0 + 1, self.rows - 1);
         const fy = src_y - @as(f32, @floatFromInt(y0));
 
         for (0..out.cols) |c| {
-            const src_x = @as(f32, @floatFromInt(c)) * x_scale;
+            const src_x: f32 = if (out.cols == 1)
+                0.5 * max_src_x
+            else
+                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
             const x0 = @as(usize, @intFromFloat(@floor(src_x)));
             const x1 = @min(x0 + 1, self.cols - 1);
             const fx = src_x - @as(f32, @floatFromInt(x0));

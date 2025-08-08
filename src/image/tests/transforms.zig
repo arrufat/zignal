@@ -215,3 +215,89 @@ test "rotate arbitrary angle" {
     try expectEqual(rotated.rows > 10, true);
     try expectEqual(rotated.cols > 10, true);
 }
+
+test "extract rotated rectangle basic and 90deg" {
+    const allocator = std.testing.allocator;
+    var image: Image(u8) = try .initAlloc(allocator, 5, 5);
+    defer image.deinit(allocator);
+
+    // Fill with simple row*10 + col pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    // Define a 3x3 square from (1,1) to (3,3)
+    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 };
+
+    // Output 3x3 buffer
+    var out0: Image(u8) = try .initAlloc(allocator, 3, 3);
+    defer out0.deinit(allocator);
+
+    // Angle 0: should match the submatrix directly
+    image.extract(rect, 0.0, out0, .nearest_neighbor);
+
+    try expectEqual(@as(u8, 11), out0.at(0, 0).*);
+    try expectEqual(@as(u8, 12), out0.at(0, 1).*);
+    try expectEqual(@as(u8, 13), out0.at(0, 2).*);
+    try expectEqual(@as(u8, 21), out0.at(1, 0).*);
+    try expectEqual(@as(u8, 22), out0.at(1, 1).*);
+    try expectEqual(@as(u8, 23), out0.at(1, 2).*);
+    try expectEqual(@as(u8, 31), out0.at(2, 0).*);
+    try expectEqual(@as(u8, 32), out0.at(2, 1).*);
+    try expectEqual(@as(u8, 33), out0.at(2, 2).*);
+
+    // Angle 90 degrees CCW: should be rotated version of the submatrix
+    var out90: Image(u8) = try .initAlloc(allocator, 3, 3);
+    defer out90.deinit(allocator);
+
+    image.extract(rect, std.math.pi / 2.0, out90, .nearest_neighbor);
+
+    try expectEqual(@as(u8, 13), out90.at(0, 0).*);
+    try expectEqual(@as(u8, 23), out90.at(0, 1).*);
+    try expectEqual(@as(u8, 33), out90.at(0, 2).*);
+    try expectEqual(@as(u8, 12), out90.at(1, 0).*);
+    try expectEqual(@as(u8, 22), out90.at(1, 1).*);
+    try expectEqual(@as(u8, 32), out90.at(1, 2).*);
+    try expectEqual(@as(u8, 11), out90.at(2, 0).*);
+    try expectEqual(@as(u8, 21), out90.at(2, 1).*);
+    try expectEqual(@as(u8, 31), out90.at(2, 2).*);
+}
+
+test "extract single-pixel axis handling centers correctly" {
+    const allocator = std.testing.allocator;
+    var image: Image(u8) = try .initAlloc(allocator, 5, 5);
+    defer image.deinit(allocator);
+
+    // Fill pattern row*10 + col
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 }; // 3x3
+
+    // 1x1 output should sample rectangle center -> source (2,2) => 22
+    var out1: Image(u8) = try .initAlloc(allocator, 1, 1);
+    defer out1.deinit(allocator);
+    image.extract(rect, 0.0, out1, .nearest_neighbor);
+    try expectEqual(@as(u8, 22), out1.at(0, 0).*);
+
+    // 1x3: rows==1 should sample center row (y=2), cols span left-to-right
+    var out_row1: Image(u8) = try .initAlloc(allocator, 1, 3);
+    defer out_row1.deinit(allocator);
+    image.extract(rect, 0.0, out_row1, .nearest_neighbor);
+    try expectEqual(@as(u8, 21), out_row1.at(0, 0).*);
+    try expectEqual(@as(u8, 22), out_row1.at(0, 1).*);
+    try expectEqual(@as(u8, 23), out_row1.at(0, 2).*);
+
+    // 3x1: cols==1 should sample center col (x=2), rows span top-to-bottom
+    var out_col1: Image(u8) = try .initAlloc(allocator, 3, 1);
+    defer out_col1.deinit(allocator);
+    image.extract(rect, 0.0, out_col1, .nearest_neighbor);
+    try expectEqual(@as(u8, 12), out_col1.at(0, 0).*);
+    try expectEqual(@as(u8, 22), out_col1.at(1, 0).*);
+    try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
+}
