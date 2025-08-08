@@ -44,6 +44,7 @@ class TestImageBinding:
         assert hasattr(img, "resize")
         assert hasattr(img, "letterbox")
         assert hasattr(img, "box_blur")
+        assert hasattr(img, "sharpen")
         assert hasattr(img, "copy")
         assert hasattr(img, "canvas")
 
@@ -59,6 +60,19 @@ class TestImageBinding:
 
         # Positive radius should keep shape
         out1 = img.box_blur(1)
+        assert out1.rows == img.rows
+        assert out1.cols == img.cols
+
+    def test_sharpen_basic(self):
+        """Sharpen returns same shape and radius 0 is no-op."""
+        arr = np.zeros((8, 12, 4), dtype=np.uint8)
+        arr[4, 6] = [10, 20, 30, 255]
+        img = zignal.Image.from_numpy(arr)
+
+        out0 = img.sharpen(0)
+        np.testing.assert_array_equal(out0.to_numpy(), img.to_numpy())
+
+        out1 = img.sharpen(1)
         assert out1.rows == img.rows
         assert out1.cols == img.cols
 
