@@ -171,8 +171,8 @@ const Build = blk: {
     if (builtin.zig_version.order(min_zig_version) == .lt) {
         const message = std.fmt.comptimePrint(
             \\Zig version is too old:
-            \\  current Zig version: {}
-            \\  minimum Zig version: {}
+            \\  current Zig version: {f}
+            \\  minimum Zig version: {f}
         , .{ builtin.zig_version, min_zig_version });
         @compileError(message);
     } else {
