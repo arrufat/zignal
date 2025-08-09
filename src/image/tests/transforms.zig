@@ -344,3 +344,69 @@ test "extract single-pixel axis handling centers correctly" {
     try expectEqual(@as(u8, 22), out_col1.at(1, 0).*);
     try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
 }
+
+test "insert and extract inverse relationship" {
+    const allocator = std.testing.allocator;
+
+    // Create source with gradient pattern
+    var source = try Image(u8).initAlloc(allocator, 64, 64);
+    defer source.deinit(allocator);
+    for (0..source.rows) |r| {
+        for (0..source.cols) |c| {
+            source.at(r, c).* = @intCast((r + c) % 256);
+        }
+    }
+
+    // Test cases: aligned, rotated, scaled
+    const cases = [_]struct {
+        rect: Rectangle(f32),
+        angle: f32,
+        size: usize,
+        method: @import("../../root.zig").InterpolationMethod,
+    }{
+        .{ .rect = Rectangle(f32).init(10, 10, 50, 50), .angle = 0, .size = 40, .method = .bilinear },
+        .{ .rect = Rectangle(f32).init(15, 15, 45, 45), .angle = std.math.pi / 4.0, .size = 30, .method = .bilinear },
+        .{ .rect = Rectangle(f32).init(20, 20, 40, 40), .angle = 0, .size = 40, .method = .bicubic }, // 2x upscale
+    };
+
+    for (cases) |tc| {
+        // Extract region
+        var extracted = try Image(u8).initAlloc(allocator, tc.size, tc.size);
+        defer extracted.deinit(allocator);
+        source.extract(tc.rect, tc.angle, extracted, tc.method);
+
+        // Insert back into blank canvas
+        var canvas = try Image(u8).initAlloc(allocator, 64, 64);
+        defer canvas.deinit(allocator);
+        @memset(canvas.data, 0);
+        canvas.insert(extracted, tc.rect, tc.angle, tc.method);
+
+        // Check reconstruction error in center region
+        const cx = (tc.rect.l + tc.rect.r) * 0.5;
+        const cy = (tc.rect.t + tc.rect.b) * 0.5;
+        const check_size = @min(tc.rect.width(), tc.rect.height()) * 0.6;
+
+        var total_error: u32 = 0;
+        var pixel_count: u32 = 0;
+
+        const start_r = @as(usize, @intFromFloat(cy - check_size / 2));
+        const end_r = @as(usize, @intFromFloat(cy + check_size / 2));
+        const start_c = @as(usize, @intFromFloat(cx - check_size / 2));
+        const end_c = @as(usize, @intFromFloat(cx + check_size / 2));
+
+        for (start_r..end_r) |r| {
+            for (start_c..end_c) |c| {
+                const diff = if (source.at(r, c).* > canvas.at(r, c).*)
+                    source.at(r, c).* - canvas.at(r, c).*
+                else
+                    canvas.at(r, c).* - source.at(r, c).*;
+                total_error += diff;
+                pixel_count += 1;
+            }
+        }
+
+        const avg_error = @as(f32, @floatFromInt(total_error)) / @as(f32, @floatFromInt(pixel_count));
+        const tolerance: f32 = if (tc.method == .nearest_neighbor) 10 else 25;
+        try std.testing.expect(avg_error < tolerance);
+    }
+}

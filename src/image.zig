@@ -27,5 +27,4 @@ test {
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");
     _ = @import("image/tests/resize.zig");
-    _ = @import("image/tests/insert_extract_inverse.zig");
 }

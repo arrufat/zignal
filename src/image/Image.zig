@@ -642,14 +642,16 @@ pub fn Image(comptime T: type) type {
         pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: InterpolationMethod) void {
             if (out.rows == 0 or out.cols == 0) return;
 
+            const frows: f32 = @floatFromInt(out.rows);
+            const fcols: f32 = @floatFromInt(out.cols);
             const width: f32 = rect.width();
             const height: f32 = rect.height();
 
             // Fast path: axis-aligned crop with no resampling
             const epsilon = 1e-6;
             if (@abs(angle) < epsilon and
-                @abs(width - @as(f32, @floatFromInt(out.cols))) < epsilon and
-                @abs(height - @as(f32, @floatFromInt(out.rows))) < epsilon)
+                @abs(width - fcols) < epsilon and
+                @abs(height - frows) < epsilon)
             {
                 // Use the same logic as crop
                 const rect_top: isize = @intFromFloat(@round(rect.t));
@@ -670,13 +672,13 @@ pub fn Image(comptime T: type) type {
                 const ty: f32 = if (out.rows == 1)
                     0.5
                 else
-                    @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(out.rows - 1));
+                    @as(f32, @floatFromInt(r)) / (frows - 1);
                 const y_rect = rect.t + ty * height;
                 for (0..out.cols) |c| {
                     const tx: f32 = if (out.cols == 1)
                         0.5
                     else
-                        @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(out.cols - 1));
+                        @as(f32, @floatFromInt(c)) / (fcols - 1);
                     const x_rect = rect.l + tx * width;
 
                     // Rotate around rectangle center by +angle (CCW)
@@ -708,14 +710,16 @@ pub fn Image(comptime T: type) type {
         pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: InterpolationMethod) void {
             if (source.rows == 0 or source.cols == 0) return;
 
+            const frows: f32 = @floatFromInt(source.rows);
+            const fcols: f32 = @floatFromInt(source.cols);
             const rect_width = rect.width();
             const rect_height = rect.height();
 
             // Fast path: axis-aligned, no resampling
             const epsilon = 1e-6;
             if (@abs(angle) < epsilon and
-                @abs(rect_width - @as(f32, @floatFromInt(source.cols))) < epsilon and
-                @abs(rect_height - @as(f32, @floatFromInt(source.rows))) < epsilon)
+                @abs(rect_width - fcols) < epsilon and
+                @abs(rect_height - frows) < epsilon)
             {
                 const dst_top: isize = @intFromFloat(@round(rect.t));
                 const dst_left: isize = @intFromFloat(@round(rect.l));
@@ -775,8 +779,8 @@ pub fn Image(comptime T: type) type {
                     const norm_y = (rect_y + half_height) * inv_height;
 
                     // Map to source image coordinates
-                    const src_x = if (source.cols == 1) 0 else norm_x * @as(f32, @floatFromInt(source.cols - 1));
-                    const src_y = if (source.rows == 1) 0 else norm_y * @as(f32, @floatFromInt(source.rows - 1));
+                    const src_x = if (source.cols == 1) 0 else norm_x * (fcols - 1);
+                    const src_y = if (source.rows == 1) 0 else norm_y * (frows - 1);
 
                     // Sample and write
                     if (source.interpolate(src_x, src_y, method)) |val| {
