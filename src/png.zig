@@ -1102,7 +1102,7 @@ fn filterRow(
 /// Lower entropy means better compression
 fn calculateFilterCost(filtered_data: []const u8) f32 {
     // Count byte frequencies
-    var freq = [_]u32{0} ** 256;
+    var freq: [256]u32 = @splat(0);
     for (filtered_data) |byte| {
         freq[byte] += 1;
     }

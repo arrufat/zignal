@@ -154,7 +154,7 @@ pub const JpegDecoder = struct {
     rgb_storage: ?[][3][64]u8 = null,
 
     // Progressive decoding state - persistent across scans
-    dc_prediction_values: [4]i32 = .{0} ** 4,
+    dc_prediction_values: [4]i32 = @splat(0),
     skip_count: u32 = 0, // For progressive AC scans
 
     // Restart marker tracking
@@ -794,7 +794,7 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
     }
 
     // DC prediction values for each component
-    var prediction_values = [_]i32{0} ** 4;
+    var prediction_values: [4]i32 = @splat(0);
 
     // Scan structure
     const noninterleaved = scan_info.components.len == 1 and scan_info.components[0].component_id == 1;
@@ -812,7 +812,7 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
             // Handle restart intervals for baseline scans
             if (decoder.restart_interval != 0 and mcus_since_restart == decoder.restart_interval) {
                 // Reset DC predictions
-                prediction_values = [_]i32{0} ** 4;
+                prediction_values = @splat(0);
                 mcus_since_restart = 0;
                 // Reset expected RST marker
                 decoder.expected_rst_marker = 0;
@@ -1470,7 +1470,7 @@ fn performBlockScan(decoder: *JpegDecoder) !void {
     const x_step = if (noninterleaved) 1 else max_h_factor;
 
     // DC prediction values for each component
-    var prediction_values = [_]i32{0} ** 4;
+    var prediction_values: [4]i32 = @splat(0);
 
     var y: usize = 0;
     while (y < decoder.block_height) : (y += y_step) {

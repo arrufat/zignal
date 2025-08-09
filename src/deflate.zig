@@ -29,7 +29,7 @@ const FIXED_LITERAL_LENGTHS = [_]u8{
 };
 
 // Fixed distance code lengths (all 5 bits)
-const FIXED_DISTANCE_LENGTHS = [_]u8{5} ** 32;
+const FIXED_DISTANCE_LENGTHS: [32]u8 = @splat(5);
 
 // Length codes 257-285 (extra bits and base lengths)
 const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
@@ -108,7 +108,7 @@ const HuffmanNode = struct {
 // Huffman decoder table for faster decoding
 const HuffmanDecoder = struct {
     // Fast lookup table for common short codes
-    fast_table: [512]u16 = [_]u16{0} ** 512, // 9-bit lookup
+    fast_table: [512]u16 = @splat(0), // 9-bit lookup
     fast_mask: u16 = 511, // 2^9 - 1
 
     // Tree for longer codes
@@ -140,19 +140,19 @@ const HuffmanDecoder = struct {
     pub fn buildFromLengths(self: *HuffmanDecoder, code_lengths: []const u8) !void {
 
         // Reset fast table and clear nodes
-        self.fast_table = [_]u16{0} ** 512;
+        self.fast_table = @splat(0);
         self.nodes.clearRetainingCapacity();
         self.root = null;
 
         // Count codes of each length
-        var length_count = [_]u16{0} ** 16;
+        var length_count: [16]u16 = @splat(0);
         for (code_lengths) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
         // Calculate first code for each length
         var code: u16 = 0;
-        var first_code = [_]u16{0} ** 16;
+        var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
             code = (code + length_count[bits - 1]) << 1;
             first_code[bits] = code;
@@ -355,7 +355,7 @@ pub const DeflateDecoder = struct {
         const code_length_order = [_]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
         // Read code length codes
-        var code_length_lengths = [_]u8{0} ** 19;
+        var code_length_lengths: [19]u8 = @splat(0);
         for (0..hclen) |i| {
             code_length_lengths[code_length_order[i]] = @intCast(try reader.readBits(3));
         }
@@ -550,14 +550,14 @@ const StaticHuffmanTables = struct {
         var codes: [288]LiteralCode = undefined;
 
         // Count codes of each length
-        var length_count = [_]u16{0} ** 16;
+        var length_count: [16]u16 = @splat(0);
         for (FIXED_LITERAL_LENGTHS) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
         // Calculate first code for each length
         var code: u16 = 0;
-        var first_code = [_]u16{0} ** 16;
+        var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
             code = (code + length_count[bits - 1]) << 1;
             first_code[bits] = code;
@@ -586,14 +586,14 @@ const StaticHuffmanTables = struct {
         var codes: [32]LiteralCode = undefined;
 
         // Count codes of each length
-        var length_count = [_]u16{0} ** 16;
+        var length_count: [16]u16 = @splat(0);
         for (FIXED_DISTANCE_LENGTHS) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
         // Calculate first code for each length
         var code: u16 = 0;
-        var first_code = [_]u16{0} ** 16;
+        var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
             code = (code + length_count[bits - 1]) << 1;
             first_code[bits] = code;

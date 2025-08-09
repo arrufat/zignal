@@ -906,7 +906,7 @@ test "FormatFlags decoding" {
 }
 
 test "Table bounds validation" {
-    const data = [_]u8{0} ** 100;
+    const data: [100]u8 = @splat(0);
 
     // Valid table
     const valid_table = TableEntry{
