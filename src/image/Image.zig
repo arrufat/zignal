@@ -690,6 +690,102 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Inserts a source image into this image at the specified rectangle with rotation.
+        ///
+        /// This is the complement to `extract`. While `extract` pulls a region out of an image,
+        /// `insert` places a source image into a destination region.
+        ///
+        /// Parameters:
+        /// - `source`: The image to insert into self.
+        /// - `rect`: Destination rectangle (in self's coordinates) where source will be placed.
+        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
+        /// - `method`: Interpolation method used when sampling from the source.
+        ///
+        /// Notes:
+        /// - The source image is scaled to fit the destination rectangle.
+        /// - Pixels outside the source bounds are not modified in self.
+        /// - This method mutates self in-place.
+        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: InterpolationMethod) void {
+            if (source.rows == 0 or source.cols == 0) return;
+
+            const rect_width = rect.width();
+            const rect_height = rect.height();
+
+            // Fast path: axis-aligned, no resampling
+            const epsilon = 1e-6;
+            if (@abs(angle) < epsilon and
+                @abs(rect_width - @as(f32, @floatFromInt(source.cols))) < epsilon and
+                @abs(rect_height - @as(f32, @floatFromInt(source.rows))) < epsilon)
+            {
+                const dst_top: isize = @intFromFloat(@round(rect.t));
+                const dst_left: isize = @intFromFloat(@round(rect.l));
+                for (0..source.rows) |r| {
+                    const y: isize = dst_top + @as(isize, @intCast(r));
+                    for (0..source.cols) |c| {
+                        const x: isize = dst_left + @as(isize, @intCast(c));
+                        if (self.atOrNull(y, x)) |dest| {
+                            dest.* = source.at(r, c).*;
+                        }
+                    }
+                }
+                return;
+            }
+
+            // General path with rotation/scaling
+            const cx = (rect.l + rect.r) * 0.5;
+            const cy = (rect.t + rect.b) * 0.5;
+            const cos_a = @cos(angle);
+            const sin_a = @sin(angle);
+
+            // Pre-compute for efficiency
+            const inv_width = 1.0 / rect_width;
+            const inv_height = 1.0 / rect_height;
+            const half_width = rect_width * 0.5;
+            const half_height = rect_height * 0.5;
+
+            // Exact bounding box of rotated rectangle
+            const abs_cos = @abs(cos_a);
+            const abs_sin = @abs(sin_a);
+            const bound_hw = half_width * abs_cos + half_height * abs_sin;
+            const bound_hh = half_width * abs_sin + half_height * abs_cos;
+
+            const min_r = if (cy - bound_hh < 0) 0 else @as(usize, @intFromFloat(@floor(cy - bound_hh)));
+            const max_r = @min(self.rows, @as(usize, @intFromFloat(@ceil(cy + bound_hh))) + 1);
+            const min_c = if (cx - bound_hw < 0) 0 else @as(usize, @intFromFloat(@floor(cx - bound_hw)));
+            const max_c = @min(self.cols, @as(usize, @intFromFloat(@ceil(cx + bound_hw))) + 1);
+
+            // Only iterate over potentially affected pixels
+            for (min_r..max_r) |r| {
+                const dest_y = @as(f32, @floatFromInt(r));
+                const dy = dest_y - cy;
+
+                for (min_c..max_c) |c| {
+                    const dest_x = @as(f32, @floatFromInt(c));
+                    const dx = dest_x - cx;
+
+                    // Inverse rotate to rectangle space
+                    const rect_x = cos_a * dx + sin_a * dy;
+                    const rect_y = -sin_a * dx + cos_a * dy;
+
+                    // Check if inside rectangle (simplified bounds check)
+                    if (@abs(rect_x) > half_width or @abs(rect_y) > half_height) continue;
+
+                    // Map to normalized [0,1] coordinates
+                    const norm_x = (rect_x + half_width) * inv_width;
+                    const norm_y = (rect_y + half_height) * inv_height;
+
+                    // Map to source image coordinates
+                    const src_x = if (source.cols == 1) 0 else norm_x * @as(f32, @floatFromInt(source.cols - 1));
+                    const src_y = if (source.rows == 1) 0 else norm_y * @as(f32, @floatFromInt(source.rows - 1));
+
+                    // Sample and write
+                    if (source.interpolate(src_x, src_y, method)) |val| {
+                        self.at(r, c).* = val;
+                    }
+                }
+            }
+        }
+
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
