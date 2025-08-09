@@ -1343,6 +1343,80 @@ fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     return py_obj;
 }
 
+const image_psnr_doc =
+    \\Calculate the Peak Signal-to-Noise Ratio (PSNR) between two images.
+    \\
+    \\PSNR is a measure of image quality, with higher values indicating better quality.
+    \\Returns infinity when images are identical.
+    \\
+    \\## Parameters
+    \\- `other` (Image): The image to compare against. Must have the same dimensions.
+    \\
+    \\## Returns
+    \\- `float`: The PSNR value in decibels (dB). Higher values indicate more similarity.
+    \\  - Typical values: 30-50 dB for good quality
+    \\  - Returns `inf` for identical images
+    \\
+    \\## Raises
+    \\- `ValueError`: If the images have different dimensions
+    \\- `TypeError`: If `other` is not an Image object
+    \\
+    \\## Examples
+    \\```python
+    \\img1 = Image.load("original.png")
+    \\img2 = Image.load("compressed.jpg")
+    \\psnr_value = img1.psnr(img2)
+    \\print(f"PSNR: {psnr_value:.2f} dB")
+    \\
+    \\# Identical images return infinity
+    \\img3 = img1.copy()
+    \\print(img1.psnr(img3))  # inf
+    \\```
+;
+
+fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments - expecting one Image object
+    var other_obj: ?*c.PyObject = null;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &other_obj) == 0) {
+        return null;
+    }
+
+    // Check if other is an Image instance
+    if (c.PyObject_IsInstance(other_obj, @ptrCast(&ImageType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image object");
+        return null;
+    }
+
+    const other = @as(*ImageObject, @ptrCast(other_obj.?));
+
+    // Get both images
+    const self_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Self image") catch return null;
+    const other_image = py_utils.validateNonNull(*Image(Rgba), other.image_ptr, "Other image") catch return null;
+
+    // Calculate PSNR
+    const psnr_value = self_image.psnr(other_image.*) catch |err| {
+        switch (err) {
+            error.DimensionMismatch => {
+                var buf: [256]u8 = undefined;
+                const msg = std.fmt.bufPrintZ(&buf, "Image dimensions must match. Self: {}x{}, Other: {}x{}", .{
+                    self_image.rows,
+                    self_image.cols,
+                    other_image.rows,
+                    other_image.cols,
+                }) catch "Image dimensions must match";
+                c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                return null;
+            },
+        }
+    };
+
+    // Return the PSNR value as a Python float
+    return c.PyFloat_FromDouble(psnr_value);
+}
+
 const image_copy_doc =
     \\Return a deep copy of the image.
     \\
@@ -1638,7 +1712,7 @@ const image_extract_doc =
     \\## Parameters
     \\- `rect` (Rectangle): The rectangular region to extract (before rotation)
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
-    \\- `size` (tuple[int, int], optional): Output size as (rows, cols). 
+    \\- `size` (tuple[int, int], optional): Output size as (rows, cols).
     \\  If not specified, uses the rectangle's dimensions.
     \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
     \\
@@ -2106,6 +2180,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = image_sharpen_doc,
         .params = "self, radius: int",
         .returns = "Image",
+    },
+    .{
+        .name = "psnr",
+        .meth = @ptrCast(&image_psnr),
+        .flags = c.METH_VARARGS,
+        .doc = image_psnr_doc,
+        .params = "self, other: Image",
+        .returns = "float",
     },
     .{
         .name = "__format__",
