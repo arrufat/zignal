@@ -52,6 +52,7 @@ class TestImageBinding:
         assert hasattr(img, "crop")
         assert hasattr(img, "extract")
         assert hasattr(img, "insert")
+        assert hasattr(img, "psnr")
 
     def test_box_blur_basic(self):
         """Box blur returns same shape and radius 0 is no-op."""
@@ -94,6 +95,66 @@ class TestImageBinding:
         imgarr = img.to_numpy()
         imgarr[0, 0] = [1, 2, 3, 4]
         assert not np.array_equal(cp.to_numpy(), img.to_numpy())
+
+    def test_psnr_returns_float(self):
+        """Test PSNR returns a float value."""
+        arr1 = np.zeros((10, 10, 4), dtype=np.uint8)
+        arr2 = np.zeros((10, 10, 4), dtype=np.uint8)
+        arr2[5, 5] = [10, 10, 10, 0]  # Small difference
+
+        img1 = zignal.Image.from_numpy(arr1)
+        img2 = zignal.Image.from_numpy(arr2)
+
+        psnr_value = img1.psnr(img2)
+        assert isinstance(psnr_value, float)
+        assert psnr_value > 0  # Should be a positive value
+
+    def test_psnr_identical_images_inf(self):
+        """Test PSNR returns infinity for identical images."""
+        arr = np.ones((10, 10, 4), dtype=np.uint8) * 128
+        img1 = zignal.Image.from_numpy(arr)
+        img2 = zignal.Image.from_numpy(arr.copy())
+
+        psnr_value = img1.psnr(img2)
+        assert psnr_value == float("inf")
+
+    def test_psnr_dimension_mismatch_error(self):
+        """Test PSNR raises ValueError for dimension mismatch."""
+        arr1 = np.zeros((10, 10, 4), dtype=np.uint8)
+        arr2 = np.zeros((10, 20, 4), dtype=np.uint8)
+
+        img1 = zignal.Image.from_numpy(arr1)
+        img2 = zignal.Image.from_numpy(arr2)
+
+        with pytest.raises(ValueError, match="dimension"):
+            img1.psnr(img2)
+
+    def test_psnr_type_error(self):
+        """Test PSNR raises TypeError for non-Image argument."""
+        arr = np.zeros((10, 10, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        with pytest.raises(TypeError, match="Image"):
+            img.psnr(None)
+
+        with pytest.raises(TypeError, match="Image"):
+            img.psnr(arr)
+
+        with pytest.raises(TypeError, match="Image"):
+            img.psnr(42)
+
+    def test_psnr_with_different_creation_methods(self):
+        """Test PSNR works with images created in different ways."""
+        # Create images using different methods
+        img1 = zignal.Image(10, 10, (128, 128, 128, 255))
+
+        arr = np.ones((10, 10, 4), dtype=np.uint8)
+        arr[:, :] = [128, 128, 128, 255]
+        img2 = zignal.Image.from_numpy(arr)
+
+        # Should work regardless of how images were created
+        psnr_value = img1.psnr(img2)
+        assert psnr_value == float("inf")  # Identical images
 
     def test_image_save_load(self):
         """Test saving and loading images works."""
