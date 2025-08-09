@@ -1346,16 +1346,13 @@ fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 const image_psnr_doc =
     \\Calculate the Peak Signal-to-Noise Ratio (PSNR) between two images.
     \\
-    \\PSNR is a measure of image quality, with higher values indicating better quality.
-    \\Returns infinity when images are identical.
+    \\Returns the PSNR value in decibels (dB). Higher values indicate more similarity.
+    \\  - Typical values: 30-50 dB for good quality
+    \\  - Returns `inf` for identical images
     \\
     \\## Parameters
     \\- `other` (Image): The image to compare against. Must have the same dimensions.
     \\
-    \\## Returns
-    \\- `float`: The PSNR value in decibels (dB). Higher values indicate more similarity.
-    \\  - Typical values: 30-50 dB for good quality
-    \\  - Returns `inf` for identical images
     \\
     \\## Raises
     \\- `ValueError`: If the images have different dimensions
