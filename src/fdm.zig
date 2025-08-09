@@ -41,14 +41,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
-                .target_mean = [_]f64{0} ** 3,
+                .target_mean = @splat(0),
                 .target_cov_u = Matrix(f64){
                     .rows = 0,
                     .cols = 0,
                     .items = &[_]f64{},
                     .allocator = allocator,
                 },
-                .target_cov_s = [_]f64{0} ** 3,
+                .target_cov_s = @splat(0),
                 .target_is_grayscale = false,
                 .target_size = 0,
                 .source_image = null,
@@ -392,7 +392,7 @@ fn getFeatureMatrix(comptime T: type, image: Image(T), matrix: *Matrix(f64)) boo
 
 /// Step 2: Center image - subtract mean
 fn centerImage(matrix: *Matrix(f64), comptime channels: usize) [3]f64 {
-    var means = [_]f64{0} ** 3;
+    var means: [3]f64 = @splat(0);
     for (0..channels) |c| {
         for (0..matrix.rows) |r| {
             means[c] += matrix.at(r, c).*;
