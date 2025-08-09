@@ -167,5 +167,101 @@ class TestColorValidation:
             zignal.Hsv(None, 50.0, 50.0)  # None instead of float
 
 
+class TestColorEquality:
+    """Test color equality comparison."""
+
+    def test_same_color_equal(self):
+        """Test that colors with same values are equal."""
+        # RGB
+        rgb1 = zignal.Rgb(128, 64, 192)
+        rgb2 = zignal.Rgb(128, 64, 192)
+        assert rgb1 == rgb2
+        assert not (rgb1 != rgb2)
+
+        # RGBA
+        rgba1 = zignal.Rgba(128, 64, 192, 255)
+        rgba2 = zignal.Rgba(128, 64, 192, 255)
+        assert rgba1 == rgba2
+        assert not (rgba1 != rgba2)
+
+        # HSV
+        hsv1 = zignal.Hsv(180.0, 50.0, 75.0)
+        hsv2 = zignal.Hsv(180.0, 50.0, 75.0)
+        assert hsv1 == hsv2
+        assert not (hsv1 != hsv2)
+
+    def test_different_values_not_equal(self):
+        """Test that colors with different values are not equal."""
+        rgb1 = zignal.Rgb(128, 64, 192)
+        rgb2 = zignal.Rgb(128, 64, 193)  # Different blue
+        assert rgb1 != rgb2
+        assert not (rgb1 == rgb2)
+
+        rgba1 = zignal.Rgba(128, 64, 192, 255)
+        rgba2 = zignal.Rgba(128, 64, 192, 254)  # Different alpha
+        assert rgba1 != rgba2
+        assert not (rgba1 == rgba2)
+
+    def test_different_types_equal_if_same_color(self):
+        """Test that colors of different types are equal if they represent the same visual color."""
+        # Same red color in different representations
+        rgb = zignal.Rgb(255, 0, 0)
+        rgba = zignal.Rgba(255, 0, 0, 255)
+        hsv = zignal.Hsv(0.0, 100.0, 100.0)  # Red in HSV
+
+        # RGB vs RGBA (same red)
+        assert rgb == rgba
+        assert not (rgb != rgba)
+
+        # RGB vs HSV (same red)
+        assert rgb == hsv
+        assert not (rgb != hsv)
+
+        # RGBA vs HSV (same red)
+        assert rgba == hsv
+        assert not (rgba != hsv)
+
+        # But different colors should not be equal
+        blue_rgb = zignal.Rgb(0, 0, 255)
+        assert rgb != blue_rgb
+        assert not (rgb == blue_rgb)
+
+    def test_non_color_comparison(self):
+        """Test comparison with non-color objects and tuples."""
+        rgb = zignal.Rgb(128, 64, 192)
+
+        # Tuples with matching values should be equal (duck typing)
+        assert rgb == (128, 64, 192)
+        assert rgb == (128, 64, 192, 255)  # RGBA tuple with default alpha
+
+        # Grayscale integers
+        gray = zignal.Rgb(100, 100, 100)
+        assert gray == 100  # Grayscale integer comparison
+
+        # Non-matching values
+        assert rgb != (128, 64, 193)  # Different blue value
+        assert rgb != 42  # Wrong grayscale value
+
+        # Non-color types that can't be converted
+        assert rgb != "color"
+        assert rgb != [128, 64, 192]  # Lists not supported
+        assert rgb != None
+
+        # Ensure == also returns False for non-convertible types
+        assert not (rgb == "color")
+        assert not (rgb == [128, 64, 192])
+        assert not (rgb == None)
+
+    def test_same_instance_equal(self):
+        """Test that a color is equal to itself."""
+        rgb = zignal.Rgb(128, 64, 192)
+        assert rgb == rgb
+        assert not (rgb != rgb)
+
+        lab = zignal.Lab(50.0, 20.0, -30.0)
+        assert lab == lab
+        assert not (lab != lab)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
