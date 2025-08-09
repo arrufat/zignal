@@ -46,6 +46,8 @@ class TestImageBinding:
         assert hasattr(img, "box_blur")
         assert hasattr(img, "sharpen")
         assert hasattr(img, "copy")
+        assert hasattr(img, "flip_left_right")
+        assert hasattr(img, "flip_top_bottom")
         assert hasattr(img, "canvas")
         assert hasattr(img, "crop")
         assert hasattr(img, "extract")
@@ -566,6 +568,70 @@ class TestPixelAccess:
         # This test would require creating an uninitialized image,
         # but since Image() constructor doesn't allow direct instantiation,
         # we can't test this case directly from Python
+
+
+class TestFlipMethods:
+    """Test flip_left_right and flip_top_bottom methods."""
+
+    def test_flip_returns_image(self):
+        """Test that flip methods return Image objects."""
+        arr = np.zeros((10, 10, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Test flip_left_right
+        result_lr = img.flip_left_right()
+        assert result_lr is not None
+        assert isinstance(result_lr, zignal.Image)
+        assert result_lr is not img  # Different object
+
+        # Test flip_top_bottom
+        result_tb = img.flip_top_bottom()
+        assert result_tb is not None
+        assert isinstance(result_tb, zignal.Image)
+        assert result_tb is not img  # Different object
+
+    def test_dimensions_preserved(self):
+        """Test that dimensions are preserved after flip."""
+        arr = np.zeros((15, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # flip_left_right preserves dimensions
+        flipped_lr = img.flip_left_right()
+        assert flipped_lr.rows == img.rows
+        assert flipped_lr.cols == img.cols
+
+        # flip_top_bottom preserves dimensions
+        flipped_tb = img.flip_top_bottom()
+        assert flipped_tb.rows == img.rows
+        assert flipped_tb.cols == img.cols
+
+    def test_original_unchanged(self):
+        """Test that original image is not modified."""
+        # Create image with specific color
+        arr = np.full((5, 5, 4), [255, 128, 64, 255], dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Store original pixel values
+        orig_pixel = img[0, 0]
+        orig_r = orig_pixel.r
+        orig_g = orig_pixel.g
+        orig_b = orig_pixel.b
+        orig_a = orig_pixel.a
+
+        # Flip should not change original
+        _ = img.flip_left_right()
+        pixel_after_lr = img[0, 0]
+        assert pixel_after_lr.r == orig_r
+        assert pixel_after_lr.g == orig_g
+        assert pixel_after_lr.b == orig_b
+        assert pixel_after_lr.a == orig_a
+
+        _ = img.flip_top_bottom()
+        pixel_after_tb = img[0, 0]
+        assert pixel_after_tb.r == orig_r
+        assert pixel_after_tb.g == orig_g
+        assert pixel_after_tb.b == orig_b
+        assert pixel_after_tb.a == orig_a
 
 
 if __name__ == "__main__":
