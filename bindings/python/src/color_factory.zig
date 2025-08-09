@@ -563,11 +563,8 @@ pub fn createColorBinding(
                 return not_impl;
             };
 
-            // Compare RGBA values
-            const equal = self_rgba.r == other_rgba.r and
-                self_rgba.g == other_rgba.g and
-                self_rgba.b == other_rgba.b and
-                self_rgba.a == other_rgba.a;
+            // Compare RGBA values directly (packed struct equality)
+            const equal = self_rgba == other_rgba;
 
             const result = if (op == 2) equal else !equal; // op==2 is Py_EQ, otherwise Py_NE
             return @ptrCast(py_utils.getPyBool(result));
