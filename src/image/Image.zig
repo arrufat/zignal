@@ -1364,6 +1364,124 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Calculates the Peak Signal-to-Noise Ratio (PSNR) between two images.
+        /// PSNR is a measure of image quality, with higher values indicating better quality.
+        /// Returns inf when images are identical (MSE = 0).
+        ///
+        /// Returns an error if the images have different dimensions.
+        ///
+        /// The calculation is type-agnostic and works with any pixel type:
+        /// - Scalars (u8, f32, etc.)
+        /// - Structs (Rgb, Rgba, etc.)
+        /// - Arrays ([3]u8, [4]f32, etc.)
+        pub fn psnr(self: Self, other: Self) !f64 {
+            // Check dimensions match
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+
+            var mse: f64 = 0.0;
+            var component_count: usize = 0;
+
+            // Calculate MSE across all pixels and components
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const pixel1 = self.at(r, c).*;
+                    const pixel2 = other.at(r, c).*;
+
+                    switch (@typeInfo(T)) {
+                        .int, .float => {
+                            // Scalar types
+                            const val1: f64 = switch (@typeInfo(T)) {
+                                .int => @floatFromInt(pixel1),
+                                .float => @floatCast(pixel1),
+                                else => unreachable,
+                            };
+                            const val2: f64 = switch (@typeInfo(T)) {
+                                .int => @floatFromInt(pixel2),
+                                .float => @floatCast(pixel2),
+                                else => unreachable,
+                            };
+                            const diff = val1 - val2;
+                            mse += diff * diff;
+                            component_count += 1;
+                        },
+                        .@"struct" => {
+                            // Struct types (Rgb, Rgba, etc.)
+                            inline for (std.meta.fields(T)) |field| {
+                                const val1 = @field(pixel1, field.name);
+                                const val2 = @field(pixel2, field.name);
+                                const f1: f64 = switch (@typeInfo(field.type)) {
+                                    .int => @floatFromInt(val1),
+                                    .float => @floatCast(val1),
+                                    else => @compileError("Unsupported field type in struct for PSNR"),
+                                };
+                                const f2: f64 = switch (@typeInfo(field.type)) {
+                                    .int => @floatFromInt(val2),
+                                    .float => @floatCast(val2),
+                                    else => @compileError("Unsupported field type in struct for PSNR"),
+                                };
+                                const diff = f1 - f2;
+                                mse += diff * diff;
+                                component_count += 1;
+                            }
+                        },
+                        .array => |array_info| {
+                            // Array types ([3]u8, [4]f32, etc.)
+                            for (0..array_info.len) |i| {
+                                const val1 = pixel1[i];
+                                const val2 = pixel2[i];
+                                const f1: f64 = switch (@typeInfo(array_info.child)) {
+                                    .int => @floatFromInt(val1),
+                                    .float => @floatCast(val1),
+                                    else => @compileError("Unsupported array element type for PSNR"),
+                                };
+                                const f2: f64 = switch (@typeInfo(array_info.child)) {
+                                    .int => @floatFromInt(val2),
+                                    .float => @floatCast(val2),
+                                    else => @compileError("Unsupported array element type for PSNR"),
+                                };
+                                const diff = f1 - f2;
+                                mse += diff * diff;
+                                component_count += 1;
+                            }
+                        },
+                        else => @compileError("Unsupported pixel type for PSNR: " ++ @typeName(T)),
+                    }
+                }
+            }
+
+            // Calculate average MSE
+            mse = mse / @as(f64, @floatFromInt(component_count));
+
+            // If MSE is 0, images are identical
+            if (mse == 0.0) {
+                return std.math.inf(f64);
+            }
+
+            // Determine MAX value based on the component type
+            const max_val: f64 = blk: {
+                const component_type = switch (@typeInfo(T)) {
+                    .int, .float => T,
+                    .@"struct" => std.meta.fields(T)[0].type, // Use first field type
+                    .array => |array_info| array_info.child,
+                    else => unreachable,
+                };
+
+                break :blk switch (@typeInfo(component_type)) {
+                    .int => |int_info| if (int_info.signedness == .unsigned)
+                        @floatFromInt(std.math.maxInt(component_type))
+                    else
+                        @compileError("Signed integers not supported for PSNR"),
+                    .float => 1.0, // Assume normalized [0, 1] for float types
+                    else => unreachable,
+                };
+            };
+
+            // Calculate PSNR: 20 * log10(MAX) - 10 * log10(MSE)
+            return 20.0 * std.math.log10(max_val) - 10.0 * std.math.log10(mse);
+        }
+
         /// Returns an iterator over all pixels in the image
         pub fn pixels(self: Self) PixelIterator(T) {
             return .{
