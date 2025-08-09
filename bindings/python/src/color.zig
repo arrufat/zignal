@@ -30,6 +30,7 @@ pub var RgbType = c.PyTypeObject{
     .tp_getset = @ptrCast(&rgb_getset),
     .tp_init = @ptrCast(&RgbBinding.init),
     .tp_new = @ptrCast(&RgbBinding.new),
+    .tp_richcompare = @ptrCast(&RgbBinding.richcompare),
 };
 
 // RGBA
@@ -49,6 +50,7 @@ pub var RgbaType = c.PyTypeObject{
     .tp_getset = @ptrCast(&rgba_getset),
     .tp_init = @ptrCast(&RgbaBinding.init),
     .tp_new = @ptrCast(&RgbaBinding.new),
+    .tp_richcompare = @ptrCast(&RgbaBinding.richcompare),
 };
 
 // HSV
@@ -68,6 +70,7 @@ pub var HsvType = c.PyTypeObject{
     .tp_getset = @ptrCast(&hsv_getset),
     .tp_init = @ptrCast(&HsvBinding.init),
     .tp_new = @ptrCast(&HsvBinding.new),
+    .tp_richcompare = @ptrCast(&HsvBinding.richcompare),
 };
 
 // HSL
@@ -87,6 +90,7 @@ pub var HslType = c.PyTypeObject{
     .tp_getset = @ptrCast(&hsl_getset),
     .tp_init = @ptrCast(&HslBinding.init),
     .tp_new = @ptrCast(&HslBinding.new),
+    .tp_richcompare = @ptrCast(&HslBinding.richcompare),
 };
 
 // LAB
@@ -106,6 +110,7 @@ pub var LabType = c.PyTypeObject{
     .tp_getset = @ptrCast(&lab_getset),
     .tp_init = @ptrCast(&LabBinding.init),
     .tp_new = @ptrCast(&LabBinding.new),
+    .tp_richcompare = @ptrCast(&LabBinding.richcompare),
 };
 
 // XYZ
@@ -125,6 +130,7 @@ pub var XyzType = c.PyTypeObject{
     .tp_getset = @ptrCast(&xyz_getset),
     .tp_init = @ptrCast(&XyzBinding.init),
     .tp_new = @ptrCast(&XyzBinding.new),
+    .tp_richcompare = @ptrCast(&XyzBinding.richcompare),
 };
 
 // OKLAB
@@ -144,6 +150,7 @@ pub var OklabType = c.PyTypeObject{
     .tp_getset = @ptrCast(&oklab_getset),
     .tp_init = @ptrCast(&OklabBinding.init),
     .tp_new = @ptrCast(&OklabBinding.new),
+    .tp_richcompare = @ptrCast(&OklabBinding.richcompare),
 };
 
 // OKLCH
@@ -163,6 +170,7 @@ pub var OklchType = c.PyTypeObject{
     .tp_getset = @ptrCast(&oklch_getset),
     .tp_init = @ptrCast(&OklchBinding.init),
     .tp_new = @ptrCast(&OklchBinding.new),
+    .tp_richcompare = @ptrCast(&OklchBinding.richcompare),
 };
 
 // LCH
@@ -182,6 +190,7 @@ pub var LchType = c.PyTypeObject{
     .tp_getset = @ptrCast(&lch_getset),
     .tp_init = @ptrCast(&LchBinding.init),
     .tp_new = @ptrCast(&LchBinding.new),
+    .tp_richcompare = @ptrCast(&LchBinding.richcompare),
 };
 
 // LMS
@@ -201,6 +210,7 @@ pub var LmsType = c.PyTypeObject{
     .tp_getset = @ptrCast(&lms_getset),
     .tp_init = @ptrCast(&LmsBinding.init),
     .tp_new = @ptrCast(&LmsBinding.new),
+    .tp_richcompare = @ptrCast(&LmsBinding.richcompare),
 };
 
 // XYB
@@ -220,6 +230,7 @@ pub var XybType = c.PyTypeObject{
     .tp_getset = @ptrCast(&xyb_getset),
     .tp_init = @ptrCast(&XybBinding.init),
     .tp_new = @ptrCast(&XybBinding.new),
+    .tp_richcompare = @ptrCast(&XybBinding.richcompare),
 };
 
 // YCBCR
@@ -239,6 +250,7 @@ pub var YcbcrType = c.PyTypeObject{
     .tp_getset = @ptrCast(&ycbcr_getset),
     .tp_init = @ptrCast(&YcbcrBinding.init),
     .tp_new = @ptrCast(&YcbcrBinding.new),
+    .tp_richcompare = @ptrCast(&YcbcrBinding.richcompare),
 };
 
 // ============================================================================

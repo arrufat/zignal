@@ -533,6 +533,46 @@ pub fn createColorBinding(
             return @ptrCast(c.PyUnicode_FromString(formatted.ptr));
         }
 
+        /// Rich comparison method implementing RGBA-based equality/inequality
+        /// Colors are compared by their RGBA representation for visual equivalence
+        pub fn richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
+            const py_utils = @import("py_utils.zig");
+
+            // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
+            if (op != 2 and op != 3) {
+                const not_impl = c.Py_NotImplemented();
+                c.Py_INCREF(not_impl);
+                return not_impl;
+            }
+
+            // Convert self to RGBA
+            const self_rgba = py_utils.parseColorToRgba(self_obj) catch {
+                // If conversion fails, clear error and return NotImplemented
+                c.PyErr_Clear();
+                const not_impl = c.Py_NotImplemented();
+                c.Py_INCREF(not_impl);
+                return not_impl;
+            };
+
+            // Convert other to RGBA
+            const other_rgba = py_utils.parseColorToRgba(other_obj) catch {
+                // If conversion fails, clear error and return NotImplemented
+                c.PyErr_Clear();
+                const not_impl = c.Py_NotImplemented();
+                c.Py_INCREF(not_impl);
+                return not_impl;
+            };
+
+            // Compare RGBA values
+            const equal = self_rgba.r == other_rgba.r and
+                self_rgba.g == other_rgba.g and
+                self_rgba.b == other_rgba.b and
+                self_rgba.a == other_rgba.a;
+
+            const result = if (op == 2) equal else !equal; // op==2 is Py_EQ, otherwise Py_NE
+            return @ptrCast(py_utils.getPyBool(result));
+        }
+
         /// __format__ method implementation
         pub fn formatMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
             const self = @as(*ObjectType, @ptrCast(self_obj));
