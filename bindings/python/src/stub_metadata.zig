@@ -216,7 +216,7 @@ pub fn toPyMethodDefArray(
         for (methods, 0..) |m, i| {
             result[i] = .{
                 .ml_name = m.name.ptr,
-                .ml_meth = @alignCast(@ptrCast(m.meth)),
+                .ml_meth = @ptrCast(@alignCast(m.meth)),
                 .ml_flags = m.flags,
                 .ml_doc = m.doc.ptr,
             };
@@ -241,8 +241,8 @@ pub fn toPyGetSetDefArray(
         for (props, 0..) |p, i| {
             result[i] = .{
                 .name = p.name.ptr,
-                .get = @alignCast(@ptrCast(p.get)),
-                .set = if (p.set) |s| @alignCast(@ptrCast(s)) else null,
+                .get = @ptrCast(@alignCast(p.get)),
+                .set = if (p.set) |s| @ptrCast(@alignCast(s)) else null,
                 .doc = p.doc.ptr,
                 .closure = null,
             };
@@ -268,7 +268,7 @@ pub fn functionsToPyMethodDefArray(
         for (funcs, 0..) |f, i| {
             result[i] = .{
                 .ml_name = f.name.ptr,
-                .ml_meth = @alignCast(@ptrCast(f.meth)),
+                .ml_meth = @ptrCast(@alignCast(f.meth)),
                 .ml_flags = f.flags,
                 .ml_doc = f.doc.ptr,
             };

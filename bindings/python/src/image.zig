@@ -1476,6 +1476,264 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 }
 
+const image_crop_doc =
+    \\Extract a rectangular region from the image.
+    \\
+    \\Returns a new Image containing the cropped region. Pixels outside the original
+    \\image bounds are filled with transparent black (0, 0, 0, 0).
+    \\
+    \\## Parameters
+    \\- `rect` (Rectangle): The rectangular region to extract
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\rect = Rectangle(10, 10, 110, 110)  # 100x100 region starting at (10, 10)
+    \\cropped = img.crop(rect)
+    \\print(cropped.rows, cropped.cols)  # 100 100
+    \\```
+;
+
+fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse Rectangle argument
+    var rect_obj: ?*c.PyObject = undefined;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj) == 0) {
+        return null;
+    }
+
+    // Parse the Rectangle object
+    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+
+    // Get the source image
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Create new image for cropped output
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    // Perform crop
+    src_image.crop(allocator, rect, new_image) catch {
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
+        return null;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
+const image_extract_doc =
+    \\Extract a rotated rectangular region from the image and resample it.
+    \\
+    \\Returns a new Image containing the extracted and resampled region.
+    \\
+    \\## Parameters
+    \\- `rect` (Rectangle): The rectangular region to extract (before rotation)
+    \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
+    \\- `size` (tuple[int, int], optional): Output size as (rows, cols). 
+    \\  If not specified, uses the rectangle's dimensions.
+    \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
+    \\
+    \\## Examples
+    \\```python
+    \\import math
+    \\img = Image.load("photo.png")
+    \\rect = Rectangle(10, 10, 110, 110)
+    \\
+    \\# Extract without rotation
+    \\extracted = img.extract(rect)
+    \\
+    \\# Extract with 45-degree rotation
+    \\rotated = img.extract(rect, angle=math.radians(45))
+    \\
+    \\# Extract and resize to specific dimensions
+    \\resized = img.extract(rect, size=(50, 50))
+    \\```
+;
+
+fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var rect_obj: ?*c.PyObject = undefined;
+    var angle: f64 = 0.0;
+    var size_obj: ?*c.PyObject = null;
+    var method_value: c_long = 1; // Default to BILINEAR
+
+    var kwlist = [_:null]?[*:0]u8{ @constCast("rect"), @constCast("angle"), @constCast("size"), @constCast("method"), null };
+    const format = std.fmt.comptimePrint("O|dOl", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &rect_obj, &angle, &size_obj, &method_value) == 0) {
+        return null;
+    }
+
+    // Parse the Rectangle object
+    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+
+    // Convert method value to Zig enum
+    const method = pythonToZigInterpolation(method_value) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
+    };
+
+    // Get the source image
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Determine output size
+    var out_rows: usize = @intFromFloat(@round(rect.height()));
+    var out_cols: usize = @intFromFloat(@round(rect.width()));
+
+    if (size_obj != null and size_obj != c.Py_None()) {
+        // Parse size tuple
+        if (c.PyTuple_Check(size_obj) == 0 or c.PyTuple_Size(size_obj) != 2) {
+            c.PyErr_SetString(c.PyExc_TypeError, "size must be a tuple of (rows, cols)");
+            return null;
+        }
+
+        const rows_obj = c.PyTuple_GetItem(size_obj, 0);
+        const cols_obj = c.PyTuple_GetItem(size_obj, 1);
+
+        const rows = c.PyLong_AsLong(rows_obj);
+        if (rows == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+            return null;
+        }
+        if (rows <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Rows must be positive");
+            return null;
+        }
+
+        const cols = c.PyLong_AsLong(cols_obj);
+        if (cols == -1 and c.PyErr_Occurred() != null) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+            return null;
+        }
+        if (cols <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Cols must be positive");
+            return null;
+        }
+
+        out_rows = @intCast(rows);
+        out_cols = @intCast(cols);
+    }
+
+    // Create output image
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = Image(Rgba).initAlloc(allocator, out_rows, out_cols) catch {
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return null;
+    };
+
+    // Perform extraction
+    src_image.extract(rect, @floatCast(angle), new_image.*, method);
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
+const image_insert_doc =
+    \\Insert a source image into this image at a specified rectangle with optional rotation.
+    \\
+    \\This method modifies the image in-place.
+    \\
+    \\## Parameters
+    \\- `source` (Image): The image to insert
+    \\- `rect` (Rectangle): Destination rectangle where the source will be placed
+    \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
+    \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
+    \\
+    \\## Examples
+    \\```python
+    \\import math
+    \\canvas = Image(500, 500)
+    \\logo = Image.load("logo.png")
+    \\
+    \\# Insert at top-left
+    \\rect = Rectangle(10, 10, 110, 110)
+    \\canvas.insert(logo, rect)
+    \\
+    \\# Insert with rotation
+    \\rect2 = Rectangle(200, 200, 300, 300)
+    \\canvas.insert(logo, rect2, angle=math.radians(45))
+    \\```
+;
+
+fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var source_obj: ?*c.PyObject = undefined;
+    var rect_obj: ?*c.PyObject = undefined;
+    var angle: f64 = 0.0;
+    var method_value: c_long = 1; // Default to BILINEAR
+
+    var kwlist = [_:null]?[*:0]u8{ @constCast("source"), @constCast("rect"), @constCast("angle"), @constCast("method"), null };
+    const format = std.fmt.comptimePrint("OO|dl", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &source_obj, &rect_obj, &angle, &method_value) == 0) {
+        return null;
+    }
+
+    // Check if source is an Image object
+    if (c.PyObject_IsInstance(source_obj, @ptrCast(&ImageType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "source must be an Image object");
+        return null;
+    }
+
+    const source = @as(*ImageObject, @ptrCast(source_obj.?));
+    const source_image = py_utils.validateNonNull(*Image(Rgba), source.image_ptr, "Source image") catch return null;
+
+    // Parse the Rectangle object
+    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+
+    // Convert method value to Zig enum
+    const method = pythonToZigInterpolation(method_value) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
+    };
+
+    // Get the destination image (self)
+    const dst_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Perform insertion (modifies dst_image in-place)
+    dst_image.insert(source_image.*, rect, @floatCast(angle), method);
+
+    // Return None
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
+}
+
 const image_canvas_doc =
     \\Create a Canvas object for drawing operations on this image.
     \\
@@ -1756,6 +2014,30 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = image_canvas_doc,
         .params = "self",
         .returns = "Canvas",
+    },
+    .{
+        .name = "crop",
+        .meth = @ptrCast(&image_crop),
+        .flags = c.METH_VARARGS,
+        .doc = image_crop_doc,
+        .params = "self, rect: Rectangle",
+        .returns = "Image",
+    },
+    .{
+        .name = "extract",
+        .meth = @ptrCast(&image_extract),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_extract_doc,
+        .params = "self, rect: Rectangle, angle: float = 0.0, size: tuple[int, int] | None = None, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .returns = "Image",
+    },
+    .{
+        .name = "insert",
+        .meth = @ptrCast(&image_insert),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_insert_doc,
+        .params = "self, source: Image, rect: Rectangle, angle: float = 0.0, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .returns = "None",
     },
 };
 

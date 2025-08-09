@@ -47,6 +47,9 @@ class TestImageBinding:
         assert hasattr(img, "sharpen")
         assert hasattr(img, "copy")
         assert hasattr(img, "canvas")
+        assert hasattr(img, "crop")
+        assert hasattr(img, "extract")
+        assert hasattr(img, "insert")
 
     def test_box_blur_basic(self):
         """Box blur returns same shape and radius 0 is no-op."""
@@ -231,6 +234,75 @@ class TestLetterbox:
         # Invalid type
         with pytest.raises(TypeError):
             img.letterbox("invalid")
+
+
+class TestCropExtractInsert:
+    """Test crop, extract, and insert methods."""
+
+    def test_crop_basic(self):
+        """Test crop method doesn't crash and returns correct size."""
+        arr = np.zeros((100, 100, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Create a rectangle
+        rect = zignal.Rectangle(10, 10, 60, 60)  # 50x50 region
+
+        # Crop should work and return correct size
+        cropped = img.crop(rect)
+        assert cropped is not None
+        assert cropped.rows == 50
+        assert cropped.cols == 50
+
+    def test_extract_basic(self):
+        """Test extract method doesn't crash."""
+        arr = np.zeros((100, 100, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        rect = zignal.Rectangle(20, 20, 80, 80)  # 60x60 region
+
+        # Basic extraction
+        extracted = img.extract(rect)
+        assert extracted is not None
+        assert extracted.rows == 60
+        assert extracted.cols == 60
+
+        # With angle
+        import math
+
+        rotated = img.extract(rect, angle=math.radians(45))
+        assert rotated is not None
+
+        # With custom size
+        resized = img.extract(rect, size=(30, 30))
+        assert resized.rows == 30
+        assert resized.cols == 30
+
+        # With interpolation method
+        extracted_nn = img.extract(rect, method=zignal.InterpolationMethod.NEAREST_NEIGHBOR)
+        assert extracted_nn is not None
+
+    def test_insert_basic(self):
+        """Test insert method doesn't crash."""
+        # Create destination and source images
+        arr_dst = np.zeros((200, 200, 4), dtype=np.uint8)
+        dst = zignal.Image.from_numpy(arr_dst)
+
+        arr_src = np.full((50, 50, 4), 255, dtype=np.uint8)
+        src = zignal.Image.from_numpy(arr_src)
+
+        rect = zignal.Rectangle(10, 10, 60, 60)
+
+        # Basic insertion - should not raise
+        dst.insert(src, rect)
+
+        # With angle
+        import math
+
+        rect2 = zignal.Rectangle(100, 100, 150, 150)
+        dst.insert(src, rect2, angle=math.radians(45))
+
+        # With interpolation method
+        dst.insert(src, rect, method=zignal.InterpolationMethod.BICUBIC)
 
 
 class TestNumpyIntegration:

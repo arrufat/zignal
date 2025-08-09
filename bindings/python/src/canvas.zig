@@ -238,17 +238,17 @@ fn makeDrawMethodWithWidth(
             // Call PyArg_ParseTupleAndKeywords with variable arguments
             switch (param_count) {
                 1 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
                         return null;
                     }
                 },
                 2 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4]) == 0) {
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4]) == 0) {
                         return null;
                     }
                 },
                 3 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4], parse_args[5]) == 0) {
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4], parse_args[5]) == 0) {
                         return null;
                     }
                 },
@@ -330,12 +330,12 @@ fn makeFillMethod(
             // Call PyArg_ParseTupleAndKeywords with variable arguments
             switch (param_count) {
                 1 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2]) == 0) {
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2]) == 0) {
                         return null;
                     }
                 },
                 2 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
                         return null;
                     }
                 },
@@ -511,7 +511,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     const kwlist = [_][*c]const u8{ "p0", "p1", "p2", "color", "width", "mode", null };
     const format = std.fmt.comptimePrint("OOOO|ll", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
         return null;
     }
 
@@ -542,7 +542,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const kwlist = [_][*c]const u8{ "p0", "p1", "p2", "p3", "color", "width", "mode", null };
     const format = std.fmt.comptimePrint("OOOOO|ll", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &p3_obj, &color_obj, &width, &mode) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &p3_obj, &color_obj, &width, &mode) == 0) {
         return null;
     }
 
@@ -572,7 +572,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const kwlist = [_][*c]const u8{ "points", "color", "width", "tension", "mode", null };
     const format = std.fmt.comptimePrint("OO|ldl", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &points_obj, &color_obj, &width, &tension, &mode) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &points_obj, &color_obj, &width, &tension, &mode) == 0) {
         return null;
     }
 
@@ -600,7 +600,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const kwlist = [_][*c]const u8{ "points", "color", "tension", "mode", null };
     const format = std.fmt.comptimePrint("OO|dl", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @constCast(@ptrCast(&kwlist)), &points_obj, &color_obj, &tension, &mode) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &points_obj, &color_obj, &tension, &mode) == 0) {
         return null;
     }
 
@@ -635,7 +635,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const kwlist = [_][*c]const u8{ "text", "position", "color", "font", "scale", "mode", null };
     const format = std.fmt.comptimePrint("OOO|Odl:draw_text", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, @constCast(kwds), format.ptr, @constCast(@ptrCast(&kwlist)), &text_obj, &position_obj, &color_obj, &font_obj, &scale, &mode) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, @constCast(kwds), format.ptr, @ptrCast(@constCast(&kwlist)), &text_obj, &position_obj, &color_obj, &font_obj, &scale, &mode) == 0) {
         return null;
     }
 
