@@ -1391,6 +1391,98 @@ fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     return py_obj;
 }
 
+const image_flip_left_right_doc =
+    \\Flip image left-to-right (horizontal mirror).
+    \\
+    \\Returns a new image that is a horizontal mirror of the original.
+    \\```python
+    \\flipped = img.flip_left_right()
+    \\```
+;
+
+fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Create copy
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return null;
+    };
+
+    // Copy and flip
+    src_image.copy(new_image.*);
+    new_image.flipLeftRight();
+
+    // Wrap into Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
+const image_flip_top_bottom_doc =
+    \\Flip image top-to-bottom (vertical mirror).
+    \\
+    \\Returns a new image that is a vertical mirror of the original.
+    \\```python
+    \\flipped = img.flip_top_bottom()
+    \\```
+;
+
+fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Create copy
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return null;
+    };
+
+    // Copy and flip
+    src_image.copy(new_image.*);
+    new_image.flipTopBottom();
+
+    // Wrap into Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    return py_obj;
+}
+
 const image_letterbox_doc =
     \\Resize image to fit within the specified size while preserving aspect ratio.
     \\
@@ -1980,6 +2072,22 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_copy),
         .flags = c.METH_NOARGS,
         .doc = image_copy_doc,
+        .params = "self",
+        .returns = "Image",
+    },
+    .{
+        .name = "flip_left_right",
+        .meth = @ptrCast(&image_flip_left_right),
+        .flags = c.METH_NOARGS,
+        .doc = image_flip_left_right_doc,
+        .params = "self",
+        .returns = "Image",
+    },
+    .{
+        .name = "flip_top_bottom",
+        .meth = @ptrCast(&image_flip_top_bottom),
+        .flags = c.METH_NOARGS,
+        .doc = image_flip_top_bottom_doc,
         .params = "self",
         .returns = "Image",
     },
