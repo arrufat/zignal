@@ -14,7 +14,7 @@ const c = py_utils.c;
 // 3. The PyTypeObject (e.g., RgbType)
 
 // RGB
-pub const RgbBinding = color_factory.createColorBinding(zignal.Rgb);
+pub const RgbBinding = color_factory.ColorBinding(zignal.Rgb);
 var rgb_getset = RgbBinding.generateGetSet();
 var rgb_methods = RgbBinding.generateMethods();
 pub var RgbType = c.PyTypeObject{
@@ -34,7 +34,7 @@ pub var RgbType = c.PyTypeObject{
 };
 
 // RGBA
-pub const RgbaBinding = color_factory.createColorBinding(zignal.Rgba);
+pub const RgbaBinding = color_factory.ColorBinding(zignal.Rgba);
 var rgba_getset = RgbaBinding.generateGetSet();
 var rgba_methods = RgbaBinding.generateMethods();
 pub var RgbaType = c.PyTypeObject{
@@ -54,7 +54,7 @@ pub var RgbaType = c.PyTypeObject{
 };
 
 // HSV
-pub const HsvBinding = color_factory.createColorBinding(zignal.Hsv);
+pub const HsvBinding = color_factory.ColorBinding(zignal.Hsv);
 var hsv_getset = HsvBinding.generateGetSet();
 var hsv_methods = HsvBinding.generateMethods();
 pub var HsvType = c.PyTypeObject{
@@ -74,7 +74,7 @@ pub var HsvType = c.PyTypeObject{
 };
 
 // HSL
-pub const HslBinding = color_factory.createColorBinding(zignal.Hsl);
+pub const HslBinding = color_factory.ColorBinding(zignal.Hsl);
 var hsl_getset = HslBinding.generateGetSet();
 var hsl_methods = HslBinding.generateMethods();
 pub var HslType = c.PyTypeObject{
@@ -94,7 +94,7 @@ pub var HslType = c.PyTypeObject{
 };
 
 // LAB
-pub const LabBinding = color_factory.createColorBinding(zignal.Lab);
+pub const LabBinding = color_factory.ColorBinding(zignal.Lab);
 var lab_getset = LabBinding.generateGetSet();
 var lab_methods = LabBinding.generateMethods();
 pub var LabType = c.PyTypeObject{
@@ -114,7 +114,7 @@ pub var LabType = c.PyTypeObject{
 };
 
 // XYZ
-pub const XyzBinding = color_factory.createColorBinding(zignal.Xyz);
+pub const XyzBinding = color_factory.ColorBinding(zignal.Xyz);
 var xyz_getset = XyzBinding.generateGetSet();
 var xyz_methods = XyzBinding.generateMethods();
 pub var XyzType = c.PyTypeObject{
@@ -134,7 +134,7 @@ pub var XyzType = c.PyTypeObject{
 };
 
 // OKLAB
-pub const OklabBinding = color_factory.createColorBinding(zignal.Oklab);
+pub const OklabBinding = color_factory.ColorBinding(zignal.Oklab);
 var oklab_getset = OklabBinding.generateGetSet();
 var oklab_methods = OklabBinding.generateMethods();
 pub var OklabType = c.PyTypeObject{
@@ -154,7 +154,7 @@ pub var OklabType = c.PyTypeObject{
 };
 
 // OKLCH
-pub const OklchBinding = color_factory.createColorBinding(zignal.Oklch);
+pub const OklchBinding = color_factory.ColorBinding(zignal.Oklch);
 var oklch_getset = OklchBinding.generateGetSet();
 var oklch_methods = OklchBinding.generateMethods();
 pub var OklchType = c.PyTypeObject{
@@ -174,7 +174,7 @@ pub var OklchType = c.PyTypeObject{
 };
 
 // LCH
-pub const LchBinding = color_factory.createColorBinding(zignal.Lch);
+pub const LchBinding = color_factory.ColorBinding(zignal.Lch);
 var lch_getset = LchBinding.generateGetSet();
 var lch_methods = LchBinding.generateMethods();
 pub var LchType = c.PyTypeObject{
@@ -194,7 +194,7 @@ pub var LchType = c.PyTypeObject{
 };
 
 // LMS
-pub const LmsBinding = color_factory.createColorBinding(zignal.Lms);
+pub const LmsBinding = color_factory.ColorBinding(zignal.Lms);
 var lms_getset = LmsBinding.generateGetSet();
 var lms_methods = LmsBinding.generateMethods();
 pub var LmsType = c.PyTypeObject{
@@ -214,7 +214,7 @@ pub var LmsType = c.PyTypeObject{
 };
 
 // XYB
-pub const XybBinding = color_factory.createColorBinding(zignal.Xyb);
+pub const XybBinding = color_factory.ColorBinding(zignal.Xyb);
 var xyb_getset = XybBinding.generateGetSet();
 var xyb_methods = XybBinding.generateMethods();
 pub var XybType = c.PyTypeObject{
@@ -234,7 +234,7 @@ pub var XybType = c.PyTypeObject{
 };
 
 // YCBCR
-pub const YcbcrBinding = color_factory.createColorBinding(zignal.Ycbcr);
+pub const YcbcrBinding = color_factory.ColorBinding(zignal.Ycbcr);
 var ycbcr_getset = YcbcrBinding.generateGetSet();
 var ycbcr_methods = YcbcrBinding.generateMethods();
 pub var YcbcrType = c.PyTypeObject{

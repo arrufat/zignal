@@ -11,6 +11,7 @@ const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
+const color_utils = @import("color_utils.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
 const image_class_doc = "RGBA image for processing and manipulation.";
@@ -97,7 +98,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     // Parse color if provided, otherwise use transparent
     var fill_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 }; // Default transparent
     if (color_obj != null and color_obj != c.Py_None()) {
-        fill_color = py_utils.parseColorToRgba(color_obj) catch {
+        fill_color = color_utils.parseColorToRgba(color_obj) catch {
             // Error already set by parseColorToRgba
             return -1;
         };
@@ -2028,7 +2029,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     }
 
     // Parse the color value using parseColorToRgba
-    const color = py_utils.parseColorToRgba(value) catch {
+    const color = color_utils.parseColorToRgba(value) catch {
         // Error already set by parseColorToRgba
         return -1;
     };

@@ -97,7 +97,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         // Error already set by parsePointList
         return null;
     };
-    defer py_utils.freePointList(points);
+    defer py_utils.allocator.free(points);
 
     // Find convex hull
     const hull_points = self.hull.?.find(points) catch {
