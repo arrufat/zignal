@@ -949,6 +949,49 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
     return result;
 }
 
+const image_fill_doc =
+    \\Fill the entire image with a solid color.
+    \\
+    \\## Parameters
+    \\- `color`: Color value as:
+    \\  - int: Grayscale value (0-255), expanded to RGBA
+    \\  - tuple[int, int, int]: RGB values
+    \\  - tuple[int, int, int, int]: RGBA values
+    \\  - Color object with to_rgba() method or r,g,b,a attributes
+    \\
+    \\## Examples
+    \\```python
+    \\img.fill(128)                      # Fill with gray
+    \\img.fill((255, 0, 0))              # Fill with red
+    \\img.fill((0, 255, 0, 128))         # Fill with semi-transparent green
+    \\img.fill(zignal.Rgb(255, 128, 0))  # Fill with orange using color object
+    \\```
+;
+
+fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments - expect a color
+    var color_obj: ?*c.PyObject = null;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &color_obj) == 0) {
+        return null;
+    }
+
+    const color = color_utils.parseColorToRgba(color_obj) catch {
+        return null;
+    };
+
+    const image_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
+        return null;
+    };
+
+    image_ptr.fill(color);
+
+    c.Py_INCREF(c.Py_None());
+    return c.Py_None();
+}
+
 const image_resize_doc =
     \\Resize the image to the specified size.
     \\
@@ -2092,6 +2135,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS,
         .doc = image_save_doc,
         .params = "self, path: str",
+        .returns = "None",
+    },
+    .{
+        .name = "fill",
+        .meth = @ptrCast(&image_fill),
+        .flags = c.METH_VARARGS,
+        .doc = image_fill_doc,
+        .params = "self, color: " ++ stub_metadata.COLOR,
         .returns = "None",
     },
     .{

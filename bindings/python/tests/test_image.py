@@ -39,6 +39,7 @@ class TestImageBinding:
         img = zignal.Image.from_numpy(arr)
 
         # Verify methods exist and are callable
+        assert hasattr(img, "fill")
         assert hasattr(img, "save")
         assert hasattr(img, "to_numpy")
         assert hasattr(img, "resize")
