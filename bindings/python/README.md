@@ -1,6 +1,6 @@
 # Zignal Python Bindings
 
-Zero-dependency image processing library written in Zig with Python bindings.
+High-performance image processing library written in Zig with Python bindings.
 
 ## Installation
 
@@ -8,128 +8,142 @@ Zero-dependency image processing library written in Zig with Python bindings.
 pip install zignal-processing
 ```
 
-## Quick Start
+## Documentation
 
-```python
-import zignal
-
-# Create RGB color
-red = zignal.Rgb(255, 0, 0)
-print(f"Red color: {red}")
-
-# Convert to HSV
-hsv = red.to_hsv()
-print(f"HSV: {hsv}")
-
-# Convert to other color spaces
-lab = red.to_lab()
-oklab = red.to_oklab()
-xyz = red.to_xyz()
-```
+Full API documentation: [https://bfactory-ai.github.io/zignal/python/zignal.html](https://bfactory-ai.github.io/zignal/python/zignal.html)
 
 ## Features
 
-- **12 Color Spaces**: RGB, RGBA, HSV, HSL, Lab, XYZ, Oklab, Oklch, LCH, LMS, XYB, YCbCr
-- **Seamless Conversions**: Convert between any supported color spaces
-- **Type Safety**: Strong typing with validation for color components
-- **Zero Dependencies**: No external dependencies, pure Zig implementation
-- **High Performance**: Native performance with minimal overhead
-- **Cross Platform**: Works on Linux, macOS, and Windows (x86_64 and ARM64)
+- **Image Processing**: Load, save, resize, crop, blur, rotate with multiple interpolation methods
+- **Pixel Operations**: Direct pixel access and assignment with any color type
+- **12 Color Spaces**: Automatic conversions between RGB, HSV, Lab, Oklab, and more
+- **Canvas Drawing**: Lines, circles, polygons, text rendering with bitmap fonts
+- **Terminal Graphics**: Display images using ANSI, Sixel, or Kitty protocols
+- **Geometry**: Rectangle and ConvexHull operations
+- **Advanced**: Feature distribution matching for color transfer
+- **Zero Dependencies**: Pure Zig implementation with no external dependencies
+
+## Quick Examples
+
+### Image Creation and Manipulation
+
+```python
+import zignal
+import numpy as np
+
+# Create image from scratch
+img = zignal.Image(480, 640, (255, 128, 0))  # Orange background
+
+# Load from file
+img = zignal.Image.load("photo.jpg")  # Supports PNG and JPEG
+
+# From NumPy array
+arr = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+img = zignal.Image.from_numpy(arr)
+
+# Process the image
+resized = img.resize((240, 320), zignal.InterpolationMethod.BILINEAR)
+blurred = img.box_blur(radius=3)
+sharpened = img.sharpen(radius=1)
+cropped = img.crop(zignal.Rectangle(100, 100, 200, 200))  # l, t, r, b
+```
+
+### Pixel Access and Assignment
+
+```python
+# Get pixel value (returns Rgba object)
+pixel = img[10, 20]
+print(f"Pixel at (10,20): {pixel:ansi}")
+
+# Set pixel with various color formats
+img[10, 20] = 128                          # Grayscale
+img[10, 21] = (255, 0, 0)                  # RGB tuple
+img[10, 22] = (255, 0, 0, 128)             # RGBA tuple
+img[10, 23] = zignal.Hsv(180, 100, 100)    # Any color object
+```
+
+### Color Spaces
+
+```python
+# All color types automatically convert to any other
+red = zignal.Rgb(255, 0, 0)
+hsv = red.to_hsv()           # Hue, Saturation, Value
+lab = red.to_lab()           # CIELAB
+oklab = red.to_oklab()       # Perceptually uniform
+
+# Create colors in any space
+hsl = zignal.Hsl(180.0, 50.0, 50.0)
+rgb = hsl.to_rgb()
+```
+
+### Canvas Drawing
+
+```python
+# Get canvas for drawing
+canvas = img.canvas()
+
+# Draw shapes
+canvas.draw_line((10, 10), (100, 100), zignal.Rgb(255, 0, 0))
+canvas.draw_circle((200, 200), radius=50, color=(0, 255, 0))
+canvas.fill_circle((300, 200), radius=30, color=(0, 0, 255))
+
+# Draw polygon
+points = [(100, 100), (200, 120), (180, 200), (80, 180)]
+canvas.fill_polygon(points, zignal.Rgba(255, 128, 0, 200))
+
+# Render text with bitmap fonts
+font = zignal.BitmapFont.load("font.bdf")  # Load BDF/PCF font
+canvas.draw_text("Hello World!", (50, 300), font, color=255)
+```
+
+### Terminal Graphics
+
+```python
+# Display in terminal using various protocols
+print(f"{img:blocks}")         # ANSI color blocks
+print(f"{img:sixel:400x200}")  # Sixel graphics (Foor, iTerm2, WezTerm)
+print(f"{img:kitty:400x200}")  # Kitty graphics protocol (Kitty, Ghostty)
+```
+Note that the display size in `sixel` and `kitty` will not distort the image,
+but scale it to fit in the `WIDTHxHEIGHT` constraints.
+If either is omitted (`WIDTHx` or `xHEIGHT`) it means unconstrained.
+
+### Geometry
+
+```python
+# Rectangle operations
+rect1 = zignal.Rectangle(10, 10, 100, 100)
+rect2 = zignal.Rectangle(50, 50, 100, 100)
+intersection = rect1.intersect(rect2)
+
+# Convex hull from points
+points = [(0, 0), (100, 0), (100, 100), (0, 100), (50, 50)]
+hull = zignal.ConvexHull().find(points)
+```
+
+### Feature Distribution Matching
+
+```python
+# Transfer color distribution from reference to target
+source = zignal.Image.load("source.jpg")
+target = zignal.Image.load("reference.jpg")
+
+fdm = zignal.FeatureDistributionMatching()
+result = fdm.match(source, target)
+result.save("color_transferred.png")
+```
 
 ## Supported Color Spaces
 
-- **RGB/RGBA**: Standard RGB with optional alpha channel (0-255)
-- **HSV**: Hue, Saturation, Value (0-360°, 0-100%, 0-100%)
-- **HSL**: Hue, Saturation, Lightness (0-360°, 0-100%, 0-100%)
-- **Lab**: CIELAB perceptual color space
-- **XYZ**: CIE 1931 XYZ color space
-- **Oklab**: Perceptually uniform color space by Björn Ottosson
-- **Oklch**: Cylindrical representation of Oklab
-- **LCH**: Cylindrical representation of Lab
-- **LMS**: Long, Medium, Short cone response
-- **XYB**: Color space used in JPEG XL
+- **RGB/RGBA**: Standard RGB with optional alpha
+- **HSV/HSL**: Hue, Saturation, Value/Lightness
+- **Lab/LCH**: CIELAB and cylindrical representation
+- **Oklab/Oklch**: Perceptually uniform color spaces
+- **XYZ/XYB**: CIE 1931 and JPEG XL color spaces
+- **LMS**: Cone response color space
 - **YCbCr**: Luma and chroma components
 
-## Examples
-
-### Color Space Conversions
-
-```python
-# Create a color in any space
-hsl = zignal.Hsl(180.0, 50.0, 50.0)  # Cyan-ish color
-
-# Convert to any other space
-rgb = hsl.to_rgb()
-lab = hsl.to_lab()
-oklab = hsl.to_oklab()
-
-# Chain conversions
-original = zignal.Rgb(128, 64, 192)
-hsv = original.to_hsv()
-back_to_rgb = hsv.to_rgb()
-```
-
-### Working with Alpha Channel
-
-```python
-# Create RGBA color
-rgba = zignal.Rgba(255, 128, 0, 200)  # Orange with transparency
-
-# Convert RGB to RGBA (default alpha=255)
-rgb = zignal.Rgb(255, 128, 0)
-rgba = rgb.to_rgba()
-```
-
-### Modern Color Spaces
-
-```python
-# Oklab - perceptually uniform color space
-oklab = zignal.Oklab(0.5, 0.1, -0.05)
-oklch = oklab.to_oklch()  # Convert to cylindrical form
-
-# Work with perceptual properties
-print(f"Lightness: {oklch.l}")
-print(f"Chroma: {oklch.c}")
-print(f"Hue: {oklch.h}")
-```
-
-### NumPy Integration (Optional)
-
-If NumPy is installed, you can work with image arrays:
-
-```python
-import numpy as np
-import zignal
-
-# Create numpy array (supports both RGB and RGBA)
-arr_rgb = np.zeros((100, 200, 3), dtype=np.uint8)
-arr_rgb[50, 100] = [255, 0, 0]  # Red pixel
-
-# Convert to Image (allocates RGBA internally for SIMD performance)
-img = zignal.Image.from_numpy(arr_rgb)
-
-# For zero-copy with 4-channel arrays, use the helper:
-arr_rgba = zignal.Image.add_alpha(arr_rgb)  # Adds alpha=255
-img = zignal.Image.from_numpy(arr_rgba)  # Zero-copy!
-
-# Convert back to numpy
-arr2 = img.to_numpy()  # Returns RGBA (4 channels) by default
-arr3 = img.to_numpy(include_alpha=False)  # Returns RGB (3 channels)
-
-# Load and save images
-img = zignal.Image.load("input.png")  # Supports PNG and JPEG
-img.save("output.png")
-```
-
-**Performance Note**: The Image class uses RGBA storage internally for SIMD-optimized operations.
-This provides 2-5x performance improvements for resize and interpolation operations.
-When using 3-channel RGB arrays, they are automatically converted to RGBA with alpha=255.
-
-Note: NumPy is not required for basic color operations.
-
 ## Building from Source
-
-Requires Zig compiler:
 
 ```bash
 git clone https://github.com/bfactory-ai/zignal
