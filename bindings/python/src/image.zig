@@ -22,6 +22,8 @@ pub const ImageObject = extern struct {
     image_ptr: ?*Image(Rgba),
     // Store reference to NumPy array if created from numpy (for zero-copy)
     numpy_ref: ?*c.PyObject,
+    // Store reference to parent Image if this is a view (for memory management)
+    parent_ref: ?*c.PyObject,
 };
 
 fn image_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -33,6 +35,7 @@ fn image_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         // Initialize to null pointer to avoid undefined behavior
         obj.image_ptr = null;
         obj.numpy_ref = null;
+        obj.parent_ref = null;
     }
     return @as(?*c.PyObject, @ptrCast(self));
 }
@@ -123,6 +126,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     image_ptr.* = image;
     self.image_ptr = image_ptr;
     self.numpy_ref = null;
+    self.parent_ref = null;
 
     return 0;
 }
@@ -132,19 +136,24 @@ fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 
     // Free the image data if it was allocated
     if (self.image_ptr) |ptr| {
-        // Only free if we allocated it (not if it's from numpy)
-        if (self.numpy_ref == null) {
+        // Only free if we allocated it (not if it's from numpy or a view)
+        if (self.numpy_ref == null and self.parent_ref == null) {
             // Full deallocation: image data + pointer wrapper
             ptr.deinit(py_utils.allocator);
             py_utils.allocator.destroy(ptr);
         } else {
-            // NumPy owns the data, just destroy the pointer wrapper
+            // NumPy or parent owns the data, just destroy the pointer wrapper
             py_utils.allocator.destroy(ptr);
         }
     }
 
     // Release reference to NumPy array if we have one
     if (self.numpy_ref) |ref| {
+        c.Py_XDECREF(ref);
+    }
+
+    // Release reference to parent Image if this is a view
+    if (self.parent_ref) |ref| {
         c.Py_XDECREF(ref);
     }
 
@@ -177,6 +186,14 @@ fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c
 
     const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
     return c.PyLong_FromLong(@intCast(ptr.cols));
+}
+
+fn image_is_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args; // No arguments
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    return @ptrCast(py_utils.getPyBool(ptr.isView()));
 }
 
 const image_load_doc =
@@ -520,6 +537,7 @@ fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         image_ptr.* = rgba_image;
         // No numpy_ref since we allocated new memory
         self.?.numpy_ref = null;
+        self.?.parent_ref = null;
     }
 
     self.?.image_ptr = image_ptr;
@@ -909,6 +927,7 @@ fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*Im
 
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
 
     return result;
 }
@@ -945,6 +964,7 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
 
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
 
     return result;
 }
@@ -1117,6 +1137,7 @@ fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return result;
 }
 
@@ -1159,6 +1180,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: I
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return result;
 }
 
@@ -1237,6 +1259,7 @@ fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1300,6 +1323,7 @@ fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1363,6 +1387,7 @@ fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1482,6 +1507,91 @@ fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
+    return py_obj;
+}
+
+const image_view_doc =
+    \\Create a view (sub-image) from a rectangular region.
+    \\
+    \\A view shares memory with the parent image, so changes to either
+    \\are reflected in both. This is a zero-copy operation.
+    \\
+    \\## Parameters
+    \\- `rect` (`Rectangle`): The rectangular region to view
+    \\
+    \\## Examples
+    \\```python
+    \\# Create a view of the top-left quadrant
+    \\rect = Rectangle(0, 0, img.cols // 2, img.rows // 2)
+    \\view = img.view(rect)
+    \\
+    \\# Modifications to the view affect the parent
+    \\view.fill((255, 0, 0))  # Fills the top-left quadrant with red
+    \\
+    \\# Check if an image is a view
+    \\print(view.is_view)  # True
+    \\print(img.is_view)   # False (unless img itself is a view)
+    \\```
+    \\
+    \\## Notes
+    \\- Views maintain a reference to their parent to prevent memory deallocation
+    \\- The rectangle bounds are clipped to the parent image dimensions
+    \\- Views can be nested (a view of a view)
+;
+
+fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse the Rectangle argument
+    var rect_obj: ?*c.PyObject = null;
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj) == 0) {
+        return null;
+    }
+
+    // Parse the Rectangle object
+    const frect = py_utils.parseRectangle(rect_obj) catch return null;
+
+    // Convert f32 rectangle to usize for the view method
+    const rect = zignal.Rectangle(usize).init(
+        @intFromFloat(@max(0, frect.l)),
+        @intFromFloat(@max(0, frect.t)),
+        @intFromFloat(@max(0, frect.r)),
+        @intFromFloat(@max(0, frect.b)),
+    );
+
+    // Get the source image
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Create the view (this returns a new Image struct that shares data)
+    const view_image = src_image.view(rect);
+
+    // Create wrapper for the view
+    const view_ptr = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image view");
+        return null;
+    };
+    errdefer allocator.destroy(view_ptr);
+
+    view_ptr.* = view_image;
+
+    // Create new Python object for the view
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        allocator.destroy(view_ptr);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = view_ptr;
+    result.numpy_ref = null;
+
+    // IMPORTANT: Keep a reference to the parent to prevent deallocation
+    c.Py_INCREF(self_obj);
+    result.parent_ref = self_obj;
+
     return py_obj;
 }
 
@@ -1528,6 +1638,7 @@ fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1574,6 +1685,7 @@ fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1721,6 +1833,7 @@ fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -1845,6 +1958,7 @@ fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const result = @as(*ImageObject, @ptrCast(py_obj));
     result.image_ptr = new_image;
     result.numpy_ref = null;
+    result.parent_ref = null;
     return py_obj;
 }
 
@@ -2176,6 +2290,22 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = image_copy_doc,
         .params = "self",
         .returns = "Image",
+    },
+    .{
+        .name = "view",
+        .meth = @ptrCast(&image_view),
+        .flags = c.METH_VARARGS,
+        .doc = image_view_doc,
+        .params = "self, rect: Rectangle",
+        .returns = "Image",
+    },
+    .{
+        .name = "is_view",
+        .meth = @ptrCast(&image_is_view),
+        .flags = c.METH_NOARGS,
+        .doc = "Check if this image is a view of another image.\n\nReturns True if this image references another image's memory,\nFalse if it owns its own memory.",
+        .params = "self",
+        .returns = "bool",
     },
     .{
         .name = "flip_left_right",
