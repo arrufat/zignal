@@ -528,6 +528,64 @@ pub fn freePointList(points: []Point(2, f32)) void {
     allocator.free(points);
 }
 
+/// Set a Python exception with an error message that includes a file path.
+/// Automatically selects the appropriate Python exception type based on the error.
+pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
+    // Map Zig errors to appropriate Python exception types
+    const exc_type = switch (err) {
+        error.FileNotFound => c.PyExc_FileNotFoundError,
+
+        error.AccessDenied,
+        error.PermissionDenied,
+        error.SharingViolation,
+        => c.PyExc_PermissionError,
+
+        error.IsDir => c.PyExc_IsADirectoryError,
+        error.NotDir => c.PyExc_NotADirectoryError,
+        error.PathAlreadyExists => c.PyExc_FileExistsError,
+
+        error.BadPathName,
+        error.InvalidUtf8,
+        error.InvalidWtf8,
+        error.UnsupportedImageFormat,
+        error.UnsupportedFontFormat,
+        => c.PyExc_ValueError,
+
+        error.OutOfMemory => c.PyExc_MemoryError,
+
+        error.WouldBlock, error.LockViolation => c.PyExc_BlockingIOError,
+
+        error.BrokenPipe => c.PyExc_BrokenPipeError,
+
+        error.ConnectionResetByPeer => c.PyExc_ConnectionResetError,
+
+        error.NameTooLong,
+        error.NoSpaceLeft,
+        error.DiskQuota,
+        error.SystemResources,
+        error.ProcessFdQuotaExceeded,
+        error.SystemFdQuotaExceeded,
+        error.FileTooBig,
+        error.FileBusy,
+        error.DeviceBusy,
+        error.NetworkNotFound,
+        error.NoDevice,
+        error.InputOutput,
+        error.SymLinkLoop,
+        error.AntivirusInterference,
+        error.Unexpected,
+        => c.PyExc_OSError,
+
+        // Default to IOError for any other file I/O errors
+        else => c.PyExc_IOError,
+    };
+
+    // Format the error message with the path
+    var buffer: [128 + std.fs.max_path_bytes]u8 = undefined;
+    const msg = std.fmt.bufPrintZ(&buffer, "{s}: '{s}'", .{ @errorName(err), path }) catch @errorName(err);
+    c.PyErr_SetString(exc_type, msg.ptr);
+}
+
 /// Helper to return Python None
 pub fn returnNone() ?*c.PyObject {
     const none = c.Py_None();

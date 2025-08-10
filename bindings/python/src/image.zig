@@ -208,25 +208,9 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     // Convert C string to Zig slice
     const path_slice = std.mem.span(file_path);
 
-    // Check if file exists first to provide better error message
-    std.fs.cwd().access(path_slice, .{}) catch |err| {
-        switch (err) {
-            error.FileNotFound => {
-                c.PyErr_SetString(c.PyExc_FileNotFoundError, "Image file not found");
-                return null;
-            },
-            else => {}, // Continue with load attempt
-        }
-    };
-
     // Load the image as RGBA for SIMD optimization benefits
     const image = Image(Rgba).load(allocator, path_slice) catch |err| {
-        switch (err) {
-            error.FileNotFound => c.PyErr_SetString(c.PyExc_FileNotFoundError, "Image file not found"),
-            error.UnsupportedImageFormat => c.PyErr_SetString(c.PyExc_ValueError, "Unsupported image format"),
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
-            else => c.PyErr_SetString(c.PyExc_IOError, "Failed to load image"),
-        }
+        py_utils.setErrorWithPath(err, path_slice);
         return null;
     };
 
@@ -586,12 +570,7 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 
     // Get allocator and save PNG
     image_ptr.save(allocator, path_slice) catch |err| {
-        switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
-            error.AccessDenied => c.PyErr_SetString(c.PyExc_PermissionError, "Permission denied"),
-            error.FileNotFound => c.PyErr_SetString(c.PyExc_FileNotFoundError, "Directory not found"),
-            else => c.PyErr_SetString(c.PyExc_IOError, "Failed to save image"),
-        }
+        py_utils.setErrorWithPath(err, path_slice);
         return null;
     };
 
