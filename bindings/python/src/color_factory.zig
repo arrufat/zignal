@@ -26,8 +26,6 @@ pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
 /// Automatically generate documentation from type name for color conversion methods
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
     const type_name = @typeName(TargetColorType);
-
-    // Extract the color space name (everything after the last dot)
     if (comptime std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
         const color_space = comptime type_name[dot_index + 1 ..];
         return comptime "Convert to `" ++ color_space ++ "` color space.";
@@ -37,9 +35,7 @@ pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
 }
 
 /// Generate a color binding with automatic property getters and validation
-pub fn createColorBinding(
-    comptime ZigColorType: type,
-) type {
+pub fn ColorBinding(comptime ZigColorType: type) type {
     const name = comptime getSimpleTypeName(ZigColorType);
     const fields = @typeInfo(ZigColorType).@"struct".fields;
     const is_packed = isPacked(ZigColorType);
@@ -241,8 +237,6 @@ pub fn createColorBinding(
         /// e.g., zignal.Rgb -> "to_rgb", zignal.Oklab -> "to_oklab"
         fn getConversionMethodName(comptime TargetColorType: type) []const u8 {
             const type_name = @typeName(TargetColorType);
-
-            // Find the last dot and take everything after it
             if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
                 const base_name = type_name[dot_index + 1 ..];
                 return "to_" ++ comptimeLowercase(base_name);
@@ -255,8 +249,6 @@ pub fn createColorBinding(
         /// e.g., zignal.Rgb -> "toRgb", zignal.Oklab -> "toOklab"
         fn getZigConversionMethodName(comptime TargetColorType: type) []const u8 {
             const type_name = @typeName(TargetColorType);
-
-            // Find the last dot and take everything after it
             if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
                 const base_name = type_name[dot_index + 1 ..];
                 return "to" ++ base_name;
@@ -273,11 +265,10 @@ pub fn createColorBinding(
                     fn method(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
                         const self = @as(*ObjectType, @ptrCast(self_obj));
                         const zig_color = objectToZigColor(self);
-                        const result = zig_color.toRgba(255); // Default alpha 255
+                        const result = zig_color.toRgba(255);
                         return @ptrCast(createColorPyObject(result));
                     }
                 }.method,
-                // All other color types use the same pattern with automatic method name generation
                 else => struct {
                     fn method(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
                         const self = @as(*ObjectType, @ptrCast(self_obj));
@@ -537,16 +528,17 @@ pub fn createColorBinding(
         /// Colors are compared by their RGBA representation for visual equivalence
         pub fn richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
             const py_utils = @import("py_utils.zig");
+            const color_utils = @import("color_utils.zig");
 
             // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
-            if (op != 2 and op != 3) {
+            if (op != c.Py_EQ and op != c.Py_NE) {
                 const not_impl = c.Py_NotImplemented();
                 c.Py_INCREF(not_impl);
                 return not_impl;
             }
 
             // Convert self to RGBA
-            const self_rgba = py_utils.parseColorToRgba(self_obj) catch {
+            const self_rgba = color_utils.parseColorToRgba(self_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();
@@ -555,7 +547,7 @@ pub fn createColorBinding(
             };
 
             // Convert other to RGBA
-            const other_rgba = py_utils.parseColorToRgba(other_obj) catch {
+            const other_rgba = color_utils.parseColorToRgba(other_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();
@@ -563,10 +555,9 @@ pub fn createColorBinding(
                 return not_impl;
             };
 
-            // Compare RGBA values directly (packed struct equality)
             const equal = self_rgba == other_rgba;
 
-            const result = if (op == 2) equal else !equal; // op==2 is Py_EQ, otherwise Py_NE
+            const result = if (op == c.Py_EQ) equal else !equal;
             return @ptrCast(py_utils.getPyBool(result));
         }
 

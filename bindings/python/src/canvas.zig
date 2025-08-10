@@ -10,6 +10,7 @@ const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
+const color_utils = @import("color_utils.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
 pub const CanvasObject = extern struct {
@@ -132,7 +133,7 @@ const FillArgs = struct {
 fn parseDrawArgs(self: *CanvasObject, color_obj: ?*c.PyObject, width: c_long, mode: c_long) !DrawArgs {
     return DrawArgs{
         .canvas = try py_utils.validateNonNull(*Canvas(Rgba), self.canvas_ptr, "Canvas"),
-        .color = try py_utils.parseColorToRgba(@ptrCast(color_obj)),
+        .color = try color_utils.parseColorToRgba(@ptrCast(color_obj)),
         .width = try py_utils.validateNonNegative(u32, width, "Width"),
         .mode = if (try py_utils.validateRange(u32, mode, 0, 1, "Mode") == 0) .fast else .soft,
     };
@@ -142,7 +143,7 @@ fn parseDrawArgs(self: *CanvasObject, color_obj: ?*c.PyObject, width: c_long, mo
 fn parseFillArgs(self: *CanvasObject, color_obj: ?*c.PyObject, mode: c_long) !FillArgs {
     return FillArgs{
         .canvas = try py_utils.validateNonNull(*Canvas(Rgba), self.canvas_ptr, "Canvas"),
-        .color = try py_utils.parseColorToRgba(@ptrCast(color_obj)),
+        .color = try color_utils.parseColorToRgba(@ptrCast(color_obj)),
         .mode = if (try py_utils.validateRange(u32, mode, 0, 1, "Mode") == 0) .fast else .soft,
     };
 }
@@ -181,7 +182,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
     }
 
     // Convert color to Rgba
-    const color = py_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
+    const color = color_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
 
     // Use the stored Canvas directly
     canvas.fill(color);
@@ -268,7 +269,7 @@ fn makeDrawMethodWithWidth(
                 common.canvas.drawRectangle(rect, common.color, common.width, common.mode);
             } else if (comptime std.mem.eql(u8, name, "draw_polygon")) {
                 const points = py_utils.parsePointList(@ptrCast(param_objs[0])) catch return null;
-                defer py_utils.freePointList(points);
+                defer allocator.free(points);
                 common.canvas.drawPolygon(points, common.color, common.width, common.mode);
             } else if (comptime std.mem.eql(u8, name, "draw_circle")) {
                 const center = py_utils.parsePointTuple(@ptrCast(param_objs[0])) catch return null;
@@ -351,7 +352,7 @@ fn makeFillMethod(
                 common.canvas.fillRectangle(rect, common.color, common.mode);
             } else if (comptime std.mem.eql(u8, name, "fill_polygon")) {
                 const points = py_utils.parsePointList(@ptrCast(param_objs[0])) catch return null;
-                defer py_utils.freePointList(points);
+                defer allocator.free(points);
                 if (has_error_handling) {
                     common.canvas.fillPolygon(points, common.color, common.mode) catch {
                         c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill polygon");
@@ -581,7 +582,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     // Parse points
     const points = py_utils.parsePointList(@ptrCast(points_obj)) catch return null;
-    defer py_utils.freePointList(points);
+    defer allocator.free(points);
 
     common.canvas.drawSplinePolygon(points, common.color, common.width, tension_val, common.mode);
 
@@ -609,7 +610,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     // Parse points
     const points = py_utils.parsePointList(@ptrCast(points_obj)) catch return null;
-    defer py_utils.freePointList(points);
+    defer allocator.free(points);
 
     common.canvas.fillSplinePolygon(points, common.color, tension_val, common.mode) catch {
         c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill spline polygon");
@@ -647,7 +648,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const position = py_utils.parsePointTuple(position_obj) catch return null;
 
-    const color = py_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
+    const color = color_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
 
     const mode_val = py_utils.validateRange(u32, mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
