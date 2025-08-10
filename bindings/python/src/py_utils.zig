@@ -149,11 +149,6 @@ fn generateFieldDoc(comptime field_name: []const u8, comptime field_type: type) 
     };
 }
 
-/// Helper to check if a type has a specific method
-fn hasMethod(comptime T: type, comptime method_name: []const u8) bool {
-    return @hasDecl(T, method_name);
-}
-
 /// Error set for conversion failures
 pub const ConversionError = error{
     not_python_object,
