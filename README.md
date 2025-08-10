@@ -37,11 +37,11 @@ pip install zignal-processing
 
 <img src="./assets/python_print.gif" width=600>
 
-[PyPI Package](https://pypi.org/project/zignal-processing/) | [Documentation](https://bfactory-ai.github.io/zignal/python/zignal.html)
+[Bindings](bindings/python) | [PyPI Package](https://pypi.org/project/zignal-processing/) | [Documentation](https://bfactory-ai.github.io/zignal/python/zignal.html)
 
 ## Examples
 
-Interactive demos showcasing Zignal's capabilities:
+[Interactive demos](https://bfactory-ai.github.io/zignal/examples) showcasing Zignal's capabilities:
 
 - [Color space conversions](https://bfactory-ai.github.io/zignal/examples/colorspaces.html) - Convert between RGB, HSL, Lab, Oklab, and more
 - [Face alignment](https://bfactory-ai.github.io/zignal/examples/face-alignment.html) - Facial landmark detection and alignment
