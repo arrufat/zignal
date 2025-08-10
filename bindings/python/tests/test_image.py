@@ -54,6 +54,8 @@ class TestImageBinding:
         assert hasattr(img, "extract")
         assert hasattr(img, "insert")
         assert hasattr(img, "psnr")
+        assert hasattr(img, "view")
+        assert hasattr(img, "is_view")
 
     def test_box_blur_basic(self):
         """Box blur returns same shape and radius 0 is no-op."""
@@ -96,6 +98,108 @@ class TestImageBinding:
         imgarr = img.to_numpy()
         imgarr[0, 0] = [1, 2, 3, 4]
         assert not np.array_equal(cp.to_numpy(), img.to_numpy())
+
+    def test_is_view_property(self):
+        """Test is_view property for regular images and views."""
+        # Create a regular image
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Regular image should not be a view
+        assert img.is_view() == False
+
+        # Create a view
+        rect = zignal.Rectangle(0, 0, 10, 10)
+        view = img.view(rect)
+
+        # View should be marked as a view
+        assert view.is_view() == True
+
+    def test_view_basic(self):
+        """Test creating a basic view of an image."""
+        # Create an image with identifiable content
+        arr = np.zeros((20, 30, 4), dtype=np.uint8)
+        arr[5:15, 10:20] = [255, 128, 64, 255]  # Fill a rectangle with color
+        img = zignal.Image.from_numpy(arr)
+
+        # Create a view of a portion
+        rect = zignal.Rectangle(10, 5, 20, 15)  # (left, top, right, bottom)
+        view = img.view(rect)
+
+        # Check view dimensions
+        assert view.rows == 10  # bottom - top = 15 - 5
+        assert view.cols == 10  # right - left = 20 - 10
+
+        # View should see the colored region
+        view_arr = view.to_numpy()
+        expected_color = [255, 128, 64, 255]
+        np.testing.assert_array_equal(view_arr[0, 0], expected_color)
+
+    def test_view_memory_sharing(self):
+        """Test that views share memory with parent image."""
+        # Create an image
+        arr = np.zeros((10, 10, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Create a view
+        rect = zignal.Rectangle(2, 2, 8, 8)
+        view = img.view(rect)
+
+        # Modify the view
+        view.fill((255, 0, 0, 255))
+
+        # Check that parent image was modified
+        parent_arr = img.to_numpy()
+        # The region [2:8, 2:8] should be red
+        expected_color = [255, 0, 0, 255]
+        np.testing.assert_array_equal(parent_arr[2, 2], expected_color)
+        np.testing.assert_array_equal(parent_arr[7, 7], expected_color)
+        # Outside the view should still be black
+        np.testing.assert_array_equal(parent_arr[0, 0], [0, 0, 0, 0])
+        np.testing.assert_array_equal(parent_arr[9, 9], [0, 0, 0, 0])
+
+    def test_view_bounds_clipping(self):
+        """Test that view bounds are clipped to image dimensions."""
+        # Create a small image
+        arr = np.ones((10, 10, 4), dtype=np.uint8) * 128
+        img = zignal.Image.from_numpy(arr)
+
+        # Try to create a view that extends beyond image bounds
+        rect = zignal.Rectangle(5, 5, 20, 20)  # Right and bottom exceed image
+        view = img.view(rect)
+
+        # View should be clipped to valid region
+        assert view.rows == 5  # 10 - 5 (clipped bottom)
+        assert view.cols == 5  # 10 - 5 (clipped right)
+
+    def test_nested_views(self):
+        """Test creating a view of a view."""
+        # Create base image
+        arr = np.zeros((20, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Create first view
+        rect1 = zignal.Rectangle(5, 5, 15, 15)
+        view1 = img.view(rect1)
+        assert view1.rows == 10
+        assert view1.cols == 10
+        assert view1.is_view() == True
+
+        # Create view of the view
+        rect2 = zignal.Rectangle(2, 2, 8, 8)
+        view2 = view1.view(rect2)
+        assert view2.rows == 6
+        assert view2.cols == 6
+        assert view2.is_view() == True
+
+        # Modify nested view
+        view2.fill((100, 100, 100, 255))
+
+        # Check it affected the parent image
+        parent_arr = img.to_numpy()
+        # The modification should appear at offset (7,7) in parent
+        # (5 from view1 offset + 2 from view2 offset)
+        np.testing.assert_array_equal(parent_arr[7, 7], [100, 100, 100, 255])
 
     def test_psnr_returns_float(self):
         """Test PSNR returns a float value."""
