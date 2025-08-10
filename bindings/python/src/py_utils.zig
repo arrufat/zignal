@@ -529,60 +529,29 @@ pub fn freePointList(points: []Point(2, f32)) void {
 }
 
 /// Set a Python exception with an error message that includes a file path.
-/// Automatically selects the appropriate Python exception type based on the error.
+/// Maps common errors to appropriate Python exception types.
 pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
-    // Map Zig errors to appropriate Python exception types
+    // Map only the most important Zig errors to Python exception types
     const exc_type = switch (err) {
         error.FileNotFound => c.PyExc_FileNotFoundError,
 
         error.AccessDenied,
         error.PermissionDenied,
-        error.SharingViolation,
         => c.PyExc_PermissionError,
 
-        error.IsDir => c.PyExc_IsADirectoryError,
-        error.NotDir => c.PyExc_NotADirectoryError,
-        error.PathAlreadyExists => c.PyExc_FileExistsError,
-
-        error.BadPathName,
-        error.InvalidUtf8,
-        error.InvalidWtf8,
         error.UnsupportedImageFormat,
         error.UnsupportedFontFormat,
         => c.PyExc_ValueError,
 
         error.OutOfMemory => c.PyExc_MemoryError,
 
-        error.WouldBlock, error.LockViolation => c.PyExc_BlockingIOError,
-
-        error.BrokenPipe => c.PyExc_BrokenPipeError,
-
-        error.ConnectionResetByPeer => c.PyExc_ConnectionResetError,
-
-        error.NameTooLong,
-        error.NoSpaceLeft,
-        error.DiskQuota,
-        error.SystemResources,
-        error.ProcessFdQuotaExceeded,
-        error.SystemFdQuotaExceeded,
-        error.FileTooBig,
-        error.FileBusy,
-        error.DeviceBusy,
-        error.NetworkNotFound,
-        error.NoDevice,
-        error.InputOutput,
-        error.SymLinkLoop,
-        error.AntivirusInterference,
-        error.Unexpected,
-        => c.PyExc_OSError,
-
-        // Default to IOError for any other file I/O errors
+        // Default to IOError for all other errors
         else => c.PyExc_IOError,
     };
 
-    // Format the error message with the path
-    var buffer: [128 + std.fs.max_path_bytes]u8 = undefined;
-    const msg = std.fmt.bufPrintZ(&buffer, "{s}: '{s}'", .{ @errorName(err), path }) catch @errorName(err);
+    // Format error message with path and error name for debugging
+    var buffer: [std.fs.max_path_bytes + 128]u8 = undefined;
+    const msg = std.fmt.bufPrintZ(&buffer, "Could not open file '{s}': {s}", .{ path, @errorName(err) }) catch "Could not open file";
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
