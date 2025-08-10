@@ -2,8 +2,12 @@ const std = @import("std");
 const c = @import("py_utils.zig").c;
 const zignal = @import("zignal");
 
-/// Extract RGBA values from a Python object with r,g,b,a attributes
-pub fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
+/// Extract RGBA values from a Python object with r,g,b,a attributes.
+/// This is a helper function used internally by parseColorToRgba.
+/// Returns error.InvalidColor if the object doesn't have the required attributes
+/// or if the attribute values cannot be converted to integers.
+/// Note: This function does NOT set Python exceptions - that's handled by parseColorToRgba.
+fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
     const r_attr = c.PyObject_GetAttrString(obj, "r");
     if (r_attr == null) return error.InvalidColor;
     defer c.Py_DECREF(r_attr);
@@ -37,8 +41,22 @@ pub fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
     };
 }
 
-/// Parse a Python color - either an integer (grayscale), a tuple (RGB/RGBA), or a color object
-/// Returns a zignal.Rgba color with values in range 0-255
+/// Parse a Python color - either an integer (grayscale), a tuple (RGB/RGBA), or a color object.
+/// Returns a zignal.Rgba color with values in range 0-255.
+///
+/// This function automatically sets appropriate Python exception messages when parsing fails,
+/// so callers can simply return null or propagate the error without additional error handling.
+///
+/// Supported formats:
+/// - Integer (0-255): Interpreted as grayscale, expanded to RGBA
+/// - Tuple of 3 ints: RGB values, alpha defaults to 255
+/// - Tuple of 4 ints: RGBA values
+/// - Color object with to_rgba() method
+/// - Color object with r,g,b,a attributes
+///
+/// On error, sets one of these Python exceptions:
+/// - TypeError: For invalid input types
+/// - ValueError: For out-of-range color values (not 0-255)
 pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
     if (color_obj == null) {
         return error.InvalidColor;
@@ -97,9 +115,14 @@ pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
     return error.InvalidColor;
 }
 
-/// Parse a Python tuple representing a color (RGB or RGBA)
-/// Returns a zignal.Rgba color with values in range 0-255
-/// This is now a helper function used by parseColor
+/// Parse a Python tuple representing a color (RGB or RGBA).
+/// Returns a zignal.Rgba color with values in range 0-255.
+/// This is a helper function used by parseColorToRgba.
+///
+/// Like parseColorToRgba, this function sets Python exception messages on error:
+/// - ValueError: If tuple size is not 3 or 4
+/// - TypeError: If tuple elements are not integers
+/// - ValueError: If color values are out of range (0-255)
 pub fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
     if (color_obj == null) {
         return error.InvalidColor;
