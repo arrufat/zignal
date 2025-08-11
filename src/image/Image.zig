@@ -13,10 +13,10 @@ const as = @import("../meta.zig").as;
 const is4xu8Struct = @import("../meta.zig").is4xu8Struct;
 const isScalar = @import("../meta.zig").isScalar;
 const png = @import("../png.zig");
+const BorderMode = @import("filtering.zig").BorderMode;
 const DisplayFormat = @import("display.zig").DisplayFormat;
 const DisplayFormatter = @import("display.zig").DisplayFormatter;
 const Filter = @import("filtering.zig").Filter;
-const BorderMode = @import("filtering.zig").BorderMode;
 const ImageFormat = @import("format.zig").ImageFormat;
 const interpolation = @import("interpolation.zig");
 const InterpolationMethod = interpolation.InterpolationMethod;
@@ -61,7 +61,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Constructs an image of rows and cols size allocating its own memory.
-        pub fn initAlloc(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(T) {
+        pub fn initAlloc(allocator: Allocator, rows: usize, cols: usize) !Image(T) {
             return .{ .rows = rows, .cols = cols, .data = try allocator.alloc(T, rows * cols), .stride = cols };
         }
 
@@ -904,7 +904,7 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
-        pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
+        pub fn boxBlur(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
             return Filter(T).boxBlur(self, allocator, blurred, radius);
         }
 
@@ -913,7 +913,7 @@ pub fn Image(comptime T: type) type {
         /// version of the original image (calculated efficiently using an integral image).
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
-        pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
+        pub fn sharpen(self: Self, allocator: Allocator, sharpened: *Self, radius: usize) !void {
             return Filter(T).sharpen(self, allocator, sharpened, radius);
         }
 
