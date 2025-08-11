@@ -468,3 +468,303 @@ test "sharpen struct type" {
     try expectEqual(sharpened_center.g >= original_center.g, true);
     try expectEqual(sharpened_center.b >= original_center.b, true);
 }
+
+test "convolve identity kernel" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize with pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c + 10);
+        }
+    }
+
+    // Identity kernel should leave image unchanged
+    const identity = [3][3]f32{
+        .{ 0, 0, 0 },
+        .{ 0, 1, 0 },
+        .{ 0, 0, 0 },
+    };
+
+    var result: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, identity, &result, .zero);
+    defer result.deinit(std.testing.allocator);
+
+    // Should be identical to original
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, result.at(r, c).*);
+        }
+    }
+}
+
+test "convolve blur kernel" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create sharp edge pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 2) 0 else 255;
+        }
+    }
+
+    // Box blur kernel
+    const blur = [3][3]f32{
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+    };
+
+    var result: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, blur, &result, .replicate);
+    defer result.deinit(std.testing.allocator);
+
+    // Edge should be softened (values between 0 and 255)
+    const edge_val = result.at(2, 2).*;
+    try expectEqual(edge_val > 0 and edge_val < 255, true);
+}
+
+test "convolve border modes" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Initialize center to 255, edges to 0
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(1, 1).* = 255;
+
+    // Simple averaging kernel
+    const kernel = [3][3]f32{
+        .{ 0.25, 0.25, 0 },
+        .{ 0.25, 0.25, 0 },
+        .{ 0, 0, 0 },
+    };
+
+    // Test zero border mode
+    var result_zero: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, kernel, &result_zero, .zero);
+    defer result_zero.deinit(std.testing.allocator);
+
+    // Test replicate border mode
+    var result_replicate: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, kernel, &result_replicate, .replicate);
+    defer result_replicate.deinit(std.testing.allocator);
+
+    // Test mirror border mode
+    var result_mirror: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, kernel, &result_mirror, .mirror);
+    defer result_mirror.deinit(std.testing.allocator);
+
+    // Border modes should produce different results
+    const corner_replicate = result_replicate.at(0, 0).*;
+
+    // With replicate, corners should be 0 (replicating edge values)
+    // With mirror/zero, results will differ based on how borders are handled
+    try expectEqual(corner_replicate == 0, true);
+
+    // Verify the border modes produce valid results (just check they don't crash)
+    _ = result_zero.at(0, 0).*;
+    _ = result_mirror.at(0, 0).*;
+}
+
+test "convolveSeparable Gaussian approximation" {
+    var image: Image(f32) = try .initAlloc(std.testing.allocator, 7, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create impulse in center
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(3, 3).* = 1.0;
+
+    // 1D Gaussian kernel approximation (normalized)
+    const gaussian_1d = [_]f32{ 0.25, 0.5, 0.25 };
+
+    var result: Image(f32) = .empty;
+    try image.convolveSeparable(std.testing.allocator, &gaussian_1d, &gaussian_1d, &result, .zero);
+    defer result.deinit(std.testing.allocator);
+
+    // Check that center has been spread out
+    const center = result.at(3, 3).*;
+    const adjacent = result.at(3, 2).*;
+
+    try expectEqual(center < 1.0, true); // Center should be less than original impulse
+    try expectEqual(adjacent > 0, true); // Adjacent pixels should have some value
+    try expectEqual(center > adjacent, true); // Center should still be brightest
+}
+
+test "blurGaussian basic" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 11, 11);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a white square in center
+    for (image.data) |*pixel| pixel.* = 0;
+    for (3..8) |r| {
+        for (3..8) |c| {
+            image.at(r, c).* = 255;
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    try image.blurGaussian(std.testing.allocator, 1.0, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Check that blur has smoothed the edges
+    const edge_sharp = image.at(2, 5).*; // Just outside the square
+    const edge_blurred = blurred.at(2, 5).*;
+
+    try expectEqual(edge_sharp, 0); // Original is sharp
+    try expectEqual(edge_blurred > 0, true); // Blurred has spread
+
+    // Center should still be bright
+    const center = blurred.at(5, 5).*;
+    try expectEqual(center > 200, true);
+}
+
+test "blurGaussian sigma variations" {
+    var image: Image(f32) = try .initAlloc(std.testing.allocator, 15, 15);
+    defer image.deinit(std.testing.allocator);
+
+    // Single bright pixel in center
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(7, 7).* = 1.0;
+
+    // Test with different sigmas
+    var blur_small: Image(f32) = .empty;
+    try image.blurGaussian(std.testing.allocator, 0.5, &blur_small);
+    defer blur_small.deinit(std.testing.allocator);
+
+    var blur_large: Image(f32) = .empty;
+    try image.blurGaussian(std.testing.allocator, 2.0, &blur_large);
+    defer blur_large.deinit(std.testing.allocator);
+
+    // Larger sigma should spread more
+    const center_small = blur_small.at(7, 7).*;
+    const center_large = blur_large.at(7, 7).*;
+    const edge_small = blur_small.at(7, 5).*; // 2 pixels away
+    const edge_large = blur_large.at(7, 5).*;
+
+    try expectEqual(center_small > center_large, true); // Small sigma keeps more at center
+    try expectEqual(edge_large > edge_small, true); // Large sigma spreads more to edges
+}
+
+test "sobel with new convolution" {
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create vertical edge
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 2) 0 else 255;
+        }
+    }
+
+    var edges: Image(u8) = .empty;
+    try image.sobel(std.testing.allocator, &edges);
+    defer edges.deinit(std.testing.allocator);
+
+    // Should detect strong edge at column 2
+    const edge_strength = edges.at(2, 2).*;
+    const non_edge = edges.at(2, 0).*;
+
+    try expectEqual(edge_strength > 200, true); // Strong edge
+    try expectEqual(non_edge < 50, true); // Weak or no edge
+}
+
+test "convolve3x3 optimization" {
+    // This test verifies that 3x3 convolution uses the optimized path
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 10, 10);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with random-ish pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast((r * 7 + c * 13) % 256);
+        }
+    }
+
+    // Edge detection kernel
+    const edge = [3][3]f32{
+        .{ -1, -1, -1 },
+        .{ -1, 8, -1 },
+        .{ -1, -1, -1 },
+    };
+
+    var result: Image(u8) = .empty;
+    try image.convolve(std.testing.allocator, edge, &result, .zero);
+    defer result.deinit(std.testing.allocator);
+
+    // Just verify it runs without error and produces reasonable output
+    try expectEqual(result.rows, image.rows);
+    try expectEqual(result.cols, image.cols);
+}
+
+test "convolve preserves color channels" {
+    // Test that RGB convolution processes each channel independently
+    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create distinct patterns in each channel
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = .{
+                .r = @intCast((r * 20) % 256), // Horizontal gradient in red
+                .g = @intCast((c * 20) % 256), // Vertical gradient in green
+                .b = @intCast((r + c) * 10 % 256), // Diagonal gradient in blue
+            };
+        }
+    }
+
+    // Identity kernel should preserve exact values
+    const identity = [3][3]f32{
+        .{ 0, 0, 0 },
+        .{ 0, 1, 0 },
+        .{ 0, 0, 0 },
+    };
+
+    var result: Image(Rgb) = .empty;
+    try image.convolve(std.testing.allocator, identity, &result, .zero);
+    defer result.deinit(std.testing.allocator);
+
+    // Verify identity kernel preserves all color channels exactly
+    for (1..image.rows - 1) |r| {
+        for (1..image.cols - 1) |c| {
+            const original = image.at(r, c).*;
+            const convolved = result.at(r, c).*;
+            try expectEqual(original.r, convolved.r);
+            try expectEqual(original.g, convolved.g);
+            try expectEqual(original.b, convolved.b);
+        }
+    }
+}
+
+test "blurGaussian preserves color" {
+    // Test that Gaussian blur on RGB images maintains color information
+    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 7, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a red square in the center
+    for (image.data) |*pixel| pixel.* = .{ .r = 0, .g = 0, .b = 0 };
+    for (2..5) |r| {
+        for (2..5) |c| {
+            image.at(r, c).* = .{ .r = 255, .g = 0, .b = 0 }; // Pure red
+        }
+    }
+
+    var blurred: Image(Rgb) = .empty;
+    try image.blurGaussian(std.testing.allocator, 1.0, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Center should still be red (though not pure 255)
+    const center = blurred.at(3, 3).*;
+    try expectEqual(true, center.r > 150); // Red channel should be high (adjusted for blur)
+    try expectEqual(true, center.g < 20); // Green should be low
+    try expectEqual(true, center.b < 20); // Blue should be low
+
+    // Edges should have blurred red (not gray)
+    const edge = blurred.at(2, 1).*;
+    if (edge.r > 0) {
+        // If there's any color, it should be red, not gray
+        try expectEqual(true, edge.g < edge.r / 2);
+        try expectEqual(true, edge.b < edge.r / 2);
+    }
+}

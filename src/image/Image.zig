@@ -15,6 +15,8 @@ const isScalar = @import("../meta.zig").isScalar;
 const png = @import("../png.zig");
 const DisplayFormat = @import("display.zig").DisplayFormat;
 const DisplayFormatter = @import("display.zig").DisplayFormatter;
+const filtering = @import("filtering.zig");
+const BorderMode = filtering.BorderMode;
 const ImageFormat = @import("format.zig").ImageFormat;
 const interpolation = @import("interpolation.zig");
 const InterpolationMethod = interpolation.InterpolationMethod;
@@ -29,6 +31,7 @@ pub fn Image(comptime T: type) type {
         stride: usize,
 
         const Self = @This();
+        const Filter = filtering.Filter(T);
 
         /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
         /// When passed to functions like `rotateFrom()`, `boxBlur()`, etc., the function will
@@ -903,294 +906,7 @@ pub fn Image(comptime T: type) type {
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
-            if (!self.hasSameShape(blurred.*)) {
-                blurred.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(blurred.*);
-                return;
-            }
-
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    var sat: Image(f32) = undefined;
-                    try self.integral(allocator, &sat);
-                    defer sat.deinit(allocator);
-
-                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
-
-                    // Process each row
-                    for (0..self.rows) |r| {
-                        const r1 = r -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-
-                        var c: usize = 0;
-
-                        // Process SIMD chunks where safe (away from borders)
-                        const row_safe = r >= radius and r + radius < self.rows;
-                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
-                            // Skip left border
-                            while (c < radius) : (c += 1) {
-                                const c1 = c -| radius;
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                                const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                    sat.at(r1, c2).* + sat.at(r1, c1).*;
-                                blurred.at(r, c).* = if (@typeInfo(T) == .int)
-                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
-                                else
-                                    as(T, sum / area);
-                            }
-
-                            // SIMD middle section (constant area when row is safe)
-                            const safe_end = self.cols - radius - simd_len;
-                            if (c <= safe_end) {
-                                const const_area: f32 = @floatFromInt((r2 - r1) * 2 * radius);
-                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
-
-                                while (c <= safe_end) : (c += simd_len) {
-                                    const c1 = c - radius;
-                                    const c2 = c + radius;
-                                    const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                                    const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                                    const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
-                                    const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
-                                    const sums = int22 - int21 - int12 + int11;
-                                    const vals = sums / area_vec;
-
-                                    for (0..simd_len) |i| {
-                                        blurred.at(r, c + i).* = if (@typeInfo(T) == .int)
-                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(vals[i]))))
-                                        else
-                                            vals[i];
-                                    }
-                                }
-                            }
-                        }
-
-                        // Process remaining pixels (right border and any leftover)
-                        while (c < self.cols) : (c += 1) {
-                            const c1 = c -| radius;
-                            const c2 = @min(c + radius, self.cols - 1);
-                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = sat.at(r2, c2).* - sat.at(r2, c1).* - sat.at(r1, c2).* + sat.at(r1, c1).*;
-                            blurred.at(r, c).* = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
-                            else
-                                as(T, sum / area);
-                        }
-                    }
-                },
-                .@"struct" => {
-                    if (is4xu8Struct(T)) {
-                        try self.boxBlur4xu8Simd(allocator, blurred, radius);
-                    } else {
-                        // Generic struct path for other color types
-                        var sat: Image([Self.channels()]f32) = undefined;
-                        try self.integral(allocator, &sat);
-                        defer sat.deinit(allocator);
-
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const r1 = r -| radius;
-                                const c1 = c -| radius;
-                                const r2 = @min(r + radius, self.rows - 1);
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-
-                                inline for (std.meta.fields(T), 0..) |f, i| {
-                                    const sum = sat.at(r2, c2)[i] - sat.at(r2, c1)[i] -
-                                        sat.at(r1, c2)[i] + sat.at(r1, c1)[i];
-                                    @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
-                                        .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
-                                        .float => as(f.type, sum / area),
-                                        else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
-                                    };
-                                }
-                            }
-                        }
-                    }
-                },
-                else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
-            }
-        }
-
-        /// Optimized box blur implementation for structs with 4 u8 fields using SIMD throughout.
-        /// This is automatically called by boxBlur() when T has exactly 4 u8 fields (e.g., RGBA, BGRA, etc).
-        fn boxBlur4xu8Simd(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
-            // Verify at compile time that this is a struct with 4 u8 fields
-            comptime {
-                const fields = std.meta.fields(T);
-                assert(fields.len == 4);
-                for (fields) |field| {
-                    assert(field.type == u8);
-                }
-            }
-
-            // Initialize output if needed
-            if (!self.hasSameShape(blurred.*)) {
-                blurred.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(blurred.*);
-                return;
-            }
-
-            // Create integral image with 4 channels
-            var sat = try Image([4]f32).initAlloc(allocator, self.rows, self.cols);
-            defer sat.deinit(allocator);
-
-            // Build integral image - first pass: row-wise cumulative sums
-            for (0..self.rows) |r| {
-                var tmp: @Vector(4, f32) = @splat(0);
-                const row_offset = r * self.stride;
-                const out_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const pixel = self.data[row_offset + c];
-                    var pixel_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
-                    }
-                    tmp += pixel_vec;
-                    sat.data[out_offset + c] = tmp;
-                }
-            }
-
-            // Second pass: column-wise cumulative sums
-            for (1..self.rows) |r| {
-                const prev_row_offset = (r - 1) * sat.cols;
-                const curr_row_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const prev_vec: @Vector(4, f32) = sat.data[prev_row_offset + c];
-                    const curr_vec: @Vector(4, f32) = sat.data[curr_row_offset + c];
-                    sat.data[curr_row_offset + c] = prev_vec + curr_vec;
-                }
-            }
-
-            // Apply box blur with SIMD
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const r1 = r -| radius;
-                    const c1 = c -| radius;
-                    const r2 = @min(r + radius, self.rows - 1);
-                    const c2 = @min(c + radius, self.cols - 1);
-                    const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                    const area_vec: @Vector(4, f32) = @splat(area);
-
-                    // Use vectors for the box sum calculation
-                    const v_r2c2: @Vector(4, f32) = sat.at(r2, c2).*;
-                    const v_r2c1: @Vector(4, f32) = sat.at(r2, c1).*;
-                    const v_r1c2: @Vector(4, f32) = sat.at(r1, c2).*;
-                    const v_r1c1: @Vector(4, f32) = sat.at(r1, c1).*;
-
-                    const sum_vec = v_r2c2 - v_r2c1 - v_r1c2 + v_r1c1;
-                    const avg_vec = sum_vec / area_vec;
-
-                    // Convert back to struct
-                    var result: T = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(avg_vec[i]))));
-                    }
-                    blurred.at(r, c).* = result;
-                }
-            }
-        }
-
-        /// Optimized sharpen implementation for structs with 4 u8 fields using SIMD throughout.
-        /// This is automatically called by sharpen() when T has exactly 4 u8 fields (e.g., RGBA, BGRA, etc).
-        fn sharpen4xu8Simd(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
-            // Verify at compile time that this is a struct with 4 u8 fields
-            comptime {
-                const fields = std.meta.fields(T);
-                assert(fields.len == 4);
-                for (fields) |field| {
-                    assert(field.type == u8);
-                }
-            }
-
-            // Initialize output if needed
-            if (!self.hasSameShape(sharpened.*)) {
-                sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(sharpened.*);
-                return;
-            }
-
-            // Create integral image with 4 channels
-            var sat = try Image([4]f32).initAlloc(allocator, self.rows, self.cols);
-            defer sat.deinit(allocator);
-
-            // Build integral image - first pass: row-wise cumulative sums
-            for (0..self.rows) |r| {
-                var tmp: @Vector(4, f32) = @splat(0);
-                const row_offset = r * self.stride;
-                const out_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const pixel = self.data[row_offset + c];
-                    var pixel_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
-                    }
-                    tmp += pixel_vec;
-                    sat.data[out_offset + c] = tmp;
-                }
-            }
-
-            // Second pass: column-wise cumulative sums
-            for (1..self.rows) |r| {
-                const prev_row_offset = (r - 1) * sat.cols;
-                const curr_row_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const prev_vec: @Vector(4, f32) = sat.data[prev_row_offset + c];
-                    const curr_vec: @Vector(4, f32) = sat.data[curr_row_offset + c];
-                    sat.data[curr_row_offset + c] = prev_vec + curr_vec;
-                }
-            }
-
-            // Apply sharpen with SIMD: sharpened = 2 * original - blurred
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const r1 = r -| radius;
-                    const c1 = c -| radius;
-                    const r2 = @min(r + radius, self.rows - 1);
-                    const c2 = @min(c + radius, self.cols - 1);
-                    const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                    const area_vec: @Vector(4, f32) = @splat(area);
-
-                    // Use vectors for the box sum calculation (blur)
-                    const v_r2c2: @Vector(4, f32) = sat.at(r2, c2).*;
-                    const v_r2c1: @Vector(4, f32) = sat.at(r2, c1).*;
-                    const v_r1c2: @Vector(4, f32) = sat.at(r1, c2).*;
-                    const v_r1c1: @Vector(4, f32) = sat.at(r1, c1).*;
-
-                    const sum_vec = v_r2c2 - v_r2c1 - v_r1c2 + v_r1c1;
-                    const blurred_vec = sum_vec / area_vec;
-
-                    // Get original pixel as vector
-                    const original_pixel = self.data[r * self.stride + c];
-                    var original_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        original_vec[i] = @floatFromInt(@field(original_pixel, field.name));
-                    }
-
-                    // Apply sharpening formula: 2 * original - blurred
-                    const sharpened_vec = @as(@Vector(4, f32), @splat(2.0)) * original_vec - blurred_vec;
-
-                    // Convert back to struct with clamping
-                    var result: T = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(sharpened_vec[i]))));
-                    }
-                    sharpened.at(r, c).* = result;
-                }
-            }
+            return Filter.boxBlur(self, allocator, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -1199,127 +915,41 @@ pub fn Image(comptime T: type) type {
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
-            if (!self.hasSameShape(sharpened.*)) {
-                sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(sharpened.*);
-                return;
-            }
+            return Filter.sharpen(self, allocator, sharpened, radius);
+        }
 
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    var sat: Image(f32) = undefined;
-                    defer sat.deinit(allocator);
-                    try self.integral(allocator, &sat);
+        /// Applies a 2D convolution with the given kernel to the image.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
+        /// - `kernel`: A 2D array representing the convolution kernel.
+        /// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
+        /// - `border_mode`: How to handle pixels at the image borders.
+        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border_mode: BorderMode) !void {
+            return Filter.convolve(self, allocator, kernel, out, border_mode);
+        }
 
-                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+        /// Performs separable convolution using two 1D kernels (horizontal and vertical).
+        /// This is much more efficient for separable filters like Gaussian blur.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `kernel_x`: Horizontal (column) kernel.
+        /// - `kernel_y`: Vertical (row) kernel.
+        /// - `out`: Output image.
+        /// - `border_mode`: How to handle image borders.
+        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
+            return Filter.convolveSeparable(self, allocator, kernel_x, kernel_y, out, border_mode);
+        }
 
-                    // Process each row
-                    for (0..self.rows) |r| {
-                        const r1 = r -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-
-                        var c: usize = 0;
-
-                        // Process SIMD chunks where safe (away from borders)
-                        const row_safe = r >= radius and r + radius < self.rows;
-                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
-                            // Skip left border
-                            while (c < radius) : (c += 1) {
-                                const c1 = c -| radius;
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                                const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                    sat.at(r1, c2).* + sat.at(r1, c1).*;
-                                const blurred = sum / area;
-                                sharpened.at(r, c).* = if (@typeInfo(T) == .int)
-                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
-                                else
-                                    as(T, 2 * as(f32, self.at(r, c).*) - blurred);
-                            }
-
-                            // SIMD middle section (constant area when row is safe)
-                            const safe_end = self.cols - radius - simd_len;
-                            if (c <= safe_end) {
-                                const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
-                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
-
-                                while (c <= safe_end) : (c += simd_len) {
-                                    const c1 = c - radius;
-                                    const c2 = c + radius;
-                                    const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                                    const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                                    const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
-                                    const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
-                                    const sums = int22 - int21 - int12 + int11;
-                                    const blurred_vals = sums / area_vec;
-
-                                    for (0..simd_len) |i| {
-                                        const original = self.at(r, c + i).*;
-                                        sharpened.at(r, c + i).* = if (@typeInfo(T) == .int)
-                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, original) - blurred_vals[i]))))
-                                        else
-                                            as(T, 2 * as(f32, original) - blurred_vals[i]);
-                                    }
-                                }
-                            }
-                        }
-
-                        // Process remaining pixels (right border and any leftover)
-                        while (c < self.cols) : (c += 1) {
-                            const c1 = c -| radius;
-                            const c2 = @min(c + radius, self.cols - 1);
-                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                sat.at(r1, c2).* + sat.at(r1, c1).*;
-                            const blurred = sum / area;
-                            sharpened.at(r, c).* = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
-                            else
-                                as(T, 2 * as(f32, self.at(r, c).*) - blurred);
-                        }
-                    }
-                },
-                .@"struct" => {
-                    if (is4xu8Struct(T)) {
-                        try self.sharpen4xu8Simd(allocator, sharpened, radius);
-                    } else {
-                        // Generic struct path for other color types
-                        var sat: Image([Self.channels()]f32) = undefined;
-                        try self.integral(allocator, &sat);
-                        defer sat.deinit(allocator);
-
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const r1 = r -| radius;
-                                const c1 = c -| radius;
-                                const r2 = @min(r + radius, self.rows - 1);
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-
-                                inline for (std.meta.fields(T), 0..) |f, i| {
-                                    const sum = sat.at(r2, c2)[i] - sat.at(r2, c1)[i] -
-                                        sat.at(r1, c2)[i] + sat.at(r1, c1)[i];
-                                    const blurred = sum / area;
-                                    const original = @field(self.at(r, c).*, f.name);
-                                    @field(sharpened.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
-                                        .int => blk: {
-                                            const sharpened_val = 2 * as(f32, original) - blurred;
-                                            break :blk @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
-                                        },
-                                        .float => as(f.type, 2 * as(f32, original) - blurred),
-                                        else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
-                                    };
-                                }
-                            }
-                        }
-                    }
-                },
-                else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
-            }
+        /// Applies Gaussian blur to the image using separable convolution.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `sigma`: Standard deviation of the Gaussian kernel.
+        /// - `out`: Output blurred image.
+        pub fn blurGaussian(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
+            return Filter.blurGaussian(self, allocator, sigma, out);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
@@ -1329,39 +959,7 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
         /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
-            if (!self.hasSameShape(out.*)) {
-                out.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            const vert_filter = [3][3]i32{
-                .{ -1, -2, -1 },
-                .{ 0, 0, 0 },
-                .{ 1, 2, 1 },
-            };
-            const horz_filter = [3][3]i32{
-                .{ -1, 0, 1 },
-                .{ -2, 0, 2 },
-                .{ -1, 0, 1 },
-            };
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const ir: isize = @intCast(r);
-                    const ic: isize = @intCast(c);
-                    var horz_temp: i32 = 0;
-                    var vert_temp: i32 = 0;
-                    for (0..vert_filter.len) |m| {
-                        const py: isize = ir - 1 + @as(isize, @intCast(m));
-                        for (0..vert_filter[0].len) |n| {
-                            const px: isize = ic - 1 + @as(isize, @intCast(n));
-                            if (self.atOrNull(py, px)) |val| {
-                                const p: i32 = @intCast(convertColor(u8, val.*));
-                                horz_temp += p * horz_filter[m][n];
-                                vert_temp += p * vert_filter[m][n];
-                            }
-                        }
-                    }
-                    out.at(r, c).* = @intFromFloat(@max(0, @min(255, @sqrt(@as(f32, @floatFromInt(horz_temp * horz_temp + vert_temp * vert_temp))))));
-                }
-            }
+            return Filter.sobel(self, allocator, out);
         }
 
         /// Calculates the Peak Signal-to-Noise Ratio (PSNR) between two images.
