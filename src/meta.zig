@@ -22,7 +22,7 @@ pub inline fn as(comptime T: type, from: anytype) T {
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
-        else => @compileError(@typeName(@TypeOf(from) ++ " is not supported.")),
+        else => @compileError(@typeName(@TypeOf(from)) ++ " is not supported."),
     }
 }
 
