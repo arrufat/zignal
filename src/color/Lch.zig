@@ -4,6 +4,9 @@
 //! - c: Chroma (chromatic intensity) (0 for achromatic, no upper bound).
 //! - h: Hue angle in degrees (0-360).
 
+const std = @import("std");
+
+const BlendMode = @import("blending.zig").BlendMode;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -28,7 +31,7 @@ pub const black: Lch = .{ .l = 0, .c = 0, .h = 0 };
 pub const white: Lch = .{ .l = 100, .c = 0, .h = 0 };
 
 /// Default formatting with ANSI color output
-pub fn format(self: Lch, writer: anytype) !void {
+pub fn format(self: Lch, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Lch, self, writer);
 }
 
@@ -97,10 +100,7 @@ pub fn toYcbcr(self: Lch) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
-/// Alpha blending: blends the given RGBA color onto this LCh color.
-pub fn blend(self: *Lch, overlay: Rgba) void {
-    // Convert to RGB, blend, then convert back
-    var rgb = self.toRgb();
-    rgb.blend(overlay);
-    self.* = rgb.toLch();
+/// Alpha blending: blends the given RGBA color onto this LCh color and returns the result.
+pub fn blend(self: Lch, overlay: Rgba, mode: BlendMode) Lch {
+    return self.toRgb().blend(overlay, mode).toLch();
 }

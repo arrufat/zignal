@@ -531,9 +531,9 @@ pub fn Canvas(comptime T: type) type {
                             pixel.* = convertColor(T, color);
                         } else if (color.a > 0) {
                             // Transparent - blend
-                            var dst = convertColor(Rgba, pixel.*);
-                            dst.blend(color);
-                            pixel.* = convertColor(T, dst);
+                            const dst = convertColor(Rgba, pixel.*);
+                            const blended = dst.blend(color, .normal);
+                            pixel.* = convertColor(T, blended);
                         }
                     },
                     else => pixel.* = convertColor(T, color),
@@ -1541,7 +1541,6 @@ test "MD5 checksum regression tests" {
     const allocator = testing.allocator;
     const print_md5sums = @import("build_options").print_md5sums;
 
-    // Fixed size for consistent checksums
     const width = 100;
     const height = 100;
 
@@ -1556,6 +1555,9 @@ test "MD5 checksum regression tests" {
 
         const canvas = Canvas(Rgba).init(allocator, img);
         test_case.draw_fn(canvas);
+        // const filename = try std.fmt.allocPrint(allocator, "{s}.png", .{test_case.name});
+        // defer allocator.free(filename);
+        // try canvas.image.save(allocator, filename);
 
         // Calculate MD5
         var md5sum: [std.crypto.hash.Md5.digest_length]u8 = undefined;

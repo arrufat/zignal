@@ -3,6 +3,8 @@
 
 const std = @import("std");
 
+const blendColors = @import("blending.zig").blendColors;
+const BlendMode = @import("blending.zig").BlendMode;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -118,17 +120,14 @@ pub fn toXyb(self: Rgb) Xyb {
     return conversions.lmsToXyb(self.toLms());
 }
 
-/// Converts RGB to Ycbcr color space using ITU-R BT.601 coefficients.
+/// Converts RGB to YCbCr color space using ITU-R BT.601 coefficients.
 pub fn toYcbcr(self: Rgb) Ycbcr {
     return conversions.rgbToYcbcr(self);
 }
 
-/// Alpha blends the given RGBA color onto this RGB color in-place.
-pub fn blend(self: *Rgb, color: Rgba) void {
-    if (color.a == 0) return;
-
-    const a = @as(f32, @floatFromInt(color.a)) / 255;
-    self.r = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.r)), @as(f32, @floatFromInt(color.r)), a));
-    self.g = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.g)), @as(f32, @floatFromInt(color.g)), a));
-    self.b = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.b)), @as(f32, @floatFromInt(color.b)), a));
+/// Alpha blends the given RGBA color onto this RGB color using the specified blend mode.
+/// Returns a new blended color.
+pub fn blend(self: Rgb, overlay: Rgba, mode: BlendMode) Rgb {
+    const blended = blendColors(self.toRgba(255), overlay, mode);
+    return .{ .r = blended.r, .g = blended.g, .b = blended.b };
 }

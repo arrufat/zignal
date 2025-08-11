@@ -8,6 +8,9 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
+const blending = @import("color/blending.zig");
+pub const BlendMode = blending.BlendMode;
+pub const blendColors = blending.blendColors;
 const conversions = @import("color/conversions.zig");
 pub const convertColor = conversions.convertColor;
 pub const isColor = conversions.isColor;
@@ -29,6 +32,11 @@ const getSimpleTypeName = @import("meta.zig").getSimpleTypeName;
 // TESTS
 // ============================================================================
 
+// Import tests from sub-modules
+test {
+    _ = @import("color/blending.zig");
+}
+
 // Helper function for testing round-trip conversions
 fn testColorConversion(from: Rgb, to: anytype) !void {
     const converted = convertColor(@TypeOf(to), from);
@@ -42,97 +50,6 @@ test "convert grayscale" {
     try expectEqual(convertColor(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
     try expectEqual(convertColor(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
     try expectEqual(convertColor(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
-}
-
-test "alphaBlend" {
-    const white = Rgb{ .r = 255, .g = 255, .b = 255 };
-    var output = Rgb{ .r = 0, .g = 0, .b = 0 };
-    output.blend(white.toRgba(128));
-    try expectEqualDeep(output, Rgb{ .r = 128, .g = 128, .b = 128 });
-}
-
-test "blend methods for all color types" {
-    // Test data: blend red (255,0,0) with 50% alpha onto black background
-    const red_rgba = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
-    const expected_rgb = Rgb{ .r = 128, .g = 0, .b = 0 }; // 50% blend of red on black
-
-    // Test Rgba.blend
-    {
-        var rgba_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
-        rgba_color.blend(red_rgba);
-        try expectEqualDeep(rgba_color.toRgb(), expected_rgb);
-    }
-
-    // Test Hsl.blend
-    {
-        var hsl_color = Hsl{ .h = 0, .s = 0, .l = 0 }; // black
-        hsl_color.blend(red_rgba);
-        const result_rgb = hsl_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Hsv.blend
-    {
-        var hsv_color = Hsv{ .h = 0, .s = 0, .v = 0 }; // black
-        hsv_color.blend(red_rgba);
-        const result_rgb = hsv_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Lab.blend
-    {
-        var lab_color = Lab{ .l = 0, .a = 0, .b = 0 }; // black
-        lab_color.blend(red_rgba);
-        const result_rgb = lab_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Oklab.blend
-    {
-        var oklab_color = Oklab{ .l = 0, .a = 0, .b = 0 }; // black
-        oklab_color.blend(red_rgba);
-        const result_rgb = oklab_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Oklch.blend
-    {
-        var oklch_color = Oklch{ .l = 0, .c = 0, .h = 0 }; // black
-        oklch_color.blend(red_rgba);
-        const result_rgb = oklch_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Lms.blend
-    {
-        var lms_color = Lms{ .l = 0, .m = 0, .s = 0 }; // black
-        lms_color.blend(red_rgba);
-        const result_rgb = lms_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-
-    // Test Xyb.blend
-    {
-        var xyb_color = Xyb{ .x = 0, .y = 0, .b = 0 }; // black
-        xyb_color.blend(red_rgba);
-        const result_rgb = xyb_color.toRgb();
-        try expectEqualDeep(result_rgb, expected_rgb);
-    }
-}
-
-test "blend with zero alpha should not change color" {
-    const transparent_red = Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 };
-    const original_blue = Rgb{ .r = 0, .g = 0, .b = 255 };
-
-    // Test that blending with zero alpha doesn't change the original color
-    var test_rgb = original_blue;
-    test_rgb.blend(transparent_red);
-    try expectEqualDeep(test_rgb, original_blue);
-
-    var test_hsl = original_blue.toHsl();
-    const original_hsl = test_hsl;
-    test_hsl.blend(transparent_red);
-    try expectEqualDeep(test_hsl, original_hsl);
 }
 
 test "Rgb fromHex and toHex" {

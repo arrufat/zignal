@@ -2,6 +2,8 @@ const std = @import("std");
 
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
+const blendColors = @import("blending.zig").blendColors;
+const BlendMode = @import("blending.zig").BlendMode;
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
@@ -128,13 +130,9 @@ pub const Rgba = packed struct {
         };
     }
 
-    /// Alpha blends the given RGBA color onto this RGBA color in-place.
-    pub fn blend(self: *Rgba, color: Rgba) void {
-        if (color.a == 0) return;
-
-        const a = @as(f32, @floatFromInt(color.a)) / 255;
-        self.r = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.r)), @as(f32, @floatFromInt(color.r)), a));
-        self.g = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.g)), @as(f32, @floatFromInt(color.g)), a));
-        self.b = @intFromFloat(std.math.lerp(@as(f32, @floatFromInt(self.b)), @as(f32, @floatFromInt(color.b)), a));
+    /// Alpha blends the given RGBA color onto this RGBA color using the specified blend mode.
+    /// Returns a new blended color.
+    pub fn blend(self: Rgba, overlay: Rgba, mode: BlendMode) Rgba {
+        return blendColors(self, overlay, mode);
     }
 };
