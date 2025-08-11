@@ -15,8 +15,8 @@ const isScalar = @import("../meta.zig").isScalar;
 const png = @import("../png.zig");
 const DisplayFormat = @import("display.zig").DisplayFormat;
 const DisplayFormatter = @import("display.zig").DisplayFormatter;
-const filtering = @import("filtering.zig");
-const BorderMode = filtering.BorderMode;
+const Filter = @import("filter.zig").Filter;
+const BorderMode = @import("filter.zig").BorderMode;
 const ImageFormat = @import("format.zig").ImageFormat;
 const interpolation = @import("interpolation.zig");
 const InterpolationMethod = interpolation.InterpolationMethod;
@@ -31,7 +31,6 @@ pub fn Image(comptime T: type) type {
         stride: usize,
 
         const Self = @This();
-        const Filter = filtering.Filter(T);
 
         /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
         /// When passed to functions like `rotateFrom()`, `boxBlur()`, etc., the function will
@@ -906,7 +905,7 @@ pub fn Image(comptime T: type) type {
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
-            return Filter.boxBlur(self, allocator, blurred, radius);
+            return Filter(T).boxBlur(self, allocator, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -915,7 +914,7 @@ pub fn Image(comptime T: type) type {
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
-            return Filter.sharpen(self, allocator, sharpened, radius);
+            return Filter(T).sharpen(self, allocator, sharpened, radius);
         }
 
         /// Applies a 2D convolution with the given kernel to the image.
@@ -926,7 +925,7 @@ pub fn Image(comptime T: type) type {
         /// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
         /// - `border_mode`: How to handle pixels at the image borders.
         pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border_mode: BorderMode) !void {
-            return Filter.convolve(self, allocator, kernel, out, border_mode);
+            return Filter(T).convolve(self, allocator, kernel, out, border_mode);
         }
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
@@ -939,7 +938,7 @@ pub fn Image(comptime T: type) type {
         /// - `out`: Output image.
         /// - `border_mode`: How to handle image borders.
         pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
-            return Filter.convolveSeparable(self, allocator, kernel_x, kernel_y, out, border_mode);
+            return Filter(T).convolveSeparable(self, allocator, kernel_x, kernel_y, out, border_mode);
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
@@ -949,7 +948,7 @@ pub fn Image(comptime T: type) type {
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
         pub fn blurGaussian(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
-            return Filter.blurGaussian(self, allocator, sigma, out);
+            return Filter(T).blurGaussian(self, allocator, sigma, out);
         }
 
         /// Applies Difference of Gaussians (DoG) band-pass filter to the image.
@@ -965,7 +964,7 @@ pub fn Image(comptime T: type) type {
         /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
         /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
         pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, out: *Self) !void {
-            return Filter.differenceOfGaussians(self, allocator, sigma1, sigma2, out);
+            return Filter(T).differenceOfGaussians(self, allocator, sigma1, sigma2, out);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
@@ -975,7 +974,7 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
         /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
-            return Filter.sobel(self, allocator, out);
+            return Filter(T).sobel(self, allocator, out);
         }
 
         /// Calculates the Peak Signal-to-Noise Ratio (PSNR) between two images.

@@ -13,10 +13,14 @@ const Image = @import("Image.zig").Image;
 
 /// Border handling modes for filter operations
 pub const BorderMode = enum {
-    zero, // Pad with zeros
-    replicate, // Replicate edge pixels
-    mirror, // Mirror at edges
-    wrap, // Wrap around (circular)
+    /// Pad with zeros
+    zero,
+    /// Replicate edge pixels
+    replicate,
+    /// Mirror at edges
+    mirror,
+    /// Wrap around (circular)
+    wrap,
 };
 
 /// Filter operations for Image(T)

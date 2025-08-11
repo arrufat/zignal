@@ -10,6 +10,7 @@
 
 // Re-export all public types
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
+pub const BorderMode = @import("image/filter.zig").BorderMode;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Image = @import("image/Image.zig").Image;
 pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
