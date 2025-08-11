@@ -737,6 +737,162 @@ test "convolve preserves color channels" {
     }
 }
 
+test "differenceOfGaussians basic functionality" {
+    // Test basic DoG functionality with a simple edge pattern
+    var image: Image(f32) = try .initAlloc(std.testing.allocator, 11, 11);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a white square in the center
+    for (image.data) |*pixel| pixel.* = 0;
+    for (3..8) |r| {
+        for (3..8) |c| {
+            image.at(r, c).* = 1.0;
+        }
+    }
+
+    var dog_result: Image(f32) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 1.0, 1.6, &dog_result);
+    defer dog_result.deinit(std.testing.allocator);
+
+    // Check that DoG produces reasonable results
+    try expectEqual(@as(usize, 11), dog_result.rows);
+    try expectEqual(@as(usize, 11), dog_result.cols);
+
+    // Check that we have non-zero values (the filter did something)
+    var has_non_zero = false;
+    var has_positive = false;
+    var has_negative = false;
+    for (0..dog_result.rows) |r| {
+        for (0..dog_result.cols) |c| {
+            const val = dog_result.at(r, c).*;
+            if (val != 0) has_non_zero = true;
+            if (val > 0) has_positive = true;
+            if (val < 0) has_negative = true;
+        }
+    }
+
+    // DoG should produce both positive and negative values (band-pass characteristic)
+    try expectEqual(true, has_non_zero);
+    try expectEqual(true, has_positive);
+    try expectEqual(true, has_negative);
+}
+
+test "differenceOfGaussians edge detection" {
+    // Test DoG for edge detection with vertical edge
+    var image: Image(u8) = try .initAlloc(std.testing.allocator, 7, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a vertical edge
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 3) 64 else 192;
+        }
+    }
+
+    var dog_result: Image(u8) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 0.5, 1.0, &dog_result);
+    defer dog_result.deinit(std.testing.allocator);
+
+    // The edge region (around column 3) should have different values than uniform regions
+    const left_uniform = dog_result.at(3, 1).*;
+    const edge_region = dog_result.at(3, 3).*;
+    const right_uniform = dog_result.at(3, 5).*;
+
+    // Edge region should differ from uniform regions
+    try expectEqual(true, edge_region != left_uniform or edge_region != right_uniform);
+}
+
+test "differenceOfGaussians invalid parameters" {
+    var image: Image(f32) = try .initAlloc(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    var result: Image(f32) = .empty;
+    // Don't defer deinit for an empty image that may never be allocated
+
+    // Test with invalid sigmas
+    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, -1.0, 2.0, &result));
+    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, 1.0, -2.0, &result));
+    try std.testing.expectError(error.SigmasMustDiffer, image.differenceOfGaussians(std.testing.allocator, 1.0, 1.0, &result));
+}
+
+test "differenceOfGaussians with RGB" {
+    // Test DoG with color images
+    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 9, 9);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a colored square in the center
+    for (image.data) |*pixel| pixel.* = .{ .r = 0, .g = 0, .b = 0 };
+    for (3..6) |r| {
+        for (3..6) |c| {
+            image.at(r, c).* = .{ .r = 255, .g = 128, .b = 64 };
+        }
+    }
+
+    var dog_result: Image(Rgb) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 0.8, 1.3, &dog_result);
+    defer dog_result.deinit(std.testing.allocator);
+
+    // Just verify it runs without error and produces reasonable output
+    try expectEqual(dog_result.rows, image.rows);
+    try expectEqual(dog_result.cols, image.cols);
+
+    // Check that color channels are processed independently
+    const center = dog_result.at(4, 4).*;
+    const edge = dog_result.at(2, 4).*;
+
+    // Edge and center should have different values (edge enhancement)
+    try expectEqual(true, center.r != edge.r or center.g != edge.g or center.b != edge.b);
+}
+
+test "differenceOfGaussians approximates manual subtraction" {
+    // Test that DoG(sigma1, sigma2) ≈ blur(sigma1) - blur(sigma2)
+    var image: Image(f32) = try .initAlloc(std.testing.allocator, 15, 15);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a test pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            const val = @as(f32, @floatFromInt((r + c) % 5)) * 0.2;
+            image.at(r, c).* = val;
+        }
+    }
+
+    const sigma1: f32 = 1.0;
+    const sigma2: f32 = 2.0;
+
+    // Compute DoG
+    var dog_result: Image(f32) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, sigma1, sigma2, &dog_result);
+    defer dog_result.deinit(std.testing.allocator);
+
+    // Compute manual subtraction
+    var blur1: Image(f32) = .empty;
+    var blur2: Image(f32) = .empty;
+    try image.blurGaussian(std.testing.allocator, sigma1, &blur1);
+    defer blur1.deinit(std.testing.allocator);
+    try image.blurGaussian(std.testing.allocator, sigma2, &blur2);
+    defer blur2.deinit(std.testing.allocator);
+
+    // Manual subtraction
+    var manual_result: Image(f32) = try .initAlloc(std.testing.allocator, image.rows, image.cols);
+    defer manual_result.deinit(std.testing.allocator);
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            manual_result.at(r, c).* = blur1.at(r, c).* - blur2.at(r, c).*;
+        }
+    }
+
+    // Results should be very close (allowing for small floating point differences)
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            const dog_val = dog_result.at(r, c).*;
+            const manual_val = manual_result.at(r, c).*;
+            const diff = @abs(dog_val - manual_val);
+            try expectEqual(true, diff < 0.001); // Allow small tolerance for floating point
+        }
+    }
+}
+
 test "blurGaussian preserves color" {
     // Test that Gaussian blur on RGB images maintains color information
     var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 7, 7);

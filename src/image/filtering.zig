@@ -897,6 +897,122 @@ pub fn Filter(comptime T: type) type {
             try convolveSeparable(self, allocator, kernel, kernel, out, .mirror);
         }
 
+        /// Applies Difference of Gaussians (DoG) band-pass filter to the image.
+        /// This efficiently computes the difference between two Gaussian blurs with different sigmas,
+        /// which acts as a band-pass filter and is commonly used for edge detection and feature enhancement.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `sigma1`: Standard deviation of the first (typically smaller) Gaussian kernel.
+        /// - `sigma2`: Standard deviation of the second (typically larger) Gaussian kernel.
+        /// - `out`: Output image containing the difference.
+        ///
+        /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
+        /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
+        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, out: *Self) !void {
+            if (sigma1 <= 0 or sigma2 <= 0) return error.InvalidSigma;
+            if (sigma1 == sigma2) return error.SigmasMustDiffer;
+
+            // Ensure output is allocated
+            if (!self.hasSameShape(out.*)) {
+                out.* = try .initAlloc(allocator, self.rows, self.cols);
+            }
+
+            // Calculate kernel sizes for both sigmas
+            const radius1 = @as(usize, @intFromFloat(@ceil(3.0 * sigma1)));
+            const kernel_size1 = 2 * radius1 + 1;
+            const radius2 = @as(usize, @intFromFloat(@ceil(3.0 * sigma2)));
+            const kernel_size2 = 2 * radius2 + 1;
+
+            // Generate both 1D Gaussian kernels
+            var kernel1 = try allocator.alloc(f32, kernel_size1);
+            defer allocator.free(kernel1);
+            var kernel2 = try allocator.alloc(f32, kernel_size2);
+            defer allocator.free(kernel2);
+
+            // Generate first kernel
+            var sum1: f32 = 0;
+            for (0..kernel_size1) |i| {
+                const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius1));
+                kernel1[i] = @exp(-(x * x) / (2.0 * sigma1 * sigma1));
+                sum1 += kernel1[i];
+            }
+            for (kernel1) |*k| {
+                k.* /= sum1;
+            }
+
+            // Generate second kernel
+            var sum2: f32 = 0;
+            for (0..kernel_size2) |i| {
+                const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius2));
+                kernel2[i] = @exp(-(x * x) / (2.0 * sigma2 * sigma2));
+                sum2 += kernel2[i];
+            }
+            for (kernel2) |*k| {
+                k.* /= sum2;
+            }
+
+            // Allocate temporary buffers for the two blurred results
+            var blur1 = try Self.initAlloc(allocator, self.rows, self.cols);
+            defer blur1.deinit(allocator);
+            var blur2 = try Self.initAlloc(allocator, self.rows, self.cols);
+            defer blur2.deinit(allocator);
+
+            // Apply both Gaussian blurs using separable convolution
+            try convolveSeparable(self, allocator, kernel1, kernel1, &blur1, .mirror);
+            try convolveSeparable(self, allocator, kernel2, kernel2, &blur2, .mirror);
+
+            // Compute the difference: blur1 - blur2
+            switch (@typeInfo(T)) {
+                .int => {
+                    // For integer types, handle underflow/overflow carefully
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const val1 = as(f32, blur1.at(r, c).*);
+                            const val2 = as(f32, blur2.at(r, c).*);
+                            const diff = val1 - val2;
+
+                            // For visualization, you might want to add an offset and scale
+                            // For now, we'll clamp to the valid range
+                            out.at(r, c).* = @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(diff))));
+                        }
+                    }
+                },
+                .float => {
+                    // For float types, direct subtraction
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            out.at(r, c).* = blur1.at(r, c).* - blur2.at(r, c).*;
+                        }
+                    }
+                },
+                .@"struct" => {
+                    // For struct types (RGB, RGBA, etc.), process each channel
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            var result_pixel: T = undefined;
+                            const pixel1 = blur1.at(r, c).*;
+                            const pixel2 = blur2.at(r, c).*;
+
+                            inline for (std.meta.fields(T)) |field| {
+                                const val1 = as(f32, @field(pixel1, field.name));
+                                const val2 = as(f32, @field(pixel2, field.name));
+                                const diff = val1 - val2;
+
+                                @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(diff)))),
+                                    .float => as(field.type, diff),
+                                    else => @compileError("Unsupported field type in struct"),
+                                };
+                            }
+                            out.at(r, c).* = result_pixel;
+                        }
+                    }
+                },
+                else => @compileError("Difference of Gaussians not supported for type " ++ @typeName(T)),
+            }
+        }
+
         /// Applies the Sobel filter to `self` to perform edge detection.
         /// The output is a grayscale image representing the magnitude of gradients at each pixel.
         ///
