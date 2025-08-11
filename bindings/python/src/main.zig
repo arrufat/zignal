@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 
 const bitmap_font = @import("bitmap_font.zig");
+const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
 const convex_hull = @import("convex_hull.zig");
@@ -91,6 +92,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register ConvexHull type
     py_utils.registerType(@ptrCast(m), "ConvexHull", @ptrCast(&convex_hull.ConvexHullType)) catch |err| {
         std.log.err("Failed to register ConvexHull: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register BlendMode enum
+    blending.registerBlendMode(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register BlendMode: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

@@ -69,6 +69,14 @@ pub const FunctionInfo = struct {
     doc: []const u8,
 };
 
+/// Documentation for a single enum value
+pub const EnumValueDoc = struct {
+    /// Enum value name (e.g., "NORMAL", "MULTIPLY")
+    name: []const u8,
+    /// Short description for inline comment
+    doc: []const u8,
+};
+
 /// Describes an enum for stub generation
 pub const EnumInfo = struct {
     /// Enum name
@@ -79,6 +87,8 @@ pub const EnumInfo = struct {
     doc: []const u8,
     /// Zig type to extract values from
     zig_type: type,
+    /// Optional documentation for each enum value
+    value_docs: ?[]const EnumValueDoc = null,
 };
 
 /// Complete module metadata
