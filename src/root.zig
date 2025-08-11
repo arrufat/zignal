@@ -60,6 +60,7 @@ pub const PixelIterator = @import("image.zig").PixelIterator;
 pub const InterpolationMethod = @import("image.zig").InterpolationMethod;
 pub const ImageFormat = @import("image.zig").ImageFormat;
 pub const DisplayFormat = @import("image.zig").DisplayFormat;
+pub const BorderMode = @import("image.zig").BorderMode;
 
 // Terminal graphics protocols
 pub const sixel = @import("sixel.zig");
