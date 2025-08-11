@@ -81,14 +81,27 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
         try stub.writef("{c}", .{lower_char});
     }
 
-    // Include self parameter for proper LSP support
-    try stub.writef("(self) -> {s}:\n", .{target_class});
+    // Special case for to_rgba which accepts optional alpha parameter
+    if (TargetType == zignal.Rgba) {
+        try stub.writef("(self, alpha: int = 255) -> {s}:\n", .{target_class});
+        try stub.write("        \"\"\"Convert to RGBA color space.\n");
+        try stub.write("        \n");
+        try stub.write("        Args:\n");
+        try stub.write("            alpha: Alpha channel value (0-255, default: 255)\n");
+        try stub.write("        \n");
+        try stub.write("        Returns:\n");
+        try stub.write("            Rgba color object\n");
+        try stub.write("        \"\"\"\n");
+    } else {
+        // Include self parameter for proper LSP support
+        try stub.writef("(self) -> {s}:\n", .{target_class});
 
-    // Add docstring using the documentation from color_factory
-    const doc = color_factory.getConversionMethodDoc(TargetType);
-    try stub.write("        \"\"\"");
-    try stub.write(doc);
-    try stub.write("\"\"\"\n");
+        // Add docstring using the documentation from color_factory
+        const doc = color_factory.getConversionMethodDoc(TargetType);
+        try stub.write("        \"\"\"");
+        try stub.write(doc);
+        try stub.write("\"\"\"\n");
+    }
     try stub.write("        ...\n");
 }
 
@@ -140,6 +153,12 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
                 try generateConversionMethod(stub, ColorType, TargetType);
             }
         }
+    }
+
+    // Add blend method if the type has it
+    if (@hasDecl(ColorType, "blend")) {
+        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: BlendMode) -> ");
+        try stub.writef("{s}: ...\n", .{class_name});
     }
 
     // Standard Python methods
@@ -246,7 +265,21 @@ fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumI
         for (field.name, 0..) |c, i| {
             uppercase_name[i] = std.ascii.toUpper(c);
         }
-        try stub.writef("    {s} = {d}\n", .{ uppercase_name[0..name_len], field.value });
+
+        // Write enum value with optional inline documentation
+        try stub.writef("    {s} = {d}", .{ uppercase_name[0..name_len], field.value });
+
+        // Add inline comment if documentation is provided
+        if (enum_info.value_docs) |docs| {
+            for (docs) |doc| {
+                if (std.mem.eql(u8, doc.name, uppercase_name[0..name_len])) {
+                    try stub.writef("  # {s}", .{doc.doc});
+                    break;
+                }
+            }
+        }
+
+        try stub.write("\n");
     }
 }
 
@@ -328,6 +361,36 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .base = "IntEnum",
         .doc = "Interpolation methods for image resizing",
         .zig_type = zignal.InterpolationMethod,
+        .value_docs = &[_]stub_metadata.EnumValueDoc{
+            .{ .name = "NEAREST_NEIGHBOR", .doc = "Fastest, pixelated, good for pixel art" },
+            .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
+            .{ .name = "BICUBIC", .doc = "Balanced quality/speed, general purpose" },
+            .{ .name = "CATMULL_ROM", .doc = "Sharp, good for natural images" },
+            .{ .name = "MITCHELL", .doc = "High quality, reduces ringing" },
+            .{ .name = "LANCZOS", .doc = "Highest quality, slowest, for final output" },
+        },
+    });
+
+    // Generate BlendMode enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "BlendMode",
+        .base = "IntEnum",
+        .doc = "Blending modes for color composition",
+        .zig_type = zignal.BlendMode,
+        .value_docs = &[_]stub_metadata.EnumValueDoc{
+            .{ .name = "NORMAL", .doc = "Standard alpha blending with transparency" },
+            .{ .name = "MULTIPLY", .doc = "Darkens by multiplying colors" },
+            .{ .name = "SCREEN", .doc = "Lightens by inverting, multiplying, inverting" },
+            .{ .name = "OVERLAY", .doc = "Combines multiply and screen for contrast" },
+            .{ .name = "SOFT_LIGHT", .doc = "Gentle contrast adjustment" },
+            .{ .name = "HARD_LIGHT", .doc = "Strong contrast, like overlay but reversed" },
+            .{ .name = "COLOR_DODGE", .doc = "Brightens base color, creates glow effects" },
+            .{ .name = "COLOR_BURN", .doc = "Darkens base color, creates deep shadows" },
+            .{ .name = "DARKEN", .doc = "Selects darker color per channel" },
+            .{ .name = "LIGHTEN", .doc = "Selects lighter color per channel" },
+            .{ .name = "DIFFERENCE", .doc = "Subtracts colors for inversion effect" },
+            .{ .name = "EXCLUSION", .doc = "Like difference but with lower contrast" },
+        },
     });
 
     // Generate DrawMode enum
@@ -336,6 +399,10 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .base = "IntEnum",
         .doc = "Rendering quality mode for drawing operations",
         .zig_type = zignal.DrawMode,
+        .value_docs = &[_]stub_metadata.EnumValueDoc{
+            .{ .name = "FAST", .doc = "Fast rendering with hard edges" },
+            .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
+        },
     });
 
     // Generate Image class from metadata
@@ -429,6 +496,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("    Image as Image,\n");
     try stub.write("    Canvas as Canvas,\n");
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
+    try stub.write("    BlendMode as BlendMode,\n");
     try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");

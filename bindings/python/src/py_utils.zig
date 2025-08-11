@@ -323,6 +323,47 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
         }
     }
 
+    // Check range before converting to avoid truncation issues with @intCast
+    switch (ValueType) {
+        c_long, c_int => {
+            // For integer types, check range using the original value
+            if (value < min or value > max) {
+                var buffer: [256]u8 = undefined;
+                const msg = blk: {
+                    // For infinity or max integer values, simplify the message
+                    if (info == .float and std.math.isInf(max)) {
+                        break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
+                    } else if (info == .int and max == std.math.maxInt(T) and T != u8) {
+                        // Don't simplify for u8 since 255 is often a specific limit (e.g., color values)
+                        if (min == 0) {
+                            break :blk std.fmt.bufPrintZ(&buffer, "{s} must be non-negative", .{name}) catch "Value out of range";
+                        } else if (min == 1) {
+                            break :blk std.fmt.bufPrintZ(&buffer, "{s} must be positive", .{name}) catch "Value out of range";
+                        } else {
+                            break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
+                        }
+                    } else {
+                        break :blk std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
+                    }
+                };
+                c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                return error.OutOfRange;
+            }
+        },
+        f64 => {
+            const min_f64 = if (info == .float) @as(f64, min) else @as(f64, @floatFromInt(min));
+            const max_f64 = if (info == .float) @as(f64, max) else @as(f64, @floatFromInt(max));
+            if (value < min_f64 or value > max_f64) {
+                var buffer: [256]u8 = undefined;
+                const msg = std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
+                c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                return error.OutOfRange;
+            }
+        },
+        else => @compileError("Unsupported value type"),
+    }
+
+    // Now convert after range check
     const converted = switch (ValueType) {
         c_long, c_int => blk: {
             if (info == .float) {
@@ -332,30 +373,8 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
             }
         },
         f64 => @as(T, @floatCast(value)),
-        else => @compileError("Unsupported value type"),
+        else => unreachable,
     };
-
-    if (converted < min or converted > max) {
-        var buffer: [256]u8 = undefined;
-        const msg = blk: {
-            // For infinity or max integer values, simplify the message
-            if (info == .float and std.math.isInf(max)) {
-                break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
-            } else if (info == .int and max == std.math.maxInt(T)) {
-                if (min == 0) {
-                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be non-negative", .{name}) catch "Value out of range";
-                } else if (min == 1) {
-                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be positive", .{name}) catch "Value out of range";
-                } else {
-                    break :blk std.fmt.bufPrintZ(&buffer, "{s} must be at least {}", .{ name, min }) catch "Value out of range";
-                }
-            } else {
-                break :blk std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
-            }
-        };
-        c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
-        return error.OutOfRange;
-    }
 
     return converted;
 }

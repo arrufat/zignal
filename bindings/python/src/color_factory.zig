@@ -13,6 +13,7 @@ const convertWithValidation = @import("py_utils.zig").convertWithValidation;
 const createColorPyObject = @import("color.zig").createColorPyObject;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
+const convertToZigBlendMode = @import("blending.zig").convertToZigBlendMode;
 
 /// Convert string to lowercase at comptime
 pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
@@ -194,9 +195,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.setter;
         }
 
-        /// Generate methods array - automatically create conversion methods for all color types + __format__
-        pub fn generateMethods() [color_types.len + 1]c.PyMethodDef {
-            var methods: [color_types.len + 1]c.PyMethodDef = undefined;
+        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend
+        pub fn generateMethods() [color_types.len + 2]c.PyMethodDef {
+            var methods: [color_types.len + 2]c.PyMethodDef = undefined;
             var index: usize = 0;
 
             // Add __format__ method
@@ -204,9 +205,50 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 .ml_name = "__format__",
                 .ml_meth = @ptrCast(&formatMethod),
                 .ml_flags = c.METH_VARARGS,
-                .ml_doc = "Format the color object with optional format specifier (e.g., 'ansi' for terminal colors)",
+                .ml_doc =
+                \\Format the color object with optional format specifier.
+                \\
+                \\## Parameters
+                \\- `format_spec` (str): Format specifier string:
+                \\  - `''` (empty): Returns the default repr() output
+                \\  - `'ansi'`: Returns ANSI-colored terminal representation
+                \\
+                \\## Examples
+                \\```python
+                \\color = zignal.Rgb(255, 0, 0)
+                \\print(f"{color}")        # Default repr: Rgb(r=255, g=0, b=0)
+                \\print(f"{color:ansi}")   # ANSI colored output in terminal
+                \\```
+                ,
             };
             index += 1;
+
+            // Add blend method if the type has it
+            if (@hasDecl(ZigColorType, "blend")) {
+                methods[index] = c.PyMethodDef{
+                    .ml_name = "blend",
+                    .ml_meth = @ptrCast(&blendMethod),
+                    .ml_flags = c.METH_VARARGS,
+                    .ml_doc =
+                    \\Blend with another color using the specified blend mode.
+                    \\
+                    \\## Parameters
+                    \\- `overlay`: An RGBA color or tuple (r, g, b, a) with values 0-255
+                    \\- `mode`: BlendMode enum value
+                    \\
+                    \\## Examples
+                    \\```python
+                    \\base = zignal.Rgb(255, 0, 0)
+                    \\overlay = zignal.Rgba(0, 255, 0, 128)
+                    \\result = base.blend(overlay, zignal.BlendMode.NORMAL)
+                    \\
+                    \\# Or using a tuple
+                    \\result = base.blend((0, 255, 0, 128), zignal.BlendMode.MULTIPLY)
+                    \\```
+                    ,
+                };
+                index += 1;
+            }
 
             // Generate conversion methods for each color type
             inline for (color_types) |TargetColorType| {
@@ -221,8 +263,12 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     methods[index] = c.PyMethodDef{
                         .ml_name = method_name.ptr,
                         .ml_meth = generateConversionMethod(TargetColorType),
-                        .ml_flags = c.METH_NOARGS,
-                        .ml_doc = getConversionMethodDoc(TargetColorType).ptr,
+                        // Special case: to_rgba accepts optional alpha parameter
+                        .ml_flags = if (TargetColorType == zignal.Rgba) c.METH_VARARGS else c.METH_NOARGS,
+                        .ml_doc = if (TargetColorType == zignal.Rgba)
+                            \\Convert to RGBA color space with the given alpha value
+                        else
+                            getConversionMethodDoc(TargetColorType).ptr,
                     };
                     index += 1;
                 } else {
@@ -262,10 +308,21 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return switch (TargetColorType) {
                 // Special case for Rgba due to default alpha parameter
                 zignal.Rgba => struct {
-                    fn method(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+                    fn method(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
                         const self = @as(*ObjectType, @ptrCast(self_obj));
+
+                        // Parse optional alpha parameter (default to 255)
+                        var alpha: c_int = 255;
+                        if (c.PyArg_ParseTuple(args, "|i", &alpha) == 0) {
+                            return null;
+                        }
+
+                        // Validate alpha range
+                        const py_utils = @import("py_utils.zig");
+                        const alpha_val = py_utils.validateRange(u8, alpha, 0, 255, "alpha") catch return null;
+
                         const zig_color = objectToZigColor(self);
-                        const result = zig_color.toRgba(255);
+                        const result = zig_color.toRgba(alpha_val);
                         return @ptrCast(createColorPyObject(result));
                     }
                 }.method,
@@ -637,6 +694,81 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 _ = c.PyErr_Format(c.PyExc_ValueError, "Unknown format code '%s' for object of type '%s'", format_spec, name.ptr);
                 return null;
             }
+        }
+
+        /// Blend method implementation
+        pub fn blendMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self = @as(*ObjectType, @ptrCast(self_obj));
+
+            // Parse arguments: overlay (Rgba or tuple) and mode (BlendMode)
+            var overlay_obj: [*c]c.PyObject = null;
+            var mode_obj: [*c]c.PyObject = null;
+
+            if (c.PyArg_ParseTuple(args, "OO", &overlay_obj, &mode_obj) == 0) {
+                return null;
+            }
+
+            // Import Rgba type to check instance
+            const rgba_module = @import("color.zig");
+
+            // Convert overlay to Zig Rgba
+            var overlay: zignal.Rgba = undefined;
+
+            // Check if overlay is an Rgba instance
+            if (c.PyObject_IsInstance(overlay_obj, @ptrCast(&rgba_module.RgbaType)) == 1) {
+                // It's an Rgba object, extract directly
+                const overlay_pyobj = @as(*rgba_module.RgbaBinding.PyObjectType, @ptrCast(overlay_obj));
+                overlay = zignal.Rgba{
+                    .r = overlay_pyobj.field0,
+                    .g = overlay_pyobj.field1,
+                    .b = overlay_pyobj.field2,
+                    .a = overlay_pyobj.field3,
+                };
+            } else if (c.PyTuple_Check(overlay_obj) == 1) {
+                // It's a tuple, parse RGBA values using PyArg_ParseTuple
+                var r: c_long = undefined;
+                var g: c_long = undefined;
+                var b: c_long = undefined;
+                var a: c_long = undefined;
+
+                if (c.PyArg_ParseTuple(overlay_obj, "llll", &r, &g, &b, &a) == 0) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "overlay tuple must contain 4 integers (r, g, b, a)");
+                    return null;
+                }
+
+                // Validate ranges using py_utils helper (it sets appropriate error messages)
+                const py_utils = @import("py_utils.zig");
+                const r_val = py_utils.validateRange(u8, r, 0, 255, "r") catch return null;
+                const g_val = py_utils.validateRange(u8, g, 0, 255, "g") catch return null;
+                const b_val = py_utils.validateRange(u8, b, 0, 255, "b") catch return null;
+                const a_val = py_utils.validateRange(u8, a, 0, 255, "a") catch return null;
+
+                overlay = zignal.Rgba{
+                    .r = r_val,
+                    .g = g_val,
+                    .b = b_val,
+                    .a = a_val,
+                };
+            } else {
+                c.PyErr_SetString(c.PyExc_TypeError, "overlay must be an Rgba color or a tuple of 4 integers (r, g, b, a)");
+                return null;
+            }
+
+            // Convert mode to Zig BlendMode
+            const mode = convertToZigBlendMode(mode_obj) catch {
+                // Error already set by convertToZigBlendMode
+                return null;
+            };
+
+            // Convert self to Zig color
+            const zig_color = objectToZigColor(self);
+
+            // Perform the blend
+            const blended = zig_color.blend(overlay, mode);
+
+            // Create and return new Python object with the blended result
+            const type_obj = @as(*c.PyTypeObject, @ptrCast(self_obj.*.ob_type));
+            return createPyObject(blended, type_obj);
         }
     };
 }
