@@ -57,20 +57,20 @@ pub fn registerBlendMode(module: *c.PyObject) !void {
         \\
         \\## Blend Modes
         \\
-        \\| Mode         | Description                                                    | Best Use Case     |
-        \\|--------------|----------------------------------------------------------------|-------------------|
-        \\| NORMAL       | Standard alpha blending with transparency                     | Layering images   |
-        \\| MULTIPLY     | Darkens by multiplying colors (white has no effect)           | Shadows, darkening|
-        \\| SCREEN       | Lightens by inverting, multiplying, then inverting            | Highlights, glow  |
-        \\| OVERLAY      | Combines multiply and screen based on base color              | Contrast enhance  |
-        \\| SOFT_LIGHT   | Gentle contrast adjustment                                     | Subtle lighting   |
-        \\| HARD_LIGHT   | Like overlay but uses overlay color to determine blend        | Strong contrast   |
-        \\| COLOR_DODGE  | Brightens base color based on overlay                         | Bright highlights |
-        \\| COLOR_BURN   | Darkens base color based on overlay                           | Deep shadows      |
-        \\| DARKEN       | Selects darker color per channel                              | Remove white      |
-        \\| LIGHTEN      | Selects lighter color per channel                             | Remove black      |
-        \\| DIFFERENCE   | Subtracts darker from lighter color                           | Invert/compare    |
-        \\| EXCLUSION    | Similar to difference but with lower contrast                 | Soft inversion    |
+        \\| Mode        | Description                                            | Best Use Case     |
+        \\|-------------|--------------------------------------------------------|-------------------|
+        \\| NORMAL      | Standard alpha blending with transparency              | Layering images   |
+        \\| MULTIPLY    | Darkens by multiplying colors (white has no effect)    | Shadows, darkening|
+        \\| SCREEN      | Lightens by inverting, multiplying, then inverting     | Highlights, glow  |
+        \\| OVERLAY     | Combines multiply and screen based on base color       | Contrast enhance  |
+        \\| SOFT_LIGHT  | Gentle contrast adjustment                             | Subtle lighting   |
+        \\| HARD_LIGHT  | Like overlay but uses overlay color to determine blend | Strong contrast   |
+        \\| COLOR_DODGE | Brightens base color based on overlay                  | Bright highlights |
+        \\| COLOR_BURN  | Darkens base color based on overlay                    | Deep shadows      |
+        \\| DARKEN      | Selects darker color per channel                       | Remove white      |
+        \\| LIGHTEN     | Selects lighter color per channel                      | Remove black      |
+        \\| DIFFERENCE  | Subtracts darker from lighter color                    | Invert/compare    |
+        \\| EXCLUSION   | Similar to difference but with lower contrast          | Soft inversion    |
         \\
         \\## Examples
         \\```python
