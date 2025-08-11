@@ -7,6 +7,7 @@
 
 const std = @import("std");
 
+const BlendMode = @import("blending.zig").BlendMode;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -101,9 +102,7 @@ pub fn toYcbcr(self: Xyb) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
-/// Alpha blends the given RGBA color onto this XYB color in-place.
-pub fn blend(self: *Xyb, color: Rgba) void {
-    var rgb = self.toRgb();
-    rgb.blend(color);
-    self.* = rgb.toXyb();
+/// Alpha blends the given RGBA color onto this XYB color and returns the result.
+pub fn blend(self: Xyb, overlay: Rgba, mode: BlendMode) Xyb {
+    return self.toRgb().blend(overlay, mode).toXyb();
 }

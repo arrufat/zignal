@@ -6,6 +6,7 @@
 
 const std = @import("std");
 
+const BlendMode = @import("blending.zig").BlendMode;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -99,9 +100,7 @@ pub fn toLch(self: Lab) Lch {
     return conversions.labToLch(self);
 }
 
-/// Alpha blends the given RGBA color onto this CIELAB color in-place.
-pub fn blend(self: *Lab, color: Rgba) void {
-    var rgb = self.toRgb();
-    rgb.blend(color);
-    self.* = rgb.toLab();
+/// Alpha blends the given RGBA color onto this CIELAB color and returns the result.
+pub fn blend(self: Lab, overlay: Rgba, mode: BlendMode) Lab {
+    return self.toRgb().blend(overlay, mode).toLab();
 }

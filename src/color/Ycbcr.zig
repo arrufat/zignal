@@ -97,9 +97,7 @@ pub fn toGray(self: Ycbcr) u8 {
     return @intFromFloat(@max(0, @min(255, @round(self.y))));
 }
 
-/// Alpha blends this color with another RGBA color.
-pub fn blend(self: *Ycbcr, other: Rgba) void {
-    var rgb = self.toRgb();
-    rgb.blend(other);
-    self.* = conversions.rgbToYcbcr(rgb);
+/// Alpha blends this color with another RGBA color and returns the result.
+pub fn blend(self: Ycbcr, overlay: Rgba) Ycbcr {
+    return self.toRgb().blend(overlay).toYcbcr();
 }
