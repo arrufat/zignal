@@ -13,6 +13,16 @@ const c = py_utils.c;
 const color_utils = @import("color_utils.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
+// Static default font with all characters, initialized once
+var font8x8: ?BitmapFont = null;
+
+fn getFont8x8() !BitmapFont {
+    if (font8x8 == null) {
+        font8x8 = try zignal.font.font8x8.create(allocator, .all);
+    }
+    return font8x8.?;
+}
+
 pub const CanvasObject = extern struct {
     ob_base: c.PyObject,
     // Keep reference to parent Image to prevent garbage collection
@@ -666,7 +676,11 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         const font_ptr = py_utils.validateNonNull(*BitmapFont, font_wrapper.font, "BitmapFont") catch return null;
         canvas.drawText(text, position, color, font_ptr.*, @as(f32, @floatCast(scale)), draw_mode);
     } else {
-        canvas.drawText(text, position, color, zignal.font.font8x8.basic, @as(f32, @floatCast(scale)), draw_mode);
+        const font = getFont8x8() catch {
+            c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to initialize default font");
+            return null;
+        };
+        canvas.drawText(text, position, color, font, @floatCast(scale), draw_mode);
     }
 
     return py_utils.returnNone();
