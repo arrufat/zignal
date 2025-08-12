@@ -2,8 +2,15 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
+const expectEqual = std.testing.expectEqual;
+const expectEqualStrings = std.testing.expectEqualStrings;
+
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
+const svd_module = @import("svd.zig");
+pub const SvdMode = svd_module.SvdMode;
+pub const SvdOptions = svd_module.SvdOptions;
+pub const SvdResult = svd_module.SvdResult;
 
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
@@ -515,6 +522,24 @@ pub fn Matrix(comptime T: type) type {
             return formatting.ScientificFormatter(Self){ .matrix = self };
         }
 
+        /// Performs singular value decomposition (SVD) on the matrix.
+        /// Returns the decomposition A = U × Σ × V^T where:
+        /// - U contains left singular vectors
+        /// - Σ is a diagonal matrix of singular values (stored as a vector)
+        /// - V contains right singular vectors
+        ///
+        /// Requires rows >= cols. See `SvdOptions` for configuration details.
+        pub fn svd(self: Self, allocator: std.mem.Allocator, options: SvdOptions) !SvdResult(T) {
+            std.debug.assert(self.rows >= self.cols);
+
+            // SVD modifies the input, so make a copy
+            var a_copy = try Matrix(T).init(allocator, self.rows, self.cols);
+            @memcpy(a_copy.items, self.items);
+            errdefer a_copy.deinit();
+
+            return svd_module.svd(T, allocator, a_copy, options);
+        }
+
         /// Default formatting (scientific notation)
         pub fn format(self: Self, writer: *std.Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
@@ -548,9 +573,6 @@ pub fn Matrix(comptime T: type) type {
 }
 
 // Tests for dynamic Matrix functionality
-const expectEqual = std.testing.expectEqual;
-const expectEqualStrings = std.testing.expectEqualStrings;
-
 test "dynamic matrix format" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

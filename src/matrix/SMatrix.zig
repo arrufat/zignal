@@ -7,6 +7,10 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("../geometry/Point.zig").Point;
 const formatting = @import("formatting.zig");
+const svd_module = @import("svd_static.zig");
+pub const SvdMode = svd_module.SvdMode;
+pub const SvdOptions = svd_module.SvdOptions;
+pub const SvdResult = svd_module.SvdResult;
 
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
@@ -532,6 +536,18 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
                 else => @compileError("Matrix(T).inverse() is not implemented for sizes above 3"),
             }
             return inv;
+        }
+
+        /// Performs singular value decomposition (SVD) on the matrix.
+        /// Returns the decomposition A = U × Σ × V^T where:
+        /// - U contains left singular vectors
+        /// - Σ is a diagonal matrix of singular values (stored as a vector)
+        /// - V contains right singular vectors
+        ///
+        /// Requires rows >= cols. See SvdOptions for configuration details.
+        pub fn svd(self: Self, comptime options: SvdOptions) SvdResult(T, rows, cols, options) {
+            comptime assert(rows >= cols);
+            return svd_module.svd(T, rows, cols, self, options);
         }
 
         /// Returns a formatter for decimal notation with specified precision
