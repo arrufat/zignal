@@ -87,11 +87,6 @@ pub const Point = point.Point;
 pub const pointInTriangle = geometry.pointInTriangle;
 pub const findBarycenter = geometry.findBarycenter;
 
-pub const svd = @import("svd.zig").svd;
-pub const SvdMode = @import("svd.zig").SvdMode;
-pub const SvdOptions = @import("svd.zig").SvdOptions;
-pub const SvdResult = @import("svd.zig").SvdResult;
-
 pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
 // Font system

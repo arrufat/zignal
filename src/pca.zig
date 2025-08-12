@@ -28,7 +28,6 @@ const Matrix = @import("matrix.zig").Matrix;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 const SMatrix = @import("matrix.zig").SMatrix;
-const svd = @import("svd.zig").svd;
 const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
 
 /// Principal Component Analysis for arbitrary-dimensional vectors.
@@ -198,7 +197,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
 
             // Perform SVD
-            const result = svd(T, 64, 64, cov_static, .{
+            const result = cov_static.svd(.{
                 .with_u = true,
                 .with_v = false,
                 .mode = .skinny_u,
@@ -213,10 +212,10 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 
             for (0..num_components) |i| {
                 if (i < n) {
-                    self.eigenvalues[i] = result.s.items[i][0];
+                    self.eigenvalues[i] = result.s.at(i, 0).*;
                     for (0..dim) |j| {
                         if (j < n) {
-                            self.components.at(j, i).* = result.u.items[j][i];
+                            self.components.at(j, i).* = result.u.at(j, i).*;
                         } else {
                             self.components.at(j, i).* = 0;
                         }
@@ -272,7 +271,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
 
             // Perform SVD on Gram matrix
-            const result = svd(T, 64, 64, gram_static, .{
+            const result = gram_static.svd(.{
                 .with_u = true,
                 .with_v = false,
                 .mode = .skinny_u,
@@ -288,7 +287,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             // Ensure we don't exceed the actual number of eigenvalues/eigenvectors computed
             const actual_components = @min(num_components, n);
             for (0..actual_components) |i| {
-                const eigenval = result.s.items[i][0];
+                const eigenval = result.s.at(i, 0).*;
                 self.eigenvalues[i] = eigenval;
 
                 if (eigenval > 1e-10) {
@@ -296,7 +295,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
                     for (0..dim) |j| {
                         var sum: T = 0;
                         for (0..n) |k| {
-                            sum += data_matrix.at(k, j).* * result.u.items[k][i];
+                            sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
                         }
                         self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n)));
                     }

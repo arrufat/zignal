@@ -10,7 +10,6 @@ const Matrix = @import("matrix.zig").Matrix;
 const OpsBuilder = @import("matrix.zig").OpsBuilder;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
-const svd = @import("svd.zig").svd;
 
 /// Feature Distribution Matching struct for stateful image style transfer.
 /// Allows efficient batch processing by reusing target distribution statistics.
@@ -145,16 +144,16 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     defer cov_matrix.deinit();
 
                     const cov_static = cov_matrix.toSMatrix(3, 3);
-                    const target_svd = svd(f64, 3, 3, cov_static, .{
+                    const target_svd = cov_static.svd(.{
                         .with_u = true,
                         .with_v = false,
                         .mode = .skinny_u,
                     });
 
-                    // Store eigenvectors and eigenvalues
+                    // Store eigenvectors and eigenvalues (copy from static to owned)
                     self.target_cov_u = try Matrix(f64).fromSMatrix(self.allocator, target_svd.u);
                     for (0..3) |i| {
-                        self.target_cov_s[i] = target_svd.s.items[i][0];
+                        self.target_cov_s[i] = target_svd.s.at(i, 0).*;
                     }
                 }
             }
@@ -256,7 +255,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     defer source_cov_matrix.deinit();
 
                     const source_cov = source_cov_matrix.toSMatrix(3, 3);
-                    const source_svd = svd(f64, 3, 3, source_cov, .{
+                    const source_svd = source_cov.svd(.{
                         .with_u = true,
                         .with_v = false,
                         .mode = .skinny_u,
@@ -272,7 +271,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     @memset(sigma_combined.items, 0);
 
                     for (0..3) |i| {
-                        const source_eigenval = source_svd.s.items[i][0];
+                        const source_eigenval = source_svd.s.at(i, 0).*;
                         const target_eigenval = self.target_cov_s[i];
 
                         if (source_eigenval > 1e-10 and target_eigenval > std.math.floatEps(f64)) {

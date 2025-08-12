@@ -42,9 +42,9 @@ pub fn build(b: *Build) void {
     // Run tests
     const test_step = b.step("test", "Run library tests");
     for ([_][]const u8{
-        "color",  "image", "geometry", "matrix", "svd",  "perlin",
-        "canvas", "png",   "deflate",  "fdm",    "jpeg", "pca",
-        "sixel",  "kitty", "font",
+        "color",  "image", "geometry", "matrix", "perlin",
+        "canvas", "png",   "deflate",  "fdm",    "jpeg",
+        "pca",    "sixel", "kitty",    "font",
     }) |module| {
         const module_test = b.addTest(.{
             .name = module,
