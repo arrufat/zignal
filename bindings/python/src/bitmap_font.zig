@@ -31,12 +31,9 @@ fn bitmap_font_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyO
 fn bitmap_font_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self = @as(*BitmapFontObject, @ptrCast(self_obj.?));
 
-    // The default font is static, only free dynamically loaded fonts
     if (self.font) |font| {
-        if (font != &zignal.font.font8x8.basic) {
-            font.deinit(allocator);
-            allocator.destroy(font);
-        }
+        font.deinit(allocator);
+        allocator.destroy(font);
     }
 
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
@@ -104,9 +101,9 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 
 // Class method: font8x8 (default font)
 const bitmap_font_font8x8_doc =
-    \\Get the built-in default 8x8 bitmap font.
+    \\Get the built-in default 8x8 bitmap font with all available characters.
     \\
-    \\This font covers ASCII characters from 0x20 (space) to 0x7E (tilde).
+    \\This font includes ASCII, extended ASCII, Greek, and box drawing characters.
     \\
     \\## Examples
     \\```python
@@ -121,7 +118,22 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     if (cached_font8x8 == null) {
         const instance = c.PyObject_CallObject(@ptrCast(type_obj), null) orelse return null;
         const self = @as(*BitmapFontObject, @ptrCast(instance));
-        self.font = @constCast(&zignal.font.font8x8.basic);
+
+        // Allocate font on heap and create with all characters
+        const font_ptr = allocator.create(BitmapFont) catch {
+            c.Py_DECREF(instance);
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate font");
+            return null;
+        };
+
+        font_ptr.* = zignal.font.font8x8.create(allocator, .all) catch {
+            allocator.destroy(font_ptr);
+            c.Py_DECREF(instance);
+            c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to create font8x8 with all characters");
+            return null;
+        };
+
+        self.font = font_ptr;
         cached_font8x8 = instance; // keep a strong ref for the lifetime of the module
     }
     // Return a new reference to the cached singleton
