@@ -7,11 +7,15 @@ const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
+const stub_metadata = @import("stub_metadata.zig");
 
 pub const BitmapFontObject = extern struct {
     ob_base: c.PyObject,
     font: ?*BitmapFont,
 };
+
+// Cached singleton Python object for the built-in 8x8 font
+var cached_font8x8: ?*c.PyObject = null;
 
 fn bitmap_font_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
@@ -29,7 +33,7 @@ fn bitmap_font_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 
     // The default font is static, only free dynamically loaded fonts
     if (self.font) |font| {
-        if (font != &zignal.font.default_font_8x8) {
+        if (font != &zignal.font.font8x8.basic) {
             font.deinit(allocator);
             allocator.destroy(font);
         }
@@ -47,7 +51,8 @@ fn bitmap_font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 const bitmap_font_load_doc =
     \\Load a bitmap font from file.
     \\
-    \\Supports BDF (Bitmap Distribution Format) and PCF (Portable Compiled Format) files.
+    \\Supports BDF (Bitmap Distribution Format) and PCF (Portable Compiled Format) files, including
+    \\optionally gzip-compressed variants (e.g., `.bdf.gz`, `.pcf.gz`).
     \\
     \\## Parameters
     \\- `path` (str): Path to the font file
@@ -97,37 +102,58 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     return instance;
 }
 
-// Class method: get_default_font
-const bitmap_font_get_default_font_doc =
+// Class method: font8x8 (default font)
+const bitmap_font_font8x8_doc =
     \\Get the built-in default 8x8 bitmap font.
     \\
     \\This font covers ASCII characters from 0x20 (space) to 0x7E (tilde).
     \\
     \\## Examples
     \\```python
-    \\font = BitmapFont.get_default_font()
+    \\font = BitmapFont.font8x8()
     \\canvas.draw_text("Hello World!", (10, 10), font, (255, 255, 255))
     \\```
 ;
 
-fn bitmap_font_get_default_font(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-
-    // Create new BitmapFont instance
-    const instance = c.PyObject_CallObject(@ptrCast(type_obj), null) orelse return null;
-    const self = @as(*BitmapFontObject, @ptrCast(instance));
-
-    // Point to the static default font
-    self.font = @constCast(&zignal.font.default_font_8x8);
-
-    return instance;
+    // Return a cached singleton instance; create on first call
+    if (cached_font8x8 == null) {
+        const instance = c.PyObject_CallObject(@ptrCast(type_obj), null) orelse return null;
+        const self = @as(*BitmapFontObject, @ptrCast(instance));
+        self.font = @constCast(&zignal.font.font8x8.basic);
+        cached_font8x8 = instance; // keep a strong ref for the lifetime of the module
+    }
+    // Return a new reference to the cached singleton
+    c.Py_INCREF(cached_font8x8);
+    return cached_font8x8;
 }
 
-var bitmap_font_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "load", .ml_meth = @ptrCast(&bitmap_font_load), .ml_flags = c.METH_VARARGS | c.METH_CLASS, .ml_doc = bitmap_font_load_doc },
-    .{ .ml_name = "get_default_font", .ml_meth = @ptrCast(&bitmap_font_get_default_font), .ml_flags = c.METH_NOARGS | c.METH_CLASS, .ml_doc = bitmap_font_get_default_font_doc },
-    .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
+// Methods metadata (used for both C API and stub generation)
+pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+    .{
+        .name = "load",
+        .meth = @ptrCast(&bitmap_font_load),
+        .flags = c.METH_VARARGS | c.METH_CLASS,
+        .doc = bitmap_font_load_doc,
+        .params = "cls, path: str",
+        .returns = "BitmapFont",
+    },
+    .{
+        .name = "font8x8",
+        .meth = @ptrCast(&bitmap_font8x8),
+        .flags = c.METH_NOARGS | c.METH_CLASS,
+        .doc = bitmap_font_font8x8_doc,
+        .params = "cls",
+        .returns = "BitmapFont",
+    },
 };
+
+var bitmap_font_methods = stub_metadata.toPyMethodDefArray(&bitmap_font_methods_metadata);
+
+const bitmap_font_class_doc =
+    "Bitmap font for text rendering. Supports BDF/PCF formats, including optional " ++
+    "gzip-compressed files (.bdf.gz, .pcf.gz).";
 
 pub var BitmapFontType = c.PyTypeObject{
     .ob_base = .{
@@ -139,7 +165,7 @@ pub var BitmapFontType = c.PyTypeObject{
     .tp_dealloc = bitmap_font_dealloc,
     .tp_repr = bitmap_font_repr,
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Bitmap font for text rendering",
+    .tp_doc = bitmap_font_class_doc,
     .tp_methods = @ptrCast(&bitmap_font_methods),
     .tp_new = bitmap_font_new,
 };

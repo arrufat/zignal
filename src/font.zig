@@ -23,9 +23,8 @@ pub const LoadFilter = union(enum) {
     ranges: []const unicode.Range,
 };
 
-// Default font
-const default_8x8 = @import("font/default_8x8.zig");
-pub const default_font_8x8 = default_8x8.font;
+// font8x8 - 8x8 monospace bitmap font
+pub const font8x8 = @import("font/font8x8.zig");
 
 // Unicode utilities
 pub const unicode = @import("font/unicode.zig");
@@ -43,6 +42,7 @@ pub const pcf = @import("font/pcf.zig");
 pub const compression = @import("font/compression.zig");
 
 test {
+    _ = font8x8;
     _ = bdf;
     _ = pcf;
     _ = compression;

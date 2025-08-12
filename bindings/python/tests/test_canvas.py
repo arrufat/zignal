@@ -296,7 +296,7 @@ class TestDrawText:
         """Test basic text drawing"""
         img = zignal.Image.from_numpy(np.zeros((100, 200, 4), dtype=np.uint8))
         canvas = img.canvas()
-        font = zignal.BitmapFont.get_default_font()
+        font = zignal.BitmapFont.font8x8()
 
         # Draw simple text
         canvas.draw_text("Hello World", (10, 10), (255, 255, 255), font)

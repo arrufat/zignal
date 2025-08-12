@@ -666,7 +666,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         const font_ptr = py_utils.validateNonNull(*BitmapFont, font_wrapper.font, "BitmapFont") catch return null;
         canvas.drawText(text, position, color, font_ptr.*, @as(f32, @floatCast(scale)), draw_mode);
     } else {
-        canvas.drawText(text, position, color, zignal.font.default_font_8x8, @as(f32, @floatCast(scale)), draw_mode);
+        canvas.drawText(text, position, color, zignal.font.font8x8.basic, @as(f32, @floatCast(scale)), draw_mode);
     }
 
     return py_utils.returnNone();
@@ -764,7 +764,7 @@ const canvas_draw_text_doc =
     \\- `text` (str): Text to draw
     \\- `position` (tuple[float, float]): Position coordinates (x, y)
     \\- `color` (int, tuple or color object): Text color.
-    \\- `font` (BitmapFont, optional): Font object to use for rendering. If `None`, uses BitmapFont.get_default_font()
+    \\- `font` (BitmapFont, optional): Font object to use for rendering. If `None`, uses BitmapFont.font8x8()
     \\- `scale` (float, optional): Text scale factor (default: 1.0)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
@@ -871,7 +871,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_text),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_text_doc,
-        .params = "self, text: str, position: tuple[float, float], color: " ++ stub_metadata.COLOR ++ ", font: BitmapFont = BitmapFont.get_default_font(), scale: float = 1.0, mode: DrawMode = DrawMode.FAST",
+        .params = "self, text: str, position: tuple[float, float], color: " ++ stub_metadata.COLOR ++ ", font: BitmapFont = BitmapFont.font8x8(), scale: float = 1.0, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
 };

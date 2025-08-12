@@ -14,6 +14,7 @@ const main_module = @import("main.zig");
 const fdm_module = @import("fdm.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
+const bitmap_font_module = @import("bitmap_font.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -343,17 +344,18 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
         .special_methods = &rectangle_module.rectangle_special_methods_metadata,
     });
 
-    // Generate BitmapFont class
-    try stub.write("\nclass BitmapFont:\n");
-    try stub.write("    \"\"\"Bitmap font for text rendering\"\"\"\n");
-    try stub.write("    @classmethod\n");
-    try stub.write("    def load(cls, path: str) -> BitmapFont:\n");
-    try stub.write("        \"\"\"Load a bitmap font from file.\"\"\"\n");
-    try stub.write("        ...\n");
-    try stub.write("    @classmethod\n");
-    try stub.write("    def get_default_font(cls) -> BitmapFont:\n");
-    try stub.write("        \"\"\"Get the built-in default 8x8 bitmap font.\"\"\"\n");
-    try stub.write("        ...\n");
+    // Generate BitmapFont class from metadata
+    const bitmap_font_methods = stub_metadata.extractMethodInfo(&bitmap_font_module.bitmap_font_methods_metadata);
+    const bitmap_font_doc = std.mem.span(bitmap_font_module.BitmapFontType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "BitmapFont",
+        .doc = bitmap_font_doc,
+        .methods = &bitmap_font_methods,
+        .properties = &[_]stub_metadata.PropertyInfo{},
+        .bases = &.{},
+        .special_methods = null,
+    });
+    // Note: BitmapFont.font8x8() returns a cached singleton
 
     // Generate InterpolationMethod enum
     try generateEnumFromMetadata(&stub, .{

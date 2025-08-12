@@ -4,7 +4,7 @@ import zignal
 
 def test_bitmap_font_default():
     """Test getting the default font."""
-    font = zignal.BitmapFont.get_default_font()
+    font = zignal.BitmapFont.font8x8()
     assert font is not None
     assert isinstance(font, zignal.BitmapFont)
 
@@ -24,7 +24,7 @@ def test_draw_text_with_default_font():
     canvas = img.canvas()
 
     # Get default font
-    font = zignal.BitmapFont.get_default_font()
+    font = zignal.BitmapFont.font8x8()
 
     # Draw text - basic call
     canvas.draw_text("Hello", (10, 10), (255, 255, 255), font)
@@ -51,7 +51,7 @@ def test_draw_text_modes():
 
     img = zignal.Image.from_numpy(np.zeros((50, 100, 4), dtype=np.uint8))
     canvas = img.canvas()
-    font = zignal.BitmapFont.get_default_font()
+    font = zignal.BitmapFont.font8x8()
 
     # Test both drawing modes
     canvas.draw_text("Fast", (5, 5), (255, 255, 255), font, mode=zignal.DrawMode.FAST)
@@ -64,7 +64,7 @@ def test_draw_text_invalid_params():
 
     img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
     canvas = img.canvas()
-    font = zignal.BitmapFont.get_default_font()
+    font = zignal.BitmapFont.font8x8()
 
     # Invalid font type
     with pytest.raises(TypeError):
