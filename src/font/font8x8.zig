@@ -19,12 +19,13 @@ const unicode = @import("unicode.zig");
 
 /// Basic ASCII font (0x20-0x7E)
 /// This font is always available and requires no allocation
+/// Uses a slice of basic_latin starting at character 0x20
 pub const basic = BitmapFont{
     .char_width = 8,
     .char_height = 8,
     .first_char = 0x20, // Space
     .last_char = 0x7E, // Tilde
-    .data = &font_data.ascii_data,
+    .data = font_data.basic_latin[0x20 * 8 .. 0x7F * 8], // Slice from 0x20 to 0x7E (inclusive)
     .glyph_map = null,
     .glyph_data = null,
 };
