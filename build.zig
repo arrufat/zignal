@@ -165,6 +165,12 @@ pub fn build(b: *Build) void {
     // Make python-bindings depend on stub generation so stubs are always up to date
     py_bindings_step.dependOn(&run_stub_generator.step);
     py_bindings_step.dependOn(&install_py_module.step);
+
+    // Also copy the built extension into the source package directory for local development
+    const pkg_dir = b.pathJoin(&.{ b.build_root.path.?, "bindings/python/zignal" });
+    const wf = b.addWriteFiles();
+    _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
+    py_bindings_step.dependOn(&wf.step);
 }
 
 const Build = blk: {

@@ -6,7 +6,7 @@ not testing the underlying drawing algorithms (which are tested in Zig).
 """
 
 import pytest
-import numpy as np
+
 import zignal
 
 
@@ -15,30 +15,27 @@ class TestCanvasBinding:
 
     def test_canvas_creation(self):
         """Test both ways to create a Canvas work"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-
-        # Method 1: image.canvas()
-        canvas1 = img.canvas()
+        image = zignal.Image(100, 100, 0)
+        canvas1 = image.canvas()
         assert canvas1 is not None
-
-        # Method 2: Canvas(image)
-        canvas2 = zignal.Canvas(img)
+        canvas2 = zignal.Canvas(image)
         assert canvas2 is not None
 
     def test_canvas_properties(self):
         """Test Canvas properties are accessible"""
-        img = zignal.Image.from_numpy(np.zeros((100, 200, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        image = zignal.Image(100, 200, 0)
+        canvas = image.canvas()
 
         # Check properties return correct values
         assert canvas.rows == 100
         assert canvas.cols == 200
-        assert canvas.image is img
+        assert canvas.image is image
 
     def test_canvas_methods_exist(self):
         """Test all Canvas methods can be called"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        image = zignal.Image(100, 100, 0)
+        original = image.copy()
+        canvas = image.canvas()
 
         # Basic methods
         canvas.fill((128, 128, 128))
@@ -67,8 +64,7 @@ class TestCanvasBinding:
         canvas.fill_spline_polygon(points, (255, 0, 128))
 
         # Verify the canvas modified the image
-        result = img.to_numpy()
-        assert np.any(result > 0)
+        assert not image == original
 
 
 class TestColorParsing:
@@ -76,7 +72,7 @@ class TestColorParsing:
 
     def test_color_tuple_parsing(self):
         """Test RGB and RGBA tuples work"""
-        img = zignal.Image.from_numpy(np.zeros((10, 10, 4), dtype=np.uint8))
+        img = zignal.Image(10, 10, 0)
         canvas = img.canvas()
 
         # RGB tuple
@@ -91,8 +87,7 @@ class TestColorParsing:
 
     def test_color_object_parsing(self):
         """Test all color object types are accepted"""
-        img = zignal.Image.from_numpy(np.zeros((10, 10, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(10, 10, 0).canvas()
 
         # Test a variety of color objects
         color_objects = [
@@ -108,14 +103,14 @@ class TestColorParsing:
         # All should work without errors
         for color in color_objects:
             canvas.fill(color)
+            assert canvas.image[0, 0] == color
 
         # Also test with draw_line
         canvas.draw_line((0, 0), (5, 5), zignal.Rgb(255, 255, 255))
 
     def test_invalid_color_handling(self):
         """Test proper errors for invalid color inputs"""
-        img = zignal.Image.from_numpy(np.zeros((10, 10, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(10, 10, 0).canvas()
 
         # Invalid color inputs should raise exceptions
         with pytest.raises(Exception):
@@ -136,20 +131,17 @@ class TestDrawLineBinding:
 
     def test_draw_line_basic(self):
         """Test draw_line accepts required parameters"""
-        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(50, 50, 0).canvas()
 
-        # Basic call with required parameters
         canvas.draw_line((10, 10), (40, 40), (255, 0, 0))
 
         # Verify it actually drew something
-        result = img.to_numpy()
-        assert np.any(result[:, :, 0] > 0)  # Some red pixels exist
+        for i in range(10, 40):
+            assert canvas.image[i, i] == (255, 0, 0)
 
     def test_draw_line_optional_params(self):
         """Test optional width and mode parameters"""
-        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(50, 50, 0).canvas()
 
         # Test width parameter
         canvas.draw_line((0, 10), (50, 10), (255, 0, 0), width=3)
@@ -161,13 +153,14 @@ class TestDrawLineBinding:
         canvas.draw_line((0, 30), (50, 30), (0, 0, 255), width=5, mode=zignal.DrawMode.FAST)
 
         # All should work without errors
-        result = img.to_numpy()
-        assert np.any(result > 0)
+        black = zignal.Rgb(0, 0, 0)
+        assert canvas.image[10, 0] != black
+        assert canvas.image[20, 0] != black
+        assert canvas.image[30, 0] != black
 
     def test_point_tuple_parsing(self):
         """Test point tuples are properly parsed"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(100, 100, 0).canvas()
 
         # Integer coordinates
         canvas.draw_line((0, 0), (50, 50), (255, 0, 0))
@@ -177,10 +170,13 @@ class TestDrawLineBinding:
 
         # Mixed types
         canvas.draw_line((10, 10.5), (90.5, 90), (0, 0, 255))
+        canvas.image.save("mixed.png")
 
         # All should work
-        result = img.to_numpy()
-        assert np.any(result > 0)
+        black = zignal.Rgb(0, 0, 0)
+        assert canvas.image[0, 0] != black
+        assert canvas.image[20, 10] != black
+        assert canvas.image[10, 10] != black
 
 
 class TestErrorHandling:
@@ -196,12 +192,11 @@ class TestErrorHandling:
 
     def test_draw_line_invalid_points(self):
         """Test draw_line with invalid point inputs"""
-        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(50, 50, 0).canvas()
 
         # Invalid point formats
         with pytest.raises(Exception):
-            canvas.draw_line((0,), (10, 10), (255, 0, 0))  # Too few coords
+            canvas.draw_line((0,), (10, 10), (255, 0, 0))
 
         with pytest.raises(Exception):
             canvas.draw_line([0, 0], (10, 10), (255, 0, 0))  # List not tuple
@@ -215,8 +210,7 @@ class TestShapeDrawing:
 
     def test_drawing_methods(self):
         """Test all drawing methods accept correct parameters"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(100, 100, 0).canvas()
 
         # Rectangle with optional params
         rect = zignal.Rectangle(5, 5, 25, 25)
@@ -234,8 +228,7 @@ class TestShapeDrawing:
 
     def test_fill_methods(self):
         """Test all fill methods accept correct parameters"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(100, 100, 0).canvas()
 
         # Fill methods with mode parameter
         rect = zignal.Rectangle(10, 10, 40, 40)
@@ -252,8 +245,7 @@ class TestRectangleParameter:
 
     def test_rectangle_usage(self):
         """Test Rectangle objects work correctly with canvas methods"""
-        img = zignal.Image.from_numpy(np.zeros((50, 50, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(50, 50, 0).canvas()
 
         # Create rectangles in different ways
         rect1 = zignal.Rectangle(5, 5, 20, 20)
@@ -264,9 +256,8 @@ class TestRectangleParameter:
         canvas.fill_rectangle(rect2, (0, 255, 0))
 
         # Verify image was modified
-        result = img.to_numpy()
-        assert np.any(result[:, :, 0] > 0)  # Red channel modified
-        assert np.any(result[:, :, 1] > 0)  # Green channel modified
+        assert canvas.image[5, 5] == zignal.Rgb(255, 0, 0)
+        assert canvas.image[25, 25] == zignal.Rgb(0, 255, 0)
 
 
 class TestBezierAndSpline:
@@ -274,8 +265,7 @@ class TestBezierAndSpline:
 
     def test_curve_methods(self):
         """Test bezier and spline methods with correct number of points"""
-        img = zignal.Image.from_numpy(np.zeros((100, 100, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(100, 100, 0).canvas()
 
         # Quadratic bezier needs 3 points
         canvas.draw_quadratic_bezier((10, 10), (50, 5), (90, 10), (255, 0, 0))
@@ -294,8 +284,7 @@ class TestDrawText:
 
     def test_draw_text_basic(self):
         """Test basic text drawing"""
-        img = zignal.Image.from_numpy(np.zeros((100, 200, 4), dtype=np.uint8))
-        canvas = img.canvas()
+        canvas = zignal.Image(100, 200, 0).canvas()
         font = zignal.BitmapFont.font8x8()
 
         # Draw simple text

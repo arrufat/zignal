@@ -62,6 +62,21 @@ img[10, 22] = (255, 0, 0, 128)             # RGBA tuple
 img[10, 23] = zignal.Hsv(180, 100, 100)    # Any color object
 ```
 
+### Iterating Pixels
+
+```python
+# Image is iterable: yields (row, col, Rgba)
+for r, c, px in img:
+    if (r + c) % 1000 == 0:
+        print(r, c, px.r, px.g, px.b, px.a)
+
+# Build a list of pixels (allocates):
+pixels = [px for _, _, px in img]
+
+# For bulk numeric ops, use NumPy:
+arr = img.to_numpy()  # shape: (rows, cols, 4)
+```
+
 ### Color Spaces
 
 ```python
