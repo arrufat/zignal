@@ -5,16 +5,8 @@ not testing the FDM algorithm itself (which is tested in Zig).
 """
 
 import pytest
+
 import zignal
-import tempfile
-import os
-
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
 
 
 class TestFDMBinding:
@@ -36,15 +28,10 @@ class TestFDMBinding:
         assert hasattr(fdm, "set_target")
         assert hasattr(fdm, "update")
 
-    @pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")
     def test_fdm_accepts_images(self):
         """Test FDM accepts Image objects."""
-        # Create two simple images
-        src_arr = np.full((10, 10, 3), 100, dtype=np.uint8)
-        ref_arr = np.full((10, 10, 3), 200, dtype=np.uint8)
-
-        src_img = zignal.Image.from_numpy(src_arr)
-        ref_img = zignal.Image.from_numpy(ref_arr)
+        src_img = zignal.Image(10, 10, 100)
+        ref_img = zignal.Image(10, 10, 200)
 
         # Create FDM instance and apply
         fdm = zignal.FeatureDistributionMatching()
@@ -53,15 +40,9 @@ class TestFDMBinding:
         # Should return None (in-place modification)
         assert result is None
 
-    @pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")
     def test_fdm_works_with_different_sizes(self):
-        """Test FDM works with different sized images."""
-        # Different sized images should be accepted
-        src_arr = np.zeros((20, 30, 3), dtype=np.uint8)
-        ref_arr = np.zeros((50, 40, 3), dtype=np.uint8)
-
-        src_img = zignal.Image.from_numpy(src_arr)
-        ref_img = zignal.Image.from_numpy(ref_arr)
+        src_img = zignal.Image(20, 30, 0)
+        ref_img = zignal.Image(50, 40, 0)
 
         # Should work without error
         fdm = zignal.FeatureDistributionMatching()
@@ -71,27 +52,21 @@ class TestFDMBinding:
         assert src_img.rows == 20
         assert src_img.cols == 30
 
-    @pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")
     def test_fdm_batch_processing(self):
         """Test FDM batch processing with reused target."""
-        # Create target and multiple sources
-        target_arr = np.full((10, 10, 3), 200, dtype=np.uint8)
-        target_img = zignal.Image.from_numpy(target_arr)
+        target_img = zignal.Image(10, 10, 200)
 
         fdm = zignal.FeatureDistributionMatching()
         fdm.set_target(target_img)
 
-        # Process multiple images with same target
         for i in range(3):
-            src_arr = np.full((10, 10, 3), 50 + i * 50, dtype=np.uint8)
-            src_img = zignal.Image.from_numpy(src_arr)
+            src_img = zignal.Image(10, 10, 50 + i * 50)
+            org_img = src_img.copy()
 
             fdm.set_source(src_img)
             fdm.update()
 
-            # Verify source was modified
-            result_arr = src_img.to_numpy(include_alpha=False)
-            assert not np.array_equal(result_arr, src_arr)
+            assert not src_img[0, 0] == org_img[0, 0]
 
 
 class TestFDMErrors:
@@ -113,11 +88,9 @@ class TestFDMErrors:
         with pytest.raises(TypeError):
             fdm.match(123, 456)
 
-    @pytest.mark.skipif(not HAS_NUMPY, reason="NumPy not available")
     def test_fdm_mixed_types(self):
         """Test FDM with one valid and one invalid argument."""
-        arr = np.zeros((10, 10, 3), dtype=np.uint8)
-        img = zignal.Image.from_numpy(arr)
+        img = zignal.Image(10, 10, 0)
 
         fdm = zignal.FeatureDistributionMatching()
 

@@ -7,14 +7,20 @@ const Rgba = zignal.Rgba;
 const DisplayFormat = zignal.DisplayFormat;
 
 const canvas = @import("canvas.zig");
+const color_utils = @import("color_utils.zig");
+const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
-const color_utils = @import("color_utils.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
-const image_class_doc = "RGBA image for processing and manipulation.";
+const image_class_doc =
+    \\
+    \\RGBA image for processing and manipulation.\n\n
+    \\This object is iterable: iterating yields (row, col, Rgba) for each pixel\n
+    \\in row-major order. For bulk numeric work, prefer to_numpy().
+;
 
 pub const ImageObject = extern struct {
     ob_base: c.PyObject,
@@ -158,6 +164,84 @@ fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     }
 
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+}
+
+fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
+    // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
+    if (op != c.Py_EQ and op != c.Py_NE) {
+        const not_impl = c.Py_NotImplemented();
+        c.Py_INCREF(not_impl);
+        return not_impl;
+    }
+
+    // Check if other is an Image object; if not, defer using NotImplemented
+    const image_type = @as([*c]c.PyTypeObject, @ptrCast(&ImageType));
+    if (c.PyObject_TypeCheck(other_obj, image_type) == 0) {
+        const not_impl = c.Py_NotImplemented();
+        c.Py_INCREF(not_impl);
+        return not_impl;
+    }
+
+    // Cast to ImageObject
+    const self = @as(*ImageObject, @ptrCast(self_obj));
+    const other = @as(*ImageObject, @ptrCast(other_obj));
+
+    // Get the image pointers
+    const self_img = self.image_ptr orelse {
+        // Self has no image data, compare with other
+        const other_has_data = other.image_ptr != null;
+        if (op == c.Py_EQ) {
+            return @ptrCast(py_utils.getPyBool(!other_has_data));
+        } else {
+            return @ptrCast(py_utils.getPyBool(other_has_data));
+        }
+    };
+
+    const other_img = other.image_ptr orelse {
+        // Other has no image data, self does
+        if (op == c.Py_EQ) {
+            return @ptrCast(py_utils.getPyBool(false));
+        } else {
+            return @ptrCast(py_utils.getPyBool(true));
+        }
+    };
+
+    // Compare dimensions first
+    if (self_img.rows != other_img.rows or self_img.cols != other_img.cols) {
+        // Dimensions don't match
+        if (op == c.Py_EQ) {
+            return @ptrCast(py_utils.getPyBool(false));
+        } else {
+            return @ptrCast(py_utils.getPyBool(true));
+        }
+    }
+
+    var pixels_equal: bool = undefined;
+    if (!self_img.isView() and !other_img.isView()) {
+        // for non views, compare all data at once
+        pixels_equal = std.mem.eql(Rgba, self_img.data, other_img.data);
+    } else {
+        // for views, compare row by row
+        pixels_equal = true;
+        for (0..self_img.rows) |row| {
+            const self_row_start = row * self_img.stride;
+            const other_row_start = row * other_img.stride;
+
+            const self_row = self_img.data[self_row_start..][0..self_img.cols];
+            const other_row = other_img.data[other_row_start..][0..other_img.cols];
+
+            if (!std.mem.eql(Rgba, self_row, other_row)) {
+                pixels_equal = false;
+                break;
+            }
+        }
+    }
+
+    if (op == c.Py_EQ) {
+        return @ptrCast(py_utils.getPyBool(pixels_equal));
+    } else {
+        return @ptrCast(py_utils.getPyBool(!pixels_equal));
+    }
 }
 
 fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -693,6 +777,12 @@ fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     defer c.Py_DECREF(concat_kwargs);
 
     return c.PyObject_Call(concatenate_func, concat_args, concat_kwargs);
+}
+
+fn image_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    _ = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    return pixel_iterator.new(self_obj);
 }
 
 /// Parse dimension string "WIDTHxHEIGHT" into optional width and height values
@@ -2425,6 +2515,12 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .returns = "int",
     },
     .{
+        .name = "__iter__",
+        .params = "self",
+        .returns = "PixelIterator",
+        .doc = "Iterate over pixels in row-major order, yielding (row, col, Rgba).",
+    },
+    .{
         .name = "__getitem__",
         .params = "self, key: tuple[int, int]",
         .returns = "Rgba",
@@ -2439,6 +2535,18 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .params = "self, format_spec: str",
         .returns = "str",
         .doc = "Format image for display. Supports 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', and 'auto'.",
+    },
+    .{
+        .name = "__eq__",
+        .params = "self, other: object",
+        .returns = "bool",
+        .doc = "Check equality with another Image by comparing dimensions and pixel data.",
+    },
+    .{
+        .name = "__ne__",
+        .params = "self, other: object",
+        .returns = "bool",
+        .doc = "Check inequality with another Image.",
     },
 };
 
@@ -2462,6 +2570,8 @@ pub var ImageType = c.PyTypeObject{
     .tp_methods = @ptrCast(&image_methods),
     .tp_getset = @ptrCast(&image_getset),
     .tp_as_mapping = @ptrCast(&image_as_mapping),
+    .tp_iter = image_iter,
     .tp_init = image_init,
     .tp_new = image_new,
+    .tp_richcompare = @ptrCast(&image_richcompare),
 };

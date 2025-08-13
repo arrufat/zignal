@@ -145,28 +145,3 @@ def test_blend_with_tuple():
     assert result.r == base.r
     assert result.g == base.g
     assert result.b == base.b
-
-
-if __name__ == "__main__":
-    test_blend_mode_enum()
-    print("✓ BlendMode enum tests passed")
-
-    test_blend_method_exists()
-    print("✓ Blend method existence tests passed")
-
-    test_blend_basic()
-    print("✓ Basic blend tests passed")
-
-    test_blend_modes()
-    print("✓ Blend mode tests passed")
-
-    test_blend_transparent()
-    print("✓ Transparent blend tests passed")
-
-    test_blend_type_preservation()
-    print("✓ Type preservation tests passed")
-
-    test_blend_with_tuple()
-    print("✓ Tuple overlay tests passed")
-
-    print("\nAll blending tests passed!")

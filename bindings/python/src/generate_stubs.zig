@@ -170,7 +170,7 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
 /// Generate class from metadata
 fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.ClassInfo) !void {
     try stub.writef("\nclass {s}:\n", .{class_info.name});
-    try stub.writef("    \"\"\"{s}\"\"\"\n", .{class_info.doc});
+    try stub.writef("    \"\"\"{s}\n\"\"\"\n", .{class_info.doc});
 
     // Generate methods
     for (class_info.methods) |method| {
@@ -298,24 +298,49 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(allocator);
     defer stub.deinit();
 
+    try stub.write(
+        \\# Auto-generated Python type stubs for zignal
+        \\# Generated from Zig source code using compile-time reflection
+        \\# Do not modify manually - regenerate using: zig build generate-stubs
+        \\
+        \\
+    );
+
     // Header and imports
-    try stub.write("# Auto-generated Python type stubs for zignal\n");
-    try stub.write("# Generated from Zig source code using compile-time reflection\n");
-    try stub.write("# Do not modify manually - regenerate using: zig build generate-stubs\n\n");
-    try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, overload, TypeAlias\n");
-    try stub.write("from enum import IntEnum\n");
-    try stub.write("import numpy as np\n");
-    try stub.write("from numpy.typing import NDArray\n");
-    try stub.write("\n");
+    try stub.write(
+        \\from __future__ import annotations
+        \\
+        \\from enum import IntEnum
+        \\from typing import TypeAlias
+        \\
+        \\import numpy as np
+        \\from numpy.typing import NDArray
+        \\
+        \\
+    );
 
     // Type aliases for common patterns
-    try stub.write("# Type aliases for common patterns\n");
-    try stub.write("Point: TypeAlias = tuple[float, float]\n");
-    try stub.write("Size: TypeAlias = tuple[int, int]\n");
-    try stub.write("RgbTuple: TypeAlias = tuple[int, int, int]\n");
-    try stub.write("RgbaTuple: TypeAlias = tuple[int, int, int, int]\n");
-    try stub.write("\n");
+    try stub.write(
+        \\# Type aliases for common patterns
+        \\Point: TypeAlias = tuple[float, float]
+        \\Size: TypeAlias = tuple[int, int]
+        \\RgbTuple: TypeAlias = tuple[int, int, int]
+        \\RgbaTuple: TypeAlias = tuple[int, int, int, int]
+        \\
+        \\
+    );
+
+    // PixelIterator class from metadata (in image module)
+    const pixel_iter_module = @import("pixel_iterator.zig");
+    const pixel_iter_doc = std.mem.span(pixel_iter_module.PixelIteratorType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "PixelIterator",
+        .doc = pixel_iter_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &[_]stub_metadata.PropertyInfo{},
+        .bases = &.{},
+        .special_methods = &pixel_iter_module.pixel_iterator_special_methods_metadata,
+    });
 
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
@@ -476,11 +501,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     // Header
     try stub.write("# Type stubs for zignal package\n");
     try stub.write("# This file helps LSPs understand the module structure\n\n");
-    try stub.write("from __future__ import annotations\n");
-    try stub.write("from typing import Any, overload, TypeAlias\n");
-    try stub.write("from enum import IntEnum\n");
-    try stub.write("import numpy as np\n");
-    try stub.write("from numpy.typing import NDArray\n\n");
+    try stub.write("from __future__ import annotations\n\n");
 
     // Re-export all types from _zignal
     try stub.write("# Re-export all types from _zignal\n");

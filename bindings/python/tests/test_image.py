@@ -4,9 +4,10 @@ These tests verify the Python bindings work correctly,
 not the underlying image processing algorithms (which are tested in Zig).
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 
 try:
     import numpy as np
@@ -32,6 +33,64 @@ class TestImageBinding:
         # Check dimensions
         assert img.rows == 10
         assert img.cols == 20
+
+    def test_image_equality(self):
+        """Test Image equality comparison."""
+        # Create two identical images
+        arr1 = np.ones((10, 20, 4), dtype=np.uint8) * 100
+        img1 = zignal.Image.from_numpy(arr1)
+
+        arr2 = np.ones((10, 20, 4), dtype=np.uint8) * 100
+        img2 = zignal.Image.from_numpy(arr2)
+
+        # Test equality
+        assert img1 == img2
+        assert not (img1 != img2)
+
+        # Test with same image
+        assert img1 == img1
+
+        # Create different image (different pixel values)
+        arr3 = np.ones((10, 20, 4), dtype=np.uint8) * 200
+        img3 = zignal.Image.from_numpy(arr3)
+
+        assert img1 != img3
+        assert not (img1 == img3)
+
+        # Create image with different dimensions
+        arr4 = np.ones((15, 20, 4), dtype=np.uint8) * 100
+        img4 = zignal.Image.from_numpy(arr4)
+
+        assert img1 != img4
+        assert not (img1 == img4)
+
+        # Test comparison with non-Image objects
+        assert img1 is not None
+        assert img1 != "string"
+        assert img1 != 42
+
+    def test_image_equality_copies_and_views(self):
+        """Test equality between copies and views."""
+        # Create original image
+        arr = np.random.randint(0, 256, (20, 30, 4), dtype=np.uint8)
+        img1 = zignal.Image.from_numpy(arr)
+
+        # Create a copy
+        img2 = img1.copy()
+
+        # Copy should be equal
+        assert img1 == img2
+
+        # Create a view (sub-image)
+        rect = zignal.Rectangle(5, 5, 10, 10)
+        view = img1.view(rect)
+
+        # View should not be equal to the whole image (different dimensions)
+        assert img1 != view
+
+        # Two views of the same region should be equal
+        view2 = img1.view(rect)
+        assert view == view2
 
     def test_image_methods_exist(self):
         """Test Image methods are accessible."""
@@ -106,14 +165,14 @@ class TestImageBinding:
         img = zignal.Image.from_numpy(arr)
 
         # Regular image should not be a view
-        assert img.is_view() == False
+        assert img.is_view() is False
 
         # Create a view
         rect = zignal.Rectangle(0, 0, 10, 10)
         view = img.view(rect)
 
         # View should be marked as a view
-        assert view.is_view() == True
+        assert view.is_view() is True
 
     def test_view_basic(self):
         """Test creating a basic view of an image."""

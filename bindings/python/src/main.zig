@@ -9,11 +9,11 @@ const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
 const interpolation = @import("interpolation.zig");
+const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
+const c = py_utils.c;
 const rectangle = @import("rectangle.zig");
 const stub_metadata = @import("stub_metadata.zig");
-
-const c = py_utils.c;
 
 // ============================================================================
 // MODULE FUNCTIONS
@@ -43,6 +43,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register Image type
     py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch |err| {
         std.log.err("Failed to register Image: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register PixelIterator type
+    py_utils.registerType(@ptrCast(m), "PixelIterator", @ptrCast(&pixel_iterator.PixelIteratorType)) catch |err| {
+        std.log.err("Failed to register PixelIterator: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

@@ -166,7 +166,6 @@ def main():
             count = zignal_html_content.count(pattern)
             validation_errors.append(f"{message} ({count} occurrence{'s' if count != 1 else ''})")
 
-
     # Match function definitions and check if they have return type annotations
     func_pattern = r'<span class="def">def</span>\s*<span class="name">([^<]+)</span><span class="signature[^"]*">([^<]+)</span>'
     func_matches = re.finditer(func_pattern, zignal_html_content)
