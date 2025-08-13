@@ -24,9 +24,9 @@ const pixel_iterator_doc =
     \\## Examples
     \\
     \\```python
-    \\image = Image(2, 3)
-    \\for r, c, px in img:
-    \\    print(f"image.at({r}, {c}) = {px:ansi}")
+    \\image = Image(2, 3, Rgb(255, 0, 0))
+    \\for r, c, pixel in image:
+    \\    print(f"image[{r}, {c}] = {pixel:ansi}")
     \\```
     \\
     \\## Notes
