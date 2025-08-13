@@ -10,6 +10,7 @@ Usage:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -140,11 +141,68 @@ def main():
 
     print("\nDocumentation generated successfully!")
     print("Search functionality has been restored.")
-    print(f"\nGenerated files:")
-    print(f"  - index.html (module listing)")
-    print(f"  - zignal.html (module documentation)")
-    print(f"  - empty.html (placeholder for search generation)")
-    print(f"  - search.js (search index)")
+
+    # Check for type annotation issues in the generated documentation
+    print("\nValidating type annotations in generated documentation...")
+    validation_errors = []
+
+    # Read the main module documentation file
+    zignal_html_content = zignal_html.read_text()
+
+    # Check for common indicators of missing type annotations
+    problematic_patterns = [
+        ("(unknown)", "Found '(unknown)' which indicates missing type information"),
+        ("typing.Any", "Found 'typing.Any' which may indicate incomplete type stubs"),
+        # Check for parameters without type annotations - look for param spans without colons
+        (
+            '<span class="param"><span class="n">[^<]+</span></span>',
+            "Found parameter without type annotation",
+        ),
+    ]
+
+    for pattern, message in problematic_patterns:
+        if pattern in zignal_html_content:
+            # Count occurrences for better reporting
+            count = zignal_html_content.count(pattern)
+            validation_errors.append(f"{message} ({count} occurrence{'s' if count != 1 else ''})")
+
+
+    # Match function definitions and check if they have return type annotations
+    func_pattern = r'<span class="def">def</span>\s*<span class="name">([^<]+)</span><span class="signature[^"]*">([^<]+)</span>'
+    func_matches = re.finditer(func_pattern, zignal_html_content)
+
+    for match in func_matches:
+        func_name = match.group(1)
+        signature = match.group(2)
+        # Check if signature has return annotation (should contain ->)
+        # Skip __init__ and other special methods that don't need return types
+        if (
+            func_name not in ["__init__", "__repr__", "__str__", "__del__"]
+            and "-&gt;" not in signature
+            and "return-annotation" not in match.group(0)
+        ):
+            validation_errors.append(
+                f"Function '{func_name}' appears to be missing return type annotation"
+            )
+
+    # Report validation results
+    if validation_errors:
+        print("\n⚠️  Type annotation issues detected:")
+        for error in validation_errors:
+            print(f"  - {error}")
+        print(
+            "\nPlease check the generated documentation and ensure all types are properly annotated."
+        )
+        print("You may need to update the .pyi stub files or the generate_stubs.zig script.")
+        sys.exit(1)
+    else:
+        print("✓ Type annotations look good!")
+
+    print("\nGenerated files:")
+    print("  - index.html (module listing)")
+    print("  - zignal.html (module documentation)")
+    print("  - empty.html (placeholder for search generation)")
+    print("  - search.js (search index)")
     print(f"\nDocumentation is available in {docs_dir}")
     print("Open index.html to browse the documentation with working search.")
 
