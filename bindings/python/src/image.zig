@@ -1935,8 +1935,9 @@ const image_extract_doc =
     \\## Parameters
     \\- `rect` (Rectangle): The rectangular region to extract (before rotation)
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
-    \\- `size` (tuple[int, int], optional): Output size as (rows, cols).
-    \\  If not specified, uses the rectangle's dimensions.
+    \\- `size` (int or tuple[int, int], optional). If not specified, uses the rectangle's dimensions.
+    \\  - If int: output is a square of side `size`
+    \\  - If tuple: output size as (rows, cols)
     \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
     \\
     \\## Examples
@@ -1952,7 +1953,10 @@ const image_extract_doc =
     \\rotated = img.extract(rect, angle=math.radians(45))
     \\
     \\# Extract and resize to specific dimensions
-    \\resized = img.extract(rect, size=(50, 50))
+    \\resized = img.extract(rect, size=(50, 75))
+    \\
+    \\# Extract to a 64x64 square
+    \\square = img.extract(rect, size=64)
     \\```
 ;
 
@@ -1988,37 +1992,53 @@ fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     var out_cols: usize = @intFromFloat(@round(rect.width()));
 
     if (size_obj != null and size_obj != c.Py_None()) {
-        // Parse size tuple
-        if (c.PyTuple_Check(size_obj) == 0 or c.PyTuple_Size(size_obj) != 2) {
-            c.PyErr_SetString(c.PyExc_TypeError, "size must be a tuple of (rows, cols)");
-            return null;
-        }
+        // Accept either an integer (square) or a tuple (rows, cols)
+        if (c.PyLong_Check(size_obj) != 0) {
+            const square = c.PyLong_AsLong(size_obj);
+            if (square == -1 and c.PyErr_Occurred() != null) {
+                return null;
+            }
+            if (square <= 0) {
+                c.PyErr_SetString(c.PyExc_ValueError, "size must be positive");
+                return null;
+            }
+            out_rows = @intCast(square);
+            out_cols = @intCast(square);
+        } else if (c.PyTuple_Check(size_obj) != 0) {
+            if (c.PyTuple_Size(size_obj) != 2) {
+                c.PyErr_SetString(c.PyExc_ValueError, "size must be a 2-tuple of (rows, cols)");
+                return null;
+            }
 
-        const rows_obj = c.PyTuple_GetItem(size_obj, 0);
-        const cols_obj = c.PyTuple_GetItem(size_obj, 1);
+            const rows_obj = c.PyTuple_GetItem(size_obj, 0);
+            const cols_obj = c.PyTuple_GetItem(size_obj, 1);
 
-        const rows = c.PyLong_AsLong(rows_obj);
-        if (rows == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
-            return null;
-        }
-        if (rows <= 0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Rows must be positive");
-            return null;
-        }
+            const rows = c.PyLong_AsLong(rows_obj);
+            if (rows == -1 and c.PyErr_Occurred() != null) {
+                c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+                return null;
+            }
+            if (rows <= 0) {
+                c.PyErr_SetString(c.PyExc_ValueError, "Rows must be positive");
+                return null;
+            }
 
-        const cols = c.PyLong_AsLong(cols_obj);
-        if (cols == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
-            return null;
-        }
-        if (cols <= 0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Cols must be positive");
-            return null;
-        }
+            const cols = c.PyLong_AsLong(cols_obj);
+            if (cols == -1 and c.PyErr_Occurred() != null) {
+                c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+                return null;
+            }
+            if (cols <= 0) {
+                c.PyErr_SetString(c.PyExc_ValueError, "Cols must be positive");
+                return null;
+            }
 
-        out_rows = @intCast(rows);
-        out_cols = @intCast(cols);
+            out_rows = @intCast(rows);
+            out_cols = @intCast(cols);
+        } else {
+            c.PyErr_SetString(c.PyExc_TypeError, "size must be an int (square) or a tuple (rows, cols)");
+            return null;
+        }
     }
 
     // Create output image
@@ -2466,7 +2486,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_extract),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_extract_doc,
-        .params = "self, rect: Rectangle, angle: float = 0.0, size: tuple[int, int] | None = None, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, rect: Rectangle, angle: float = 0.0, size: int | tuple[int, int] | None = None, method: InterpolationMethod = InterpolationMethod.BILINEAR",
         .returns = "Image",
     },
     .{
