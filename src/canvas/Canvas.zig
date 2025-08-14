@@ -124,18 +124,32 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Checks if an angle is within an arc's range.
+        /// Arcs are drawn counter-clockwise from start_angle to end_angle.
         /// Handles wrapping around 2π correctly.
         inline fn isAngleInArc(angle: f32, start: f32, end: f32) bool {
+            // Normalize all angles to [0, 2π] range
             const norm_angle = normalizeAngle(angle);
             const norm_start = normalizeAngle(start);
-            const norm_end = normalizeAngle(end);
+            var norm_end = normalizeAngle(end);
 
-            if (norm_start <= norm_end) {
-                return norm_angle >= norm_start and norm_angle <= norm_end;
-            } else {
-                // Arc wraps around 0
-                return norm_angle >= norm_start or norm_angle <= norm_end;
+            // If the arc spans a full circle or more, include all angles
+            if (@abs(end - start) >= 2 * std.math.pi) {
+                return true;
             }
+
+            // Ensure we go counter-clockwise from start to end
+            // If end is less than start after normalization, it wraps around 0
+            if (norm_end < norm_start) {
+                norm_end += 2 * std.math.pi;
+            }
+
+            // Check if angle is in range, handling wrap-around
+            if (norm_angle >= norm_start and norm_angle <= norm_end) {
+                return true;
+            }
+            // Also check with angle shifted by 2π for wrap-around cases
+            const shifted_angle = norm_angle + 2 * std.math.pi;
+            return shifted_angle >= norm_start and shifted_angle <= norm_end;
         }
 
         /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
@@ -1184,54 +1198,60 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for filling solid (non-anti-aliased) arcs.
-        /// Optimized version that calculates intersection points directly.
+        /// Fills a pie slice (arc + lines to center).
         fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) void {
             const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
+
+            // Calculate bounding box
             const top = @max(0, center.y() - radius);
             const bottom = @min(frows - 1, center.y() + radius);
+            const left = @max(0, center.x() - radius);
+            const right = @min(fcols - 1, center.x() + radius);
 
+            // For each scanline in the bounding box
             var y = top;
             while (y <= bottom) : (y += 1) {
                 const dy = y - center.y();
-                const dx_max = @sqrt(@max(0, radius * radius - dy * dy));
 
-                if (dx_max > 0) {
-                    // Calculate the left and right boundaries of the circle at this y
-                    const circle_left = center.x() - dx_max;
-                    const circle_right = center.x() + dx_max;
+                // Calculate the x-range where the circle intersects this scanline
+                const dx_max_sq = radius * radius - dy * dy;
+                if (dx_max_sq <= 0) continue;
 
-                    // For pie slices, we need to also consider the lines from center to arc endpoints
-                    // Calculate where the arc boundary lines intersect this scanline
-                    var x_left = circle_right; // Start with invalid range
-                    var x_right = circle_left;
+                const dx_max = @sqrt(dx_max_sq);
+                const circle_left = center.x() - dx_max;
+                const circle_right = center.x() + dx_max;
 
-                    // Check multiple points along the scanline to find the arc boundaries
-                    // This is more robust than trying to solve the intersection analytically
-                    const num_checks = @as(usize, @intFromFloat(@max(10, dx_max * 2)));
-                    var found_arc = false;
+                // Clamp to image bounds
+                const scan_left = @max(left, circle_left);
+                const scan_right = @min(right, circle_right);
 
-                    var i: usize = 0;
-                    while (i <= num_checks) : (i += 1) {
-                        const x = circle_left + (circle_right - circle_left) * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_checks));
-                        const dx = x - center.x();
+                // For pie slices, we need to check each pixel individually
+                // This is more accurate than the previous sampling approach
+                var x = scan_left;
+                while (x <= scan_right) : (x += 1) {
+                    const dx = x - center.x();
 
-                        // Check if this point is within the radius
-                        if (dx * dx + dy * dy <= radius * radius) {
-                            const angle = std.math.atan2(dy, dx);
-                            if (isAngleInArc(angle, start_angle, end_angle)) {
-                                if (!found_arc) {
-                                    x_left = x;
-                                    found_arc = true;
-                                }
-                                x_right = x;
+                    // Verify we're inside the circle
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        // Check if this angle is within the arc
+                        const angle = std.math.atan2(dy, dx);
+                        if (isAngleInArc(angle, start_angle, end_angle)) {
+                            // Find the continuous span of pixels in the arc
+                            var span_end = x;
+                            while (span_end < scan_right) : (span_end += 1) {
+                                const next_dx = span_end + 1 - center.x();
+                                if (next_dx * next_dx + dy * dy > radius * radius) break;
+
+                                const next_angle = std.math.atan2(dy, next_dx);
+                                if (!isAngleInArc(next_angle, start_angle, end_angle)) break;
                             }
-                        }
-                    }
 
-                    // Fill the span if we found valid arc points
-                    if (found_arc) {
-                        self.setHorizontalSpan(x_left, x_right, y, solid_color);
+                            // Fill the continuous span
+                            self.setHorizontalSpan(x, span_end, y, solid_color);
+                            x = span_end; // Skip to end of span
+                        }
                     }
                 }
             }

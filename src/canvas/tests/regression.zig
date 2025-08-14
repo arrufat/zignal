@@ -172,7 +172,7 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawArcQuarter", .md5sum = "028912b02048fa169c8cb808ff669184", .draw_fn = drawArcQuarter },
     .{ .name = "drawArcHalf", .md5sum = "39194cb90d53611a6eb4401e4c28d5bb", .draw_fn = drawArcHalf },
     .{ .name = "drawArcThick", .md5sum = "70595cc2d1252de2e1c10d8debfcea70", .draw_fn = drawArcThick },
-    .{ .name = "fillArcQuarter", .md5sum = "9ab798889197768049d6530e773ffa95", .draw_fn = fillArcQuarter },
+    .{ .name = "fillArcQuarter", .md5sum = "acfcff99a739fb974774f392f0c472e2", .draw_fn = fillArcQuarter },
     .{ .name = "fillArcHalf", .md5sum = "ab22d8ce9c9f4a6ce9f5519c08e89f30", .draw_fn = fillArcHalf },
     .{ .name = "fillArcFull", .md5sum = "3c6832b07c09de096e8ba85712419332", .draw_fn = fillArcFull },
 };
