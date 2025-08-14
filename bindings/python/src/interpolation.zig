@@ -4,6 +4,35 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
+// Documentation for the InterpolationMethod enum (used at runtime and for stub generation)
+pub const interpolation_method_doc =
+    \\Interpolation methods for image resizing.
+    \\
+    \\Performance and quality comparison:
+    \\
+    \\| Method            | Quality | Speed | Best Use Case       | Overshoot |
+    \\|-------------------|---------|-------|---------------------|-----------|
+    \\| NEAREST_NEIGHBOR  | ★☆☆☆☆   | ★★★★★ | Pixel art, masks    | No        |
+    \\| BILINEAR          | ★★☆☆☆   | ★★★★☆ | Real-time, preview  | No        |
+    \\| BICUBIC           | ★★★☆☆   | ★★★☆☆ | General purpose     | Yes       |
+    \\| CATMULL_ROM       | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
+    \\| MITCHELL          | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
+    \\| LANCZOS           | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
+    \\
+    \\Note: "Overshoot" means the filter can create values outside the input range,
+    \\which can cause ringing artifacts but may also enhance sharpness.
+;
+
+// Per-value documentation for stub generation
+pub const interpolation_method_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "NEAREST_NEIGHBOR", .doc = "Fastest, pixelated, good for pixel art" },
+    .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
+    .{ .name = "BICUBIC", .doc = "Balanced quality/speed, general purpose" },
+    .{ .name = "CATMULL_ROM", .doc = "Sharp, good for natural images" },
+    .{ .name = "MITCHELL", .doc = "High quality, reduces ringing" },
+    .{ .name = "LANCZOS", .doc = "Highest quality, slowest, for final output" },
+};
+
 // Python object for InterpolationMethod (empty, it's just an enum)
 pub const InterpolationMethodObject = extern struct {
     ob_base: c.PyObject,
@@ -57,23 +86,7 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
     const interpolation_method = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
 
     // Add docstring to the enum
-    const doc_str = c.PyUnicode_FromString(
-        \\Interpolation methods for image resizing.
-        \\
-        \\Performance and quality comparison:
-        \\
-        \\| Method            | Quality | Speed | Best Use Case       | Overshoot |
-        \\|-------------------|---------|-------|---------------------|-----------|
-        \\| NEAREST_NEIGHBOR  | ★☆☆☆☆   | ★★★★★ | Pixel art, masks    | No        |
-        \\| BILINEAR          | ★★☆☆☆   | ★★★★☆ | Real-time, preview  | No        |
-        \\| BICUBIC           | ★★★☆☆   | ★★★☆☆ | General purpose     | Yes       |
-        \\| CATMULL_ROM       | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
-        \\| MITCHELL          | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
-        \\| LANCZOS           | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
-        \\
-        \\Note: "Overshoot" means the filter can create values outside the input range,
-        \\which can cause ringing artifacts but may also enhance sharpness.
-    ) orelse return error.DocStringFailed;
+    const doc_str = c.PyUnicode_FromString(interpolation_method_doc) orelse return error.DocStringFailed;
     if (c.PyObject_SetAttrString(interpolation_method, "__doc__", doc_str) < 0) {
         c.Py_DECREF(doc_str);
         c.Py_DECREF(interpolation_method);
