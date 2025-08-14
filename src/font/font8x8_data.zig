@@ -3,8 +3,6 @@
 //!
 //! Based on font8x8 by Daniel Hepper (Public Domain)
 
-const std = @import("std");
-
 /// Character range information
 pub const CharRange = struct {
     start: u21,
