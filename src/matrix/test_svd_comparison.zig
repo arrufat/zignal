@@ -8,7 +8,6 @@ const Matrix = @import("Matrix.zig").Matrix;
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_dynamic = @import("svd.zig").svd;
 const svd_static = @import("svd_static.zig").svd;
-const SvdOptions = @import("svd_static.zig").SvdOptions;
 
 test "SVD comparison: basic 5x4 matrix" {
     const allocator = testing.allocator;
