@@ -116,15 +116,15 @@ const HuffmanDecoder = struct {
     allocator: Allocator,
     nodes: ArrayList(HuffmanNode),
 
-    pub fn init(allocator: Allocator) HuffmanDecoder {
+    pub fn init(gpa: Allocator) HuffmanDecoder {
         return .{
-            .allocator = allocator,
-            .nodes = ArrayList(HuffmanNode).init(allocator),
+            .allocator = gpa,
+            .nodes = .empty,
         };
     }
 
     pub fn deinit(self: *HuffmanDecoder) void {
-        self.nodes.deinit();
+        self.nodes.deinit(self.allocator);
     }
 
     fn reverseBits(code: u16, length: u8) u16 {
@@ -163,7 +163,7 @@ const HuffmanDecoder = struct {
         for (code_lengths) |len| {
             if (len > 9) max_nodes += len;
         }
-        try self.nodes.ensureTotalCapacity(max_nodes);
+        try self.nodes.ensureTotalCapacity(self.allocator, max_nodes);
 
         // Build fast lookup table and tree
         for (code_lengths, 0..) |len, symbol| {
@@ -274,7 +274,7 @@ const BitReader = struct {
 
 // DEFLATE decompressor
 pub const DeflateDecoder = struct {
-    allocator: Allocator,
+    gpa: Allocator,
     output: ArrayList(u8),
     literal_decoder: HuffmanDecoder,
     distance_decoder: HuffmanDecoder,
@@ -282,15 +282,15 @@ pub const DeflateDecoder = struct {
 
     pub fn init(allocator: Allocator) DeflateDecoder {
         return .{
-            .allocator = allocator,
-            .output = ArrayList(u8).init(allocator),
+            .gpa = allocator,
+            .output = .empty,
             .literal_decoder = HuffmanDecoder.init(allocator),
             .distance_decoder = HuffmanDecoder.init(allocator),
         };
     }
 
     pub fn deinit(self: *DeflateDecoder) void {
-        self.output.deinit();
+        self.output.deinit(self.gpa);
         self.literal_decoder.deinit();
         self.distance_decoder.deinit();
     }
@@ -315,7 +315,7 @@ pub const DeflateDecoder = struct {
             if (is_final) break;
         }
 
-        return self.output.clone();
+        return self.output.clone(self.gpa);
     }
 
     fn decodeUncompressedBlock(self: *DeflateDecoder, reader: *BitReader) !void {
@@ -334,7 +334,7 @@ pub const DeflateDecoder = struct {
         }
 
         const old_len = self.output.items.len;
-        try self.output.resize(old_len + len);
+        try self.output.resize(self.gpa, old_len + len);
         try reader.readBytes(self.output.items[old_len..]);
     }
 
@@ -361,13 +361,13 @@ pub const DeflateDecoder = struct {
         }
 
         // Build code length decoder
-        var code_length_decoder = HuffmanDecoder.init(self.allocator);
+        var code_length_decoder = HuffmanDecoder.init(self.gpa);
         defer code_length_decoder.deinit();
         try code_length_decoder.buildFromLengths(&code_length_lengths);
 
         // Decode literal/length and distance code lengths
-        var lengths = try self.allocator.alloc(u8, hlit + hdist);
-        defer self.allocator.free(lengths);
+        var lengths = try self.gpa.alloc(u8, hlit + hdist);
+        defer self.gpa.free(lengths);
 
         var i: usize = 0;
         while (i < lengths.len) {
@@ -417,7 +417,7 @@ pub const DeflateDecoder = struct {
 
             if (symbol < 256) {
                 // Literal byte
-                try self.output.append(@intCast(symbol));
+                try self.output.append(self.gpa, @intCast(symbol));
             } else if (symbol == 256) {
                 // End of block
                 break;
@@ -446,7 +446,7 @@ pub const DeflateDecoder = struct {
                 const start_pos = self.output.items.len - distance;
                 for (0..length) |j| {
                     const byte = self.output.items[start_pos + (j % distance)];
-                    try self.output.append(byte);
+                    try self.output.append(self.gpa, byte);
                 }
             } else {
                 return error.InvalidLiteralLengthSymbol;
@@ -527,14 +527,14 @@ pub const DeflateDecoder = struct {
 };
 
 // Public decompression function
-pub fn inflate(allocator: Allocator, compressed_data: []const u8) ![]u8 {
-    var decoder = DeflateDecoder.init(allocator);
+pub fn inflate(gpa: Allocator, compressed_data: []const u8) ![]u8 {
+    var decoder = DeflateDecoder.init(gpa);
     defer decoder.deinit();
 
     var result = try decoder.decode(compressed_data);
-    defer result.deinit();
+    defer result.deinit(gpa);
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(gpa);
 }
 
 // Build static Huffman encoder tables by computing codes from lengths
@@ -689,20 +689,20 @@ const BitWriter = struct {
         return .{ .output = output };
     }
 
-    pub fn writeBits(self: *BitWriter, code: u32, bits: u8) !void {
+    pub fn writeBits(self: *BitWriter, gpa: Allocator, code: u32, bits: u8) !void {
         self.bit_buffer |= code << @as(u5, @intCast(self.bit_count));
         self.bit_count += bits;
 
         while (self.bit_count >= 8) {
-            try self.output.append(@intCast(self.bit_buffer & 0xFF));
+            try self.output.append(gpa, @intCast(self.bit_buffer & 0xFF));
             self.bit_buffer >>= 8;
             self.bit_count -= 8;
         }
     }
 
-    pub fn flush(self: *BitWriter) !void {
+    pub fn flush(self: *BitWriter, gpa: Allocator) !void {
         if (self.bit_count > 0) {
-            try self.output.append(@intCast(self.bit_buffer & 0xFF));
+            try self.output.append(gpa, @intCast(self.bit_buffer & 0xFF));
             self.bit_buffer = 0;
             self.bit_count = 0;
         }
@@ -718,18 +718,18 @@ pub const CompressionMethod = enum {
 
 // DEFLATE encoder for PNG compression
 pub const DeflateEncoder = struct {
-    allocator: Allocator,
+    gpa: Allocator,
     output: ArrayList(u8),
 
-    pub fn init(allocator: Allocator) DeflateEncoder {
+    pub fn init(gpa: Allocator) DeflateEncoder {
         return .{
-            .allocator = allocator,
-            .output = ArrayList(u8).init(allocator),
+            .gpa = gpa,
+            .output = .empty,
         };
     }
 
     pub fn deinit(self: *DeflateEncoder) void {
-        self.output.deinit();
+        self.output.deinit(self.gpa);
     }
 
     // Simple LZ77 match finder
@@ -837,26 +837,26 @@ pub const DeflateEncoder = struct {
 
             // Block header: BFINAL (1 bit) + BTYPE (2 bits) = 000 or 001 for final
             const block_header: u8 = if (is_final) 0x01 else 0x00;
-            try self.output.append(block_header);
+            try self.output.append(self.gpa, block_header);
 
             // Length and NLEN (one's complement of length)
             const len: u16 = @intCast(chunk_size);
             const nlen: u16 = ~len;
 
             // Write length in little-endian format
-            try self.output.append(@intCast(len & 0xFF));
-            try self.output.append(@intCast((len >> 8) & 0xFF));
+            try self.output.append(self.gpa, @intCast(len & 0xFF));
+            try self.output.append(self.gpa, @intCast((len >> 8) & 0xFF));
             // Write NLEN in little-endian format
-            try self.output.append(@intCast(nlen & 0xFF));
-            try self.output.append(@intCast((nlen >> 8) & 0xFF));
+            try self.output.append(self.gpa, @intCast(nlen & 0xFF));
+            try self.output.append(self.gpa, @intCast((nlen >> 8) & 0xFF));
 
             // Uncompressed data
-            try self.output.appendSlice(data[pos .. pos + chunk_size]);
+            try self.output.appendSlice(self.gpa, data[pos .. pos + chunk_size]);
 
             pos += chunk_size;
         }
 
-        return self.output.clone();
+        return self.output.clone(self.gpa);
     }
 
     fn encodeStaticHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
@@ -874,7 +874,7 @@ pub const DeflateEncoder = struct {
         if (has_high_bytes) {}
 
         // Write block header: BFINAL=1, BTYPE=01 (static Huffman)
-        try writer.writeBits(0x3, 3); // 011 in binary (LSB first: BFINAL=1, BTYPE=01)
+        try writer.writeBits(self.gpa, 0x3, 3); // 011 in binary (LSB first: BFINAL=1, BTYPE=01)
 
         var pos: usize = 0;
         while (pos < data.len) {
@@ -888,20 +888,20 @@ pub const DeflateEncoder = struct {
 
                 // Write length code (using static Huffman table)
                 const length_huffman = StaticHuffmanTables.literal_codes[length_info.code];
-                try writer.writeBits(length_huffman.code, length_huffman.bits);
+                try writer.writeBits(self.gpa, length_huffman.code, length_huffman.bits);
 
                 // Write extra length bits if needed
                 if (length_info.extra_bits > 0) {
-                    try writer.writeBits(length_info.extra_value, length_info.extra_bits);
+                    try writer.writeBits(self.gpa, length_info.extra_value, length_info.extra_bits);
                 }
 
                 // Write distance code (5 bits, values 0-31)
                 const distance_huffman = StaticHuffmanTables.distance_codes[distance_info.code];
-                try writer.writeBits(distance_huffman.code, distance_huffman.bits);
+                try writer.writeBits(self.gpa, distance_huffman.code, distance_huffman.bits);
 
                 // Write extra distance bits if needed
                 if (distance_info.extra_bits > 0) {
-                    try writer.writeBits(distance_info.extra_value, distance_info.extra_bits);
+                    try writer.writeBits(self.gpa, distance_info.extra_value, distance_info.extra_bits);
                 }
 
                 pos += match.length;
@@ -909,31 +909,31 @@ pub const DeflateEncoder = struct {
                 // Output literal
                 const literal = data[pos];
                 const literal_huffman = StaticHuffmanTables.literal_codes[literal];
-                try writer.writeBits(literal_huffman.code, literal_huffman.bits);
+                try writer.writeBits(self.gpa, literal_huffman.code, literal_huffman.bits);
                 pos += 1;
             }
         }
 
         // Write end-of-block symbol (256)
         const eob_huffman = StaticHuffmanTables.literal_codes[256];
-        try writer.writeBits(eob_huffman.code, eob_huffman.bits);
+        try writer.writeBits(self.gpa, eob_huffman.code, eob_huffman.bits);
 
         // Flush remaining bits
-        try writer.flush();
+        try writer.flush(self.gpa);
 
-        return self.output.clone();
+        return self.output.clone(self.gpa);
     }
 };
 
 // Public compression function with selectable compression method
-pub fn deflate(allocator: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
-    var encoder = DeflateEncoder.init(allocator);
+pub fn deflate(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
+    var encoder = DeflateEncoder.init(gpa);
     defer encoder.deinit();
 
     var result = try encoder.encode(data, method);
-    defer result.deinit();
+    defer result.deinit(gpa);
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(gpa);
 }
 
 // Adler-32 checksum implementation (required for zlib format)
@@ -951,17 +951,17 @@ fn adler32(data: []const u8) u32 {
 }
 
 // Compress data using zlib format (RFC 1950) - required for PNG IDAT chunks
-pub fn zlibCompress(allocator: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
+pub fn zlibCompress(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
     // Generate raw DEFLATE data first
-    const deflate_data = try deflate(allocator, data, method);
-    defer allocator.free(deflate_data);
+    const deflate_data = try deflate(gpa, data, method);
+    defer gpa.free(deflate_data);
 
     // Calculate Adler-32 checksum of original data
     const checksum = adler32(data);
 
     // Create zlib-wrapped result
-    var result = ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result: ArrayList(u8) = .empty;
+    defer result.deinit(gpa);
 
     // zlib header (2 bytes)
     // CMF: compression method (8) + compression info (7 for 32K window)
@@ -976,23 +976,23 @@ pub fn zlibCompress(allocator: Allocator, data: []const u8, method: CompressionM
         flg |= @intCast(fcheck);
     }
 
-    try result.append(cmf);
-    try result.append(flg);
+    try result.append(gpa, cmf);
+    try result.append(gpa, flg);
 
     // DEFLATE data
-    try result.appendSlice(deflate_data);
+    try result.appendSlice(gpa, deflate_data);
 
     // Adler-32 checksum (4 bytes, big-endian)
-    try result.append(@intCast((checksum >> 24) & 0xFF));
-    try result.append(@intCast((checksum >> 16) & 0xFF));
-    try result.append(@intCast((checksum >> 8) & 0xFF));
-    try result.append(@intCast(checksum & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 24) & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 16) & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 8) & 0xFF));
+    try result.append(gpa, @intCast(checksum & 0xFF));
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(gpa);
 }
 
 // Decompress zlib format data (RFC 1950)
-pub fn zlibDecompress(allocator: Allocator, zlib_data: []const u8) ![]u8 {
+pub fn zlibDecompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
     if (zlib_data.len < 6) { // header(2) + data(at least 1) + checksum(4)
         return error.InvalidZlibData;
     }
@@ -1018,14 +1018,14 @@ pub fn zlibDecompress(allocator: Allocator, zlib_data: []const u8) ![]u8 {
     const deflate_data = zlib_data[2 .. zlib_data.len - 4];
 
     // Decompress DEFLATE data
-    const decompressed = try inflate(allocator, deflate_data);
+    const decompressed = try inflate(gpa, deflate_data);
 
     // Verify Adler-32 checksum
     const expected_checksum = std.mem.readInt(u32, zlib_data[zlib_data.len - 4 ..][0..4], .big);
     const actual_checksum = adler32(decompressed);
 
     if (actual_checksum != expected_checksum) {
-        allocator.free(decompressed);
+        gpa.free(decompressed);
         return error.ChecksumMismatch;
     }
 

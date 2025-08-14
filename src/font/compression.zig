@@ -137,51 +137,51 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
 }
 
 /// Compress data to gzip format
-pub fn compressGzip(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+pub fn compressGzip(gpa: std.mem.Allocator, data: []const u8) ![]u8 {
     // Compress data using deflate
-    const compressed_data = try deflate.deflate(allocator, data, .static_huffman);
-    defer allocator.free(compressed_data);
+    const compressed_data = try deflate.deflate(gpa, data, .static_huffman);
+    defer gpa.free(compressed_data);
 
     // Calculate CRC32 checksum of original data
     const checksum = crc32(data);
 
     // Create gzip output
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result: std.ArrayList(u8) = .empty;
+    defer result.deinit(gpa);
 
     // Write gzip header (10 bytes)
-    try result.append(0x1f); // Magic number byte 1
-    try result.append(0x8b); // Magic number byte 2
-    try result.append(0x08); // Compression method (deflate)
-    try result.append(0x00); // Flags (no extra fields)
+    try result.append(gpa, 0x1f); // Magic number byte 1
+    try result.append(gpa, 0x8b); // Magic number byte 2
+    try result.append(gpa, 0x08); // Compression method (deflate)
+    try result.append(gpa, 0x00); // Flags (no extra fields)
 
     // Modification time (4 bytes) - set to 0
-    try result.append(0x00);
-    try result.append(0x00);
-    try result.append(0x00);
-    try result.append(0x00);
+    try result.append(gpa, 0x00);
+    try result.append(gpa, 0x00);
+    try result.append(gpa, 0x00);
+    try result.append(gpa, 0x00);
 
-    try result.append(0x00); // Extra flags
-    try result.append(0x03); // OS (Unix)
+    try result.append(gpa, 0x00); // Extra flags
+    try result.append(gpa, 0x03); // OS (Unix)
 
     // Write compressed data
-    try result.appendSlice(compressed_data);
+    try result.appendSlice(gpa, compressed_data);
 
     // Write gzip trailer (8 bytes)
     // CRC32 (4 bytes, little-endian)
-    try result.append(@intCast(checksum & 0xFF));
-    try result.append(@intCast((checksum >> 8) & 0xFF));
-    try result.append(@intCast((checksum >> 16) & 0xFF));
-    try result.append(@intCast((checksum >> 24) & 0xFF));
+    try result.append(gpa, @intCast(checksum & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 8) & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 16) & 0xFF));
+    try result.append(gpa, @intCast((checksum >> 24) & 0xFF));
 
     // Uncompressed size (4 bytes, little-endian)
     const size: u32 = @intCast(data.len & 0xFFFFFFFF);
-    try result.append(@intCast(size & 0xFF));
-    try result.append(@intCast((size >> 8) & 0xFF));
-    try result.append(@intCast((size >> 16) & 0xFF));
-    try result.append(@intCast((size >> 24) & 0xFF));
+    try result.append(gpa, @intCast(size & 0xFF));
+    try result.append(gpa, @intCast((size >> 8) & 0xFF));
+    try result.append(gpa, @intCast((size >> 16) & 0xFF));
+    try result.append(gpa, @intCast((size >> 24) & 0xFF));
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(gpa);
 }
 
 test "gzip decompression" {

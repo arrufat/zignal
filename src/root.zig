@@ -92,7 +92,6 @@ pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMa
 // Font system
 pub const font = @import("font.zig");
 pub const BitmapFont = font.BitmapFont;
-pub const default_font_8x8 = font.default_font_8x8;
 
 // PCA (Principal Component Analysis) system
 const pca = @import("pca.zig");

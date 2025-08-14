@@ -447,7 +447,7 @@ pub fn Image(comptime T: type) type {
         ///   with the rotated image data. If `rotated.rows` and `rotated.cols` are both 0, optimal
         ///   dimensions will be computed automatically. The caller is responsible for deallocating
         ///   `rotated.data` if it was allocated by this function.
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: InterpolationMethod, rotated: *Self) !void {
+        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: InterpolationMethod, rotated: *Self) !void {
             // Auto-compute optimal bounds if dimensions are 0
             const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
                 const bounds = self.rotateBounds(angle);
@@ -464,9 +464,9 @@ pub fn Image(comptime T: type) type {
             // Fast paths for orthogonal rotations
             if (@abs(normalized_angle) < epsilon or @abs(normalized_angle - std.math.tau) < epsilon) {
                 // 0° or 360° - copy
-                var array: std.ArrayList(T) = .init(allocator);
-                try array.resize(actual_rows * actual_cols);
-                rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice());
+                var array: std.ArrayList(T) = .empty;
+                try array.resize(gpa, actual_rows * actual_cols);
+                rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
 
                 const offset_r = (actual_rows -| self.rows) / 2;
                 const offset_c = (actual_cols -| self.cols) / 2;
@@ -484,23 +484,23 @@ pub fn Image(comptime T: type) type {
 
             if (@abs(normalized_angle - std.math.pi / 2.0) < epsilon) {
                 // 90° counter-clockwise
-                return self.rotate90CCW(allocator, actual_rows, actual_cols, rotated);
+                return self.rotate90CCW(gpa, actual_rows, actual_cols, rotated);
             }
 
             if (@abs(normalized_angle - std.math.pi) < epsilon) {
                 // 180° - flip both axes
-                return self.rotate180(allocator, actual_rows, actual_cols, rotated);
+                return self.rotate180(gpa, actual_rows, actual_cols, rotated);
             }
 
             if (@abs(normalized_angle - 3.0 * std.math.pi / 2.0) < epsilon) {
                 // 270° counter-clockwise (90° clockwise)
-                return self.rotate270CCW(allocator, actual_rows, actual_cols, rotated);
+                return self.rotate270CCW(gpa, actual_rows, actual_cols, rotated);
             }
 
             // General rotation using inverse transformation
-            var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(actual_rows * actual_cols);
-            rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice());
+            var array: std.ArrayList(T) = .empty;
+            try array.resize(gpa, actual_rows * actual_cols);
+            rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
 
             const cos = @cos(angle);
             const sin = @sin(angle);
@@ -533,10 +533,10 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Fast 90-degree counter-clockwise rotation.
-        fn rotate90CCW(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+        fn rotate90CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .empty;
+            try array.resize(gpa, output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 
@@ -555,10 +555,10 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Fast 180-degree rotation.
-        fn rotate180(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+        fn rotate180(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .empty;
+            try array.resize(gpa, output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 
@@ -577,10 +577,10 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Fast 270-degree counter-clockwise rotation (90-degree clockwise).
-        fn rotate270CCW(self: Self, allocator: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .init(allocator);
-            try array.resize(output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice());
+        fn rotate270CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
+            var array: std.ArrayList(T) = .empty;
+            try array.resize(gpa, output_rows * output_cols);
+            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 

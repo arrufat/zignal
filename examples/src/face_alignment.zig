@@ -127,15 +127,15 @@ pub export fn extract_aligned_face(
     const image: Image(Rgba) = .init(rows, cols, rgba_ptr[0 .. rows * cols]);
 
     const landmarks: []const Point = blk: {
-        var array: std.ArrayList(Point) = .init(allocator);
-        array.resize(landmarks_len) catch {
+        var array: std.ArrayList(Point) = .empty;
+        array.resize(allocator, landmarks_len) catch {
             std.log.err("Ran out of memory while resizing landmarks ArrayList", .{});
             @panic("OOM");
         };
         for (array.items, 0..) |*l, i| {
             l.* = landmarks_ptr[i];
         }
-        break :blk array.toOwnedSlice() catch {
+        break :blk array.toOwnedSlice(allocator) catch {
             std.log.err("Ran out of memory while taking ownership of the landmarks ArrayList", .{});
             @panic("OOM");
         };

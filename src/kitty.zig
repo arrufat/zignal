@@ -56,12 +56,12 @@ pub const Options = struct {
 pub fn fromImage(
     comptime T: type,
     image: Image(T),
-    allocator: Allocator,
+    gpa: Allocator,
     options: Options,
 ) ![]u8 {
     var image_to_encode = image;
     var scaled_image: ?Image(T) = null;
-    defer if (scaled_image) |*img| img.deinit(allocator);
+    defer if (scaled_image) |*img| img.deinit(gpa);
 
     // Handle scaling if dimensions specified
     if (options.width != null or options.height != null) {
@@ -83,57 +83,57 @@ pub fn fromImage(
 
         // Only scale if factor is different from 1.0
         if (@abs(scale_factor - 1.0) > 0.001) {
-            scaled_image = try image.scale(allocator, scale_factor, options.interpolation);
+            scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
             image_to_encode = scaled_image.?;
         }
     }
 
     // Encode the (possibly scaled) image as PNG
-    const png_data = try png.encodeImage(T, allocator, image_to_encode, .default);
-    defer allocator.free(png_data);
+    const png_data = try png.encodeImage(T, gpa, image_to_encode, .default);
+    defer gpa.free(png_data);
 
     // Calculate base64 encoded size
     const encoder = std.base64.standard.Encoder;
     const encoded_size = encoder.calcSize(png_data.len);
 
     // Allocate buffer for base64 data
-    const base64_data = try allocator.alloc(u8, encoded_size);
-    defer allocator.free(base64_data);
+    const base64_data = try gpa.alloc(u8, encoded_size);
+    defer gpa.free(base64_data);
 
     // Encode to base64
     _ = encoder.encode(base64_data, png_data);
 
     // Build the output with proper escape sequences
-    var output = std.ArrayList(u8).init(allocator);
-    errdefer output.deinit();
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(gpa);
 
     // If chunking is disabled, send everything in one go
     if (!options.enable_chunking) {
         // Write escape sequence start
-        try output.appendSlice("\x1b_G");
+        try output.appendSlice(gpa, "\x1b_G");
 
         // Write control data
-        try output.appendSlice("a=T");
-        try output.appendSlice(",f=100");
-        try output.writer().print(",q={d}", .{options.quiet});
+        try output.appendSlice(gpa, "a=T");
+        try output.appendSlice(gpa, ",f=100");
+        try output.writer(gpa).print(",q={d}", .{options.quiet});
 
         // Optional parameters
         if (options.image_id) |id| {
-            try output.writer().print(",i={d}", .{id});
+            try output.writer(gpa).print(",i={d}", .{id});
         }
         if (options.placement_id) |id| {
-            try output.writer().print(",p={d}", .{id});
+            try output.writer(gpa).print(",p={d}", .{id});
         }
         if (options.delete_after) {
-            try output.appendSlice(",d=1");
+            try output.appendSlice(gpa, ",d=1");
         }
 
         // Separator and payload
-        try output.appendSlice(";");
-        try output.appendSlice(base64_data);
-        try output.appendSlice("\x1b\\");
+        try output.appendSlice(gpa, ";");
+        try output.appendSlice(gpa, base64_data);
+        try output.appendSlice(gpa, "\x1b\\");
 
-        return output.toOwnedSlice();
+        return output.toOwnedSlice(gpa);
     }
 
     // Process each chunk (original chunking logic)
@@ -149,57 +149,57 @@ pub fn fromImage(
         const chunk = base64_data[offset..chunk_end];
 
         // Write escape sequence start
-        try output.appendSlice("\x1b_G");
+        try output.appendSlice(gpa, "\x1b_G");
 
         // Write control data for first chunk
         if (chunk_index == 0) {
             // Action: transmit and display
-            try output.appendSlice("a=T");
+            try output.appendSlice(gpa, "a=T");
 
             // Format: PNG
-            try output.appendSlice(",f=100");
+            try output.appendSlice(gpa, ",f=100");
 
             // Quiet mode
-            try output.writer().print(",q={d}", .{options.quiet});
+            try output.writer(gpa).print(",q={d}", .{options.quiet});
 
             // Optional image ID
             if (options.image_id) |id| {
-                try output.writer().print(",i={d}", .{id});
+                try output.writer(gpa).print(",i={d}", .{id});
             }
 
             // Optional placement ID
             if (options.placement_id) |id| {
-                try output.writer().print(",p={d}", .{id});
+                try output.writer(gpa).print(",p={d}", .{id});
             }
 
             // Delete after display
             if (options.delete_after) {
-                try output.appendSlice(",d=1");
+                try output.appendSlice(gpa, ",d=1");
             }
         }
 
         // More data indicator (m=1 for continuation, m=0 or omitted for final)
         if (!is_last) {
             if (chunk_index == 0) {
-                try output.appendSlice(",m=1");
+                try output.appendSlice(gpa, ",m=1");
             } else {
-                try output.appendSlice("m=1");
+                try output.appendSlice(gpa, "m=1");
             }
         }
 
         // Separator between control and payload
-        try output.appendSlice(";");
+        try output.appendSlice(gpa, ";");
 
         // Write chunk data
-        try output.appendSlice(chunk);
+        try output.appendSlice(gpa, chunk);
 
         // Write escape sequence end
-        try output.appendSlice("\x1b\\");
+        try output.appendSlice(gpa, "\x1b\\");
 
         offset = chunk_end;
     }
 
-    return output.toOwnedSlice();
+    return output.toOwnedSlice(gpa);
 }
 
 /// Detects if the terminal supports Kitty graphics protocol

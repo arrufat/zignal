@@ -165,13 +165,13 @@ pub const PngImage = struct {
     gamma: ?f32 = null, // Gamma value from gAMA chunk
     srgb_intent: ?SrgbRenderingIntent = null, // sRGB rendering intent
 
-    pub fn deinit(self: *PngImage, allocator: Allocator) void {
-        self.idat_data.deinit();
+    pub fn deinit(self: *PngImage, gpa: Allocator) void {
+        self.idat_data.deinit(gpa);
         if (self.palette) |palette| {
-            allocator.free(palette);
+            gpa.free(palette);
         }
         if (self.transparency) |trans| {
-            allocator.free(trans);
+            gpa.free(trans);
         }
     }
 };
@@ -334,17 +334,17 @@ fn parseHeader(chunk: Chunk) !Header {
 }
 
 // PNG decoder entry point
-pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
+pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
     }
 
-    var reader = ChunkReader.init(png_data[8..]);
-    var png_image = PngImage{
+    var reader: ChunkReader = .init(png_data[8..]);
+    var png_image: PngImage = .{
         .header = undefined,
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
-    errdefer png_image.deinit(allocator);
+    errdefer png_image.deinit(gpa);
 
     var header_found = false;
 
@@ -359,7 +359,7 @@ pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
             if (palette_size > 256) return error.PaletteTooLarge;
             if (chunk.data.len < palette_size * 3) return error.InvalidPaletteLength;
 
-            var palette = try allocator.alloc([3]u8, palette_size);
+            var palette = try gpa.alloc([3]u8, palette_size);
             for (0..palette_size) |i| {
                 const offset = i * 3;
                 if (offset + 3 > chunk.data.len) return error.InvalidPaletteLength;
@@ -385,7 +385,7 @@ pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
                 },
             }
 
-            const transparency = try allocator.alloc(u8, chunk.length);
+            const transparency = try gpa.alloc(u8, chunk.length);
             @memcpy(transparency, chunk.data);
             png_image.transparency = transparency;
         } else if (std.mem.eql(u8, &chunk.type, "gAMA")) {
@@ -406,7 +406,7 @@ pub fn decode(allocator: Allocator, png_data: []const u8) !PngImage {
                 else => return error.InvalidSrgbIntent,
             };
         } else if (std.mem.eql(u8, &chunk.type, "IDAT")) {
-            try png_image.idat_data.appendSlice(chunk.data);
+            try png_image.idat_data.appendSlice(gpa, chunk.data);
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             break;
         }
@@ -757,39 +757,40 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
 
 // Chunk writer for PNG encoding
 pub const ChunkWriter = struct {
+    gpa: Allocator,
     data: ArrayList(u8),
 
-    pub fn init(allocator: Allocator) ChunkWriter {
-        return .{ .data = ArrayList(u8).init(allocator) };
+    pub fn init(gpa: Allocator) ChunkWriter {
+        return .{ .gpa = gpa, .data = .empty };
     }
 
     pub fn deinit(self: *ChunkWriter) void {
-        self.data.deinit();
+        self.data.deinit(self.gpa);
     }
 
     pub fn writeChunk(self: *ChunkWriter, chunk_type: [4]u8, chunk_data: []const u8) !void {
         // Length (4 bytes, big endian)
         const length: u32 = @intCast(chunk_data.len);
-        try self.data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, length, .big)));
+        try self.data.appendSlice(self.gpa, std.mem.asBytes(&std.mem.nativeTo(u32, length, .big)));
 
         // Type (4 bytes)
-        try self.data.appendSlice(&chunk_type);
+        try self.data.appendSlice(self.gpa, &chunk_type);
 
         // Data
-        try self.data.appendSlice(chunk_data);
+        try self.data.appendSlice(self.gpa, chunk_data);
 
         // CRC (4 bytes, big endian) - calculate CRC of type + data
-        var crc_data = try self.data.allocator.alloc(u8, 4 + chunk_data.len);
-        defer self.data.allocator.free(crc_data);
+        var crc_data = try self.gpa.alloc(u8, 4 + chunk_data.len);
+        defer self.gpa.free(crc_data);
         @memcpy(crc_data[0..4], &chunk_type);
         @memcpy(crc_data[4..], chunk_data);
 
         const chunk_crc = crc(crc_data);
-        try self.data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, chunk_crc, .big)));
+        try self.data.appendSlice(self.gpa, std.mem.asBytes(&std.mem.nativeTo(u32, chunk_crc, .big)));
     }
 
     pub fn toOwnedSlice(self: *ChunkWriter) ![]u8 {
-        return self.data.toOwnedSlice();
+        return self.data.toOwnedSlice(self.gpa);
     }
 };
 
@@ -877,12 +878,12 @@ fn getColorType(comptime T: type) ColorType {
 }
 
 // Encode Image data to PNG format
-pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
-    var writer = ChunkWriter.init(allocator);
+pub fn encode(gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
+    var writer = ChunkWriter.init(gpa);
     defer writer.deinit();
 
     // Write PNG signature
-    try writer.data.appendSlice(&signature);
+    try writer.data.appendSlice(gpa, &signature);
 
     // Create and write IHDR
     const header = Header{
@@ -914,15 +915,15 @@ pub fn encode(allocator: Allocator, image_data: []const u8, width: u32, height: 
 
     // Apply row filtering based on options
     const filtered_data = switch (options.filter_mode) {
-        .none => try filterScanlines(allocator, image_data, header, .none),
-        .adaptive => try filterScanlinesAdaptive(allocator, image_data, header),
-        .fixed => |filter_type| try filterScanlines(allocator, image_data, header, filter_type),
+        .none => try filterScanlines(gpa, image_data, header, .none),
+        .adaptive => try filterScanlinesAdaptive(gpa, image_data, header),
+        .fixed => |filter_type| try filterScanlines(gpa, image_data, header, filter_type),
     };
-    defer allocator.free(filtered_data);
+    defer gpa.free(filtered_data);
 
     // Compress filtered data with zlib format (required for PNG IDAT) using static Huffman
-    const compressed_data = try deflate.zlibCompress(allocator, filtered_data, .static_huffman);
-    defer allocator.free(compressed_data);
+    const compressed_data = try deflate.zlibCompress(gpa, filtered_data, .static_huffman);
+    defer gpa.free(compressed_data);
 
     // Write IDAT chunk
     try writer.writeChunk("IDAT".*, compressed_data);
@@ -1874,8 +1875,7 @@ test "PNG encode with color management chunks" {
 }
 
 test "PNG CRC validation" {
-    const allocator = std.testing.allocator;
-    _ = allocator;
+    const gpa = std.testing.allocator;
 
     // Test IHDR chunk CRC
     const ihdr_type = "IHDR";
@@ -1889,11 +1889,11 @@ test "PNG CRC validation" {
         0, // interlace
     };
 
-    var test_data = ArrayList(u8).init(std.testing.allocator);
-    defer test_data.deinit();
+    var test_data: ArrayList(u8) = .empty;
+    defer test_data.deinit(gpa);
 
-    try test_data.appendSlice(ihdr_type);
-    try test_data.appendSlice(&ihdr_data);
+    try test_data.appendSlice(gpa, ihdr_type);
+    try test_data.appendSlice(gpa, &ihdr_data);
 
     const calculated_crc = crc(test_data.items);
 
@@ -1948,46 +1948,46 @@ test "PNG filter types" {
 }
 
 test "PNG bounds checking - large image dimensions" {
-    const allocator = std.testing.allocator;
+    const gpa = std.testing.allocator;
 
     // Create a malformed PNG with excessively large dimensions
-    var png_data = ArrayList(u8).init(allocator);
-    defer png_data.deinit();
+    var png_data: ArrayList(u8) = .empty;
+    defer png_data.deinit(gpa);
 
     // PNG signature
-    try png_data.appendSlice(&signature);
+    try png_data.appendSlice(gpa, &signature);
 
     // IHDR chunk with oversized dimensions
     const ihdr_length: u32 = 13;
-    try png_data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_length, .big)));
-    try png_data.appendSlice("IHDR");
+    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_length, .big)));
+    try png_data.appendSlice(gpa, "IHDR");
 
     // Width: 50000 (exceeds MAX_DIMENSION)
-    try png_data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
+    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
     // Height: 50000 (exceeds MAX_DIMENSION)
-    try png_data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
+    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
 
-    try png_data.append(8); // bit depth
-    try png_data.append(2); // color type (RGB)
-    try png_data.append(0); // compression
-    try png_data.append(0); // filter
-    try png_data.append(0); // interlace
+    try png_data.append(gpa, 8); // bit depth
+    try png_data.append(gpa, 2); // color type (RGB)
+    try png_data.append(gpa, 0); // compression
+    try png_data.append(gpa, 0); // filter
+    try png_data.append(gpa, 0); // interlace
 
     // Calculate and append CRC
-    var crc_data = try allocator.alloc(u8, 4 + 13);
-    defer allocator.free(crc_data);
+    var crc_data = try gpa.alloc(u8, 4 + 13);
+    defer gpa.free(crc_data);
     @memcpy(crc_data[0..4], "IHDR");
     @memcpy(crc_data[4..], png_data.items[16..29]);
     const ihdr_crc = crc(crc_data);
-    try png_data.appendSlice(std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_crc, .big)));
+    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_crc, .big)));
 
     // Try to decode - should fail with ImageTooLarge
-    const result = decode(allocator, png_data.items);
+    const result = decode(gpa, png_data.items);
     try std.testing.expectError(error.ImageTooLarge, result);
 }
 
 test "PNG bounds checking - malformed palette" {
-    const allocator = std.testing.allocator;
+    const gpa = std.testing.allocator;
 
     // Test malformed palette chunk that's too short
     const chunk = Chunk{
@@ -2007,9 +2007,9 @@ test "PNG bounds checking - malformed palette" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
-    defer png_image.deinit(allocator);
+    defer png_image.deinit(gpa);
 
     // Simulate the palette parsing that would happen in decode()
     if (chunk.length % 3 != 0) {
@@ -2108,7 +2108,7 @@ test "PNG palette transparency support" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
     defer png_image.deinit(allocator);
 
@@ -2219,7 +2219,7 @@ test "PNG transparency error cases" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
     defer png_image.deinit(allocator);
 
@@ -2301,7 +2301,7 @@ test "PNG gAMA chunk parsing" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
     defer png_image.deinit(allocator);
 
@@ -2335,7 +2335,7 @@ test "PNG sRGB chunk parsing" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = ArrayList(u8).init(allocator),
+        .idat_data = .empty,
     };
     defer png_image.deinit(allocator);
 

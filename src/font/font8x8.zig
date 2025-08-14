@@ -43,10 +43,10 @@ pub fn extended(allocator: std.mem.Allocator) !BitmapFont {
 /// Create a font with specific Unicode ranges
 /// This requires allocation and can fail
 /// The returned font must be freed with deinit()
-pub fn create(allocator: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
+pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
     // Build list of characters to include
-    var char_list = std.ArrayList(u21).init(allocator);
-    defer char_list.deinit();
+    var char_list: std.ArrayList(u21) = .empty;
+    defer char_list.deinit(gpa);
 
     switch (filter) {
         .all => {
@@ -54,7 +54,7 @@ pub fn create(allocator: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
             for (font_data.ranges) |range| {
                 var code = range.start;
                 while (code <= range.end) : (code += 1) {
-                    try char_list.append(code);
+                    try char_list.append(gpa, code);
                 }
             }
         },
@@ -68,7 +68,7 @@ pub fn create(allocator: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
                     if (start <= end) {
                         var code = start;
                         while (code <= end) : (code += 1) {
-                            try char_list.append(code);
+                            try char_list.append(gpa, code);
                         }
                     }
                 }
@@ -84,28 +84,28 @@ pub fn create(allocator: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
     std.mem.sort(u21, char_list.items, {}, std.sort.asc(u21));
 
     // Remove duplicates
-    var unique_chars = std.ArrayList(u21).init(allocator);
-    defer unique_chars.deinit();
+    var unique_chars: std.ArrayList(u21) = .empty;
+    defer unique_chars.deinit(gpa);
 
     var prev: ?u21 = null;
     for (char_list.items) |code| {
         if (prev == null or prev.? != code) {
-            try unique_chars.append(code);
+            try unique_chars.append(gpa, code);
             prev = code;
         }
     }
 
     // Build glyph map and data
-    var glyph_map = std.AutoHashMap(u32, usize).init(allocator);
+    var glyph_map: std.AutoHashMap(u32, usize) = .init(gpa);
     errdefer glyph_map.deinit();
 
-    var glyph_data_list = try allocator.alloc(GlyphData, unique_chars.items.len);
-    errdefer allocator.free(glyph_data_list);
+    var glyph_data_list = try gpa.alloc(GlyphData, unique_chars.items.len);
+    errdefer gpa.free(glyph_data_list);
 
     // Calculate total bitmap size needed
     const total_size = unique_chars.items.len * 8; // 8 bytes per character
-    var bitmap_data = try allocator.alloc(u8, total_size);
-    errdefer allocator.free(bitmap_data);
+    var bitmap_data = try gpa.alloc(u8, total_size);
+    errdefer gpa.free(bitmap_data);
 
     // Copy character data
     for (unique_chars.items, 0..) |code, idx| {
