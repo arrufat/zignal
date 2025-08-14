@@ -864,6 +864,8 @@ pub fn Canvas(comptime T: type) type {
                 const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
                 const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
+                if (left >= right or top >= bottom) return;
+
                 for (top..bottom) |r| {
                     const y = @as(f32, @floatFromInt(r)) - center.y();
                     for (left..right) |c| {
