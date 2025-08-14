@@ -15,6 +15,8 @@ const fdm_module = @import("fdm.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
 const bitmap_font_module = @import("bitmap_font.zig");
+const blending_module = @import("blending.zig");
+const interpolation_module = @import("interpolation.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -387,50 +389,27 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try generateEnumFromMetadata(&stub, .{
         .name = "InterpolationMethod",
         .base = "IntEnum",
-        .doc = "Interpolation methods for image resizing",
+        .doc = interpolation_module.interpolation_method_doc,
         .zig_type = zignal.InterpolationMethod,
-        .value_docs = &[_]stub_metadata.EnumValueDoc{
-            .{ .name = "NEAREST_NEIGHBOR", .doc = "Fastest, pixelated, good for pixel art" },
-            .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
-            .{ .name = "BICUBIC", .doc = "Balanced quality/speed, general purpose" },
-            .{ .name = "CATMULL_ROM", .doc = "Sharp, good for natural images" },
-            .{ .name = "MITCHELL", .doc = "High quality, reduces ringing" },
-            .{ .name = "LANCZOS", .doc = "Highest quality, slowest, for final output" },
-        },
+        .value_docs = &interpolation_module.interpolation_method_values,
     });
 
     // Generate BlendMode enum
     try generateEnumFromMetadata(&stub, .{
         .name = "BlendMode",
         .base = "IntEnum",
-        .doc = "Blending modes for color composition",
+        .doc = blending_module.blend_mode_doc,
         .zig_type = zignal.BlendMode,
-        .value_docs = &[_]stub_metadata.EnumValueDoc{
-            .{ .name = "NORMAL", .doc = "Standard alpha blending with transparency" },
-            .{ .name = "MULTIPLY", .doc = "Darkens by multiplying colors" },
-            .{ .name = "SCREEN", .doc = "Lightens by inverting, multiplying, inverting" },
-            .{ .name = "OVERLAY", .doc = "Combines multiply and screen for contrast" },
-            .{ .name = "SOFT_LIGHT", .doc = "Gentle contrast adjustment" },
-            .{ .name = "HARD_LIGHT", .doc = "Strong contrast, like overlay but reversed" },
-            .{ .name = "COLOR_DODGE", .doc = "Brightens base color, creates glow effects" },
-            .{ .name = "COLOR_BURN", .doc = "Darkens base color, creates deep shadows" },
-            .{ .name = "DARKEN", .doc = "Selects darker color per channel" },
-            .{ .name = "LIGHTEN", .doc = "Selects lighter color per channel" },
-            .{ .name = "DIFFERENCE", .doc = "Subtracts colors for inversion effect" },
-            .{ .name = "EXCLUSION", .doc = "Like difference but with lower contrast" },
-        },
+        .value_docs = &blending_module.blend_mode_values,
     });
 
     // Generate DrawMode enum
     try generateEnumFromMetadata(&stub, .{
         .name = "DrawMode",
         .base = "IntEnum",
-        .doc = "Rendering quality mode for drawing operations",
+        .doc = canvas_module.draw_mode_doc,
         .zig_type = zignal.DrawMode,
-        .value_docs = &[_]stub_metadata.EnumValueDoc{
-            .{ .name = "FAST", .doc = "Fast rendering with hard edges" },
-            .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
-        },
+        .value_docs = &canvas_module.draw_mode_values,
     });
 
     // Generate Image class from metadata
