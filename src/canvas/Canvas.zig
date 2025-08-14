@@ -1257,6 +1257,53 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
+        /// Helper: Calculate distance from point to radial edge and which side it's on
+        inline fn getRadialEdgeInfo(x: f32, y: f32, edge_x: f32, edge_y: f32) struct { distance: f32, side: f32 } {
+            const cross_product = x * edge_y - y * edge_x;
+            return .{
+                .distance = @abs(cross_product),
+                .side = cross_product,
+            };
+        }
+
+        /// Helper: Calculate antialiased coverage for arc boundaries
+        inline fn calculateArcCoverage(dist: f32, radius: f32, in_arc: bool, start_info: anytype, end_info: anytype) f32 {
+            const edge_aa_threshold = 1.0;
+            const circular_aa_range = 1.0;
+
+            // Base coverage from circular boundary
+            var coverage: f32 = if (dist <= radius - circular_aa_range)
+                1.0 // Fully inside circle
+            else if (dist < radius + circular_aa_range)
+                @max(0, @min(1, radius - dist + 0.5)) // Antialiased circular edge
+            else
+                0.0; // Outside circle
+
+            if (!in_arc) {
+                // Outside arc angle - check if we're near edges for antialiasing
+                if (coverage == 0) return 0; // Too far from circle
+
+                var edge_coverage: f32 = 0;
+                if (start_info.distance < edge_aa_threshold and start_info.side < 0) {
+                    edge_coverage = @max(edge_coverage, 1.0 - start_info.distance);
+                }
+                if (end_info.distance < edge_aa_threshold and end_info.side > 0) {
+                    edge_coverage = @max(edge_coverage, 1.0 - end_info.distance);
+                }
+                coverage *= edge_coverage;
+            } else if (coverage > 0) {
+                // Inside arc angle - apply edge antialiasing to reduce coverage near edges
+                if (start_info.distance < edge_aa_threshold and start_info.side >= 0) {
+                    coverage = @min(coverage, start_info.distance);
+                }
+                if (end_info.distance < edge_aa_threshold and end_info.side <= 0) {
+                    coverage = @min(coverage, end_info.distance);
+                }
+            }
+
+            return coverage;
+        }
+
         /// Internal function for filling smooth (anti-aliased) arcs.
         fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) !void {
             // For full circles, use fillCircle for better quality
@@ -1265,117 +1312,45 @@ pub fn Canvas(comptime T: type) type {
                 return;
             }
 
-            // Calculate the radial edge vectors (from center to arc endpoints)
-            const start_x = @cos(start_angle);
-            const start_y = @sin(start_angle);
-            const end_x = @cos(end_angle);
-            const end_y = @sin(end_angle);
+            // Precompute edge vectors
+            const start_edge = .{ .x = @cos(start_angle), .y = @sin(start_angle) };
+            const end_edge = .{ .x = @cos(end_angle), .y = @sin(end_angle) };
 
+            // Calculate bounding box
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: usize = @intFromFloat(@round(@max(0, center.x() - radius - 1)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y() - radius - 1)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + radius + 1)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + radius + 1)));
-            if (right <= left or bottom <= top) return;
+            const bounds = .{
+                .left = @as(usize, @intFromFloat(@round(@max(0, center.x() - radius - 1)))),
+                .top = @as(usize, @intFromFloat(@round(@max(0, center.y() - radius - 1)))),
+                .right = @as(usize, @intFromFloat(@round(@min(fcols, center.x() + radius + 1)))),
+                .bottom = @as(usize, @intFromFloat(@round(@min(frows, center.y() + radius + 1)))),
+            };
 
-            for (top..bottom) |r| {
+            if (bounds.right <= bounds.left or bounds.bottom <= bounds.top) return;
+
+            const rgba_color = convertColor(Rgba, color);
+
+            // Process each pixel in bounding box
+            for (bounds.top..bounds.bottom) |r| {
                 const py = as(f32, r);
                 const y = py - center.y();
-                for (left..right) |c| {
+
+                for (bounds.left..bounds.right) |c| {
                     const px = as(f32, c);
                     const x = px - center.x();
-                    const dist_sq = x * x + y * y;
 
-                    // Skip pixels clearly outside the circle
+                    // Quick rejection for pixels far outside circle
+                    const dist_sq = x * x + y * y;
                     if (dist_sq > (radius + 1) * (radius + 1)) continue;
 
                     const dist = @sqrt(dist_sq);
-
-                    // Calculate angle for this pixel
                     const angle = std.math.atan2(y, x);
-
-                    // Check if angle is within the arc range
                     const in_arc = isAngleInArc(angle, start_angle, end_angle);
 
-                    // Calculate alpha/coverage
-                    var alpha: f32 = 0.0;
-
-                    // Calculate perpendicular distances to radial edges
-                    // Distance to start radial line using cross product
-                    const start_cross = @abs(x * start_y - y * start_x);
-                    // Distance to end radial line
-                    const end_cross = @abs(x * end_y - y * end_x);
-
-                    // Check if the point is on the correct side of the radial edges
-                    // A point is on the "inside" if it's counter-clockwise from start and clockwise from end
-                    const start_side = x * start_y - y * start_x;
-                    const end_side = x * end_y - y * end_x;
-
-                    if (in_arc) {
-                        // We're inside the arc angle range
-                        if (dist <= radius - 1) {
-                            // Fully inside
-                            alpha = 1.0;
-                        } else if (dist < radius + 1) {
-                            // On the circular edge - antialias
-                            alpha = @max(0, @min(1, radius - dist + 0.5));
-                        }
-
-                        // Apply radial edge antialiasing if we're close to an edge
-                        if (alpha > 0) {
-                            // Only apply edge AA if we're actually near the edge
-                            // Check proximity to start edge
-                            if (start_cross < 1.0 and start_side >= 0) {
-                                // We're within 1 pixel of the start edge
-                                const edge_alpha = start_cross;
-                                alpha = @min(alpha, edge_alpha);
-                            }
-                            // Check proximity to end edge
-                            if (end_cross < 1.0 and end_side <= 0) {
-                                // We're within 1 pixel of the end edge
-                                const edge_alpha = end_cross;
-                                alpha = @min(alpha, edge_alpha);
-                            }
-                        }
-                    } else {
-                        // We're outside the arc angle range
-                        // Check if we're close enough to antialias
-                        if (dist <= radius + 1) {
-                            // Check if we're near a radial edge for antialiasing
-                            var edge_alpha: f32 = 0.0;
-
-                            // Near start edge and on the outside of it
-                            if (start_cross < 1.0 and start_side < 0) {
-                                edge_alpha = @max(edge_alpha, 1.0 - start_cross);
-                            }
-                            // Near end edge and on the outside of it
-                            if (end_cross < 1.0 and end_side > 0) {
-                                edge_alpha = @max(edge_alpha, 1.0 - end_cross);
-                            }
-
-                            if (edge_alpha > 0) {
-                                // Also factor in circular edge
-                                if (dist > radius - 1) {
-                                    const circ_alpha = @max(0, @min(1, radius - dist + 0.5));
-                                    alpha = edge_alpha * circ_alpha;
-                                } else {
-                                    alpha = edge_alpha;
-                                }
-                            }
-                        }
-                    }
-
-                    // Apply the pixel if it has any coverage
-                    if (alpha > 0.001) {
-                        if (alpha >= 0.999) {
-                            self.setPixel(.point(.{ px, py }), color);
-                        } else {
-                            // Blend with background
-                            const rgba_color = convertColor(Rgba, color);
-                            self.setPixel(.point(.{ px, py }), rgba_color.fade(alpha));
-                        }
-                    }
+                    const start_info = getRadialEdgeInfo(x, y, start_edge.x, start_edge.y);
+                    const end_info = getRadialEdgeInfo(x, y, end_edge.x, end_edge.y);
+                    const coverage = calculateArcCoverage(dist, radius, in_arc, start_info, end_info);
+                    self.setPixel(.point(.{ px, py }), rgba_color.fade(coverage));
                 }
             }
         }
