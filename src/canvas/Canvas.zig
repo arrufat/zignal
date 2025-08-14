@@ -1258,13 +1258,10 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Helper: Calculate antialiased coverage for arc boundaries
-        inline fn calculateArcCoverage(x: f32, y: f32, dist: f32, radius: f32, in_arc: bool, start_edge: anytype, end_edge: anytype) f32 {
-            // Calculate cross products for radial edge distances
-            const start_cross_product = x * start_edge.y - y * start_edge.x;
-            const end_cross_product = x * end_edge.y - y * end_edge.x;
+        inline fn calculateArcCoverage(dist: f32, radius: f32, in_arc: bool, start_cross_product: f32, end_cross_product: f32) f32 {
             const start_cross = @abs(start_cross_product);
             const end_cross = @abs(end_cross_product);
-            
+
             // Circular boundary coverage
             const circ_coverage = if (dist <= radius - 1.0)
                 1.0
@@ -1303,23 +1300,22 @@ pub fn Canvas(comptime T: type) type {
             // Calculate bounding box
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const bounds = .{
-                .left = @as(usize, @intFromFloat(@round(@max(0, center.x() - radius - 1)))),
-                .top = @as(usize, @intFromFloat(@round(@max(0, center.y() - radius - 1)))),
-                .right = @as(usize, @intFromFloat(@round(@min(fcols, center.x() + radius + 1)))),
-                .bottom = @as(usize, @intFromFloat(@round(@min(frows, center.y() + radius + 1)))),
+            const bounds: Rectangle(usize) = .{
+                .l = @intFromFloat(@round(@max(0, center.x() - radius - 1))),
+                .t = @intFromFloat(@round(@max(0, center.y() - radius - 1))),
+                .r = @intFromFloat(@round(@min(fcols, center.x() + radius + 1))),
+                .b = @intFromFloat(@round(@min(frows, center.y() + radius + 1))),
             };
-
-            if (bounds.right <= bounds.left or bounds.bottom <= bounds.top) return;
+            if (bounds.isEmpty()) return;
 
             const rgba_color = convertColor(Rgba, color);
 
             // Process each pixel in bounding box
-            for (bounds.top..bounds.bottom) |r| {
+            for (bounds.t..bounds.b) |r| {
                 const py = as(f32, r);
                 const y = py - center.y();
 
-                for (bounds.left..bounds.right) |c| {
+                for (bounds.l..bounds.r) |c| {
                     const px = as(f32, c);
                     const x = px - center.x();
 
@@ -1327,12 +1323,27 @@ pub fn Canvas(comptime T: type) type {
                     const dist_sq = x * x + y * y;
                     if (dist_sq > (radius + 1) * (radius + 1)) continue;
 
-                    const dist = @sqrt(dist_sq);
+                    // Check angle first (before expensive sqrt)
                     const angle = std.math.atan2(y, x);
                     const in_arc = isAngleInArc(angle, start_angle, end_angle);
 
-                    const coverage = calculateArcCoverage(x, y, dist, radius, in_arc, start_edge, end_edge);
-                    self.setPixel(.point(.{ px, py }), rgba_color.fade(coverage));
+                    // Calculate cross products for edge proximity (cheap)
+                    const start_cross_product = x * start_edge.y - y * start_edge.x;
+                    const end_cross_product = x * end_edge.y - y * end_edge.x;
+
+                    // Early reject if outside arc and not near edges
+                    if (!in_arc) {
+                        const near_start = @abs(start_cross_product) < 1.0 and start_cross_product < 0;
+                        const near_end = @abs(end_cross_product) < 1.0 and end_cross_product > 0;
+                        if (!near_start and !near_end) continue;
+                    }
+
+                    // Now calculate expensive sqrt only for pixels we'll actually render
+                    const dist = @sqrt(dist_sq);
+                    const coverage = calculateArcCoverage(dist, radius, in_arc, start_cross_product, end_cross_product);
+                    if (coverage > 0) {
+                        self.setPixel(.point(.{ px, py }), rgba_color.fade(coverage));
+                    }
                 }
             }
         }
