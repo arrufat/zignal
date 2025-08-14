@@ -18,11 +18,11 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Create a 512x512 image for the logo
-    var img = try Image(Rgb).initAlloc(allocator, 512, 512);
-    defer img.deinit(allocator);
+    var image = try Image(Rgb).initAlloc(allocator, 512, 512);
+    defer image.deinit(allocator);
 
     // Create canvas for drawing
-    var canvas = Canvas(Rgb).init(allocator, img);
+    var canvas = Canvas(Rgb).init(allocator, image);
 
     // Fill background with a dark color
     const bg_color = Rgb{ .r = 20, .g = 24, .b = 32 };
@@ -40,8 +40,10 @@ pub fn main() !void {
     // Add decorative elements
     drawDecorativeElements(&canvas);
 
+    std.debug.print("{f}\n", .{image.display(.auto)});
+
     // Save the logo
-    try img.save(allocator, "zignal_logo.png");
+    try image.save(allocator, "zignal_logo.png");
     std.debug.print("Logo saved as zignal_logo.png\n", .{});
 }
 
