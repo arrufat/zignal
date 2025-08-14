@@ -1259,42 +1259,125 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling smooth (anti-aliased) arcs.
         fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) !void {
-            // Generate polygon approximation of the filled arc (pie slice)
-            const angle_span = end_angle - start_angle;
-            const arc_length = @abs(angle_span) * radius;
-
-            // Determine number of segments based on arc length
-            const segments = @max(@as(usize, 8), @as(usize, @intFromFloat(@ceil(arc_length / 5.0))));
-            const angle_step = angle_span / @as(f32, @floatFromInt(segments));
-
-            // Stack allocation for reasonable arc sizes (segments + center point)
-            var stack_points: [258]Point(2, f32) = undefined;
-            var points: []Point(2, f32) = undefined;
-
-            const total_points = segments + 2; // Arc points + center
-
-            if (total_points <= stack_points.len) {
-                points = stack_points[0..total_points];
-            } else {
-                // For very large arcs, use heap allocation
-                points = try self.allocator.alloc(Point(2, f32), total_points);
-            }
-            defer if (total_points > stack_points.len) self.allocator.free(points);
-
-            // First point is the center
-            points[0] = center;
-
-            // Generate points along the arc
-            for (0..segments + 1) |i| {
-                const angle = start_angle + @as(f32, @floatFromInt(i)) * angle_step;
-                points[i + 1] = .point(.{
-                    center.x() + radius * @cos(angle),
-                    center.y() + radius * @sin(angle),
-                });
+            // For full circles, use fillCircle for better quality
+            if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
+                self.fillCircle(center, radius, color, .soft);
+                return;
             }
 
-            // Fill as polygon
-            try self.fillPolygon(points, color, .soft);
+            // Calculate the radial edge vectors (from center to arc endpoints)
+            const start_x = @cos(start_angle);
+            const start_y = @sin(start_angle);
+            const end_x = @cos(end_angle);
+            const end_y = @sin(end_angle);
+
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
+            const left: usize = @intFromFloat(@round(@max(0, center.x() - radius - 1)));
+            const top: usize = @intFromFloat(@round(@max(0, center.y() - radius - 1)));
+            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + radius + 1)));
+            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + radius + 1)));
+            if (right <= left or bottom <= top) return;
+
+            for (top..bottom) |r| {
+                const py = as(f32, r);
+                const y = py - center.y();
+                for (left..right) |c| {
+                    const px = as(f32, c);
+                    const x = px - center.x();
+                    const dist_sq = x * x + y * y;
+
+                    // Skip pixels clearly outside the circle
+                    if (dist_sq > (radius + 1) * (radius + 1)) continue;
+
+                    const dist = @sqrt(dist_sq);
+
+                    // Calculate angle for this pixel
+                    const angle = std.math.atan2(y, x);
+
+                    // Check if angle is within the arc range
+                    const in_arc = isAngleInArc(angle, start_angle, end_angle);
+
+                    // Calculate alpha/coverage
+                    var alpha: f32 = 0.0;
+
+                    // Calculate perpendicular distances to radial edges
+                    // Distance to start radial line using cross product
+                    const start_cross = @abs(x * start_y - y * start_x);
+                    // Distance to end radial line
+                    const end_cross = @abs(x * end_y - y * end_x);
+
+                    // Check if the point is on the correct side of the radial edges
+                    // A point is on the "inside" if it's counter-clockwise from start and clockwise from end
+                    const start_side = x * start_y - y * start_x;
+                    const end_side = x * end_y - y * end_x;
+
+                    if (in_arc) {
+                        // We're inside the arc angle range
+                        if (dist <= radius - 1) {
+                            // Fully inside
+                            alpha = 1.0;
+                        } else if (dist < radius + 1) {
+                            // On the circular edge - antialias
+                            alpha = @max(0, @min(1, radius - dist + 0.5));
+                        }
+
+                        // Apply radial edge antialiasing if we're close to an edge
+                        if (alpha > 0) {
+                            // Only apply edge AA if we're actually near the edge
+                            // Check proximity to start edge
+                            if (start_cross < 1.0 and start_side >= 0) {
+                                // We're within 1 pixel of the start edge
+                                const edge_alpha = start_cross;
+                                alpha = @min(alpha, edge_alpha);
+                            }
+                            // Check proximity to end edge
+                            if (end_cross < 1.0 and end_side <= 0) {
+                                // We're within 1 pixel of the end edge
+                                const edge_alpha = end_cross;
+                                alpha = @min(alpha, edge_alpha);
+                            }
+                        }
+                    } else {
+                        // We're outside the arc angle range
+                        // Check if we're close enough to antialias
+                        if (dist <= radius + 1) {
+                            // Check if we're near a radial edge for antialiasing
+                            var edge_alpha: f32 = 0.0;
+
+                            // Near start edge and on the outside of it
+                            if (start_cross < 1.0 and start_side < 0) {
+                                edge_alpha = @max(edge_alpha, 1.0 - start_cross);
+                            }
+                            // Near end edge and on the outside of it
+                            if (end_cross < 1.0 and end_side > 0) {
+                                edge_alpha = @max(edge_alpha, 1.0 - end_cross);
+                            }
+
+                            if (edge_alpha > 0) {
+                                // Also factor in circular edge
+                                if (dist > radius - 1) {
+                                    const circ_alpha = @max(0, @min(1, radius - dist + 0.5));
+                                    alpha = edge_alpha * circ_alpha;
+                                } else {
+                                    alpha = edge_alpha;
+                                }
+                            }
+                        }
+                    }
+
+                    // Apply the pixel if it has any coverage
+                    if (alpha > 0.001) {
+                        if (alpha >= 0.999) {
+                            self.setPixel(.point(.{ px, py }), color);
+                        } else {
+                            // Blend with background
+                            const rgba_color = convertColor(Rgba, color);
+                            self.setPixel(.point(.{ px, py }), rgba_color.fade(alpha));
+                        }
+                    }
+                }
+            }
         }
 
         /// Draws a quadratic Bézier curve with specified width and fill mode.
