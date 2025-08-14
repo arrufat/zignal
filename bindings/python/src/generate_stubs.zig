@@ -85,23 +85,24 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
     // Special case for to_rgba which accepts optional alpha parameter
     if (TargetType == zignal.Rgba) {
         try stub.writef("(self, alpha: int = 255) -> {s}:\n", .{target_class});
-        try stub.write("        \"\"\"Convert to RGBA color space.\n");
-        try stub.write("        \n");
-        try stub.write("        Args:\n");
-        try stub.write("            alpha: Alpha channel value (0-255, default: 255)\n");
-        try stub.write("        \n");
-        try stub.write("        Returns:\n");
-        try stub.write("            Rgba color object\n");
-        try stub.write("        \"\"\"\n");
+        try stub.write(
+            \\        """Convert to RGBA color space.
+            \\
+            \\        Args:
+            \\            alpha: Alpha channel value (0-255, default: 255)
+            \\
+            \\        Returns:
+            \\            Rgba color object
+            \\        """
+            \\
+        );
     } else {
         // Include self parameter for proper LSP support
         try stub.writef("(self) -> {s}:\n", .{target_class});
 
         // Add docstring using the documentation from color_factory
         const doc = color_factory.getConversionMethodDoc(TargetType);
-        try stub.write("        \"\"\"");
-        try stub.write(doc);
-        try stub.write("\"\"\"\n");
+        try stub.writef("        \"\"\"{s}\"\"\"\n", .{doc});
     }
     try stub.write("        ...\n");
 }
@@ -268,13 +269,13 @@ fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumI
         }
 
         // Write enum value with optional inline documentation
-        try stub.writef("    {s} = {d}", .{ uppercase_name[0..name_len], field.value });
+        try stub.writef("    {s} = {d}\n", .{ uppercase_name[0..name_len], field.value });
 
         // Add inline comment if documentation is provided
         if (enum_info.value_docs) |docs| {
             for (docs) |doc| {
                 if (std.mem.eql(u8, doc.name, uppercase_name[0..name_len])) {
-                    try stub.writef("  # {s}", .{doc.doc});
+                    try stub.writef("    \"\"\"{s}\"\"\"", .{doc.doc});
                     break;
                 }
             }
