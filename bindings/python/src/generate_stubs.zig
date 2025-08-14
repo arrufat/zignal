@@ -22,23 +22,23 @@ const GeneratedStub = struct {
     content: std.ArrayList(u8),
     allocator: std.mem.Allocator,
 
-    fn init(allocator: std.mem.Allocator) GeneratedStub {
+    fn init(gpa: std.mem.Allocator) GeneratedStub {
         return GeneratedStub{
-            .content = std.ArrayList(u8).init(allocator),
-            .allocator = allocator,
+            .allocator = gpa,
+            .content = .empty,
         };
     }
 
     fn deinit(self: *GeneratedStub) void {
-        self.content.deinit();
+        self.content.deinit(self.allocator);
     }
 
     fn write(self: *GeneratedStub, text: []const u8) !void {
-        try self.content.appendSlice(text);
+        try self.content.appendSlice(self.allocator, text);
     }
 
     fn writef(self: *GeneratedStub, comptime fmt: []const u8, args: anytype) !void {
-        try self.content.writer().print(fmt, args);
+        try self.content.writer(self.allocator).print(fmt, args);
     }
 };
 
@@ -297,8 +297,8 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
 }
 
 /// Generate complete stub file
-fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
-    var stub = GeneratedStub.init(allocator);
+fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
+    var stub = GeneratedStub.init(gpa);
     defer stub.deinit();
 
     try stub.write(
@@ -470,12 +470,12 @@ fn generateStubFile(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("\n__version__: str\n");
     try stub.write("__all__: list[str]\n");
 
-    return try stub.content.toOwnedSlice();
+    return try stub.content.toOwnedSlice(gpa);
 }
 
 /// Generate __init__.pyi stub file for the main package
-fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
-    var stub = GeneratedStub.init(allocator);
+fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
+    var stub = GeneratedStub.init(gpa);
     defer stub.deinit();
 
     // Header
@@ -515,7 +515,7 @@ fn generateInitStub(allocator: std.mem.Allocator) ![]u8 {
     try stub.write("__version__: str\n");
     try stub.write("__all__: list[str]\n");
 
-    return try stub.content.toOwnedSlice();
+    return try stub.content.toOwnedSlice(gpa);
 }
 
 /// Main function to generate and write all stub files

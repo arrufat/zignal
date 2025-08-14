@@ -51,6 +51,10 @@ const BdfParseState = struct {
     glyphs: std.ArrayList(BdfGlyph),
     bitmap_data: std.ArrayList(u8),
     all_ascii: bool = true,
+    fn deinit(self: *BdfParseState, gpa: Allocator) void {
+        self.glyphs.deinit(gpa);
+        self.bitmap_data.deinit(gpa);
+    }
 };
 
 /// Load a BDF font from a file path
@@ -58,21 +62,21 @@ const BdfParseState = struct {
 /// - allocator: Memory allocator
 /// - path: Path to BDF file
 /// - filter: Filter for which characters to load
-pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
+pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
     const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Read entire file into memory
-    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
-    defer allocator.free(raw_file_contents);
+    const raw_file_contents = try std.fs.cwd().readFileAlloc(gpa, path, max_file_size);
+    defer gpa.free(raw_file_contents);
 
     // Decompress if needed
     var file_contents: []u8 = undefined;
     var decompressed_data: ?[]u8 = null;
-    defer if (decompressed_data) |data| allocator.free(data);
+    defer if (decompressed_data) |data| gpa.free(data);
 
     if (is_compressed) {
-        decompressed_data = compression.decompressGzip(allocator, raw_file_contents) catch |err| switch (err) {
+        decompressed_data = compression.decompressGzip(gpa, raw_file_contents) catch |err| switch (err) {
             compression.CompressionError.InvalidCompression => return BdfError.InvalidCompression,
             else => return err,
         };
@@ -82,18 +86,14 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
         file_contents = raw_file_contents;
     }
 
-    // Use arena for temporary allocations
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_allocator = arena.allocator();
-
     // Parse BDF file in a single pass
     var lines = std.mem.tokenizeAny(u8, file_contents, "\n\r");
     var state = BdfParseState{
         .font = undefined,
-        .glyphs = std.ArrayList(BdfGlyph).init(arena_allocator),
-        .bitmap_data = std.ArrayList(u8).init(arena_allocator),
+        .glyphs = .empty,
+        .bitmap_data = .empty,
     };
+    defer state.deinit(gpa);
 
     // Parse header
     state.font = try parseHeader(&lines);
@@ -112,7 +112,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
         }
 
         // Parse glyph
-        if (try parseGlyph(&lines, &state, filter)) {
+        if (try parseGlyph(gpa, &lines, &state, filter)) {
             parsed_glyphs += 1;
         }
 
@@ -122,10 +122,10 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     }
 
     // Convert to BitmapFont format
-    const bitmap_data = try allocator.alloc(u8, state.bitmap_data.items.len);
+    const bitmap_data = try gpa.alloc(u8, state.bitmap_data.items.len);
     @memcpy(bitmap_data, state.bitmap_data.items);
 
-    return convertToBitmapFont(allocator, state.font, state.glyphs.items, bitmap_data, state.all_ascii);
+    return convertToBitmapFont(gpa, state.font, state.glyphs.items, bitmap_data, state.all_ascii);
 }
 
 /// Parse BDF header
@@ -180,7 +180,7 @@ fn parseHeader(lines: *std.mem.TokenIterator(u8, .any)) !BdfFont {
 }
 
 /// Parse a single glyph and its bitmap data
-fn parseGlyph(lines: *std.mem.TokenIterator(u8, .any), state: *BdfParseState, filter: LoadFilter) !bool {
+fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *BdfParseState, filter: LoadFilter) !bool {
     var glyph = BdfGlyph{
         .encoding = undefined,
         .bbox = .{
@@ -279,12 +279,12 @@ fn parseGlyph(lines: *std.mem.TokenIterator(u8, .any), state: *BdfParseState, fi
                         }
                     }
 
-                    try state.bitmap_data.append(our_byte);
+                    try state.bitmap_data.append(gpa, our_byte);
                 }
             }
 
             // Add glyph to list
-            try state.glyphs.append(glyph);
+            try state.glyphs.append(gpa, glyph);
 
             if (glyph.encoding > 127) {
                 state.all_ascii = false;
@@ -492,22 +492,20 @@ test "BDF to BitmapFont conversion" {
     ;
 
     // Test through the full API - simulate file read
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
     var lines = std.mem.tokenizeAny(u8, test_bdf, "\n\r");
     var state = BdfParseState{
         .font = undefined,
-        .glyphs = std.ArrayList(BdfGlyph).init(arena.allocator()),
-        .bitmap_data = std.ArrayList(u8).init(arena.allocator()),
+        .glyphs = .empty,
+        .bitmap_data = .empty,
     };
+    defer state.deinit(std.testing.allocator);
 
     state.font = try parseHeader(&lines);
 
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
         if (std.mem.startsWith(u8, trimmed, "STARTCHAR")) {
-            _ = try parseGlyph(&lines, &state, .all);
+            _ = try parseGlyph(std.testing.allocator, &lines, &state, .all);
         }
     }
 
@@ -711,11 +709,11 @@ test "BDF save and load roundtrip" {
 }
 
 /// Save a BitmapFont to a BDF file
-pub fn save(allocator: Allocator, font: BitmapFont, path: []const u8) !void {
+pub fn save(gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     // Create buffer for BDF content
-    var bdf_content = std.ArrayList(u8).init(allocator);
-    defer bdf_content.deinit();
-    const writer = bdf_content.writer();
+    var bdf_content: std.ArrayList(u8) = .empty;
+    defer bdf_content.deinit(gpa);
+    const writer = bdf_content.writer(gpa);
 
     // Write header
     try writeBdfHeader(writer, font);
@@ -723,8 +721,8 @@ pub fn save(allocator: Allocator, font: BitmapFont, path: []const u8) !void {
     // Write glyphs
     if (font.glyph_map) |map| {
         // Variable-width/Unicode font - collect and sort encodings
-        var encodings = try allocator.alloc(u32, map.count());
-        defer allocator.free(encodings);
+        var encodings = try gpa.alloc(u32, map.count());
+        defer gpa.free(encodings);
 
         var iter = map.iterator();
         var idx: usize = 0;
@@ -760,8 +758,8 @@ pub fn save(allocator: Allocator, font: BitmapFont, path: []const u8) !void {
 
     if (is_compressed) {
         // Compress the BDF content
-        const compressed_data = try compression.compressGzip(allocator, bdf_content.items);
-        defer allocator.free(compressed_data);
+        const compressed_data = try compression.compressGzip(gpa, bdf_content.items);
+        defer gpa.free(compressed_data);
         try file.writeAll(compressed_data);
         std.log.info("BDF: Saved compressed font to {s} ({} bytes compressed from {} bytes)", .{ path, compressed_data.len, bdf_content.items.len });
     } else {

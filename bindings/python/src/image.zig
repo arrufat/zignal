@@ -947,11 +947,11 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     const formatter = image_ptr.display(display_format);
 
     // Capture formatted output using std.fmt.format
-    var buffer: std.ArrayList(u8) = .init(allocator);
-    defer buffer.deinit();
+    var buffer: std.ArrayList(u8) = .empty;
+    defer buffer.deinit(allocator);
 
     // Use std.fmt.format to invoke the formatter's format method properly
-    std.fmt.format(buffer.writer(), "{f}", .{formatter}) catch |err| {
+    std.fmt.format(buffer.writer(allocator), "{f}", .{formatter}) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
         }

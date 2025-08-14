@@ -9,6 +9,7 @@
 //! and uncompressed metrics, as well as gzip-compressed PCF files.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
 const LoadFilter = @import("../font.zig").LoadFilter;
@@ -703,6 +704,7 @@ fn shouldIncludeGlyph(encoding: u32, filter: LoadFilter) bool {
 
 /// Convert a single glyph bitmap from PCF format to our format
 fn convertGlyphBitmap(
+    gpa: Allocator,
     bitmap_data: []const u8,
     offset: u32,
     width: u16,
@@ -728,9 +730,9 @@ fn convertGlyphBitmap(
                     @bitReverse(byte)
                 else
                     byte;
-                try output.append(converted_byte);
+                try output.append(gpa, converted_byte);
             } else {
-                try output.append(0);
+                try output.append(gpa, 0);
             }
         }
     }
@@ -738,7 +740,7 @@ fn convertGlyphBitmap(
 
 /// Convert parsed PCF data to BitmapFont format
 fn convertToBitmapFont(
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     metrics_info: MetricsInfo,
     bitmap_info: BitmapInfo,
     encoding: EncodingEntry,
@@ -748,12 +750,12 @@ fn convertToBitmapFont(
     max_height: u16,
 ) !BitmapFont {
     // Determine which glyphs to include
-    var glyph_list = std.ArrayList(struct {
+    var glyph_list: std.ArrayList(struct {
         codepoint: u32,
         glyph_index: usize,
         metric: Metric,
-    }).init(allocator);
-    defer glyph_list.deinit();
+    }) = .empty;
+    defer glyph_list.deinit(gpa);
 
     var all_ascii = true;
     var min_char: u8 = 255;
@@ -775,7 +777,7 @@ fn convertToBitmapFont(
         if (!shouldIncludeGlyph(codepoint, filter)) continue;
 
         if (glyph_index < metrics_info.glyph_count) {
-            try glyph_list.append(.{
+            try glyph_list.append(gpa, .{
                 .codepoint = codepoint,
                 .glyph_index = glyph_index,
                 .metric = metrics_info.metrics[glyph_index],
@@ -799,16 +801,16 @@ fn convertToBitmapFont(
     }
 
     // Pre-allocate converted bitmap buffer
-    var converted_bitmaps = std.ArrayList(u8).init(allocator);
-    defer converted_bitmaps.deinit();
-    try converted_bitmaps.ensureTotalCapacity(total_bitmap_size);
+    var converted_bitmaps: std.ArrayList(u8) = .empty;
+    defer converted_bitmaps.deinit(gpa);
+    try converted_bitmaps.ensureTotalCapacity(gpa, total_bitmap_size);
 
-    var glyph_map = std.AutoHashMap(u32, usize).init(allocator);
+    var glyph_map: std.AutoHashMap(u32, usize) = .init(gpa);
     errdefer glyph_map.deinit();
     try glyph_map.ensureTotalCapacity(@intCast(glyph_list.items.len));
 
-    var glyph_data_list = try allocator.alloc(GlyphData, glyph_list.items.len);
-    errdefer allocator.free(glyph_data_list);
+    var glyph_data_list = try gpa.alloc(GlyphData, glyph_list.items.len);
+    errdefer gpa.free(glyph_data_list);
 
     for (glyph_list.items, 0..) |glyph_info, list_index| {
         const metric = glyph_info.metric;
@@ -824,6 +826,7 @@ fn convertToBitmapFont(
         const glyph_pad = @as(GlyphPadding, @enumFromInt(pad_bits));
 
         try convertGlyphBitmap(
+            gpa,
             bitmap_info.bitmap_data,
             bitmap_offset,
             dims.width,
@@ -850,7 +853,7 @@ fn convertToBitmapFont(
     }
 
     // Create final bitmap data
-    const bitmap_data = try allocator.alloc(u8, converted_bitmaps.items.len);
+    const bitmap_data = try gpa.alloc(u8, converted_bitmaps.items.len);
     @memcpy(bitmap_data, converted_bitmaps.items);
 
     return BitmapFont{

@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
@@ -7,20 +8,22 @@ const Point = @import("Point.zig").Point;
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
     return struct {
+        gpa: Allocator,
         points: std.ArrayList(Point(2, T)),
         hull: std.ArrayList(Point(2, T)),
 
         const Self = @This();
-        pub fn init(allocator: std.mem.Allocator) Self {
+        pub fn init(gpa: Allocator) Self {
             return Self{
-                .points = .init(allocator),
-                .hull = .init(allocator),
+                .gpa = gpa,
+                .points = .empty,
+                .hull = .empty,
             };
         }
 
-        pub fn deinit(self: Self) void {
-            self.points.deinit();
-            self.hull.deinit();
+        pub fn deinit(self: *Self) void {
+            self.points.deinit(self.gpa);
+            self.hull.deinit(self.gpa);
         }
 
         const Orientation = enum {
@@ -57,7 +60,7 @@ pub fn ConvexHull(comptime T: type) type {
                 return null;
             }
             self.points.clearRetainingCapacity();
-            try self.points.resize(points.len);
+            try self.points.resize(self.gpa, points.len);
             @memcpy(self.points.items, points);
 
             // Find the topmost-leftmost point (lowest y, then lowest x)
@@ -79,7 +82,7 @@ pub fn ConvexHull(comptime T: type) type {
             std.mem.sort(Point(2, T), self.points.items[1..], lowest, clockwiseOrder);
 
             self.hull.clearRetainingCapacity();
-            try self.hull.append(lowest); // Add pivot first
+            try self.hull.append(self.gpa, lowest); // Add pivot first
 
             // Process remaining points
             for (self.points.items[1..]) |p| {
@@ -91,7 +94,7 @@ pub fn ConvexHull(comptime T: type) type {
                 ) != .clockwise) {
                     _ = self.hull.pop();
                 }
-                try self.hull.append(p);
+                try self.hull.append(self.gpa, p);
             }
 
             // Handle the case where all input points were collinear.

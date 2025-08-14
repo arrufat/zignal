@@ -94,7 +94,7 @@ pub const Options = struct {
 pub fn fromImage(
     comptime T: type,
     image: Image(T),
-    allocator: Allocator,
+    gpa: Allocator,
     options: Options,
 ) ![]u8 {
 
@@ -138,7 +138,7 @@ pub fn fromImage(
             generateWeb216Palette(&palette);
         },
         .adaptive => |adaptive_opts| {
-            palette_size = generateAdaptivePalette(T, allocator, image, &palette, adaptive_opts.max_colors) catch blk: {
+            palette_size = generateAdaptivePalette(T, gpa, image, &palette, adaptive_opts.max_colors) catch blk: {
                 generateFixed6x7x6Palette(&palette);
                 break :blk 252;
             };
@@ -156,7 +156,7 @@ pub fn fromImage(
 
     // Prepare image for dithering if needed
     var dithered_img: ?Image(Rgb) = null;
-    defer if (dithered_img) |*img| img.deinit(allocator);
+    defer if (dithered_img) |*img| img.deinit(gpa);
 
     if (dither_mode != .none) {
         var working_img: Image(Rgb) = undefined;
@@ -166,10 +166,10 @@ pub fn fromImage(
             // For Rgb images, this does a direct memcpy
             // For Rgba images, this efficiently drops the alpha channel
             // For other types, this handles proper color conversion
-            working_img = try image.convert(Rgb, allocator);
+            working_img = try image.convert(Rgb, gpa);
         } else {
             // Scaling needed - use interpolation
-            working_img = try Image(Rgb).initAlloc(allocator, height, width);
+            working_img = try Image(Rgb).initAlloc(gpa, height, width);
 
             // Copy scaled image data to working image
             for (0..height) |row| {
@@ -205,15 +205,15 @@ pub fn fromImage(
         sixel_rows * width * 2 +
         sixel_rows * palette_size * 5;
 
-    var output = try std.ArrayList(u8).initCapacity(allocator, estimated_size);
-    defer output.deinit();
+    var output: std.ArrayList(u8) = try .initCapacity(gpa, estimated_size);
+    defer output.deinit(gpa);
 
     // Start sixel sequence with DCS, then add raster dimensions
     // Format: ESC P q " P1 ; P2 ; width ; height
     // P1=1 (aspect ratio 1:1), P2=1 (keep background)
     // Note: Some terminals don't respect the height parameter and will show
     // black padding for images whose height is not a multiple of 6
-    try output.writer().print("\x1bPq\"1;1;{d};{d}", .{ width, height });
+    try output.writer(gpa).print("\x1bPq\"1;1;{d};{d}", .{ width, height });
 
     // Define palette - unified approach
     var palette_buf: [64]u8 = undefined; // Buffer for building palette strings
@@ -249,7 +249,7 @@ pub fn fromImage(
         pos += 1;
         pos += std.fmt.printInt(palette_buf[pos..], b_val, 10, .lower, .{});
 
-        try output.appendSlice(palette_buf[0..pos]);
+        try output.appendSlice(gpa, palette_buf[0..pos]);
     }
 
     // Encode pixels as sixels
@@ -323,7 +323,7 @@ pub fn fromImage(
                 var color_select_buf: [16]u8 = undefined;
                 color_select_buf[0] = '#';
                 const len = std.fmt.printInt(color_select_buf[1..], current_color, 10, .lower, .{});
-                try output.appendSlice(color_select_buf[0 .. len + 1]);
+                try output.appendSlice(gpa, color_select_buf[0 .. len + 1]);
             }
 
             // Output all sixels for this color - build complete row first
@@ -339,7 +339,7 @@ pub fn fromImage(
             }
 
             // Write the entire row at once
-            try output.appendSlice(row_buffer[0..width]);
+            try output.appendSlice(gpa, row_buffer[0..width]);
 
             // Carriage return to go back to start of line (except for last color)
             var more_colors = false;
@@ -350,20 +350,20 @@ pub fn fromImage(
                 }
             }
             if (more_colors) {
-                try output.writer().print("$", .{}); // Graphics carriage return
+                try output.writer(gpa).print("$", .{}); // Graphics carriage return
             }
         }
 
         // Move to next sixel row if not at end
         if (row + 6 < height) {
-            try output.writer().print("-", .{}); // Graphics new line
+            try output.writer(gpa).print("-", .{}); // Graphics new line
         }
     }
 
     // End sixel sequence with ST
-    try output.writer().print("\x1b\\", .{});
+    try output.writer(gpa).print("\x1b\\", .{});
 
-    return output.toOwnedSlice();
+    return output.toOwnedSlice(gpa);
 }
 
 /// Color histogram entry for adaptive palette generation
@@ -594,13 +594,13 @@ fn generateWeb216Palette(palette: []Rgb) void {
 /// Generates an adaptive palette using median cut algorithm
 fn generateAdaptivePalette(
     comptime T: type,
-    allocator: Allocator,
+    gpa: Allocator,
     image: Image(T),
     palette: []Rgb,
     max_colors: u16,
 ) !usize {
     const HashMap = std.hash_map.HashMap(u16, u32, std.hash_map.AutoContext(u16), 80);
-    var histogram = HashMap.init(allocator);
+    var histogram = HashMap.init(gpa);
     defer histogram.deinit();
 
     // Build color histogram (quantized to 5-bit per channel for efficiency)
@@ -625,8 +625,8 @@ fn generateAdaptivePalette(
     }
 
     // Convert histogram to array for median cut
-    var color_list = std.ArrayList(ColorCount).init(allocator);
-    defer color_list.deinit();
+    var color_list: std.ArrayList(ColorCount) = .empty;
+    defer color_list.deinit(gpa);
 
     var iter = histogram.iterator();
     while (iter.next()) |entry| {
@@ -642,7 +642,7 @@ fn generateAdaptivePalette(
         const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
         const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
 
-        try color_list.append(.{
+        try color_list.append(gpa, .{
             .r = r8,
             .g = g8,
             .b = b8,
@@ -667,8 +667,8 @@ fn generateAdaptivePalette(
     }
 
     // Initialize first box with all colors
-    var boxes = std.ArrayList(ColorBox).init(allocator);
-    defer boxes.deinit();
+    var boxes: std.ArrayList(ColorBox) = .empty;
+    defer boxes.deinit(gpa);
 
     var initial_box = ColorBox{
         .colors = color_list.items,
@@ -692,7 +692,7 @@ fn generateAdaptivePalette(
         initial_box.population += c.count;
     }
 
-    try boxes.append(initial_box);
+    try boxes.append(gpa, initial_box);
 
     // Median cut algorithm
     while (boxes.items.len < palette_size) {
@@ -799,11 +799,11 @@ fn generateAdaptivePalette(
         }
 
         if (box1.colors.len > 0 and box1.r_max >= box1.r_min) {
-            try boxes.append(box1);
+            try boxes.append(gpa, box1);
         }
 
         if (box2.colors.len > 0 and box2.r_max >= box2.r_min) {
-            try boxes.append(box2);
+            try boxes.append(gpa, box2);
         }
     }
 
