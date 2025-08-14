@@ -630,6 +630,76 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     return py_utils.returnNone();
 }
 
+fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var center_obj: ?*c.PyObject = undefined;
+    var radius: f64 = undefined;
+    var start_angle: f64 = undefined;
+    var end_angle: f64 = undefined;
+    var color_obj: ?*c.PyObject = undefined;
+    var width: c_long = 1;
+    var mode: c_long = 0;
+
+    const kwlist = [_][*c]const u8{ "center", "radius", "start_angle", "end_angle", "color", "width", "mode", null };
+    const format = std.fmt.comptimePrint("OdddO|ll", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &width, &mode) == 0) {
+        return null;
+    }
+
+    const common = parseDrawArgs(self, color_obj, width, mode) catch return null;
+
+    // Convert arguments
+    const center = py_utils.parsePointTuple(@ptrCast(center_obj)) catch return null;
+    const radius_val = @as(f32, @floatCast(radius));
+    const start_angle_val = @as(f32, @floatCast(start_angle));
+    const end_angle_val = @as(f32, @floatCast(end_angle));
+
+    common.canvas.drawArc(center, radius_val, start_angle_val, end_angle_val, common.color, common.width, common.mode) catch {
+        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to draw arc");
+        return null;
+    };
+
+    return py_utils.returnNone();
+}
+
+fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var center_obj: ?*c.PyObject = undefined;
+    var radius: f64 = undefined;
+    var start_angle: f64 = undefined;
+    var end_angle: f64 = undefined;
+    var color_obj: ?*c.PyObject = undefined;
+    var mode: c_long = 0;
+
+    const kwlist = [_][*c]const u8{ "center", "radius", "start_angle", "end_angle", "color", "mode", null };
+    const format = std.fmt.comptimePrint("OdddO|l", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &mode) == 0) {
+        return null;
+    }
+
+    const common = parseFillArgs(self, color_obj, mode) catch return null;
+
+    // Convert arguments
+    const center = py_utils.parsePointTuple(@ptrCast(center_obj)) catch return null;
+    // Allow negative radius - the Zig library will handle it gracefully (no-op)
+    const radius_val = @as(f32, @floatCast(radius));
+    const start_angle_val = @as(f32, @floatCast(start_angle));
+    const end_angle_val = @as(f32, @floatCast(end_angle));
+
+    common.canvas.fillArc(center, radius_val, start_angle_val, end_angle_val, common.color, common.mode) catch {
+        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill arc");
+        return null;
+    };
+
+    return py_utils.returnNone();
+}
+
 fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*CanvasObject, @ptrCast(self_obj.?));
 
@@ -771,6 +841,41 @@ const canvas_fill_spline_polygon_doc =
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
+const canvas_draw_arc_doc =
+    \\Draw an arc outline.
+    \\
+    \\## Parameters
+    \\- `center` (tuple[float, float]): Center coordinates (x, y)
+    \\- `radius` (float): Arc radius in pixels
+    \\- `start_angle` (float): Starting angle in radians (0 = right, π/2 = down, π = left, 3π/2 = up)
+    \\- `end_angle` (float): Ending angle in radians
+    \\- `color` (int, tuple or color object): Color of the arc.
+    \\- `width` (int, optional): Line width in pixels (default: 1)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\
+    \\## Notes
+    \\- Angles are measured in radians, with 0 pointing right and increasing clockwise
+    \\- For a full circle, use start_angle=0 and end_angle=2π
+    \\- The arc is drawn from start_angle to end_angle in the positive angular direction
+;
+
+const canvas_fill_arc_doc =
+    \\Fill an arc (pie slice) area.
+    \\
+    \\## Parameters
+    \\- `center` (tuple[float, float]): Center coordinates (x, y)
+    \\- `radius` (float): Arc radius in pixels
+    \\- `start_angle` (float): Starting angle in radians (0 = right, π/2 = down, π = left, 3π/2 = up)
+    \\- `end_angle` (float): Ending angle in radians
+    \\- `color` (int, tuple or color object): Fill color.
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\
+    \\## Notes
+    \\- Creates a filled pie slice from the center to the arc edge
+    \\- Angles are measured in radians, with 0 pointing right and increasing clockwise
+    \\- For a full circle, use start_angle=0 and end_angle=2π
+;
+
 const canvas_draw_text_doc =
     \\Draw text on the canvas.
     \\
@@ -846,6 +951,22 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = FillCircle.doc_string,
         .params = "self, center: tuple[float, float], radius: float, color: " ++ stub_metadata.COLOR ++ ", mode: DrawMode = DrawMode.FAST",
+        .returns = "None",
+    },
+    .{
+        .name = "draw_arc",
+        .meth = @ptrCast(&canvas_draw_arc),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_arc_doc,
+        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: " ++ stub_metadata.COLOR ++ ", width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .returns = "None",
+    },
+    .{
+        .name = "fill_arc",
+        .meth = @ptrCast(&canvas_fill_arc),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_fill_arc_doc,
+        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: " ++ stub_metadata.COLOR ++ ", mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
