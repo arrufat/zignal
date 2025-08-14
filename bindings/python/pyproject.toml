@@ -22,6 +22,7 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/bfactory-ai/zignal"
@@ -36,6 +37,7 @@ docs = ["pdoc"]
 [tool.uv]
 dev-dependencies = [
     "pytest",
+    "ty",
     "ruff",
     "numpy",
     "pdoc",
