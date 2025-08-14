@@ -1257,51 +1257,35 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Helper: Calculate distance from point to radial edge and which side it's on
-        inline fn getRadialEdgeInfo(x: f32, y: f32, edge_x: f32, edge_y: f32) struct { distance: f32, side: f32 } {
-            const cross_product = x * edge_y - y * edge_x;
-            return .{
-                .distance = @abs(cross_product),
-                .side = cross_product,
-            };
-        }
-
         /// Helper: Calculate antialiased coverage for arc boundaries
-        inline fn calculateArcCoverage(dist: f32, radius: f32, in_arc: bool, start_info: anytype, end_info: anytype) f32 {
-            const edge_aa_threshold = 1.0;
-            const circular_aa_range = 1.0;
-
-            // Base coverage from circular boundary
-            var coverage: f32 = if (dist <= radius - circular_aa_range)
-                1.0 // Fully inside circle
-            else if (dist < radius + circular_aa_range)
-                @max(0, @min(1, radius - dist + 0.5)) // Antialiased circular edge
+        inline fn calculateArcCoverage(x: f32, y: f32, dist: f32, radius: f32, in_arc: bool, start_edge: anytype, end_edge: anytype) f32 {
+            // Calculate cross products for radial edge distances
+            const start_cross_product = x * start_edge.y - y * start_edge.x;
+            const end_cross_product = x * end_edge.y - y * end_edge.x;
+            const start_cross = @abs(start_cross_product);
+            const end_cross = @abs(end_cross_product);
+            
+            // Circular boundary coverage
+            const circ_coverage = if (dist <= radius - 1.0)
+                1.0
+            else if (dist < radius + 1.0)
+                @max(0, @min(1, radius - dist + 0.5))
             else
-                0.0; // Outside circle
+                0.0;
 
             if (!in_arc) {
-                // Outside arc angle - check if we're near edges for antialiasing
-                if (coverage == 0) return 0; // Too far from circle
-
+                // Outside arc - apply edge antialiasing
                 var edge_coverage: f32 = 0;
-                if (start_info.distance < edge_aa_threshold and start_info.side < 0) {
-                    edge_coverage = @max(edge_coverage, 1.0 - start_info.distance);
-                }
-                if (end_info.distance < edge_aa_threshold and end_info.side > 0) {
-                    edge_coverage = @max(edge_coverage, 1.0 - end_info.distance);
-                }
-                coverage *= edge_coverage;
-            } else if (coverage > 0) {
-                // Inside arc angle - apply edge antialiasing to reduce coverage near edges
-                if (start_info.distance < edge_aa_threshold and start_info.side >= 0) {
-                    coverage = @min(coverage, start_info.distance);
-                }
-                if (end_info.distance < edge_aa_threshold and end_info.side <= 0) {
-                    coverage = @min(coverage, end_info.distance);
-                }
+                if (start_cross < 1.0 and start_cross_product < 0) edge_coverage = @max(edge_coverage, 1.0 - start_cross);
+                if (end_cross < 1.0 and end_cross_product > 0) edge_coverage = @max(edge_coverage, 1.0 - end_cross);
+                return circ_coverage * edge_coverage;
+            } else {
+                // Inside arc - reduce coverage near edges
+                var coverage = circ_coverage;
+                if (start_cross < 1.0 and start_cross_product >= 0) coverage = @min(coverage, start_cross);
+                if (end_cross < 1.0 and end_cross_product <= 0) coverage = @min(coverage, end_cross);
+                return coverage;
             }
-
-            return coverage;
         }
 
         /// Internal function for filling smooth (anti-aliased) arcs.
@@ -1347,9 +1331,7 @@ pub fn Canvas(comptime T: type) type {
                     const angle = std.math.atan2(y, x);
                     const in_arc = isAngleInArc(angle, start_angle, end_angle);
 
-                    const start_info = getRadialEdgeInfo(x, y, start_edge.x, start_edge.y);
-                    const end_info = getRadialEdgeInfo(x, y, end_edge.x, end_edge.y);
-                    const coverage = calculateArcCoverage(dist, radius, in_arc, start_info, end_info);
+                    const coverage = calculateArcCoverage(x, y, dist, radius, in_arc, start_edge, end_edge);
                     self.setPixel(.point(.{ px, py }), rgba_color.fade(coverage));
                 }
             }
