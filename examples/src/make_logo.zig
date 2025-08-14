@@ -118,7 +118,7 @@ fn drawSignalWaves(canvas: *Canvas(Rgb), allocator: std.mem.Allocator) !void {
 
 fn drawZignalText(canvas: *Canvas(Rgb)) void {
     // Use the default 8x8 font
-    const font = zignal.default_font_8x8;
+    const font = zignal.font.font8x8.basic;
 
     // Scale factor for the text
     const scale: f32 = 10;
@@ -129,6 +129,11 @@ fn drawZignalText(canvas: *Canvas(Rgb)) void {
 
     // Use classic Zig orange for all letters
     const text_color = Rgb{ .r = 247, .g = 164, .b = 29 };
+    const shadow_color = blk: {
+        var oklab = text_color.toOklab();
+        oklab.l = @max(0, oklab.l - 0.3);
+        break :blk oklab.toRgb();
+    };
 
     // First pass: calculate total width using tight bounds
     var total_width: f32 = 0;
@@ -149,7 +154,7 @@ fn drawZignalText(canvas: *Canvas(Rgb)) void {
         canvas.drawText(
             &char_str,
             .point(.{ current_x + 2, y_pos + 2 }),
-            text_color.toRgba(80),
+            shadow_color,
             font,
             scale,
             .fast,
