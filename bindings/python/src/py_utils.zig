@@ -22,7 +22,14 @@ pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj:
 
 /// Get Python boolean singletons using the stable Python C API
 pub fn getPyBool(value: bool) [*c]c.PyObject {
-    return c.PyBool_FromLong(if (value) 1 else 0);
+    return c.PyBool_FromLong(@intFromBool(value));
+}
+
+/// Helper to return Python None
+pub fn getPyNone() ?*c.PyObject {
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
 }
 
 /// Convert a Zig value to Python object
@@ -291,13 +298,6 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
     var buffer: [std.fs.max_path_bytes + 128]u8 = undefined;
     const msg = std.fmt.bufPrintZ(&buffer, "Could not open file '{s}': {s}", .{ path, @errorName(err) }) catch "Could not open file";
     c.PyErr_SetString(exc_type, msg.ptr);
-}
-
-/// Helper to return Python None
-pub fn returnNone() ?*c.PyObject {
-    const none = c.Py_None();
-    c.Py_INCREF(none);
-    return none;
 }
 
 /// Generic range validation that works with both integers and floats
