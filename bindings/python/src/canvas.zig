@@ -217,7 +217,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
     // Use the stored Canvas directly
     canvas.fill(color);
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 // Macro-like function to generate draw methods with width parameter
@@ -307,7 +307,7 @@ fn makeDrawMethodWithWidth(
                 common.canvas.drawCircle(center, radius, common.color, common.width, common.mode);
             }
 
-            return py_utils.returnNone();
+            return py_utils.getPyNone();
         }
 
         const doc_string = doc;
@@ -397,7 +397,7 @@ fn makeFillMethod(
                 common.canvas.fillCircle(center, radius, common.color, common.mode);
             }
 
-            return py_utils.returnNone();
+            return py_utils.getPyNone();
         }
 
         const doc_string = doc;
@@ -555,7 +555,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
 
     common.canvas.drawQuadraticBezier(p0, p1, p2, common.color, common.width, common.mode);
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -587,7 +587,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
 
     common.canvas.drawCubicBezier(p0, p1, p2, p3, common.color, common.width, common.mode);
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -616,7 +616,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     common.canvas.drawSplinePolygon(points, common.color, common.width, tension_val, common.mode);
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -647,7 +647,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
         return null;
     };
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -682,7 +682,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         return null;
     };
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -717,7 +717,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         return null;
     };
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -773,7 +773,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         canvas.drawText(text, position, color, font, @floatCast(scale), draw_mode);
     }
 
-    return py_utils.returnNone();
+    return py_utils.getPyNone();
 }
 
 // Property getters
