@@ -31,7 +31,7 @@ pub fn Filter(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
-        pub fn blurBox(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
+        pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
             }
@@ -1304,7 +1304,7 @@ pub fn Filter(comptime T: type) type {
         /// - `allocator`: The allocator to use for temporary buffers.
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
-        pub fn blurGaussian(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
+        pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
             if (sigma <= 0) return error.InvalidSigma;
 
             // Calculate kernel size (3 sigma on each side)

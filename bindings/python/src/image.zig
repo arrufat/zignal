@@ -1356,7 +1356,7 @@ fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     return py_obj;
 }
 
-const image_blur_box_doc =
+const image_box_blur_doc =
     \\Apply a box blur to the image.
     \\
     \\## Parameters
@@ -1365,12 +1365,12 @@ const image_blur_box_doc =
     \\## Examples
     \\```python
     \\img = Image.load("photo.png")
-    \\soft = img.blur_box(2)
-    \\identity = img.blur_box(0)  # no-op copy
+    \\soft = img.box_blur(2)
+    \\identity = img.box_blur(0)  # no-op copy
     \\```
 ;
 
-fn image_blur_box(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse arguments
@@ -1398,7 +1398,7 @@ fn image_blur_box(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     // Initialize as empty; blurBox will allocate and size appropriately
     new_image.* = Image(Rgba).empty;
 
-    src_image.blurBox(allocator, new_image, @intCast(radius_long)) catch {
+    src_image.boxBlur(allocator, new_image, @intCast(radius_long)) catch {
         allocator.destroy(new_image);
         c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
         return null;
@@ -1465,6 +1465,74 @@ fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     src_image.sharpen(allocator, new_image, @intCast(radius_long)) catch {
         allocator.destroy(new_image);
         c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+        return null;
+    };
+
+    // Create new Python object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
+    if (py_obj == null) {
+        new_image.deinit(allocator);
+        allocator.destroy(new_image);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
+        return null;
+    }
+
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+    result.image_ptr = new_image;
+    result.numpy_ref = null;
+    result.parent_ref = null;
+    return py_obj;
+}
+
+const image_gaussian_blur_doc =
+    \\Apply Gaussian blur to the image.
+    \\
+    \\## Parameters
+    \\- `sigma` (float): Standard deviation of the Gaussian kernel. Must be > 0.
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\blurred = img.gaussian_blur(2.0)
+    \\blurred_soft = img.gaussian_blur(5.0)  # More blur
+    \\```
+;
+
+fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var sigma: f64 = 0;
+    var kwlist = [_:null]?[*:0]u8{ @constCast("sigma"), null };
+    const format = std.fmt.comptimePrint("d", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &sigma) == 0) {
+        return null;
+    }
+
+    if (sigma <= 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "sigma must be > 0");
+        return null;
+    }
+
+    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+
+    // Allocate new image wrapper; underlying data will be allocated by blurGaussian
+    const new_image = allocator.create(Image(Rgba)) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+        return null;
+    };
+    errdefer allocator.destroy(new_image);
+
+    // Initialize as empty; blurGaussian will allocate and size appropriately
+    new_image.* = Image(Rgba).empty;
+
+    src_image.gaussianBlur(allocator, @floatCast(sigma), new_image) catch |err| {
+        allocator.destroy(new_image);
+        if (err == error.InvalidSigma) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
+        } else {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+        }
         return null;
     };
 
@@ -2437,10 +2505,10 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "Image",
     },
     .{
-        .name = "blur_box",
-        .meth = @ptrCast(&image_blur_box),
+        .name = "box_blur",
+        .meth = @ptrCast(&image_box_blur),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
-        .doc = image_blur_box_doc,
+        .doc = image_box_blur_doc,
         .params = "self, radius: int",
         .returns = "Image",
     },
@@ -2450,6 +2518,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_sharpen_doc,
         .params = "self, radius: int",
+        .returns = "Image",
+    },
+    .{
+        .name = "gaussian_blur",
+        .meth = @ptrCast(&image_gaussian_blur),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_gaussian_blur_doc,
+        .params = "self, sigma: float",
         .returns = "Image",
     },
     .{

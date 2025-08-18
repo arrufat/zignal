@@ -452,7 +452,7 @@ test "convolveSeparable Gaussian approximation" {
     try expectEqual(center > adjacent, true); // Center should still be brightest
 }
 
-test "blurGaussian basic" {
+test "gaussianBlur basic" {
     var image: Image(u8) = try .initAlloc(std.testing.allocator, 11, 11);
     defer image.deinit(std.testing.allocator);
 
@@ -465,7 +465,7 @@ test "blurGaussian basic" {
     }
 
     var blurred: Image(u8) = .empty;
-    try image.blurGaussian(std.testing.allocator, 1.0, &blurred);
+    try image.gaussianBlur(std.testing.allocator, 1.0, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Check that blur has smoothed the edges
@@ -480,7 +480,7 @@ test "blurGaussian basic" {
     try expectEqual(center > 200, true);
 }
 
-test "blurGaussian sigma variations" {
+test "gaussianBlur sigma variations" {
     var image: Image(f32) = try .initAlloc(std.testing.allocator, 15, 15);
     defer image.deinit(std.testing.allocator);
 
@@ -490,11 +490,11 @@ test "blurGaussian sigma variations" {
 
     // Test with different sigmas
     var blur_small: Image(f32) = .empty;
-    try image.blurGaussian(std.testing.allocator, 0.5, &blur_small);
+    try image.gaussianBlur(std.testing.allocator, 0.5, &blur_small);
     defer blur_small.deinit(std.testing.allocator);
 
     var blur_large: Image(f32) = .empty;
-    try image.blurGaussian(std.testing.allocator, 2.0, &blur_large);
+    try image.gaussianBlur(std.testing.allocator, 2.0, &blur_large);
     defer blur_large.deinit(std.testing.allocator);
 
     // Larger sigma should spread more
@@ -728,9 +728,9 @@ test "differenceOfGaussians approximates manual subtraction" {
     // Compute manual subtraction
     var blur1: Image(f32) = .empty;
     var blur2: Image(f32) = .empty;
-    try image.blurGaussian(std.testing.allocator, sigma1, &blur1);
+    try image.gaussianBlur(std.testing.allocator, sigma1, &blur1);
     defer blur1.deinit(std.testing.allocator);
-    try image.blurGaussian(std.testing.allocator, sigma2, &blur2);
+    try image.gaussianBlur(std.testing.allocator, sigma2, &blur2);
     defer blur2.deinit(std.testing.allocator);
 
     // Manual subtraction
@@ -753,7 +753,7 @@ test "differenceOfGaussians approximates manual subtraction" {
     }
 }
 
-test "blurGaussian preserves color" {
+test "gaussianBlur preserves color" {
     // Test that Gaussian blur on RGB images maintains color information
     var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
@@ -767,7 +767,7 @@ test "blurGaussian preserves color" {
     }
 
     var blurred: Image(Rgb) = .empty;
-    try image.blurGaussian(std.testing.allocator, 1.0, &blurred);
+    try image.gaussianBlur(std.testing.allocator, 1.0, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Center should still be red (though not pure 255)

@@ -806,8 +806,8 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
-        pub fn blurBox(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
-            return Filter(T).blurBox(self, allocator, blurred, radius);
+        pub fn boxBlur(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
+            return Filter(T).boxBlur(self, allocator, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -849,8 +849,8 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use for temporary buffers.
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
-        pub fn blurGaussian(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
-            return Filter(T).blurGaussian(self, allocator, sigma, out);
+        pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
+            return Filter(T).gaussianBlur(self, allocator, sigma, out);
         }
 
         /// Applies Difference of Gaussians (DoG) band-pass filter to the image.
