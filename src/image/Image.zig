@@ -10,7 +10,6 @@ const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const jpeg = @import("../jpeg.zig");
 const as = @import("../meta.zig").as;
-const is4xu8Struct = @import("../meta.zig").is4xu8Struct;
 const isScalar = @import("../meta.zig").isScalar;
 const png = @import("../png.zig");
 const BorderMode = @import("filtering.zig").BorderMode;
@@ -308,8 +307,8 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Resizes an image to fit in out, using the specified interpolation method.
-        pub fn resize(self: Self, out: Self, method: InterpolationMethod) void {
-            interpolation.resize(T, self, out, method);
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: InterpolationMethod) !void {
+            try interpolation.resize(T, allocator, self, out, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
@@ -324,7 +323,7 @@ pub fn Image(comptime T: type) type {
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
             const scaled = try Self.initAlloc(allocator, new_rows, new_cols);
-            self.resize(scaled, method);
+            try self.resize(allocator, scaled, method);
             return scaled;
         }
 
@@ -355,7 +354,7 @@ pub fn Image(comptime T: type) type {
 
             // If scale factors are exactly equal, aspect ratios match - skip letterboxing
             if (rows_scale == cols_scale) {
-                self.resize(out.*, method);
+                try self.resize(allocator, out.*, method);
                 return out.getRectangle();
             }
 
@@ -385,7 +384,7 @@ pub fn Image(comptime T: type) type {
             const output_view = out.view(content_rect);
 
             // Resize the image into the view
-            self.resize(output_view, method);
+            try self.resize(allocator, output_view, method);
 
             return content_rect;
         }
@@ -801,104 +800,7 @@ pub fn Image(comptime T: type) type {
             allocator: Allocator,
             sat: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
-            if (!self.hasSameShape(sat.*)) {
-                sat.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    // First pass: compute row-wise cumulative sums
-                    for (0..self.rows) |r| {
-                        var tmp: f32 = 0;
-                        const row_offset = r * self.stride;
-                        const out_offset = r * sat.cols;
-                        for (0..self.cols) |c| {
-                            tmp += as(f32, self.data[row_offset + c]);
-                            sat.data[out_offset + c] = tmp;
-                        }
-                    }
-
-                    // Second pass: add column-wise cumulative sums using SIMD
-                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
-                    for (1..self.rows) |r| {
-                        const prev_row_offset = (r - 1) * sat.cols;
-                        const curr_row_offset = r * sat.cols;
-                        var c: usize = 0;
-
-                        // Process SIMD-width chunks
-                        while (c + simd_len <= self.cols) : (c += simd_len) {
-                            const prev_vals: @Vector(simd_len, f32) = sat.data[prev_row_offset + c ..][0..simd_len].*;
-                            const curr_vals: @Vector(simd_len, f32) = sat.data[curr_row_offset + c ..][0..simd_len].*;
-                            sat.data[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
-                        }
-
-                        // Handle remaining columns
-                        while (c < self.cols) : (c += 1) {
-                            sat.data[curr_row_offset + c] += sat.data[prev_row_offset + c];
-                        }
-                    }
-                },
-                .@"struct" => {
-                    if (is4xu8Struct(T)) {
-                        // SIMD-optimized path for 4x u8 structs (e.g., RGBA)
-                        // First pass: row-wise cumulative sums
-                        for (0..self.rows) |r| {
-                            var tmp: @Vector(4, f32) = @splat(0);
-                            const row_offset = r * self.stride;
-                            const out_offset = r * sat.cols;
-
-                            for (0..self.cols) |c| {
-                                const pixel = self.data[row_offset + c];
-                                var pixel_vec: @Vector(4, f32) = undefined;
-                                inline for (std.meta.fields(T), 0..) |field, i| {
-                                    pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
-                                }
-                                tmp += pixel_vec;
-                                sat.data[out_offset + c] = tmp;
-                            }
-                        }
-
-                        // Second pass: column-wise cumulative sums
-                        for (1..self.rows) |r| {
-                            const prev_row_offset = (r - 1) * sat.cols;
-                            const curr_row_offset = r * sat.cols;
-
-                            for (0..self.cols) |c| {
-                                const prev_vec: @Vector(4, f32) = sat.data[prev_row_offset + c];
-                                const curr_vec: @Vector(4, f32) = sat.data[curr_row_offset + c];
-                                sat.data[curr_row_offset + c] = prev_vec + curr_vec;
-                            }
-                        }
-                    } else {
-                        // Generic scalar path for other struct types
-                        const num_channels = comptime Self.channels();
-
-                        // First pass: compute row-wise cumulative sums for all channels
-                        for (0..self.rows) |r| {
-                            var tmp = [_]f32{0} ** num_channels;
-                            const row_offset = r * self.stride;
-                            const out_offset = r * sat.cols;
-                            for (0..self.cols) |c| {
-                                inline for (std.meta.fields(T), 0..) |f, i| {
-                                    tmp[i] += as(f32, @field(self.data[row_offset + c], f.name));
-                                    sat.data[out_offset + c][i] = tmp[i];
-                                }
-                            }
-                        }
-
-                        // Second pass: add column-wise cumulative sums
-                        for (1..self.rows) |r| {
-                            const prev_row_offset = (r - 1) * sat.cols;
-                            const curr_row_offset = r * sat.cols;
-                            for (0..self.cols) |c| {
-                                inline for (0..num_channels) |i| {
-                                    sat.data[curr_row_offset + c][i] += sat.data[prev_row_offset + c][i];
-                                }
-                            }
-                        }
-                    }
-                },
-                else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
-            }
+            return Filter(T).integral(self, allocator, sat);
         }
 
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented

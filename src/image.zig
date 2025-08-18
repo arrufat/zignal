@@ -15,6 +15,7 @@ pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Image = @import("image/Image.zig").Image;
 pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
+pub const channel_ops = @import("image/channel_ops.zig");
 
 // Run all tests
 test {

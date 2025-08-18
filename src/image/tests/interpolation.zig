@@ -290,7 +290,7 @@ test "resize preserves value range" {
     defer dst.deinit(allocator);
 
     // Test resize with bilinear interpolation
-    src.resize(dst, .bilinear);
+    try src.resize(allocator, dst, .bilinear);
 
     // Check that all interpolated values are within the original range
     var min_val: u8 = 255;

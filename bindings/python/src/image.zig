@@ -1040,7 +1040,10 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
     };
 
     // Perform resize
-    src_image.resize(new_image.*, method);
+    src_image.resize(allocator, new_image.*, method) catch {
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return error.OutOfMemory;
+    };
 
     // Create new Python object
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
