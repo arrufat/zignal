@@ -31,7 +31,7 @@ pub fn Filter(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
-        pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
+        pub fn blurBox(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
             if (!self.hasSameShape(blurred.*)) {
                 blurred.* = try .initAlloc(allocator, self.rows, self.cols);
             }
