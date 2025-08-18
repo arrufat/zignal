@@ -21,20 +21,18 @@
 //! ## Performance Guide
 //!
 //! Approximate performance on 512x512 RGBA images (Mpix/s):
-//! - Nearest neighbor: ~400 Mpix/s (with SIMD)
-//! - Bilinear: ~100 Mpix/s (with SIMD)
-//! - Bicubic: ~25 Mpix/s (with SIMD)
-//! - Catmull-Rom: ~25 Mpix/s (with SIMD)
-//! - Lanczos: ~8.5 Mpix/s (with SIMD)
-//! - Mitchell: ~22 Mpix/s (with SIMD)
+//! - Nearest neighbor: ~400 Mpix/s
+//! - Bilinear: ~100 Mpix/s
+//! - Bicubic: ~25 Mpix/s
+//! - Catmull-Rom: ~25 Mpix/s
+//! - Lanczos: ~8.5 Mpix/s
+//! - Mitchell: ~22 Mpix/s
 
 const std = @import("std");
-const as = @import("../meta.zig").as;
-const is4xu8Struct = @import("../meta.zig").is4xu8Struct;
+const Allocator = std.mem.Allocator;
 
-// ============================================================================
-// Public API
-// ============================================================================
+const as = @import("../meta.zig").as;
+const channel_ops = @import("channel_ops.zig");
 
 /// Interpolation method for image resizing and sampling
 ///
@@ -96,8 +94,8 @@ pub fn interpolate(comptime T: type, self: anytype, x: f32, y: f32, method: Inte
 /// Special optimizations:
 /// - Scale=1: Uses memcpy for same-size copies
 /// - 2x upscaling: Specialized fast path for bilinear
-/// - RGBA images: SIMD-optimized paths for all methods
-pub fn resize(comptime T: type, self: anytype, out: anytype, method: InterpolationMethod) void {
+/// - RGB/RGBA images: Channel separation for optimized processing
+pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytype, method: InterpolationMethod) !void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         // If dimensions match exactly, just copy the data
@@ -110,22 +108,74 @@ pub fn resize(comptime T: type, self: anytype, out: anytype, method: Interpolati
         return;
     }
 
-    // SIMD optimizations for 4xu8 structs (RGBA)
-    if (is4xu8Struct(T)) {
-        return switch (method) {
-            .nearest_neighbor => resizeNearestNeighbor4xu8(T, self, out),
-            .bilinear => if (out.rows == self.rows * 2 and out.cols == self.cols * 2)
-                resize2xUpscale4xu8(T, self, out)
-            else
-                resizeBilinear4xu8(T, self, out),
-            .bicubic => resizeBicubic4xu8(T, self, out),
-            .catmull_rom => resizeCatmullRom4xu8(T, self, out),
-            .lanczos => resizeLanczos4xu8(T, self, out),
-            .mitchell => |m| resizeMitchell4xu8(T, self, out, m.b, m.c),
+    // Channel separation for RGB/RGBA types with u8 components
+    if (comptime isRGBType(T)) {
+        const channels = channel_ops.splitRgbChannels(T, self, allocator) catch {
+            // Fallback to generic implementation on allocation failure
+            resizeGeneric(T, self, out, method);
+            return;
         };
+        defer for (channels) |channel| allocator.free(channel);
+
+        // Allocate output channels
+        const out_plane_size = out.rows * out.cols;
+        const r_out = allocator.alloc(u8, out_plane_size) catch {
+            resizeGeneric(T, self, out, method);
+            return;
+        };
+        defer allocator.free(r_out);
+        const g_out = allocator.alloc(u8, out_plane_size) catch {
+            resizeGeneric(T, self, out, method);
+            return;
+        };
+        defer allocator.free(g_out);
+        const b_out = allocator.alloc(u8, out_plane_size) catch {
+            resizeGeneric(T, self, out, method);
+            return;
+        };
+        defer allocator.free(b_out);
+
+        // Resize each channel using optimized plane functions
+        switch (method) {
+            .nearest_neighbor => {
+                channel_ops.resizePlaneNearestU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneNearestU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneNearestU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+            },
+            .bilinear => {
+                channel_ops.resizePlaneBilinearU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneBilinearU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneBilinearU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+            },
+            .bicubic => {
+                channel_ops.resizePlaneBicubicU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneBicubicU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneBicubicU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+            },
+            .catmull_rom => {
+                channel_ops.resizePlaneCatmullRomU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneCatmullRomU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
+                channel_ops.resizePlaneCatmullRomU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+            },
+            .mitchell, .lanczos => {
+                // Mitchell and Lanczos are more complex, fall back to generic for now
+                // This ensures correct interpolation even if not optimized
+                resizeGeneric(T, self, out, method);
+                return;
+            },
+        }
+
+        // Combine channels back
+        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out);
+        return;
     }
 
     // Fall back to generic implementation
+    resizeGeneric(T, self, out, method);
+}
+
+/// Generic resize implementation for non-optimized types
+fn resizeGeneric(comptime T: type, self: anytype, out: anytype, method: InterpolationMethod) void {
     const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
     const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
@@ -144,6 +194,37 @@ pub fn resize(comptime T: type, self: anytype, out: anytype, method: Interpolati
             }
         }
     }
+}
+
+/// Check if a type is an RGB/RGBA type with u8 components
+fn isRGBType(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return false;
+
+    const fields = std.meta.fields(T);
+    if (fields.len < 3 or fields.len > 4) return false;
+
+    // Check first three fields are u8 and named appropriately
+    if (fields[0].type != u8) return false;
+    if (fields[1].type != u8) return false;
+    if (fields[2].type != u8) return false;
+
+    // Check for RGB naming pattern
+    const has_rgb_names = (std.mem.eql(u8, fields[0].name, "r") and
+        std.mem.eql(u8, fields[1].name, "g") and
+        std.mem.eql(u8, fields[2].name, "b")) or
+        (std.mem.eql(u8, fields[0].name, "red") and
+            std.mem.eql(u8, fields[1].name, "green") and
+            std.mem.eql(u8, fields[2].name, "blue"));
+
+    if (!has_rgb_names) return false;
+
+    // If 4 fields, check alpha is also u8
+    if (fields.len == 4) {
+        return fields[3].type == u8;
+    }
+
+    return true;
 }
 
 // ============================================================================
@@ -255,665 +336,131 @@ fn interpolateBilinear(comptime T: type, self: anytype, x: f32, y: f32) ?T {
                 );
             }
         },
-        else => @compileError("Image(" ++ @typeName(T) ++ ").interpolateBilinear: unsupported image type"),
+        else => @compileError("Unsupported type for bilinear interpolation: " ++ @typeName(T)),
     }
+
     return temp;
 }
 
 fn interpolateBicubic(comptime T: type, self: anytype, x: f32, y: f32) ?T {
-    const ix: isize = @intFromFloat(@floor(x));
-    const iy: isize = @intFromFloat(@floor(y));
-
-    // Check bounds - need 4x4 neighborhood
-    if (ix < 1 or iy < 1 or ix >= self.cols - 2 or iy >= self.rows - 2) {
-        return null;
-    }
-
-    const fx = x - as(f32, ix);
-    const fy = y - as(f32, iy);
-
-    var result: T = std.mem.zeroes(T);
-
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            var sum: f32 = 0.0;
-            for (0..4) |j| {
-                const y_idx = iy - 1 + @as(isize, @intCast(j));
-                const wy = bicubicKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy);
-
-                for (0..4) |i| {
-                    const x_idx = ix - 1 + @as(isize, @intCast(i));
-                    const wx = bicubicKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx);
-
-                    sum += wx * wy * as(f32, self.at(@intCast(y_idx), @intCast(x_idx)).*);
-                }
-            }
-            result = if (@typeInfo(T) == .int)
-                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum))))
-            else
-                as(T, sum);
-        },
-        .@"struct" => {
-            inline for (std.meta.fields(T)) |f| {
-                var sum: f32 = 0.0;
-                for (0..4) |j| {
-                    const y_idx = iy - 1 + @as(isize, @intCast(j));
-                    const wy = bicubicKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy);
-
-                    for (0..4) |i| {
-                        const x_idx = ix - 1 + @as(isize, @intCast(i));
-                        const wx = bicubicKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx);
-
-                        sum += wx * wy * as(f32, @field(self.at(@intCast(y_idx), @intCast(x_idx)).*, f.name));
-                    }
-                }
-                @field(result, f.name) = switch (@typeInfo(f.type)) {
-                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum)))),
-                    .float => as(f.type, sum),
-                    else => @compileError("Unsupported field type for interpolation"),
-                };
-            }
-        },
-        else => @compileError("Image(" ++ @typeName(T) ++ ").interpolateBicubic: unsupported image type"),
-    }
-
-    return result;
+    return interpolateWithKernel(T, self, x, y, 2, bicubicKernel, .{});
 }
 
 fn interpolateCatmullRom(comptime T: type, self: anytype, x: f32, y: f32) ?T {
-    const ix: isize = @intFromFloat(@floor(x));
-    const iy: isize = @intFromFloat(@floor(y));
-
-    // Check bounds - need 4x4 neighborhood
-    if (ix < 1 or iy < 1 or ix >= self.cols - 2 or iy >= self.rows - 2) {
-        return null;
-    }
-
-    const fx = x - as(f32, ix);
-    const fy = y - as(f32, iy);
-
-    var result: T = std.mem.zeroes(T);
-
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            var sum: f32 = 0.0;
-            for (0..4) |j| {
-                const y_idx = iy - 1 + @as(isize, @intCast(j));
-                const wy = catmullRomKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy);
-
-                for (0..4) |i| {
-                    const x_idx = ix - 1 + @as(isize, @intCast(i));
-                    const wx = catmullRomKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx);
-
-                    sum += wx * wy * as(f32, self.at(@intCast(y_idx), @intCast(x_idx)).*);
-                }
-            }
-            result = if (@typeInfo(T) == .int)
-                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum))))
-            else
-                as(T, sum);
-        },
-        .@"struct" => {
-            inline for (std.meta.fields(T)) |f| {
-                var sum: f32 = 0.0;
-                for (0..4) |j| {
-                    const y_idx = iy - 1 + @as(isize, @intCast(j));
-                    const wy = catmullRomKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy);
-
-                    for (0..4) |i| {
-                        const x_idx = ix - 1 + @as(isize, @intCast(i));
-                        const wx = catmullRomKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx);
-
-                        sum += wx * wy * as(f32, @field(self.at(@intCast(y_idx), @intCast(x_idx)).*, f.name));
-                    }
-                }
-                @field(result, f.name) = switch (@typeInfo(f.type)) {
-                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum)))),
-                    .float => as(f.type, sum),
-                    else => @compileError("Unsupported field type for interpolation"),
-                };
-            }
-        },
-        else => @compileError("Image(" ++ @typeName(T) ++ ").interpolateCatmullRom: unsupported image type"),
-    }
-
-    return result;
+    return interpolateWithKernel(T, self, x, y, 2, catmullRomKernel, .{});
 }
 
 fn interpolateLanczos(comptime T: type, self: anytype, x: f32, y: f32) ?T {
-    const ix: isize = @intFromFloat(@floor(x));
-    const iy: isize = @intFromFloat(@floor(y));
     const a: f32 = 3.0; // Lanczos3
-
-    // Check bounds - need 6x6 neighborhood for Lanczos3
-    if (ix < 2 or iy < 2 or ix >= self.cols - 3 or iy >= self.rows - 3) {
-        return null;
-    }
-
-    const fx = x - as(f32, ix);
-    const fy = y - as(f32, iy);
-
-    var result: T = std.mem.zeroes(T);
-
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            var sum: f32 = 0.0;
-            var weight_sum: f32 = 0.0;
-
-            for (0..6) |j| {
-                const y_idx = iy - 2 + @as(isize, @intCast(j));
-                const dy = as(f32, @as(isize, @intCast(j)) - 2) - fy;
-                const wy = lanczosKernel(dy, a);
-
-                for (0..6) |i| {
-                    const x_idx = ix - 2 + @as(isize, @intCast(i));
-                    const dx = as(f32, @as(isize, @intCast(i)) - 2) - fx;
-                    const wx = lanczosKernel(dx, a);
-                    const w = wx * wy;
-
-                    sum += w * as(f32, self.at(@intCast(y_idx), @intCast(x_idx)).*);
-                    weight_sum += w;
-                }
-            }
-            const final_value = if (weight_sum != 0.0) sum / weight_sum else sum;
-            result = if (@typeInfo(T) == .int)
-                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(final_value))))
-            else
-                as(T, final_value);
-        },
-        .@"struct" => {
-            inline for (std.meta.fields(T)) |f| {
-                var sum: f32 = 0.0;
-                var weight_sum: f32 = 0.0;
-
-                for (0..6) |j| {
-                    const y_idx = iy - 2 + @as(isize, @intCast(j));
-                    const dy = as(f32, @as(isize, @intCast(j)) - 2) - fy;
-                    const wy = lanczosKernel(dy, a);
-
-                    for (0..6) |i| {
-                        const x_idx = ix - 2 + @as(isize, @intCast(i));
-                        const dx = as(f32, @as(isize, @intCast(i)) - 2) - fx;
-                        const wx = lanczosKernel(dx, a);
-                        const w = wx * wy;
-
-                        sum += w * as(f32, @field(self.at(@intCast(y_idx), @intCast(x_idx)).*, f.name));
-                        weight_sum += w;
-                    }
-                }
-                const final_value = if (weight_sum != 0.0) sum / weight_sum else sum;
-                @field(result, f.name) = switch (@typeInfo(f.type)) {
-                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(final_value)))),
-                    .float => as(f.type, final_value),
-                    else => @compileError("Unsupported field type for interpolation"),
-                };
-            }
-        },
-        else => @compileError("Image(" ++ @typeName(T) ++ ").interpolateLanczos: unsupported image type"),
-    }
-
-    return result;
+    return interpolateWithKernel(T, self, x, y, 3, lanczosKernel, .{a});
 }
 
 fn interpolateMitchell(comptime T: type, self: anytype, x: f32, y: f32, m_b: f32, m_c: f32) ?T {
+    return interpolateWithKernel(T, self, x, y, 2, mitchellKernel, .{ m_b, m_c });
+}
+
+/// Generic kernel-based interpolation function
+fn interpolateWithKernel(
+    comptime T: type,
+    self: anytype,
+    x: f32,
+    y: f32,
+    comptime window_radius: usize,
+    kernel_fn: anytype,
+    kernel_params: anytype,
+) ?T {
     const ix: isize = @intFromFloat(@floor(x));
     const iy: isize = @intFromFloat(@floor(y));
-
-    // Check bounds - need 4x4 neighborhood
-    if (ix < 1 or iy < 1 or ix >= self.cols - 2 or iy >= self.rows - 2) {
-        return null;
-    }
-
     const fx = x - as(f32, ix);
     const fy = y - as(f32, iy);
 
-    var result: T = std.mem.zeroes(T);
+    // Check bounds for the entire kernel window
+    const min_x = ix - @as(isize, @intCast(window_radius - 1));
+    const max_x = ix + @as(isize, @intCast(window_radius));
+    const min_y = iy - @as(isize, @intCast(window_radius - 1));
+    const max_y = iy + @as(isize, @intCast(window_radius));
 
+    if (min_x < 0 or max_x >= self.cols or min_y < 0 or max_y >= self.rows) {
+        return null;
+    }
+
+    const window_size = window_radius * 2;
+
+    // Calculate weights
+    var x_weights: [6]f32 = undefined; // Max window size is 6 for Lanczos3
+    var y_weights: [6]f32 = undefined;
+
+    inline for (0..window_size) |i| {
+        const offset = @as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fx;
+        if (kernel_params.len == 0) {
+            x_weights[i] = kernel_fn(offset);
+            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy);
+        } else if (kernel_params.len == 1) {
+            x_weights[i] = kernel_fn(offset, kernel_params[0]);
+            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy, kernel_params[0]);
+        } else if (kernel_params.len == 2) {
+            x_weights[i] = kernel_fn(offset, kernel_params[0], kernel_params[1]);
+            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy, kernel_params[0], kernel_params[1]);
+        } else {
+            @compileError("Unsupported number of kernel parameters");
+        }
+    }
+
+    // Apply kernel
+    var result: T = undefined;
     switch (@typeInfo(T)) {
         .int, .float => {
-            var sum: f32 = 0.0;
-            for (0..4) |j| {
-                const y_idx = iy - 1 + @as(isize, @intCast(j));
-                const wy = mitchellKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy, m_b, m_c);
+            var sum: f32 = 0;
+            var weight_sum: f32 = 0;
 
-                for (0..4) |i| {
-                    const x_idx = ix - 1 + @as(isize, @intCast(i));
-                    const wx = mitchellKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx, m_b, m_c);
-
-                    sum += wx * wy * as(f32, self.at(@intCast(y_idx), @intCast(x_idx)).*);
+            inline for (0..window_size) |j| {
+                inline for (0..window_size) |i| {
+                    const pixel_y = @as(usize, @intCast(iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j))));
+                    const pixel_x = @as(usize, @intCast(ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i))));
+                    const pixel = self.at(pixel_y, pixel_x).*;
+                    const weight = x_weights[i] * y_weights[j];
+                    sum += as(f32, pixel) * weight;
+                    weight_sum += weight;
                 }
             }
-            result = if (@typeInfo(T) == .int)
-                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum))))
-            else
-                as(T, sum);
+
+            const val = if (weight_sum != 0) sum / weight_sum else 0;
+            result = switch (@typeInfo(T)) {
+                .int => |int_info| if (int_info.signedness == .unsigned)
+                    @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(T))), val)))
+                else
+                    as(T, val),
+                else => as(T, val),
+            };
         },
         .@"struct" => {
             inline for (std.meta.fields(T)) |f| {
-                var sum: f32 = 0.0;
-                for (0..4) |j| {
-                    const y_idx = iy - 1 + @as(isize, @intCast(j));
-                    const wy = mitchellKernel(as(f32, @as(isize, @intCast(j)) - 1) - fy, m_b, m_c);
+                var sum: f32 = 0;
+                var weight_sum: f32 = 0;
 
-                    for (0..4) |i| {
-                        const x_idx = ix - 1 + @as(isize, @intCast(i));
-                        const wx = mitchellKernel(as(f32, @as(isize, @intCast(i)) - 1) - fx, m_b, m_c);
-
-                        sum += wx * wy * as(f32, @field(self.at(@intCast(y_idx), @intCast(x_idx)).*, f.name));
+                inline for (0..window_size) |j| {
+                    inline for (0..window_size) |i| {
+                        const pixel_y = @as(usize, @intCast(iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j))));
+                        const pixel_x = @as(usize, @intCast(ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i))));
+                        const pixel = self.at(pixel_y, pixel_x).*;
+                        const weight = x_weights[i] * y_weights[j];
+                        sum += as(f32, @field(pixel, f.name)) * weight;
+                        weight_sum += weight;
                     }
                 }
+
+                const val = if (weight_sum != 0) sum / weight_sum else 0;
                 @field(result, f.name) = switch (@typeInfo(f.type)) {
-                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum)))),
-                    .float => as(f.type, sum),
-                    else => @compileError("Unsupported field type for interpolation"),
+                    .int => |int_info| if (int_info.signedness == .unsigned)
+                        @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(f.type))), val)))
+                    else
+                        as(f.type, val),
+                    else => as(f.type, val),
                 };
             }
         },
-        else => @compileError("Image(" ++ @typeName(T) ++ ").interpolateMitchell: unsupported image type"),
+        else => @compileError("Unsupported type for kernel interpolation: " ++ @typeName(T)),
     }
 
     return result;
-}
-
-// ============================================================================
-// SIMD Optimized Resize Functions
-// ============================================================================
-
-/// Generic SIMD-optimized kernel-based resize for 4xu8 types (RGBA)
-/// This function implements the common pattern for bicubic, Catmull-Rom, Mitchell, and Lanczos
-fn resizeKernel4xu8(
-    comptime T: type,
-    self: anytype,
-    out: anytype,
-    comptime window_radius: usize, // 2 for 4x4 kernels, 3 for 6x6 (Lanczos)
-    kernel_fn: anytype, // Function that takes (x, ...params) and returns f32
-    kernel_params: anytype, // Additional parameters for the kernel (empty struct for most)
-    normalize_weights: bool, // Whether to normalize by weight sum (needed for Lanczos)
-) void {
-    comptime std.debug.assert(is4xu8Struct(T));
-
-    const window_size = window_radius * 2;
-    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
-    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
-
-    // Process each output pixel
-    for (0..out.rows) |r| {
-        const src_y: f32 = if (out.rows == 1)
-            0.5 * max_src_y
-        else
-            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
-        const iy = @as(isize, @intFromFloat(@floor(src_y)));
-        const fy = src_y - @as(f32, @floatFromInt(iy));
-
-        // Skip if we can't get a full neighborhood
-        if (iy < window_radius - 1 or iy >= self.rows - window_radius) {
-            // Fall back to nearest neighbor for edge pixels
-            for (0..out.cols) |c| {
-                const src_x: f32 = if (out.cols == 1)
-                    0.5 * max_src_x
-                else
-                    @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
-                const ix_clamped = @max(0, @min(self.cols - 1, @as(usize, @intFromFloat(@round(src_x)))));
-                const iy_clamped = @max(0, @min(self.rows - 1, @as(usize, @intCast(@max(0, @min(@as(isize, @intCast(self.rows - 1)), iy))))));
-                out.at(r, c).* = self.at(iy_clamped, ix_clamped).*;
-            }
-            continue;
-        }
-
-        // Pre-compute y weights
-        var y_weights_array: [6]f32 = undefined; // Max size for Lanczos
-        inline for (0..window_size) |j| {
-            const offset = @as(f32, @floatFromInt(@as(isize, @intCast(j)) - @as(isize, @intCast(window_radius - 1)))) - fy;
-            if (kernel_params.len == 0) {
-                y_weights_array[j] = kernel_fn(offset);
-            } else if (kernel_params.len == 1) {
-                y_weights_array[j] = kernel_fn(offset, kernel_params[0]);
-            } else if (kernel_params.len == 2) {
-                y_weights_array[j] = kernel_fn(offset, kernel_params[0], kernel_params[1]);
-            } else {
-                @compileError("Unsupported number of kernel parameters");
-            }
-        }
-        const y_weights = y_weights_array[0..window_size];
-
-        for (0..out.cols) |c| {
-            const src_x: f32 = if (out.cols == 1)
-                0.5 * max_src_x
-            else
-                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
-            const ix = @as(isize, @intFromFloat(@floor(src_x)));
-            const fx = src_x - @as(f32, @floatFromInt(ix));
-
-            // Skip if we can't get a full neighborhood
-            if (ix < window_radius - 1 or ix >= self.cols - window_radius) {
-                // Fall back to nearest neighbor for edge pixels
-                const ix_clamped = @max(0, @min(self.cols - 1, @as(usize, @intFromFloat(@round(src_x)))));
-                const iy_clamped = @as(usize, @intCast(iy));
-                out.at(r, c).* = self.at(iy_clamped, ix_clamped).*;
-                continue;
-            }
-
-            // Pre-compute x weights
-            var x_weights_array: [6]f32 = undefined; // Max size for Lanczos
-            inline for (0..window_size) |i| {
-                const offset = @as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fx;
-                if (kernel_params.len == 0) {
-                    x_weights_array[i] = kernel_fn(offset);
-                } else if (kernel_params.len == 1) {
-                    x_weights_array[i] = kernel_fn(offset, kernel_params[0]);
-                } else if (kernel_params.len == 2) {
-                    x_weights_array[i] = kernel_fn(offset, kernel_params[0], kernel_params[1]);
-                } else {
-                    @compileError("Unsupported number of kernel parameters");
-                }
-            }
-            const x_weights = x_weights_array[0..window_size];
-
-            // Accumulate weighted sum for each channel using SIMD
-            var sums = @Vector(4, f32){ 0, 0, 0, 0 }; // RGBA channels
-            var weight_sum: f32 = if (normalize_weights) 0 else 1;
-
-            // Process the neighborhood
-            inline for (0..window_size) |j| {
-                const y_idx = @as(usize, @intCast(iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j))));
-                const wy = y_weights[j];
-
-                // Process all x positions for this row
-                var row_sum = @Vector(4, f32){ 0, 0, 0, 0 };
-                var row_weight: f32 = 0;
-
-                inline for (0..window_size) |i| {
-                    const x_idx = @as(usize, @intCast(ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i))));
-                    const pixel = self.at(y_idx, x_idx).*;
-
-                    // Convert pixel to vector
-                    var pixel_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, k| {
-                        pixel_vec[k] = @floatFromInt(@field(pixel, field.name));
-                    }
-
-                    // Calculate weight
-                    const wx = x_weights[i];
-
-                    if (normalize_weights) {
-                        // For Lanczos - accumulate with individual weights
-                        const w = wx * wy;
-                        const w_vec: @Vector(4, f32) = @splat(w);
-                        row_sum += pixel_vec * w_vec;
-                        row_weight += w;
-                    } else {
-                        // For others - accumulate with x weight only
-                        const wx_vec: @Vector(4, f32) = @splat(wx);
-                        row_sum += pixel_vec * wx_vec;
-                    }
-                }
-
-                if (normalize_weights) {
-                    sums += row_sum;
-                    weight_sum += row_weight;
-                } else {
-                    // For 4x4 kernels, apply y weight to entire row
-                    const wy_vec: @Vector(4, f32) = @splat(wy);
-                    sums += row_sum * wy_vec;
-                }
-            }
-
-            // Convert back to struct
-            var result: T = undefined;
-            if (normalize_weights and weight_sum != 0) {
-                const inv_weight: @Vector(4, f32) = @splat(1.0 / weight_sum);
-                const normalized = sums * inv_weight;
-                inline for (std.meta.fields(T), 0..) |field, k| {
-                    @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(normalized[k]))));
-                }
-            } else if (normalize_weights) {
-                // Fallback to center pixel if weights sum to zero
-                const center_pixel = self.at(@intCast(iy), @intCast(ix)).*;
-                result = center_pixel;
-            } else {
-                // Direct conversion for non-normalized kernels
-                inline for (std.meta.fields(T), 0..) |field, k| {
-                    @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(sums[k]))));
-                }
-            }
-
-            out.at(r, c).* = result;
-        }
-    }
-}
-
-/// Specialized 2x upscaling for 4xu8 images (RGBA/RGB) using SIMD
-fn resize2xUpscale4xu8(comptime T: type, self: anytype, out: anytype) void {
-    std.debug.assert(is4xu8Struct(T));
-    std.debug.assert(out.rows == self.rows * 2);
-    std.debug.assert(out.cols == self.cols * 2);
-
-    // Process each row
-    for (0..self.rows) |sr| {
-        const dr = sr * 2;
-
-        // Process each pixel
-        for (0..self.cols) |sc| {
-            const dc = sc * 2;
-            const src_pixel = self.at(sr, sc).*;
-
-            // Convert struct to vector for SIMD operations
-            var src_vec: @Vector(4, u16) = undefined;
-            inline for (std.meta.fields(T), 0..) |field, i| {
-                src_vec[i] = @field(src_pixel, field.name);
-            }
-
-            // Write top-left pixel
-            out.at(dr, dc).* = src_pixel;
-
-            // Top-right pixel (horizontal interpolation)
-            if (sc < self.cols - 1) {
-                const next_pixel = self.at(sr, sc + 1).*;
-                var next_vec: @Vector(4, u16) = undefined;
-                inline for (std.meta.fields(T), 0..) |field, i| {
-                    next_vec[i] = @field(next_pixel, field.name);
-                }
-
-                const horiz_avg = (src_vec + next_vec) / @as(@Vector(4, u16), @splat(2));
-                var result: T = undefined;
-                inline for (std.meta.fields(T), 0..) |field, i| {
-                    @field(result, field.name) = @intCast(horiz_avg[i]);
-                }
-                out.at(dr, dc + 1).* = result;
-            } else {
-                out.at(dr, dc + 1).* = src_pixel;
-            }
-
-            // Bottom row interpolation
-            if (sr < self.rows - 1) {
-                const bottom_pixel = self.at(sr + 1, sc).*;
-                var bottom_vec: @Vector(4, u16) = undefined;
-                inline for (std.meta.fields(T), 0..) |field, i| {
-                    bottom_vec[i] = @field(bottom_pixel, field.name);
-                }
-
-                // Bottom-left (vertical interpolation)
-                const vert_avg = (src_vec + bottom_vec) / @as(@Vector(4, u16), @splat(2));
-                var vert_result: T = undefined;
-                inline for (std.meta.fields(T), 0..) |field, i| {
-                    @field(vert_result, field.name) = @intCast(vert_avg[i]);
-                }
-                out.at(dr + 1, dc).* = vert_result;
-
-                // Bottom-right (bilinear interpolation)
-                if (sc < self.cols - 1) {
-                    const br_pixel = self.at(sr + 1, sc + 1).*;
-                    var br_vec: @Vector(4, u16) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        br_vec[i] = @field(br_pixel, field.name);
-                    }
-
-                    const next_pixel = self.at(sr, sc + 1).*;
-                    var next_vec: @Vector(4, u16) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        next_vec[i] = @field(next_pixel, field.name);
-                    }
-
-                    const bilinear_avg = (src_vec + next_vec + bottom_vec + br_vec) / @as(@Vector(4, u16), @splat(4));
-                    var bilinear_result: T = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        @field(bilinear_result, field.name) = @intCast(bilinear_avg[i]);
-                    }
-                    out.at(dr + 1, dc + 1).* = bilinear_result;
-                } else {
-                    out.at(dr + 1, dc + 1).* = vert_result;
-                }
-            } else {
-                // Last row - copy from top row
-                out.at(dr + 1, dc).* = src_pixel;
-                out.at(dr + 1, dc + 1).* = out.at(dr, dc + 1).*;
-            }
-        }
-    }
-}
-
-/// SIMD-optimized nearest neighbor resize for 4xu8 types (RGBA)
-fn resizeNearestNeighbor4xu8(comptime T: type, self: anytype, out: anytype) void {
-    std.debug.assert(is4xu8Struct(T));
-    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
-    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
-
-    // Process 4 output pixels at a time using SIMD
-    const vec_size = 4;
-
-    for (0..out.rows) |r| {
-        const src_y_f: f32 = if (out.rows == 1)
-            0.5 * max_src_y
-        else
-            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
-        const src_y = @min(self.rows - 1, @as(usize, @intFromFloat(@round(src_y_f))));
-
-        var c: usize = 0;
-
-        // SIMD processing for groups of 4 pixels
-        while (c + vec_size <= out.cols) : (c += vec_size) {
-            // Calculate source X coordinates for 4 pixels
-            const x_coords = @Vector(4, f32){
-                @floatFromInt(c),
-                @floatFromInt(c + 1),
-                @floatFromInt(c + 2),
-                @floatFromInt(c + 3),
-            };
-
-            const scale_x: f32 = if (out.cols == 1) 0.0 else (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
-            const src_x_vec = x_coords * @as(@Vector(4, f32), @splat(scale_x));
-
-            // Round to nearest and clamp
-            const src_x_indices = @Vector(4, u32){
-                @min(self.cols - 1, @as(u32, @intFromFloat(@round(src_x_vec[0])))),
-                @min(self.cols - 1, @as(u32, @intFromFloat(@round(src_x_vec[1])))),
-                @min(self.cols - 1, @as(u32, @intFromFloat(@round(src_x_vec[2])))),
-                @min(self.cols - 1, @as(u32, @intFromFloat(@round(src_x_vec[3])))),
-            };
-
-            // Gather pixels from source
-            inline for (0..vec_size) |i| {
-                const src_pixel = self.at(src_y, src_x_indices[i]).*;
-                out.at(r, c + i).* = src_pixel;
-            }
-        }
-
-        // Handle remaining pixels
-        while (c < out.cols) : (c += 1) {
-            const src_x_f: f32 = if (out.cols == 1)
-                0.5 * max_src_x
-            else
-                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
-            const src_x = @min(self.cols - 1, @as(usize, @intFromFloat(@round(src_x_f))));
-            out.at(r, c).* = self.at(src_y, src_x).*;
-        }
-    }
-}
-
-/// SIMD-optimized bilinear resize for 4xu8 types (RGBA) - works for all scales
-fn resizeBilinear4xu8(comptime T: type, self: anytype, out: anytype) void {
-    comptime std.debug.assert(is4xu8Struct(T));
-    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
-    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
-
-    for (0..out.rows) |r| {
-        const src_y: f32 = if (out.rows == 1)
-            0.5 * max_src_y
-        else
-            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
-        const y0 = @as(usize, @intFromFloat(@floor(src_y)));
-        const y1 = @min(y0 + 1, self.rows - 1);
-        const fy = src_y - @as(f32, @floatFromInt(y0));
-
-        for (0..out.cols) |c| {
-            const src_x: f32 = if (out.cols == 1)
-                0.5 * max_src_x
-            else
-                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
-            const x0 = @as(usize, @intFromFloat(@floor(src_x)));
-            const x1 = @min(x0 + 1, self.cols - 1);
-            const fx = src_x - @as(f32, @floatFromInt(x0));
-
-            // Load the 4 neighboring pixels
-            const tl = self.at(y0, x0).*;
-            const tr = self.at(y0, x1).*;
-            const bl = self.at(y1, x0).*;
-            const br = self.at(y1, x1).*;
-
-            // Convert to f32 vectors - same pattern as boxBlur4xu8Simd
-            var tl_vec: @Vector(4, f32) = undefined;
-            var tr_vec: @Vector(4, f32) = undefined;
-            var bl_vec: @Vector(4, f32) = undefined;
-            var br_vec: @Vector(4, f32) = undefined;
-
-            inline for (std.meta.fields(T), 0..) |field, i| {
-                tl_vec[i] = @floatFromInt(@field(tl, field.name));
-                tr_vec[i] = @floatFromInt(@field(tr, field.name));
-                bl_vec[i] = @floatFromInt(@field(bl, field.name));
-                br_vec[i] = @floatFromInt(@field(br, field.name));
-            }
-
-            // Bilinear interpolation using f32 vectors
-            const fx_vec: @Vector(4, f32) = @splat(fx);
-            const fy_vec: @Vector(4, f32) = @splat(fy);
-            const one_minus_fx_vec: @Vector(4, f32) = @splat(1.0 - fx);
-            const one_minus_fy_vec: @Vector(4, f32) = @splat(1.0 - fy);
-
-            // Horizontal interpolation
-            const top = tl_vec * one_minus_fx_vec + tr_vec * fx_vec;
-            const bottom = bl_vec * one_minus_fx_vec + br_vec * fx_vec;
-
-            // Vertical interpolation
-            const result_vec = top * one_minus_fy_vec + bottom * fy_vec;
-
-            // Convert back to struct with clamping
-            var result: T = undefined;
-            inline for (std.meta.fields(T), 0..) |field, i| {
-                @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(result_vec[i]))));
-            }
-
-            out.at(r, c).* = result;
-        }
-    }
-}
-
-/// SIMD-optimized bicubic resize for 4xu8 types (RGBA)
-fn resizeBicubic4xu8(comptime T: type, self: anytype, out: anytype) void {
-    resizeKernel4xu8(T, self, out, 2, bicubicKernel, .{}, false);
-}
-
-/// SIMD-optimized Catmull-Rom resize for 4xu8 types (RGBA)
-fn resizeCatmullRom4xu8(comptime T: type, self: anytype, out: anytype) void {
-    resizeKernel4xu8(T, self, out, 2, catmullRomKernel, .{}, false);
-}
-
-/// SIMD-optimized Mitchell-Netravali resize for 4xu8 types (RGBA)
-fn resizeMitchell4xu8(comptime T: type, self: anytype, out: anytype, m_b: f32, m_c: f32) void {
-    resizeKernel4xu8(T, self, out, 2, mitchellKernel, .{ m_b, m_c }, false);
-}
-
-/// SIMD-optimized Lanczos resize for 4xu8 types (RGBA)
-fn resizeLanczos4xu8(comptime T: type, self: anytype, out: anytype) void {
-    const a: f32 = 3.0; // Lanczos3
-    resizeKernel4xu8(T, self, out, 3, lanczosKernel, .{a}, true);
 }

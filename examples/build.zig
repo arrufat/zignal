@@ -22,8 +22,7 @@ pub fn build(b: *std.Build) void {
         "png_example",
         "pca_example",
         "make_logo",
-        "bdf_font_demo",
-        "font_unicode_demo",
+        "image_demo",
     };
 
     // Build exec_examples with run steps and check compilation

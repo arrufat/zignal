@@ -8,8 +8,8 @@ const convertColor = @import("../color.zig").convertColor;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-const is4xu8Struct = meta.is4xu8Struct;
 const Image = @import("Image.zig").Image;
+const channel_ops = @import("channel_ops.zig");
 
 /// Border handling modes for filter operations
 pub const BorderMode = enum {
@@ -42,79 +42,82 @@ pub fn Filter(comptime T: type) type {
 
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    var sat: Image(f32) = undefined;
-                    try self.integral(allocator, &sat);
-                    defer sat.deinit(allocator);
+                    // Build integral image
+                    const plane_size = self.rows * self.cols;
+                    const integral_img = try allocator.alloc(f32, plane_size);
+                    defer allocator.free(integral_img);
 
-                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
-
-                    // Process each row
-                    for (0..self.rows) |r| {
-                        const r1 = r -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-
-                        var c: usize = 0;
-
-                        // Process SIMD chunks where safe (away from borders)
-                        const row_safe = r >= radius and r + radius < self.rows;
-                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
-                            // Skip left border
-                            while (c < radius) : (c += 1) {
-                                const c1 = c -| radius;
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                                const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                    sat.at(r1, c2).* + sat.at(r1, c1).*;
-                                blurred.at(r, c).* = if (@typeInfo(T) == .int)
-                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
-                                else
-                                    as(T, sum / area);
-                            }
-
-                            // SIMD middle section (constant area when row is safe)
-                            const safe_end = self.cols - radius - simd_len;
-                            if (c <= safe_end) {
-                                const const_area: f32 = @floatFromInt((r2 - r1) * 2 * radius);
-                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
-
-                                while (c <= safe_end) : (c += simd_len) {
-                                    const c1 = c - radius;
-                                    const c2 = c + radius;
-                                    const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                                    const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                                    const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
-                                    const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
-                                    const sums = int22 - int21 - int12 + int11;
-                                    const vals = sums / area_vec;
-
-                                    for (0..simd_len) |i| {
-                                        blurred.at(r, c + i).* = if (@typeInfo(T) == .int)
-                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(vals[i]))))
-                                        else
-                                            vals[i];
-                                    }
-                                }
-                            }
+                    // Use optimized paths for u8 and f32, generic path for others
+                    if (T == u8) {
+                        integralPlane(u8, self.data, integral_img, self.rows, self.cols);
+                        boxBlurPlane(u8, integral_img, std.mem.sliceAsBytes(blurred.data), self.rows, self.cols, radius);
+                    } else if (T == f32) {
+                        integralPlane(f32, self.data, integral_img, self.rows, self.cols);
+                        boxBlurPlane(f32, integral_img, blurred.data, self.rows, self.cols, radius);
+                    } else {
+                        // Generic path: convert to f32 for processing
+                        const src_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(src_f32);
+                        for (0..plane_size) |i| {
+                            src_f32[i] = meta.as(f32, self.data[i]);
                         }
+                        integralPlane(f32, src_f32, integral_img, self.rows, self.cols);
 
-                        // Process remaining pixels (right border and any leftover)
-                        while (c < self.cols) : (c += 1) {
-                            const c1 = c -| radius;
-                            const c2 = @min(c + radius, self.cols - 1);
-                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = sat.at(r2, c2).* - sat.at(r2, c1).* - sat.at(r1, c2).* + sat.at(r1, c1).*;
-                            blurred.at(r, c).* = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(sum / area))))
+                        const dst_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(dst_f32);
+                        boxBlurPlane(f32, integral_img, dst_f32, self.rows, self.cols, radius);
+
+                        // Convert back to target type
+                        for (0..plane_size) |i| {
+                            blurred.data[i] = if (@typeInfo(T) == .int)
+                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(dst_f32[i]))))
                             else
-                                as(T, sum / area);
+                                meta.as(T, dst_f32[i]);
                         }
                     }
                 },
                 .@"struct" => {
-                    if (is4xu8Struct(T)) {
-                        try boxBlur4xu8Simd(self, allocator, blurred, radius);
+                    const fields = std.meta.fields(T);
+                    const has_alpha = comptime channel_ops.hasAlphaChannel(T);
+
+                    // Check if all RGB fields are u8
+                    const all_u8 = comptime blk: {
+                        for (fields[0..@min(3, fields.len)]) |field| {
+                            if (field.type != u8) break :blk false;
+                        }
+                        break :blk true;
+                    };
+
+                    if (all_u8 and fields.len >= 3) {
+                        // Optimized path for u8 RGB types
+                        const plane_size = self.rows * self.cols;
+
+                        // Separate channels
+                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        defer for (channels) |channel| allocator.free(channel);
+
+                        // Process each channel
+                        const integral_img = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(integral_img);
+
+                        const r_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(r_out);
+                        const g_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(g_out);
+                        const b_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(b_out);
+
+                        integralPlane(u8, channels[0], integral_img, self.rows, self.cols);
+                        boxBlurPlane(u8, integral_img, r_out, self.rows, self.cols, radius);
+
+                        integralPlane(u8, channels[1], integral_img, self.rows, self.cols);
+                        boxBlurPlane(u8, integral_img, g_out, self.rows, self.cols, radius);
+
+                        integralPlane(u8, channels[2], integral_img, self.rows, self.cols);
+                        boxBlurPlane(u8, integral_img, b_out, self.rows, self.cols, radius);
+
+                        // Recombine channels
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, blurred.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -127,11 +130,21 @@ pub fn Filter(comptime T: type) type {
                                 const c1 = c -| radius;
                                 const r2 = @min(r + radius, self.rows - 1);
                                 const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                                const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                                inline for (std.meta.fields(T), 0..) |f, i| {
-                                    const sum = sat.at(r2, c2)[i] - sat.at(r2, c1)[i] -
-                                        sat.at(r1, c2)[i] + sat.at(r1, c1)[i];
+                                inline for (fields, 0..) |f, i| {
+                                    // Skip alpha channel if present
+                                    if (has_alpha and i == 3) {
+                                        @field(blurred.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
+                                        continue;
+                                    }
+
+                                    // Use correct integral image indices
+                                    const sum = (if (r2 < self.rows and c2 < self.cols) sat.at(r2, c2)[i] else 0) -
+                                        (if (r2 < self.rows and c1 > 0) sat.at(r2, c1 - 1)[i] else 0) -
+                                        (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
+                                        (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
+
                                     @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                         .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
                                         .float => as(f.type, sum / area),
@@ -143,89 +156,6 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
-            }
-        }
-
-        /// Optimized box blur implementation for structs with 4 u8 fields using SIMD throughout.
-        /// This is automatically called by boxBlur() when T has exactly 4 u8 fields (e.g., RGBA, BGRA, etc).
-        fn boxBlur4xu8Simd(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
-            // Verify at compile time that this is a struct with 4 u8 fields
-            comptime {
-                const fields = std.meta.fields(T);
-                assert(fields.len == 4);
-                for (fields) |field| {
-                    assert(field.type == u8);
-                }
-            }
-
-            // Initialize output if needed
-            if (!self.hasSameShape(blurred.*)) {
-                blurred.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(blurred.*);
-                return;
-            }
-
-            // Create integral image with 4 channels
-            var sat = try Image([4]f32).initAlloc(allocator, self.rows, self.cols);
-            defer sat.deinit(allocator);
-
-            // Build integral image - first pass: row-wise cumulative sums
-            for (0..self.rows) |r| {
-                var tmp: @Vector(4, f32) = @splat(0);
-                const row_offset = r * self.stride;
-                const out_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const pixel = self.data[row_offset + c];
-                    var pixel_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
-                    }
-                    tmp += pixel_vec;
-                    sat.data[out_offset + c] = tmp;
-                }
-            }
-
-            // Second pass: column-wise cumulative sums
-            for (1..self.rows) |r| {
-                const prev_row_offset = (r - 1) * sat.cols;
-                const curr_row_offset = r * sat.cols;
-
-                for (0..self.cols) |c| {
-                    const prev_vec: @Vector(4, f32) = sat.data[prev_row_offset + c];
-                    const curr_vec: @Vector(4, f32) = sat.data[curr_row_offset + c];
-                    sat.data[curr_row_offset + c] = prev_vec + curr_vec;
-                }
-            }
-
-            // Apply box blur with SIMD
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const r1 = r -| radius;
-                    const c1 = c -| radius;
-                    const r2 = @min(r + radius, self.rows - 1);
-                    const c2 = @min(c + radius, self.cols - 1);
-                    const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                    const area_vec: @Vector(4, f32) = @splat(area);
-
-                    // Use vectors for the box sum calculation
-                    const v_r2c2: @Vector(4, f32) = sat.at(r2, c2).*;
-                    const v_r2c1: @Vector(4, f32) = sat.at(r2, c1).*;
-                    const v_r1c2: @Vector(4, f32) = sat.at(r1, c2).*;
-                    const v_r1c1: @Vector(4, f32) = sat.at(r1, c1).*;
-
-                    const sum_vec = v_r2c2 - v_r2c1 - v_r1c2 + v_r1c1;
-                    const avg_vec = sum_vec / area_vec;
-
-                    // Convert back to struct
-                    var result: T = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(avg_vec[i]))));
-                    }
-                    blurred.at(r, c).* = result;
-                }
             }
         }
 
@@ -245,83 +175,81 @@ pub fn Filter(comptime T: type) type {
 
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    var sat: Image(f32) = undefined;
-                    defer sat.deinit(allocator);
-                    try self.integral(allocator, &sat);
+                    const plane_size = self.rows * self.cols;
+                    const integral_img = try allocator.alloc(f32, plane_size);
+                    defer allocator.free(integral_img);
 
-                    const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
-
-                    // Process each row
-                    for (0..self.rows) |r| {
-                        const r1 = r -| radius;
-                        const r2 = @min(r + radius, self.rows - 1);
-                        const r1_offset = r1 * self.cols;
-                        const r2_offset = r2 * self.cols;
-
-                        var c: usize = 0;
-
-                        // Process SIMD chunks where safe (away from borders)
-                        const row_safe = r >= radius and r + radius < self.rows;
-                        if (simd_len > 1 and self.cols > 2 * radius + simd_len and row_safe) {
-                            // Skip left border
-                            while (c < radius) : (c += 1) {
-                                const c1 = c -| radius;
-                                const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                                const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                    sat.at(r1, c2).* + sat.at(r1, c1).*;
-                                const blurred = sum / area;
-                                sharpened.at(r, c).* = if (@typeInfo(T) == .int)
-                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
-                                else
-                                    as(T, 2 * as(f32, self.at(r, c).*) - blurred);
-                            }
-
-                            // SIMD middle section (constant area when row is safe)
-                            const safe_end = self.cols - radius - simd_len;
-                            if (c <= safe_end) {
-                                const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
-                                const area_vec: @Vector(simd_len, f32) = @splat(const_area);
-
-                                while (c <= safe_end) : (c += simd_len) {
-                                    const c1 = c - radius;
-                                    const c2 = c + radius;
-                                    const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                                    const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                                    const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
-                                    const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
-                                    const sums = int22 - int21 - int12 + int11;
-                                    const blurred_vals = sums / area_vec;
-
-                                    for (0..simd_len) |i| {
-                                        const original = self.at(r, c + i).*;
-                                        sharpened.at(r, c + i).* = if (@typeInfo(T) == .int)
-                                            @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, original) - blurred_vals[i]))))
-                                        else
-                                            as(T, 2 * as(f32, original) - blurred_vals[i]);
-                                    }
-                                }
-                            }
+                    // Use optimized paths for u8 and f32, generic path for others
+                    if (T == u8) {
+                        integralPlane(u8, self.data, integral_img, self.rows, self.cols);
+                        sharpenPlane(u8, self.data, integral_img, std.mem.sliceAsBytes(sharpened.data), self.rows, self.cols, radius);
+                    } else if (T == f32) {
+                        integralPlane(f32, self.data, integral_img, self.rows, self.cols);
+                        sharpenPlane(f32, self.data, integral_img, sharpened.data, self.rows, self.cols, radius);
+                    } else {
+                        // Generic path: convert to f32 for processing
+                        const src_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(src_f32);
+                        for (0..plane_size) |i| {
+                            src_f32[i] = meta.as(f32, self.data[i]);
                         }
+                        integralPlane(f32, src_f32, integral_img, self.rows, self.cols);
 
-                        // Process remaining pixels (right border and any leftover)
-                        while (c < self.cols) : (c += 1) {
-                            const c1 = c -| radius;
-                            const c2 = @min(c + radius, self.cols - 1);
-                            const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                            const sum = sat.at(r2, c2).* - sat.at(r2, c1).* -
-                                sat.at(r1, c2).* + sat.at(r1, c1).*;
-                            const blurred = sum / area;
-                            sharpened.at(r, c).* = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(2 * as(f32, self.at(r, c).*) - blurred))))
+                        const dst_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(dst_f32);
+                        sharpenPlane(f32, src_f32, integral_img, dst_f32, self.rows, self.cols, radius);
+
+                        // Convert back to target type
+                        for (0..plane_size) |i| {
+                            sharpened.data[i] = if (@typeInfo(T) == .int)
+                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(dst_f32[i]))))
                             else
-                                as(T, 2 * as(f32, self.at(r, c).*) - blurred);
+                                meta.as(T, dst_f32[i]);
                         }
                     }
                 },
                 .@"struct" => {
-                    if (is4xu8Struct(T)) {
-                        try sharpen4xu8Simd(self, allocator, sharpened, radius);
+                    const fields = std.meta.fields(T);
+                    const has_alpha = comptime channel_ops.hasAlphaChannel(T);
+
+                    // Check if all RGB fields are u8
+                    const all_u8 = comptime blk: {
+                        for (fields[0..@min(3, fields.len)]) |field| {
+                            if (field.type != u8) break :blk false;
+                        }
+                        break :blk true;
+                    };
+
+                    if (all_u8 and fields.len >= 3) {
+                        // Optimized path for u8 RGB types
+                        const plane_size = self.rows * self.cols;
+
+                        // Separate channels
+                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        defer for (channels) |channel| allocator.free(channel);
+
+                        // Process each channel
+                        const integral_img = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(integral_img);
+
+                        const r_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(r_out);
+                        const g_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(g_out);
+                        const b_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(b_out);
+
+                        integralPlane(u8, channels[0], integral_img, self.rows, self.cols);
+                        sharpenPlane(u8, channels[0], integral_img, r_out, self.rows, self.cols, radius);
+
+                        integralPlane(u8, channels[1], integral_img, self.rows, self.cols);
+                        sharpenPlane(u8, channels[1], integral_img, g_out, self.rows, self.cols, radius);
+
+                        integralPlane(u8, channels[2], integral_img, self.rows, self.cols);
+                        sharpenPlane(u8, channels[2], integral_img, b_out, self.rows, self.cols, radius);
+
+                        // Recombine channels
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, sharpened.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -334,11 +262,21 @@ pub fn Filter(comptime T: type) type {
                                 const c1 = c -| radius;
                                 const r2 = @min(r + radius, self.rows - 1);
                                 const c2 = @min(c + radius, self.cols - 1);
-                                const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
+                                const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                                inline for (std.meta.fields(T), 0..) |f, i| {
-                                    const sum = sat.at(r2, c2)[i] - sat.at(r2, c1)[i] -
-                                        sat.at(r1, c2)[i] + sat.at(r1, c1)[i];
+                                inline for (fields, 0..) |f, i| {
+                                    // Skip alpha channel if present
+                                    if (has_alpha and i == 3) {
+                                        @field(sharpened.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
+                                        continue;
+                                    }
+
+                                    // Use correct integral image indices
+                                    const sum = (if (r2 < self.rows and c2 < self.cols) sat.at(r2, c2)[i] else 0) -
+                                        (if (r2 < self.rows and c1 > 0) sat.at(r2, c1 - 1)[i] else 0) -
+                                        (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
+                                        (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
+
                                     const blurred = sum / area;
                                     const original = @field(self.at(r, c).*, f.name);
                                     @field(sharpened.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
@@ -358,97 +296,228 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
-        /// Optimized sharpen implementation for structs with 4 u8 fields using SIMD throughout.
-        /// This is automatically called by sharpen() when T has exactly 4 u8 fields (e.g., RGBA, BGRA, etc).
-        fn sharpen4xu8Simd(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
-            // Verify at compile time that this is a struct with 4 u8 fields
-            comptime {
-                const fields = std.meta.fields(T);
-                assert(fields.len == 4);
-                for (fields) |field| {
-                    assert(field.type == u8);
-                }
-            }
+        /// Comptime function generator for specialized convolution implementations.
+        /// Generates optimized code for specific kernel dimensions at compile time.
+        fn ConvolveKernel(comptime height: usize, comptime width: usize) type {
+            return struct {
+                const kernel_size = height * width;
+                const half_h = height / 2;
+                const half_w = width / 2;
 
-            // Initialize output if needed
-            if (!self.hasSameShape(sharpened.*)) {
-                sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
-            }
-            if (radius == 0) {
-                self.copy(sharpened.*);
-                return;
-            }
+                /// Optimized convolution for u8 planes with integer arithmetic.
+                fn convolveU8Plane(
+                    src: []const u8,
+                    dst: []u8,
+                    rows: usize,
+                    cols: usize,
+                    kernel: [kernel_size]i32,
+                    border_mode: BorderMode,
+                ) void {
+                    const SCALE = 256;
+                    const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
 
-            // Create integral image with 4 channels
-            var sat = try Image([4]f32).initAlloc(allocator, self.rows, self.cols);
-            defer sat.deinit(allocator);
+                    for (0..rows) |r| {
+                        var c: usize = 0;
 
-            // Build integral image - first pass: row-wise cumulative sums
-            for (0..self.rows) |r| {
-                var tmp: @Vector(4, f32) = @splat(0);
-                const row_offset = r * self.stride;
-                const out_offset = r * sat.cols;
+                        // SIMD path for interior pixels (only for reasonably small kernels)
+                        if ((comptime (height <= 7 and width <= 7)) and r >= half_h and r + half_h < rows and cols > vec_len + width) {
+                            c = half_w;
+                            const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
 
-                for (0..self.cols) |c| {
-                    const pixel = self.data[row_offset + c];
-                    var pixel_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        pixel_vec[i] = @floatFromInt(@field(pixel, field.name));
+                            while (c + vec_len <= safe_end) : (c += vec_len) {
+                                var result_vec: @Vector(vec_len, i32) = @splat(0);
+
+                                // Unroll kernel application for known sizes
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const kernel_val = kernel[ky * width + kx];
+                                        const kernel_vec: @Vector(vec_len, i32) = @splat(kernel_val);
+
+                                        var pixel_vec: @Vector(vec_len, i32) = undefined;
+                                        for (0..vec_len) |i| {
+                                            const src_r = r + ky - half_h;
+                                            const src_c = c + i + kx - half_w;
+                                            pixel_vec[i] = src[src_r * cols + src_c];
+                                        }
+
+                                        result_vec += pixel_vec * kernel_vec;
+                                    }
+                                }
+
+                                const half_scale_vec: @Vector(vec_len, i32) = @splat(SCALE / 2);
+                                const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
+                                const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
+
+                                for (0..vec_len) |i| {
+                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                                }
+                            }
+                        }
+
+                        while (c < cols) : (c += 1) {
+                            if (r >= half_h and r + half_h < rows and c >= half_w and c + half_w < cols) {
+                                var result: i32 = 0;
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const src_r = r + ky - half_h;
+                                        const src_c = c + kx - half_w;
+                                        const pixel_val = @as(i32, src[src_r * cols + src_c]);
+                                        result += pixel_val * kernel[ky * width + kx];
+                                    }
+                                }
+                                const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                                dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                            } else {
+                                const ir = @as(isize, @intCast(r));
+                                const ic = @as(isize, @intCast(c));
+                                var result: i32 = 0;
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                                        const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                                        const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
+                                            @as(i32, src[@as(usize, @intCast(iry * @as(isize, @intCast(cols)) + icx))])
+                                        else switch (border_mode) {
+                                            .zero => 0,
+                                            .replicate => blk: {
+                                                const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
+                                                const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
+                                                break :blk @as(i32, src[@as(usize, @intCast(clamped_r * @as(isize, @intCast(cols)) + clamped_c))]);
+                                            },
+                                            .mirror => blk: {
+                                                var rr = iry;
+                                                var cc = icx;
+                                                if (rr < 0) rr = -rr - 1;
+                                                if (rr >= rows) rr = 2 * @as(isize, @intCast(rows)) - rr - 1;
+                                                if (cc < 0) cc = -cc - 1;
+                                                if (cc >= cols) cc = 2 * @as(isize, @intCast(cols)) - cc - 1;
+                                                break :blk @as(i32, src[@as(usize, @intCast(rr * @as(isize, @intCast(cols)) + cc))]);
+                                            },
+                                            .wrap => blk: {
+                                                const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
+                                                const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
+                                                break :blk @as(i32, src[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(cols)) + wrapped_c))]);
+                                            },
+                                        };
+                                        result += pixel_val * kernel[ky * width + kx];
+                                    }
+                                }
+                                const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                                dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                            }
+                        }
                     }
-                    tmp += pixel_vec;
-                    sat.data[out_offset + c] = tmp;
                 }
-            }
 
-            // Second pass: column-wise cumulative sums
-            for (1..self.rows) |r| {
-                const prev_row_offset = (r - 1) * sat.cols;
-                const curr_row_offset = r * sat.cols;
+                /// Optimized convolution for f32 planes with SIMD.
+                fn convolveF32Plane(
+                    src: []const f32,
+                    dst: []f32,
+                    rows: usize,
+                    cols: usize,
+                    kernel: [kernel_size]f32,
+                    border_mode: BorderMode,
+                ) void {
+                    const vec_len = comptime std.simd.suggestVectorLength(f32) orelse 8;
 
-                for (0..self.cols) |c| {
-                    const prev_vec: @Vector(4, f32) = sat.data[prev_row_offset + c];
-                    const curr_vec: @Vector(4, f32) = sat.data[curr_row_offset + c];
-                    sat.data[curr_row_offset + c] = prev_vec + curr_vec;
-                }
-            }
+                    // Pre-create kernel vectors for SIMD (only for small kernels)
+                    const use_kernel_vecs = comptime (kernel_size <= 25);
+                    var kernel_vecs: if (use_kernel_vecs) [kernel_size]@Vector(vec_len, f32) else void = undefined;
 
-            // Apply sharpen with SIMD: sharpened = 2 * original - blurred
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const r1 = r -| radius;
-                    const c1 = c -| radius;
-                    const r2 = @min(r + radius, self.rows - 1);
-                    const c2 = @min(c + radius, self.cols - 1);
-                    const area: f32 = @floatFromInt((r2 - r1) * (c2 - c1));
-                    const area_vec: @Vector(4, f32) = @splat(area);
-
-                    // Use vectors for the box sum calculation (blur)
-                    const v_r2c2: @Vector(4, f32) = sat.at(r2, c2).*;
-                    const v_r2c1: @Vector(4, f32) = sat.at(r2, c1).*;
-                    const v_r1c2: @Vector(4, f32) = sat.at(r1, c2).*;
-                    const v_r1c1: @Vector(4, f32) = sat.at(r1, c1).*;
-
-                    const sum_vec = v_r2c2 - v_r2c1 - v_r1c2 + v_r1c1;
-                    const blurred_vec = sum_vec / area_vec;
-
-                    // Get original pixel as vector
-                    const original_pixel = self.data[r * self.stride + c];
-                    var original_vec: @Vector(4, f32) = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        original_vec[i] = @floatFromInt(@field(original_pixel, field.name));
+                    if (use_kernel_vecs) {
+                        inline for (0..kernel_size) |i| {
+                            kernel_vecs[i] = @splat(kernel[i]);
+                        }
                     }
 
-                    // Apply sharpening formula: 2 * original - blurred
-                    const sharpened_vec = @as(@Vector(4, f32), @splat(2.0)) * original_vec - blurred_vec;
+                    for (0..rows) |r| {
+                        var c: usize = 0;
 
-                    // Convert back to struct with clamping
-                    var result: T = undefined;
-                    inline for (std.meta.fields(T), 0..) |field, i| {
-                        @field(result, field.name) = @intFromFloat(@max(0, @min(255, @round(sharpened_vec[i]))));
+                        // SIMD path for interior pixels
+                        if ((comptime (height <= 7 and width <= 7)) and r >= half_h and r + half_h < rows and cols > vec_len + width) {
+                            c = half_w;
+                            const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
+
+                            while (c + vec_len <= safe_end) : (c += vec_len) {
+                                var result_vec: @Vector(vec_len, f32) = @splat(0);
+
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const kid = ky * width + kx;
+                                        const kernel_vec = if (use_kernel_vecs)
+                                            kernel_vecs[kid]
+                                        else
+                                            @as(@Vector(vec_len, f32), @splat(kernel[kid]));
+
+                                        var pixel_vec: @Vector(vec_len, f32) = undefined;
+                                        for (0..vec_len) |i| {
+                                            const src_r = r + ky - half_h;
+                                            const src_c = c + i + kx - half_w;
+                                            pixel_vec[i] = src[src_r * cols + src_c];
+                                        }
+
+                                        result_vec += pixel_vec * kernel_vec;
+                                    }
+                                }
+
+                                for (0..vec_len) |i| {
+                                    dst[r * cols + c + i] = result_vec[i];
+                                }
+                            }
+                        }
+
+                        while (c < cols) : (c += 1) {
+                            if (r >= half_h and r + half_h < rows and c >= half_w and c + half_w < cols) {
+                                var result: f32 = 0;
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const src_r = r + ky - half_h;
+                                        const src_c = c + kx - half_w;
+                                        result += src[src_r * cols + src_c] * kernel[ky * width + kx];
+                                    }
+                                }
+                                dst[r * cols + c] = result;
+                            } else {
+                                const ir = @as(isize, @intCast(r));
+                                const ic = @as(isize, @intCast(c));
+                                var result: f32 = 0;
+                                inline for (0..height) |ky| {
+                                    inline for (0..width) |kx| {
+                                        const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                                        const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                                        const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
+                                            src[@as(usize, @intCast(iry * @as(isize, @intCast(cols)) + icx))]
+                                        else switch (border_mode) {
+                                            .zero => 0,
+                                            .replicate => blk: {
+                                                const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
+                                                const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
+                                                break :blk src[@as(usize, @intCast(clamped_r * @as(isize, @intCast(cols)) + clamped_c))];
+                                            },
+                                            .mirror => blk: {
+                                                var rr = iry;
+                                                var cc = icx;
+                                                if (rr < 0) rr = -rr - 1;
+                                                if (rr >= rows) rr = 2 * @as(isize, @intCast(rows)) - rr - 1;
+                                                if (cc < 0) cc = -cc - 1;
+                                                if (cc >= cols) cc = 2 * @as(isize, @intCast(cols)) - cc - 1;
+                                                break :blk src[@as(usize, @intCast(rr * @as(isize, @intCast(cols)) + cc))];
+                                            },
+                                            .wrap => blk: {
+                                                const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
+                                                const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
+                                                break :blk src[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(cols)) + wrapped_c))];
+                                            },
+                                        };
+                                        result += pixel_val * kernel[ky * width + kx];
+                                    }
+                                }
+                                dst[r * cols + c] = result;
+                            }
+                        }
                     }
-                    sharpened.at(r, c).* = result;
                 }
-            }
+            };
         }
 
         /// Applies a 2D convolution with the given kernel to the image.
@@ -471,67 +540,40 @@ pub fn Filter(comptime T: type) type {
                 out.* = try .initAlloc(allocator, self.rows, self.cols);
             }
 
-            // Check for special optimized cases
-            if (kernel_height == 3 and kernel_width == 3) {
-                return convolve3x3(self, kernel, out.*, border_mode);
-            }
-
-            // General convolution
-            const half_h = kernel_height / 2;
-            const half_w = kernel_width / 2;
+            // Generate specialized implementation for this kernel size
+            const Kernel = ConvolveKernel(kernel_height, kernel_width);
 
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    // Scalar types - single channel convolution
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            var accumulator: f32 = 0;
+                    // Optimized path for u8 with integer arithmetic
+                    if (T == u8) {
+                        // Convert floating-point kernel to integer
+                        const SCALE = 256;
+                        const kernel_int = flattenKernelInt(Kernel.kernel_size, kernel, SCALE);
 
-                            const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
-                            if (in_interior) {
-                                // Fast path: no border handling needed
-                                const r0: usize = r - half_h;
-                                const c0: usize = c - half_w;
-                                for (0..kernel_height) |kr| {
-                                    const rr = r0 + kr;
-                                    for (0..kernel_width) |kc| {
-                                        const cc = c0 + kc;
-                                        const pixel_val = self.at(rr, cc).*;
-                                        const kernel_val = kernel[kr][kc];
-                                        accumulator += as(f32, pixel_val) * as(f32, kernel_val);
-                                    }
-                                }
-                            } else {
-                                // Border path: fetch with border handling
-                                for (0..kernel_height) |kr| {
-                                    for (0..kernel_width) |kc| {
-                                        const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
-                                        const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = getPixelWithBorder(self, src_r, src_c, border_mode);
-                                        const kernel_val = kernel[kr][kc];
-                                        accumulator += as(f32, pixel_val) * as(f32, kernel_val);
-                                    }
-                                }
-                            }
+                        const src_data = self.data[0 .. self.rows * self.cols];
+                        const dst_data = out.data[0 .. out.rows * out.cols];
 
-                            out.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(accumulator)))),
-                                .float => as(T, accumulator),
-                                else => unreachable,
-                            };
-                        }
-                    }
-                },
-                .@"struct" => {
-                    // Struct types (RGB, RGBA, etc.) - channel-wise convolution
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            var result_pixel: T = undefined;
+                        Kernel.convolveU8Plane(src_data, dst_data, self.rows, self.cols, kernel_int, border_mode);
+                    } else if (T == f32) {
+                        // Optimized path for f32 with SIMD
+                        const kernel_flat = flattenKernelFloat(Kernel.kernel_size, kernel);
 
-                            inline for (std.meta.fields(T)) |field| {
+                        const src_data = self.data[0 .. self.rows * self.cols];
+                        const dst_data = out.data[0 .. out.rows * out.cols];
+
+                        Kernel.convolveF32Plane(src_data, dst_data, self.rows, self.cols, kernel_flat, border_mode);
+                    } else {
+                        // Generic scalar path for other types
+                        const half_h = Kernel.half_h;
+                        const half_w = Kernel.half_w;
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
                                 var accumulator: f32 = 0;
+
                                 const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
                                 if (in_interior) {
+                                    // Fast path: no border handling needed
                                     const r0: usize = r - half_h;
                                     const c0: usize = c - half_w;
                                     for (0..kernel_height) |kr| {
@@ -539,32 +581,123 @@ pub fn Filter(comptime T: type) type {
                                         for (0..kernel_width) |kc| {
                                             const cc = c0 + kc;
                                             const pixel_val = self.at(rr, cc).*;
-                                            const channel_val = @field(pixel_val, field.name);
                                             const kernel_val = kernel[kr][kc];
-                                            accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                            accumulator += as(f32, pixel_val) * as(f32, kernel_val);
                                         }
                                     }
                                 } else {
+                                    // Border path: fetch with border handling
                                     for (0..kernel_height) |kr| {
                                         for (0..kernel_width) |kc| {
                                             const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
                                             const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
                                             const pixel_val = getPixelWithBorder(self, src_r, src_c, border_mode);
-                                            const channel_val = @field(pixel_val, field.name);
                                             const kernel_val = kernel[kr][kc];
-                                            accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                            accumulator += as(f32, pixel_val) * as(f32, kernel_val);
                                         }
                                     }
                                 }
 
-                                @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(accumulator)))),
-                                    .float => as(field.type, accumulator),
-                                    else => @compileError("Unsupported field type in struct"),
+                                out.at(r, c).* = switch (@typeInfo(T)) {
+                                    .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(accumulator)))),
+                                    .float => as(T, accumulator),
+                                    else => unreachable,
                                 };
                             }
+                        }
+                    }
+                },
+                .@"struct" => {
+                    // Optimized path for u8 structs (RGB, RGBA, etc.)
+                    const fields = std.meta.fields(T);
+                    const all_u8 = comptime blk: {
+                        for (fields) |field| {
+                            if (field.type != u8) break :blk false;
+                        }
+                        break :blk true;
+                    };
 
-                            out.at(r, c).* = result_pixel;
+                    if (all_u8 and (fields.len == 3 or fields.len == 4)) {
+                        // Channel separation approach for optimal performance
+                        const SCALE = 256;
+                        const kernel_int = flattenKernelInt(Kernel.kernel_size, kernel, SCALE);
+
+                        // Separate channels using helper
+                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        defer allocator.free(channels[0]);
+                        defer allocator.free(channels[1]);
+                        defer allocator.free(channels[2]);
+
+                        // Allocate output planes
+                        const plane_size = self.rows * self.cols;
+                        const r_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(r_out);
+                        const g_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(g_out);
+                        const b_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(b_out);
+
+                        // Convolve each channel independently using the optimized u8 plane function
+                        inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }) |src_channel, dst_channel| {
+                            Kernel.convolveU8Plane(src_channel, dst_channel, self.rows, self.cols, kernel_int, border_mode);
+                        }
+
+                        // Recombine channels using helper
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out.*);
+                    } else {
+                        // Generic struct path for other color types
+                        const has_alpha = comptime channel_ops.hasAlphaChannel(T);
+                        const channels_to_process = if (has_alpha) 3 else fields.len;
+                        const half_h = Kernel.half_h;
+                        const half_w = Kernel.half_w;
+
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                var result_pixel: T = undefined;
+
+                                inline for (0..channels_to_process) |field_idx| {
+                                    const field = fields[field_idx];
+                                    var accumulator: f32 = 0;
+                                    const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
+                                    if (in_interior) {
+                                        const r0: usize = r - half_h;
+                                        const c0: usize = c - half_w;
+                                        for (0..kernel_height) |kr| {
+                                            const rr = r0 + kr;
+                                            for (0..kernel_width) |kc| {
+                                                const cc = c0 + kc;
+                                                const pixel_val = self.at(rr, cc).*;
+                                                const channel_val = @field(pixel_val, field.name);
+                                                const kernel_val = kernel[kr][kc];
+                                                accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                            }
+                                        }
+                                    } else {
+                                        for (0..kernel_height) |kr| {
+                                            for (0..kernel_width) |kc| {
+                                                const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
+                                                const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
+                                                const pixel_val = getPixelWithBorder(self, src_r, src_c, border_mode);
+                                                const channel_val = @field(pixel_val, field.name);
+                                                const kernel_val = kernel[kr][kc];
+                                                accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                            }
+                                        }
+                                    }
+
+                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(accumulator)))),
+                                        .float => as(field.type, accumulator),
+                                        else => @compileError("Unsupported field type in struct"),
+                                    };
+                                }
+
+                                if (has_alpha) {
+                                    @field(result_pixel, fields[3].name) = @field(self.at(r, c).*, fields[3].name);
+                                }
+
+                                out.at(r, c).* = result_pixel;
+                            }
                         }
                     }
                 },
@@ -572,155 +705,368 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
-        /// Optimized convolution for 3x3 kernels using SIMD where possible.
-        fn convolve3x3(self: Self, kernel: anytype, out: Self, border_mode: BorderMode) void {
-            const kr = [9]f32{
-                as(f32, kernel[0][0]), as(f32, kernel[0][1]), as(f32, kernel[0][2]),
-                as(f32, kernel[1][0]), as(f32, kernel[1][1]), as(f32, kernel[1][2]),
-                as(f32, kernel[2][0]), as(f32, kernel[2][1]), as(f32, kernel[2][2]),
-            };
+        /// Optimized separable convolution for u8 planes with integer arithmetic.
+        /// The kernel must be pre-scaled by 256 for integer arithmetic.
+        fn convolveSeparableU8Plane(
+            src: []const u8,
+            dst: []u8,
+            temp: []u8,
+            rows: usize,
+            cols: usize,
+            kernel_x_int: []const i32,
+            kernel_y_int: []const i32,
+            border_mode: BorderMode,
+        ) void {
+            const SCALE = 256;
+            const half_x = kernel_x_int.len / 2;
+            const half_y = kernel_y_int.len / 2;
 
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    // Scalar types - single channel
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            var result: f32 = 0;
-                            if (r > 0 and r + 1 < self.rows and c > 0 and c + 1 < self.cols) {
-                                // Fast interior path
-                                const p00 = self.at(r - 1, c - 1).*;
-                                const p01 = self.at(r - 1, c + 0).*;
-                                const p02 = self.at(r - 1, c + 1).*;
-                                const p10 = self.at(r + 0, c - 1).*;
-                                const p11 = self.at(r + 0, c + 0).*;
-                                const p12 = self.at(r + 0, c + 1).*;
-                                const p20 = self.at(r + 1, c - 1).*;
-                                const p21 = self.at(r + 1, c + 0).*;
-                                const p22 = self.at(r + 1, c + 1).*;
-
-                                result =
-                                    as(f32, p00) * kr[0] + as(f32, p01) * kr[1] + as(f32, p02) * kr[2] +
-                                    as(f32, p10) * kr[3] + as(f32, p11) * kr[4] + as(f32, p12) * kr[5] +
-                                    as(f32, p20) * kr[6] + as(f32, p21) * kr[7] + as(f32, p22) * kr[8];
-                            } else {
-                                const ir = @as(isize, @intCast(r));
-                                const ic = @as(isize, @intCast(c));
-                                const p00 = getPixelWithBorder(self, ir - 1, ic - 1, border_mode);
-                                const p01 = getPixelWithBorder(self, ir - 1, ic, border_mode);
-                                const p02 = getPixelWithBorder(self, ir - 1, ic + 1, border_mode);
-                                const p10 = getPixelWithBorder(self, ir, ic - 1, border_mode);
-                                const p11 = getPixelWithBorder(self, ir, ic, border_mode);
-                                const p12 = getPixelWithBorder(self, ir, ic + 1, border_mode);
-                                const p20 = getPixelWithBorder(self, ir + 1, ic - 1, border_mode);
-                                const p21 = getPixelWithBorder(self, ir + 1, ic, border_mode);
-                                const p22 = getPixelWithBorder(self, ir + 1, ic + 1, border_mode);
-
-                                result =
-                                    as(f32, p00) * kr[0] + as(f32, p01) * kr[1] + as(f32, p02) * kr[2] +
-                                    as(f32, p10) * kr[3] + as(f32, p11) * kr[4] + as(f32, p12) * kr[5] +
-                                    as(f32, p20) * kr[6] + as(f32, p21) * kr[7] + as(f32, p22) * kr[8];
-                            }
-
-                            out.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
-                                .float => as(T, result),
-                                else => unreachable,
+            // Horizontal pass (src -> temp)
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    var result: i32 = 0;
+                    if (c >= half_x and c + half_x < cols) {
+                        // Fast path: no border handling needed
+                        const c0 = c - half_x;
+                        for (kernel_x_int, 0..) |k, i| {
+                            const cc = c0 + i;
+                            const pixel_val = @as(i32, src[r * cols + cc]);
+                            result += pixel_val * k;
+                        }
+                    } else {
+                        // Border handling
+                        const ic = @as(isize, @intCast(c));
+                        for (kernel_x_int, 0..) |k, i| {
+                            const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
+                            const pixel_val = if (icx >= 0 and icx < cols)
+                                @as(i32, src[r * cols + @as(usize, @intCast(icx))])
+                            else switch (border_mode) {
+                                .zero => 0,
+                                .replicate => blk: {
+                                    const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
+                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(clamped_c))]);
+                                },
+                                .mirror => blk: {
+                                    var cc = icx;
+                                    if (cc < 0) cc = -cc - 1;
+                                    if (cc >= cols) cc = 2 * @as(isize, @intCast(cols)) - cc - 1;
+                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(cc))]);
+                                },
+                                .wrap => blk: {
+                                    const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
+                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(wrapped_c))]);
+                                },
                             };
+                            result += pixel_val * k;
                         }
                     }
-                },
-                .@"struct" => {
-                    // Struct types - channel-wise convolution
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            var result_pixel: T = undefined;
-                            if (r > 0 and r + 1 < self.rows and c > 0 and c + 1 < self.cols) {
-                                const p00 = self.at(r - 1, c - 1).*;
-                                const p01 = self.at(r - 1, c + 0).*;
-                                const p02 = self.at(r - 1, c + 1).*;
-                                const p10 = self.at(r + 0, c - 1).*;
-                                const p11 = self.at(r + 0, c + 0).*;
-                                const p12 = self.at(r + 0, c + 1).*;
-                                const p20 = self.at(r + 1, c - 1).*;
-                                const p21 = self.at(r + 1, c + 0).*;
-                                const p22 = self.at(r + 1, c + 1).*;
+                    const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                    temp[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                }
+            }
 
-                                inline for (std.meta.fields(T)) |field| {
-                                    const result =
-                                        as(f32, @field(p00, field.name)) * kr[0] + as(f32, @field(p01, field.name)) * kr[1] + as(f32, @field(p02, field.name)) * kr[2] +
-                                        as(f32, @field(p10, field.name)) * kr[3] + as(f32, @field(p11, field.name)) * kr[4] + as(f32, @field(p12, field.name)) * kr[5] +
-                                        as(f32, @field(p20, field.name)) * kr[6] + as(f32, @field(p21, field.name)) * kr[7] + as(f32, @field(p22, field.name)) * kr[8];
-                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(result)))),
-                                        .float => as(field.type, result),
-                                        else => @compileError("Unsupported field type"),
-                                    };
-                                }
-                            } else {
-                                const ir = @as(isize, @intCast(r));
-                                const ic = @as(isize, @intCast(c));
-                                const p00 = getPixelWithBorder(self, ir - 1, ic - 1, border_mode);
-                                const p01 = getPixelWithBorder(self, ir - 1, ic, border_mode);
-                                const p02 = getPixelWithBorder(self, ir - 1, ic + 1, border_mode);
-                                const p10 = getPixelWithBorder(self, ir, ic - 1, border_mode);
-                                const p11 = getPixelWithBorder(self, ir, ic, border_mode);
-                                const p12 = getPixelWithBorder(self, ir, ic + 1, border_mode);
-                                const p20 = getPixelWithBorder(self, ir + 1, ic - 1, border_mode);
-                                const p21 = getPixelWithBorder(self, ir + 1, ic, border_mode);
-                                const p22 = getPixelWithBorder(self, ir + 1, ic + 1, border_mode);
-
-                                inline for (std.meta.fields(T)) |field| {
-                                    const result =
-                                        as(f32, @field(p00, field.name)) * kr[0] + as(f32, @field(p01, field.name)) * kr[1] + as(f32, @field(p02, field.name)) * kr[2] +
-                                        as(f32, @field(p10, field.name)) * kr[3] + as(f32, @field(p11, field.name)) * kr[4] + as(f32, @field(p12, field.name)) * kr[5] +
-                                        as(f32, @field(p20, field.name)) * kr[6] + as(f32, @field(p21, field.name)) * kr[7] + as(f32, @field(p22, field.name)) * kr[8];
-                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(result)))),
-                                        .float => as(field.type, result),
-                                        else => @compileError("Unsupported field type"),
-                                    };
-                                }
-                            }
-
-                            out.at(r, c).* = result_pixel;
+            // Vertical pass (temp -> dst)
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    var result: i32 = 0;
+                    if (r >= half_y and r + half_y < rows) {
+                        // Fast path: no border handling needed
+                        const r0 = r - half_y;
+                        for (kernel_y_int, 0..) |k, i| {
+                            const rr = r0 + i;
+                            const pixel_val = @as(i32, temp[rr * cols + c]);
+                            result += pixel_val * k;
+                        }
+                    } else {
+                        // Border handling
+                        const ir = @as(isize, @intCast(r));
+                        for (kernel_y_int, 0..) |k, i| {
+                            const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
+                            const pixel_val = if (iry >= 0 and iry < rows)
+                                @as(i32, temp[@as(usize, @intCast(iry)) * cols + c])
+                            else switch (border_mode) {
+                                .zero => 0,
+                                .replicate => blk: {
+                                    const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
+                                    break :blk @as(i32, temp[@as(usize, @intCast(clamped_r)) * cols + c]);
+                                },
+                                .mirror => blk: {
+                                    var rr = iry;
+                                    if (rr < 0) rr = -rr - 1;
+                                    if (rr >= rows) rr = 2 * @as(isize, @intCast(rows)) - rr - 1;
+                                    break :blk @as(i32, temp[@as(usize, @intCast(rr)) * cols + c]);
+                                },
+                                .wrap => blk: {
+                                    const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
+                                    break :blk @as(i32, temp[@as(usize, @intCast(wrapped_r)) * cols + c]);
+                                },
+                            };
+                            result += pixel_val * k;
                         }
                     }
-                },
-                else => unreachable,
+                    const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                    dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                }
             }
         }
 
-        /// Get pixel value with border handling.
-        inline fn getPixelWithBorder(self: Self, row: isize, col: isize, border_mode: BorderMode) T {
-            const irows = @as(isize, @intCast(self.rows));
-            const icols = @as(isize, @intCast(self.cols));
+        /// Optimized convolution for scalar types (int/float) with SIMD.
+        /// Build integral image from any scalar type plane into f32 plane with SIMD optimization.
+        /// The output integral image allows O(1) computation of rectangular region sums.
+        fn integralPlane(comptime SrcT: type, src: []const SrcT, dst: []f32, rows: usize, cols: usize) void {
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
-            switch (border_mode) {
-                .zero => {
-                    if (row < 0 or col < 0 or row >= irows or col >= icols) {
-                        return std.mem.zeroes(T);
+            // First pass: compute row-wise cumulative sums
+            for (0..rows) |r| {
+                var tmp: f32 = 0;
+                const row_offset = r * cols;
+                for (0..cols) |c| {
+                    tmp += meta.as(f32, src[row_offset + c]);
+                    dst[row_offset + c] = tmp;
+                }
+            }
+
+            // Second pass: add column-wise cumulative sums using SIMD
+            for (1..rows) |r| {
+                const prev_row_offset = (r - 1) * cols;
+                const curr_row_offset = r * cols;
+                var c: usize = 0;
+
+                // Process SIMD-width chunks
+                while (c + simd_len <= cols) : (c += simd_len) {
+                    const prev_vals: @Vector(simd_len, f32) = dst[prev_row_offset + c ..][0..simd_len].*;
+                    const curr_vals: @Vector(simd_len, f32) = dst[curr_row_offset + c ..][0..simd_len].*;
+                    dst[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
+                }
+
+                // Handle remaining columns
+                while (c < cols) : (c += 1) {
+                    dst[curr_row_offset + c] += dst[prev_row_offset + c];
+                }
+            }
+        }
+
+        /// Box blur for any plane type using integral image with SIMD optimization.
+        fn boxBlurPlane(comptime PlaneType: type, integral_img: []const f32, dst: []PlaneType, rows: usize, cols: usize, radius: usize) void {
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+            for (0..rows) |r| {
+                const r1 = r -| radius;
+                const r2 = @min(r + radius, rows - 1);
+                const r2_offset = r2 * cols;
+
+                var c: usize = 0;
+
+                // SIMD processing for safe regions
+                const row_safe = r >= radius and r + radius < rows;
+                if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
+                    // Handle left border
+                    while (c < radius) : (c += 1) {
+                        const c1 = c -| radius;
+                        const c2 = @min(c + radius, cols - 1);
+                        const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                        // Compute sum using integral image inclusion-exclusion
+                        const sum = integral_img[r2_offset + c2] -
+                            (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
+                            (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+
+                        const val = sum / area;
+                        dst[r * cols + c] = if (PlaneType == u8)
+                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(val))))))
+                        else
+                            @as(PlaneType, val);
                     }
-                    return self.at(@intCast(row), @intCast(col)).*;
+
+                    // SIMD middle section
+                    const safe_end = cols - radius;
+                    if (c + simd_len <= safe_end) {
+                        const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                        const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                        while (c + simd_len <= safe_end) : (c += simd_len) {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+
+                            // Load integral values with SIMD
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) integral_img[(r1 - 1) * cols + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = if (c1 > 0) integral_img[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int22: @Vector(simd_len, f32) = integral_img[r2_offset + c2 ..][0..simd_len].*;
+
+                            const sums = int22 - int21 - int12 + int11;
+                            const vals = sums / area_vec;
+
+                            if (PlaneType == u8) {
+                                for (0..simd_len) |i| {
+                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
+                                }
+                            } else {
+                                dst[r * cols + c ..][0..simd_len].* = vals;
+                            }
+                        }
+                    }
+                }
+
+                while (c < cols) : (c += 1) {
+                    const c1 = c -| radius;
+                    const c2 = @min(c + radius, cols - 1);
+                    const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                    const sum = integral_img[r2_offset + c2] -
+                        (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
+                        (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+
+                    dst[r * cols + c] = if (PlaneType == u8)
+                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sum / area))))))
+                    else
+                        sum / area;
+                }
+            }
+        }
+
+        /// Sharpen plane using integral image (sharpened = 2*original - blurred).
+        fn sharpenPlane(comptime PlaneType: type, src: []const PlaneType, integral_img: []const f32, dst: []PlaneType, rows: usize, cols: usize, radius: usize) void {
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+            for (0..rows) |r| {
+                const r1 = r -| radius;
+                const r2 = @min(r + radius, rows - 1);
+                const r2_offset = r2 * cols;
+
+                var c: usize = 0;
+
+                // SIMD processing for safe regions
+                const row_safe = r >= radius and r + radius < rows;
+                if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
+                    // Handle left border
+                    while (c < radius) : (c += 1) {
+                        const c1 = c -| radius;
+                        const c2 = @min(c + radius, cols - 1);
+                        const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                        const sum = integral_img[r2_offset + c2] -
+                            (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
+                            (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+
+                        const blurred = sum / area;
+                        const original = meta.as(f32, src[r * cols + c]);
+                        const sharpened = 2 * original - blurred;
+                        dst[r * cols + c] = if (PlaneType == u8)
+                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                        else
+                            sharpened;
+                    }
+
+                    // SIMD middle section
+                    const safe_end = cols - radius;
+                    if (c + simd_len <= safe_end) {
+                        const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                        const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                        while (c + simd_len <= safe_end) : (c += simd_len) {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) integral_img[(r1 - 1) * cols + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = if (c1 > 0) integral_img[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int22: @Vector(simd_len, f32) = integral_img[r2_offset + c2 ..][0..simd_len].*;
+
+                            const sums = int22 - int21 - int12 + int11;
+                            const blurred_vals = sums / area_vec;
+
+                            if (PlaneType == u8) {
+                                for (0..simd_len) |i| {
+                                    const original = meta.as(f32, src[r * cols + c + i]);
+                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(2 * original - blurred_vals[i]))))));
+                                }
+                            } else {
+                                const two_vec: @Vector(simd_len, f32) = @splat(2.0);
+                                var original_vals: @Vector(simd_len, f32) = undefined;
+                                for (0..simd_len) |i| {
+                                    original_vals[i] = meta.as(f32, src[r * cols + c + i]);
+                                }
+                                dst[r * cols + c ..][0..simd_len].* = two_vec * original_vals - blurred_vals;
+                            }
+                        }
+                    }
+                }
+
+                while (c < cols) : (c += 1) {
+                    const c1 = c -| radius;
+                    const c2 = @min(c + radius, cols - 1);
+                    const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                    const sum = integral_img[r2_offset + c2] -
+                        (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
+                        (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+
+                    const blurred = sum / area;
+                    const original = meta.as(f32, src[r * cols + c]);
+                    const sharpened = 2 * original - blurred;
+                    dst[r * cols + c] = if (PlaneType == u8)
+                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                    else
+                        sharpened;
+                }
+            }
+        }
+
+        /// Build integral image (summed area table) from the source image.
+        /// Uses channel separation and SIMD optimization for performance.
+        pub fn integral(
+            self: Self,
+            allocator: Allocator,
+            sat: *Image(if (meta.isScalar(T)) f32 else [Self.channels()]f32),
+        ) !void {
+            if (!self.hasSameShape(sat.*)) {
+                sat.* = try .initAlloc(allocator, self.rows, self.cols);
+            }
+
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    // Use generic integral plane function for all scalar types
+                    integralPlane(T, self.data, sat.data, self.rows, self.cols);
                 },
-                .replicate => {
-                    const r = @max(0, @min(row, irows - 1));
-                    const c = @max(0, @min(col, icols - 1));
-                    return self.at(@intCast(r), @intCast(c)).*;
+                .@"struct" => {
+                    // Channel separation for struct types
+                    const fields = std.meta.fields(T);
+
+                    // Create temporary buffers for each channel
+                    const src_plane = try allocator.alloc(f32, self.rows * self.cols);
+                    defer allocator.free(src_plane);
+                    const dst_plane = try allocator.alloc(f32, self.rows * self.cols);
+                    defer allocator.free(dst_plane);
+
+                    // Process each channel separately
+                    inline for (fields, 0..) |field, ch| {
+                        // Extract channel to src_plane
+                        for (0..self.rows * self.cols) |i| {
+                            const pixel = self.data[i];
+                            const val = @field(pixel, field.name);
+                            src_plane[i] = if (@typeInfo(field.type) == .int)
+                                @floatFromInt(val)
+                            else if (@typeInfo(field.type) == .float)
+                                @floatCast(val)
+                            else
+                                0;
+                        }
+
+                        // Compute integral for this channel
+                        integralPlane(f32, src_plane, dst_plane, self.rows, self.cols);
+
+                        // Store result in output channel
+                        for (0..self.rows * self.cols) |i| {
+                            sat.data[i][ch] = dst_plane[i];
+                        }
+                    }
                 },
-                .mirror => {
-                    // Reflect indices across borders with period 2*N
-                    if (irows == 0 or icols == 0) return std.mem.zeroes(T);
-                    var r = @mod(row, 2 * irows);
-                    var c = @mod(col, 2 * icols);
-                    if (r >= irows) r = 2 * irows - 1 - r;
-                    if (c >= icols) c = 2 * icols - 1 - c;
-                    return self.at(@intCast(r), @intCast(c)).*;
-                },
-                .wrap => {
-                    const r = @mod(row, irows);
-                    const c = @mod(col, icols);
-                    return self.at(@intCast(r), @intCast(c)).*;
-                },
+                else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
             }
         }
 
@@ -748,6 +1094,31 @@ pub fn Filter(comptime T: type) type {
             // Horizontal pass
             switch (@typeInfo(T)) {
                 .int, .float => {
+                    // Optimized path for u8 with integer arithmetic
+                    if (T == u8) {
+                        // Convert kernels to integer
+                        const SCALE = 256;
+                        const kernel_x_int = try allocator.alloc(i32, kernel_x.len);
+                        defer allocator.free(kernel_x_int);
+                        const kernel_y_int = try allocator.alloc(i32, kernel_y.len);
+                        defer allocator.free(kernel_y_int);
+
+                        for (kernel_x, 0..) |k, i| {
+                            kernel_x_int[i] = @intFromFloat(@round(k * SCALE));
+                        }
+                        for (kernel_y, 0..) |k, i| {
+                            kernel_y_int[i] = @intFromFloat(@round(k * SCALE));
+                        }
+
+                        const src_data = self.data[0 .. self.rows * self.cols];
+                        const dst_data = out.data[0 .. out.rows * out.cols];
+                        const temp_data = temp.data[0 .. temp.rows * temp.cols];
+
+                        convolveSeparableU8Plane(src_data, dst_data, temp_data, self.rows, self.cols, kernel_x_int, kernel_y_int, border_mode);
+                        return; // Skip the rest of the function
+                    }
+
+                    // Generic path for other scalar types
                     for (0..self.rows) |r| {
                         for (0..self.cols) |c| {
                             var sum: f32 = 0;
@@ -774,6 +1145,65 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
+                    // Optimized path for u8 structs (RGB, RGBA, etc.)
+                    const fields = std.meta.fields(T);
+                    const all_u8 = comptime blk: {
+                        for (fields) |field| {
+                            if (field.type != u8) break :blk false;
+                        }
+                        break :blk true;
+                    };
+
+                    if (all_u8 and (fields.len == 3 or fields.len == 4)) {
+                        // Channel separation approach for optimal performance
+
+                        // Convert kernels to integer
+                        const SCALE = 256;
+                        const kernel_x_int = try allocator.alloc(i32, kernel_x.len);
+                        defer allocator.free(kernel_x_int);
+                        const kernel_y_int = try allocator.alloc(i32, kernel_y.len);
+                        defer allocator.free(kernel_y_int);
+
+                        for (kernel_x, 0..) |k, i| {
+                            kernel_x_int[i] = @intFromFloat(@round(k * SCALE));
+                        }
+                        for (kernel_y, 0..) |k, i| {
+                            kernel_y_int[i] = @intFromFloat(@round(k * SCALE));
+                        }
+
+                        // Separate channels using helper
+                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        defer allocator.free(channels[0]);
+                        defer allocator.free(channels[1]);
+                        defer allocator.free(channels[2]);
+
+                        // Allocate output and temp planes
+                        const plane_size = self.rows * self.cols;
+                        const r_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(r_out);
+                        const g_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(g_out);
+                        const b_out = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(b_out);
+
+                        const r_temp = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(r_temp);
+                        const g_temp = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(g_temp);
+                        const b_temp = try allocator.alloc(u8, plane_size);
+                        defer allocator.free(b_temp);
+
+                        // Convolve each channel independently using the optimized u8 plane function
+                        inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }, .{ r_temp, g_temp, b_temp }) |src_channel, dst_channel, temp_channel| {
+                            convolveSeparableU8Plane(src_channel, dst_channel, temp_channel, self.rows, self.cols, kernel_x_int, kernel_y_int, border_mode);
+                        }
+
+                        // Recombine channels using helper
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out.*);
+                        return; // Skip the rest of the function
+                    }
+
+                    // Generic struct path for other color types
                     for (0..self.rows) |r| {
                         for (0..self.cols) |c| {
                             var result_pixel: T = undefined;
@@ -1028,52 +1458,122 @@ pub fn Filter(comptime T: type) type {
                 out.* = try .initAlloc(allocator, self.rows, self.cols);
             }
 
-            // Sobel kernels for edge detection
-            const sobel_x = [3][3]f32{
-                .{ -1, 0, 1 },
-                .{ -2, 0, 2 },
-                .{ -1, 0, 1 },
-            };
-            const sobel_y = [3][3]f32{
-                .{ -1, -2, -1 },
-                .{ 0, 0, 0 },
-                .{ 1, 2, 1 },
-            };
+            // For now, use float path for all types to ensure correctness
+            {
+                // Original float path for other types
+                const sobel_x = [3][3]f32{
+                    .{ -1, 0, 1 },
+                    .{ -2, 0, 2 },
+                    .{ -1, 0, 1 },
+                };
+                const sobel_y = [3][3]f32{
+                    .{ -1, -2, -1 },
+                    .{ 0, 0, 0 },
+                    .{ 1, 2, 1 },
+                };
 
-            // Convert input to grayscale float if needed
-            var gray_float: Image(f32) = undefined;
-            const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
-            if (needs_conversion) {
-                gray_float = try .initAlloc(allocator, self.rows, self.cols);
+                // Convert input to grayscale float if needed
+                var gray_float: Image(f32) = undefined;
+                const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
+                if (needs_conversion) {
+                    gray_float = try .initAlloc(allocator, self.rows, self.cols);
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            gray_float.at(r, c).* = as(f32, convertColor(u8, self.at(r, c).*));
+                        }
+                    }
+                } else {
+                    gray_float = self;
+                }
+                defer if (needs_conversion) gray_float.deinit(allocator);
+
+                // Apply Sobel X and Y filters
+                var grad_x = Image(f32).empty;
+                var grad_y = Image(f32).empty;
+                defer grad_x.deinit(allocator);
+                defer grad_y.deinit(allocator);
+
+                const GrayFilter = Filter(f32);
+                try GrayFilter.convolve(gray_float, allocator, sobel_x, &grad_x, .replicate);
+                try GrayFilter.convolve(gray_float, allocator, sobel_y, &grad_y, .replicate);
+
+                // Compute gradient magnitude
                 for (0..self.rows) |r| {
                     for (0..self.cols) |c| {
-                        gray_float.at(r, c).* = as(f32, convertColor(u8, self.at(r, c).*));
+                        const gx = grad_x.at(r, c).*;
+                        const gy = grad_y.at(r, c).*;
+                        const magnitude = @sqrt(gx * gx + gy * gy);
+                        out.at(r, c).* = @intFromFloat(@max(0, @min(255, magnitude)));
                     }
                 }
-            } else {
-                gray_float = self;
             }
-            defer if (needs_conversion) gray_float.deinit(allocator);
+        }
 
-            // Apply Sobel X and Y filters
-            var grad_x = Image(f32).empty;
-            var grad_y = Image(f32).empty;
-            defer grad_x.deinit(allocator);
-            defer grad_y.deinit(allocator);
+        // ========== Helper Functions ==========
 
-            const GrayFilter = Filter(f32);
-            try GrayFilter.convolve(gray_float, allocator, sobel_x, &grad_x, .zero);
-            try GrayFilter.convolve(gray_float, allocator, sobel_y, &grad_y, .zero);
+        /// Get pixel value with border handling.
+        inline fn getPixelWithBorder(self: Self, row: isize, col: isize, border_mode: BorderMode) T {
+            const irows = @as(isize, @intCast(self.rows));
+            const icols = @as(isize, @intCast(self.cols));
 
-            // Compute gradient magnitude
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const gx = grad_x.at(r, c).*;
-                    const gy = grad_y.at(r, c).*;
-                    const magnitude = @sqrt(gx * gx + gy * gy);
-                    out.at(r, c).* = @intFromFloat(@max(0, @min(255, magnitude)));
+            switch (border_mode) {
+                .zero => {
+                    if (row < 0 or col < 0 or row >= irows or col >= icols) {
+                        return std.mem.zeroes(T);
+                    }
+                    return self.at(@intCast(row), @intCast(col)).*;
+                },
+                .replicate => {
+                    const r = @max(0, @min(row, irows - 1));
+                    const c = @max(0, @min(col, icols - 1));
+                    return self.at(@intCast(r), @intCast(c)).*;
+                },
+                .mirror => {
+                    // Reflect indices across borders with period 2*N
+                    if (irows == 0 or icols == 0) return std.mem.zeroes(T);
+                    var r = @mod(row, 2 * irows);
+                    var c = @mod(col, 2 * icols);
+                    if (r >= irows) r = 2 * irows - 1 - r;
+                    if (c >= icols) c = 2 * icols - 1 - c;
+                    return self.at(@intCast(r), @intCast(c)).*;
+                },
+                .wrap => {
+                    const r = @mod(row, irows);
+                    const c = @mod(col, icols);
+                    return self.at(@intCast(r), @intCast(c)).*;
+                },
+            }
+        }
+
+        /// Flatten a 2D kernel and convert to i32 (if scale provided) or f32
+        inline fn flattenKernelInt(comptime size: usize, kernel: anytype, scale: i32) [size]i32 {
+            const kernel_info = @typeInfo(@TypeOf(kernel));
+            const kernel_height = kernel_info.array.len;
+            const kernel_width = @typeInfo(kernel_info.array.child).array.len;
+            var result: [size]i32 = undefined;
+            var idx: usize = 0;
+            inline for (0..kernel_height) |kr| {
+                inline for (0..kernel_width) |kc| {
+                    result[idx] = @intFromFloat(@round(as(f32, kernel[kr][kc]) * @as(f32, @floatFromInt(scale))));
+                    idx += 1;
                 }
             }
+            return result;
+        }
+
+        inline fn flattenKernelFloat(comptime size: usize, kernel: anytype) [size]f32 {
+            const kernel_info = @typeInfo(@TypeOf(kernel));
+            const kernel_height = kernel_info.array.len;
+            const kernel_width = @typeInfo(kernel_info.array.child).array.len;
+            var result: [size]f32 = undefined;
+            var idx: usize = 0;
+            inline for (0..kernel_height) |kr| {
+                inline for (0..kernel_width) |kc| {
+                    result[idx] = as(f32, kernel[kr][kc]);
+                    idx += 1;
+                }
+            }
+            return result;
         }
     };
 }

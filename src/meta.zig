@@ -46,20 +46,6 @@ pub inline fn isPacked(comptime T: type) bool {
     return type_info == .@"struct" and type_info.@"struct".layout == .@"packed";
 }
 
-/// Returns true if and only if T is a struct with exactly 4 u8 fields.
-/// This is used to identify pixel types suitable for SIMD optimization (e.g., RGBA, BGRA).
-pub inline fn is4xu8Struct(comptime T: type) bool {
-    return comptime blk: {
-        if (@typeInfo(T) != .@"struct") break :blk false;
-        const fields = @import("std").meta.fields(T);
-        if (fields.len != 4) break :blk false;
-        for (fields) |field| {
-            if (field.type != u8) break :blk false;
-        }
-        break :blk true;
-    };
-}
-
 /// Strips all type names to their unqualified base names.
 /// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
 pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
