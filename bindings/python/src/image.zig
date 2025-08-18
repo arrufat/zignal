@@ -1356,7 +1356,7 @@ fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     return py_obj;
 }
 
-const image_box_blur_doc =
+const image_blur_box_doc =
     \\Apply a box blur to the image.
     \\
     \\## Parameters
@@ -1365,12 +1365,12 @@ const image_box_blur_doc =
     \\## Examples
     \\```python
     \\img = Image.load("photo.png")
-    \\soft = img.box_blur(2)
-    \\identity = img.box_blur(0)  # no-op copy
+    \\soft = img.blur_box(2)
+    \\identity = img.blur_box(0)  # no-op copy
     \\```
 ;
 
-fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_blur_box(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse arguments
@@ -1388,17 +1388,17 @@ fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
 
-    // Allocate new image wrapper; underlying data will be allocated by boxBlur
+    // Allocate new image wrapper; underlying data will be allocated by blurBox
     const new_image = allocator.create(Image(Rgba)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return null;
     };
     errdefer allocator.destroy(new_image);
 
-    // Initialize as empty; boxBlur will allocate and size appropriately
+    // Initialize as empty; blurBox will allocate and size appropriately
     new_image.* = Image(Rgba).empty;
 
-    src_image.boxBlur(allocator, new_image, @intCast(radius_long)) catch {
+    src_image.blurBox(allocator, new_image, @intCast(radius_long)) catch {
         allocator.destroy(new_image);
         c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
         return null;
@@ -1421,7 +1421,7 @@ fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 const image_sharpen_doc =
-    \\Sharpen the image using unsharp masking (2 * self - box_blur).
+    \\Sharpen the image using unsharp masking (2 * self - blur_box).
     \\
     \\## Parameters
     \\- `radius` (int): Non-negative blur radius used to compute the unsharp mask. `0` returns an unmodified copy.
@@ -2437,10 +2437,10 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "Image",
     },
     .{
-        .name = "box_blur",
-        .meth = @ptrCast(&image_box_blur),
+        .name = "blur_box",
+        .meth = @ptrCast(&image_blur_box),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
-        .doc = image_box_blur_doc,
+        .doc = image_blur_box_doc,
         .params = "self, radius: int",
         .returns = "Image",
     },

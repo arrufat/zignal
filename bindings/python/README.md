@@ -43,7 +43,7 @@ img = zignal.Image.from_numpy(arr)
 
 # Process the image
 resized = img.resize((240, 320), zignal.InterpolationMethod.BILINEAR)
-blurred = img.box_blur(radius=3)
+blurred = img.blur_box(radius=3)
 sharpened = img.sharpen(radius=1)
 cropped = img.crop(zignal.Rectangle(100, 100, 200, 200))  # l, t, r, b
 ```

@@ -32,7 +32,7 @@ pub fn Image(comptime T: type) type {
         const Self = @This();
 
         /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
-        /// When passed to functions like `rotateFrom()`, `boxBlur()`, etc., the function will
+        /// When passed to functions like `rotateFrom()`, `blurBox()`, etc., the function will
         /// automatically allocate and size the image appropriately. This eliminates the need
         /// to pre-allocate or guess output dimensions.
         ///
@@ -806,8 +806,8 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
-        pub fn boxBlur(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
-            return Filter(T).boxBlur(self, allocator, blurred, radius);
+        pub fn blurBox(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
+            return Filter(T).blurBox(self, allocator, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
