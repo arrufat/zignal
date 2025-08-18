@@ -19,7 +19,7 @@ pub fn main() !void {
 
     var blurred: Image(Rgba) = try .initAlloc(gpa, image.rows, image.cols);
     defer blurred.deinit(gpa);
-    try image.blurGaussian(gpa, 5.0, &blurred);
+    try image.gaussianBlur(gpa, 5.0, &blurred);
     try blurred.save(gpa, "liza-gaussian.png");
 
     var resized: Image(Rgba) = try .initAlloc(gpa, image.rows / 2, image.cols / 2);

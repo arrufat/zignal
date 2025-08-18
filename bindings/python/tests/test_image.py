@@ -103,8 +103,9 @@ class TestImageBinding:
         assert hasattr(img, "to_numpy")
         assert hasattr(img, "resize")
         assert hasattr(img, "letterbox")
-        assert hasattr(img, "blur_box")
+        assert hasattr(img, "box_blur")
         assert hasattr(img, "sharpen")
+        assert hasattr(img, "gaussian_blur")
         assert hasattr(img, "copy")
         assert hasattr(img, "flip_left_right")
         assert hasattr(img, "flip_top_bottom")
@@ -116,18 +117,18 @@ class TestImageBinding:
         assert hasattr(img, "view")
         assert hasattr(img, "is_view")
 
-    def test_blur_box_basic(self):
+    def test_box_blur_basic(self):
         """Box blur returns same shape and radius 0 is no-op."""
         arr = np.zeros((8, 12, 4), dtype=np.uint8)
         arr[4, 6] = [255, 128, 64, 255]
         img = zignal.Image.from_numpy(arr)
 
         # Radius 0 should be a copy
-        out0 = img.blur_box(0)
+        out0 = img.box_blur(0)
         np.testing.assert_array_equal(out0.to_numpy(), img.to_numpy())
 
         # Positive radius should keep shape
-        out1 = img.blur_box(1)
+        out1 = img.box_blur(1)
         assert out1.rows == img.rows
         assert out1.cols == img.cols
 
@@ -143,6 +144,35 @@ class TestImageBinding:
         out1 = img.sharpen(1)
         assert out1.rows == img.rows
         assert out1.cols == img.cols
+    
+    def test_gaussian_blur_basic(self):
+        """Gaussian blur returns same shape and works with valid sigma values."""
+        arr = np.zeros((8, 12, 4), dtype=np.uint8)
+        arr[4, 6] = [255, 128, 64, 255]
+        img = zignal.Image.from_numpy(arr)
+
+        # Small sigma should keep shape
+        out1 = img.gaussian_blur(1.0)
+        assert out1.rows == img.rows
+        assert out1.cols == img.cols
+
+        # Larger sigma should also keep shape
+        out2 = img.gaussian_blur(5.0)
+        assert out2.rows == img.rows
+        assert out2.cols == img.cols
+    
+    def test_gaussian_blur_invalid_sigma(self):
+        """Gaussian blur should reject invalid sigma values."""
+        arr = np.zeros((8, 12, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        # Zero sigma should raise ValueError
+        with pytest.raises(ValueError, match="sigma must be > 0"):
+            img.gaussian_blur(0.0)
+
+        # Negative sigma should raise ValueError
+        with pytest.raises(ValueError, match="sigma must be > 0"):
+            img.gaussian_blur(-1.0)
 
     def test_copy_independent(self):
         """Copy returns independent image memory."""
