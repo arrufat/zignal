@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
         "pca_example",
         "make_logo",
         "image_demo",
+        "orb_demo",
     };
 
     // Build exec_examples with run steps and check compilation
