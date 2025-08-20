@@ -179,6 +179,20 @@ pub fn Image(comptime T: type) type {
             return self.cols != self.stride;
         }
 
+        /// Creates a duplicate of the image with newly allocated memory.
+        /// Correctly handles views by copying only the visible data.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// var duped = try image.dupe(allocator);
+        /// defer duped.deinit(allocator);
+        /// ```
+        pub fn dupe(self: Self, allocator: Allocator) !Self {
+            const result = try Self.initAlloc(allocator, self.rows, self.cols);
+            self.copy(result);
+            return result;
+        }
+
         /// Copies image data from `self` to `dst`, correctly handling views.
         /// If src and dst are the same object, does nothing (no-op).
         /// Uses fast @memcpy when neither image is a view, falls back to row-by-row copying otherwise.

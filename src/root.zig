@@ -114,7 +114,6 @@ pub const BinaryDescriptor = features.BinaryDescriptor;
 pub const Fast = features.Fast;
 pub const Orb = features.Orb;
 pub const BruteForceMatcher = features.BruteForceMatcher;
-pub const OptimalMatcher = features.OptimalMatcher;
 pub const Match = features.Match;
 pub const MatchStats = features.MatchStats;
 pub const filterMatchesRatioTest = features.filterMatchesRatioTest;
