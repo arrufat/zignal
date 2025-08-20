@@ -14,7 +14,6 @@ pub const SvdResult = svd_module.SvdResult;
 
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
-    assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
 
@@ -77,6 +76,27 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Cast matrix elements to a different type (rounds when converting float to int)
+        pub fn cast(self: Self, comptime TargetType: type, allocator: std.mem.Allocator) !Matrix(TargetType) {
+            var result = try Matrix(TargetType).init(allocator, self.rows, self.cols);
+            for (self.items, 0..) |val, i| {
+                result.items[i] = switch (@typeInfo(TargetType)) {
+                    .int => switch (@typeInfo(T)) {
+                        .float => @intFromFloat(@round(val)),
+                        .int => @intCast(val),
+                        else => @compileError("Unsupported cast from " ++ @typeName(T) ++ " to " ++ @typeName(TargetType)),
+                    },
+                    .float => switch (@typeInfo(T)) {
+                        .float => @floatCast(val),
+                        .int => @floatFromInt(val),
+                        else => @compileError("Unsupported cast from " ++ @typeName(T) ++ " to " ++ @typeName(TargetType)),
+                    },
+                    else => @compileError("Target type must be numeric"),
+                };
+            }
+            return result;
+        }
+
         /// Sums all the elements in a matrix.
         pub fn sum(self: Self) T {
             var accum: T = 0;
@@ -88,6 +108,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
+            comptime assert(@typeInfo(T) == .float);
             var squared_sum: T = 0;
             for (self.items) |val| {
                 squared_sum += val * val;
@@ -113,6 +134,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Standard deviation: sqrt(variance)
         pub fn stdDev(self: Self) T {
+            comptime assert(@typeInfo(T) == .float);
             return @sqrt(self.variance());
         }
 
@@ -186,6 +208,7 @@ pub fn Matrix(comptime T: type) type {
         /// Compute LU decomposition with partial pivoting
         /// Returns L, U matrices and permutation vector such that PA = LU
         pub fn lu(self: Self) !LuResult {
+            comptime assert(@typeInfo(T) == .float);
             const n = self.rows;
             assert(n == self.cols); // Must be square
 
@@ -288,6 +311,7 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the determinant of the matrix using analytical formulas for small matrices
         /// and LU decomposition for larger matrices
         pub fn determinant(self: Self) !T {
+            comptime assert(@typeInfo(T) == .float);
             assert(self.rows == self.cols);
             assert(self.rows > 0);
 
@@ -351,6 +375,7 @@ pub fn Matrix(comptime T: type) type {
         /// Returns Q, R matrices and permutation such that A*P = Q*R where Q is orthogonal and R is upper triangular
         /// Also computes the numerical rank of the matrix
         pub fn qr(self: Self) !QrResult {
+            comptime assert(@typeInfo(T) == .float);
             const m = self.rows;
             const n = self.cols;
 
@@ -504,6 +529,7 @@ pub fn Matrix(comptime T: type) type {
         /// The rank is determined by counting non-zero diagonal elements in R
         /// above a tolerance based on machine precision and matrix norm
         pub fn rank(self: Self) !usize {
+            comptime assert(@typeInfo(T) == .float);
             // Compute QR decomposition with column pivoting
             var qr_result = try self.qr();
             defer qr_result.deinit();
@@ -530,6 +556,7 @@ pub fn Matrix(comptime T: type) type {
         ///
         /// Requires rows >= cols. See `SvdOptions` for configuration details.
         pub fn svd(self: Self, allocator: std.mem.Allocator, options: SvdOptions) !SvdResult(T) {
+            comptime assert(@typeInfo(T) == .float);
             std.debug.assert(self.rows >= self.cols);
 
             // SVD modifies the input, so make a copy

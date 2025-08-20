@@ -31,17 +31,58 @@ pub const Assignment = struct {
     }
 };
 
+/// Find the optimal scale factor for converting float matrix to integers
+/// by analyzing the decimal places in the data
+fn findScaleFactor(comptime T: type, matrix: Matrix(T)) i32 {
+    if (@typeInfo(T) != .float) return 1; // No scaling for integers
+
+    var max_decimal_places: u8 = 0;
+    for (0..matrix.rows) |i| {
+        for (0..matrix.cols) |j| {
+            const val = matrix.at(i, j).*;
+            const decimal_places = countDecimalPlaces(val);
+            max_decimal_places = @max(max_decimal_places, decimal_places);
+        }
+    }
+
+    const capped_places = @min(max_decimal_places, 6); // Cap at 6 decimal places
+    return std.math.pow(i32, 10, capped_places);
+}
+
+/// Count the number of significant decimal places in a float
+fn countDecimalPlaces(val: f32) u8 {
+    if (val == 0) return 0;
+
+    const abs_val = @abs(val);
+    var count: u8 = 0;
+    var temp = abs_val - @floor(abs_val); // Remove integer part
+
+    // Count decimal places (up to precision limits)
+    while (temp > 0.0001 and count < 8) {
+        temp = temp * 10 - @floor(temp * 10);
+        count += 1;
+    }
+
+    return count;
+}
+
 /// Solves the assignment problem using the Hungarian algorithm (Kuhn-Munkres algorithm)
 ///
 /// Finds the optimal one-to-one assignment that minimizes/maximizes total cost in O(n³) time.
 /// This implementation handles both square and rectangular cost matrices.
 ///
+/// @param T The numeric type of the cost matrix (int or float)
 /// @param allocator Memory allocator for temporary data structures
 /// @param cost_matrix Matrix where element (i,j) is the cost/profit of assigning row i to column j
 /// @param policy Whether to minimize cost or maximize profit
 /// @return Optimal assignment that minimizes/maximizes total cost
-pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), policy: OptimizationPolicy) !Assignment {
-    const multiplier: f32 = switch (policy) {
+pub fn solveAssignmentProblem(
+    comptime T: type,
+    allocator: Allocator,
+    cost_matrix: Matrix(T),
+    policy: OptimizationPolicy,
+) !Assignment {
+    const multiplier: i64 = switch (policy) {
         .min => 1,
         .max => -1,
     };
@@ -49,15 +90,25 @@ pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), po
     const n_cols = cost_matrix.cols;
     const n = @max(n_rows, n_cols);
 
+    const scale_factor = if (@typeInfo(T) == .float) findScaleFactor(T, cost_matrix) else 1;
+
     // Create square working matrix with optional values for padding
-    var work = try allocator.alloc(?f32, n * n);
+    var work = try allocator.alloc(?i64, n * n);
     defer allocator.free(work);
 
-    // Initialize work matrix - null for padding cells
+    // Initialize work matrix - convert all types to i64 with appropriate scaling for floats.
     for (0..n) |i| {
         for (0..n) |j| {
             if (i < n_rows and j < n_cols) {
-                work[i * n + j] = cost_matrix.at(i, j).* * multiplier;
+                const base_val = cost_matrix.at(i, j).*;
+                work[i * n + j] = switch (@typeInfo(T)) {
+                    .float => blk: {
+                        const val = base_val * @as(T, @floatFromInt(multiplier));
+                        break :blk @intFromFloat(@round(val * @as(T, @floatFromInt(scale_factor))));
+                    },
+                    .int => @as(i64, base_val) * multiplier,
+                    else => @compileError("Unsupported type for cost matrix"),
+                };
             } else {
                 work[i * n + j] = null;
             }
@@ -67,7 +118,7 @@ pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), po
     // Step 1: Row reduction - subtract row minimum from each row
     for (0..n) |i| {
         // Find minimum value in non-null cells of this row
-        var min_val: ?f32 = null;
+        var min_val: ?i64 = null;
         for (0..n) |j| {
             if (work[i * n + j]) |val| {
                 if (min_val) |current_min| {
@@ -93,7 +144,7 @@ pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), po
     // Step 2: Column reduction - subtract column minimum from each column
     for (0..n) |j| {
         // Find minimum value in non-null cells of this column
-        var min_val: ?f32 = null;
+        var min_val: ?i64 = null;
         for (0..n) |i| {
             if (work[i * n + j]) |val| {
                 if (min_val) |current_min| {
@@ -224,7 +275,7 @@ pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), po
             }
         } else {
             // Step 4: No uncovered zeros, modify matrix
-            var min_uncovered: ?f32 = null;
+            var min_uncovered: ?i64 = null;
 
             // Find minimum uncovered value
             for (0..n) |i| {
@@ -271,7 +322,11 @@ pub fn solveAssignmentProblem(allocator: Allocator, cost_matrix: Matrix(f32), po
             if (col < n_cols) {
                 result_assignments[i] = col;
                 // Use original cost matrix values (not the multiplied work matrix)
-                total_cost += cost_matrix.at(i, col).*;
+                const cost_val = cost_matrix.at(i, col).*;
+                total_cost += if (@typeInfo(T) == .float)
+                    cost_val
+                else
+                    @as(f32, @floatFromInt(cost_val));
             } else {
                 result_assignments[i] = null;
             }
@@ -380,12 +435,45 @@ test "Hungarian algorithm - simple 3x3" {
     cost.at(2, 1).* = 6;
     cost.at(2, 2).* = 9;
 
-    var result = try solveAssignmentProblem(allocator, cost, .min);
+    var result = try solveAssignmentProblem(f32, allocator, cost, .min);
     defer result.deinit();
 
     // Optimal assignment should have cost 1+4+9=14 or similar minimal
     try expectEqual(@as(usize, 3), result.assignments.len);
     try expectEqual(true, result.total_cost <= 15); // Allow some flexibility for the simple implementation
+}
+
+test "Hungarian algorithm - integer matrix" {
+    const allocator = std.testing.allocator;
+
+    // Test with integer cost matrix
+    var cost = try Matrix(i32).init(allocator, 3, 3);
+    defer cost.deinit();
+
+    // Simple integer costs
+    cost.at(0, 0).* = 10;
+    cost.at(0, 1).* = 20;
+    cost.at(0, 2).* = 30;
+    cost.at(1, 0).* = 15;
+    cost.at(1, 1).* = 25;
+    cost.at(1, 2).* = 35;
+    cost.at(2, 0).* = 20;
+    cost.at(2, 1).* = 30;
+    cost.at(2, 2).* = 40;
+
+    var result = try solveAssignmentProblem(i32, allocator, cost, .min);
+    defer result.deinit();
+
+    // Verify we got valid assignments
+    try expectEqual(@as(usize, 3), result.assignments.len);
+
+    // Check that each row has an assignment
+    for (result.assignments) |assignment| {
+        try expectEqual(true, assignment != null);
+    }
+
+    // Verify total cost is reasonable (should be 10+25+40=75 for diagonal)
+    try expectEqual(true, result.total_cost <= 80);
 }
 
 test "Hungarian algorithm - rectangular matrix" {
@@ -402,7 +490,7 @@ test "Hungarian algorithm - rectangular matrix" {
     cost.at(1, 1).* = 2;
     cost.at(1, 2).* = 1;
 
-    var result = try solveAssignmentProblem(allocator, cost, .min);
+    var result = try solveAssignmentProblem(f32, allocator, cost, .min);
     defer result.deinit();
 
     try expectEqual(@as(usize, 2), result.assignments.len);
