@@ -25,7 +25,6 @@ const Matrix = @import("Matrix.zig").Matrix;
 
 /// Builder for chaining matrix operations with in-place modifications
 pub fn OpsBuilder(comptime T: type) type {
-    assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
 

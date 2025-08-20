@@ -77,7 +77,7 @@ pub fn match(
     }
 
     // Solve assignment problem (minimize cost)
-    var assignment = try optimization.solveAssignmentProblem(allocator, cost_matrix, .min);
+    var assignment = try optimization.solveAssignmentProblem(f32, allocator, cost_matrix, .min);
     defer assignment.deinit();
 
     // Convert assignments to Match structs, filtering by max_distance
