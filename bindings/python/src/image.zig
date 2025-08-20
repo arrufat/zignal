@@ -1641,20 +1641,16 @@ fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 
     const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
 
-    // Allocate destination image of same size
     const new_image = allocator.create(Image(Rgba)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return null;
     };
     errdefer allocator.destroy(new_image);
 
-    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+    new_image.* = src_image.dupe(allocator) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
         return null;
     };
-
-    // Perform copy
-    src_image.copy(new_image.*);
 
     // Wrap into Python object
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
@@ -1771,20 +1767,19 @@ fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
 
     const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
 
-    // Create copy
+    // Create a copy and flip it
     const new_image = allocator.create(Image(Rgba)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return null;
     };
     errdefer allocator.destroy(new_image);
 
-    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+    new_image.* = src_image.dupe(allocator) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
         return null;
     };
 
-    // Copy and flip
-    src_image.copy(new_image.*);
+    // Flip the cloned image
     new_image.flipLeftRight();
 
     // Wrap into Python object
@@ -1825,13 +1820,12 @@ fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     };
     errdefer allocator.destroy(new_image);
 
-    new_image.* = Image(Rgba).initAlloc(allocator, src_image.rows, src_image.cols) catch {
+    new_image.* = src_image.dupe(allocator) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
         return null;
     };
 
-    // Copy and flip
-    src_image.copy(new_image.*);
+    // Flip the cloned image
     new_image.flipTopBottom();
 
     // Wrap into Python object

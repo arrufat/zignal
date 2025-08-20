@@ -144,7 +144,7 @@ class TestImageBinding:
         out1 = img.sharpen(1)
         assert out1.rows == img.rows
         assert out1.cols == img.cols
-    
+
     def test_gaussian_blur_basic(self):
         """Gaussian blur returns same shape and works with valid sigma values."""
         arr = np.zeros((8, 12, 4), dtype=np.uint8)
@@ -160,7 +160,7 @@ class TestImageBinding:
         out2 = img.gaussian_blur(5.0)
         assert out2.rows == img.rows
         assert out2.cols == img.cols
-    
+
     def test_gaussian_blur_invalid_sigma(self):
         """Gaussian blur should reject invalid sigma values."""
         arr = np.zeros((8, 12, 4), dtype=np.uint8)

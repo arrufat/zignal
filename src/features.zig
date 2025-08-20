@@ -14,7 +14,6 @@ pub const Orb = @import("features/Orb.zig");
 
 // Feature matching
 pub const BruteForceMatcher = @import("features/matcher.zig").BruteForceMatcher;
-pub const OptimalMatcher = @import("features/OptimalMatcher.zig");
 pub const Match = @import("features/matcher.zig").Match;
 pub const MatchStats = @import("features/matcher.zig").MatchStats;
 
