@@ -306,7 +306,6 @@ pub fn Filter(comptime T: type) type {
                                         continue;
                                     }
 
-                                    // Use correct integral image indices
                                     const sum = (if (r2 < self.rows and c2 < self.cols) sat.at(r2, c2)[i] else 0) -
                                         (if (r2 < self.rows and c1 > 0) sat.at(r2, c1 - 1)[i] else 0) -
                                         (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
@@ -904,7 +903,7 @@ pub fn Filter(comptime T: type) type {
 
             const rows = src_img.rows;
             const cols = src_img.cols;
-            const simd_len: usize = 1; // disable SIMD for correctness; revisit after
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
             // First pass: compute row-wise cumulative sums
             for (0..rows) |r| {
@@ -944,7 +943,7 @@ pub fn Filter(comptime T: type) type {
             assert(sat.stride == sat.cols);
             const rows = sat.rows;
             const cols = sat.cols;
-            const simd_len: usize = 1; // disable SIMD for correctness; revisit after
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
             for (0..rows) |r| {
                 const r1 = r -| radius;
@@ -956,14 +955,12 @@ pub fn Filter(comptime T: type) type {
                 // SIMD processing for safe regions
                 const row_safe = r >= radius and r + radius < rows;
                 if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
-                    // Handle left border
-                    while (c < radius) : (c += 1) {
+                    // Handle left border (including the column where c1 would be 0)
+                    while (c <= radius) : (c += 1) {
                         const c1 = c -| radius;
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        // Compute sum using integral image inclusion-exclusion
-                        // Need to check boundaries since integral image uses (r-1, c-1) indexing
                         const sum = sat.data[r2 * sat.stride + c2] -
                             (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
                             (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
@@ -976,9 +973,9 @@ pub fn Filter(comptime T: type) type {
                             @as(PlaneType, val);
                     }
 
-                    // SIMD middle section
+                    // SIMD middle section - only in completely safe region
                     const safe_end = cols - radius;
-                    if (c + simd_len <= safe_end) {
+                    if (c < safe_end) {
                         const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
                         const area_vec: @Vector(simd_len, f32) = @splat(const_area);
 
@@ -986,7 +983,6 @@ pub fn Filter(comptime T: type) type {
                             const c1 = c - radius;
                             const c2 = c + radius;
 
-                            // Load integral values with SIMD - use correct indices
                             const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
                             const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
                             const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
@@ -1051,13 +1047,12 @@ pub fn Filter(comptime T: type) type {
                 // SIMD processing for safe regions
                 const row_safe = r >= radius and r + radius < rows;
                 if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
-                    // Handle left border
-                    while (c < radius) : (c += 1) {
+                    // Handle left border (including the column where c1 would be 0)
+                    while (c <= radius) : (c += 1) {
                         const c1 = c -| radius;
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        // Correct integral image access with boundary checks
                         const sum = sat.data[r2 * sat.stride + c2] -
                             (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
                             (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
@@ -1072,9 +1067,9 @@ pub fn Filter(comptime T: type) type {
                             sharpened;
                     }
 
-                    // SIMD middle section
+                    // SIMD middle section - only in completely safe region
                     const safe_end = cols - radius;
-                    if (c + simd_len <= safe_end) {
+                    if (c < safe_end) {
                         const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
                         const area_vec: @Vector(simd_len, f32) = @splat(const_area);
 
@@ -1082,7 +1077,6 @@ pub fn Filter(comptime T: type) type {
                             const c1 = c - radius;
                             const c2 = c + radius;
 
-                            // Load integral values with SIMD - use correct indices
                             const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
                             const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
                             const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
