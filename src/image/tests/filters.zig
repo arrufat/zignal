@@ -597,6 +597,90 @@ test "convolve preserves color channels" {
     }
 }
 
+test "convolve into view (stride-safe)" {
+    // Create a base image with a larger stride than the view width
+    var base_src: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    defer base_src.deinit(std.testing.allocator);
+    for (0..base_src.rows) |r| {
+        for (0..base_src.cols) |c| {
+            base_src.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    // Create a destination base initialized to a sentinel value
+    var base_dst: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    defer base_dst.deinit(std.testing.allocator);
+    for (base_dst.data) |*p| p.* = 0xAA;
+
+    // Views over a 4x4 region; note view.stride != view.cols
+    const rect: Rectangle(usize) = .{ .l = 2, .t = 1, .r = 6, .b = 5 }; // width=4, height=4
+    var src_view = base_src.view(rect);
+    var dst_view = base_dst.view(rect);
+
+    // Identity kernel: should copy src_view into dst_view
+    const identity = [3][3]f32{
+        .{ 0, 0, 0 },
+        .{ 0, 1, 0 },
+        .{ 0, 0, 0 },
+    };
+
+    try src_view.convolve(std.testing.allocator, identity, &dst_view, .zero);
+
+    // Verify dst view matches src view
+    for (0..src_view.rows) |r| {
+        for (0..src_view.cols) |c| {
+            try expectEqual(src_view.at(r, c).*, dst_view.at(r, c).*);
+        }
+    }
+
+    // Outside the view, base_dst should remain unchanged (0xAA)
+    for (0..base_dst.rows) |r| {
+        for (0..base_dst.cols) |c| {
+            const inside = r >= rect.t and r < rect.b and c >= rect.l and c < rect.r;
+            if (!inside) try expectEqual(@as(u8, 0xAA), base_dst.at(r, c).*);
+        }
+    }
+}
+
+test "convolveSeparable into view (stride-safe)" {
+    // Create a base image and a matching destination base
+    var base_src: Image(u8) = try .initAlloc(std.testing.allocator, 7, 9);
+    defer base_src.deinit(std.testing.allocator);
+    for (0..base_src.rows) |r| {
+        for (0..base_src.cols) |c| {
+            base_src.at(r, c).* = @intCast((r * 7 + c * 3) % 256);
+        }
+    }
+
+    var base_dst: Image(u8) = try .initAlloc(std.testing.allocator, 7, 9);
+    defer base_dst.deinit(std.testing.allocator);
+    for (base_dst.data) |*p| p.* = 0x55;
+
+    // Define a view region; ensure stride != cols for the view
+    const rect: Rectangle(usize) = .{ .l = 1, .t = 2, .r = 6, .b = 6 }; // width=5, height=4
+    var src_view = base_src.view(rect);
+    var dst_view = base_dst.view(rect);
+
+    // Separable identity: [1] horizontally and vertically
+    const k1 = [_]f32{1.0};
+    try src_view.convolveSeparable(std.testing.allocator, &k1, &k1, &dst_view, .zero);
+
+    // Verify dst view matches src view
+    for (0..src_view.rows) |r| {
+        for (0..src_view.cols) |c| {
+            try expectEqual(src_view.at(r, c).*, dst_view.at(r, c).*);
+        }
+    }
+
+    // Outside the view, base_dst should remain unchanged (0x55)
+    for (0..base_dst.rows) |r| {
+        for (0..base_dst.cols) |c| {
+            const inside = r >= rect.t and r < rect.b and c >= rect.l and c < rect.r;
+            if (!inside) try expectEqual(@as(u8, 0x55), base_dst.at(r, c).*);
+        }
+    }
+}
+
 test "differenceOfGaussians basic functionality" {
     // Test basic DoG functionality with a simple edge pattern
     var image: Image(f32) = try .initAlloc(std.testing.allocator, 11, 11);
