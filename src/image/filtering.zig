@@ -40,6 +40,19 @@ pub fn Filter(comptime T: type) type {
                 return;
             }
 
+            // If the destination is a view (non-contiguous), compute into a temporary
+            // contiguous image and copy back at the end. The low-level plane functions
+            // write assuming packed rows (stride == cols).
+            var dst_img: Self = undefined;
+            var use_temp_dst = false;
+            if (blurred.isView()) {
+                dst_img = try .initAlloc(allocator, self.rows, self.cols);
+                use_temp_dst = true;
+                defer if (use_temp_dst) dst_img.deinit(allocator);
+            } else {
+                dst_img = blurred.*;
+            }
+
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Build integral image
@@ -50,10 +63,10 @@ pub fn Filter(comptime T: type) type {
                     // Use optimized paths for u8 and f32, generic path for others
                     if (T == u8) {
                         integralPlane(u8, self.data, integral_img, self.rows, self.cols);
-                        boxBlurPlane(u8, integral_img, std.mem.sliceAsBytes(blurred.data), self.rows, self.cols, radius);
+                        boxBlurPlane(u8, integral_img, dst_img.data, self.rows, self.cols, radius);
                     } else if (T == f32) {
                         integralPlane(f32, self.data, integral_img, self.rows, self.cols);
-                        boxBlurPlane(f32, integral_img, blurred.data, self.rows, self.cols, radius);
+                        boxBlurPlane(f32, integral_img, dst_img.data, self.rows, self.cols, radius);
                     } else {
                         // Generic path: convert to f32 for processing
                         const src_f32 = try allocator.alloc(f32, plane_size);
@@ -69,7 +82,7 @@ pub fn Filter(comptime T: type) type {
 
                         // Convert back to target type
                         for (0..plane_size) |i| {
-                            blurred.data[i] = if (@typeInfo(T) == .int)
+                            dst_img.data[i] = if (@typeInfo(T) == .int)
                                 @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(dst_f32[i]))))
                             else
                                 meta.as(T, dst_f32[i]);
@@ -117,7 +130,7 @@ pub fn Filter(comptime T: type) type {
                         boxBlurPlane(u8, integral_img, b_out, self.rows, self.cols, radius);
 
                         // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, blurred.*);
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, dst_img);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -135,7 +148,7 @@ pub fn Filter(comptime T: type) type {
                                 inline for (fields, 0..) |f, i| {
                                     // Skip alpha channel if present
                                     if (has_alpha and i == 3) {
-                                        @field(blurred.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
+                                        @field(dst_img.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
                                         continue;
                                     }
 
@@ -145,7 +158,7 @@ pub fn Filter(comptime T: type) type {
                                         (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
                                         (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
 
-                                    @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    @field(dst_img.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                         .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
                                         .float => as(f.type, sum / area),
                                         else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
@@ -156,6 +169,12 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
+            }
+
+            // If we computed into a temporary destination (because blurred is a view),
+            // copy the packed result back into the view using the safe copy path.
+            if (use_temp_dst) {
+                dst_img.copy(blurred.*);
             }
         }
 
@@ -182,7 +201,7 @@ pub fn Filter(comptime T: type) type {
                     // Use optimized paths for u8 and f32, generic path for others
                     if (T == u8) {
                         integralPlane(u8, self.data, integral_img, self.rows, self.cols);
-                        sharpenPlane(u8, self.data, integral_img, std.mem.sliceAsBytes(sharpened.data), self.rows, self.cols, radius);
+                        sharpenPlane(u8, self.data, integral_img, sharpened.data, self.rows, self.cols, radius);
                     } else if (T == f32) {
                         integralPlane(f32, self.data, integral_img, self.rows, self.cols);
                         sharpenPlane(f32, self.data, integral_img, sharpened.data, self.rows, self.cols, radius);

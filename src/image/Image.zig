@@ -238,7 +238,7 @@ pub fn Image(comptime T: type) type {
                     while (row < self.rows) : (row += 1) {
                         const src_start = row * self.stride;
                         const dst_start = row * self.cols;
-                        @memcpy(result.data[dst_start..dst_start + self.cols], self.data[src_start..src_start + self.cols]);
+                        @memcpy(result.data[dst_start .. dst_start + self.cols], self.data[src_start .. src_start + self.cols]);
                     }
                 }
             } else {
