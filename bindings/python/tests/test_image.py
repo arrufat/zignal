@@ -290,6 +290,72 @@ class TestImageBinding:
         # (5 from view1 offset + 2 from view2 offset)
         np.testing.assert_array_equal(parent_arr[7, 7], [100, 100, 100, 255])
 
+    def test_view_convert_grayscale(self):
+        """Test converting a view to different formats - grayscale."""
+        # Create a grayscale image
+        img = zignal.Image(20, 20, 128, format=zignal.Grayscale)
+
+        # Create a view (Rectangle uses exclusive bounds)
+        rect = zignal.Rectangle(5, 5, 15, 15)  # 10x10 view
+        view = img.view(rect)
+
+        # Convert view to RGB
+        rgb_img = view.convert(zignal.Rgb)
+        assert rgb_img.rows == 10
+        assert rgb_img.cols == 10
+
+        # Convert view to RGBA
+        rgba_img = view.convert(zignal.Rgba)
+        assert rgba_img.rows == 10
+        assert rgba_img.cols == 10
+
+    def test_view_convert_rgb(self):
+        """Test converting a view to different formats - RGB."""
+        # Create an RGB image
+        img = zignal.Image(20, 20, (255, 128, 64), format=zignal.Rgb)
+
+        # Create a view
+        rect = zignal.Rectangle(0, 0, 5, 5)
+        view = img.view(rect)
+
+        # Convert view to Grayscale
+        gray_img = view.convert(zignal.Grayscale)
+        assert gray_img.rows == 5
+        assert gray_img.cols == 5
+
+        # Convert view to RGBA
+        rgba_img = view.convert(zignal.Rgba)
+        assert rgba_img.rows == 5
+        assert rgba_img.cols == 5
+
+        # Verify the conversion preserves the view dimensions
+        np_rgba = rgba_img.to_numpy()
+        assert np_rgba.shape == (5, 5, 4)
+
+    def test_view_convert_rgba(self):
+        """Test converting a view to different formats - RGBA."""
+        # Create an RGBA image
+        img = zignal.Image(15, 15, (255, 0, 0, 128), format=zignal.Rgba)
+
+        # Create a view (Rectangle uses exclusive bounds)
+        rect = zignal.Rectangle(5, 5, 13, 13)  # 8x8 view
+        view = img.view(rect)
+
+        # Convert view to Grayscale
+        gray_img = view.convert(zignal.Grayscale)
+        assert gray_img.rows == 8
+        assert gray_img.cols == 8
+
+        # Convert view to RGB
+        rgb_img = view.convert(zignal.Rgb)
+        assert rgb_img.rows == 8
+        assert rgb_img.cols == 8
+
+        # Same format conversion (should still work)
+        rgba_copy = view.convert(zignal.Rgba)
+        assert rgba_copy.rows == 8
+        assert rgba_copy.cols == 8
+
     def test_psnr_returns_float(self):
         """Test PSNR returns a float value."""
         arr1 = np.zeros((10, 10, 4), dtype=np.uint8)
@@ -378,7 +444,6 @@ class TestImageBinding:
         """Test class methods are available."""
         assert hasattr(zignal.Image, "load")
         assert hasattr(zignal.Image, "from_numpy")
-        assert hasattr(zignal.Image, "add_alpha")
 
 
 class TestResize:
@@ -587,34 +652,6 @@ class TestNumpyIntegration:
         arr_view = arr[:, :, ::2]  # Non-contiguous view
         with pytest.raises(ValueError, match="not C-contiguous"):
             zignal.Image.from_numpy(arr_view)
-
-    def test_to_numpy_options(self):
-        """Test to_numpy include_alpha parameter."""
-        arr = np.zeros((5, 5, 4), dtype=np.uint8)
-        arr[:, :] = [100, 150, 200, 128]
-        img = zignal.Image.from_numpy(arr)
-
-        # With alpha (default)
-        arr_with_alpha = img.to_numpy()
-        assert arr_with_alpha.shape == (5, 5, 4)
-
-        # Without alpha
-        arr_without_alpha = img.to_numpy(include_alpha=False)
-        assert arr_without_alpha.shape == (5, 5, 3)
-
-    def test_add_alpha_static_method(self):
-        """Test add_alpha helper method."""
-        # Create 3-channel array
-        arr_rgb = np.zeros((10, 20, 3), dtype=np.uint8)
-
-        # Add alpha with default
-        arr_rgba = zignal.Image.add_alpha(arr_rgb)
-        assert arr_rgba.shape == (10, 20, 4)
-        assert np.all(arr_rgba[:, :, 3] == 255)
-
-        # Add alpha with custom value
-        arr_rgba2 = zignal.Image.add_alpha(arr_rgb, 128)
-        assert np.all(arr_rgba2[:, :, 3] == 128)
 
 
 class TestPixelAccess:

@@ -30,8 +30,8 @@ class TestFDMBinding:
 
     def test_fdm_accepts_images(self):
         """Test FDM accepts Image objects."""
-        src_img = zignal.Image(10, 10, 100)
-        ref_img = zignal.Image(10, 10, 200)
+        src_img = zignal.Image(10, 10, (100, 100, 100))
+        ref_img = zignal.Image(10, 10, (200, 200, 200))
 
         # Create FDM instance and apply
         fdm = zignal.FeatureDistributionMatching()
@@ -41,8 +41,8 @@ class TestFDMBinding:
         assert result is None
 
     def test_fdm_works_with_different_sizes(self):
-        src_img = zignal.Image(20, 30, 0)
-        ref_img = zignal.Image(50, 40, 0)
+        src_img = zignal.Image(20, 30, (0, 0, 0))
+        ref_img = zignal.Image(50, 40, (0, 0, 0))
 
         # Should work without error
         fdm = zignal.FeatureDistributionMatching()
@@ -54,13 +54,14 @@ class TestFDMBinding:
 
     def test_fdm_batch_processing(self):
         """Test FDM batch processing with reused target."""
-        target_img = zignal.Image(10, 10, 200)
+        target_img = zignal.Image(10, 10, (200, 200, 200))
 
         fdm = zignal.FeatureDistributionMatching()
         fdm.set_target(target_img)
 
         for i in range(3):
-            src_img = zignal.Image(10, 10, 50 + i * 50)
+            val = 50 + i * 50
+            src_img = zignal.Image(10, 10, (val, val, val))
             org_img = src_img.copy()
 
             fdm.set_source(src_img)

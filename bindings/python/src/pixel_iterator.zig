@@ -2,6 +2,7 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Rgba = zignal.Rgba;
+const Rgb = zignal.Rgb;
 
 const ImageObject = @import("image.zig").ImageObject;
 const py_utils = @import("py_utils.zig");
@@ -15,7 +16,7 @@ pub const PixelIteratorObject = extern struct {
 
 const pixel_iterator_doc =
     \\
-    \\Iterator over image pixels yielding (row, col, Rgba).
+    \\Iterator over image pixels yielding (row, col, pixel) in native format.
     \\
     \\This iterator walks the image in row-major order (top-left to bottom-right).
     \\For views, iteration respects the view bounds and the underlying stride, so
@@ -24,9 +25,9 @@ const pixel_iterator_doc =
     \\## Examples
     \\
     \\```python
-    \\image = Image(2, 3, Rgb(255, 0, 0))
+    \\image = Image(2, 3, Rgb(255, 0, 0), format=zignal.Rgb)
     \\for r, c, pixel in image:
-    \\    print(f"image[{r}, {c}] = {pixel:ansi}")
+    \\    print(f"image[{r}, {c}] = {pixel}")
     \\```
     \\
     \\## Notes
@@ -54,34 +55,57 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     }
 
     const img_py = @as(*ImageObject, @ptrCast(self.image_ref.?));
-    const img = img_py.image_ptr orelse {
-        c.PyErr_SetNone(c.PyExc_StopIteration);
-        return null;
-    };
-
-    const total = img.rows * img.cols;
+    const total = if (img_py.py_image) |pimg| pimg.rows() * pimg.cols() else 0;
     if (self.index >= total) {
         c.PyErr_SetNone(c.PyExc_StopIteration);
         return null;
     }
 
-    const row: usize = self.index / img.cols;
-    const col: usize = self.index % img.cols;
-    const pixel_index = row * img.stride + col;
-    const pixel = img.data[pixel_index];
+    // Compute row/col and get pixel in native format
+    var row: usize = undefined;
+    var col: usize = undefined;
+    var pixel_obj: ?*c.PyObject = null;
 
-    // Create Python Rgba object
-    const color_module = @import("color.zig");
-    const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0) orelse return null;
-    const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
-    rgba.field0 = pixel.r;
-    rgba.field1 = pixel.g;
-    rgba.field2 = pixel.b;
-    rgba.field3 = pixel.a;
+    if (img_py.py_image == null) {
+        c.PyErr_SetNone(c.PyExc_StopIteration);
+        return null;
+    }
+    const pimg = img_py.py_image.?;
+    row = self.index / pimg.cols();
+    col = self.index % pimg.cols();
+    switch (pimg.data) {
+        .gray => |img| {
+            const v = img.at(row, col).*;
+            pixel_obj = c.PyLong_FromLong(@intCast(v));
+        },
+        .rgb => |img| {
+            const p = img.at(row, col).*;
+            const color_module = @import("color.zig");
+            const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbType), 0) orelse return null;
+            const rgb = @as(*color_module.RgbBinding.PyObjectType, @ptrCast(rgb_obj));
+            rgb.field0 = p.r;
+            rgb.field1 = p.g;
+            rgb.field2 = p.b;
+            pixel_obj = rgb_obj;
+        },
+        .rgba => |img| {
+            const p = img.at(row, col).*;
+            const color_module = @import("color.zig");
+            const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0) orelse return null;
+            const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
+            rgba.field0 = p.r;
+            rgba.field1 = p.g;
+            rgba.field2 = p.b;
+            rgba.field3 = p.a;
+            pixel_obj = rgba_obj;
+        },
+    }
 
-    // Build tuple (row, col, rgba)
-    const result = c.Py_BuildValue("(nnO)", @as(c.Py_ssize_t, @intCast(row)), @as(c.Py_ssize_t, @intCast(col)), rgba_obj) orelse {
-        c.Py_DECREF(rgba_obj);
+    if (pixel_obj == null) return null;
+
+    // Build tuple (row, col, pixel)
+    const result = c.Py_BuildValue("(nnO)", @as(c.Py_ssize_t, @intCast(row)), @as(c.Py_ssize_t, @intCast(col)), pixel_obj.?) orelse {
+        c.Py_DECREF(pixel_obj.?);
         return null;
     };
 
@@ -122,7 +146,7 @@ pub const pixel_iterator_special_methods_metadata = [_]@import("stub_metadata.zi
     .{
         .name = "__next__",
         .params = "self",
-        .returns = "tuple[int, int, Rgba]",
-        .doc = "Return the next (row, col, Rgba) tuple.",
+        .returns = "tuple[int, int, Color]",
+        .doc = "Return the next (row, col, pixel) where pixel is native: int | Rgb | Rgba.",
     },
 };

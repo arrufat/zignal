@@ -5,6 +5,7 @@ const bitmap_font = @import("bitmap_font.zig");
 const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
+const grayscale_format = @import("grayscale_format.zig");
 const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
@@ -113,6 +114,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register all color types from the registry
     color.registerAllColorTypes(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register color types: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register Grayscale sentinel type
+    grayscale_format.registerGrayscaleType(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register Grayscale type: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

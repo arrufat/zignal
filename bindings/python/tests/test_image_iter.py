@@ -46,6 +46,35 @@ def test_image_iteration_matches_getitem():
     assert count == len(img)
 
 
+def test_iterator_return_types():
+    """Test that iteration returns the correct types for each format."""
+    # Test Grayscale format - should return integer
+    gray_img = zignal.Image(5, 5, 128, format=zignal.Grayscale)
+    for r, c, pixel in gray_img:
+        assert isinstance(pixel, int), f"Grayscale should return int, got {type(pixel)}"
+        assert pixel == 128
+        break  # Just test first pixel
+
+    # Test RGB format - should return Rgb object
+    rgb_img = zignal.Image(5, 5, (255, 128, 64), format=zignal.Rgb)
+    for r, c, pixel in rgb_img:
+        assert isinstance(pixel, zignal.Rgb), f"RGB should return Rgb object, got {type(pixel)}"
+        assert pixel.r == 255
+        assert pixel.g == 128
+        assert pixel.b == 64
+        break  # Just test first pixel
+
+    # Test RGBA format - should return Rgba object
+    rgba_img = zignal.Image(5, 5, (255, 128, 64, 32), format=zignal.Rgba)
+    for r, c, pixel in rgba_img:
+        assert isinstance(pixel, zignal.Rgba), f"RGBA should return Rgba object, got {type(pixel)}"
+        assert pixel.r == 255
+        assert pixel.g == 128
+        assert pixel.b == 64
+        assert pixel.a == 32
+        break  # Just test first pixel
+
+
 def test_view_iteration_stride_and_bounds():
     rows, cols = 6, 8
     arr = np.arange(rows * cols * 4, dtype=np.uint8).reshape(rows, cols, 4)

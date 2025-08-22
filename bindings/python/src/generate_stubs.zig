@@ -359,6 +359,11 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     }
     try stub.write("\n");
 
+    // Add Grayscale sentinel type (format selector for images)
+    try stub.write("\nclass Grayscale:\n");
+    try stub.write("    \"\"\"Grayscale image format (single channel, u8)\"\"\"\n");
+    try stub.write("    ...\n");
+
     // Generate Rectangle class from metadata
     const rectangle_methods = stub_metadata.extractMethodInfo(&rectangle_module.rectangle_methods_metadata);
     const rectangle_properties = stub_metadata.extractPropertyInfo(&rectangle_module.rectangle_properties_metadata);
