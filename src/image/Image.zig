@@ -228,10 +228,29 @@ pub fn Image(comptime T: type) type {
         pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
             var result: Image(TargetType) = try .initAlloc(allocator, self.rows, self.cols);
             if (T == TargetType) {
-                @memcpy(result.data, self.data);
+                // For same type, we need to handle views properly
+                if (self.stride == self.cols) {
+                    // Contiguous data, can use memcpy
+                    @memcpy(result.data, self.data);
+                } else {
+                    // Non-contiguous (view), copy row by row
+                    var row: usize = 0;
+                    while (row < self.rows) : (row += 1) {
+                        const src_start = row * self.stride;
+                        const dst_start = row * self.cols;
+                        @memcpy(result.data[dst_start..dst_start + self.cols], self.data[src_start..src_start + self.cols]);
+                    }
+                }
             } else {
-                for (self.data, 0..) |pixel, i| {
-                    result.data[i] = convertColor(TargetType, pixel);
+                // Different types, convert pixel by pixel
+                var row: usize = 0;
+                while (row < self.rows) : (row += 1) {
+                    var col: usize = 0;
+                    while (col < self.cols) : (col += 1) {
+                        const src_idx = row * self.stride + col;
+                        const dst_idx = row * self.cols + col;
+                        result.data[dst_idx] = convertColor(TargetType, self.data[src_idx]);
+                    }
                 }
             }
             return result;

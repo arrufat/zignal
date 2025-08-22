@@ -4,10 +4,15 @@ const zignal = @import("zignal");
 const InterpolationMethod = zignal.InterpolationMethod;
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
+const Rgb = zignal.Rgb;
 const DisplayFormat = zignal.DisplayFormat;
 
 const canvas = @import("canvas.zig");
 const color_utils = @import("color_utils.zig");
+const color_bindings = @import("color.zig");
+const grayscale_format = @import("grayscale_format.zig");
+const PyImageMod = @import("PyImage.zig");
+const PyImage = PyImageMod.PyImage;
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
@@ -17,15 +22,16 @@ const stub_metadata = @import("stub_metadata.zig");
 
 const image_class_doc =
     \\
-    \\RGBA image for processing and manipulation.\n\n
-    \\This object is iterable: iterating yields (row, col, Rgba) for each pixel\n
-    \\in row-major order. For bulk numeric work, prefer to_numpy().
+    \\Image for processing and manipulation.\n\n
+    \\This object is iterable: iterating yields (row, col, pixel) in native\n
+    \\format (Grayscale→int, Rgb→Rgb, Rgba→Rgba) in row-major order. For bulk\n
+    \\numeric work, prefer to_numpy().
 ;
 
 pub const ImageObject = extern struct {
     ob_base: c.PyObject,
-    // Store pointer to heap-allocated image data (optional)
-    image_ptr: ?*Image(Rgba),
+    // Store dynamic image for non-RGBA formats (or future migration)
+    py_image: ?*PyImage,
     // Store reference to NumPy array if created from numpy (for zero-copy)
     numpy_ref: ?*c.PyObject,
     // Store reference to parent Image if this is a view (for memory management)
@@ -38,8 +44,8 @@ fn image_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 
     const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
     if (self) |obj| {
-        // Initialize to null pointer to avoid undefined behavior
-        obj.image_ptr = null;
+        // Initialize to none
+        obj.py_image = null;
         obj.numpy_ref = null;
         obj.parent_ref = null;
     }
@@ -58,45 +64,52 @@ const image_init_doc =
     \\  - RGBA tuple (r, g, b, a) with values 0-255
     \\  - Any color object (Rgb, Hsl, Hsv, etc.)
     \\  - Defaults to transparent (0, 0, 0, 0)
+    \\- `format` (type, keyword-only): Pixel format sentinel specifying storage type.
+    \\  - `zignal.Grayscale` → single-channel u8 (NumPy shape (H, W, 1))
+    \\  - `zignal.Rgb` (default) → 3-channel RGB (NumPy shape (H, W, 3))
+    \\  - `zignal.Rgba` → 4-channel RGBA (NumPy shape (H, W, 4))
     \\
     \\## Examples
     \\```python
-    \\# Create a 100x200 transparent image
+    \\# Create a 100x200 black image (default RGB)
     \\img = Image(100, 200)
     \\
-    \\# Create a 100x200 red image
+    \\# Create a 100x200 red image (RGBA)
     \\img = Image(100, 200, (255, 0, 0))
     \\
-    \\# Create a 100x200 gray image
-    \\img = Image(100, 200, 128)
+    \\# Create a 100x200 grayscale image with mid-gray fill
+    \\img = Image(100, 200, 128, format=zignal.Grayscale)
+    \\
+    \\# Create a 100x200 RGB image
+    \\img = Image(100, 200, (0, 255, 0), format=zignal.Rgb)
     \\
     \\# Create an image from numpy array dimensions
     \\img = Image(*arr.shape[:2])
     \\
-    \\# Create with semi-transparent blue
-    \\img = Image(100, 200, (0, 0, 255, 128))
+    \\# Create with semi-transparent blue (requires RGBA)
+    \\img = Image(100, 200, (0, 0, 255, 128), format=zignal.Rgba)
     \\```
 ;
 
 fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    _ = kwds; // Not used in current implementation
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Check if the image is already initialized (might be from load or from_numpy)
-    if (self.image_ptr != null) {
+    if (self.py_image != null) {
         // Already initialized, just return success
         return 0;
     }
 
-    // Parse arguments
+    // Parse arguments: rows, cols, optional color, keyword-only format
     var rows: c_int = 0;
     var cols: c_int = 0;
     var color_obj: ?*c.PyObject = null;
+    var format_obj: ?*c.PyObject = null;
 
-    // Parse as separate integers
-    const format = std.fmt.comptimePrint("ii|O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &rows, &cols, &color_obj) == 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols, color=None) as arguments");
+    var kwlist = [_:null]?[*:0]u8{ @constCast("rows"), @constCast("cols"), @constCast("color"), @constCast("format"), null };
+    const fmt = std.fmt.comptimePrint("ii|O$O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(&kwlist), &rows, &cols, &color_obj, &format_obj) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols, color=None, *, format=...) arguments");
         return -1;
     }
 
@@ -106,51 +119,122 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
     // Parse color if provided, otherwise use transparent
     var fill_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 }; // Default transparent
+    var color_components: usize = 0; // Track number of color components
+    var is_integer_color = false;
     if (color_obj != null and color_obj != c.Py_None()) {
+        // Check if it's an integer (grayscale)
+        if (c.PyLong_Check(color_obj) != 0) {
+            is_integer_color = true;
+        }
+        // Check tuple size if it's a tuple to auto-detect format
+        else if (c.PyTuple_Check(color_obj) != 0) {
+            color_components = @intCast(c.PyTuple_Size(color_obj));
+        }
         fill_color = color_utils.parseColorToRgba(color_obj) catch {
             // Error already set by parseColorToRgba
             return -1;
         };
     }
 
-    // Create image
-    var image = Image(Rgba).initAlloc(allocator, validated_rows, validated_cols) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return -1;
-    };
+    // Determine requested format (sentinel types); default based on color type.
+    var _use_gray: bool = is_integer_color; // Integer color defaults to grayscale
+    var _use_rgb: bool = (!is_integer_color and color_components != 4); // Default to RGB unless grayscale or 4-component
+    if (format_obj) |fmt_obj| {
+        // Accept either the type object itself or an instance of the type
+        // Compare pointer identity for type objects
+        // TODO: Remove explicit cast after Python 3.10 is dropped
+        const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
+        if (is_type_obj) {
+            if (fmt_obj == @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType))) {
+                _use_gray = true;
+            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
+                _use_rgb = true;
+            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
+                _use_rgb = false;
+            } else {
+                c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+                return -1;
+            }
+        } else {
+            // Instances: allow Rgb/Rgba instances for convenience
+            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
+                _use_rgb = true;
+            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
+                _use_rgb = false;
+            } else {
+                c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+                return -1;
+            }
+        }
+    }
 
-    // Fill with specified color
-    @memset(image.data, fill_color);
-
-    // Store the image
-    const image_ptr = allocator.create(Image(Rgba)) catch {
-        image.deinit(allocator);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return -1;
-    };
-
-    image_ptr.* = image;
-    self.image_ptr = image_ptr;
-    self.numpy_ref = null;
-    self.parent_ref = null;
-
-    return 0;
+    // Create grayscale or RGBA depending on requested format
+    if (_use_gray) {
+        // Grayscale path
+        var gimg = Image(u8).initAlloc(allocator, validated_rows, validated_cols) catch {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+            return -1;
+        };
+        // Fill with grayscale value derived from provided color using luma
+        @memset(gimg.data, fill_color.toGray());
+        const pimg = allocator.create(PyImage) catch {
+            gimg.deinit(allocator);
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            return -1;
+        };
+        pimg.data = PyImage.Variant{ .gray = gimg };
+        pimg.owning = true;
+        self.py_image = pimg;
+        self.numpy_ref = null;
+        self.parent_ref = null;
+        return 0;
+    } else if (_use_rgb) {
+        // RGB path
+        var rimg = Image(Rgb).initAlloc(allocator, validated_rows, validated_cols) catch {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+            return -1;
+        };
+        @memset(rimg.data, fill_color.toRgb());
+        const pimg = allocator.create(PyImage) catch {
+            rimg.deinit(allocator);
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            return -1;
+        };
+        pimg.data = PyImage.Variant{ .rgb = rimg };
+        pimg.owning = true;
+        self.py_image = pimg;
+        self.numpy_ref = null;
+        self.parent_ref = null;
+        return 0;
+    } else {
+        // RGBA path (explicit)
+        var image = Image(Rgba).initAlloc(allocator, validated_rows, validated_cols) catch {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+            return -1;
+        };
+        @memset(image.data, fill_color);
+        const pimg = allocator.create(PyImage) catch {
+            image.deinit(allocator);
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            return -1;
+        };
+        pimg.* = .{ .data = .{ .rgba = image } };
+        self.py_image = pimg;
+        self.numpy_ref = null;
+        self.parent_ref = null;
+        return 0;
+    }
 }
 
 fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    // Free the image data if it was allocated
-    if (self.image_ptr) |ptr| {
-        // Only free if we allocated it (not if it's from numpy or a view)
-        if (self.numpy_ref == null and self.parent_ref == null) {
-            // Full deallocation: image data + pointer wrapper
-            ptr.deinit(py_utils.allocator);
-            py_utils.allocator.destroy(ptr);
-        } else {
-            // NumPy or parent owns the data, just destroy the pointer wrapper
-            py_utils.allocator.destroy(ptr);
-        }
+    // Free PyImage if present
+    if (self.py_image) |pimg| {
+        var tmp = pimg.*;
+        tmp.deinit(py_utils.allocator);
+        py_utils.allocator.destroy(pimg);
+        self.py_image = null;
     }
 
     // Release reference to NumPy array if we have one
@@ -186,70 +270,56 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     const self = @as(*ImageObject, @ptrCast(self_obj));
     const other = @as(*ImageObject, @ptrCast(other_obj));
 
-    // Get the image pointers
-    const self_img = self.image_ptr orelse {
-        // Self has no image data, compare with other
-        const other_has_data = other.image_ptr != null;
-        if (op == c.Py_EQ) {
-            return @ptrCast(py_utils.getPyBool(!other_has_data));
-        } else {
-            return @ptrCast(py_utils.getPyBool(other_has_data));
-        }
-    };
+    // Variant-aware equality: compare size and per-pixel RGBA values
+    if (self.py_image == null or other.py_image == null) {
+        // If either is uninitialized, they are equal only for != case
+        return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
+    }
+    // Store in local variables after null check to avoid repeated unwrapping
+    const self_img = self.py_image.?;
+    const other_img = other.py_image.?;
+    const dims_self = .{ self_img.rows(), self_img.cols() };
+    const dims_other = .{ other_img.rows(), other_img.cols() };
 
-    const other_img = other.image_ptr orelse {
-        // Other has no image data, self does
-        if (op == c.Py_EQ) {
-            return @ptrCast(py_utils.getPyBool(false));
-        } else {
-            return @ptrCast(py_utils.getPyBool(true));
-        }
-    };
-
-    // Compare dimensions first
-    if (self_img.rows != other_img.rows or self_img.cols != other_img.cols) {
-        // Dimensions don't match
-        if (op == c.Py_EQ) {
-            return @ptrCast(py_utils.getPyBool(false));
-        } else {
-            return @ptrCast(py_utils.getPyBool(true));
-        }
+    if (dims_self[0] != dims_other[0] or dims_self[1] != dims_other[1]) {
+        return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
     }
 
-    var pixels_equal: bool = undefined;
-    if (!self_img.isView() and !other_img.isView()) {
-        // for non views, compare all data at once
-        pixels_equal = std.mem.eql(Rgba, self_img.data, other_img.data);
-    } else {
-        // for views, compare row by row
-        pixels_equal = true;
-        for (0..self_img.rows) |row| {
-            const self_row_start = row * self_img.stride;
-            const other_row_start = row * other_img.stride;
-
-            const self_row = self_img.data[self_row_start..][0..self_img.cols];
-            const other_row = other_img.data[other_row_start..][0..other_img.cols];
-
-            if (!std.mem.eql(Rgba, self_row, other_row)) {
-                pixels_equal = false;
+    const rows = dims_self[0];
+    const cols = dims_self[1];
+    var equal = true;
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        var cidx: usize = 0;
+        while (cidx < cols) : (cidx += 1) {
+            const a = self_img.getPixelRgba(r, cidx);
+            const b = other_img.getPixelRgba(r, cidx);
+            if (a != b) {
+                equal = false;
                 break;
             }
         }
+        if (!equal) break;
     }
 
     if (op == c.Py_EQ) {
-        return @ptrCast(py_utils.getPyBool(pixels_equal));
+        return @ptrCast(py_utils.getPyBool(equal));
     } else {
-        return @ptrCast(py_utils.getPyBool(!pixels_equal));
+        return @ptrCast(py_utils.getPyBool(!equal));
     }
 }
 
 fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    if (self.image_ptr) |ptr| {
-        var buffer: [64]u8 = undefined;
-        const formatted = std.fmt.bufPrintZ(&buffer, "Image({d}x{d})", .{ ptr.rows, ptr.cols }) catch return null;
+    if (self.py_image) |pimg| {
+        var buffer: [96]u8 = undefined;
+        const fmt_name = switch (pimg.data) {
+            .gray => "Grayscale",
+            .rgb => "Rgb",
+            .rgba => "Rgba",
+        };
+        const formatted = std.fmt.bufPrintZ(&buffer, "Image({d}x{d}, format={s})", .{ pimg.rows(), pimg.cols(), fmt_name }) catch return null;
         return c.PyUnicode_FromString(formatted.ptr);
     } else {
         return c.PyUnicode_FromString("Image(uninitialized)");
@@ -260,24 +330,66 @@ fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c
     _ = closure;
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-    return c.PyLong_FromLong(@intCast(ptr.rows));
+    if (self.py_image) |pimg| {
+        return c.PyLong_FromLong(@intCast(pimg.rows()));
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-    return c.PyLong_FromLong(@intCast(ptr.cols));
+    if (self.py_image) |pimg| {
+        return c.PyLong_FromLong(@intCast(pimg.cols()));
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
+fn image_get_format(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+    _ = closure;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Return sentinel type objects: zignal.Grayscale, zignal.Rgb, or zignal.Rgba
+    if (self.py_image) |pimg| {
+        return switch (pimg.data) {
+            .gray => blk: {
+                const obj = @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType));
+                c.Py_INCREF(obj);
+                break :blk obj;
+            },
+            .rgb => blk: {
+                const obj = @as(*c.PyObject, @ptrCast(&color_bindings.RgbType));
+                c.Py_INCREF(obj);
+                break :blk obj;
+            },
+            .rgba => blk: {
+                const obj = @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType));
+                c.Py_INCREF(obj);
+                break :blk obj;
+            },
+        };
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 fn image_is_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-    return @ptrCast(py_utils.getPyBool(ptr.isView()));
+    if (self.py_image) |pimg| {
+        const is_view = switch (pimg.data) {
+            .gray => |img| img.isView(),
+            .rgb => |img| img.isView(),
+            .rgba => |img| img.isView(),
+        };
+        return @ptrCast(py_utils.getPyBool(is_view));
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_load_doc =
@@ -310,178 +422,392 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     // Convert C string to Zig slice
     const path_slice = std.mem.span(file_path);
 
-    // Load the image as RGBA for SIMD optimization benefits
-    const image = Image(Rgba).load(allocator, path_slice) catch |err| {
+    // PNG: load native format (Grayscale, RGB, RGBA)
+    if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
+        const data = std.fs.cwd().readFileAlloc(allocator, path_slice, 100 * 1024 * 1024) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+        defer allocator.free(data);
+        var decoded = zignal.png.decode(allocator, data) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+        defer decoded.deinit(allocator);
+        const native = zignal.png.toNativeImage(allocator, decoded) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+        const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+        if (self == null) return null;
+        switch (native) {
+            .grayscale => |img| {
+                const p = allocator.create(PyImage) catch {
+                    var tmp = img;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                p.* = .{ .data = .{ .gray = img }, .owning = true };
+                self.?.py_image = p;
+            },
+            .rgb => |img| {
+                const p = allocator.create(PyImage) catch {
+                    var tmp = img;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                p.* = .{ .data = .{ .rgb = img }, .owning = true };
+                self.?.py_image = p;
+            },
+            .rgba => |img| {
+                const p = allocator.create(PyImage) catch {
+                    var tmp = img;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                p.* = .{ .data = .{ .rgba = img }, .owning = true };
+                self.?.py_image = p;
+            },
+        }
+        self.?.numpy_ref = null;
+        self.?.parent_ref = null;
+        return @as(?*c.PyObject, @ptrCast(self));
+    }
+
+    // JPEG: detect grayscale vs color and load native
+    if (std.mem.endsWith(u8, path_slice, ".jpg") or std.mem.endsWith(u8, path_slice, ".JPG") or
+        std.mem.endsWith(u8, path_slice, ".jpeg") or std.mem.endsWith(u8, path_slice, ".JPEG"))
+    {
+        const data = std.fs.cwd().readFileAlloc(allocator, path_slice, 200 * 1024 * 1024) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+        defer allocator.free(data);
+
+        const comps = detectJpegComponents(data) orelse {
+            c.PyErr_SetString(c.PyExc_ValueError, "Invalid JPEG file (no SOF marker)");
+            return null;
+        };
+        if (comps == 1) {
+            const image = Image(u8).load(allocator, path_slice) catch |err| {
+                py_utils.setErrorWithPath(err, path_slice);
+                return null;
+            };
+            const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+            if (self == null) {
+                var img = image;
+                img.deinit(allocator);
+                return null;
+            }
+            const pimg = allocator.create(PyImage) catch {
+                var img = image;
+                img.deinit(allocator);
+                c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                return null;
+            };
+            pimg.* = .{ .data = .{ .gray = image }, .owning = true };
+            self.?.py_image = pimg;
+            self.?.numpy_ref = null;
+            self.?.parent_ref = null;
+            return @as(?*c.PyObject, @ptrCast(self));
+        } else {
+            const image = Image(Rgb).load(allocator, path_slice) catch |err| {
+                py_utils.setErrorWithPath(err, path_slice);
+                return null;
+            };
+            const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+            if (self == null) {
+                var img = image;
+                img.deinit(allocator);
+                return null;
+            }
+            const pimg = allocator.create(PyImage) catch {
+                var img = image;
+                img.deinit(allocator);
+                c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                return null;
+            };
+            pimg.* = .{ .data = .{ .rgb = image }, .owning = true };
+            self.?.py_image = pimg;
+            self.?.numpy_ref = null;
+            self.?.parent_ref = null;
+            return @as(?*c.PyObject, @ptrCast(self));
+        }
+    }
+
+    // Others: default to RGB
+    const image = Image(Rgb).load(allocator, path_slice) catch |err| {
         py_utils.setErrorWithPath(err, path_slice);
         return null;
     };
-
-    // Create new Python object
     const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
     if (self == null) {
         var img = image;
         img.deinit(allocator);
         return null;
     }
-
-    // Allocate space for the image on heap and move it there
-    const image_ptr = allocator.create(Image(Rgba)) catch {
+    const pimg = allocator.create(PyImage) catch {
         var img = image;
         img.deinit(allocator);
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
         return null;
     };
-
-    image_ptr.* = image;
-    self.?.image_ptr = image_ptr;
-
+    pimg.* = .{ .data = .{ .rgb = image }, .owning = true };
+    self.?.py_image = pimg;
+    self.?.numpy_ref = null;
+    self.?.parent_ref = null;
     return @as(?*c.PyObject, @ptrCast(self));
+}
+
+// Minimal JPEG header scan to detect number of components.
+// Returns 1 for grayscale, 3 for color, or null on error.
+fn detectJpegComponents(data: []const u8) ?u8 {
+    if (data.len < 4) return null;
+    // SOI
+    if (!(data[0] == 0xFF and data[1] == 0xD8)) return null;
+    var i: usize = 2;
+    while (i + 3 < data.len) {
+        // Find marker prefix 0xFF
+        if (data[i] != 0xFF) {
+            i += 1;
+            continue;
+        }
+        // Skip fill bytes 0xFF
+        while (i < data.len and data[i] == 0xFF) i += 1;
+        if (i >= data.len) break;
+        const marker = data[i];
+        i += 1;
+        // Markers without length
+        if (marker == 0xD8 or marker == 0xD9 or (marker >= 0xD0 and marker <= 0xD7) or marker == 0x01) {
+            continue;
+        }
+        if (i + 1 >= data.len) break;
+        const len: usize = (@as(usize, data[i]) << 8) | data[i + 1];
+        i += 2;
+        if (len < 2 or i + len - 2 > data.len) break;
+        // SOF0 or SOF2
+        if (marker == 0xC0 or marker == 0xC2) {
+            if (len < 8) break; // need at least up to components byte
+            // length bytes cover: [precision(1), height(2), width(2), components(1), ...]
+            const components = data[i + 5];
+            return components;
+        }
+        i += len - 2;
+    }
+    return null;
 }
 
 const image_to_numpy_doc =
     \\Convert the image to a NumPy array (zero-copy when possible).
     \\
-    \\## Parameters
-    \\- `include_alpha` (bool, optional): If True (default), returns array with shape (rows, cols, 4).
-    \\  If False, returns array with shape (rows, cols, 3).
+    \\Returns an array in the image's native format:\n
+    \\- Grayscale → shape (rows, cols, 1)\n
+    \\- Rgb → shape (rows, cols, 3)\n
+    \\- Rgba → shape (rows, cols, 4)
     \\
     \\## Examples
     \\```python
     \\img = Image.load("photo.png")
-    \\arr_rgba = img.to_numpy()  # Include alpha
-    \\arr_rgb = img.to_numpy(include_alpha=False)  # RGB only
-    \\print(arr_rgba.shape, arr_rgb.shape)
-    \\# Output: (512, 768, 4) (512, 768, 3)
+    \\arr = img.to_numpy()
+    \\print(arr.shape, arr.dtype)
+    \\# Example: (H, W, C) uint8 where C is 1, 3, or 4
     \\```
 ;
 
-fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args; // No arguments
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    // Parse arguments - include_alpha defaults to true
-    var include_alpha: c_int = 1;
-    var kwlist = [_:null]?[*:0]u8{ @constCast("include_alpha"), null };
-    const format = std.fmt.comptimePrint("|p", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &include_alpha) == 0) {
-        return null;
-    }
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            .gray => |img| {
+                // Import numpy
+                const np_module = c.PyImport_ImportModule("numpy") orelse {
+                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    return null;
+                };
+                defer c.Py_DECREF(np_module);
 
-    const ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+                // Create a memoryview from our image data
+                var buffer = c.Py_buffer{
+                    .buf = @ptrCast(img.data.ptr),
+                    .obj = self_obj,
+                    .len = @intCast(img.rows * img.cols * @sizeOf(u8)),
+                    .itemsize = 1,
+                    .readonly = 0,
+                    .ndim = 1,
+                    .format = @constCast("B"),
+                    .shape = null,
+                    .strides = null,
+                    .suboffsets = null,
+                    .internal = null,
+                };
+                c.Py_INCREF(self_obj); // Keep parent alive
 
-    // If created from numpy and include_alpha matches, return the original array
-    if (self.numpy_ref) |numpy_array| {
-        // Check if numpy array has the right number of channels
-        // For now, just return it if include_alpha is true (4 channels)
-        if (include_alpha != 0) {
-            c.Py_INCREF(numpy_array);
-            return numpy_array;
+                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
+                    c.Py_DECREF(self_obj);
+                    return null;
+                };
+                defer c.Py_DECREF(memview);
+
+                // numpy.frombuffer(memview, dtype='uint8').reshape(rows, cols, 1)
+                const frombuffer = c.PyObject_GetAttrString(np_module, "frombuffer") orelse return null;
+                defer c.Py_DECREF(frombuffer);
+                const args_tuple2 = c.Py_BuildValue("(O)", memview) orelse return null;
+                defer c.Py_DECREF(args_tuple2);
+                const kwargs2 = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
+                defer c.Py_DECREF(kwargs2);
+                const flat_array = c.PyObject_Call(frombuffer, args_tuple2, kwargs2) orelse return null;
+                const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(reshape_method);
+                const shape_tuple = c.Py_BuildValue("(III)", img.rows, img.cols, @as(c_uint, 1)) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(shape_tuple);
+                const reshaped = c.PyObject_CallObject(reshape_method, shape_tuple) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                c.Py_DECREF(flat_array);
+                return reshaped;
+            },
+            .rgb => |img| {
+                // Import numpy
+                const np_module = c.PyImport_ImportModule("numpy") orelse {
+                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    return null;
+                };
+                defer c.Py_DECREF(np_module);
+
+                // Create a memoryview from our image data (packed RGB u8)
+                var buffer = c.Py_buffer{
+                    .buf = @ptrCast(img.data.ptr),
+                    .obj = self_obj,
+                    .len = @intCast(img.rows * img.cols * @sizeOf(Rgb)),
+                    .itemsize = 1,
+                    .readonly = 0,
+                    .ndim = 1,
+                    .format = @constCast("B"),
+                    .shape = null,
+                    .strides = null,
+                    .suboffsets = null,
+                    .internal = null,
+                };
+                c.Py_INCREF(self_obj); // Keep parent alive
+
+                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
+                    c.Py_DECREF(self_obj);
+                    return null;
+                };
+                defer c.Py_DECREF(memview);
+
+                // numpy.frombuffer(memview, dtype='uint8').reshape(rows, cols, 3)
+                const frombuffer = c.PyObject_GetAttrString(np_module, "frombuffer") orelse return null;
+                defer c.Py_DECREF(frombuffer);
+                const args_tuple2 = c.Py_BuildValue("(O)", memview) orelse return null;
+                defer c.Py_DECREF(args_tuple2);
+                const kwargs2 = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
+                defer c.Py_DECREF(kwargs2);
+                const flat_array = c.PyObject_Call(frombuffer, args_tuple2, kwargs2) orelse return null;
+                const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(reshape_method);
+                const shape_tuple = c.Py_BuildValue("(III)", img.rows, img.cols, @as(c_uint, 3)) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(shape_tuple);
+                const reshaped = c.PyObject_CallObject(reshape_method, shape_tuple) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                c.Py_DECREF(flat_array);
+                return reshaped;
+            },
+            .rgba => |img| {
+                // Import numpy
+                const np_module = c.PyImport_ImportModule("numpy") orelse {
+                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    return null;
+                };
+                defer c.Py_DECREF(np_module);
+
+                // Create a memoryview from our image data (packed RGBA u8)
+                var buffer = c.Py_buffer{
+                    .buf = @ptrCast(img.data.ptr),
+                    .obj = self_obj,
+                    .len = @intCast(img.rows * img.cols * @sizeOf(Rgba)),
+                    .itemsize = 1,
+                    .readonly = 0,
+                    .ndim = 1,
+                    .format = @constCast("B"),
+                    .shape = null,
+                    .strides = null,
+                    .suboffsets = null,
+                    .internal = null,
+                };
+                c.Py_INCREF(self_obj); // Keep parent alive
+
+                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
+                    c.Py_DECREF(self_obj);
+                    return null;
+                };
+                defer c.Py_DECREF(memview);
+
+                // numpy.frombuffer(memview, dtype='uint8').reshape(rows, cols, 4)
+                const frombuffer = c.PyObject_GetAttrString(np_module, "frombuffer") orelse return null;
+                defer c.Py_DECREF(frombuffer);
+                const args_tuple2 = c.Py_BuildValue("(O)", memview) orelse return null;
+                defer c.Py_DECREF(args_tuple2);
+                const kwargs2 = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
+                defer c.Py_DECREF(kwargs2);
+                const flat_array = c.PyObject_Call(frombuffer, args_tuple2, kwargs2) orelse return null;
+                const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(reshape_method);
+                const shape_tuple = c.Py_BuildValue("(III)", img.rows, img.cols, @as(c_uint, 4)) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                defer c.Py_DECREF(shape_tuple);
+                const reshaped = c.PyObject_CallObject(reshape_method, shape_tuple) orelse {
+                    c.Py_DECREF(flat_array);
+                    return null;
+                };
+                c.Py_DECREF(flat_array);
+                return reshaped;
+            },
         }
-        // If include_alpha is false and we have a 4-channel array, we need to slice it
-        // Fall through to create a new view
     }
-    // Import numpy
-    const np_module = c.PyImport_ImportModule("numpy") orelse {
-        c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
-        return null;
-    };
-    defer c.Py_DECREF(np_module);
-
-    // Create a memoryview from our image data
-    var buffer = c.Py_buffer{
-        .buf = @ptrCast(ptr.data.ptr),
-        .obj = self_obj,
-        .len = @intCast(ptr.rows * ptr.cols * @sizeOf(Rgba)),
-        .itemsize = 1,
-        .readonly = 0,
-        .ndim = 1,
-        .format = @constCast("B"),
-        .shape = null,
-        .strides = null,
-        .suboffsets = null,
-        .internal = null,
-    };
-    c.Py_INCREF(self_obj); // Keep parent alive
-
-    const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
-        c.Py_DECREF(self_obj);
-        return null;
-    };
-    defer c.Py_DECREF(memview);
-
-    // Get numpy.frombuffer function
-    const frombuffer = c.PyObject_GetAttrString(np_module, "frombuffer") orelse return null;
-    defer c.Py_DECREF(frombuffer);
-
-    // Create arguments for frombuffer(memview, dtype='uint8')
-    const args_tuple = c.Py_BuildValue("(O)", memview) orelse return null;
-    defer c.Py_DECREF(args_tuple);
-
-    const kwargs = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
-    defer c.Py_DECREF(kwargs);
-
-    // Call numpy.frombuffer
-    const flat_array = c.PyObject_Call(frombuffer, args_tuple, kwargs) orelse return null;
-
-    // Always reshape to (rows, cols, 4) since internal storage is RGBA
-    const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse {
-        c.Py_DECREF(flat_array);
-        return null;
-    };
-    defer c.Py_DECREF(reshape_method);
-
-    const shape_tuple = c.Py_BuildValue("(III)", ptr.rows, ptr.cols, @as(c_uint, 4)) orelse {
-        c.Py_DECREF(flat_array);
-        return null;
-    };
-    defer c.Py_DECREF(shape_tuple);
-
-    const reshaped_array = c.PyObject_CallObject(reshape_method, shape_tuple) orelse {
-        c.Py_DECREF(flat_array);
-        return null;
-    };
-
-    c.Py_DECREF(flat_array);
-
-    // If include_alpha is false, slice to get only RGB channels
-    if (include_alpha == 0) {
-        // array[:, :, :3]
-        const slice_obj = c.PySlice_New(c.Py_None(), c.Py_None(), c.Py_None()) orelse {
-            c.Py_DECREF(reshaped_array);
-            return null;
-        };
-        defer c.Py_DECREF(slice_obj);
-
-        const three = c.PyLong_FromLong(3) orelse {
-            c.Py_DECREF(reshaped_array);
-            return null;
-        };
-        defer c.Py_DECREF(three);
-
-        const slice_tuple = c.Py_BuildValue("(OOO)", slice_obj, slice_obj, c.PySlice_New(c.Py_None(), three, c.Py_None())) orelse {
-            c.Py_DECREF(reshaped_array);
-            return null;
-        };
-        defer c.Py_DECREF(slice_tuple);
-
-        const sliced_array = c.PyObject_GetItem(reshaped_array, slice_tuple) orelse {
-            c.Py_DECREF(reshaped_array);
-            return null;
-        };
-
-        c.Py_DECREF(reshaped_array);
-        return sliced_array;
-    }
-
-    return reshaped_array;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_from_numpy_doc =
-    \\Create Image from NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
+    \\Create Image from a NumPy array with dtype uint8.
     \\
-    \\For 4-channel arrays, zero-copy is used. For 3-channel arrays, the data is
-    \\converted to RGBA format with alpha=255 (requires allocation).
-    \\To enable zero-copy for RGB arrays, use Image.add_alpha() first.
+    \\Zero-copy is used for contiguous arrays with these shapes:
+    \\- RGB: (rows, cols, 3) → Image(Rgb)
+    \\- RGBA: (rows, cols, 4) → Image(Rgba)
+    \\
+    \\Arrays must be C-contiguous. Non-contiguous inputs should be converted with `numpy.ascontiguousarray`.
     \\
     \\## Parameters
     \\- `array` (NDArray[np.uint8]): NumPy array with shape (rows, cols, 3) or (rows, cols, 4) and dtype uint8.
@@ -541,31 +867,29 @@ fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         return null;
     }
 
-    // Validate dimensions (should be 3D with shape (rows, cols, 3 or 4))
-    if (buffer.ndim != 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3) or (rows, cols, 4)");
+    // Validate dimensions and shape: only 3D arrays with 3 or 4 channels are supported
+    const ndim: c_int = buffer.ndim;
+    if (ndim != 3) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3|4)");
         return null;
     }
 
-    // Get shape information
     const shape = @as([*]c.Py_ssize_t, @ptrCast(buffer.shape));
     const rows = @as(usize, @intCast(shape[0]));
     const cols = @as(usize, @intCast(shape[1]));
-    const channels = @as(usize, @intCast(shape[2]));
-
-    if (channels != 3 and channels != 4) {
+    const channels: usize = @as(usize, @intCast(shape[2]));
+    if (!(channels == 3 or channels == 4)) {
         c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB) or 4 channels (RGBA)");
         return null;
     }
 
     // Check if array is C-contiguous
-    // For C-contiguous, strides should be: (cols*channels, channels, 1)
     const strides = @as([*]c.Py_ssize_t, @ptrCast(buffer.strides));
-    const expected_stride_2 = buffer.itemsize; // Should be 1 for uint8
-    const expected_stride_1 = expected_stride_2 * @as(c.Py_ssize_t, @intCast(channels)); // Should be 3 or 4
-    const expected_stride_0 = expected_stride_1 * @as(c.Py_ssize_t, @intCast(cols)); // Should be cols * channels
-
-    if (strides[0] != expected_stride_0 or strides[1] != expected_stride_1 or strides[2] != expected_stride_2) {
+    const item = buffer.itemsize; // 1 for uint8
+    const expected_stride_2 = item; // 1
+    const expected_stride_1 = expected_stride_2 * @as(c.Py_ssize_t, @intCast(channels));
+    const expected_stride_0 = expected_stride_1 * @as(c.Py_ssize_t, @intCast(cols));
+    if (strides[2] != expected_stride_2 or strides[1] != expected_stride_1 or strides[0] != expected_stride_0) {
         c.PyErr_SetString(c.PyExc_ValueError, "Array is not C-contiguous. Use numpy.ascontiguousarray() first.");
         return null;
     }
@@ -576,55 +900,43 @@ fn image_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         return null;
     }
 
-    // Allocate space for the image struct on heap
-    const image_ptr = allocator.create(Image(Rgba)) catch {
-        c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-
     if (channels == 4) {
         // Zero-copy: create image that points to NumPy's data directly
         const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
         const data_slice = data_ptr[0..@intCast(buffer.len)];
 
         // Use initFromBytes to reinterpret the data as RGBA pixels
-        image_ptr.* = Image(Rgba).initFromBytes(rows, cols, data_slice);
+        const img = Image(Rgba).initFromBytes(rows, cols, data_slice);
 
         // Keep a reference to the NumPy array to prevent deallocation
         c.Py_INCREF(array_obj.?);
         self.?.numpy_ref = array_obj;
-    } else {
-        // 3 channels - need to allocate and convert to RGBA
-        var rgba_image = Image(Rgba).initAlloc(allocator, rows, cols) catch {
-            allocator.destroy(image_ptr);
+        // Wrap as PyImage non-owning RGBA
+        const pimg = allocator.create(PyImage) catch {
             c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate RGBA image");
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
             return null;
         };
-
-        // Copy RGB data and set alpha to 255
-        const rgb_data = @as([*]const u8, @ptrCast(buffer.buf));
-        for (0..rows) |r| {
-            for (0..cols) |col| {
-                const src_idx = (r * cols + col) * 3;
-                const dst_idx = r * cols + col;
-                rgba_image.data[dst_idx] = Rgba{
-                    .r = rgb_data[src_idx],
-                    .g = rgb_data[src_idx + 1],
-                    .b = rgb_data[src_idx + 2],
-                    .a = 255,
-                };
-            }
-        }
-
-        image_ptr.* = rgba_image;
-        // No numpy_ref since we allocated new memory
-        self.?.numpy_ref = null;
+        pimg.* = .{ .data = .{ .rgba = img }, .owning = false };
+        self.?.py_image = pimg;
         self.?.parent_ref = null;
-    }
-
-    self.?.image_ptr = image_ptr;
+        return @as(?*c.PyObject, @ptrCast(self));
+    } else if (channels == 3) {
+        // Zero-copy RGB
+        const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
+        const data_slice = data_ptr[0..@intCast(buffer.len)];
+        const img = Image(Rgb).initFromBytes(rows, cols, data_slice);
+        c.Py_INCREF(array_obj.?);
+        self.?.numpy_ref = array_obj;
+        const pimg = allocator.create(PyImage) catch {
+            c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            return null;
+        };
+        pimg.* = .{ .data = .{ .rgb = img }, .owning = false };
+        self.?.py_image = pimg;
+        self.?.parent_ref = null;
+    } else unreachable; // validated above
     return @as(?*c.PyObject, @ptrCast(self));
 }
 
@@ -650,8 +962,7 @@ const image_save_doc =
 fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    // Check if image is initialized
-    const image_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    // Determine display format based on spec (parsed below)
 
     // Parse file path argument
     var file_path: [*c]const u8 = undefined;
@@ -671,11 +982,21 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
         return null;
     }
 
-    // Get allocator and save PNG
-    image_ptr.save(allocator, path_slice) catch |err| {
-        py_utils.setErrorWithPath(err, path_slice);
+    // Save PNG for current image format
+    if (self.py_image) |pimg| {
+        const res = switch (pimg.data) {
+            .gray => |img| img.save(allocator, path_slice),
+            .rgb => |img| img.save(allocator, path_slice),
+            .rgba => |img| img.save(allocator, path_slice),
+        };
+        res catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return null;
-    };
+    }
 
     // Return None
     const none = c.Py_None();
@@ -683,105 +1004,257 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     return none;
 }
 
-const image_add_alpha_doc =
-    \\Add alpha channel to a 3-channel RGB numpy array.
+const image_convert_doc =
     \\
-    \\This is useful for enabling zero-copy when creating Images from RGB arrays.
+    \\Convert the image to a different pixel format.
     \\
-    \\## Parameters
-    \\- `array` (NDArray[np.uint8]): NumPy array with shape (rows, cols, 3) and dtype uint8
-    \\- `alpha` (int, optional): Alpha value to use for all pixels (default: 255)
+    \\Supported targets: Grayscale, Rgb, Rgba.
     \\
-    \\## Examples
-    \\```python
-    \\rgb_arr = np.zeros((100, 200, 3), dtype=np.uint8)
-    \\rgba_arr = Image.add_alpha(rgb_arr)
-    \\print(rgba_arr.shape)
-    \\# Output: (100, 200, 4)
-    \\img = Image.from_numpy(rgba_arr)  # Zero-copy creation
-    \\```
+    \\Returns a new Image with the requested format.
 ;
 
-fn image_add_alpha(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = type_obj;
-    var array_obj: ?*c.PyObject = undefined;
-    var alpha_value: c_int = 255;
+fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const format = std.fmt.comptimePrint("O|i", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &array_obj, &alpha_value) == 0) {
+    // Parse one argument: target format sentinel or instance of Rgb/Rgba
+    var format_obj: ?*c.PyObject = null;
+    const fmt = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, fmt.ptr, &format_obj) == 0) {
         return null;
     }
 
-    if (array_obj == null or array_obj == c.Py_None()) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Array cannot be None");
+    if (format_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "convert() requires a target format (zignal.Grayscale, zignal.Rgb, or zignal.Rgba)");
         return null;
     }
 
-    // Import numpy if not already imported
-    const np_module = c.PyImport_ImportModule("numpy") orelse {
-        c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
-        return null;
-    };
-    defer c.Py_DECREF(np_module);
+    // Determine target type
+    var target_gray = false;
+    var target_rgb = false;
+    var target_rgba = false;
 
-    // Get array shape
-    const shape_attr = c.PyObject_GetAttrString(array_obj, "shape") orelse {
-        c.PyErr_SetString(c.PyExc_TypeError, "Input must be a numpy array");
-        return null;
-    };
-    defer c.Py_DECREF(shape_attr);
-
-    // Check if shape is (h, w, 3)
-    var h: c.Py_ssize_t = 0;
-    var w: c.Py_ssize_t = 0;
-    var c_var: c.Py_ssize_t = 0;
-    if (c.PyArg_ParseTuple(shape_attr, "nnn", &h, &w, &c_var) == 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 3)");
-        return null;
+    // TODO: Remove explicit cast after Python 3.10 is dropped
+    const is_type_obj = c.PyObject_TypeCheck(format_obj.?, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
+    if (is_type_obj) {
+        if (format_obj.? == @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType))) {
+            target_gray = true;
+        } else if (format_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
+            target_rgb = true;
+        } else if (format_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
+            target_rgba = true;
+        } else {
+            c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+            return null;
+        }
+    } else {
+        if (c.PyObject_IsInstance(format_obj.?, @ptrCast(&color_bindings.RgbType)) == 1) {
+            target_rgb = true;
+        } else if (c.PyObject_IsInstance(format_obj.?, @ptrCast(&color_bindings.RgbaType)) == 1) {
+            target_rgba = true;
+        } else {
+            c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+            return null;
+        }
     }
 
-    if (c_var != 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 3 channels (RGB)");
-        return null;
+    // Execute conversion using underlying Image(T).convert
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            .gray => |*img| {
+                if (target_gray) {
+                    // Same format: copy
+                    var out = Image(u8).initAlloc(allocator, img.rows, img.cols) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        return null;
+                    };
+                    img.copy(out);
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        out.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .gray = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgb) {
+                    const out = img.convert(Rgb, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgb = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgba) {
+                    const out = img.convert(Rgba, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgba = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                }
+            },
+            .rgb => |*img| {
+                if (target_gray) {
+                    const out = img.convert(u8, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .gray = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgb) {
+                    var out = Image(Rgb).initAlloc(allocator, img.rows, img.cols) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        return null;
+                    };
+                    img.copy(out);
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        out.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgb = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgba) {
+                    const out = img.convert(Rgba, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgba = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                }
+            },
+            .rgba => |*img| {
+                if (target_gray) {
+                    const out = img.convert(u8, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .gray = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgb) {
+                    const out = img.convert(Rgb, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        return null;
+                    };
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        var tmp = out;
+                        tmp.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgb = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                } else if (target_rgba) {
+                    var out = Image(Rgba).initAlloc(allocator, img.rows, img.cols) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        return null;
+                    };
+                    img.copy(out);
+                    const py = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+                    const out_self = @as(*ImageObject, @ptrCast(py));
+                    const pnew = allocator.create(PyImage) catch {
+                        out.deinit(allocator);
+                        c.Py_DECREF(py);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                        return null;
+                    };
+                    pnew.* = .{ .data = .{ .rgba = out } };
+                    out_self.py_image = pnew;
+                    out_self.numpy_ref = null;
+                    out_self.parent_ref = null;
+                    return py;
+                }
+            },
+        }
     }
 
-    // Create alpha array: np.full((h, w, 1), alpha_value, dtype=np.uint8)
-    const full_func = c.PyObject_GetAttrString(np_module, "full") orelse return null;
-    defer c.Py_DECREF(full_func);
-
-    const shape_tuple = c.Py_BuildValue("((nnn)i)", h, w, @as(c.Py_ssize_t, 1), alpha_value) orelse return null;
-    defer c.Py_DECREF(shape_tuple);
-
-    const kwargs = c.Py_BuildValue("{s:s}", "dtype", "uint8") orelse return null;
-    defer c.Py_DECREF(kwargs);
-
-    const alpha_array = c.PyObject_Call(full_func, shape_tuple, kwargs) orelse return null;
-    defer c.Py_DECREF(alpha_array);
-
-    // Concatenate: np.concatenate([array, alpha_array], axis=2)
-    const concatenate_func = c.PyObject_GetAttrString(np_module, "concatenate") orelse return null;
-    defer c.Py_DECREF(concatenate_func);
-
-    const arrays_list = c.PyList_New(2) orelse return null;
-    defer c.Py_DECREF(arrays_list);
-
-    c.Py_INCREF(array_obj.?);
-    _ = c.PyList_SetItem(arrays_list, 0, array_obj.?);
-    c.Py_INCREF(alpha_array);
-    _ = c.PyList_SetItem(arrays_list, 1, alpha_array);
-
-    const concat_args = c.Py_BuildValue("(O)", arrays_list) orelse return null;
-    defer c.Py_DECREF(concat_args);
-
-    const concat_kwargs = c.Py_BuildValue("{s:i}", "axis", @as(c_int, 2)) orelse return null;
-    defer c.Py_DECREF(concat_kwargs);
-
-    return c.PyObject_Call(concatenate_func, concat_args, concat_kwargs);
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 fn image_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
-    _ = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    // Require PyImage variant for iteration
+    if (self.py_image == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
     return pixel_iterator.new(self_obj);
 }
 
@@ -865,8 +1338,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         return image_repr(self_obj);
     }
 
-    // Check if image is initialized
-    const image_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    // Determine display format based on spec
 
     // Determine display format based on spec
     const display_format: DisplayFormat = if (std.mem.eql(u8, spec_slice, "ansi"))
@@ -943,23 +1415,30 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         return null;
     };
 
-    // Create formatter
-    const formatter = image_ptr.display(display_format);
-
-    // Capture formatted output using std.fmt.format
-    var buffer: std.ArrayList(u8) = .empty;
-    defer buffer.deinit(allocator);
-
-    // Use std.fmt.format to invoke the formatter's format method properly
-    std.fmt.format(buffer.writer(allocator), "{f}", .{formatter}) catch |err| {
-        switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
+    // Format image according to display_format and return a string
+    if (self.py_image) |pimg| {
+        var buffer: std.ArrayList(u8) = .empty;
+        defer buffer.deinit(allocator);
+        const w = buffer.writer(allocator);
+        switch (pimg.data) {
+            .gray => |*img| std.fmt.format(w, "{f}", .{img.display(display_format)}) catch |err| {
+                if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                return null;
+            },
+            .rgb => |*img| std.fmt.format(w, "{f}", .{img.display(display_format)}) catch |err| {
+                if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                return null;
+            },
+            .rgba => |*img| std.fmt.format(w, "{f}", .{img.display(display_format)}) catch |err| {
+                if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                return null;
+            },
         }
+        return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return null;
-    };
-
-    // Create Python string from buffer
-    return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
+    }
 }
 
 fn pythonToZigInterpolation(py_value: c_long) !InterpolationMethod {
@@ -975,102 +1454,144 @@ fn pythonToZigInterpolation(py_value: c_long) !InterpolationMethod {
 }
 
 fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*ImageObject {
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
-        return error.ImageNotInitialized;
-    };
-
-    var scaled_image = src_image.scale(allocator, scale, method) catch |err| {
-        switch (err) {
-            error.InvalidScaleFactor => {
-                c.PyErr_SetString(c.PyExc_ValueError, "Scale factor must be positive");
-                return error.InvalidScaleFactor;
+    if (self.py_image) |pimg| {
+        // Dispatch by variant
+        switch (pimg.data) {
+            .gray => |*img| {
+                var out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
             },
-            error.InvalidDimensions => {
-                c.PyErr_SetString(c.PyExc_ValueError, "Resulting image dimensions would be zero");
-                return error.InvalidDimensions;
+            .rgb => |*img| {
+                var out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
             },
-            error.OutOfMemory => {
-                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate scaled image");
-                return error.OutOfMemory;
+            .rgba => |*img| {
+                var out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
             },
         }
-    };
-
-    // Wrap in heap-allocated pointer
-    const new_image = allocator.create(Image(Rgba)) catch {
-        scaled_image.deinit(allocator);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return error.OutOfMemory;
-    };
-    errdefer allocator.destroy(new_image);
-    new_image.* = scaled_image;
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return error.OutOfMemory;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-
-    return result;
+    return error.ImageNotInitialized;
 }
 
 fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
-        return error.ImageNotInitialized;
-    };
-
-    // Create new image
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return error.OutOfMemory;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = Image(Rgba).initAlloc(allocator, rows, cols) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return error.OutOfMemory;
-    };
-
-    // Perform resize
-    src_image.resize(allocator, new_image.*, method) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return error.OutOfMemory;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return error.OutOfMemory;
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            .gray => |*img| {
+                var out = Image(u8).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                img.resize(allocator, out, method) catch return error.OutOfMemory;
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
+            },
+            .rgb => |*img| {
+                var out = Image(Rgb).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                img.resize(allocator, out, method) catch return error.OutOfMemory;
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
+            },
+            .rgba => |*img| {
+                var out = Image(Rgba).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                img.resize(allocator, out, method) catch return error.OutOfMemory;
+                const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+                const result = @as(*ImageObject, @ptrCast(py_obj));
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+                result.numpy_ref = null;
+                result.parent_ref = null;
+                return result;
+            },
+        }
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
+    return error.ImageNotInitialized;
+}
 
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-
-    return result;
+fn mapScaleError(err: anyerror) anyerror {
+    return switch (err) {
+        error.InvalidScaleFactor => blk: {
+            c.PyErr_SetString(c.PyExc_ValueError, "Scale factor must be positive");
+            break :blk error.InvalidScaleFactor;
+        },
+        error.InvalidDimensions => blk: {
+            c.PyErr_SetString(c.PyExc_ValueError, "Resulting image dimensions would be zero");
+            break :blk error.InvalidDimensions;
+        },
+        error.OutOfMemory => blk: {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate scaled image");
+            break :blk error.OutOfMemory;
+        },
+        else => err,
+    };
 }
 
 const image_fill_doc =
     \\Fill the entire image with a solid color.
     \\
+    \\The color is converted to the image's native pixel format (Grayscale/Rgb/Rgba).
+    \\
     \\## Parameters
     \\- `color`: Color value as:
-    \\  - int: Grayscale value (0-255), expanded to RGBA
+    \\  - int: Grayscale value (0-255)
     \\  - tuple[int, int, int]: RGB values
     \\  - tuple[int, int, int, int]: RGBA values
-    \\  - Color object with to_rgba() method or r,g,b,a attributes
+    \\  - Any supported color object (e.g., Rgb, Rgba)
     \\
     \\## Examples
     \\```python
@@ -1095,11 +1616,16 @@ fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
         return null;
     };
 
-    const image_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            .gray => |*img| img.fill(color),
+            .rgb => |*img| img.fill(color),
+            .rgba => |*img| img.fill(color),
+        }
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return null;
-    };
-
-    image_ptr.fill(color);
+    }
 
     c.Py_INCREF(c.Py_None());
     return c.Py_None();
@@ -1192,89 +1718,101 @@ fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
 }
 
 fn image_letterbox_square(self: *ImageObject, size: usize, method: InterpolationMethod) !*ImageObject {
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
-        return error.ImageNotInitialized;
-    };
-
-    // Create new image for letterbox output
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return error.OutOfMemory;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = Image(Rgba).initAlloc(allocator, size, size) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return error.OutOfMemory;
-    };
-
-    // Perform letterbox
-    _ = src_image.letterbox(allocator, new_image, method) catch |err| {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
-            error.InvalidDimensions => c.PyErr_SetString(c.PyExc_ValueError, "Invalid dimensions"),
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).initAlloc(allocator, size, size) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch return error.OutOfMemory;
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).initAlloc(allocator, size, size) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch return error.OutOfMemory;
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).initAlloc(allocator, size, size) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch {
+                    out.deinit(allocator);
+                    return error.OutOfMemory;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
         }
-        return err;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return error.OutOfMemory;
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return result;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return result;
+    return error.ImageNotInitialized;
 }
 
 fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch {
-        return error.ImageNotInitialized;
-    };
-
-    // Create new image for letterbox output
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return error.OutOfMemory;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = Image(Rgba).initAlloc(allocator, rows, cols) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return error.OutOfMemory;
-    };
-
-    // Perform letterbox
-    _ = src_image.letterbox(allocator, new_image, method) catch |err| {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory"),
-            error.InvalidDimensions => c.PyErr_SetString(c.PyExc_ValueError, "Invalid dimensions"),
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch return error.OutOfMemory;
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch return error.OutOfMemory;
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).initAlloc(allocator, rows, cols) catch return error.OutOfMemory;
+                _ = img.letterbox(allocator, &out, method) catch {
+                    out.deinit(allocator);
+                    return error.OutOfMemory;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return error.OutOfMemory;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
         }
-        return err;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return error.OutOfMemory;
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return result;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return result;
+    return error.ImageNotInitialized;
 }
 
 const image_rotate_doc =
@@ -1321,39 +1859,62 @@ fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         return null;
     };
 
-    // Get the source image
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create new image for rotated output
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    // Initialize as empty, will be auto-sized by rotate function
-    new_image.* = Image(Rgba).empty;
-
-    // Perform rotation
-    src_image.rotate(allocator, @floatCast(angle), method, new_image) catch {
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-        return null;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).empty;
+                img.rotate(allocator, @floatCast(angle), method, &out) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).empty;
+                img.rotate(allocator, @floatCast(angle), method, &out) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).empty;
+                img.rotate(allocator, @floatCast(angle), method, &out) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_box_blur_doc =
@@ -1386,38 +1947,62 @@ fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Allocate new image wrapper; underlying data will be allocated by blurBox
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    // Initialize as empty; blurBox will allocate and size appropriately
-    new_image.* = Image(Rgba).empty;
-
-    src_image.boxBlur(allocator, new_image, @intCast(radius_long)) catch {
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-        return null;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).empty;
+                img.boxBlur(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).empty;
+                img.boxBlur(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).empty;
+                img.boxBlur(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_sharpen_doc =
@@ -1450,38 +2035,62 @@ fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         return null;
     }
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Allocate new image wrapper; underlying data will be allocated by sharpen
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    // Initialize as empty; sharpen will allocate and size appropriately
-    new_image.* = Image(Rgba).empty;
-
-    src_image.sharpen(allocator, new_image, @intCast(radius_long)) catch {
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-        return null;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).empty;
+                img.sharpen(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).empty;
+                img.sharpen(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).empty;
+                img.sharpen(allocator, &out, @intCast(radius_long)) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_gaussian_blur_doc =
@@ -1509,47 +2118,80 @@ fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         return null;
     }
 
-    if (sigma <= 0) {
+    // Validate sigma: must be finite and > 0
+    if (!std.math.isFinite(sigma) or sigma <= 0) {
         c.PyErr_SetString(c.PyExc_ValueError, "sigma must be > 0");
         return null;
     }
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Allocate new image wrapper; underlying data will be allocated by blurGaussian
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    // Initialize as empty; blurGaussian will allocate and size appropriately
-    new_image.* = Image(Rgba).empty;
-
-    src_image.gaussianBlur(allocator, @floatCast(sigma), new_image) catch |err| {
-        allocator.destroy(new_image);
-        if (err == error.InvalidSigma) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
-        } else {
-            c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).empty;
+                img.gaussianBlur(allocator, @floatCast(sigma), &out) catch |err| {
+                    c.Py_DECREF(py_obj);
+                    if (err == error.InvalidSigma) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
+                    } else {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    }
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).empty;
+                img.gaussianBlur(allocator, @floatCast(sigma), &out) catch |err| {
+                    c.Py_DECREF(py_obj);
+                    if (err == error.InvalidSigma) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
+                    } else {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    }
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).empty;
+                img.gaussianBlur(allocator, @floatCast(sigma), &out) catch |err| {
+                    c.Py_DECREF(py_obj);
+                    if (err == error.InvalidSigma) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
+                    } else {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    }
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
         }
-        return null;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_psnr_doc =
@@ -1598,29 +2240,94 @@ fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 
     const other = @as(*ImageObject, @ptrCast(other_obj.?));
 
-    // Get both images
-    const self_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Self image") catch return null;
-    const other_image = py_utils.validateNonNull(*Image(Rgba), other.image_ptr, "Other image") catch return null;
+    // Require both images initialized via PyImage
+    if (self.py_image == null or other.py_image == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
 
-    // Calculate PSNR
-    const psnr_value = self_image.psnr(other_image.*) catch |err| {
-        switch (err) {
-            error.DimensionMismatch => {
-                var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrintZ(&buf, "Image dimensions must match. Self: {}x{}, Other: {}x{}", .{
-                    self_image.rows,
-                    self_image.cols,
-                    other_image.rows,
-                    other_image.cols,
-                }) catch "Image dimensions must match";
-                c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+    // Store in local variables after null check
+    const a = self.py_image.?;
+    const b = other.py_image.?;
+
+    // Compute PSNR only when both have the same pixel format
+    var out_value: f64 = 0;
+    switch (a.data) {
+        .gray => |img_a| {
+            const img_b = switch (b.data) {
+                .gray => |i| i,
+                else => {
+                    c.PyErr_SetString(c.PyExc_TypeError, "PSNR requires both images have the same pixel format");
+                    return null;
+                },
+            };
+            out_value = img_a.psnr(img_b) catch |err| {
+                if (err == error.DimensionMismatch) {
+                    var buf: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrintZ(&buf, "Image dimensions must match. Self: {}x{}, Other: {}x{}", .{
+                        img_a.rows,
+                        img_a.cols,
+                        img_b.rows,
+                        img_b.cols,
+                    }) catch "Image dimensions must match";
+                    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                    return null;
+                }
+                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to compute PSNR");
                 return null;
-            },
-        }
-    };
+            };
+        },
+        .rgb => |img_a| {
+            const img_b = switch (b.data) {
+                .rgb => |i| i,
+                else => {
+                    c.PyErr_SetString(c.PyExc_TypeError, "PSNR requires both images have the same pixel format");
+                    return null;
+                },
+            };
+            out_value = img_a.psnr(img_b) catch |err| {
+                if (err == error.DimensionMismatch) {
+                    var buf: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrintZ(&buf, "Image dimensions must match. Self: {}x{}, Other: {}x{}", .{
+                        img_a.rows,
+                        img_a.cols,
+                        img_b.rows,
+                        img_b.cols,
+                    }) catch "Image dimensions must match";
+                    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                    return null;
+                }
+                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to compute PSNR");
+                return null;
+            };
+        },
+        .rgba => |img_a| {
+            const img_b = switch (b.data) {
+                .rgba => |i| i,
+                else => {
+                    c.PyErr_SetString(c.PyExc_TypeError, "PSNR requires both images have the same pixel format");
+                    return null;
+                },
+            };
+            out_value = img_a.psnr(img_b) catch |err| {
+                if (err == error.DimensionMismatch) {
+                    var buf: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrintZ(&buf, "Image dimensions must match. Self: {}x{}, Other: {}x{}", .{
+                        img_a.rows,
+                        img_a.cols,
+                        img_b.rows,
+                        img_b.cols,
+                    }) catch "Image dimensions must match";
+                    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+                    return null;
+                }
+                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to compute PSNR");
+                return null;
+            };
+        },
+    }
 
-    // Return the PSNR value as a Python float
-    return c.PyFloat_FromDouble(psnr_value);
+    return c.PyFloat_FromDouble(out_value);
 }
 
 const image_copy_doc =
@@ -1639,33 +2346,62 @@ fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     _ = args; // No arguments
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = src_image.dupe(allocator) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return null;
-    };
-
-    // Wrap into Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                const out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    var tmp = out;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                const out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    var tmp = out;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                const out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    var tmp = out;
+                    tmp.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_view_doc =
@@ -1718,38 +2454,50 @@ fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
         @intFromFloat(@max(0, frect.b)),
     );
 
-    // Get the source image
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create the view (this returns a new Image struct that shares data)
-    const view_image = src_image.view(rect);
-
-    // Create wrapper for the view
-    const view_ptr = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image view");
-        return null;
-    };
-    errdefer allocator.destroy(view_ptr);
-
-    view_ptr.* = view_image;
-
-    // Create new Python object for the view
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        allocator.destroy(view_ptr);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        // Create new Python Image wrapping the view in the same variant
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                const view_img = img.view(rect);
+                const pnew = allocator.create(PyImage) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate view");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = view_img }, .owning = false };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                const view_img = img.view(rect);
+                const pnew = allocator.create(PyImage) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate view");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = view_img }, .owning = false };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                const view_img = img.view(rect);
+                const pnew = allocator.create(PyImage) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate view");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = view_img }, .owning = false };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        c.Py_INCREF(self_obj);
+        result.parent_ref = self_obj;
+        return py_obj;
     }
 
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = view_ptr;
-    result.numpy_ref = null;
-
-    // IMPORTANT: Keep a reference to the parent to prevent deallocation
-    c.Py_INCREF(self_obj);
-    result.parent_ref = self_obj;
-
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_flip_left_right_doc =
@@ -1765,37 +2513,65 @@ fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     _ = args;
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create a copy and flip it
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = src_image.dupe(allocator) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return null;
-    };
-
-    // Flip the cloned image
-    new_image.flipLeftRight();
-
-    // Wrap into Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipLeftRight();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipLeftRight();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipLeftRight();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
 
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_flip_top_bottom_doc =
@@ -1811,37 +2587,65 @@ fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     _ = args;
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create copy
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = src_image.dupe(allocator) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return null;
-    };
-
-    // Flip the cloned image
-    new_image.flipTopBottom();
-
-    // Wrap into Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipTopBottom();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipTopBottom();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.flipTopBottom();
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
 
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_letterbox_doc =
@@ -1960,36 +2764,81 @@ fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(rect_obj) catch return null;
 
-    // Get the source image
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create new image for cropped output
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    // Perform crop
-    src_image.crop(allocator, rect, new_image) catch {
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
-        return null;
-    };
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |*img| {
+                var out = Image(u8).initAlloc(allocator, img.rows, img.cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                img.crop(allocator, rect, &out) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |*img| {
+                var out = Image(Rgb).initAlloc(allocator, img.rows, img.cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                img.crop(allocator, rect, &out) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |*img| {
+                var out = Image(Rgba).initAlloc(allocator, img.rows, img.cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                img.crop(allocator, rect, &out) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
+                    return null;
+                };
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_extract_doc =
@@ -2049,9 +2898,6 @@ fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         return null;
     };
 
-    // Get the source image
-    const src_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
     // Determine output size
     var out_rows: usize = @intFromFloat(@round(rect.height()));
     var out_cols: usize = @intFromFloat(@round(rect.width()));
@@ -2106,35 +2952,62 @@ fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         }
     }
 
-    // Create output image
-    const new_image = allocator.create(Image(Rgba)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-        return null;
-    };
-    errdefer allocator.destroy(new_image);
-
-    new_image.* = Image(Rgba).initAlloc(allocator, out_rows, out_cols) catch {
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-        return null;
-    };
-
-    // Perform extraction
-    src_image.extract(rect, @floatCast(angle), new_image.*, method);
-
-    // Create new Python object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0);
-    if (py_obj == null) {
-        new_image.deinit(allocator);
-        allocator.destroy(new_image);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Python object");
-        return null;
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            .gray => |img| {
+                var out = Image(u8).initAlloc(allocator, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                img.extract(rect, @floatCast(angle), out, method);
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .gray = out } };
+                result.py_image = pnew;
+            },
+            .rgb => |img| {
+                var out = Image(Rgb).initAlloc(allocator, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                img.extract(rect, @floatCast(angle), out, method);
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgb = out } };
+                result.py_image = pnew;
+            },
+            .rgba => |img| {
+                var out = Image(Rgba).initAlloc(allocator, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                img.extract(rect, @floatCast(angle), out, method);
+                const pnew = allocator.create(PyImage) catch {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                pnew.* = .{ .data = .{ .rgba = out } };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
     }
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-    result.image_ptr = new_image;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-    return py_obj;
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_insert_doc =
@@ -2186,7 +3059,6 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     }
 
     const source = @as(*ImageObject, @ptrCast(source_obj.?));
-    const source_image = py_utils.validateNonNull(*Image(Rgba), source.image_ptr, "Source image") catch return null;
 
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(rect_obj) catch return null;
@@ -2197,16 +3069,78 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         return null;
     };
 
-    // Get the destination image (self)
-    const dst_image = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Perform insertion (modifies dst_image in-place)
-    dst_image.insert(source_image.*, rect, @floatCast(angle), method);
-
-    // Return None
-    const none = c.Py_None();
-    c.Py_INCREF(none);
-    return none;
+    // Variant-aware in-place insert
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            .gray => |*dst| {
+                var src_u8: Image(u8) = undefined;
+                if (source.py_image == null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    return null;
+                }
+                const src_pimg = source.py_image.?;
+                switch (src_pimg.data) {
+                    .gray => |img| src_u8 = img,
+                    .rgb => |img| src_u8 = img.convert(u8, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                    .rgba => |img| src_u8 = img.convert(u8, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                }
+                defer src_u8.deinit(allocator);
+                dst.insert(src_u8, rect, @floatCast(angle), method);
+            },
+            .rgb => |*dst| {
+                var src_rgb: Image(Rgb) = undefined;
+                if (source.py_image == null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    return null;
+                }
+                const src_pimg = source.py_image.?;
+                switch (src_pimg.data) {
+                    .rgb => |img| src_rgb = img,
+                    .gray => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                    .rgba => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                }
+                defer src_rgb.deinit(allocator);
+                dst.insert(src_rgb, rect, @floatCast(angle), method);
+            },
+            .rgba => |*dst| {
+                var src_rgba: Image(Rgba) = undefined;
+                if (source.py_image == null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    return null;
+                }
+                const src_pimg = source.py_image.?;
+                switch (src_pimg.data) {
+                    .rgba => |img| src_rgba = img,
+                    .gray => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                    .rgb => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        return null;
+                    },
+                }
+                dst.insert(src_rgba, rect, @floatCast(angle), method);
+            },
+        }
+        const none = c.Py_None();
+        c.Py_INCREF(none);
+        return none;
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
 }
 
 const image_canvas_doc =
@@ -2223,41 +3157,16 @@ const image_canvas_doc =
 
 fn image_canvas(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments expected
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
-
-    // Check if image is initialized
-    const img_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
-
-    // Create new Canvas object
-    const canvas_obj = @as(?*canvas.CanvasObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(&canvas.CanvasType), 0)));
-    if (canvas_obj == null) {
-        return null;
-    }
-
-    // Keep reference to parent Image to prevent garbage collection
-    c.Py_INCREF(self_obj.?);
-    canvas_obj.?.image_ref = @ptrCast(self_obj);
-
-    // Create and store the Canvas struct
-    const canvas_ptr = allocator.create(canvas.Canvas(Rgba)) catch {
-        c.Py_DECREF(self_obj.?);
-        c.Py_DECREF(@as(*c.PyObject, @ptrCast(canvas_obj)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Canvas");
-        return null;
-    };
-
-    // Initialize the Canvas
-    canvas_ptr.* = canvas.Canvas(Rgba).init(allocator, img_ptr.*);
-    canvas_obj.?.canvas_ptr = canvas_ptr;
-
-    return @as(?*c.PyObject, @ptrCast(canvas_obj));
+    // Create Canvas by calling its constructor with this Image object
+    const args_tuple = c.Py_BuildValue("(O)", self_obj.?) orelse return null;
+    defer c.Py_DECREF(args_tuple);
+    const canvas_py = c.PyObject_CallObject(@ptrCast(&canvas.CanvasType), args_tuple) orelse return null;
+    return canvas_py;
 }
 
 fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
-
-    // Check if image is initialized
-    const img_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return null;
+    const pimg_opt = self.py_image;
 
     // Parse the key - expecting a tuple of (row, col)
     if (c.PyTuple_Check(key) == 0) {
@@ -2287,41 +3196,62 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
     }
 
     // Bounds checking
-    if (row < 0 or row >= img_ptr.rows) {
-        c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
-        return null;
-    }
-    if (col < 0 or col >= img_ptr.cols) {
-        c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
-        return null;
-    }
-
-    // Get the pixel value
-    const pixel = img_ptr.at(@intCast(row), @intCast(col)).*;
-
-    // Import color module to get RgbaType
-    const color_module = @import("color.zig");
-
-    // Create and return an Rgba object
-    const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0);
-    if (rgba_obj == null) {
+    if (pimg_opt) |pimg| {
+        if (row < 0 or row >= pimg.rows()) {
+            c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
+            return null;
+        }
+        if (col < 0 or col >= pimg.cols()) {
+            c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
+            return null;
+        }
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return null;
     }
 
-    const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
-    rgba.field0 = pixel.r;
-    rgba.field1 = pixel.g;
-    rgba.field2 = pixel.b;
-    rgba.field3 = pixel.a;
+    // Variant-specific pixel return
+    if (pimg_opt) |pimg| {
+        switch (pimg.data) {
+            .gray => |img| {
+                const gray = img.at(@intCast(row), @intCast(col)).*;
+                return c.PyLong_FromLong(@intCast(gray));
+            },
+            .rgb => |img| {
+                const p = img.at(@intCast(row), @intCast(col)).*;
+                const color_module = @import("color.zig");
+                const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbType), 0);
+                if (rgb_obj == null) return null;
+                const rgb = @as(*color_module.RgbBinding.PyObjectType, @ptrCast(rgb_obj));
+                rgb.field0 = p.r;
+                rgb.field1 = p.g;
+                rgb.field2 = p.b;
+                return rgb_obj;
+            },
+            .rgba => |img| {
+                const p = img.at(@intCast(row), @intCast(col)).*;
+                const color_module = @import("color.zig");
+                const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0);
+                if (rgba_obj == null) return null;
+                const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
+                rgba.field0 = p.r;
+                rgba.field1 = p.g;
+                rgba.field2 = p.b;
+                rgba.field3 = p.a;
+                return rgba_obj;
+            },
+        }
+    }
 
-    return rgba_obj;
+    // Unreachable; bounds check above should have returned
+    return null;
 }
 
 fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject) callconv(.c) c_int {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
-    // Check if image is initialized
-    const img_ptr = py_utils.validateNonNull(*Image(Rgba), self.image_ptr, "Image") catch return -1;
+    // If PyImage present, use it; else use RGBA pointer
+    const pimg_opt = self.py_image;
 
     // Parse the key - expecting a tuple of (row, col)
     if (c.PyTuple_Check(key) == 0) {
@@ -2351,12 +3281,17 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     }
 
     // Bounds checking
-    if (row < 0 or row >= img_ptr.rows) {
-        c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
-        return -1;
-    }
-    if (col < 0 or col >= img_ptr.cols) {
-        c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
+    if (pimg_opt) |pimg| {
+        if (row < 0 or row >= pimg.rows()) {
+            c.PyErr_SetString(c.PyExc_IndexError, "Row index out of bounds");
+            return -1;
+        }
+        if (col < 0 or col >= pimg.cols()) {
+            c.PyErr_SetString(c.PyExc_IndexError, "Column index out of bounds");
+            return -1;
+        }
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return -1;
     }
 
@@ -2367,7 +3302,11 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     };
 
     // Set the pixel value
-    img_ptr.at(@intCast(row), @intCast(col)).* = color;
+    if (pimg_opt) |pimg| {
+        pimg.setPixelRgba(@intCast(row), @intCast(col), color);
+    } else {
+        return -1;
+    }
 
     return 0;
 }
@@ -2376,13 +3315,11 @@ fn image_len(self_obj: ?*c.PyObject) callconv(.c) c.Py_ssize_t {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Check if image is initialized
-    if (self.image_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-        return -1;
+    if (self.py_image) |pimg| {
+        return @intCast(pimg.rows() * pimg.cols());
     }
-
-    const img = self.image_ptr.?;
-    return @intCast(img.rows * img.cols);
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return -1;
 }
 
 pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
@@ -2395,6 +3332,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "Image",
     },
     .{
+        .name = "convert",
+        .meth = @ptrCast(&image_convert),
+        .flags = c.METH_VARARGS,
+        .doc = image_convert_doc,
+        .params = "self, format: Grayscale | Rgb | Rgba",
+        .returns = "Image",
+    },
+    .{
         .name = "from_numpy",
         .meth = @ptrCast(&image_from_numpy),
         .flags = c.METH_VARARGS | c.METH_CLASS,
@@ -2403,19 +3348,11 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "Image",
     },
     .{
-        .name = "add_alpha",
-        .meth = @ptrCast(&image_add_alpha),
-        .flags = c.METH_VARARGS | c.METH_STATIC,
-        .doc = image_add_alpha_doc,
-        .params = "array: NDArray[np.uint8], alpha: int = 255",
-        .returns = "NDArray[np.uint8]",
-    },
-    .{
         .name = "to_numpy",
         .meth = @ptrCast(&image_to_numpy),
-        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .flags = c.METH_NOARGS,
         .doc = image_to_numpy_doc,
-        .params = "self, include_alpha: bool = True",
+        .params = "self",
         .returns = "NDArray[np.uint8]",
     },
     .{
@@ -2589,6 +3526,13 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
         .doc = "Number of columns (width) in the image",
         .type = "int",
     },
+    .{
+        .name = "format",
+        .get = @ptrCast(&image_get_format),
+        .set = null,
+        .doc = "Pixel format sentinel (Grayscale, Rgb, or Rgba)",
+        .type = "Grayscale | Rgb | Rgba",
+    },
 };
 
 var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
@@ -2597,8 +3541,7 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        // .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None",
-        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None",
+        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None, format = Grayscale | Rgb | Rgba",
         .returns = "None",
         .doc = image_init_doc,
     },
@@ -2611,12 +3554,12 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .name = "__iter__",
         .params = "self",
         .returns = "PixelIterator",
-        .doc = "Iterate over pixels in row-major order, yielding (row, col, Rgba).",
+        .doc = "Iterate over pixels in row-major order, yielding (row, col, pixel) in native format (int|Rgb|Rgba).",
     },
     .{
         .name = "__getitem__",
         .params = "self, key: tuple[int, int]",
-        .returns = "Rgba",
+        .returns = "int | Rgb | Rgba",
     },
     .{
         .name = "__setitem__",

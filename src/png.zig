@@ -425,7 +425,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
 }
 
 /// Convert PNG image data to its most natural Zignal Image type
-fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
+pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
     rgba: Image(Rgba),
