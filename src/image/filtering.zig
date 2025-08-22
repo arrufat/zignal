@@ -40,52 +40,50 @@ pub fn Filter(comptime T: type) type {
                 return;
             }
 
-            // If the destination is a view (non-contiguous), compute into a temporary
-            // contiguous image and copy back at the end. The low-level plane functions
-            // write assuming packed rows (stride == cols).
-            var dst_img: Self = undefined;
-            var use_temp_dst = false;
-            if (blurred.isView()) {
-                dst_img = try .initAlloc(allocator, self.rows, self.cols);
-                use_temp_dst = true;
-                defer if (use_temp_dst) dst_img.deinit(allocator);
-            } else {
-                dst_img = blurred.*;
-            }
-
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Build integral image
                     const plane_size = self.rows * self.cols;
-                    const integral_img = try allocator.alloc(f32, plane_size);
-                    defer allocator.free(integral_img);
+                    const integral_buf = try allocator.alloc(f32, plane_size);
+                    defer allocator.free(integral_buf);
+                    const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
                     // Use optimized paths for u8 and f32, generic path for others
                     if (T == u8) {
-                        integralPlane(u8, self.data, integral_img, self.rows, self.cols);
-                        boxBlurPlane(u8, integral_img, dst_img.data, self.rows, self.cols, radius);
+                        integralPlane(u8, self, integral_img);
+                        boxBlurPlane(u8, integral_img, blurred.*, radius);
                     } else if (T == f32) {
-                        integralPlane(f32, self.data, integral_img, self.rows, self.cols);
-                        boxBlurPlane(f32, integral_img, dst_img.data, self.rows, self.cols, radius);
+                        integralPlane(f32, self, integral_img);
+                        boxBlurPlane(f32, integral_img, blurred.*, radius);
                     } else {
                         // Generic path: convert to f32 for processing
                         const src_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(src_f32);
-                        for (0..plane_size) |i| {
-                            src_f32[i] = meta.as(f32, self.data[i]);
+                        // Gather source respecting stride into packed image
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                src_f32[r * self.cols + c] = meta.as(f32, self.at(r, c).*);
+                            }
                         }
-                        integralPlane(f32, src_f32, integral_img, self.rows, self.cols);
+                        const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
+                        integralPlane(f32, src_img, integral_img);
 
                         const dst_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(dst_f32);
-                        boxBlurPlane(f32, integral_img, dst_f32, self.rows, self.cols, radius);
+                        const dst_img_packed: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_f32 };
+                        boxBlurPlane(f32, integral_img, dst_img_packed, radius);
 
                         // Convert back to target type
-                        for (0..plane_size) |i| {
-                            dst_img.data[i] = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(dst_f32[i]))))
-                            else
-                                meta.as(T, dst_f32[i]);
+                        for (0..self.rows) |r| {
+                            const dst_row_packed = r * self.cols;
+                            const dst_row = r * blurred.stride;
+                            for (0..self.cols) |c| {
+                                const v = dst_f32[dst_row_packed + c];
+                                blurred.data[dst_row + c] = if (@typeInfo(T) == .int)
+                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(v))))
+                                else
+                                    meta.as(T, v);
+                            }
                         }
                     }
                 },
@@ -110,8 +108,9 @@ pub fn Filter(comptime T: type) type {
                         defer for (channels) |channel| allocator.free(channel);
 
                         // Process each channel
-                        const integral_img = try allocator.alloc(f32, plane_size);
-                        defer allocator.free(integral_img);
+                        const integral_buf = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(integral_buf);
+                        const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
                         const r_out = try allocator.alloc(u8, plane_size);
                         defer allocator.free(r_out);
@@ -120,17 +119,23 @@ pub fn Filter(comptime T: type) type {
                         const b_out = try allocator.alloc(u8, plane_size);
                         defer allocator.free(b_out);
 
-                        integralPlane(u8, channels[0], integral_img, self.rows, self.cols);
-                        boxBlurPlane(u8, integral_img, r_out, self.rows, self.cols, radius);
+                        const r_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[0] };
+                        const r_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = r_out };
+                        integralPlane(u8, r_plane, integral_img);
+                        boxBlurPlane(u8, integral_img, r_out_img, radius);
 
-                        integralPlane(u8, channels[1], integral_img, self.rows, self.cols);
-                        boxBlurPlane(u8, integral_img, g_out, self.rows, self.cols, radius);
+                        const g_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[1] };
+                        const g_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = g_out };
+                        integralPlane(u8, g_plane, integral_img);
+                        boxBlurPlane(u8, integral_img, g_out_img, radius);
 
-                        integralPlane(u8, channels[2], integral_img, self.rows, self.cols);
-                        boxBlurPlane(u8, integral_img, b_out, self.rows, self.cols, radius);
+                        const b_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[2] };
+                        const b_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = b_out };
+                        integralPlane(u8, b_plane, integral_img);
+                        boxBlurPlane(u8, integral_img, b_out_img, radius);
 
                         // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, dst_img);
+                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, blurred.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -148,7 +153,7 @@ pub fn Filter(comptime T: type) type {
                                 inline for (fields, 0..) |f, i| {
                                     // Skip alpha channel if present
                                     if (has_alpha and i == 3) {
-                                        @field(dst_img.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
+                                        @field(blurred.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
                                         continue;
                                     }
 
@@ -158,7 +163,7 @@ pub fn Filter(comptime T: type) type {
                                         (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
                                         (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
 
-                                    @field(dst_img.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                         .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
                                         .float => as(f.type, sum / area),
                                         else => @compileError("Can't compute the boxBlur image with struct fields of type " ++ @typeName(f.type) ++ "."),
@@ -169,12 +174,6 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the boxBlur image of " ++ @typeName(T) ++ "."),
-            }
-
-            // If we computed into a temporary destination (because blurred is a view),
-            // copy the packed result back into the view using the safe copy path.
-            if (use_temp_dst) {
-                dst_img.copy(blurred.*);
             }
         }
 
@@ -195,35 +194,45 @@ pub fn Filter(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int, .float => {
                     const plane_size = self.rows * self.cols;
-                    const integral_img = try allocator.alloc(f32, plane_size);
-                    defer allocator.free(integral_img);
+                    const integral_buf = try allocator.alloc(f32, plane_size);
+                    defer allocator.free(integral_buf);
+                    const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
                     // Use optimized paths for u8 and f32, generic path for others
                     if (T == u8) {
-                        integralPlane(u8, self.data, integral_img, self.rows, self.cols);
-                        sharpenPlane(u8, self.data, integral_img, sharpened.data, self.rows, self.cols, radius);
+                        integralPlane(u8, self, integral_img);
+                        sharpenPlane(u8, self, integral_img, sharpened.*, radius);
                     } else if (T == f32) {
-                        integralPlane(f32, self.data, integral_img, self.rows, self.cols);
-                        sharpenPlane(f32, self.data, integral_img, sharpened.data, self.rows, self.cols, radius);
+                        integralPlane(f32, self, integral_img);
+                        sharpenPlane(f32, self, integral_img, sharpened.*, radius);
                     } else {
                         // Generic path: convert to f32 for processing
                         const src_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(src_f32);
-                        for (0..plane_size) |i| {
-                            src_f32[i] = meta.as(f32, self.data[i]);
+                        // Gather respecting stride into packed plane
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                src_f32[r * self.cols + c] = meta.as(f32, self.at(r, c).*);
+                            }
                         }
-                        integralPlane(f32, src_f32, integral_img, self.rows, self.cols);
+                        const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
+                        integralPlane(f32, src_img, integral_img);
 
                         const dst_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(dst_f32);
-                        sharpenPlane(f32, src_f32, integral_img, dst_f32, self.rows, self.cols, radius);
+                        const src_packed: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
+                        const dst_packed: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_f32 };
+                        sharpenPlane(f32, src_packed, integral_img, dst_packed, radius);
 
                         // Convert back to target type
-                        for (0..plane_size) |i| {
-                            sharpened.data[i] = if (@typeInfo(T) == .int)
-                                @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(dst_f32[i]))))
-                            else
-                                meta.as(T, dst_f32[i]);
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const v = dst_f32[r * self.cols + c];
+                                sharpened.at(r, c).* = if (@typeInfo(T) == .int)
+                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(v))))
+                                else
+                                    meta.as(T, v);
+                            }
                         }
                     }
                 },
@@ -248,8 +257,9 @@ pub fn Filter(comptime T: type) type {
                         defer for (channels) |channel| allocator.free(channel);
 
                         // Process each channel
-                        const integral_img = try allocator.alloc(f32, plane_size);
-                        defer allocator.free(integral_img);
+                        const integral_buf = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(integral_buf);
+                        const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
                         const r_out = try allocator.alloc(u8, plane_size);
                         defer allocator.free(r_out);
@@ -258,14 +268,20 @@ pub fn Filter(comptime T: type) type {
                         const b_out = try allocator.alloc(u8, plane_size);
                         defer allocator.free(b_out);
 
-                        integralPlane(u8, channels[0], integral_img, self.rows, self.cols);
-                        sharpenPlane(u8, channels[0], integral_img, r_out, self.rows, self.cols, radius);
+                        const r_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[0] };
+                        const r_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = r_out };
+                        integralPlane(u8, r_plane, integral_img);
+                        sharpenPlane(u8, r_plane, integral_img, r_out_img, radius);
 
-                        integralPlane(u8, channels[1], integral_img, self.rows, self.cols);
-                        sharpenPlane(u8, channels[1], integral_img, g_out, self.rows, self.cols, radius);
+                        const g_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[1] };
+                        const g_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = g_out };
+                        integralPlane(u8, g_plane, integral_img);
+                        sharpenPlane(u8, g_plane, integral_img, g_out_img, radius);
 
-                        integralPlane(u8, channels[2], integral_img, self.rows, self.cols);
-                        sharpenPlane(u8, channels[2], integral_img, b_out, self.rows, self.cols, radius);
+                        const b_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[2] };
+                        const b_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = b_out };
+                        integralPlane(u8, b_plane, integral_img);
+                        sharpenPlane(u8, b_plane, integral_img, b_out_img, radius);
 
                         // Recombine channels
                         channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, sharpened.*);
@@ -325,15 +341,15 @@ pub fn Filter(comptime T: type) type {
 
                 /// Optimized convolution for u8 planes with integer arithmetic.
                 fn convolveU8Plane(
-                    src: []const u8,
-                    dst: []u8,
-                    rows: usize,
-                    cols: usize,
+                    src_img: Image(u8),
+                    dst_img: Image(u8),
                     kernel: [kernel_size]i32,
                     border_mode: BorderMode,
                 ) void {
                     const SCALE = 256;
                     const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
+                    const rows = src_img.rows;
+                    const cols = src_img.cols;
 
                     for (0..rows) |r| {
                         var c: usize = 0;
@@ -356,7 +372,7 @@ pub fn Filter(comptime T: type) type {
                                         for (0..vec_len) |i| {
                                             const src_r = r + ky - half_h;
                                             const src_c = c + i + kx - half_w;
-                                            pixel_vec[i] = src[src_r * cols + src_c];
+                                            pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
                                         }
 
                                         result_vec += pixel_vec * kernel_vec;
@@ -368,7 +384,7 @@ pub fn Filter(comptime T: type) type {
                                 const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
 
                                 for (0..vec_len) |i| {
-                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                                    dst_img.data[r * dst_img.stride + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
                                 }
                             }
                         }
@@ -380,12 +396,12 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const src_r = r + ky - half_h;
                                         const src_c = c + kx - half_w;
-                                        const pixel_val = @as(i32, src[src_r * cols + src_c]);
+                                        const pixel_val = @as(i32, src_img.data[src_r * src_img.stride + src_c]);
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
                                 const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                                dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                                dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                             } else {
                                 const ir = @as(isize, @intCast(r));
                                 const ic = @as(isize, @intCast(c));
@@ -395,13 +411,13 @@ pub fn Filter(comptime T: type) type {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
                                         const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
-                                            @as(i32, src[@as(usize, @intCast(iry * @as(isize, @intCast(cols)) + icx))])
+                                            @as(i32, src_img.data[@as(usize, @intCast(iry * @as(isize, @intCast(src_img.stride)) + icx))])
                                         else switch (border_mode) {
                                             .zero => 0,
                                             .replicate => blk: {
                                                 const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
                                                 const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                                break :blk @as(i32, src[@as(usize, @intCast(clamped_r * @as(isize, @intCast(cols)) + clamped_c))]);
+                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(clamped_r * @as(isize, @intCast(src_img.stride)) + clamped_c))]);
                                             },
                                             .mirror => blk: {
                                                 var rr = iry;
@@ -428,19 +444,19 @@ pub fn Filter(comptime T: type) type {
                                                     cc = 2 * cols_i - cc - 1;
                                                     if (cc < 0) cc = -cc - 1;
                                                 }
-                                                break :blk @as(i32, src[@as(usize, @intCast(rr * cols_i + cc))]);
+                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(rr * @as(isize, @intCast(src_img.stride)) + cc))]);
                                             },
                                             .wrap => blk: {
                                                 const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
                                                 const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                                break :blk @as(i32, src[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(cols)) + wrapped_c))]);
+                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(src_img.stride)) + wrapped_c))]);
                                             },
                                         };
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
                                 const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                                dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                                dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                             }
                         }
                     }
@@ -448,14 +464,14 @@ pub fn Filter(comptime T: type) type {
 
                 /// Optimized convolution for f32 planes with SIMD.
                 fn convolveF32Plane(
-                    src: []const f32,
-                    dst: []f32,
-                    rows: usize,
-                    cols: usize,
+                    src_img: Image(f32),
+                    dst_img: Image(f32),
                     kernel: [kernel_size]f32,
                     border_mode: BorderMode,
                 ) void {
                     const vec_len = comptime std.simd.suggestVectorLength(f32) orelse 8;
+                    const rows = src_img.rows;
+                    const cols = src_img.cols;
 
                     // Pre-create kernel vectors for SIMD (only for small kernels)
                     const use_kernel_vecs = comptime (kernel_size <= 25);
@@ -490,7 +506,7 @@ pub fn Filter(comptime T: type) type {
                                         for (0..vec_len) |i| {
                                             const src_r = r + ky - half_h;
                                             const src_c = c + i + kx - half_w;
-                                            pixel_vec[i] = src[src_r * cols + src_c];
+                                            pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
                                         }
 
                                         result_vec += pixel_vec * kernel_vec;
@@ -498,7 +514,7 @@ pub fn Filter(comptime T: type) type {
                                 }
 
                                 for (0..vec_len) |i| {
-                                    dst[r * cols + c + i] = result_vec[i];
+                                    dst_img.data[r * dst_img.stride + c + i] = result_vec[i];
                                 }
                             }
                         }
@@ -510,10 +526,10 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const src_r = r + ky - half_h;
                                         const src_c = c + kx - half_w;
-                                        result += src[src_r * cols + src_c] * kernel[ky * width + kx];
+                                        result += src_img.data[src_r * src_img.stride + src_c] * kernel[ky * width + kx];
                                     }
                                 }
-                                dst[r * cols + c] = result;
+                                dst_img.data[r * dst_img.stride + c] = result;
                             } else {
                                 const ir = @as(isize, @intCast(r));
                                 const ic = @as(isize, @intCast(c));
@@ -523,13 +539,13 @@ pub fn Filter(comptime T: type) type {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
                                         const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
-                                            src[@as(usize, @intCast(iry * @as(isize, @intCast(cols)) + icx))]
+                                            src_img.data[@as(usize, @intCast(iry * @as(isize, @intCast(src_img.stride)) + icx))]
                                         else switch (border_mode) {
                                             .zero => 0,
                                             .replicate => blk: {
                                                 const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
                                                 const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                                break :blk src[@as(usize, @intCast(clamped_r * @as(isize, @intCast(cols)) + clamped_c))];
+                                                break :blk src_img.data[@as(usize, @intCast(clamped_r * @as(isize, @intCast(src_img.stride)) + clamped_c))];
                                             },
                                             .mirror => blk: {
                                                 var rr = iry;
@@ -556,18 +572,18 @@ pub fn Filter(comptime T: type) type {
                                                     cc = 2 * cols_i - cc - 1;
                                                     if (cc < 0) cc = -cc - 1;
                                                 }
-                                                break :blk src[@as(usize, @intCast(rr * cols_i + cc))];
+                                                break :blk src_img.data[@as(usize, @intCast(rr * @as(isize, @intCast(src_img.stride)) + cc))];
                                             },
                                             .wrap => blk: {
                                                 const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
                                                 const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                                break :blk src[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(cols)) + wrapped_c))];
+                                                break :blk src_img.data[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(src_img.stride)) + wrapped_c))];
                                             },
                                         };
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
-                                dst[r * cols + c] = result;
+                                dst_img.data[r * dst_img.stride + c] = result;
                             }
                         }
                     }
@@ -606,18 +622,11 @@ pub fn Filter(comptime T: type) type {
                         const SCALE = 256;
                         const kernel_int = flattenKernelInt(Kernel.kernel_size, kernel, SCALE);
 
-                        const src_data = self.data[0 .. self.rows * self.cols];
-                        const dst_data = out.data[0 .. out.rows * out.cols];
-
-                        Kernel.convolveU8Plane(src_data, dst_data, self.rows, self.cols, kernel_int, border_mode);
+                        Kernel.convolveU8Plane(self, out.*, kernel_int, border_mode);
                     } else if (T == f32) {
                         // Optimized path for f32 with SIMD
                         const kernel_flat = flattenKernelFloat(Kernel.kernel_size, kernel);
-
-                        const src_data = self.data[0 .. self.rows * self.cols];
-                        const dst_data = out.data[0 .. out.rows * out.cols];
-
-                        Kernel.convolveF32Plane(src_data, dst_data, self.rows, self.cols, kernel_flat, border_mode);
+                        Kernel.convolveF32Plane(self, out.*, kernel_flat, border_mode);
                     } else {
                         // Generic scalar path for other types
                         const half_h = Kernel.half_h;
@@ -694,7 +703,9 @@ pub fn Filter(comptime T: type) type {
 
                         // Convolve each channel independently using the optimized u8 plane function
                         inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }) |src_channel, dst_channel| {
-                            Kernel.convolveU8Plane(src_channel, dst_channel, self.rows, self.cols, kernel_int, border_mode);
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_channel };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_channel };
+                            Kernel.convolveU8Plane(src_plane, dst_plane, kernel_int, border_mode);
                         }
 
                         // Recombine channels using helper
@@ -763,11 +774,9 @@ pub fn Filter(comptime T: type) type {
         /// Optimized separable convolution for u8 planes with integer arithmetic.
         /// The kernel must be pre-scaled by 256 for integer arithmetic.
         fn convolveSeparableU8Plane(
-            src: []const u8,
-            dst: []u8,
-            temp: []u8,
-            rows: usize,
-            cols: usize,
+            src_img: Image(u8),
+            dst_img: Image(u8),
+            temp_img: Image(u8),
             kernel_x_int: []const i32,
             kernel_y_int: []const i32,
             border_mode: BorderMode,
@@ -775,6 +784,8 @@ pub fn Filter(comptime T: type) type {
             const SCALE = 256;
             const half_x = kernel_x_int.len / 2;
             const half_y = kernel_y_int.len / 2;
+            const rows = src_img.rows;
+            const cols = src_img.cols;
 
             // Horizontal pass (src -> temp)
             for (0..rows) |r| {
@@ -785,7 +796,7 @@ pub fn Filter(comptime T: type) type {
                         const c0 = c - half_x;
                         for (kernel_x_int, 0..) |k, i| {
                             const cc = c0 + i;
-                            const pixel_val = @as(i32, src[r * cols + cc]);
+                            const pixel_val = @as(i32, src_img.data[r * src_img.stride + cc]);
                             result += pixel_val * k;
                         }
                     } else {
@@ -794,12 +805,12 @@ pub fn Filter(comptime T: type) type {
                         for (kernel_x_int, 0..) |k, i| {
                             const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
                             const pixel_val = if (icx >= 0 and icx < cols)
-                                @as(i32, src[r * cols + @as(usize, @intCast(icx))])
+                                @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(icx))])
                             else switch (border_mode) {
                                 .zero => 0,
                                 .replicate => blk: {
                                     const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(clamped_c))]);
+                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(clamped_c))]);
                                 },
                                 .mirror => blk: {
                                     var cc = icx;
@@ -814,18 +825,18 @@ pub fn Filter(comptime T: type) type {
                                         cc = 2 * cols_i - cc - 1;
                                         if (cc < 0) cc = -cc - 1;
                                     }
-                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(cc))]);
+                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(cc))]);
                                 },
                                 .wrap => blk: {
                                     const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                    break :blk @as(i32, src[r * cols + @as(usize, @intCast(wrapped_c))]);
+                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(wrapped_c))]);
                                 },
                             };
                             result += pixel_val * k;
                         }
                     }
                     const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                    temp[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                    temp_img.data[r * temp_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                 }
             }
 
@@ -838,7 +849,7 @@ pub fn Filter(comptime T: type) type {
                         const r0 = r - half_y;
                         for (kernel_y_int, 0..) |k, i| {
                             const rr = r0 + i;
-                            const pixel_val = @as(i32, temp[rr * cols + c]);
+                            const pixel_val = @as(i32, temp_img.data[rr * temp_img.stride + c]);
                             result += pixel_val * k;
                         }
                     } else {
@@ -847,12 +858,12 @@ pub fn Filter(comptime T: type) type {
                         for (kernel_y_int, 0..) |k, i| {
                             const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
                             const pixel_val = if (iry >= 0 and iry < rows)
-                                @as(i32, temp[@as(usize, @intCast(iry)) * cols + c])
+                                @as(i32, temp_img.data[@as(usize, @intCast(iry)) * temp_img.stride + c])
                             else switch (border_mode) {
                                 .zero => 0,
                                 .replicate => blk: {
                                     const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
-                                    break :blk @as(i32, temp[@as(usize, @intCast(clamped_r)) * cols + c]);
+                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(clamped_r)) * temp_img.stride + c]);
                                 },
                                 .mirror => blk: {
                                     var rr = iry;
@@ -867,18 +878,18 @@ pub fn Filter(comptime T: type) type {
                                         rr = 2 * rows_i - rr - 1;
                                         if (rr < 0) rr = -rr - 1;
                                     }
-                                    break :blk @as(i32, temp[@as(usize, @intCast(rr)) * cols + c]);
+                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(rr)) * temp_img.stride + c]);
                                 },
                                 .wrap => blk: {
                                     const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
-                                    break :blk @as(i32, temp[@as(usize, @intCast(wrapped_r)) * cols + c]);
+                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(wrapped_r)) * temp_img.stride + c]);
                                 },
                             };
                             result += pixel_val * k;
                         }
                     }
                     const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                    dst[r * cols + c] = @intCast(@max(0, @min(255, rounded)));
+                    dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                 }
             }
         }
@@ -886,47 +897,59 @@ pub fn Filter(comptime T: type) type {
         /// Optimized convolution for scalar types (int/float) with SIMD.
         /// Build integral image from any scalar type plane into f32 plane with SIMD optimization.
         /// The output integral image allows O(1) computation of rectangular region sums.
-        fn integralPlane(comptime SrcT: type, src: []const SrcT, dst: []f32, rows: usize, cols: usize) void {
+        fn integralPlane(comptime SrcT: type, src_img: Image(SrcT), dst_img: Image(f32)) void {
+            assert(src_img.rows == dst_img.rows and src_img.cols == dst_img.cols);
+            // Keep integral packed for SIMD convenience
+            assert(dst_img.stride == dst_img.cols);
+
+            const rows = src_img.rows;
+            const cols = src_img.cols;
             const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
             // First pass: compute row-wise cumulative sums
             for (0..rows) |r| {
                 var tmp: f32 = 0;
-                const row_offset = r * cols;
+                const src_row_offset = r * src_img.stride;
+                const dst_row_offset = r * dst_img.stride; // equals cols
                 for (0..cols) |c| {
-                    tmp += meta.as(f32, src[row_offset + c]);
-                    dst[row_offset + c] = tmp;
+                    tmp += meta.as(f32, src_img.data[src_row_offset + c]);
+                    dst_img.data[dst_row_offset + c] = tmp;
                 }
             }
 
-            // Second pass: add column-wise cumulative sums using SIMD
+            // Second pass: add column-wise cumulative sums using SIMD over packed dst
             for (1..rows) |r| {
-                const prev_row_offset = (r - 1) * cols;
-                const curr_row_offset = r * cols;
+                const prev_row_offset = (r - 1) * dst_img.stride;
+                const curr_row_offset = r * dst_img.stride;
                 var c: usize = 0;
 
                 // Process SIMD-width chunks
                 while (c + simd_len <= cols) : (c += simd_len) {
-                    const prev_vals: @Vector(simd_len, f32) = dst[prev_row_offset + c ..][0..simd_len].*;
-                    const curr_vals: @Vector(simd_len, f32) = dst[curr_row_offset + c ..][0..simd_len].*;
-                    dst[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
+                    const prev_vals: @Vector(simd_len, f32) = dst_img.data[prev_row_offset + c ..][0..simd_len].*;
+                    const curr_vals: @Vector(simd_len, f32) = dst_img.data[curr_row_offset + c ..][0..simd_len].*;
+                    dst_img.data[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
                 }
 
                 // Handle remaining columns
                 while (c < cols) : (c += 1) {
-                    dst[curr_row_offset + c] += dst[prev_row_offset + c];
+                    dst_img.data[curr_row_offset + c] += dst_img.data[prev_row_offset + c];
                 }
             }
         }
 
         /// Box blur for any plane type using integral image with SIMD optimization.
-        fn boxBlurPlane(comptime PlaneType: type, integral_img: []const f32, dst: []PlaneType, rows: usize, cols: usize, radius: usize) void {
+        fn boxBlurPlane(comptime PlaneType: type, sat: Image(f32), dst: Image(PlaneType), radius: usize) void {
+            assert(sat.rows == dst.rows and sat.cols == dst.cols);
+            // Integral is expected to be packed
+            assert(sat.stride == sat.cols);
+            const rows = sat.rows;
+            const cols = sat.cols;
             const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
             for (0..rows) |r| {
                 const r1 = r -| radius;
                 const r2 = @min(r + radius, rows - 1);
-                const r2_offset = r2 * cols;
+                const r2_offset = r2 * sat.stride;
 
                 var c: usize = 0;
 
@@ -940,13 +963,13 @@ pub fn Filter(comptime T: type) type {
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                         // Compute sum using integral image inclusion-exclusion
-                        const sum = integral_img[r2_offset + c2] -
-                            (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
-                            (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
-                            (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+                        const sum = sat.data[r2_offset + c2] -
+                            (if (c1 > 0) sat.data[r2_offset + c1 - 1] else 0) -
+                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1] else 0);
 
                         const val = sum / area;
-                        dst[r * cols + c] = if (PlaneType == u8)
+                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
                             @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(val))))))
                         else
                             @as(PlaneType, val);
@@ -963,20 +986,20 @@ pub fn Filter(comptime T: type) type {
                             const c2 = c + radius;
 
                             // Load integral values with SIMD
-                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1 ..][0..simd_len].* else @splat(0);
-                            const int12: @Vector(simd_len, f32) = if (r1 > 0) integral_img[(r1 - 1) * cols + c2 ..][0..simd_len].* else @splat(0);
-                            const int21: @Vector(simd_len, f32) = if (c1 > 0) integral_img[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
-                            const int22: @Vector(simd_len, f32) = integral_img[r2_offset + c2 ..][0..simd_len].*;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = if (c1 > 0) sat.data[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
 
                             const sums = int22 - int21 - int12 + int11;
                             const vals = sums / area_vec;
 
                             if (PlaneType == u8) {
                                 for (0..simd_len) |i| {
-                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
+                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
                                 }
                             } else {
-                                dst[r * cols + c ..][0..simd_len].* = vals;
+                                dst.data[r * dst.stride + c ..][0..simd_len].* = vals;
                             }
                         }
                     }
@@ -987,12 +1010,12 @@ pub fn Filter(comptime T: type) type {
                     const c2 = @min(c + radius, cols - 1);
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                    const sum = integral_img[r2_offset + c2] -
-                        (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
-                        (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
-                        (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+                    const sum = sat.data[r2_offset + c2] -
+                        (if (c1 > 0) sat.data[r2_offset + c1 - 1] else 0) -
+                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1] else 0);
 
-                    dst[r * cols + c] = if (PlaneType == u8)
+                    dst.data[r * dst.stride + c] = if (PlaneType == u8)
                         @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sum / area))))))
                     else
                         sum / area;
@@ -1001,13 +1024,24 @@ pub fn Filter(comptime T: type) type {
         }
 
         /// Sharpen plane using integral image (sharpened = 2*original - blurred).
-        fn sharpenPlane(comptime PlaneType: type, src: []const PlaneType, integral_img: []const f32, dst: []PlaneType, rows: usize, cols: usize, radius: usize) void {
+        fn sharpenPlane(
+            comptime PlaneType: type,
+            src: Image(PlaneType),
+            sat: Image(f32),
+            dst: Image(PlaneType),
+            radius: usize,
+        ) void {
+            assert(src.rows == dst.rows and src.cols == dst.cols);
+            assert(sat.rows == src.rows and sat.cols == src.cols);
+            assert(sat.stride == sat.cols);
+            const rows = src.rows;
+            const cols = src.cols;
             const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
 
             for (0..rows) |r| {
                 const r1 = r -| radius;
                 const r2 = @min(r + radius, rows - 1);
-                const r2_offset = r2 * cols;
+                const r2_offset = r2 * sat.stride;
 
                 var c: usize = 0;
 
@@ -1020,15 +1054,15 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        const sum = integral_img[r2_offset + c2] -
-                            (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
-                            (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
-                            (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+                        const sum = sat.data[r2_offset + c2] -
+                            (if (c1 > 0) sat.data[r2_offset + c1 - 1] else 0) -
+                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1] else 0);
 
                         const blurred = sum / area;
-                        const original = meta.as(f32, src[r * cols + c]);
+                        const original = meta.as(f32, src.data[r * src.stride + c]);
                         const sharpened = 2 * original - blurred;
-                        dst[r * cols + c] = if (PlaneType == u8)
+                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
                             @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
                         else
                             sharpened;
@@ -1044,26 +1078,26 @@ pub fn Filter(comptime T: type) type {
                             const c1 = c - radius;
                             const c2 = c + radius;
 
-                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1 ..][0..simd_len].* else @splat(0);
-                            const int12: @Vector(simd_len, f32) = if (r1 > 0) integral_img[(r1 - 1) * cols + c2 ..][0..simd_len].* else @splat(0);
-                            const int21: @Vector(simd_len, f32) = if (c1 > 0) integral_img[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
-                            const int22: @Vector(simd_len, f32) = integral_img[r2_offset + c2 ..][0..simd_len].*;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = if (c1 > 0) sat.data[r2_offset + c1 - 1 ..][0..simd_len].* else @splat(0);
+                            const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
 
                             const sums = int22 - int21 - int12 + int11;
                             const blurred_vals = sums / area_vec;
 
                             if (PlaneType == u8) {
                                 for (0..simd_len) |i| {
-                                    const original = meta.as(f32, src[r * cols + c + i]);
-                                    dst[r * cols + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(2 * original - blurred_vals[i]))))));
+                                    const original = meta.as(f32, src.data[r * src.stride + c + i]);
+                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(2 * original - blurred_vals[i]))))));
                                 }
                             } else {
                                 const two_vec: @Vector(simd_len, f32) = @splat(2.0);
                                 var original_vals: @Vector(simd_len, f32) = undefined;
                                 for (0..simd_len) |i| {
-                                    original_vals[i] = meta.as(f32, src[r * cols + c + i]);
+                                    original_vals[i] = meta.as(f32, src.data[r * src.stride + c + i]);
                                 }
-                                dst[r * cols + c ..][0..simd_len].* = two_vec * original_vals - blurred_vals;
+                                dst.data[r * dst.stride + c ..][0..simd_len].* = two_vec * original_vals - blurred_vals;
                             }
                         }
                     }
@@ -1074,15 +1108,15 @@ pub fn Filter(comptime T: type) type {
                     const c2 = @min(c + radius, cols - 1);
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                    const sum = integral_img[r2_offset + c2] -
-                        (if (c1 > 0) integral_img[r2_offset + c1 - 1] else 0) -
-                        (if (r1 > 0) integral_img[(r1 - 1) * cols + c2] else 0) +
-                        (if (r1 > 0 and c1 > 0) integral_img[(r1 - 1) * cols + c1 - 1] else 0);
+                    const sum = sat.data[r2_offset + c2] -
+                        (if (c1 > 0) sat.data[r2_offset + c1 - 1] else 0) -
+                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + c1 - 1] else 0);
 
                     const blurred = sum / area;
-                    const original = meta.as(f32, src[r * cols + c]);
+                    const original = meta.as(f32, src.data[r * src.stride + c]);
                     const sharpened = 2 * original - blurred;
-                    dst[r * cols + c] = if (PlaneType == u8)
+                    dst.data[r * dst.stride + c] = if (PlaneType == u8)
                         @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
                     else
                         sharpened;
@@ -1104,7 +1138,7 @@ pub fn Filter(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Use generic integral plane function for all scalar types
-                    integralPlane(T, self.data, sat.data, self.rows, self.cols);
+                    integralPlane(T, self, sat.*);
                 },
                 .@"struct" => {
                     // Channel separation for struct types
@@ -1118,22 +1152,26 @@ pub fn Filter(comptime T: type) type {
 
                     // Process each channel separately
                     inline for (fields, 0..) |field, ch| {
-                        // Extract channel to src_plane
-                        for (0..self.rows * self.cols) |i| {
-                            const pixel = self.data[i];
-                            const val = @field(pixel, field.name);
-                            src_plane[i] = if (@typeInfo(field.type) == .int)
-                                @floatFromInt(val)
-                            else if (@typeInfo(field.type) == .float)
-                                @floatCast(val)
-                            else
-                                0;
+                        // Extract channel to packed src_plane respecting stride
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const pix = self.at(r, c).*;
+                                const val = @field(pix, field.name);
+                                src_plane[r * self.cols + c] = switch (@typeInfo(field.type)) {
+                                    .int => @floatFromInt(val),
+                                    .float => @floatCast(val),
+                                    else => 0,
+                                };
+                            }
                         }
 
-                        // Compute integral for this channel
-                        integralPlane(f32, src_plane, dst_plane, self.rows, self.cols);
+                        const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_plane };
+                        const dst_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_plane };
 
-                        // Store result in output channel
+                        // Compute integral for this channel from packed src_plane into packed dst_plane
+                        integralPlane(f32, src_img, dst_img);
+
+                        // Store result in output channel (packed to packed)
                         for (0..self.rows * self.cols) |i| {
                             sat.data[i][ch] = dst_plane[i];
                         }
@@ -1184,11 +1222,7 @@ pub fn Filter(comptime T: type) type {
                             kernel_y_int[i] = @intFromFloat(@round(k * SCALE));
                         }
 
-                        const src_data = self.data[0 .. self.rows * self.cols];
-                        const dst_data = out.data[0 .. out.rows * out.cols];
-                        const temp_data = temp.data[0 .. temp.rows * temp.cols];
-
-                        convolveSeparableU8Plane(src_data, dst_data, temp_data, self.rows, self.cols, kernel_x_int, kernel_y_int, border_mode);
+                        convolveSeparableU8Plane(self, out.*, temp, kernel_x_int, kernel_y_int, border_mode);
                         return; // Skip the rest of the function
                     }
 
@@ -1271,7 +1305,10 @@ pub fn Filter(comptime T: type) type {
 
                         // Convolve each channel independently using the optimized u8 plane function
                         inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }, .{ r_temp, g_temp, b_temp }) |src_channel, dst_channel, temp_channel| {
-                            convolveSeparableU8Plane(src_channel, dst_channel, temp_channel, self.rows, self.cols, kernel_x_int, kernel_y_int, border_mode);
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_channel };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_channel };
+                            const tmp_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = temp_channel };
+                            convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
                         }
 
                         // Recombine channels using helper
