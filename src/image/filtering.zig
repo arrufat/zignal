@@ -904,7 +904,7 @@ pub fn Filter(comptime T: type) type {
 
             const rows = src_img.rows;
             const cols = src_img.cols;
-            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+            const simd_len: usize = 1; // disable SIMD for correctness; revisit after
 
             // First pass: compute row-wise cumulative sums
             for (0..rows) |r| {
@@ -944,7 +944,7 @@ pub fn Filter(comptime T: type) type {
             assert(sat.stride == sat.cols);
             const rows = sat.rows;
             const cols = sat.cols;
-            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+            const simd_len: usize = 1; // disable SIMD for correctness; revisit after
 
             for (0..rows) |r| {
                 const r1 = r -| radius;
@@ -963,10 +963,11 @@ pub fn Filter(comptime T: type) type {
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                         // Compute sum using integral image inclusion-exclusion
+                        // Need to check boundaries since integral image uses (r-1, c-1) indexing
                         const sum = sat.data[r2 * sat.stride + c2] -
-                            sat.data[r2 * sat.stride + c1] -
-                            sat.data[r1 * sat.stride + c2] +
-                            sat.data[r1 * sat.stride + c1];
+                            (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
+                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
 
                         const val = sum / area;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
@@ -985,11 +986,11 @@ pub fn Filter(comptime T: type) type {
                             const c1 = c - radius;
                             const c2 = c + radius;
 
-                            // Load integral values with SIMD
-                            const r1_offset = r1 * sat.stride;
-                            const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                            const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
+                            // Load integral values with SIMD - use correct indices
+                            const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + (c1 - 1) ..][0..simd_len].*;
                             const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
 
                             const sums = int22 - int21 - int12 + int11;
@@ -1011,10 +1012,11 @@ pub fn Filter(comptime T: type) type {
                     const c2 = @min(c + radius, cols - 1);
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
+                    // Correct integral image access with boundary checks
                     const sum = sat.data[r2 * sat.stride + c2] -
-                        sat.data[r2 * sat.stride + c1] -
-                        sat.data[r1 * sat.stride + c2] +
-                        sat.data[r1 * sat.stride + c1];
+                        (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
+                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
 
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
                         @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sum / area))))))
@@ -1055,10 +1057,11 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
+                        // Correct integral image access with boundary checks
                         const sum = sat.data[r2 * sat.stride + c2] -
-                            sat.data[r2 * sat.stride + c1] -
-                            sat.data[r1 * sat.stride + c2] +
-                            sat.data[r1 * sat.stride + c1];
+                            (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
+                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
 
                         const blurred = sum / area;
                         const original = meta.as(f32, src.data[r * src.stride + c]);
@@ -1079,10 +1082,11 @@ pub fn Filter(comptime T: type) type {
                             const c1 = c - radius;
                             const c2 = c + radius;
 
-                            const r1_offset = r1 * sat.stride;
-                            const int11: @Vector(simd_len, f32) = sat.data[r1_offset + c1 ..][0..simd_len].*;
-                            const int12: @Vector(simd_len, f32) = sat.data[r1_offset + c2 ..][0..simd_len].*;
-                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + c1 ..][0..simd_len].*;
+                            // Load integral values with SIMD - use correct indices
+                            const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + (c1 - 1) ..][0..simd_len].*;
                             const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
 
                             const sums = int22 - int21 - int12 + int11;
@@ -1110,10 +1114,11 @@ pub fn Filter(comptime T: type) type {
                     const c2 = @min(c + radius, cols - 1);
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
+                    // Correct integral image access with boundary checks
                     const sum = sat.data[r2 * sat.stride + c2] -
-                        sat.data[r2 * sat.stride + c1] -
-                        sat.data[r1 * sat.stride + c2] +
-                        sat.data[r1 * sat.stride + c1];
+                        (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
+                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
 
                     const blurred = sum / area;
                     const original = meta.as(f32, src.data[r * src.stride + c]);
