@@ -459,7 +459,7 @@ test "FDM mean and covariance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
-    var source_img = try Image(Rgb).initAlloc(allocator, 50, 50);
+    var source_img = try Image(Rgb).init(allocator, 50, 50);
     defer source_img.deinit(allocator);
     for (source_img.data, 0..) |*pixel, i| {
         // Create specific pattern for known covariance structure
@@ -473,7 +473,7 @@ test "FDM mean and covariance matching" {
     }
 
     // Create target image with different known statistics
-    var target_img = try Image(Rgb).initAlloc(allocator, 50, 50);
+    var target_img = try Image(Rgb).init(allocator, 50, 50);
     defer target_img.deinit(allocator);
     for (target_img.data, 0..) |*pixel, i| {
         const x = i % 50;
@@ -564,7 +564,7 @@ test "FDM grayscale mean and variance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
-    var source_img = try Image(u8).initAlloc(allocator, 100, 1);
+    var source_img = try Image(u8).init(allocator, 100, 1);
     defer source_img.deinit(allocator);
 
     // Fill with values 0-99 for known mean=49.5, variance
@@ -573,7 +573,7 @@ test "FDM grayscale mean and variance matching" {
     }
 
     // Create target image with different known statistics
-    var target_img = try Image(u8).initAlloc(allocator, 100, 1);
+    var target_img = try Image(u8).init(allocator, 100, 1);
     defer target_img.deinit(allocator);
 
     // Fill with values 100-199 for known mean=149.5
@@ -602,7 +602,7 @@ test "FDM batch processing with reused target" {
     const allocator = testing.allocator;
 
     // Create a target style image
-    var target_img = try Image(Rgb).initAlloc(allocator, 20, 20);
+    var target_img = try Image(Rgb).init(allocator, 20, 20);
     defer target_img.deinit(allocator);
     for (target_img.data, 0..) |*pixel, i| {
         // Warm color palette
@@ -616,7 +616,7 @@ test "FDM batch processing with reused target" {
     // Create multiple source images to transform
     var source_images: [3]Image(Rgb) = undefined;
     for (&source_images, 0..) |*img, idx| {
-        img.* = try Image(Rgb).initAlloc(allocator, 20, 20);
+        img.* = try Image(Rgb).init(allocator, 20, 20);
         for (img.data, 0..) |*pixel, i| {
             // Different cool color patterns
             pixel.* = Rgb{
@@ -673,14 +673,14 @@ test "FDM error handling" {
     try testing.expectError(error.NoTargetSet, fdm.update());
 
     // Set target but not source
-    var target_img = try Image(Rgb).initAlloc(allocator, 10, 10);
+    var target_img = try Image(Rgb).init(allocator, 10, 10);
     defer target_img.deinit(allocator);
     try fdm.setTarget(target_img);
 
     try testing.expectError(error.NoSourceSet, fdm.update());
 
     // Now it should work
-    var source_img = try Image(Rgb).initAlloc(allocator, 10, 10);
+    var source_img = try Image(Rgb).init(allocator, 10, 10);
     defer source_img.deinit(allocator);
     try fdm.setSource(source_img);
     try fdm.update(); // Should succeed

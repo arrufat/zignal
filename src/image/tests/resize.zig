@@ -13,7 +13,7 @@ test "letterbox maintains aspect ratio with padding" {
     // Test 1: Wide image to square - should add vertical padding
     {
         // Create 8x4 image (2:1 aspect ratio)
-        var src: Image(u8) = try .initAlloc(allocator, 4, 8);
+        var src: Image(u8) = try .init(allocator, 4, 8);
         defer src.deinit(allocator);
 
         // Fill with gradient to verify content preservation
@@ -24,7 +24,7 @@ test "letterbox maintains aspect ratio with padding" {
         }
 
         // Letterbox to 6x6 square
-        var output: Image(u8) = try .initAlloc(allocator, 6, 6);
+        var output: Image(u8) = try .init(allocator, 6, 6);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .bilinear);
@@ -50,7 +50,7 @@ test "letterbox maintains aspect ratio with padding" {
     // Test 2: Tall image to wide - should add horizontal padding
     {
         // Create 3x9 image (1:3 aspect ratio)
-        var src: Image(color.Rgb) = try .initAlloc(allocator, 9, 3);
+        var src: Image(color.Rgb) = try .init(allocator, 9, 3);
         defer src.deinit(allocator);
 
         // Fill with distinct colors
@@ -66,7 +66,7 @@ test "letterbox maintains aspect ratio with padding" {
         }
 
         // Letterbox to 12x4 (3:1 aspect ratio)
-        var output: Image(color.Rgb) = try .initAlloc(allocator, 4, 12);
+        var output: Image(color.Rgb) = try .init(allocator, 4, 12);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .nearest_neighbor);
@@ -96,19 +96,19 @@ test "letterbox edge cases" {
 
     // Test zero dimension handling
     {
-        var src: Image(u8) = try .initAlloc(allocator, 5, 5);
+        var src: Image(u8) = try .init(allocator, 5, 5);
         defer src.deinit(allocator);
 
-        var output: Image(u8) = .init(0, 10, &[_]u8{});
+        var output: Image(u8) = .initFromSlice(0, 10, &[_]u8{});
         try expectError(error.InvalidDimensions, src.letterbox(allocator, &output, .nearest_neighbor));
 
-        var output2: Image(u8) = .init(10, 0, &[_]u8{});
+        var output2: Image(u8) = .initFromSlice(10, 0, &[_]u8{});
         try expectError(error.InvalidDimensions, src.letterbox(allocator, &output2, .nearest_neighbor));
     }
 
     // Test same aspect ratio - no padding needed
     {
-        var src: Image(f32) = try .initAlloc(allocator, 4, 6);
+        var src: Image(f32) = try .init(allocator, 4, 6);
         defer src.deinit(allocator);
 
         // Fill with test values
@@ -119,7 +119,7 @@ test "letterbox edge cases" {
         }
 
         // Scale to 8x12 (same 3:2 aspect ratio)
-        var output: Image(f32) = try .initAlloc(allocator, 8, 12);
+        var output: Image(f32) = try .init(allocator, 8, 12);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .bicubic);
@@ -133,11 +133,11 @@ test "letterbox edge cases" {
 
     // Test 1x1 source image
     {
-        var src: Image(u8) = try .initAlloc(allocator, 1, 1);
+        var src: Image(u8) = try .init(allocator, 1, 1);
         defer src.deinit(allocator);
         src.at(0, 0).* = 128;
 
-        var output: Image(u8) = try .initAlloc(allocator, 10, 10);
+        var output: Image(u8) = try .init(allocator, 10, 10);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .nearest_neighbor);
@@ -159,7 +159,7 @@ test "letterbox interpolation methods comparison" {
     const allocator = std.testing.allocator;
 
     // Create a gradient pattern to ensure interpolation produces intermediate values
-    var src: Image(u8) = try .initAlloc(allocator, 3, 3);
+    var src: Image(u8) = try .init(allocator, 3, 3);
     defer src.deinit(allocator);
 
     // Create gradient from 0 to 255
@@ -182,7 +182,7 @@ test "letterbox interpolation methods comparison" {
     };
 
     for (methods) |method| {
-        var output: Image(u8) = try .initAlloc(allocator, 10, 10);
+        var output: Image(u8) = try .init(allocator, 10, 10);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, method);
@@ -198,14 +198,14 @@ test "letterbox extreme aspect ratios" {
 
     // Test very wide image (16:1)
     {
-        var src: Image(u8) = try .initAlloc(allocator, 2, 32);
+        var src: Image(u8) = try .init(allocator, 2, 32);
         defer src.deinit(allocator);
         for (0..src.data.len) |i| {
             src.data[i] = 200;
         }
 
         // Letterbox to square
-        var output: Image(u8) = try .initAlloc(allocator, 64, 64);
+        var output: Image(u8) = try .init(allocator, 64, 64);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .bilinear);
@@ -224,14 +224,14 @@ test "letterbox extreme aspect ratios" {
 
     // Test very tall image (1:16)
     {
-        var src: Image(u8) = try .initAlloc(allocator, 32, 2);
+        var src: Image(u8) = try .init(allocator, 32, 2);
         defer src.deinit(allocator);
         for (0..src.data.len) |i| {
             src.data[i] = 100;
         }
 
         // Letterbox to square
-        var output: Image(u8) = try .initAlloc(allocator, 64, 64);
+        var output: Image(u8) = try .init(allocator, 64, 64);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .bicubic);
@@ -253,7 +253,7 @@ test "scale image" {
     const allocator = std.testing.allocator;
 
     // Create a test image
-    var img = try Image(u8).initAlloc(allocator, 100, 100);
+    var img = try Image(u8).init(allocator, 100, 100);
     defer img.deinit(allocator);
 
     // Fill with some pattern
@@ -286,7 +286,7 @@ test "scale image" {
     try expectError(error.InvalidScaleFactor, img.scale(allocator, -1, .bilinear));
 
     // Test very small scale that would result in 0 dimensions
-    var tiny_img = try Image(u8).initAlloc(allocator, 2, 2);
+    var tiny_img = try Image(u8).init(allocator, 2, 2);
     defer tiny_img.deinit(allocator);
     try expectError(error.InvalidDimensions, tiny_img.scale(allocator, 0.1, .bilinear));
 }

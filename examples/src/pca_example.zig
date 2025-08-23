@@ -190,7 +190,7 @@ pub fn main() !void {
     defer gpa.free(original_points);
 
     // 2. Create original visualization
-    var original_image: Image(Rgb) = try .initAlloc(gpa, canvas_size, canvas_size);
+    var original_image: Image(Rgb) = try .init(gpa, canvas_size, canvas_size);
     defer original_image.deinit(gpa);
 
     const original_canvas: Canvas(Rgb) = .init(gpa, original_image);
@@ -214,7 +214,7 @@ pub fn main() !void {
     const aligned_points = try projectAndAlign(gpa, pca, original_points);
     defer gpa.free(aligned_points);
 
-    var aligned_image = try Image(Rgb).initAlloc(gpa, canvas_size, canvas_size);
+    var aligned_image = try Image(Rgb).init(gpa, canvas_size, canvas_size);
     defer aligned_image.deinit(gpa);
 
     const aligned_canvas = Canvas(Rgb).init(gpa, aligned_image);

@@ -10,7 +10,7 @@ const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../Image.zig").Image;
 
 test "boxBlur radius 0 with views" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    var image: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer image.deinit(std.testing.allocator);
 
     // Fill with pattern
@@ -37,7 +37,7 @@ test "boxBlur radius 0 with views" {
 }
 
 test "view" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
@@ -48,7 +48,7 @@ test "view" {
 
 test "boxBlur basic functionality" {
     // Test with uniform image - should remain unchanged
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Fill with uniform value
@@ -65,7 +65,7 @@ test "boxBlur basic functionality" {
 }
 
 test "boxBlur zero radius" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with pattern
@@ -89,7 +89,7 @@ test "boxBlur zero radius" {
 
 test "boxBlur border effects" {
     // Create a small image to test border handling
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with a pattern where center is 255, edges are 0
@@ -116,7 +116,7 @@ test "boxBlur border effects" {
 }
 
 test "boxBlur struct type" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with different colors
@@ -152,7 +152,7 @@ test "boxBlur border area calculations" {
     const radius = 3;
 
     // Test with uniform image - all pixels should have the same value after blur
-    var uniform_image: Image(u8) = try .initAlloc(std.testing.allocator, test_size, test_size);
+    var uniform_image: Image(u8) = try .init(std.testing.allocator, test_size, test_size);
     defer uniform_image.deinit(std.testing.allocator);
 
     for (uniform_image.data) |*pixel| pixel.* = 200;
@@ -169,7 +169,7 @@ test "boxBlur border area calculations" {
     }
 
     // Test with gradient - area calculations should be smooth
-    var gradient_image: Image(u8) = try .initAlloc(std.testing.allocator, test_size, test_size);
+    var gradient_image: Image(u8) = try .init(std.testing.allocator, test_size, test_size);
     defer gradient_image.deinit(std.testing.allocator);
 
     for (0..test_size) |r| {
@@ -197,7 +197,7 @@ test "boxBlur struct type comprehensive" {
     // Test RGBA with both large images (SIMD) and small images (scalar)
     for ([_]usize{ 8, 32 }) |test_size| { // Small and large
         for ([_]usize{ 1, 3 }) |radius| {
-            var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, test_size, test_size);
+            var image: Image(color.Rgba) = try .init(std.testing.allocator, test_size, test_size);
             defer image.deinit(std.testing.allocator);
 
             // Create a red-to-blue gradient
@@ -237,7 +237,7 @@ test "boxBlur struct type comprehensive" {
 }
 
 test "sharpen basic functionality" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Create an edge pattern: left half dark, right half bright
@@ -264,7 +264,7 @@ test "sharpen basic functionality" {
 }
 
 test "sharpen zero radius" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with pattern
@@ -287,7 +287,7 @@ test "sharpen zero radius" {
 }
 
 test "sharpen uniform image" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 4, 4);
+    var image: Image(u8) = try .init(std.testing.allocator, 4, 4);
     defer image.deinit(std.testing.allocator);
 
     // Fill with uniform value
@@ -305,7 +305,7 @@ test "sharpen uniform image" {
 }
 
 test "sharpen struct type" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Create a simple pattern with a bright center
@@ -330,7 +330,7 @@ test "sharpen struct type" {
 }
 
 test "convolve identity kernel" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with pattern
@@ -360,7 +360,7 @@ test "convolve identity kernel" {
 }
 
 test "convolve blur kernel" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Create sharp edge pattern
@@ -387,7 +387,7 @@ test "convolve blur kernel" {
 }
 
 test "convolve border modes" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize center to 255, edges to 0
@@ -429,7 +429,7 @@ test "convolve border modes" {
 }
 
 test "convolveSeparable Gaussian approximation" {
-    var image: Image(f32) = try .initAlloc(std.testing.allocator, 7, 7);
+    var image: Image(f32) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
     // Create impulse in center
@@ -453,7 +453,7 @@ test "convolveSeparable Gaussian approximation" {
 }
 
 test "gaussianBlur basic" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 11, 11);
+    var image: Image(u8) = try .init(std.testing.allocator, 11, 11);
     defer image.deinit(std.testing.allocator);
 
     // Create a white square in center
@@ -481,7 +481,7 @@ test "gaussianBlur basic" {
 }
 
 test "gaussianBlur sigma variations" {
-    var image: Image(f32) = try .initAlloc(std.testing.allocator, 15, 15);
+    var image: Image(f32) = try .init(std.testing.allocator, 15, 15);
     defer image.deinit(std.testing.allocator);
 
     // Single bright pixel in center
@@ -508,7 +508,7 @@ test "gaussianBlur sigma variations" {
 }
 
 test "sobel with new convolution" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Create vertical edge
@@ -532,7 +532,7 @@ test "sobel with new convolution" {
 
 test "convolve3x3 optimization" {
     // This test verifies that 3x3 convolution uses the optimized path
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 10, 10);
+    var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
 
     // Fill with random-ish pattern
@@ -560,7 +560,7 @@ test "convolve3x3 optimization" {
 
 test "convolve preserves color channels" {
     // Test that RGB convolution processes each channel independently
-    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(Rgb) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     // Create distinct patterns in each channel
@@ -599,7 +599,7 @@ test "convolve preserves color channels" {
 
 test "convolve into view (stride-safe)" {
     // Create a base image with a larger stride than the view width
-    var base_src: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    var base_src: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer base_src.deinit(std.testing.allocator);
     for (0..base_src.rows) |r| {
         for (0..base_src.cols) |c| {
@@ -608,7 +608,7 @@ test "convolve into view (stride-safe)" {
     }
 
     // Create a destination base initialized to a sentinel value
-    var base_dst: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    var base_dst: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer base_dst.deinit(std.testing.allocator);
     for (base_dst.data) |*p| p.* = 0xAA;
 
@@ -644,7 +644,7 @@ test "convolve into view (stride-safe)" {
 
 test "convolveSeparable into view (stride-safe)" {
     // Create a base image and a matching destination base
-    var base_src: Image(u8) = try .initAlloc(std.testing.allocator, 7, 9);
+    var base_src: Image(u8) = try .init(std.testing.allocator, 7, 9);
     defer base_src.deinit(std.testing.allocator);
     for (0..base_src.rows) |r| {
         for (0..base_src.cols) |c| {
@@ -652,7 +652,7 @@ test "convolveSeparable into view (stride-safe)" {
         }
     }
 
-    var base_dst: Image(u8) = try .initAlloc(std.testing.allocator, 7, 9);
+    var base_dst: Image(u8) = try .init(std.testing.allocator, 7, 9);
     defer base_dst.deinit(std.testing.allocator);
     for (base_dst.data) |*p| p.* = 0x55;
 
@@ -683,7 +683,7 @@ test "convolveSeparable into view (stride-safe)" {
 
 test "differenceOfGaussians basic functionality" {
     // Test basic DoG functionality with a simple edge pattern
-    var image: Image(f32) = try .initAlloc(std.testing.allocator, 11, 11);
+    var image: Image(f32) = try .init(std.testing.allocator, 11, 11);
     defer image.deinit(std.testing.allocator);
 
     // Create a white square in the center
@@ -723,7 +723,7 @@ test "differenceOfGaussians basic functionality" {
 
 test "differenceOfGaussians edge detection" {
     // Test DoG for edge detection with vertical edge
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 7, 7);
+    var image: Image(u8) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
     // Create a vertical edge
@@ -747,7 +747,7 @@ test "differenceOfGaussians edge detection" {
 }
 
 test "differenceOfGaussians invalid parameters" {
-    var image: Image(f32) = try .initAlloc(std.testing.allocator, 5, 5);
+    var image: Image(f32) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
     var result: Image(f32) = .empty;
@@ -761,7 +761,7 @@ test "differenceOfGaussians invalid parameters" {
 
 test "differenceOfGaussians with RGB" {
     // Test DoG with color images
-    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 9, 9);
+    var image: Image(Rgb) = try .init(std.testing.allocator, 9, 9);
     defer image.deinit(std.testing.allocator);
 
     // Create a colored square in the center
@@ -790,7 +790,7 @@ test "differenceOfGaussians with RGB" {
 
 test "differenceOfGaussians approximates manual subtraction" {
     // Test that DoG(sigma1, sigma2) ≈ blur(sigma1) - blur(sigma2)
-    var image: Image(f32) = try .initAlloc(std.testing.allocator, 15, 15);
+    var image: Image(f32) = try .init(std.testing.allocator, 15, 15);
     defer image.deinit(std.testing.allocator);
 
     // Create a test pattern
@@ -818,7 +818,7 @@ test "differenceOfGaussians approximates manual subtraction" {
     defer blur2.deinit(std.testing.allocator);
 
     // Manual subtraction
-    var manual_result: Image(f32) = try .initAlloc(std.testing.allocator, image.rows, image.cols);
+    var manual_result: Image(f32) = try .init(std.testing.allocator, image.rows, image.cols);
     defer manual_result.deinit(std.testing.allocator);
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -839,7 +839,7 @@ test "differenceOfGaussians approximates manual subtraction" {
 
 test "gaussianBlur preserves color" {
     // Test that Gaussian blur on RGB images maintains color information
-    var image: Image(Rgb) = try .initAlloc(std.testing.allocator, 7, 7);
+    var image: Image(Rgb) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
     // Create a red square in the center

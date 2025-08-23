@@ -10,7 +10,7 @@ const color = @import("../../color.zig");
 
 // Helper function to create a simple gradient test image
 fn createGradientImage(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(u8) {
-    var img = try Image(u8).initAlloc(allocator, rows, cols);
+    var img = try Image(u8).init(allocator, rows, cols);
     for (0..rows) |r| {
         for (0..cols) |c| {
             // Create a diagonal gradient from top-left (0) to bottom-right (255)
@@ -23,7 +23,7 @@ fn createGradientImage(allocator: std.mem.Allocator, rows: usize, cols: usize) !
 
 // Helper function to create a checkerboard pattern
 fn createCheckerboard(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(u8) {
-    var img = try Image(u8).initAlloc(allocator, rows, cols);
+    var img = try Image(u8).init(allocator, rows, cols);
     for (0..rows) |r| {
         for (0..cols) |c| {
             img.at(r, c).* = if ((r + c) % 2 == 0) 0 else 255;
@@ -83,7 +83,7 @@ test "bilinear interpolation - exact pixels" {
 
 test "bilinear interpolation - midpoints" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 3, 3);
+    var img = try Image(u8).init(allocator, 3, 3);
     defer img.deinit(allocator);
 
     // Create a simple 3x3 pattern
@@ -240,7 +240,7 @@ test "RGB image interpolation" {
     const allocator = std.testing.allocator;
     const Rgb = color.Rgb;
 
-    var img = try Image(Rgb).initAlloc(allocator, 4, 4);
+    var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Create a color gradient
@@ -276,7 +276,7 @@ test "resize preserves value range" {
     const allocator = std.testing.allocator;
 
     // Create a simple gradient image
-    var src = try Image(u8).initAlloc(allocator, 4, 4);
+    var src = try Image(u8).init(allocator, 4, 4);
     defer src.deinit(allocator);
 
     // Fill with values from 0 to 240
@@ -286,7 +286,7 @@ test "resize preserves value range" {
         }
     }
 
-    var dst = try Image(u8).initAlloc(allocator, 8, 8);
+    var dst = try Image(u8).init(allocator, 8, 8);
     defer dst.deinit(allocator);
 
     // Test resize with bilinear interpolation
@@ -311,7 +311,7 @@ test "resize preserves value range" {
 
 test "catmull-rom no overshoot property" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 5, 5);
+    var img = try Image(u8).init(allocator, 5, 5);
     defer img.deinit(allocator);
 
     // Create an image with values between 50 and 200
@@ -337,7 +337,7 @@ test "catmull-rom no overshoot property" {
 
 test "float image interpolation" {
     const allocator = std.testing.allocator;
-    var img = try Image(f32).initAlloc(allocator, 4, 4);
+    var img = try Image(f32).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Create a float gradient
@@ -359,7 +359,7 @@ test "float image interpolation" {
 
 test "clamping stress test - sharp edge with bicubic" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 6, 6);
+    var img = try Image(u8).init(allocator, 6, 6);
     defer img.deinit(allocator);
 
     // Create a sharp edge that would cause overshoot
@@ -390,7 +390,7 @@ test "clamping stress test - sharp edge with bicubic" {
 
 test "clamping stress test - all kernel methods" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 8, 8);
+    var img = try Image(u8).init(allocator, 8, 8);
     defer img.deinit(allocator);
 
     // Create extreme contrast pattern
@@ -426,7 +426,7 @@ test "clamping stress test - all kernel methods" {
 
 test "bilinear exact linear interpolation" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 2, 2);
+    var img = try Image(u8).init(allocator, 2, 2);
     defer img.deinit(allocator);
 
     // Create a simple 2x2 grid
@@ -455,7 +455,7 @@ test "bilinear exact linear interpolation" {
 
 test "nearest neighbor discontinuity" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 2, 2);
+    var img = try Image(u8).init(allocator, 2, 2);
     defer img.deinit(allocator);
 
     img.at(0, 0).* = 0;
@@ -476,7 +476,7 @@ test "nearest neighbor discontinuity" {
 
 test "interpolation symmetry" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 5, 5);
+    var img = try Image(u8).init(allocator, 5, 5);
     defer img.deinit(allocator);
 
     // Create symmetric pattern
@@ -499,7 +499,7 @@ test "interpolation symmetry" {
 
 test "mitchell parameter effects" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 6, 6);
+    var img = try Image(u8).init(allocator, 6, 6);
     defer img.deinit(allocator);
 
     // Create a pattern with both smooth and sharp features
@@ -535,7 +535,7 @@ test "mitchell parameter effects" {
 
 test "lanczos weight normalization" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 8, 8);
+    var img = try Image(u8).init(allocator, 8, 8);
     defer img.deinit(allocator);
 
     // Fill with constant value
@@ -554,7 +554,7 @@ test "lanczos weight normalization" {
 
 test "extreme value edge cases" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 4, 4);
+    var img = try Image(u8).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Fill with extreme values
@@ -591,7 +591,7 @@ test "extreme value edge cases" {
 
 test "single pixel image handling" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).initAlloc(allocator, 1, 1);
+    var img = try Image(u8).init(allocator, 1, 1);
     defer img.deinit(allocator);
 
     img.at(0, 0).* = 42;
@@ -611,7 +611,7 @@ test "single pixel image handling" {
 test "RGB clamping stress test" {
     const allocator = std.testing.allocator;
     const Rgb = color.Rgb;
-    var img = try Image(Rgb).initAlloc(allocator, 4, 4);
+    var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Create extreme RGB values

@@ -97,7 +97,7 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
 pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr: ?[*]u8, extra_len: usize, seam_ptr: [*]usize, seam_size: usize) void {
     assert(seam_size == rows);
     const size = rows * cols;
-    var image: Image(Rgba) = .init(rows, cols, rgba_ptr[0..size]);
+    var image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
 
     const allocator: std.mem.Allocator = blk: {
         if (extra_ptr) |ptr| {
@@ -114,11 +114,11 @@ pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr:
         }
     };
 
-    var edges = Image(u8).initAlloc(allocator, rows, cols) catch @panic("OOM");
+    var edges = Image(u8).init(allocator, rows, cols) catch @panic("OOM");
     defer edges.deinit(allocator);
     image.sobel(allocator, &edges) catch @panic("OOM");
 
-    var energy_map = Image(u32).initAlloc(allocator, image.rows, image.cols) catch @panic("OOM");
+    var energy_map = Image(u32).init(allocator, image.rows, image.cols) catch @panic("OOM");
     defer energy_map.deinit(allocator);
     computeEnergy(edges, &energy_map);
 

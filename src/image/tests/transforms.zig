@@ -8,7 +8,7 @@ const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
 
 test "getRectangle" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
@@ -16,7 +16,7 @@ test "getRectangle" {
 }
 
 test "copy function with views" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 5, 7);
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 7);
     defer image.deinit(std.testing.allocator);
 
     // Fill with pattern
@@ -30,7 +30,7 @@ test "copy function with views" {
     const view = image.view(.{ .l = 1, .t = 1, .r = 4, .b = 3 });
 
     // Copy view to new image
-    var copied: Image(u8) = try .initAlloc(std.testing.allocator, view.rows, view.cols);
+    var copied: Image(u8) = try .init(std.testing.allocator, view.rows, view.cols);
     defer copied.deinit(std.testing.allocator);
 
     view.copy(copied);
@@ -43,7 +43,7 @@ test "copy function with views" {
     }
 
     // Test copy from regular image to view
-    var target: Image(u8) = try .initAlloc(std.testing.allocator, 6, 8);
+    var target: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer target.deinit(std.testing.allocator);
 
     // Fill target with different pattern
@@ -72,7 +72,7 @@ test "copy function with views" {
 }
 
 test "copy function in-place behavior" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 3);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Fill with pattern
@@ -101,7 +101,7 @@ test "copy function in-place behavior" {
     }
 }
 test "view" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
@@ -113,7 +113,7 @@ test "view" {
 }
 
 test "view with getRectangle returns full image" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 100, 200);
+    var image: Image(u8) = try .init(std.testing.allocator, 100, 200);
     defer image.deinit(std.testing.allocator);
 
     // Fill image with test pattern
@@ -154,7 +154,7 @@ test "view with getRectangle returns full image" {
 }
 
 test "rotateBounds" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 100, 200);
+    var image: Image(u8) = try .init(std.testing.allocator, 100, 200);
     defer image.deinit(std.testing.allocator);
 
     // Test 0 degrees - should be same size
@@ -184,7 +184,7 @@ test "rotateBounds" {
 }
 
 test "rotate orthogonal fast paths" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 3, 4);
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 4);
     defer image.deinit(std.testing.allocator);
 
     // Create a pattern to verify correct rotation
@@ -239,7 +239,7 @@ test "rotate orthogonal fast paths" {
 }
 
 test "rotate arbitrary angle" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 10, 10);
+    var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
 
     // Fill with pattern
@@ -261,7 +261,7 @@ test "rotate arbitrary angle" {
 
 test "extract rotated rectangle basic and 90deg" {
     const allocator = std.testing.allocator;
-    var image: Image(u8) = try .initAlloc(allocator, 5, 5);
+    var image: Image(u8) = try .init(allocator, 5, 5);
     defer image.deinit(allocator);
 
     // Fill with simple row*10 + col pattern
@@ -275,7 +275,7 @@ test "extract rotated rectangle basic and 90deg" {
     const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 };
 
     // Output 3x3 buffer
-    var out0: Image(u8) = try .initAlloc(allocator, 3, 3);
+    var out0: Image(u8) = try .init(allocator, 3, 3);
     defer out0.deinit(allocator);
 
     // Angle 0: should match the submatrix directly
@@ -292,7 +292,7 @@ test "extract rotated rectangle basic and 90deg" {
     try expectEqual(@as(u8, 33), out0.at(2, 2).*);
 
     // Angle 90 degrees CCW: should be rotated version of the submatrix
-    var out90: Image(u8) = try .initAlloc(allocator, 3, 3);
+    var out90: Image(u8) = try .init(allocator, 3, 3);
     defer out90.deinit(allocator);
 
     image.extract(rect, std.math.pi / 2.0, out90, .nearest_neighbor);
@@ -310,7 +310,7 @@ test "extract rotated rectangle basic and 90deg" {
 
 test "extract single-pixel axis handling centers correctly" {
     const allocator = std.testing.allocator;
-    var image: Image(u8) = try .initAlloc(allocator, 5, 5);
+    var image: Image(u8) = try .init(allocator, 5, 5);
     defer image.deinit(allocator);
 
     // Fill pattern row*10 + col
@@ -323,13 +323,13 @@ test "extract single-pixel axis handling centers correctly" {
     const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 }; // 3x3
 
     // 1x1 output should sample rectangle center -> source (2,2) => 22
-    var out1: Image(u8) = try .initAlloc(allocator, 1, 1);
+    var out1: Image(u8) = try .init(allocator, 1, 1);
     defer out1.deinit(allocator);
     image.extract(rect, 0.0, out1, .nearest_neighbor);
     try expectEqual(@as(u8, 22), out1.at(0, 0).*);
 
     // 1x3: rows==1 should sample center row (y=2), cols span left-to-right
-    var out_row1: Image(u8) = try .initAlloc(allocator, 1, 3);
+    var out_row1: Image(u8) = try .init(allocator, 1, 3);
     defer out_row1.deinit(allocator);
     image.extract(rect, 0.0, out_row1, .nearest_neighbor);
     try expectEqual(@as(u8, 21), out_row1.at(0, 0).*);
@@ -337,7 +337,7 @@ test "extract single-pixel axis handling centers correctly" {
     try expectEqual(@as(u8, 23), out_row1.at(0, 2).*);
 
     // 3x1: cols==1 should sample center col (x=2), rows span top-to-bottom
-    var out_col1: Image(u8) = try .initAlloc(allocator, 3, 1);
+    var out_col1: Image(u8) = try .init(allocator, 3, 1);
     defer out_col1.deinit(allocator);
     image.extract(rect, 0.0, out_col1, .nearest_neighbor);
     try expectEqual(@as(u8, 12), out_col1.at(0, 0).*);
@@ -349,7 +349,7 @@ test "insert and extract inverse relationship" {
     const allocator = std.testing.allocator;
 
     // Create source with gradient pattern
-    var source = try Image(u8).initAlloc(allocator, 64, 64);
+    var source = try Image(u8).init(allocator, 64, 64);
     defer source.deinit(allocator);
     for (0..source.rows) |r| {
         for (0..source.cols) |c| {
@@ -371,12 +371,12 @@ test "insert and extract inverse relationship" {
 
     for (cases) |tc| {
         // Extract region
-        var extracted = try Image(u8).initAlloc(allocator, tc.size, tc.size);
+        var extracted = try Image(u8).init(allocator, tc.size, tc.size);
         defer extracted.deinit(allocator);
         source.extract(tc.rect, tc.angle, extracted, tc.method);
 
         // Insert back into blank canvas
-        var canvas = try Image(u8).initAlloc(allocator, 64, 64);
+        var canvas = try Image(u8).init(allocator, 64, 64);
         defer canvas.deinit(allocator);
         @memset(canvas.data, 0);
         canvas.insert(extracted, tc.rect, tc.angle, tc.method);

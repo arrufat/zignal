@@ -152,7 +152,7 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
 pub export fn whitebalance(rgba_ptr: [*]Rgba, rows: usize, cols: usize, r: u8, g: u8, b: u8) void {
     const color: Rgb = .{ .r = r, .g = g, .b = b };
     std.log.info("color: {}, {}, {}\n", color);
-    const image: Image(Rgba) = .init(rows, cols, rgba_ptr[0 .. rows * cols]);
+    const image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0 .. rows * cols]);
     const w = estimateIlluminant(image, color, 0.7);
     whitebalanceSimd(image.data, w);
 }

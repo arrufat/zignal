@@ -62,7 +62,7 @@ test "PixelIterator basic functionality" {
     const allocator = std.testing.allocator;
 
     // Create a simple 3x3 image
-    var img = try Image(u8).initAlloc(allocator, 3, 3);
+    var img = try Image(u8).init(allocator, 3, 3);
     defer img.deinit(allocator);
 
     // Fill with sequential values
@@ -96,7 +96,7 @@ test "PixelIterator with views" {
     const allocator = std.testing.allocator;
 
     // Create a 4x4 image
-    var img: Image(u8) = try .initAlloc(allocator, 4, 4);
+    var img: Image(u8) = try .init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Fill with sequential values
@@ -141,13 +141,13 @@ test "PixelIterator reuse with init" {
     const allocator = std.testing.allocator;
 
     // Create two different images
-    var img1: Image(u8) = try .initAlloc(allocator, 2, 2);
+    var img1: Image(u8) = try .init(allocator, 2, 2);
     defer img1.deinit(allocator);
     for (0..4) |i| {
         img1.data[i] = @intCast(i * 10); // 0, 10, 20, 30
     }
 
-    var img2: Image(u8) = try .initAlloc(allocator, 3, 3);
+    var img2: Image(u8) = try .init(allocator, 3, 3);
     defer img2.deinit(allocator);
     for (0..9) |i| {
         img2.data[i] = @intCast(i); // 0, 1, 2, ..., 8

@@ -220,7 +220,7 @@ test "imageToKitty basic functionality" {
     const allocator = testing.allocator;
 
     // Create a small test image
-    var img = try Image(Rgb).initAlloc(allocator, 2, 2);
+    var img = try Image(Rgb).init(allocator, 2, 2);
     defer img.deinit(allocator);
 
     // Fill with test colors
@@ -251,7 +251,7 @@ test "imageToKitty with options" {
     const allocator = testing.allocator;
 
     // Create a small test image
-    var img = try Image(u8).initAlloc(allocator, 1, 1);
+    var img = try Image(u8).init(allocator, 1, 1);
     defer img.deinit(allocator);
     img.at(0, 0).* = 128;
 

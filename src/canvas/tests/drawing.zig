@@ -13,7 +13,7 @@ test "line endpoints are connected" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     // Fill with white
@@ -74,7 +74,7 @@ test "thick lines have correct width" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
@@ -125,7 +125,7 @@ test "filled circle has correct radius" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
@@ -181,7 +181,7 @@ test "circle outline has correct thickness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
@@ -229,7 +229,7 @@ test "filled rectangle has correct area" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
@@ -269,7 +269,7 @@ test "polygon fill respects convexity" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
@@ -313,9 +313,9 @@ test "antialiased vs solid fill coverage" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img_solid = try Image(Rgba).initAlloc(allocator, width, height);
+    var img_solid = try Image(Rgba).init(allocator, width, height);
     defer img_solid.deinit(allocator);
-    var img_smooth = try Image(Rgba).initAlloc(allocator, width, height);
+    var img_smooth = try Image(Rgba).init(allocator, width, height);
     defer img_smooth.deinit(allocator);
 
     const canvas_solid = Canvas(Rgba).init(allocator, img_solid);
@@ -354,7 +354,7 @@ test "bezier curve smoothness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).initAlloc(allocator, width, height);
+    var img = try Image(Rgba).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgba).init(allocator, img);
