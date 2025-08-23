@@ -87,17 +87,7 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
     // Special case for to_rgba which accepts optional alpha parameter
     if (TargetType == zignal.Rgba) {
         try stub.writef("(self, alpha: int = 255) -> {s}:\n", .{target_class});
-        try stub.write(
-            \\        """Convert to RGBA color space.
-            \\
-            \\        Args:
-            \\            alpha: Alpha channel value (0-255, default: 255)
-            \\
-            \\        Returns:
-            \\            Rgba color object
-            \\        """
-            \\
-        );
+        try stub.write("        \"\"\"Convert to RGBA color space with the given alpha value (0-255, default: 255)\"\"\"\n");
     } else {
         // Include self parameter for proper LSP support
         try stub.writef("(self) -> {s}:\n", .{target_class});
@@ -158,6 +148,14 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
             }
         }
     }
+
+    // Add to_gray method (all color types have it)
+    try stub.write(
+        \\    def to_gray(self) -> int:
+        \\        """Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255."""
+        \\    ...
+        \\
+    );
 
     // Add blend method if the type has it
     if (@hasDecl(ColorType, "blend")) {

@@ -263,5 +263,37 @@ class TestColorEquality:
         assert not (lab != lab)
 
 
+class TestColorToGray:
+    """Test the to_gray method on all color types."""
+
+    def test_to_gray_basic(self):
+        """Test that to_gray works for all color types and returns valid integers."""
+        # Test one instance of each color type
+        test_cases = [
+            (zignal.Rgb(128, 128, 128), "Rgb"),
+            (zignal.Rgba(128, 128, 128, 255), "Rgba"),
+            (zignal.Hsv(0.0, 0.0, 50.0), "Hsv"),
+            (zignal.Hsl(0.0, 0.0, 50.0), "Hsl"),
+            (zignal.Lab(50.0, 0.0, 0.0), "Lab"),
+            (zignal.Xyz(0.2, 0.2, 0.2), "Xyz"),
+            (zignal.Oklab(0.5, 0.0, 0.0), "Oklab"),
+            (zignal.Oklch(0.5, 0.0, 0.0), "Oklch"),
+            (zignal.Lch(50.0, 0.0, 0.0), "Lch"),
+            (zignal.Lms(0.2, 0.2, 0.2), "Lms"),
+            (zignal.Xyb(0.0, 0.0, 0.0), "Xyb"),
+            (zignal.Ycbcr(128.0, 128.0, 128.0), "Ycbcr"),
+        ]
+
+        for color, name in test_cases:
+            gray = color.to_gray()
+            assert isinstance(gray, int), f"{name}.to_gray() did not return an int"
+            assert 0 <= gray <= 255, f"{name}.to_gray() = {gray} out of range"
+
+    def test_to_gray_black_white(self):
+        """Test black and white conversions."""
+        assert zignal.Rgb(0, 0, 0).to_gray() == 0
+        assert zignal.Rgb(255, 255, 255).to_gray() == 255
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
