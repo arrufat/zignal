@@ -28,6 +28,10 @@ pub fn Filter(comptime T: type) type {
     return struct {
         const Self = Image(T);
 
+        // ============================================================================
+        // Public API - Main filtering functions
+        // ============================================================================
+
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
@@ -107,35 +111,29 @@ pub fn Filter(comptime T: type) type {
                         const channels = try channel_ops.splitRgbChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Process each channel
+                        // Allocate output planes and integral buffer
+                        var out_channels: [3][]u8 = undefined;
+                        inline for (&out_channels) |*ch| {
+                            ch.* = try allocator.alloc(u8, plane_size);
+                        }
+                        defer {
+                            inline for (out_channels) |ch| allocator.free(ch);
+                        }
+
                         const integral_buf = try allocator.alloc(f32, plane_size);
                         defer allocator.free(integral_buf);
                         const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
-                        const r_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(r_out);
-                        const g_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(g_out);
-                        const b_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(b_out);
-
-                        const r_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[0] };
-                        const r_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = r_out };
-                        integralPlane(u8, r_plane, integral_img);
-                        boxBlurPlane(u8, integral_img, r_out_img, radius);
-
-                        const g_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[1] };
-                        const g_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = g_out };
-                        integralPlane(u8, g_plane, integral_img);
-                        boxBlurPlane(u8, integral_img, g_out_img, radius);
-
-                        const b_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[2] };
-                        const b_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = b_out };
-                        integralPlane(u8, b_plane, integral_img);
-                        boxBlurPlane(u8, integral_img, b_out_img, radius);
+                        // Process all channels with single integral buffer
+                        inline for (channels, out_channels) |src_data, dst_data| {
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                            integralPlane(u8, src_plane, integral_img);
+                            boxBlurPlane(u8, integral_img, dst_plane, radius);
+                        }
 
                         // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, blurred.*);
+                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], blurred.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -158,10 +156,7 @@ pub fn Filter(comptime T: type) type {
                                     }
 
                                     // Use correct integral image indices
-                                    const sum = (if (r2 < self.rows and c2 < self.cols) sat.at(r2, c2)[i] else 0) -
-                                        (if (r2 < self.rows and c1 > 0) sat.at(r2, c1 - 1)[i] else 0) -
-                                        (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
-                                        (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
+                                    const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
 
                                     @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                         .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
@@ -256,35 +251,29 @@ pub fn Filter(comptime T: type) type {
                         const channels = try channel_ops.splitRgbChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Process each channel
+                        // Allocate output planes and integral buffer
+                        var out_channels: [3][]u8 = undefined;
+                        inline for (&out_channels) |*ch| {
+                            ch.* = try allocator.alloc(u8, plane_size);
+                        }
+                        defer {
+                            inline for (out_channels) |ch| allocator.free(ch);
+                        }
+
                         const integral_buf = try allocator.alloc(f32, plane_size);
                         defer allocator.free(integral_buf);
                         const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
-                        const r_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(r_out);
-                        const g_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(g_out);
-                        const b_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(b_out);
-
-                        const r_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[0] };
-                        const r_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = r_out };
-                        integralPlane(u8, r_plane, integral_img);
-                        sharpenPlane(u8, r_plane, integral_img, r_out_img, radius);
-
-                        const g_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[1] };
-                        const g_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = g_out };
-                        integralPlane(u8, g_plane, integral_img);
-                        sharpenPlane(u8, g_plane, integral_img, g_out_img, radius);
-
-                        const b_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = channels[2] };
-                        const b_out_img: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = b_out };
-                        integralPlane(u8, b_plane, integral_img);
-                        sharpenPlane(u8, b_plane, integral_img, b_out_img, radius);
+                        // Process all channels with single integral buffer
+                        inline for (channels, out_channels) |src_data, dst_data| {
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                            integralPlane(u8, src_plane, integral_img);
+                            sharpenPlane(u8, src_plane, integral_img, dst_plane, radius);
+                        }
 
                         // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, sharpened.*);
+                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], sharpened.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -306,10 +295,7 @@ pub fn Filter(comptime T: type) type {
                                         continue;
                                     }
 
-                                    const sum = (if (r2 < self.rows and c2 < self.cols) sat.at(r2, c2)[i] else 0) -
-                                        (if (r2 < self.rows and c1 > 0) sat.at(r2, c1 - 1)[i] else 0) -
-                                        (if (r1 > 0 and c2 < self.cols) sat.at(r1 - 1, c2)[i] else 0) +
-                                        (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[i] else 0);
+                                    const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
 
                                     const blurred = sum / area;
                                     const original = @field(self.at(r, c).*, f.name);
@@ -329,6 +315,10 @@ pub fn Filter(comptime T: type) type {
                 else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
             }
         }
+
+        // ============================================================================
+        // Convolution Kernel Specialization
+        // ============================================================================
 
         /// Comptime function generator for specialized convolution implementations.
         /// Generates optimized code for specific kernel dimensions at compile time.
@@ -353,8 +343,8 @@ pub fn Filter(comptime T: type) type {
                     for (0..rows) |r| {
                         var c: usize = 0;
 
-                        // SIMD path for interior pixels (only for reasonably small kernels)
-                        if ((comptime (height <= 7 and width <= 7)) and r >= half_h and r + half_h < rows and cols > vec_len + width) {
+                        // SIMD path for interior pixels
+                        if (r >= half_h and r + half_h < rows and cols > vec_len + width) {
                             c = half_w;
                             const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
 
@@ -409,48 +399,7 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
-                                            @as(i32, src_img.data[@as(usize, @intCast(iry * @as(isize, @intCast(src_img.stride)) + icx))])
-                                        else switch (border_mode) {
-                                            .zero => 0,
-                                            .replicate => blk: {
-                                                const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
-                                                const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(clamped_r * @as(isize, @intCast(src_img.stride)) + clamped_c))]);
-                                            },
-                                            .mirror => blk: {
-                                                var rr = iry;
-                                                var cc = icx;
-                                                const rows_i = @as(isize, @intCast(rows));
-                                                const cols_i = @as(isize, @intCast(cols));
-                                                // Handle negative row indices
-                                                while (rr < 0) {
-                                                    rr = -rr - 1;
-                                                    if (rr >= rows_i) rr = 2 * rows_i - rr - 1;
-                                                }
-                                                // Handle row indices >= rows
-                                                while (rr >= rows_i) {
-                                                    rr = 2 * rows_i - rr - 1;
-                                                    if (rr < 0) rr = -rr - 1;
-                                                }
-                                                // Handle negative column indices
-                                                while (cc < 0) {
-                                                    cc = -cc - 1;
-                                                    if (cc >= cols_i) cc = 2 * cols_i - cc - 1;
-                                                }
-                                                // Handle column indices >= cols
-                                                while (cc >= cols_i) {
-                                                    cc = 2 * cols_i - cc - 1;
-                                                    if (cc < 0) cc = -cc - 1;
-                                                }
-                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(rr * @as(isize, @intCast(src_img.stride)) + cc))]);
-                                            },
-                                            .wrap => blk: {
-                                                const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
-                                                const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                                break :blk @as(i32, src_img.data[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(src_img.stride)) + wrapped_c))]);
-                                            },
-                                        };
+                                        const pixel_val = @as(i32, getScalarWithBorder(src_img, iry, icx, border_mode));
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
@@ -472,21 +421,17 @@ pub fn Filter(comptime T: type) type {
                     const rows = src_img.rows;
                     const cols = src_img.cols;
 
-                    // Pre-create kernel vectors for SIMD (only for small kernels)
-                    const use_kernel_vecs = comptime (kernel_size <= 25);
-                    var kernel_vecs: if (use_kernel_vecs) [kernel_size]@Vector(vec_len, f32) else void = undefined;
-
-                    if (use_kernel_vecs) {
-                        inline for (0..kernel_size) |i| {
-                            kernel_vecs[i] = @splat(kernel[i]);
-                        }
+                    // Pre-create kernel vectors for SIMD
+                    var kernel_vecs: [kernel_size]@Vector(vec_len, f32) = undefined;
+                    inline for (0..kernel_size) |i| {
+                        kernel_vecs[i] = @splat(kernel[i]);
                     }
 
                     for (0..rows) |r| {
                         var c: usize = 0;
 
                         // SIMD path for interior pixels
-                        if ((comptime (height <= 7 and width <= 7)) and r >= half_h and r + half_h < rows and cols > vec_len + width) {
+                        if (r >= half_h and r + half_h < rows and cols > vec_len + width) {
                             c = half_w;
                             const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
 
@@ -496,10 +441,7 @@ pub fn Filter(comptime T: type) type {
                                 inline for (0..height) |ky| {
                                     inline for (0..width) |kx| {
                                         const kid = ky * width + kx;
-                                        const kernel_vec = if (use_kernel_vecs)
-                                            kernel_vecs[kid]
-                                        else
-                                            @as(@Vector(vec_len, f32), @splat(kernel[kid]));
+                                        const kernel_vec = kernel_vecs[kid];
 
                                         var pixel_vec: @Vector(vec_len, f32) = undefined;
                                         for (0..vec_len) |i| {
@@ -537,48 +479,7 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = if (iry >= 0 and iry < rows and icx >= 0 and icx < cols)
-                                            src_img.data[@as(usize, @intCast(iry * @as(isize, @intCast(src_img.stride)) + icx))]
-                                        else switch (border_mode) {
-                                            .zero => 0,
-                                            .replicate => blk: {
-                                                const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
-                                                const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                                break :blk src_img.data[@as(usize, @intCast(clamped_r * @as(isize, @intCast(src_img.stride)) + clamped_c))];
-                                            },
-                                            .mirror => blk: {
-                                                var rr = iry;
-                                                var cc = icx;
-                                                const rows_i = @as(isize, @intCast(rows));
-                                                const cols_i = @as(isize, @intCast(cols));
-                                                // Handle negative row indices
-                                                while (rr < 0) {
-                                                    rr = -rr - 1;
-                                                    if (rr >= rows_i) rr = 2 * rows_i - rr - 1;
-                                                }
-                                                // Handle row indices >= rows
-                                                while (rr >= rows_i) {
-                                                    rr = 2 * rows_i - rr - 1;
-                                                    if (rr < 0) rr = -rr - 1;
-                                                }
-                                                // Handle negative column indices
-                                                while (cc < 0) {
-                                                    cc = -cc - 1;
-                                                    if (cc >= cols_i) cc = 2 * cols_i - cc - 1;
-                                                }
-                                                // Handle column indices >= cols
-                                                while (cc >= cols_i) {
-                                                    cc = 2 * cols_i - cc - 1;
-                                                    if (cc < 0) cc = -cc - 1;
-                                                }
-                                                break :blk src_img.data[@as(usize, @intCast(rr * @as(isize, @intCast(src_img.stride)) + cc))];
-                                            },
-                                            .wrap => blk: {
-                                                const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
-                                                const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                                break :blk src_img.data[@as(usize, @intCast(wrapped_r * @as(isize, @intCast(src_img.stride)) + wrapped_c))];
-                                            },
-                                        };
+                                        const pixel_val = getScalarWithBorder(src_img, iry, icx, border_mode);
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
@@ -619,12 +520,12 @@ pub fn Filter(comptime T: type) type {
                     if (T == u8) {
                         // Convert floating-point kernel to integer
                         const SCALE = 256;
-                        const kernel_int = flattenKernelInt(Kernel.kernel_size, kernel, SCALE);
+                        const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
 
                         Kernel.convolveU8Plane(self, out.*, kernel_int, border_mode);
                     } else if (T == f32) {
                         // Optimized path for f32 with SIMD
-                        const kernel_flat = flattenKernelFloat(Kernel.kernel_size, kernel);
+                        const kernel_flat = flattenKernel(f32, Kernel.kernel_size, kernel, null);
                         Kernel.convolveF32Plane(self, out.*, kernel_flat, border_mode);
                     } else {
                         // Generic scalar path for other types
@@ -683,32 +584,31 @@ pub fn Filter(comptime T: type) type {
                     if (all_u8 and (fields.len == 3 or fields.len == 4)) {
                         // Channel separation approach for optimal performance
                         const SCALE = 256;
-                        const kernel_int = flattenKernelInt(Kernel.kernel_size, kernel, SCALE);
+                        const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
+                        const plane_size = self.rows * self.cols;
 
                         // Separate channels using helper
                         const channels = try channel_ops.splitRgbChannels(T, self, allocator);
-                        defer allocator.free(channels[0]);
-                        defer allocator.free(channels[1]);
-                        defer allocator.free(channels[2]);
+                        defer for (channels) |channel| allocator.free(channel);
 
                         // Allocate output planes
-                        const plane_size = self.rows * self.cols;
-                        const r_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(r_out);
-                        const g_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(g_out);
-                        const b_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(b_out);
+                        var out_channels: [3][]u8 = undefined;
+                        inline for (&out_channels) |*ch| {
+                            ch.* = try allocator.alloc(u8, plane_size);
+                        }
+                        defer {
+                            inline for (out_channels) |ch| allocator.free(ch);
+                        }
 
                         // Convolve each channel independently using the optimized u8 plane function
-                        inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }) |src_channel, dst_channel| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_channel };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_channel };
+                        inline for (channels, out_channels) |src_data, dst_data| {
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
                             Kernel.convolveU8Plane(src_plane, dst_plane, kernel_int, border_mode);
                         }
 
                         // Recombine channels using helper
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out.*);
+                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], out.*);
                     } else {
                         // Generic struct path for other color types
                         const has_alpha = comptime channel_ops.hasAlphaChannel(T);
@@ -770,6 +670,10 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
+        // ============================================================================
+        // Optimized Plane Processing Functions
+        // ============================================================================
+
         /// Optimized separable convolution for u8 planes with integer arithmetic.
         /// The kernel must be pre-scaled by 256 for integer arithmetic.
         fn convolveSeparableU8Plane(
@@ -803,34 +707,7 @@ pub fn Filter(comptime T: type) type {
                         const ic = @as(isize, @intCast(c));
                         for (kernel_x_int, 0..) |k, i| {
                             const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                            const pixel_val = if (icx >= 0 and icx < cols)
-                                @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(icx))])
-                            else switch (border_mode) {
-                                .zero => 0,
-                                .replicate => blk: {
-                                    const clamped_c = @max(0, @min(@as(isize, @intCast(cols - 1)), icx));
-                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(clamped_c))]);
-                                },
-                                .mirror => blk: {
-                                    var cc = icx;
-                                    const cols_i = @as(isize, @intCast(cols));
-                                    // Handle negative indices
-                                    while (cc < 0) {
-                                        cc = -cc - 1;
-                                        if (cc >= cols_i) cc = 2 * cols_i - cc - 1;
-                                    }
-                                    // Handle indices >= cols
-                                    while (cc >= cols_i) {
-                                        cc = 2 * cols_i - cc - 1;
-                                        if (cc < 0) cc = -cc - 1;
-                                    }
-                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(cc))]);
-                                },
-                                .wrap => blk: {
-                                    const wrapped_c = @mod(icx, @as(isize, @intCast(cols)));
-                                    break :blk @as(i32, src_img.data[r * src_img.stride + @as(usize, @intCast(wrapped_c))]);
-                                },
-                            };
+                            const pixel_val = @as(i32, getScalarWithBorder(src_img, @as(isize, @intCast(r)), icx, border_mode));
                             result += pixel_val * k;
                         }
                     }
@@ -856,34 +733,7 @@ pub fn Filter(comptime T: type) type {
                         const ir = @as(isize, @intCast(r));
                         for (kernel_y_int, 0..) |k, i| {
                             const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                            const pixel_val = if (iry >= 0 and iry < rows)
-                                @as(i32, temp_img.data[@as(usize, @intCast(iry)) * temp_img.stride + c])
-                            else switch (border_mode) {
-                                .zero => 0,
-                                .replicate => blk: {
-                                    const clamped_r = @max(0, @min(@as(isize, @intCast(rows - 1)), iry));
-                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(clamped_r)) * temp_img.stride + c]);
-                                },
-                                .mirror => blk: {
-                                    var rr = iry;
-                                    const rows_i = @as(isize, @intCast(rows));
-                                    // Handle negative indices
-                                    while (rr < 0) {
-                                        rr = -rr - 1;
-                                        if (rr >= rows_i) rr = 2 * rows_i - rr - 1;
-                                    }
-                                    // Handle indices >= rows
-                                    while (rr >= rows_i) {
-                                        rr = 2 * rows_i - rr - 1;
-                                        if (rr < 0) rr = -rr - 1;
-                                    }
-                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(rr)) * temp_img.stride + c]);
-                                },
-                                .wrap => blk: {
-                                    const wrapped_r = @mod(iry, @as(isize, @intCast(rows)));
-                                    break :blk @as(i32, temp_img.data[@as(usize, @intCast(wrapped_r)) * temp_img.stride + c]);
-                                },
-                            };
+                            const pixel_val = @as(i32, getScalarWithBorder(temp_img, iry, @as(isize, @intCast(c)), border_mode));
                             result += pixel_val * k;
                         }
                     }
@@ -898,8 +748,6 @@ pub fn Filter(comptime T: type) type {
         /// The output integral image allows O(1) computation of rectangular region sums.
         fn integralPlane(comptime SrcT: type, src_img: Image(SrcT), dst_img: Image(f32)) void {
             assert(src_img.rows == dst_img.rows and src_img.cols == dst_img.cols);
-            // Keep integral packed for SIMD convenience
-            assert(dst_img.stride == dst_img.cols);
 
             const rows = src_img.rows;
             const cols = src_img.cols;
@@ -939,8 +787,6 @@ pub fn Filter(comptime T: type) type {
         /// Box blur for any plane type using integral image with SIMD optimization.
         fn boxBlurPlane(comptime PlaneType: type, sat: Image(f32), dst: Image(PlaneType), radius: usize) void {
             assert(sat.rows == dst.rows and sat.cols == dst.cols);
-            // Integral is expected to be packed
-            assert(sat.stride == sat.cols);
             const rows = sat.rows;
             const cols = sat.cols;
             const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
@@ -961,10 +807,7 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        const sum = sat.data[r2 * sat.stride + c2] -
-                            (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
-                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
-                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
+                        const sum = computeIntegralSum(sat, r1, c1, r2, c2);
 
                         const val = sum / area;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
@@ -1009,10 +852,7 @@ pub fn Filter(comptime T: type) type {
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                     // Correct integral image access with boundary checks
-                    const sum = sat.data[r2 * sat.stride + c2] -
-                        (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
-                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
-                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
+                    const sum = computeIntegralSum(sat, r1, c1, r2, c2);
 
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
                         @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sum / area))))))
@@ -1032,7 +872,6 @@ pub fn Filter(comptime T: type) type {
         ) void {
             assert(src.rows == dst.rows and src.cols == dst.cols);
             assert(sat.rows == src.rows and sat.cols == src.cols);
-            assert(sat.stride == sat.cols);
             const rows = src.rows;
             const cols = src.cols;
             const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
@@ -1053,10 +892,7 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        const sum = sat.data[r2 * sat.stride + c2] -
-                            (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
-                            (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
-                            (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
+                        const sum = computeIntegralSum(sat, r1, c1, r2, c2);
 
                         const blurred = sum / area;
                         const original = meta.as(f32, src.data[r * src.stride + c]);
@@ -1109,10 +945,7 @@ pub fn Filter(comptime T: type) type {
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                     // Correct integral image access with boundary checks
-                    const sum = sat.data[r2 * sat.stride + c2] -
-                        (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
-                        (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
-                        (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
+                    const sum = computeIntegralSum(sat, r1, c1, r2, c2);
 
                     const blurred = sum / area;
                     const original = meta.as(f32, src.data[r * src.stride + c]);
@@ -1267,9 +1100,10 @@ pub fn Filter(comptime T: type) type {
 
                     if (all_u8 and (fields.len == 3 or fields.len == 4)) {
                         // Channel separation approach for optimal performance
+                        const SCALE = 256;
+                        const plane_size = self.rows * self.cols;
 
                         // Convert kernels to integer
-                        const SCALE = 256;
                         const kernel_x_int = try allocator.alloc(i32, kernel_x.len);
                         defer allocator.free(kernel_x_int);
                         const kernel_y_int = try allocator.alloc(i32, kernel_y.len);
@@ -1284,36 +1118,32 @@ pub fn Filter(comptime T: type) type {
 
                         // Separate channels using helper
                         const channels = try channel_ops.splitRgbChannels(T, self, allocator);
-                        defer allocator.free(channels[0]);
-                        defer allocator.free(channels[1]);
-                        defer allocator.free(channels[2]);
+                        defer for (channels) |channel| allocator.free(channel);
 
                         // Allocate output and temp planes
-                        const plane_size = self.rows * self.cols;
-                        const r_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(r_out);
-                        const g_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(g_out);
-                        const b_out = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(b_out);
-
-                        const r_temp = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(r_temp);
-                        const g_temp = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(g_temp);
-                        const b_temp = try allocator.alloc(u8, plane_size);
-                        defer allocator.free(b_temp);
+                        var out_channels: [3][]u8 = undefined;
+                        var temp_channels: [3][]u8 = undefined;
+                        inline for (&out_channels, &temp_channels) |*out_ch, *temp_ch| {
+                            out_ch.* = try allocator.alloc(u8, plane_size);
+                            temp_ch.* = try allocator.alloc(u8, plane_size);
+                        }
+                        defer {
+                            inline for (out_channels, temp_channels) |out_ch, temp_ch| {
+                                allocator.free(out_ch);
+                                allocator.free(temp_ch);
+                            }
+                        }
 
                         // Convolve each channel independently using the optimized u8 plane function
-                        inline for (.{ channels[0], channels[1], channels[2] }, .{ r_out, g_out, b_out }, .{ r_temp, g_temp, b_temp }) |src_channel, dst_channel, temp_channel| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_channel };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_channel };
-                            const tmp_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = temp_channel };
+                        inline for (channels, out_channels, temp_channels) |src_data, dst_data, temp_data| {
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                            const tmp_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = temp_data };
                             convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
                         }
 
                         // Recombine channels using helper
-                        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out.*);
+                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], out.*);
                         return; // Skip the rest of the function
                     }
 
@@ -1626,67 +1456,115 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
-        // ========== Helper Functions ==========
+        // ============================================================================
+        // Helper Functions - Border handling, kernel processing, utilities
+        // ============================================================================
 
         /// Get pixel value with border handling.
-        inline fn getPixelWithBorder(self: Self, row: isize, col: isize, border_mode: BorderMode) T {
+        fn getPixelWithBorder(self: Self, row: isize, col: isize, border_mode: BorderMode) T {
             const irows = @as(isize, @intCast(self.rows));
             const icols = @as(isize, @intCast(self.cols));
 
+            return applyBorderMode(T, row, col, irows, icols, border_mode, self);
+        }
+
+        /// Get scalar pixel value with border handling from an Image.
+        fn getScalarWithBorder(img: anytype, row: isize, col: isize, border_mode: BorderMode) @TypeOf(img.data[0]) {
+            const irows = @as(isize, @intCast(img.rows));
+            const icols = @as(isize, @intCast(img.cols));
+
+            const coords = computeBorderCoords(row, col, irows, icols, border_mode);
+            if (coords.is_zero) return 0;
+            return img.data[@as(usize, @intCast(coords.row)) * img.stride + @as(usize, @intCast(coords.col))];
+        }
+
+        /// Common border mode logic that returns adjusted coordinates.
+        fn computeBorderCoords(row: isize, col: isize, rows: isize, cols: isize, border_mode: BorderMode) struct { row: isize, col: isize, is_zero: bool } {
             switch (border_mode) {
                 .zero => {
-                    if (row < 0 or col < 0 or row >= irows or col >= icols) {
-                        return std.mem.zeroes(T);
+                    if (row < 0 or col < 0 or row >= rows or col >= cols) {
+                        return .{ .row = 0, .col = 0, .is_zero = true };
                     }
-                    return self.at(@intCast(row), @intCast(col)).*;
+                    return .{ .row = row, .col = col, .is_zero = false };
                 },
                 .replicate => {
-                    const r = @max(0, @min(row, irows - 1));
-                    const c = @max(0, @min(col, icols - 1));
-                    return self.at(@intCast(r), @intCast(c)).*;
+                    const r = @max(0, @min(row, rows - 1));
+                    const c = @max(0, @min(col, cols - 1));
+                    return .{ .row = r, .col = c, .is_zero = false };
                 },
                 .mirror => {
-                    // Reflect indices across borders with period 2*N
-                    if (irows == 0 or icols == 0) return std.mem.zeroes(T);
-                    var r = @mod(row, 2 * irows);
-                    var c = @mod(col, 2 * icols);
-                    if (r >= irows) r = 2 * irows - 1 - r;
-                    if (c >= icols) c = 2 * icols - 1 - c;
-                    return self.at(@intCast(r), @intCast(c)).*;
+                    if (rows == 0 or cols == 0) return .{ .row = 0, .col = 0, .is_zero = true };
+                    var r = row;
+                    var c = col;
+                    // Handle negative row indices
+                    while (r < 0) {
+                        r = -r - 1;
+                        if (r >= rows) r = 2 * rows - r - 1;
+                    }
+                    // Handle row indices >= rows
+                    while (r >= rows) {
+                        r = 2 * rows - r - 1;
+                        if (r < 0) r = -r - 1;
+                    }
+                    // Handle negative column indices
+                    while (c < 0) {
+                        c = -c - 1;
+                        if (c >= cols) c = 2 * cols - c - 1;
+                    }
+                    // Handle column indices >= cols
+                    while (c >= cols) {
+                        c = 2 * cols - c - 1;
+                        if (c < 0) c = -c - 1;
+                    }
+                    return .{ .row = r, .col = c, .is_zero = false };
                 },
                 .wrap => {
-                    const r = @mod(row, irows);
-                    const c = @mod(col, icols);
-                    return self.at(@intCast(r), @intCast(c)).*;
+                    const r = @mod(row, rows);
+                    const c = @mod(col, cols);
+                    return .{ .row = r, .col = c, .is_zero = false };
                 },
             }
         }
 
-        /// Flatten a 2D kernel and convert to i32 (if scale provided) or f32
-        inline fn flattenKernelInt(comptime size: usize, kernel: anytype, scale: i32) [size]i32 {
-            const kernel_info = @typeInfo(@TypeOf(kernel));
-            const kernel_height = kernel_info.array.len;
-            const kernel_width = @typeInfo(kernel_info.array.child).array.len;
-            var result: [size]i32 = undefined;
-            var idx: usize = 0;
-            inline for (0..kernel_height) |kr| {
-                inline for (0..kernel_width) |kc| {
-                    result[idx] = @intFromFloat(@round(as(f32, kernel[kr][kc]) * @as(f32, @floatFromInt(scale))));
-                    idx += 1;
-                }
-            }
-            return result;
+        /// Apply border mode and return the pixel value.
+        fn applyBorderMode(comptime PixelType: type, row: isize, col: isize, rows: isize, cols: isize, border_mode: BorderMode, self: anytype) PixelType {
+            const coords = computeBorderCoords(row, col, rows, cols, border_mode);
+            if (coords.is_zero) return std.mem.zeroes(PixelType);
+            return self.at(@intCast(coords.row), @intCast(coords.col)).*;
         }
 
-        inline fn flattenKernelFloat(comptime size: usize, kernel: anytype) [size]f32 {
+        /// Compute integral image sum with boundary checks.
+        fn computeIntegralSum(sat: Image(f32), r1: usize, c1: usize, r2: usize, c2: usize) f32 {
+            return sat.data[r2 * sat.stride + c2] -
+                (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
+                (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
+                (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
+        }
+
+        /// Compute integral image sum for multi-channel images.
+        fn computeIntegralSumMultiChannel(sat: anytype, r1: usize, c1: usize, r2: usize, c2: usize, channel: usize) f32 {
+            return (if (r2 < sat.rows and c2 < sat.cols) sat.at(r2, c2)[channel] else 0) -
+                (if (r2 < sat.rows and c1 > 0) sat.at(r2, c1 - 1)[channel] else 0) -
+                (if (r1 > 0 and c2 < sat.cols) sat.at(r1 - 1, c2)[channel] else 0) +
+                (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[channel] else 0);
+        }
+
+        /// Flatten a 2D kernel to 1D array and optionally scale to integer.
+        inline fn flattenKernel(comptime OutType: type, comptime size: usize, kernel: anytype, scale: ?i32) [size]OutType {
             const kernel_info = @typeInfo(@TypeOf(kernel));
             const kernel_height = kernel_info.array.len;
             const kernel_width = @typeInfo(kernel_info.array.child).array.len;
-            var result: [size]f32 = undefined;
+            var result: [size]OutType = undefined;
             var idx: usize = 0;
             inline for (0..kernel_height) |kr| {
                 inline for (0..kernel_width) |kc| {
-                    result[idx] = as(f32, kernel[kr][kc]);
+                    const val = as(f32, kernel[kr][kc]);
+                    result[idx] = if (OutType == i32 and scale != null)
+                        @intFromFloat(@round(val * @as(f32, @floatFromInt(scale.?))))
+                    else if (OutType == f32)
+                        val
+                    else
+                        @compileError("Unsupported kernel output type");
                     idx += 1;
                 }
             }
