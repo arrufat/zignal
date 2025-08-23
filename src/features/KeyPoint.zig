@@ -3,7 +3,6 @@
 //! Used for feature detection algorithms like FAST, Harris, and ORB.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 

@@ -1,10 +1,11 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const expectEqual = std.testing.expectEqual;
+const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
-const Image = @import("Image.zig").Image;
+const Image = @import("../image.zig").Image;
 const Filter = @import("filtering.zig").Filter;
-const InterpolationMethod = @import("interpolation.zig").InterpolationMethod;
 
 /// A multi-scale image pyramid for scale-invariant feature detection.
 /// Each level is downsampled from the previous by a scale factor.
@@ -167,9 +168,6 @@ pub fn ImagePyramid(comptime T: type) type {
 }
 
 // Tests
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "ImagePyramid basic construction" {
     const allocator = std.testing.allocator;
 

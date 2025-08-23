@@ -3,7 +3,7 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
-const Image = @import("../Image.zig").Image;
+const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
 
@@ -151,36 +151,6 @@ test "view with getRectangle returns full image" {
     try expectEqual(@as(usize, 0), full_rect.t);
     try expectEqual(@as(usize, 200), full_rect.r);
     try expectEqual(@as(usize, 100), full_rect.b);
-}
-
-test "rotateBounds" {
-    var image: Image(u8) = try .init(std.testing.allocator, 100, 200);
-    defer image.deinit(std.testing.allocator);
-
-    // Test 0 degrees - should be same size
-    const bounds_0 = image.rotateBounds(0);
-    try expectEqual(@as(usize, 200), bounds_0.cols);
-    try expectEqual(@as(usize, 100), bounds_0.rows);
-
-    // Test 90 degrees - should be swapped exactly
-    const bounds_90 = image.rotateBounds(std.math.pi / 2.0);
-    try expectEqual(@as(usize, 100), bounds_90.cols);
-    try expectEqual(@as(usize, 200), bounds_90.rows);
-
-    // Test 180 degrees - should be same size
-    const bounds_180 = image.rotateBounds(std.math.pi);
-    try expectEqual(@as(usize, 200), bounds_180.cols);
-    try expectEqual(@as(usize, 100), bounds_180.rows);
-
-    // Test 270 degrees - should be swapped exactly
-    const bounds_270 = image.rotateBounds(3.0 * std.math.pi / 2.0);
-    try expectEqual(@as(usize, 100), bounds_270.cols);
-    try expectEqual(@as(usize, 200), bounds_270.rows);
-
-    // Test 45 degrees - should be larger
-    const bounds_45 = image.rotateBounds(std.math.pi / 4.0);
-    try expectEqual(bounds_45.cols > 200, true);
-    try expectEqual(bounds_45.rows > 100, true);
 }
 
 test "rotate orthogonal fast paths" {

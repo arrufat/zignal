@@ -8,9 +8,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const expectEqual = std.testing.expectEqual;
 
-const KeyPoint = @import("KeyPoint.zig");
 const Image = @import("../image.zig").Image;
+const KeyPoint = @import("KeyPoint.zig");
 
 /// Intensity difference threshold for corner detection
 threshold: u8 = 20,
@@ -252,9 +253,6 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
 }
 
 // Tests
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "FAST detector initialization" {
     const fast = Fast{
         .threshold = 25,

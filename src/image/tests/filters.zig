@@ -7,7 +7,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const color = @import("../../color.zig");
 const Rgb = color.Rgb;
 const Rectangle = @import("../../geometry.zig").Rectangle;
-const Image = @import("../Image.zig").Image;
+const Image = @import("../../image.zig").Image;
 
 test "boxBlur radius 0 with views" {
     var image: Image(u8) = try .init(std.testing.allocator, 6, 8);

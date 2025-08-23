@@ -8,7 +8,7 @@ const convertColor = @import("../color.zig").convertColor;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-const Image = @import("Image.zig").Image;
+const Image = @import("../image.zig").Image;
 const channel_ops = @import("channel_ops.zig");
 
 /// Border handling modes for filter operations
