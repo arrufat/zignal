@@ -195,9 +195,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.setter;
         }
 
-        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend
-        pub fn generateMethods() [color_types.len + 2]c.PyMethodDef {
-            var methods: [color_types.len + 2]c.PyMethodDef = undefined;
+        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend + to_gray
+        pub fn generateMethods() [color_types.len + 3]c.PyMethodDef {
+            var methods: [color_types.len + 3]c.PyMethodDef = undefined;
             var index: usize = 0;
 
             // Add __format__ method
@@ -249,6 +249,15 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 };
                 index += 1;
             }
+
+            // Add to_gray method (all color types have toGray in Zig)
+            methods[index] = c.PyMethodDef{
+                .ml_name = "to_gray",
+                .ml_meth = @ptrCast(&toGrayMethod),
+                .ml_flags = c.METH_NOARGS,
+                .ml_doc = "Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255.",
+            };
+            index += 1;
 
             // Generate conversion methods for each color type
             inline for (color_types) |TargetColorType| {
@@ -694,6 +703,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 _ = c.PyErr_Format(c.PyExc_ValueError, "Unknown format code '%s' for object of type '%s'", format_spec, name.ptr);
                 return null;
             }
+        }
+
+        /// to_gray method implementation
+        pub fn toGrayMethod(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self = @as(*ObjectType, @ptrCast(self_obj));
+            const zig_color = objectToZigColor(self);
+            const gray_value = zig_color.toGray();
+            return @ptrCast(c.PyLong_FromLong(gray_value));
         }
 
         /// Blend method implementation
