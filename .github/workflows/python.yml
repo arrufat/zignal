@@ -190,8 +190,8 @@ jobs:
     name: Upload to TestPyPI
     needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
-    # Upload to TestPyPI on PRs for testing
-    if: github.event_name == 'pull_request'
+    # Upload to TestPyPI on PRs and releases for testing
+    if: github.event_name == 'pull_request' || github.event_name == 'release'
     environment:
       name: test-pypi
       url: https://test.pypi.org/p/zignal-processing
