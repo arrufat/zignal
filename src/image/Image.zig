@@ -169,7 +169,7 @@ pub fn Image(comptime T: type) type {
                 .rows = bounded.height(),
                 .cols = bounded.width(),
                 .data = self.data[bounded.t * self.stride + bounded.l .. (bounded.b - 1) * self.stride + bounded.r],
-                .stride = self.cols,
+                .stride = self.stride,
             };
         }
 

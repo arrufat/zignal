@@ -3253,9 +3253,67 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     // If PyImage present, use it; else use RGBA pointer
     const pimg_opt = self.py_image;
 
+    // Check if key is a slice object (for view[:] = image syntax)
+    // Use direct type comparison instead of PySlice_Check to avoid Zig translation issues
+    // TODO: replace with `if (c.PySlice_Check(key) != 0) {` after Python 3.10 support is dropped
+    if (c.Py_TYPE(key) == &c.PySlice_Type) {
+        // Handle slice assignment
+        var start: c.Py_ssize_t = undefined;
+        var stop: c.Py_ssize_t = undefined;
+        var step: c.Py_ssize_t = undefined;
+
+        // For full slice [:], start=0, stop=PY_SSIZE_T_MAX, step=1
+        if (c.PySlice_Unpack(key, &start, &stop, &step) < 0) {
+            return -1; // Error already set
+        }
+
+        // Check if this is a full slice [:] (start=0, stop=MAX, step=1)
+        const is_full_slice = (start == 0 or start == c.PY_SSIZE_T_MIN) and
+            (stop == c.PY_SSIZE_T_MAX) and
+            (step == 1);
+
+        if (!is_full_slice) {
+            c.PyErr_SetString(c.PyExc_NotImplementedError, "Only full slice [:] assignment is currently supported");
+            return -1;
+        }
+
+        // Check if value is an Image object
+        if (c.PyObject_IsInstance(value, @ptrCast(&ImageType)) != 1) {
+            c.PyErr_SetString(c.PyExc_TypeError, "Can only assign another Image to a slice");
+            return -1;
+        }
+
+        const src_image = @as(*ImageObject, @ptrCast(value));
+
+        // Ensure both images are initialized
+        if (pimg_opt == null) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Destination image not initialized");
+            return -1;
+        }
+
+        if (src_image.py_image == null) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Source image not initialized");
+            return -1;
+        }
+
+        const dst_pimg = pimg_opt.?;
+        const src_pimg = src_image.py_image.?;
+
+        // Check dimensions match
+        if (dst_pimg.rows() != src_pimg.rows() or dst_pimg.cols() != src_pimg.cols()) {
+            _ = c.PyErr_Format(c.PyExc_ValueError, "Image dimensions must match for slice assignment. Got (%zu, %zu) vs (%zu, %zu)", dst_pimg.rows(), dst_pimg.cols(), src_pimg.rows(), src_pimg.cols());
+            return -1;
+        }
+
+        // Copy pixels from source to destination
+        dst_pimg.copyFrom(src_pimg.*);
+
+        return 0;
+    }
+
     // Parse the key - expecting a tuple of (row, col)
     if (c.PyTuple_Check(key) == 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Image indices must be a tuple of (row, col)");
+        c.PyErr_SetString(c.PyExc_TypeError, "Image indices must be a tuple of (row, col) or a slice");
         return -1;
     }
 
@@ -3563,7 +3621,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
     .{
         .name = "__setitem__",
-        .params = "self, key: tuple[int, int], value: " ++ stub_metadata.COLOR,
+        .params = "self, key: tuple[int, int] | slice, value: " ++ stub_metadata.COLOR ++ " | Image",
         .returns = "None",
     },
     .{
