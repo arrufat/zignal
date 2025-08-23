@@ -4,11 +4,10 @@
 //! rotation, flipping, cropping, extraction, insertion, and letterboxing.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
-const Image = @import("Image.zig").Image;
 const Rectangle = @import("../geometry.zig").Rectangle;
+const Image = @import("../image.zig").Image;
 const InterpolationMethod = @import("interpolation.zig").InterpolationMethod;
 
 /// Rotation bounds result
@@ -166,7 +165,7 @@ pub fn Transform(comptime T: type) type {
 
             // Auto-compute optimal bounds if dimensions are 0
             const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
-                const bounds = self.rotateBounds(angle);
+                const bounds = rotateBounds(self, angle);
                 break :blk .{ bounds.rows, bounds.cols };
             } else .{ rotated.rows, rotated.cols };
 

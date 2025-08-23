@@ -1,7 +1,8 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const expectEqual = std.testing.expectEqual;
+const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const BinaryDescriptor = @import("BinaryDescriptor.zig");
 
@@ -287,9 +288,6 @@ pub const MatchStats = struct {
 };
 
 // Tests
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "BruteForceMatcher basic matching" {
     const allocator = std.testing.allocator;
 

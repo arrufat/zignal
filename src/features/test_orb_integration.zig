@@ -1,21 +1,14 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const expectEqual = std.testing.expectEqual;
+
+const Image = @import("../image.zig").Image;
+const BruteForceMatcher = @import("matcher.zig").BruteForceMatcher;
+const MatchStats = @import("matcher.zig").MatchStats;
+const Orb = @import("orb.zig").Orb;
 
 // Import all ORB components
-const KeyPoint = @import("keypoint.zig").KeyPoint;
-const BinaryDescriptor = @import("descriptor.zig").BinaryDescriptor;
-const Fast = @import("fast.zig").Fast;
-const Image = @import("../image.zig").Image;
-const Orb = @import("orb.zig").Orb;
-const BruteForceMatcher = @import("matcher.zig").BruteForceMatcher;
-const Match = @import("matcher.zig").Match;
-const MatchStats = @import("matcher.zig").MatchStats;
-
 // Test helpers
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "ORB full pipeline - detection, description, and matching" {
     const allocator = std.testing.allocator;
 

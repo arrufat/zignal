@@ -5,9 +5,6 @@
 //! processing using SIMD and integer arithmetic.
 
 const std = @import("std");
-const meta = @import("../meta.zig");
-const as = meta.as;
-const Image = @import("Image.zig").Image;
 
 /// Check if a struct type has an alpha channel (4th field named 'a' or 'alpha')
 pub fn hasAlphaChannel(comptime T: type) bool {

@@ -1,7 +1,7 @@
 //! Iterator for all pixels in an image, handles views transparently.
 
 const std = @import("std");
-const Image = @import("Image.zig").Image;
+const Image = @import("../image.zig").Image;
 const Rectangle = @import("../geometry.zig").Rectangle;
 
 pub fn PixelIterator(comptime T: type) type {

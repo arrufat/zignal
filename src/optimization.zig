@@ -4,8 +4,9 @@
 //! including the Hungarian algorithm for assignment problems.
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const expectEqual = std.testing.expectEqual;
+
 const Matrix = @import("matrix.zig").Matrix;
 
 /// Optimization policy for the assignment problem
@@ -412,9 +413,6 @@ fn constructAugmentingPath(
 }
 
 // Tests
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "Hungarian algorithm - simple 3x3" {
     const allocator = std.testing.allocator;
 

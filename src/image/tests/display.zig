@@ -4,7 +4,7 @@ const std = @import("std");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
 const color = @import("../../color.zig");
-const Image = @import("../Image.zig").Image;
+const Image = @import("../../image.zig").Image;
 
 test "image format function" {
     const Rgb = color.Rgb;

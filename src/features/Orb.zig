@@ -1,15 +1,15 @@
 //! ORB (Oriented FAST and Rotated BRIEF) feature detector and descriptor
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const expectEqual = std.testing.expectEqual;
 
-const KeyPoint = @import("KeyPoint.zig");
-const BinaryDescriptor = @import("BinaryDescriptor.zig");
-const Fast = @import("Fast.zig");
 const Image = @import("../image.zig").Image;
 const ImagePyramid = @import("../image/pyramid.zig").ImagePyramid;
+const BinaryDescriptor = @import("BinaryDescriptor.zig");
+const Fast = @import("Fast.zig");
+const KeyPoint = @import("KeyPoint.zig");
 
 /// Default patch size for BRIEF descriptor (industry standard)
 pub const DEFAULT_PATCH_SIZE: u8 = 31;
@@ -296,9 +296,6 @@ fn samplePixel(image: Image(u8), x: f32, y: f32) u8 {
 }
 
 // Tests
-const expectEqual = std.testing.expectEqual;
-const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-
 test "ORB initialization" {
     const orb = Orb{
         .n_features = 1000,
