@@ -185,7 +185,7 @@ test "MD5 checksum regression tests" {
     const height = 100;
 
     for (md5_checksums) |test_case| {
-        var img = try Image(Rgba).initAlloc(allocator, width, height);
+        var img = try Image(Rgba).init(allocator, width, height);
         defer img.deinit(allocator);
 
         // White background

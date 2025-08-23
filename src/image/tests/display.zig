@@ -10,7 +10,7 @@ test "image format function" {
     const Rgb = color.Rgb;
 
     // Create a small 2x2 RGB image
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    var image = try Image(Rgb).init(std.testing.allocator, 2, 2);
     defer image.deinit(std.testing.allocator);
 
     // Set up a pattern: red, green, blue, white
@@ -39,7 +39,7 @@ test "image format ansi_blocks" {
     const Rgb = color.Rgb;
 
     // Create a small 2x2 RGB image
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    var image = try Image(Rgb).init(std.testing.allocator, 2, 2);
     defer image.deinit(std.testing.allocator);
 
     // Set up a pattern: red, green, blue, white
@@ -67,7 +67,7 @@ test "image format ansi_blocks odd rows" {
     const Rgb = color.Rgb;
 
     // Create a 3x2 RGB image (odd number of rows)
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 3, 2);
+    var image = try Image(Rgb).init(std.testing.allocator, 3, 2);
     defer image.deinit(std.testing.allocator);
 
     // Set up colors
@@ -98,7 +98,7 @@ test "image format braille" {
     const Rgb = color.Rgb;
 
     // Create a 4x4 RGB image (perfect for one Braille character)
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 4, 2);
+    var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
     defer image.deinit(std.testing.allocator);
 
     // Create a diagonal pattern
@@ -135,7 +135,7 @@ test "image format braille custom threshold" {
     const Rgb = color.Rgb;
 
     // Create a 4x2 grayscale gradient image
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 4, 2);
+    var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
     defer image.deinit(std.testing.allocator);
 
     // Create a gradient from black to white
@@ -169,7 +169,7 @@ test "image format braille large image" {
     const Rgb = color.Rgb;
 
     // Create an 8x4 image (2x2 Braille characters)
-    var image = try Image(Rgb).initAlloc(std.testing.allocator, 8, 4);
+    var image = try Image(Rgb).init(std.testing.allocator, 8, 4);
     defer image.deinit(std.testing.allocator);
 
     // Fill with checkerboard pattern

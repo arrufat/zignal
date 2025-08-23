@@ -51,8 +51,8 @@ pub export fn fdm(
     const src_size = source_rows * source_cols;
     const ref_size = target_rows * target_cols;
 
-    const src_img: Image(Rgba) = .init(source_rows, source_cols, source_ptr[0..src_size]);
-    const ref_img: Image(Rgba) = .init(target_rows, target_cols, target_ptr[0..ref_size]);
+    const src_img: Image(Rgba) = .initFromSlice(source_rows, source_cols, source_ptr[0..src_size]);
+    const ref_img: Image(Rgba) = .initFromSlice(target_rows, target_cols, target_ptr[0..ref_size]);
 
     // Apply FDM using new API
     var matcher = FeatureDistributionMatching(Rgba).init(allocator);

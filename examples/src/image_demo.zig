@@ -11,18 +11,18 @@ pub fn main() !void {
     var image: Image(Rgba) = try .load(gpa, "../assets/liza.jpg");
     defer image.deinit(gpa);
 
-    var edges: Image(u8) = try .initAlloc(gpa, image.rows, image.cols);
+    var edges: Image(u8) = try .init(gpa, image.rows, image.cols);
     defer edges.deinit(gpa);
 
     try image.sobel(gpa, &edges);
     try edges.save(gpa, "liza-sobel.png");
 
-    var blurred: Image(Rgba) = try .initAlloc(gpa, image.rows, image.cols);
+    var blurred: Image(Rgba) = try .init(gpa, image.rows, image.cols);
     defer blurred.deinit(gpa);
     try image.gaussianBlur(gpa, 5.0, &blurred);
     try blurred.save(gpa, "liza-gaussian.png");
 
-    var resized: Image(Rgba) = try .initAlloc(gpa, image.rows / 2, image.cols / 2);
+    var resized: Image(Rgba) = try .init(gpa, image.rows / 2, image.cols / 2);
     defer resized.deinit(gpa);
     try image.resize(gpa, resized, .nearest_neighbor);
     try resized.save(gpa, "liza-resized-nearest.png");

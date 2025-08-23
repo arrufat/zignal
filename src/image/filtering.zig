@@ -37,7 +37,7 @@ pub fn Filter(comptime T: type) type {
         /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: std.mem.Allocator, blurred: *Self, radius: usize) !void {
             if (!self.hasSameShape(blurred.*)) {
-                blurred.* = try .initAlloc(allocator, self.rows, self.cols);
+                blurred.* = try .init(allocator, self.rows, self.cols);
             }
             if (radius == 0) {
                 self.copy(blurred.*);
@@ -179,7 +179,7 @@ pub fn Filter(comptime T: type) type {
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
             if (!self.hasSameShape(sharpened.*)) {
-                sharpened.* = try .initAlloc(allocator, self.rows, self.cols);
+                sharpened.* = try .init(allocator, self.rows, self.cols);
             }
             if (radius == 0) {
                 self.copy(sharpened.*);
@@ -508,7 +508,7 @@ pub fn Filter(comptime T: type) type {
             const kernel_width = @typeInfo(outer_array.child).array.len;
 
             if (!self.hasSameShape(out.*)) {
-                out.* = try .initAlloc(allocator, self.rows, self.cols);
+                out.* = try .init(allocator, self.rows, self.cols);
             }
 
             // Generate specialized implementation for this kernel size
@@ -966,7 +966,7 @@ pub fn Filter(comptime T: type) type {
             sat: *Image(if (meta.isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
             if (!self.hasSameShape(sat.*)) {
-                sat.* = try .initAlloc(allocator, self.rows, self.cols);
+                sat.* = try .init(allocator, self.rows, self.cols);
             }
 
             switch (@typeInfo(T)) {
@@ -1027,11 +1027,11 @@ pub fn Filter(comptime T: type) type {
         pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
             // Ensure output is properly allocated
             if (out.rows == 0 or out.cols == 0 or !self.hasSameShape(out.*)) {
-                out.* = try .initAlloc(allocator, self.rows, self.cols);
+                out.* = try .init(allocator, self.rows, self.cols);
             }
 
             // Allocate temporary buffer for intermediate result
-            var temp = try Self.initAlloc(allocator, self.rows, self.cols);
+            var temp = try Self.init(allocator, self.rows, self.cols);
             defer temp.deinit(allocator);
 
             const half_x = kernel_x.len / 2;
@@ -1296,7 +1296,7 @@ pub fn Filter(comptime T: type) type {
 
             // Ensure output is allocated
             if (!self.hasSameShape(out.*)) {
-                out.* = try .initAlloc(allocator, self.rows, self.cols);
+                out.* = try .init(allocator, self.rows, self.cols);
             }
 
             // Calculate kernel sizes for both sigmas
@@ -1334,9 +1334,9 @@ pub fn Filter(comptime T: type) type {
             }
 
             // Allocate temporary buffers for the two blurred results
-            var blur1 = try Self.initAlloc(allocator, self.rows, self.cols);
+            var blur1 = try Self.init(allocator, self.rows, self.cols);
             defer blur1.deinit(allocator);
-            var blur2 = try Self.initAlloc(allocator, self.rows, self.cols);
+            var blur2 = try Self.init(allocator, self.rows, self.cols);
             defer blur2.deinit(allocator);
 
             // Apply both Gaussian blurs using separable convolution
@@ -1402,7 +1402,7 @@ pub fn Filter(comptime T: type) type {
         /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
             if (!self.hasSameShape(out.*)) {
-                out.* = try .initAlloc(allocator, self.rows, self.cols);
+                out.* = try .init(allocator, self.rows, self.cols);
             }
 
             // For now, use float path for all types to ensure correctness
@@ -1423,7 +1423,7 @@ pub fn Filter(comptime T: type) type {
                 var gray_float: Image(f32) = undefined;
                 const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
                 if (needs_conversion) {
-                    gray_float = try .initAlloc(allocator, self.rows, self.cols);
+                    gray_float = try .init(allocator, self.rows, self.cols);
                     for (0..self.rows) |r| {
                         for (0..self.cols) |c| {
                             gray_float.at(r, c).* = as(f32, convertColor(u8, self.at(r, c).*));

@@ -12,7 +12,7 @@ test "arc drawing - basic angles" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgb).initAlloc(allocator, width, height);
+    var img = try Image(Rgb).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgb).init(allocator, img);
@@ -66,7 +66,7 @@ test "arc drawing - full circle optimization" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgb).initAlloc(allocator, width, height);
+    var img = try Image(Rgb).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgb).init(allocator, img);
@@ -97,9 +97,9 @@ test "arc drawing - angle wrapping" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img1 = try Image(Rgb).initAlloc(allocator, width, height);
+    var img1 = try Image(Rgb).init(allocator, width, height);
     defer img1.deinit(allocator);
-    var img2 = try Image(Rgb).initAlloc(allocator, width, height);
+    var img2 = try Image(Rgb).init(allocator, width, height);
     defer img2.deinit(allocator);
 
     const canvas1 = Canvas(Rgb).init(allocator, img1);
@@ -139,7 +139,7 @@ test "fillArc - pie slices" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgb).initAlloc(allocator, width, height);
+    var img = try Image(Rgb).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgb).init(allocator, img);
@@ -183,9 +183,9 @@ test "arc drawing - soft vs fast mode" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img_fast = try Image(Rgba).initAlloc(allocator, width, height);
+    var img_fast = try Image(Rgba).init(allocator, width, height);
     defer img_fast.deinit(allocator);
-    var img_soft = try Image(Rgba).initAlloc(allocator, width, height);
+    var img_soft = try Image(Rgba).init(allocator, width, height);
     defer img_soft.deinit(allocator);
 
     const canvas_fast = Canvas(Rgba).init(allocator, img_fast);
@@ -228,7 +228,7 @@ test "arc drawing - zero and negative radius" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img = try Image(Rgb).initAlloc(allocator, width, height);
+    var img = try Image(Rgb).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgb).init(allocator, img);
@@ -253,7 +253,7 @@ test "arc drawing - NaN and Inf angles" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img = try Image(Rgb).initAlloc(allocator, width, height);
+    var img = try Image(Rgb).init(allocator, width, height);
     defer img.deinit(allocator);
 
     const canvas = Canvas(Rgb).init(allocator, img);

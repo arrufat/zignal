@@ -344,7 +344,7 @@ test "ORB detect and compute on synthetic image" {
     const allocator = std.testing.allocator;
 
     // Create test image with strong corner patterns
-    var image = try Image(u8).initAlloc(allocator, 100, 100);
+    var image = try Image(u8).init(allocator, 100, 100);
     defer image.deinit(allocator);
 
     // Fill with mid-gray

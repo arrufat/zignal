@@ -6,7 +6,7 @@ const Image = @import("../Image.zig").Image;
 const color = @import("../../color.zig");
 
 test "integral image scalar" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     var integral: Image(f32) = undefined;
@@ -24,7 +24,7 @@ test "integral image scalar" {
 }
 
 test "integral image view scalar" {
-    var image: Image(u8) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     const view = image.view(.{ .l = 2, .t = 3, .r = 8, .b = 10 });
@@ -42,7 +42,7 @@ test "integral image view scalar" {
 }
 
 test "integral image struct" {
-    var image: Image(color.Rgba) = try .initAlloc(std.testing.allocator, 21, 13);
+    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
     var integral: Image([4]f32) = undefined;
@@ -67,11 +67,11 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     const test_size = 10;
 
     // Create RGB image
-    var rgb_img = try Image(Rgb).initAlloc(std.testing.allocator, test_size, test_size);
+    var rgb_img = try Image(Rgb).init(std.testing.allocator, test_size, test_size);
     defer rgb_img.deinit(std.testing.allocator);
 
     // Create RGBA image
-    var rgba_img = try Image(color.Rgba).initAlloc(std.testing.allocator, test_size, test_size);
+    var rgba_img = try Image(color.Rgba).init(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
 
     // Fill both with identical RGB values

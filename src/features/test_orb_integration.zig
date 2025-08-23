@@ -239,7 +239,7 @@ test "ORB kNN matching" {
 // Helper functions to create test images
 
 fn createTestImage(allocator: Allocator, rows: usize, cols: usize, seed: u64) !Image(u8) {
-    var image = try Image(u8).initAlloc(allocator, rows, cols);
+    var image = try Image(u8).init(allocator, rows, cols);
 
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
@@ -270,7 +270,7 @@ fn createTestImage(allocator: Allocator, rows: usize, cols: usize, seed: u64) !I
 }
 
 fn createPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8) {
-    var image = try Image(u8).initAlloc(allocator, rows, cols);
+    var image = try Image(u8).init(allocator, rows, cols);
 
     // Fill with gray
     for (0..rows) |r| {
@@ -299,7 +299,7 @@ fn createPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8)
 }
 
 fn createRotatedPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8) {
-    var image = try Image(u8).initAlloc(allocator, rows, cols);
+    var image = try Image(u8).init(allocator, rows, cols);
 
     // Fill with gray
     for (0..rows) |r| {

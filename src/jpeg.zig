@@ -1818,7 +1818,7 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
     defer decoder.deinit();
 
     // Create output image
-    var img = try Image(T).initAlloc(allocator, decoder.height, decoder.width);
+    var img = try Image(T).init(allocator, decoder.height, decoder.width);
     errdefer img.deinit(allocator);
 
     // Complete block-based pipeline:

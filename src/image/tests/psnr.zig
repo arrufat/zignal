@@ -12,13 +12,13 @@ const Image = @import("../Image.zig").Image;
 
 test "PSNR identical images returns inf" {
     // Test with u8 scalar type
-    var img1 = try Image(u8).initAlloc(std.testing.allocator, 10, 10);
+    var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
     for (img1.data) |*pixel| {
         pixel.* = 128;
     }
 
-    var img2 = try Image(u8).initAlloc(std.testing.allocator, 10, 10);
+    var img2 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img2.deinit(std.testing.allocator);
     for (img2.data) |*pixel| {
         pixel.* = 128;
@@ -29,24 +29,24 @@ test "PSNR identical images returns inf" {
 }
 
 test "PSNR dimension mismatch error" {
-    var img1 = try Image(u8).initAlloc(std.testing.allocator, 10, 10);
+    var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
 
-    var img2 = try Image(u8).initAlloc(std.testing.allocator, 10, 20);
+    var img2 = try Image(u8).init(std.testing.allocator, 10, 20);
     defer img2.deinit(std.testing.allocator);
 
     try expectError(error.DimensionMismatch, img1.psnr(img2));
 }
 
 test "PSNR with known values for u8" {
-    var img1 = try Image(u8).initAlloc(std.testing.allocator, 2, 2);
+    var img1 = try Image(u8).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = 100;
     img1.at(0, 1).* = 150;
     img1.at(1, 0).* = 200;
     img1.at(1, 1).* = 250;
 
-    var img2 = try Image(u8).initAlloc(std.testing.allocator, 2, 2);
+    var img2 = try Image(u8).init(std.testing.allocator, 2, 2);
     defer img2.deinit(std.testing.allocator);
     img2.at(0, 0).* = 110; // diff = 10
     img2.at(0, 1).* = 140; // diff = -10
@@ -60,11 +60,11 @@ test "PSNR with known values for u8" {
 }
 
 test "PSNR with RGB struct type" {
-    var img1 = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    var img1 = try Image(Rgb).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.fill(Rgb{ .r = 100, .g = 150, .b = 200 });
 
-    var img2 = try Image(Rgb).initAlloc(std.testing.allocator, 2, 2);
+    var img2 = try Image(Rgb).init(std.testing.allocator, 2, 2);
     defer img2.deinit(std.testing.allocator);
     img2.fill(Rgb{ .r = 110, .g = 140, .b = 205 });
 
@@ -77,12 +77,12 @@ test "PSNR with RGB struct type" {
 }
 
 test "PSNR with RGBA struct type" {
-    var img1 = try Image(Rgba).initAlloc(std.testing.allocator, 1, 2);
+    var img1 = try Image(Rgba).init(std.testing.allocator, 1, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
     img1.at(0, 1).* = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
 
-    var img2 = try Image(Rgba).initAlloc(std.testing.allocator, 1, 2);
+    var img2 = try Image(Rgba).init(std.testing.allocator, 1, 2);
     defer img2.deinit(std.testing.allocator);
     img2.at(0, 0).* = Rgba{ .r = 250, .g = 5, .b = 0, .a = 255 }; // diffs: 5, 5, 0, 0
     img2.at(0, 1).* = Rgba{ .r = 0, .g = 250, .b = 5, .a = 255 }; // diffs: 0, 5, 5, 0
@@ -94,14 +94,14 @@ test "PSNR with RGBA struct type" {
 }
 
 test "PSNR with f32 scalar type" {
-    var img1 = try Image(f32).initAlloc(std.testing.allocator, 2, 2);
+    var img1 = try Image(f32).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = 0.5;
     img1.at(0, 1).* = 0.7;
     img1.at(1, 0).* = 0.3;
     img1.at(1, 1).* = 0.9;
 
-    var img2 = try Image(f32).initAlloc(std.testing.allocator, 2, 2);
+    var img2 = try Image(f32).init(std.testing.allocator, 2, 2);
     defer img2.deinit(std.testing.allocator);
     img2.at(0, 0).* = 0.4; // diff = 0.1
     img2.at(0, 1).* = 0.8; // diff = -0.1
@@ -115,12 +115,12 @@ test "PSNR with f32 scalar type" {
 }
 
 test "PSNR with array type [3]u8" {
-    var img1 = try Image([3]u8).initAlloc(std.testing.allocator, 1, 2);
+    var img1 = try Image([3]u8).init(std.testing.allocator, 1, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = .{ 100, 150, 200 };
     img1.at(0, 1).* = .{ 50, 100, 150 };
 
-    var img2 = try Image([3]u8).initAlloc(std.testing.allocator, 1, 2);
+    var img2 = try Image([3]u8).init(std.testing.allocator, 1, 2);
     defer img2.deinit(std.testing.allocator);
     img2.at(0, 0).* = .{ 105, 145, 195 }; // diffs: 5, -5, -5
     img2.at(0, 1).* = .{ 45, 105, 155 }; // diffs: -5, 5, 5
@@ -132,13 +132,13 @@ test "PSNR with array type [3]u8" {
 }
 
 test "PSNR extreme case: black vs white" {
-    var img1 = try Image(u8).initAlloc(std.testing.allocator, 10, 10);
+    var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
     for (img1.data) |*pixel| {
         pixel.* = 0; // All black
     }
 
-    var img2 = try Image(u8).initAlloc(std.testing.allocator, 10, 10);
+    var img2 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img2.deinit(std.testing.allocator);
     for (img2.data) |*pixel| {
         pixel.* = 255; // All white
@@ -151,13 +151,13 @@ test "PSNR extreme case: black vs white" {
 }
 
 test "PSNR with slight noise" {
-    var img1 = try Image(u8).initAlloc(std.testing.allocator, 100, 100);
+    var img1 = try Image(u8).init(std.testing.allocator, 100, 100);
     defer img1.deinit(std.testing.allocator);
     for (img1.data) |*pixel| {
         pixel.* = 128;
     }
 
-    var img2 = try Image(u8).initAlloc(std.testing.allocator, 100, 100);
+    var img2 = try Image(u8).init(std.testing.allocator, 100, 100);
     defer img2.deinit(std.testing.allocator);
     for (img2.data) |*pixel| {
         pixel.* = 128;

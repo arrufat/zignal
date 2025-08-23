@@ -67,7 +67,7 @@ pub fn Filter(comptime T: type) type {
         pub fn boxBlur(self: Image(T), allocator: Allocator, blurred: *Image(T), radius: usize) !void {
             _ = radius;
             if (blurred.rows == 0) {
-                blurred.* = try Image(T).initAlloc(allocator, self.rows, self.cols);
+                blurred.* = try Image(T).init(allocator, self.rows, self.cols);
             }
 
             // Simple box blur (just copy for testing)
@@ -138,7 +138,7 @@ pub fn ImagePyramid(comptime T: type) type {
                 const radius = @as(usize, @intFromFloat(blur_sigma * 2));
                 try Filter(T).boxBlur(prev_level, allocator, &blurred, radius);
 
-                levels[i] = try Image(T).initAlloc(allocator, new_rows, new_cols);
+                levels[i] = try Image(T).init(allocator, new_rows, new_cols);
 
                 const blur_to_use = if (blurred.rows > 0) blurred else prev_level;
                 try blur_to_use.resize(allocator, levels[i], .bilinear);
@@ -174,7 +174,7 @@ const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 test "ImagePyramid construction and scaling" {
     const allocator = std.testing.allocator;
 
-    var image = try Image(u8).initAlloc(allocator, 640, 480);
+    var image = try Image(u8).init(allocator, 640, 480);
     defer image.deinit(allocator);
 
     // Fill with test pattern

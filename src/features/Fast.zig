@@ -271,7 +271,7 @@ test "FAST detector on synthetic corner" {
     const allocator = std.testing.allocator;
 
     // Create a simple image with a corner pattern
-    var image = try Image(u8).initAlloc(allocator, 20, 20);
+    var image = try Image(u8).init(allocator, 20, 20);
     defer image.deinit(allocator);
 
     // Fill with gray
@@ -321,7 +321,7 @@ test "FAST non-maximal suppression" {
     const allocator = std.testing.allocator;
 
     // Create a simple image
-    var image = try Image(u8).initAlloc(allocator, 50, 50);
+    var image = try Image(u8).init(allocator, 50, 50);
     defer image.deinit(allocator);
 
     // Fill with gradient pattern that will create many corners

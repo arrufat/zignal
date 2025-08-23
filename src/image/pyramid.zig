@@ -88,7 +88,7 @@ pub fn ImagePyramid(comptime T: type) type {
                 }
 
                 // Allocate and resize to create the new level
-                levels[i] = try Image(T).initAlloc(allocator, new_rows, new_cols);
+                levels[i] = try Image(T).init(allocator, new_rows, new_cols);
 
                 // Use bilinear interpolation for downsampling
                 const blur_to_use = if (blurred.rows > 0) blurred else prev_level;
@@ -174,7 +174,7 @@ test "ImagePyramid basic construction" {
     const allocator = std.testing.allocator;
 
     // Create a test image
-    var image = try Image(u8).initAlloc(allocator, 640, 480);
+    var image = try Image(u8).init(allocator, 640, 480);
     defer image.deinit(allocator);
 
     // Fill with test pattern
@@ -208,7 +208,7 @@ test "ImagePyramid basic construction" {
 test "ImagePyramid scale calculations" {
     const allocator = std.testing.allocator;
 
-    var image = try Image(u8).initAlloc(allocator, 100, 100);
+    var image = try Image(u8).init(allocator, 100, 100);
     defer image.deinit(allocator);
 
     var pyramid = try ImagePyramid(u8).build(allocator, image, 4, 1.2, 1.0);
@@ -234,7 +234,7 @@ test "ImagePyramid truncation for small images" {
     const allocator = std.testing.allocator;
 
     // Start with a small image
-    var image = try Image(u8).initAlloc(allocator, 32, 32);
+    var image = try Image(u8).init(allocator, 32, 32);
     defer image.deinit(allocator);
 
     // Request many levels but expect truncation
@@ -253,7 +253,7 @@ test "ImagePyramid truncation for small images" {
 test "ImagePyramid memory usage" {
     const allocator = std.testing.allocator;
 
-    var image = try Image(u8).initAlloc(allocator, 256, 256);
+    var image = try Image(u8).init(allocator, 256, 256);
     defer image.deinit(allocator);
 
     var pyramid = try ImagePyramid(u8).build(allocator, image, 4, 1.5, 1.0);

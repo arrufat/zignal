@@ -137,7 +137,7 @@ pub fn main() !void {
     // Create visualization: concatenate images side by side
     const combined_width = original.cols + rotated.cols;
     const combined_height = @max(original.rows, rotated.rows);
-    var match_viz = try Image(Rgb).initAlloc(allocator, combined_height, combined_width);
+    var match_viz = try Image(Rgb).init(allocator, combined_height, combined_width);
     defer match_viz.deinit(allocator);
 
     // Fill with black

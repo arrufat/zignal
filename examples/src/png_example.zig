@@ -28,7 +28,7 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n📸 1. RGB Image Creation & Round-trip Testing", .{});
 
-    var rgb_image = try Image(Rgb).initAlloc(gpa, height, width);
+    var rgb_image = try Image(Rgb).init(gpa, height, width);
     defer rgb_image.deinit(gpa);
 
     // Create a colorful test pattern
@@ -64,7 +64,7 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n🎭 2. RGBA with Transparency", .{});
 
-    var rgba_image = try Image(Rgba).initAlloc(gpa, height, width);
+    var rgba_image = try Image(Rgba).init(gpa, height, width);
     defer rgba_image.deinit(gpa);
 
     for (0..height) |y| {
@@ -99,7 +99,7 @@ pub fn main() !void {
     // ========================================================================
     std.log.info("\n⚫ 3. Grayscale Images", .{});
 
-    var gray_image = try Image(u8).initAlloc(gpa, height, width);
+    var gray_image = try Image(u8).init(gpa, height, width);
     defer gray_image.deinit(gpa);
 
     // Create a pattern with various gray levels
@@ -146,7 +146,7 @@ pub fn main() !void {
     std.log.info("\n🌈 5. Custom Color Space Support", .{});
 
     // Create HSL image and save as PNG (automatic conversion to RGB)
-    var hsl_image = try Image(Hsl).initAlloc(gpa, height / 2, width / 2);
+    var hsl_image = try Image(Hsl).init(gpa, height / 2, width / 2);
     defer hsl_image.deinit(gpa);
 
     for (0..height / 2) |y| {
@@ -173,7 +173,7 @@ pub fn main() !void {
     std.log.info("\n🧪 6. Edge Cases & Validation", .{});
 
     // Test 1x1 pixel image
-    var tiny_image = try Image(Rgb).initAlloc(gpa, 1, 1);
+    var tiny_image = try Image(Rgb).init(gpa, 1, 1);
     defer tiny_image.deinit(gpa);
     tiny_image.data[0] = Rgb{ .r = 255, .g = 0, .b = 128 };
 
@@ -186,7 +186,7 @@ pub fn main() !void {
 
     // Test large-ish image (performance test)
     const large_size = 128;
-    var large_image = try Image(Rgb).initAlloc(gpa, large_size, large_size);
+    var large_image = try Image(Rgb).init(gpa, large_size, large_size);
     defer large_image.deinit(gpa);
 
     for (0..large_size) |y| {

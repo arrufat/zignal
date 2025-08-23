@@ -18,7 +18,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Create a 512x512 image for the logo
-    var image = try Image(Rgb).initAlloc(allocator, 512, 512);
+    var image = try Image(Rgb).init(allocator, 512, 512);
     defer image.deinit(allocator);
 
     // Create canvas for drawing

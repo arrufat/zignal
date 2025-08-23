@@ -501,7 +501,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .rgba = Image(Rgba).init(height, width, output_data) };
+                return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
                 // Create grayscale image when no transparency
                 const total_pixels = @as(u64, width) * @as(u64, height);
@@ -522,7 +522,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .grayscale = Image(u8).init(height, width, output_data) };
+                return .{ .grayscale = .initFromSlice(height, width, output_data) };
             }
         },
         .rgb => {
@@ -546,7 +546,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .rgba = Image(Rgba).init(height, width, output_data) };
+                return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
                 // Create RGB image when no transparency
                 const total_pixels = @as(u64, width) * @as(u64, height);
@@ -567,7 +567,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .rgb = Image(Rgb).init(height, width, output_data) };
+                return .{ .rgb = .initFromSlice(height, width, output_data) };
             }
         },
         .rgba => {
@@ -604,7 +604,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                 }
             }
 
-            return .{ .rgba = Image(Rgba).init(height, width, output_data) };
+            return .{ .rgba = .initFromSlice(height, width, output_data) };
         },
         .palette => {
             // Convert palette to RGB or RGBA (if transparency present)
@@ -657,7 +657,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .rgba = Image(Rgba).init(height, width, output_data) };
+                return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
                 // No transparency - convert to RGB
                 var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
@@ -693,7 +693,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     }
                 }
 
-                return .{ .rgb = Image(Rgb).init(height, width, output_data) };
+                return .{ .rgb = .initFromSlice(height, width, output_data) };
             }
         },
     }
@@ -946,7 +946,7 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), opti
         },
         else => {
             // Convert unsupported type to RGB
-            var rgb_image = try Image(Rgb).initAlloc(allocator, image.rows, image.cols);
+            var rgb_image = try Image(Rgb).init(allocator, image.rows, image.cols);
             defer rgb_image.deinit(allocator);
 
             // Convert each pixel to RGB
@@ -1683,7 +1683,7 @@ test "PNG round-trip encoding/decoding" {
     defer allocator.free(owned_data);
     @memcpy(owned_data, &test_data);
 
-    const original_image = Image(Rgb).init(height, width, owned_data);
+    const original_image: Image(Rgb) = .initFromSlice(height, width, owned_data);
 
     // Encode to PNG
     const png_data = try encodeImage(Rgb, allocator, original_image, .default);
@@ -1827,7 +1827,7 @@ test "PNG encode with color management chunks" {
         Rgb{ .r = 255, .g = 0, .b = 0 }, Rgb{ .r = 0, .g = 255, .b = 0 },
         Rgb{ .r = 0, .g = 0, .b = 255 }, Rgb{ .r = 255, .g = 255, .b = 0 },
     };
-    const test_image = Image(Rgb).init(2, 2, &test_data);
+    const test_image: Image(Rgb) = .initFromSlice(2, 2, &test_data);
 
     // Test encoding with sRGB chunk
     const srgb_options: EncodeOptions = .{ .srgb_intent = .perceptual };

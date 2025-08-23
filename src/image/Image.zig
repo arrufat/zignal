@@ -44,10 +44,10 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub const empty: Self = .{ .rows = 0, .cols = 0, .data = undefined, .stride = 0 };
 
-        /// Constructs an image of rows and cols size.  If the slice is owned by this image,
-        /// deinit should also be called.
-        pub fn init(rows: usize, cols: usize, data: []T) Image(T) {
-            return .{ .rows = rows, .cols = cols, .data = data, .stride = cols };
+        /// Constructs an image of rows and cols size allocating its own memory.
+        /// The image owns the memory and deinit should be called to free it.
+        pub fn init(allocator: Allocator, rows: usize, cols: usize) !Image(T) {
+            return .{ .rows = rows, .cols = cols, .data = try allocator.alloc(T, rows * cols), .stride = cols };
         }
 
         /// Sets the image rows and cols to zero and frees the memory from the image.  It should
@@ -59,9 +59,9 @@ pub fn Image(comptime T: type) type {
             allocator.free(self.data);
         }
 
-        /// Constructs an image of rows and cols size allocating its own memory.
-        pub fn initAlloc(allocator: Allocator, rows: usize, cols: usize) !Image(T) {
-            return .{ .rows = rows, .cols = cols, .data = try allocator.alloc(T, rows * cols), .stride = cols };
+        /// Constructs an image of rows and cols size from an existing slice.
+        pub fn initFromSlice(rows: usize, cols: usize, data: []T) Image(T) {
+            return .{ .rows = rows, .cols = cols, .data = data, .stride = cols };
         }
 
         /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
@@ -188,7 +188,7 @@ pub fn Image(comptime T: type) type {
         /// defer duped.deinit(allocator);
         /// ```
         pub fn dupe(self: Self, allocator: Allocator) !Self {
-            const result = try Self.initAlloc(allocator, self.rows, self.cols);
+            const result = try Self.init(allocator, self.rows, self.cols);
             self.copy(result);
             return result;
         }
@@ -226,7 +226,7 @@ pub fn Image(comptime T: type) type {
         /// defer gray_image.deinit(allocator);
         /// ```
         pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
-            var result: Image(TargetType) = try .initAlloc(allocator, self.rows, self.cols);
+            var result: Image(TargetType) = try .init(allocator, self.rows, self.cols);
             if (T == TargetType) {
                 // For same type, we need to handle views properly
                 if (self.stride == self.cols) {
@@ -355,7 +355,7 @@ pub fn Image(comptime T: type) type {
 
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
-            const scaled = try Self.initAlloc(allocator, new_rows, new_cols);
+            const scaled = try Self.init(allocator, new_rows, new_cols);
             try self.resize(allocator, scaled, method);
             return scaled;
         }
@@ -372,7 +372,7 @@ pub fn Image(comptime T: type) type {
 
             // Allocate output if not already allocated
             if (out.data.len == 0) {
-                out.* = try .initAlloc(allocator, out.rows, out.cols);
+                out.* = try .init(allocator, out.rows, out.cols);
             }
 
             // Early return if dimensions match - just copy and return full rectangle
@@ -498,7 +498,7 @@ pub fn Image(comptime T: type) type {
                 // 0° or 360° - copy
                 var array: std.ArrayList(T) = .empty;
                 try array.resize(gpa, actual_rows * actual_cols);
-                rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
+                rotated.* = .initFromSlice(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
 
                 const offset_r = (actual_rows -| self.rows) / 2;
                 const offset_c = (actual_cols -| self.cols) / 2;
@@ -532,7 +532,7 @@ pub fn Image(comptime T: type) type {
             // General rotation using inverse transformation
             var array: std.ArrayList(T) = .empty;
             try array.resize(gpa, actual_rows * actual_cols);
-            rotated.* = .init(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
+            rotated.* = .initFromSlice(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
 
             const cos = @cos(angle);
             const sin = @sin(angle);
@@ -568,7 +568,7 @@ pub fn Image(comptime T: type) type {
         fn rotate90CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
             var array: std.ArrayList(T) = .empty;
             try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
+            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 
@@ -590,7 +590,7 @@ pub fn Image(comptime T: type) type {
         fn rotate180(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
             var array: std.ArrayList(T) = .empty;
             try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
+            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 
@@ -612,7 +612,7 @@ pub fn Image(comptime T: type) type {
         fn rotate270CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
             var array: std.ArrayList(T) = .empty;
             try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .init(output_rows, output_cols, try array.toOwnedSlice(gpa));
+            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
 
             for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
 
@@ -656,7 +656,7 @@ pub fn Image(comptime T: type) type {
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
             const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
-            chip.* = try .initAlloc(allocator, chip_rows, chip_cols);
+            chip.* = try .init(allocator, chip_rows, chip_cols);
             self.copyRect(chip_top, chip_left, chip.*);
         }
 

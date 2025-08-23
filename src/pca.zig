@@ -380,7 +380,7 @@ pub fn imageToColorPoints(comptime ColorType: type, allocator: Allocator, image:
 pub fn colorPointsToImage(comptime ColorType: type, allocator: Allocator, points: []const @Vector(std.meta.fields(ColorType).len, f64), rows: usize, cols: usize) !Image(ColorType) {
     assert(points.len == rows * cols);
 
-    var image = try Image(ColorType).initAlloc(allocator, rows, cols);
+    var image = try Image(ColorType).init(allocator, rows, cols);
 
     for (points, 0..) |point, i| {
         image.data[i] = pointToColor(ColorType, point);
@@ -406,7 +406,7 @@ pub fn imageToIntensityPoints(allocator: Allocator, image: Image(u8)) ![]@Vector
 pub fn intensityPointsToImage(allocator: Allocator, points: []const @Vector(1, f64), rows: usize, cols: usize) !Image(u8) {
     assert(points.len == rows * cols);
 
-    var image = try Image(u8).initAlloc(allocator, rows, cols);
+    var image = try Image(u8).init(allocator, rows, cols);
 
     for (points, 0..) |point, i| {
         const intensity = std.math.clamp(point[0] * 255.0, 0, 255);
@@ -494,7 +494,7 @@ test "Generic image to color points conversion" {
     const allocator = std.testing.allocator;
 
     // Create a simple 2x2 RGB image
-    var image = try Image(Rgb).initAlloc(allocator, 2, 2);
+    var image = try Image(Rgb).init(allocator, 2, 2);
     defer image.deinit(allocator);
 
     image.data[0] = Rgb{ .r = 255, .g = 0, .b = 0 }; // Red
@@ -530,7 +530,7 @@ test "PCA on image color data" {
     const allocator = std.testing.allocator;
 
     // Create a simple gradient image
-    var image = try Image(Rgb).initAlloc(allocator, 2, 2);
+    var image = try Image(Rgb).init(allocator, 2, 2);
     defer image.deinit(allocator);
 
     image.data[0] = Rgb{ .r = 0, .g = 0, .b = 0 }; // Black

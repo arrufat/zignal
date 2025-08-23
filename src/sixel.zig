@@ -169,7 +169,7 @@ pub fn fromImage(
             working_img = try image.convert(Rgb, gpa);
         } else {
             // Scaling needed - use interpolation
-            working_img = try Image(Rgb).initAlloc(gpa, height, width);
+            working_img = try Image(Rgb).init(gpa, height, width);
 
             // Copy scaled image data to working image
             for (0..height) |row| {
@@ -857,7 +857,7 @@ test "basic sixel encoding - 2x2 image" {
     const allocator = std.testing.allocator;
 
     // Create a 2x2 test image with distinct colors
-    var img = try Image(Rgb).initAlloc(allocator, 2, 2);
+    var img = try Image(Rgb).init(allocator, 2, 2);
     defer img.deinit(allocator);
 
     img.at(0, 0).* = .{ .r = 255, .g = 0, .b = 0 }; // Red
@@ -887,7 +887,7 @@ test "basic sixel encoding - verify palette format" {
     const allocator = std.testing.allocator;
 
     // Create a 4x4 test image
-    var img = try Image(Rgb).initAlloc(allocator, 4, 4);
+    var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     // Fill with a single color to ensure it appears in palette
@@ -913,7 +913,7 @@ test "palette mode - fixed 6x7x6 color mapping" {
     const allocator = std.testing.allocator;
 
     // Create image with colors that map to specific palette indices
-    var img = try Image(Rgb).initAlloc(allocator, 1, 3);
+    var img = try Image(Rgb).init(allocator, 1, 3);
     defer img.deinit(allocator);
 
     // Colors chosen to map to specific 6x7x6 palette entries
@@ -938,7 +938,7 @@ test "palette mode - adaptive with color reduction" {
     const allocator = std.testing.allocator;
 
     // Create image with 8 distinct colors
-    var img = try Image(Rgb).initAlloc(allocator, 4, 4);
+    var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
 
     const colors = [_]Rgb{
@@ -981,7 +981,7 @@ test "palette mode - adaptive with color reduction" {
 test "edge case - single pixel image" {
     const allocator = std.testing.allocator;
 
-    var img = try Image(Rgb).initAlloc(allocator, 1, 1);
+    var img = try Image(Rgb).init(allocator, 1, 1);
     defer img.deinit(allocator);
 
     img.at(0, 0).* = .{ .r = 128, .g = 128, .b = 128 };
@@ -1003,7 +1003,7 @@ test "edge case - single pixel image" {
 test "edge case - uniform color image" {
     const allocator = std.testing.allocator;
 
-    var img = try Image(Rgb).initAlloc(allocator, 8, 8);
+    var img = try Image(Rgb).init(allocator, 8, 8);
     defer img.deinit(allocator);
 
     // Fill entire image with same color
