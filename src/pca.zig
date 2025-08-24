@@ -46,6 +46,19 @@ const SMatrix = @import("matrix.zig").SMatrix;
 
 /// Principal Component Analysis for arbitrary-dimensional vectors.
 /// Uses SIMD-accelerated vector operations for optimal performance.
+///
+/// Type parameters
+/// - `T`: floating-point scalar type used for all computations and storage.
+///   Typically `f32` (faster, less memory) or `f64` (higher precision).
+///   Constraints: `T` must be a floating-point type.
+/// - `dim`: number of features per input vector. This is a compile-time
+///   constant and defines `Vec = @Vector(dim, T)` for inputs/outputs.
+///   Constraints: `dim >= 1`.
+///
+/// Notes
+/// - The components matrix has shape `dim × k` (columns are principal axes).
+/// - Eigenvalues (length `k`) are variances along each component (descending).
+/// - Choose `T = f32` for speed and `T = f64` for numerical robustness.
 pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
     assert(@typeInfo(T) == .float);
     assert(dim >= 1);
