@@ -22,14 +22,6 @@ pub const color_types = .{
     zignal.Ycbcr,
 };
 
-/// Check if a type is a supported color type
-pub fn isSupportedColor(comptime T: type) bool {
-    inline for (color_types) |ColorType| {
-        if (T == ColorType) return true;
-    }
-    return false;
-}
-
 /// Generic color component validation using type introspection
 /// This function determines validation rules based on the actual field types and semantics
 pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, value: anytype) bool {
@@ -60,12 +52,12 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
             return false;
         },
 
-        // Lab: L: 0-100, a/b: -200 to 200
+        // Lab: L: 0-100, a/b: -128 to 127
         zignal.Lab => {
             if (std.mem.eql(u8, field_name, "l")) {
                 return value >= 0.0 and value <= 100.0;
             } else if (std.mem.eql(u8, field_name, "a") or std.mem.eql(u8, field_name, "b")) {
-                return value >= -200.0 and value <= 200.0;
+                return value >= -128.0 and value <= 127.0;
             }
             return false;
         },
@@ -159,13 +151,13 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
         zignal.Rgb, zignal.Rgba => "RGB values must be in range 0-255",
         zignal.Hsv => "HSV values must be in valid ranges (h: 0-360, s: 0-100, v: 0-100)",
         zignal.Hsl => "HSL values must be in valid ranges (h: 0-360, s: 0-100, l: 0-100)",
-        zignal.Lab => "Lab values must be in valid ranges (L: 0-100, a/b: typically -128 to 127)",
-        zignal.Xyz => "XYZ values must be non-negative",
-        zignal.Oklab => "Oklab values must be in valid ranges (l: 0-1, a/b: typically -0.5 to 0.5)",
+        zignal.Lab => "Lab values must be in valid ranges (L: 0-100, a/b: -128 to 127)",
+        zignal.Xyz => "XYZ values must be in range 0-150",
+        zignal.Oklab => "Oklab values must be in valid ranges (l: 0-1, a/b: -0.5 to 0.5)",
         zignal.Oklch => "Oklch values must be in valid ranges (l: 0-1, c: 0-0.5, h: 0-360)",
         zignal.Lch => "Lch values must be in valid ranges (l: 0-100, c: >=0, h: 0-360)",
-        zignal.Lms => "LMS values should be non-negative cone responses",
-        zignal.Xyb => "XYB values used in JPEG XL compression",
+        zignal.Lms => "LMS values must be in range 0-1000",
+        zignal.Xyb => "XYB values must be in range -1000 to 1000",
         zignal.Ycbcr => "YCbCr values must be in range 0-255",
         else => @compileError("Missing validation error message for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
