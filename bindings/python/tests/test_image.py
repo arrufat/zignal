@@ -37,30 +37,21 @@ class TestImageBinding:
     def test_image_equality(self):
         """Test Image equality comparison."""
         # Create two identical images
-        arr1 = np.ones((10, 20, 4), dtype=np.uint8) * 100
-        img1 = zignal.Image.from_numpy(arr1)
-
-        arr2 = np.ones((10, 20, 4), dtype=np.uint8) * 100
-        img2 = zignal.Image.from_numpy(arr2)
+        img1 = zignal.Image(10, 20, zignal.Rgba(100, 100, 100, 255))
+        img2 = zignal.Image(10, 20, zignal.Rgba(100, 100, 100, 255))
 
         # Test equality
+        assert img1 == img1
         assert img1 == img2
         assert not (img1 != img2)
 
-        # Test with same image
-        assert img1 == img1
-
         # Create different image (different pixel values)
-        arr3 = np.ones((10, 20, 4), dtype=np.uint8) * 200
-        img3 = zignal.Image.from_numpy(arr3)
-
+        img3 = zignal.Image(10, 20, zignal.Rgba(200, 200, 200, 255))
         assert img1 != img3
         assert not (img1 == img3)
 
         # Create image with different dimensions
-        arr4 = np.ones((15, 20, 4), dtype=np.uint8) * 100
-        img4 = zignal.Image.from_numpy(arr4)
-
+        img4 = zignal.Image(15, 20, zignal.Rgba(100, 100, 100, 255))
         assert img1 != img4
         assert not (img1 == img4)
 
