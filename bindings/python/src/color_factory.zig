@@ -604,7 +604,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
 
             // Convert self to RGBA
-            const self_rgba = color_utils.parseColorToRgba(self_obj) catch {
+            const self_rgba = color_utils.parseColorTo(zignal.Rgba, self_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();
@@ -613,7 +613,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             };
 
             // Convert other to RGBA
-            const other_rgba = color_utils.parseColorToRgba(other_obj) catch {
+            const other_rgba = color_utils.parseColorTo(zignal.Rgba, other_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();

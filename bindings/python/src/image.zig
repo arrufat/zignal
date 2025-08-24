@@ -100,6 +100,17 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         return 0;
     }
 
+    // Define color input types for cleaner logic
+    const ColorInputType = enum {
+        none,
+        grayscale, // Integer value
+        rgb_tuple, // 3-component tuple
+        rgba_tuple, // 4-component tuple
+        rgb_object, // Rgb instance
+        rgba_object, // Rgba instance
+        other, // Other color object
+    };
+
     // Parse arguments: rows, cols, optional color, keyword-only format
     var rows: c_int = 0;
     var cols: c_int = 0;
@@ -117,118 +128,166 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     const validated_rows = py_utils.validateRange(usize, rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
     const validated_cols = py_utils.validateRange(usize, cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
 
-    // Parse color if provided, otherwise use transparent
-    var fill_color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 }; // Default transparent
-    var color_components: usize = 0; // Track number of color components
-    var is_integer_color = false;
-    var is_rgba_object = false; // Track if color is an Rgba instance
+    // Detect color input type
+    var color_type = ColorInputType.none;
     if (color_obj != null and color_obj != c.Py_None()) {
-        // Check if it's an integer (grayscale)
         if (c.PyLong_Check(color_obj) != 0) {
-            is_integer_color = true;
+            color_type = .grayscale;
+        } else if (c.PyTuple_Check(color_obj) != 0) {
+            const tuple_size = c.PyTuple_Size(color_obj);
+            if (tuple_size == 3) {
+                color_type = .rgb_tuple;
+            } else if (tuple_size == 4) {
+                color_type = .rgba_tuple;
+            } else {
+                c.PyErr_SetString(c.PyExc_ValueError, "Color tuple must have 3 or 4 elements");
+                return -1;
+            }
+        } else if (c.PyObject_IsInstance(color_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
+            color_type = .rgba_object;
+        } else if (c.PyObject_IsInstance(color_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
+            color_type = .rgb_object;
+        } else {
+            color_type = .other;
         }
-        // Check tuple size if it's a tuple to auto-detect format
-        else if (c.PyTuple_Check(color_obj) != 0) {
-            color_components = @intCast(c.PyTuple_Size(color_obj));
-        }
-        // Check if it's an Rgba instance
-        else if (c.PyObject_IsInstance(color_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
-            is_rgba_object = true;
-        }
-        fill_color = color_utils.parseColorToRgba(color_obj) catch {
-            // Error already set by parseColorToRgba
-            return -1;
-        };
     }
 
-    // Determine requested format (sentinel types); default based on color type.
-    var _use_gray: bool = is_integer_color; // Integer color defaults to grayscale
-    // Default to RGB unless grayscale, 4-component tuple, or Rgba object
-    var _use_rgb: bool = (!is_integer_color and color_components != 4 and !is_rgba_object);
+    // Determine target format based on color type and explicit format parameter
+    const ImageFormat = enum { grayscale, rgb, rgba };
+    var target_format: ImageFormat = undefined;
+
     if (format_obj) |fmt_obj| {
-        // Accept either the type object itself or an instance of the type
-        // Compare pointer identity for type objects
+        // Explicit format specified
         // TODO: Remove explicit cast after Python 3.10 is dropped
         const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
         if (is_type_obj) {
             if (fmt_obj == @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType))) {
-                _use_gray = true;
+                target_format = .grayscale;
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
-                _use_rgb = true;
+                target_format = .rgb;
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
-                _use_rgb = false;
+                target_format = .rgba;
             } else {
                 c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
                 return -1;
             }
         } else {
             // Instances: allow Rgb/Rgba instances for convenience
-            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
-                _use_rgb = true;
+            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&grayscale_format.GrayscaleType)) == 1) {
+                target_format = .grayscale;
+            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
+                target_format = .rgb;
             } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
-                _use_rgb = false;
+                target_format = .rgba;
             } else {
                 c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
                 return -1;
             }
         }
+    } else {
+        // Auto-detect format based on color type
+        target_format = switch (color_type) {
+            .none => .rgb, // Default to RGB for no color
+            .grayscale => .grayscale,
+            .rgb_tuple => .rgb,
+            .rgba_tuple => .rgba,
+            .rgb_object => .rgb,
+            .rgba_object => .rgba,
+            .other => .rgb, // Default to RGB for other color objects
+        };
     }
 
-    // Create grayscale or RGBA depending on requested format
-    if (_use_gray) {
-        // Grayscale path
-        var gimg = Image(u8).init(allocator, validated_rows, validated_cols) catch {
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-            return -1;
-        };
-        // Fill with grayscale value derived from provided color using luma
-        @memset(gimg.data, fill_color.toGray());
-        const pimg = allocator.create(PyImage) catch {
-            gimg.deinit(allocator);
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-            return -1;
-        };
-        pimg.data = PyImage.Variant{ .gray = gimg };
-        pimg.owning = true;
-        self.py_image = pimg;
-        self.numpy_ref = null;
-        self.parent_ref = null;
-        return 0;
-    } else if (_use_rgb) {
-        // RGB path
-        var rimg = Image(Rgb).init(allocator, validated_rows, validated_cols) catch {
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-            return -1;
-        };
-        @memset(rimg.data, fill_color.toRgb());
-        const pimg = allocator.create(PyImage) catch {
-            rimg.deinit(allocator);
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-            return -1;
-        };
-        pimg.data = PyImage.Variant{ .rgb = rimg };
-        pimg.owning = true;
-        self.py_image = pimg;
-        self.numpy_ref = null;
-        self.parent_ref = null;
-        return 0;
-    } else {
-        // RGBA path (explicit)
-        var image = Image(Rgba).init(allocator, validated_rows, validated_cols) catch {
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-            return -1;
-        };
-        @memset(image.data, fill_color);
-        const pimg = allocator.create(PyImage) catch {
-            image.deinit(allocator);
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-            return -1;
-        };
-        pimg.* = .{ .data = .{ .rgba = image } };
-        self.py_image = pimg;
-        self.numpy_ref = null;
-        self.parent_ref = null;
-        return 0;
+    // Create image with appropriate format and fill with color
+    switch (target_format) {
+        .grayscale => {
+            var gimg = Image(u8).init(allocator, validated_rows, validated_cols) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return -1;
+            };
+
+            // Parse color to grayscale if provided
+            if (color_obj != null and color_obj != c.Py_None()) {
+                const gray_value = color_utils.parseColorTo(u8, color_obj) catch {
+                    gimg.deinit(allocator);
+                    // Error already set by parseColorTo
+                    return -1;
+                };
+                @memset(gimg.data, gray_value);
+            } else {
+                @memset(gimg.data, 0); // Default to black
+            }
+
+            const pimg = allocator.create(PyImage) catch {
+                gimg.deinit(allocator);
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                return -1;
+            };
+            pimg.data = PyImage.Variant{ .gray = gimg };
+            pimg.owning = true;
+            self.py_image = pimg;
+            self.numpy_ref = null;
+            self.parent_ref = null;
+            return 0;
+        },
+        .rgb => {
+            var rimg = Image(Rgb).init(allocator, validated_rows, validated_cols) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return -1;
+            };
+
+            // Parse color to RGB if provided
+            if (color_obj != null and color_obj != c.Py_None()) {
+                const rgb_color = color_utils.parseColorTo(Rgb, color_obj) catch {
+                    rimg.deinit(allocator);
+                    // Error already set by parseColorTo
+                    return -1;
+                };
+                @memset(rimg.data, rgb_color);
+            } else {
+                @memset(rimg.data, Rgb{ .r = 0, .g = 0, .b = 0 }); // Default to black
+            }
+
+            const pimg = allocator.create(PyImage) catch {
+                rimg.deinit(allocator);
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                return -1;
+            };
+            pimg.data = PyImage.Variant{ .rgb = rimg };
+            pimg.owning = true;
+            self.py_image = pimg;
+            self.numpy_ref = null;
+            self.parent_ref = null;
+            return 0;
+        },
+        .rgba => {
+            var image = Image(Rgba).init(allocator, validated_rows, validated_cols) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return -1;
+            };
+
+            // Parse color to RGBA if provided
+            if (color_obj != null and color_obj != c.Py_None()) {
+                const rgba_color = color_utils.parseColorTo(Rgba, color_obj) catch {
+                    image.deinit(allocator);
+                    // Error already set by parseColorTo
+                    return -1;
+                };
+                @memset(image.data, rgba_color);
+            } else {
+                @memset(image.data, Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 }); // Default to transparent
+            }
+
+            const pimg = allocator.create(PyImage) catch {
+                image.deinit(allocator);
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                return -1;
+            };
+            pimg.* = .{ .data = .{ .rgba = image } };
+            self.py_image = pimg;
+            self.numpy_ref = null;
+            self.parent_ref = null;
+            return 0;
+        },
     }
 }
 
@@ -1618,7 +1677,7 @@ fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
         return null;
     }
 
-    const color = color_utils.parseColorToRgba(color_obj) catch {
+    const color = color_utils.parseColorTo(Rgba, color_obj) catch {
         return null;
     };
 
@@ -3359,9 +3418,9 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
         return -1;
     }
 
-    // Parse the color value using parseColorToRgba
-    const color = color_utils.parseColorToRgba(value) catch {
-        // Error already set by parseColorToRgba
+    // Parse the color value using parseColorTo
+    const color = color_utils.parseColorTo(Rgba, value) catch {
+        // Error already set by parseColorTo
         return -1;
     };
 

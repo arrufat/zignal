@@ -213,7 +213,7 @@ const FillArgs = struct {
 
 // Helper to parse common draw arguments
 fn parseDrawArgs(self: *CanvasObject, color_obj: ?*c.PyObject, width: c_long, mode: c_long) !DrawArgs {
-    const rgba = try color_utils.parseColorToRgba(@ptrCast(color_obj));
+    const rgba = try color_utils.parseColorTo(Rgba, @ptrCast(color_obj));
     var args = DrawArgs{
         .kind = self.kind,
         .width = try py_utils.validateNonNegative(u32, width, "Width"),
@@ -244,7 +244,7 @@ fn parseDrawArgs(self: *CanvasObject, color_obj: ?*c.PyObject, width: c_long, mo
 
 // Helper to parse common fill arguments
 fn parseFillArgs(self: *CanvasObject, color_obj: ?*c.PyObject, mode: c_long) !FillArgs {
-    const rgba = try color_utils.parseColorToRgba(@ptrCast(color_obj));
+    const rgba = try color_utils.parseColorTo(Rgba, @ptrCast(color_obj));
     var args = FillArgs{
         .kind = self.kind,
         .mode = if (try py_utils.validateRange(u32, mode, 0, 1, "Mode") == 0) .fast else .soft,
@@ -304,7 +304,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
     }
 
     // Parse and fill according to canvas kind
-    const rgba = color_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
+    const rgba = color_utils.parseColorTo(Rgba, @ptrCast(color_obj)) catch return null;
     switch (self.kind) {
         .gray => if (self.canvas_gray) |cptr| cptr.fill(rgba.toGray()) else return null,
         .rgb => if (self.canvas_rgb) |cptr| cptr.fill(rgba.toRgb()) else return null,
@@ -920,7 +920,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const position = py_utils.parsePointTuple(position_obj) catch return null;
 
-    const rgba = color_utils.parseColorToRgba(@ptrCast(color_obj)) catch return null;
+    const rgba = color_utils.parseColorTo(Rgba, @ptrCast(color_obj)) catch return null;
 
     const mode_val = py_utils.validateRange(u32, mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);

@@ -2,12 +2,48 @@ const std = @import("std");
 const c = @import("py_utils.zig").c;
 const zignal = @import("zignal");
 
-/// Extract RGBA values from a Python object with r,g,b,a attributes.
-/// This is a helper function used internally by parseColorToRgba.
+const Rgb = zignal.Rgb;
+const Rgba = zignal.Rgba;
+
+/// Extract RGB values from a Python object with r,g,b attributes.
+/// This is a helper function used internally.
 /// Returns error.InvalidColor if the object doesn't have the required attributes
 /// or if the attribute values cannot be converted to integers.
-/// Note: This function does NOT set Python exceptions - that's handled by parseColorToRgba.
-fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
+/// Note: This function does NOT set Python exceptions.
+fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
+    const r_attr = c.PyObject_GetAttrString(obj, "r");
+    if (r_attr == null) return error.InvalidColor;
+    defer c.Py_DECREF(r_attr);
+
+    const g_attr = c.PyObject_GetAttrString(obj, "g");
+    if (g_attr == null) return error.InvalidColor;
+    defer c.Py_DECREF(g_attr);
+
+    const b_attr = c.PyObject_GetAttrString(obj, "b");
+    if (b_attr == null) return error.InvalidColor;
+    defer c.Py_DECREF(b_attr);
+
+    const r = c.PyLong_AsLong(r_attr);
+    const g = c.PyLong_AsLong(g_attr);
+    const b = c.PyLong_AsLong(b_attr);
+
+    if (c.PyErr_Occurred() != null) {
+        return error.InvalidColor;
+    }
+
+    return Rgb{
+        .r = @intCast(r),
+        .g = @intCast(g),
+        .b = @intCast(b),
+    };
+}
+
+/// Extract RGBA values from a Python object with r,g,b,a attributes.
+/// This is a helper function used internally.
+/// Returns error.InvalidColor if the object doesn't have the required attributes
+/// or if the attribute values cannot be converted to integers.
+/// Note: This function does NOT set Python exceptions.
+fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
     const r_attr = c.PyObject_GetAttrString(obj, "r");
     if (r_attr == null) return error.InvalidColor;
     defer c.Py_DECREF(r_attr);
@@ -33,7 +69,7 @@ fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
         return error.InvalidColor;
     }
 
-    return zignal.Rgba{
+    return .{
         .r = @intCast(r),
         .g = @intCast(g),
         .b = @intCast(b),
@@ -41,26 +77,31 @@ fn extractRgbaFromObject(obj: *c.PyObject) !zignal.Rgba {
     };
 }
 
-/// Parse a Python color - either an integer (grayscale), a tuple (RGB/RGBA), or a color object.
-/// Returns a zignal.Rgba color with values in range 0-255.
+/// Generic color parsing function that converts Python color objects to the specified type.
+/// Supported target types: u8 (grayscale), Rgb, Rgba
 ///
-/// This function automatically sets appropriate Python exception messages when parsing fails,
-/// so callers can simply return null or propagate the error without additional error handling.
-///
-/// Supported formats:
-/// - Integer (0-255): Interpreted as grayscale, expanded to RGBA
-/// - Tuple of 3 ints: RGB values, alpha defaults to 255
-/// - Tuple of 4 ints: RGBA values
-/// - Color object with to_rgba() method
-/// - Color object with r,g,b,a attributes
+/// Supported input formats:
+/// - Integer (0-255): Interpreted as grayscale, converted to target type
+/// - Tuple of 3 ints: RGB values, converted to target type
+/// - Tuple of 4 ints: RGBA values, converted to target type
+/// - Color object with appropriate conversion method (to_gray, to_rgb, to_rgba)
+/// - Color object with r,g,b[,a] attributes
 ///
 /// On error, sets one of these Python exceptions:
 /// - TypeError: For invalid input types
 /// - ValueError: For out-of-range color values (not 0-255)
-pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
+pub fn parseColorTo(comptime T: type, color_obj: ?*c.PyObject) !T {
     if (color_obj == null) {
         return error.InvalidColor;
     }
+
+    // Determine the conversion method name based on target type
+    const method_name = switch (T) {
+        u8 => "to_gray",
+        Rgb => "to_rgb",
+        Rgba => "to_rgba",
+        else => @compileError("Unsupported color type: " ++ @typeName(T)),
+    };
 
     // Check if it's an integer (grayscale)
     if (c.PyLong_Check(color_obj) != 0) {
@@ -75,55 +116,111 @@ pub fn parseColorToRgba(color_obj: ?*c.PyObject) !zignal.Rgba {
             return error.InvalidColor;
         }
 
-        return zignal.Rgba{
-            .r = @intCast(gray_value),
-            .g = @intCast(gray_value),
-            .b = @intCast(gray_value),
-            .a = 255,
+        // Convert grayscale to target type
+        return switch (T) {
+            u8 => @intCast(gray_value),
+            Rgb => Rgb{
+                .r = @intCast(gray_value),
+                .g = @intCast(gray_value),
+                .b = @intCast(gray_value),
+            },
+            Rgba => Rgba{
+                .r = @intCast(gray_value),
+                .g = @intCast(gray_value),
+                .b = @intCast(gray_value),
+                .a = 255,
+            },
+            else => unreachable,
         };
     }
 
     // Check if it's a tuple
     if (c.PyTuple_Check(color_obj) != 0) {
-        return parseColorTuple(color_obj);
+        const rgba = try parseColorTuple(color_obj);
+        // Convert RGBA to target type
+        return switch (T) {
+            u8 => rgba.toGray(),
+            Rgb => rgba.toRgb(),
+            Rgba => rgba,
+            else => unreachable,
+        };
     }
 
-    // Check if it has a to_rgba method (duck typing)
-    const to_rgba_str = c.PyUnicode_FromString("to_rgba");
-    defer c.Py_DECREF(to_rgba_str);
+    // Check if it has the appropriate conversion method (duck typing)
+    const method_str = c.PyUnicode_FromString(method_name);
+    defer c.Py_DECREF(method_str);
 
-    if (c.PyObject_HasAttr(color_obj, to_rgba_str) != 0) {
-        // Call to_rgba() method
-        const rgba_obj = c.PyObject_CallMethodObjArgs(color_obj, to_rgba_str, @as(?*c.PyObject, null));
-        if (rgba_obj == null) {
+    if (c.PyObject_HasAttr(color_obj, method_str) != 0) {
+        // Call the conversion method
+        const result_obj = c.PyObject_CallMethodObjArgs(color_obj, method_str, @as(?*c.PyObject, null));
+        if (result_obj == null) {
             return error.InvalidColor;
         }
-        defer c.Py_DECREF(rgba_obj);
+        defer c.Py_DECREF(result_obj);
 
-        return extractRgbaFromObject(rgba_obj);
+        // Extract value based on target type
+        return switch (T) {
+            u8 => blk: {
+                const gray_value = c.PyLong_AsLong(result_obj);
+                if (gray_value == -1 and c.PyErr_Occurred() != null) {
+                    c.PyErr_SetString(c.PyExc_TypeError, "to_gray() must return an integer");
+                    return error.InvalidColor;
+                }
+                if (gray_value < 0 or gray_value > 255) {
+                    c.PyErr_SetString(c.PyExc_ValueError, "Gray value must be in range 0-255");
+                    return error.InvalidColor;
+                }
+                break :blk @intCast(gray_value);
+            },
+            Rgb => try extractRgbFromObject(result_obj),
+            Rgba => try extractRgbaFromObject(result_obj),
+            else => unreachable,
+        };
     }
 
-    // Check if it's an Rgba-like object directly (has r,g,b,a attributes)
-    if (extractRgbaFromObject(color_obj.?)) |rgba| {
-        return rgba;
+    // Try to extract RGB/RGBA values directly from the object
+    const extract_result = switch (T) {
+        u8 => blk: {
+            // For grayscale, try to extract RGB and convert to gray
+            if (extractRgbFromObject(color_obj.?)) |rgb| {
+                break :blk rgb.toGray();
+            } else |_| {
+                c.PyErr_Clear();
+                break :blk error.InvalidColor;
+            }
+        },
+        Rgb => extractRgbFromObject(color_obj.?),
+        Rgba => extractRgbaFromObject(color_obj.?),
+        else => unreachable,
+    };
+
+    if (extract_result) |result| {
+        return result;
     } else |_| {
         // Clear any Python error that might have been set by failed attribute access
         c.PyErr_Clear();
     }
 
-    c.PyErr_SetString(c.PyExc_TypeError, "Color must be an integer (0-255), a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgba() method or r,g,b,a attributes");
+    // Set appropriate error message based on target type
+    const error_msg = switch (T) {
+        u8 => "Color must be an integer (0-255), a tuple of RGB values, or a color object with to_gray() method or r,g,b attributes",
+        Rgb => "Color must be an integer (0-255), a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgb() method or r,g,b attributes",
+        Rgba => "Color must be an integer (0-255), a tuple of (r, g, b) or (r, g, b, a), or a color object with to_rgba() method or r,g,b,a attributes",
+        else => unreachable,
+    };
+    c.PyErr_SetString(c.PyExc_TypeError, error_msg);
     return error.InvalidColor;
 }
 
 /// Parse a Python tuple representing a color (RGB or RGBA).
-/// Returns a zignal.Rgba color with values in range 0-255.
-/// This is a helper function used by parseColorToRgba.
+/// Returns a Rgba color with values in range 0-255.
+/// This is a helper function used by parseColorTo.
 ///
-/// Like parseColorToRgba, this function sets Python exception messages on error:
+/// Sets Python exception messages on error:
 /// - ValueError: If tuple size is not 3 or 4
 /// - TypeError: If tuple elements are not integers
 /// - ValueError: If color values are out of range (0-255)
-pub fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
+pub fn parseColorTuple(color_obj: ?*c.PyObject) !Rgba {
     if (color_obj == null) {
         return error.InvalidColor;
     }
@@ -180,7 +277,7 @@ pub fn parseColorTuple(color_obj: ?*c.PyObject) !zignal.Rgba {
         return error.InvalidColor;
     }
 
-    return zignal.Rgba{
+    return Rgba{
         .r = @intCast(r),
         .g = @intCast(g),
         .b = @intCast(b),
