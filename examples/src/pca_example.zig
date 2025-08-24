@@ -5,7 +5,7 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Canvas = zignal.Canvas;
-const PCA = zignal.PrincipalComponentAnalysis;
+const Pca = zignal.PrincipalComponentAnalysis;
 const Point = zignal.Point;
 
 /// Bounds structure for point clouds
@@ -102,7 +102,7 @@ fn drawPoints(canvas: Canvas(Rgb), points: []const @Vector(2, f64), bounds: Boun
 }
 
 /// Draw PCA axes on canvas
-fn drawPcaAxes(canvas: Canvas(Rgb), pca: PCA(f64, 2), bounds: Bounds) !void {
+fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64, 2), bounds: Bounds) !void {
     const canvas_size = @as(f32, @floatFromInt(canvas.image.cols));
     const mean_vec = pca.getMean();
     const mean_canvas = worldToCanvas(mean_vec, canvas_size, bounds);
@@ -160,7 +160,7 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: PCA(f64, 2), bounds: Bounds) !void {
 }
 
 /// Project points using PCA and create new aligned dataset
-fn projectAndAlign(allocator: std.mem.Allocator, pca: PCA(f64, 2), original_points: []const @Vector(2, f64)) ![]@Vector(2, f64) {
+fn projectAndAlign(allocator: std.mem.Allocator, pca: Pca(f64, 2), original_points: []const @Vector(2, f64)) ![]@Vector(2, f64) {
     var aligned_points = try allocator.alloc(@Vector(2, f64), original_points.len);
 
     for (original_points, 0..) |point, i| {
@@ -202,7 +202,7 @@ pub fn main() !void {
     drawPoints(original_canvas, original_points, original_bounds, Rgb{ .r = 100, .g = 150, .b = 255 }, 3.0); // Light blue points
 
     // 3. Compute PCA
-    var pca = PCA(f64, 2).init(gpa);
+    var pca = Pca(f64, 2).init(gpa);
     defer pca.deinit();
 
     try pca.fit(original_points, null); // Keep all components
