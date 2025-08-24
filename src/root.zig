@@ -95,17 +95,7 @@ pub const BitmapFont = font.BitmapFont;
 
 // PCA (Principal Component Analysis) system
 const pca = @import("pca.zig");
-pub const PrincipalComponentAnalysis = pca.PrincipalComponentAnalysis; // Legacy alias
-
-// Color conversion utilities
-pub const colorToPoint = pca.colorToPoint;
-pub const pointToColor = pca.pointToColor;
-
-// Image-to-points conversion functions
-pub const imageToColorPoints = pca.imageToColorPoints;
-pub const colorPointsToImage = pca.colorPointsToImage;
-pub const imageToIntensityPoints = pca.imageToIntensityPoints;
-pub const intensityPointsToImage = pca.intensityPointsToImage;
+pub const PrincipalComponentAnalysis = pca.PrincipalComponentAnalysis;
 
 // Feature detection and description
 const features = @import("features.zig");
