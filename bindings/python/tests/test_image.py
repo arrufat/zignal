@@ -284,7 +284,7 @@ class TestImageBinding:
     def test_view_convert_grayscale(self):
         """Test converting a view to different formats - grayscale."""
         # Create a grayscale image
-        img = zignal.Image(20, 20, 128, format=zignal.Grayscale)
+        img = zignal.Image(20, 20, 128, dtype=zignal.Grayscale)
 
         # Create a view (Rectangle uses exclusive bounds)
         rect = zignal.Rectangle(5, 5, 15, 15)  # 10x10 view
@@ -303,7 +303,7 @@ class TestImageBinding:
     def test_view_convert_rgb(self):
         """Test converting a view to different formats - RGB."""
         # Create an RGB image
-        img = zignal.Image(20, 20, (255, 128, 64), format=zignal.Rgb)
+        img = zignal.Image(20, 20, (255, 128, 64), dtype=zignal.Rgb)
 
         # Create a view
         rect = zignal.Rectangle(0, 0, 5, 5)
@@ -326,7 +326,7 @@ class TestImageBinding:
     def test_view_convert_rgba(self):
         """Test converting a view to different formats - RGBA."""
         # Create an RGBA image
-        img = zignal.Image(15, 15, (255, 0, 0, 128), format=zignal.Rgba)
+        img = zignal.Image(15, 15, (255, 0, 0, 128), dtype=zignal.Rgba)
 
         # Create a view (Rectangle uses exclusive bounds)
         rect = zignal.Rectangle(5, 5, 13, 13)  # 8x8 view

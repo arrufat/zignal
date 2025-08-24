@@ -49,14 +49,14 @@ def test_image_iteration_matches_getitem():
 def test_iterator_return_types():
     """Test that iteration returns the correct types for each format."""
     # Test Grayscale format - should return integer
-    gray_img = zignal.Image(5, 5, 128, format=zignal.Grayscale)
+    gray_img = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
     for r, c, pixel in gray_img:
         assert isinstance(pixel, int), f"Grayscale should return int, got {type(pixel)}"
         assert pixel == 128
         break  # Just test first pixel
 
     # Test RGB format - should return Rgb object
-    rgb_img = zignal.Image(5, 5, (255, 128, 64), format=zignal.Rgb)
+    rgb_img = zignal.Image(5, 5, (255, 128, 64), dtype=zignal.Rgb)
     for r, c, pixel in rgb_img:
         assert isinstance(pixel, zignal.Rgb), f"RGB should return Rgb object, got {type(pixel)}"
         assert pixel.r == 255
@@ -65,7 +65,7 @@ def test_iterator_return_types():
         break  # Just test first pixel
 
     # Test RGBA format - should return Rgba object
-    rgba_img = zignal.Image(5, 5, (255, 128, 64, 32), format=zignal.Rgba)
+    rgba_img = zignal.Image(5, 5, (255, 128, 64, 32), dtype=zignal.Rgba)
     for r, c, pixel in rgba_img:
         assert isinstance(pixel, zignal.Rgba), f"RGBA should return Rgba object, got {type(pixel)}"
         assert pixel.r == 255
