@@ -25,10 +25,10 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const Rgb = @import("color.zig").Rgb;
-const Rgba = @import("color.zig").Rgba;
-const SMatrix = @import("matrix.zig").SMatrix;
 const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
+const svd_dyn = @import("matrix/svd.zig");
+const Rgb = @import("color.zig").Rgb;
+const SMatrix = @import("matrix.zig").SMatrix;
 
 /// Principal Component Analysis for arbitrary-dimensional vectors.
 /// Uses SIMD-accelerated vector operations for optimal performance.
@@ -83,8 +83,21 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 
             const n_samples = vectors.len;
             const max_components = @min(n_samples - 1, dim);
+            if (num_components) |k| {
+                if (k == 0) return error.InvalidComponents;
+            }
             const requested_components = num_components orelse max_components;
             const actual_components = @min(requested_components, max_components);
+
+            // If this instance was previously fitted, free old allocations
+            if (self.eigenvalues.len > 0) {
+                self.allocator.free(self.eigenvalues);
+                self.eigenvalues = &[_]T{};
+            }
+            if (self.num_components > 0) {
+                self.components.deinit();
+                self.num_components = 0;
+            }
 
             // Compute mean vector using SIMD operations
             self.mean = @splat(0);
@@ -186,44 +199,56 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 
             const n = cov_matrix.rows;
 
-            // Convert to static matrix for SVD - keep size reasonable
-            if (n > 64) return error.DimensionTooLarge;
-
-            var cov_static: SMatrix(T, 64, 64) = .initAll(0);
-            for (0..n) |i| {
-                for (0..n) |j| {
-                    cov_static.items[i][j] = cov_matrix.at(i, j).*;
-                }
-            }
-
-            // Perform SVD
-            const result = cov_static.svd(.{
-                .with_u = true,
-                .with_v = false,
-                .mode = .skinny_u,
-            });
-
-            if (result.converged != 0) return error.SvdFailed;
-
-            // Extract components and eigenvalues
+            // Prepare outputs
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.alloc(T, num_components);
             self.components = try Matrix(T).init(self.allocator, dim, num_components);
 
-            for (0..num_components) |i| {
-                if (i < n) {
-                    self.eigenvalues[i] = result.s.at(i, 0).*;
-                    for (0..dim) |j| {
-                        if (j < n) {
-                            self.components.at(j, i).* = result.u.at(j, i).*;
-                        } else {
-                            self.components.at(j, i).* = 0;
-                        }
+            if (n <= 64) {
+                // Static SVD fast path
+                var cov_static: SMatrix(T, 64, 64) = .initAll(0);
+                for (0..n) |i| {
+                    for (0..n) |j| {
+                        cov_static.items[i][j] = cov_matrix.at(i, j).*;
                     }
-                } else {
-                    self.eigenvalues[i] = 0;
-                    for (0..dim) |j| {
-                        self.components.at(j, i).* = 0;
+                }
+                const result = cov_static.svd(.{
+                    .with_u = true,
+                    .with_v = false,
+                    .mode = .skinny_u,
+                });
+                if (result.converged != 0) return error.SvdFailed;
+
+                for (0..num_components) |i| {
+                    if (i < n) {
+                        self.eigenvalues[i] = result.s.at(i, 0).*;
+                        for (0..dim) |j| {
+                            self.components.at(j, i).* = if (j < n) result.u.at(j, i).* else 0;
+                        }
+                    } else {
+                        self.eigenvalues[i] = 0;
+                        for (0..dim) |j| self.components.at(j, i).* = 0;
+                    }
+                }
+            } else {
+                // Dynamic SVD fallback for large dimensions
+                var result = try svd_dyn.svd(T, self.allocator, cov_matrix, .{
+                    .with_u = true,
+                    .with_v = false,
+                    .mode = .skinny_u,
+                });
+                defer result.deinit();
+                if (result.converged != 0) return error.SvdFailed;
+
+                for (0..num_components) |i| {
+                    if (i < n) {
+                        self.eigenvalues[i] = result.s.at(i, 0).*;
+                        for (0..dim) |j| {
+                            self.components.at(j, i).* = result.u.at(j, i).*;
+                        }
+                    } else {
+                        self.eigenvalues[i] = 0;
+                        for (0..dim) |j| self.components.at(j, i).* = 0;
                     }
                 }
             }
@@ -260,58 +285,77 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 
             const n = gram_matrix.rows;
 
-            // Convert to static matrix for SVD - keep size reasonable
-            if (n > 64) return error.DimensionTooLarge;
-
-            var gram_static: SMatrix(T, 64, 64) = .{};
-            for (0..n) |i| {
-                for (0..n) |j| {
-                    gram_static.items[i][j] = gram_matrix.at(i, j).*;
-                }
-            }
-
-            // Perform SVD on Gram matrix
-            const result = gram_static.svd(.{
-                .with_u = true,
-                .with_v = false,
-                .mode = .skinny_u,
-            });
-
-            if (result.converged != 0) return error.SvdFailed;
-
             // Extract components by projecting data onto eigenvectors
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.alloc(T, num_components);
             self.components = try Matrix(T).init(self.allocator, dim, num_components);
 
-            // Ensure we don't exceed the actual number of eigenvalues/eigenvectors computed
-            const actual_components = @min(num_components, n);
-            for (0..actual_components) |i| {
-                const eigenval = result.s.at(i, 0).*;
-                self.eigenvalues[i] = eigenval;
-
-                if (eigenval > 1e-10) {
-                    // Compute component as X^T * u_i / sqrt(eigenval)
-                    for (0..dim) |j| {
-                        var sum: T = 0;
-                        for (0..n) |k| {
-                            sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
-                        }
-                        self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n)));
-                    }
-                } else {
-                    // Zero eigenvalue, set component to zero
-                    for (0..dim) |j| {
-                        self.components.at(j, i).* = 0;
+            if (n <= 64) {
+                var gram_static: SMatrix(T, 64, 64) = .initAll(0);
+                for (0..n) |i| {
+                    for (0..n) |j| {
+                        gram_static.items[i][j] = gram_matrix.at(i, j).*;
                     }
                 }
-            }
 
-            // Fill remaining components with zeros if num_components > actual_components
-            for (actual_components..num_components) |i| {
-                self.eigenvalues[i] = 0;
-                for (0..dim) |j| {
-                    self.components.at(j, i).* = 0;
+                const result = gram_static.svd(.{
+                    .with_u = true,
+                    .with_v = false,
+                    .mode = .skinny_u,
+                });
+                if (result.converged != 0) return error.SvdFailed;
+
+                const actual_components = @min(num_components, n);
+                for (0..actual_components) |i| {
+                    const eigenval = result.s.at(i, 0).*;
+                    self.eigenvalues[i] = eigenval;
+
+                    if (eigenval > 1e-10) {
+                        // Principal component: X^T u_i / sqrt((n-1) * eigenval)
+                        for (0..dim) |j| {
+                            var sum: T = 0;
+                            for (0..n) |k| {
+                                sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
+                            }
+                            self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n_samples - 1)));
+                        }
+                    } else {
+                        for (0..dim) |j| self.components.at(j, i).* = 0;
+                    }
+                }
+                for (actual_components..num_components) |i| {
+                    self.eigenvalues[i] = 0;
+                    for (0..dim) |j| self.components.at(j, i).* = 0;
+                }
+            } else {
+                var result = try svd_dyn.svd(T, self.allocator, gram_matrix, .{
+                    .with_u = true,
+                    .with_v = false,
+                    .mode = .skinny_u,
+                });
+                defer result.deinit();
+                if (result.converged != 0) return error.SvdFailed;
+
+                const actual_components = @min(num_components, n);
+                for (0..actual_components) |i| {
+                    const eigenval = result.s.at(i, 0).*;
+                    self.eigenvalues[i] = eigenval;
+
+                    if (eigenval > 1e-10) {
+                        for (0..dim) |j| {
+                            var sum: T = 0;
+                            for (0..n) |k| {
+                                sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
+                            }
+                            self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n_samples - 1)));
+                        }
+                    } else {
+                        for (0..dim) |j| self.components.at(j, i).* = 0;
+                    }
+                }
+                for (actual_components..num_components) |i| {
+                    self.eigenvalues[i] = 0;
+                    for (0..dim) |j| self.components.at(j, i).* = 0;
                 }
             }
         }
