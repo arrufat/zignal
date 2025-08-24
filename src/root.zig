@@ -106,7 +106,6 @@ pub const Orb = features.Orb;
 pub const BruteForceMatcher = features.BruteForceMatcher;
 pub const Match = features.Match;
 pub const MatchStats = features.MatchStats;
-pub const filterMatchesRatioTest = features.filterMatchesRatioTest;
 
 // Optimization algorithms
 pub const optimization = @import("optimization.zig");
