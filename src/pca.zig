@@ -148,6 +148,22 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             return coefficients;
         }
 
+        /// Project a vector into the provided buffer (avoids allocation).
+        /// The slice must have length equal to `num_components`.
+        pub fn projectInto(self: Self, dst: []T, vector: Vec) !void {
+            if (self.num_components == 0) return error.NotFitted;
+            if (dst.len != self.num_components) return error.InvalidCoefficients;
+
+            const centered = vector - self.mean;
+            for (0..self.num_components) |i| {
+                var sum: T = 0;
+                for (0..dim) |j| {
+                    sum += centered[j] * self.components.at(j, i).*;
+                }
+                dst[i] = sum;
+            }
+        }
+
         /// Reconstruct a vector from PCA coefficients.
         pub fn reconstruct(self: Self, coefficients: []const T) !Vec {
             if (self.num_components == 0) return error.NotFitted;
@@ -165,6 +181,31 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
 
             return result;
+        }
+
+        /// Batch-transform: project multiple vectors using a single GEMM.
+        /// Returns a matrix of shape (vectors.len × num_components) with one row per input vector.
+        pub fn transform(self: Self, vectors: []const Vec) !Matrix(T) {
+            if (self.num_components == 0) return error.NotFitted;
+            if (vectors.len == 0) return error.NoVectors;
+
+            // Build centered data matrix (m × dim)
+            const m = vectors.len;
+            var data_matrix: Matrix(T) = try Matrix(T).init(self.allocator, m, dim);
+            errdefer data_matrix.deinit();
+            defer data_matrix.deinit();
+            for (vectors, 0..) |vec, i| {
+                const centered = vec - self.mean;
+                for (0..dim) |j| {
+                    data_matrix.at(i, j).* = centered[j];
+                }
+            }
+
+            // Compute Xc * components -> (m × k)
+            var ops = try OpsBuilder(T).init(self.allocator, data_matrix);
+            defer ops.deinit();
+            try ops.gemm(false, self.components, false, 1.0, 0.0, null);
+            return ops.toOwned();
         }
 
         /// Get the mean vector
@@ -440,4 +481,36 @@ test "PCA on image color data using Point conversion" {
 
     const reconstructed = try pca.reconstruct(coeffs);
     _ = reconstructed; // Just verify it works
+}
+
+test "PCA Gram path normalization and direction" {
+    const allocator = std.testing.allocator;
+
+    // Two 3D samples along x-axis -> triggers Gram path (n_samples <= dim)
+    const vectors = [_]@Vector(3, f64){ .{ 1.0, 0.0, 0.0 }, .{ 3.0, 0.0, 0.0 } };
+
+    var pca = PrincipalComponentAnalysis(f64, 3).init(allocator);
+    defer pca.deinit();
+    try pca.fit(&vectors, 1);
+
+    // First eigenvalue should be 2 (since covariance on centered data has [[2,0,0],...])
+    try std.testing.expect(@abs(pca.eigenvalues[0] - 2.0) < 1e-9);
+
+    // First component direction should align with x-axis (sign-insensitive)
+    const c0x = pca.components.at(0, 0).*;
+    const c0y = pca.components.at(1, 0).*;
+    const c0z = pca.components.at(2, 0).*;
+    try std.testing.expect(@abs(@abs(c0x) - 1.0) < 1e-9);
+    try std.testing.expect(@abs(c0y) < 1e-12);
+    try std.testing.expect(@abs(c0z) < 1e-12);
+
+    // Batch transform should match per-vector projection
+    var coeffs_matrix = try pca.transform(&vectors);
+    defer coeffs_matrix.deinit();
+
+    const coeffs0 = try allocator.alloc(f64, pca.num_components);
+    defer allocator.free(coeffs0);
+    try pca.projectInto(coeffs0, vectors[0]);
+
+    try std.testing.expect(@abs(coeffs0[0] - coeffs_matrix.at(0, 0).*) < 1e-12);
 }
