@@ -46,23 +46,17 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         1 => extern struct {
             ob_base: c.PyObject,
             field0: fields[0].type,
-
-            pub const field_names = [_][]const u8{fields[0].name};
         },
         2 => extern struct {
             ob_base: c.PyObject,
             field0: fields[0].type,
             field1: fields[1].type,
-
-            pub const field_names = [_][]const u8{ fields[0].name, fields[1].name };
         },
         3 => extern struct {
             ob_base: c.PyObject,
             field0: fields[0].type,
             field1: fields[1].type,
             field2: fields[2].type,
-
-            pub const field_names = [_][]const u8{ fields[0].name, fields[1].name, fields[2].name };
         },
         4 => extern struct {
             ob_base: c.PyObject,
@@ -70,8 +64,6 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             field1: fields[1].type,
             field2: fields[2].type,
             field3: fields[3].type,
-
-            pub const field_names = [_][]const u8{ fields[0].name, fields[1].name, fields[2].name, fields[3].name };
         },
         else => @compileError("Color types with more than 4 fields not supported yet"),
     };

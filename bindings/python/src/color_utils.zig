@@ -5,31 +5,32 @@ const zignal = @import("zignal");
 const Rgb = zignal.Rgb;
 const Rgba = zignal.Rgba;
 
+/// Extract color component attribute from a Python object.
+/// This is a helper function used internally.
+/// Returns null if the attribute doesn't exist or isn't a valid integer.
+/// Note: This function does NOT set Python exceptions.
+fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
+    const attr = c.PyObject_GetAttrString(obj, name);
+    if (attr == null) return null;
+    defer c.Py_DECREF(attr);
+
+    const value = c.PyLong_AsLong(attr);
+    if (c.PyErr_Occurred() != null) {
+        return null;
+    }
+
+    return value;
+}
+
 /// Extract RGB values from a Python object with r,g,b attributes.
 /// This is a helper function used internally.
 /// Returns error.InvalidColor if the object doesn't have the required attributes
 /// or if the attribute values cannot be converted to integers.
 /// Note: This function does NOT set Python exceptions.
 fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
-    const r_attr = c.PyObject_GetAttrString(obj, "r");
-    if (r_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(r_attr);
-
-    const g_attr = c.PyObject_GetAttrString(obj, "g");
-    if (g_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(g_attr);
-
-    const b_attr = c.PyObject_GetAttrString(obj, "b");
-    if (b_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(b_attr);
-
-    const r = c.PyLong_AsLong(r_attr);
-    const g = c.PyLong_AsLong(g_attr);
-    const b = c.PyLong_AsLong(b_attr);
-
-    if (c.PyErr_Occurred() != null) {
-        return error.InvalidColor;
-    }
+    const r = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
+    const g = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
+    const b = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
 
     return Rgb{
         .r = @intCast(r),
@@ -44,30 +45,10 @@ fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
 /// or if the attribute values cannot be converted to integers.
 /// Note: This function does NOT set Python exceptions.
 fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
-    const r_attr = c.PyObject_GetAttrString(obj, "r");
-    if (r_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(r_attr);
-
-    const g_attr = c.PyObject_GetAttrString(obj, "g");
-    if (g_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(g_attr);
-
-    const b_attr = c.PyObject_GetAttrString(obj, "b");
-    if (b_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(b_attr);
-
-    const a_attr = c.PyObject_GetAttrString(obj, "a");
-    if (a_attr == null) return error.InvalidColor;
-    defer c.Py_DECREF(a_attr);
-
-    const r = c.PyLong_AsLong(r_attr);
-    const g = c.PyLong_AsLong(g_attr);
-    const b = c.PyLong_AsLong(b_attr);
-    const a = c.PyLong_AsLong(a_attr);
-
-    if (c.PyErr_Occurred() != null) {
-        return error.InvalidColor;
-    }
+    const r = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
+    const g = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
+    const b = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
+    const a = extractColorAttribute(obj, "a") orelse return error.InvalidColor;
 
     return .{
         .r = @intCast(r),
