@@ -558,13 +558,7 @@ pub fn Matrix(comptime T: type) type {
         pub fn svd(self: Self, allocator: std.mem.Allocator, options: SvdOptions) !SvdResult(T) {
             comptime assert(@typeInfo(T) == .float);
             std.debug.assert(self.rows >= self.cols);
-
-            // SVD modifies the input, so make a copy
-            var a_copy = try Matrix(T).init(allocator, self.rows, self.cols);
-            @memcpy(a_copy.items, self.items);
-            errdefer a_copy.deinit();
-
-            return svd_module.svd(T, allocator, a_copy, options);
+            return svd_module.svd(T, allocator, self, options);
         }
 
         /// Default formatting (scientific notation)

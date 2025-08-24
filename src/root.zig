@@ -95,7 +95,7 @@ pub const BitmapFont = font.BitmapFont;
 
 // PCA (Principal Component Analysis) system
 const pca = @import("pca.zig");
-pub const PrincipalComponentAnalysis = pca.PrincipalComponentAnalysis;
+pub const Pca = pca.Pca;
 
 // Feature detection and description
 const features = @import("features.zig");
