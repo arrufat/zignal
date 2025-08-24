@@ -5,15 +5,16 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Canvas = zignal.Canvas;
-const Pca = zignal.PrincipalComponentAnalysis;
+const Pca = zignal.Pca;
 const Point = zignal.Point;
+const Matrix = zignal.Matrix;
 
 /// Bounds structure for point clouds
 const Bounds = struct { min: @Vector(2, f64), max: @Vector(2, f64) };
 
 /// Generate a 2D point cloud with a clear dominant direction
-fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) ![]@Vector(2, f64) {
-    const points = try allocator.alloc(@Vector(2, f64), num_points);
+fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) !Matrix(f64) {
+    var points = try Matrix(f64).init(allocator, num_points, 2);
 
     // Use a deterministic random number generator for reproducible results
     var prng: std.Random.DefaultPrng = .init(42);
@@ -24,7 +25,7 @@ fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) ![]@Vecto
     const main_direction = @Vector(2, f64){ 1.0, 0.6 };
     const noise_strength = 0.3;
 
-    for (points, 0..) |*point, i| {
+    for (0..num_points) |i| {
         // Parameter along main direction
         const t = (rand.float(f64) - 0.5) * 4.0; // Range: -2 to 2
 
@@ -36,12 +37,15 @@ fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) ![]@Vecto
         const noise_y = (rand.float(f64) - 0.5) * noise_strength;
         const noise = @Vector(2, f64){ noise_x, noise_y };
 
-        point.* = main_point + noise;
+        const point = main_point + noise;
+
+        points.at(i, 0).* = point[0];
+        points.at(i, 1).* = point[1];
 
         // Add some outliers for more realistic data
         if (i < num_points / 20) {
-            point.*[0] += (rand.float(f64) - 0.5) * 2.0;
-            point.*[1] += (rand.float(f64) - 0.5) * 2.0;
+            points.at(i, 0).* += (rand.float(f64) - 0.5) * 2.0;
+            points.at(i, 1).* += (rand.float(f64) - 0.5) * 2.0;
         }
     }
 
@@ -72,13 +76,14 @@ fn worldToCanvas(world_point: @Vector(2, f64), canvas_size: f32, world_bounds: B
 }
 
 /// Find bounding box of point cloud
-fn findBounds(points: []const @Vector(2, f64)) Bounds {
-    if (points.len == 0) return .{ .min = @splat(0), .max = @splat(1) };
+fn findBounds(points: Matrix(f64)) Bounds {
+    if (points.rows == 0) return .{ .min = @splat(0), .max = @splat(1) };
 
-    var min_point = points[0];
-    var max_point = points[0];
+    var min_point = @Vector(2, f64){ points.at(0, 0).*, points.at(0, 1).* };
+    var max_point = @Vector(2, f64){ points.at(0, 0).*, points.at(0, 1).* };
 
-    for (points[1..]) |point| {
+    for (1..points.rows) |i| {
+        const point = @Vector(2, f64){ points.at(i, 0).*, points.at(i, 1).* };
         min_point = @min(min_point, point);
         max_point = @max(max_point, point);
     }
@@ -92,19 +97,21 @@ fn findBounds(points: []const @Vector(2, f64)) Bounds {
 }
 
 /// Draw points on canvas
-fn drawPoints(canvas: Canvas(Rgb), points: []const @Vector(2, f64), bounds: Bounds, color: Rgb, radius: f32) void {
+fn drawPoints(canvas: Canvas(Rgb), points: Matrix(f64), bounds: Bounds, color: Rgb, radius: f32) void {
     const canvas_size = @as(f32, @floatFromInt(canvas.image.cols));
 
-    for (points) |pt| {
+    for (0..points.rows) |i| {
+        const pt = @Vector(2, f64){ points.at(i, 0).*, points.at(i, 1).* };
         const canvas_point = worldToCanvas(pt, canvas_size, bounds);
         canvas.drawCircle(canvas_point, radius, color, 1, .soft);
     }
 }
 
 /// Draw PCA axes on canvas
-fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64, 2), bounds: Bounds) !void {
+fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64), bounds: Bounds) !void {
     const canvas_size = @as(f32, @floatFromInt(canvas.image.cols));
-    const mean_vec = pca.getMean();
+    const mean_slice = pca.getMean();
+    const mean_vec = @Vector(2, f64){ mean_slice[0], mean_slice[1] };
     const mean_canvas = worldToCanvas(mean_vec, canvas_size, bounds);
 
     // Draw mean point
@@ -160,21 +167,9 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64, 2), bounds: Bounds) !void {
 }
 
 /// Project points using PCA and create new aligned dataset
-fn projectAndAlign(allocator: std.mem.Allocator, pca: Pca(f64, 2), original_points: []const @Vector(2, f64)) ![]@Vector(2, f64) {
-    var aligned_points = try allocator.alloc(@Vector(2, f64), original_points.len);
-
-    for (original_points, 0..) |point, i| {
-        // Project to PCA space
-        const coeffs = try pca.project(point);
-        defer allocator.free(coeffs);
-
-        // For visualization, we'll create new 2D coordinates where:
-        // X = first principal component coefficient
-        // Y = second principal component coefficient
-        aligned_points[i] = @Vector(2, f64){ coeffs[0], coeffs[1] };
-    }
-
-    return aligned_points;
+fn projectAndAlign(pca: Pca(f64), original_points: Matrix(f64)) !Matrix(f64) {
+    // Use the batch transform method to project all points at once
+    return try pca.transform(original_points);
 }
 
 pub fn main() !void {
@@ -186,8 +181,8 @@ pub fn main() !void {
     const num_points = 200;
 
     // 1. Generate point cloud with dominant direction
-    const original_points = try generatePointCloud(gpa, num_points);
-    defer gpa.free(original_points);
+    var original_points = try generatePointCloud(gpa, num_points);
+    defer original_points.deinit();
 
     // 2. Create original visualization
     var original_image: Image(Rgb) = try .init(gpa, canvas_size, canvas_size);
@@ -202,7 +197,7 @@ pub fn main() !void {
     drawPoints(original_canvas, original_points, original_bounds, Rgb{ .r = 100, .g = 150, .b = 255 }, 3.0); // Light blue points
 
     // 3. Compute PCA
-    var pca = Pca(f64, 2).init(gpa);
+    var pca = try Pca(f64).init(gpa, 2); // 2D points
     defer pca.deinit();
 
     try pca.fit(original_points, null); // Keep all components
@@ -211,8 +206,8 @@ pub fn main() !void {
     try drawPcaAxes(original_canvas, pca, original_bounds);
 
     // 4. Project points to PCA space and create aligned visualization
-    const aligned_points = try projectAndAlign(gpa, pca, original_points);
-    defer gpa.free(aligned_points);
+    var aligned_points = try projectAndAlign(pca, original_points);
+    defer aligned_points.deinit();
 
     var aligned_image = try Image(Rgb).init(gpa, canvas_size, canvas_size);
     defer aligned_image.deinit(gpa);
@@ -222,7 +217,7 @@ pub fn main() !void {
 
     const aligned_bounds = findBounds(aligned_points);
 
-    // Draw aligned points
+    // Draw aligned points (note: aligned_points is now in PCA space)
     drawPoints(aligned_canvas, aligned_points, aligned_bounds, Rgb{ .r = 255, .g = 150, .b = 100 }, 3.0); // Light orange points
 
     // Draw coordinate axes in aligned space

@@ -1,12 +1,12 @@
 //! Principal Component Analysis (PCA) for dimensionality reduction and feature extraction.
 //!
-//! - Works on arbitrary-dimensional vectors using Zig's SIMD vectors (`@Vector(dim, T)`).
+//! - Works on arbitrary-dimensional vectors
 //! - Supports both covariance (dim × dim) and Gram (n × n) paths automatically.
 //! - Components are stored column-wise in a matrix of shape `dim × k` (orthonormal).
 //! - Eigenvalues are singular values squared of centered data, scaled by `1/(n-1)` (variances).
 //!
 //! Shapes and conventions
-//! - Input vectors: `Vec = @Vector(dim, T)`.
+//! - Input vectors: `[]const T, of length dim`.
 //! - `components`: `Matrix(T)` with shape `dim × k` where each column is a principal direction.
 //! - `eigenvalues`: `[]T` length `k`, sorted descending.
 //! - Projection of a vector `x`: `coeffs = components^T * (x - mean)` (length `k`).
@@ -14,23 +14,26 @@
 //!
 //! Example
 //! ```zig
-//! const points_2d = [_]@Vector(2, f64){ .{1.0, 2.0}, .{3.0, 4.0}, .{5.0, 6.0} };
-//! var pca_2d = PrincipalComponentAnalysis(f64, 2).init(allocator);
-//! defer pca_2d.deinit();
-//! try pca_2d.fit(&points_2d, null); // keep all possible components
+//! // Create data matrix with 3 samples of 2D points
+//! var data: Matrix(f64) = try .init(allocator, 3, 2);
+//! defer data.deinit();
+//! data.at(0, 0).* = 1.0; data.at(0, 1).* = 2.0;
+//! data.at(1, 0).* = 3.0; data.at(1, 1).* = 4.0;
+//! data.at(2, 0).* = 5.0; data.at(2, 1).* = 6.0;
 //!
-//! // Project (allocates a slice owned by caller)
-//! const coeffs = try pca_2d.project(.{2.0, 3.0});
+//! var pca: Pca(f64) = try .init(allocator, 2);
+//! defer pca.deinit();
+//! try pca.fit(data, null); // keep all possible components
+//!
+//! // Project a single point (allocates a slice owned by caller)
+//! const test_point = [_]f64{2.0, 3.0};
+//! const coeffs = try pca.project(&test_point);
 //! defer allocator.free(coeffs);
-//! const reconstructed = try pca_2d.reconstruct(coeffs);
-//!
-//! // No-alloc projection into a caller-provided buffer
-//! var tmp = try allocator.alloc(f64, pca_2d.num_components);
-//! defer allocator.free(tmp);
-//! try pca_2d.projectInto(tmp, .{2.0, 3.0});
+//! const reconstructed = try pca.reconstruct(coeffs);
+//! defer allocator.free(reconstructed);
 //!
 //! // Batch transform (m × k matrix)
-//! var coeffs_mat = try pca_2d.transform(&points_2d);
+//! var coeffs_mat = try pca.transform(data);
 //! defer coeffs_mat.deinit();
 //! ```
 
@@ -42,79 +45,78 @@ const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
 const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
 const Rgb = @import("color.zig").Rgb;
-const SMatrix = @import("matrix.zig").SMatrix;
 
-/// Principal Component Analysis for arbitrary-dimensional vectors.
-/// Uses SIMD-accelerated vector operations for optimal performance.
+/// Principal Component Analysis
 ///
 /// Type parameters
 /// - `T`: floating-point scalar type used for all computations and storage.
 ///   Typically `f32` (faster, less memory) or `f64` (higher precision).
 ///   Constraints: `T` must be a floating-point type.
-/// - `dim`: number of features per input vector. This is a compile-time
-///   constant and defines `Vec = @Vector(dim, T)` for inputs/outputs.
-///   Constraints: `dim >= 1`.
 ///
 /// Notes
 /// - The components matrix has shape `dim × k` (columns are principal axes).
 /// - Eigenvalues (length `k`) are variances along each component (descending).
 /// - Choose `T = f32` for speed and `T = f64` for numerical robustness.
-pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
+pub fn Pca(comptime T: type) type {
     assert(@typeInfo(T) == .float);
-    assert(dim >= 1);
 
     return struct {
         const Self = @This();
-        const Vec = @Vector(dim, T);
 
         /// Mean vector for centering data
-        mean: Vec,
+        mean: []T,
         /// Principal components matrix (dim × num_components)
         components: Matrix(T),
         /// Eigenvalues in descending order
         eigenvalues: []T,
         /// Number of components retained
         num_components: usize,
+        /// Dimension of input vectors
+        dim: usize,
         /// Memory allocator
         allocator: Allocator,
 
-        /// Initialize an empty PCA instance
-        pub fn init(allocator: Allocator) Self {
+        /// Initialize an empty PCA instance with runtime dimension
+        pub fn init(allocator: Allocator, dim: usize) !Self {
+            assert(dim >= 1);
+            const mean_slice = try allocator.alloc(T, dim);
+            @memset(mean_slice, 0);
             return Self{
-                .mean = @splat(0),
+                .mean = mean_slice,
                 .components = undefined,
                 .eigenvalues = &[_]T{},
                 .num_components = 0,
+                .dim = dim,
                 .allocator = allocator,
             };
         }
 
         /// Free allocated memory
         pub fn deinit(self: *Self) void {
-            if (self.eigenvalues.len > 0) {
-                self.allocator.free(self.eigenvalues);
-                self.eigenvalues = &[_]T{};
-            }
+            self.allocator.free(self.mean);
+            self.allocator.free(self.eigenvalues);
             if (self.num_components > 0) {
                 self.components.deinit();
-                self.num_components = 0;
             }
         }
 
-        /// Fit the PCA model on centered data derived from `vectors`.
-        /// - vectors: training samples (length n), each `@Vector(dim, T)`
+        /// Fit the PCA model on centered data derived from data matrix.
+        /// - data_matrix: training samples matrix (n_samples × dim)
         /// - num_components: number of components to retain; when null keeps `min(n-1, dim)`
         ///
         /// Notes:
         /// - Uses covariance path when `n > dim`, Gram path otherwise.
         /// - Replaces previous `components`/`eigenvalues` if already fitted.
         /// - Returns `error.InsufficientData` for `n < 2` and `error.InvalidComponents` for `0`.
-        pub fn fit(self: *Self, vectors: []const Vec, num_components: ?usize) !void {
-            if (vectors.len == 0) return error.NoVectors;
-            if (vectors.len == 1) return error.InsufficientData;
+        pub fn fit(self: *Self, data_matrix: Matrix(T), num_components: ?usize) !void {
+            const n_samples = data_matrix.rows;
+            const data_dim = data_matrix.cols;
 
-            const n_samples = vectors.len;
-            const max_components = @min(n_samples - 1, dim);
+            if (data_dim != self.dim) return error.DimensionMismatch;
+            if (n_samples == 0) return error.NoVectors;
+            if (n_samples == 1) return error.InsufficientData;
+
+            const max_components = @min(n_samples - 1, self.dim);
             if (num_components) |k| {
                 if (k == 0) return error.InvalidComponents;
             }
@@ -131,69 +133,67 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
                 self.num_components = 0;
             }
 
-            // Compute mean vector using SIMD operations
-            self.mean = @splat(0);
-            for (vectors) |vec| {
-                self.mean += vec;
+            // Compute mean vector using scalar operations
+            @memset(self.mean, 0);
+            for (0..n_samples) |i| {
+                for (0..self.dim) |j| {
+                    self.mean[j] += data_matrix.at(i, j).*;
+                }
             }
-            self.mean = self.mean / @as(Vec, @splat(@floatFromInt(n_samples)));
+            const n_samples_f = @as(T, @floatFromInt(n_samples));
+            for (0..self.dim) |j| {
+                self.mean[j] /= n_samples_f;
+            }
 
             // Create centered data matrix
-            var data_matrix: Matrix(T) = try .init(self.allocator, n_samples, dim);
-            defer data_matrix.deinit();
+            var centered_matrix: Matrix(T) = try .init(self.allocator, n_samples, self.dim);
+            defer centered_matrix.deinit();
 
-            for (vectors, 0..) |vec, i| {
-                const centered = vec - self.mean;
-                for (0..dim) |j| {
-                    data_matrix.at(i, j).* = centered[j];
+            for (0..n_samples) |i| {
+                for (0..self.dim) |j| {
+                    centered_matrix.at(i, j).* = data_matrix.at(i, j).* - self.mean[j];
                 }
             }
 
             // Choose computation path based on data dimensions
-            if (n_samples <= dim) {
+            if (n_samples <= self.dim) {
                 // Few samples: use Gram matrix approach (n_samples × n_samples)
-                try self.computeComponentsFromGram(&data_matrix, actual_components);
+                try self.computeComponentsFromGram(&centered_matrix, actual_components);
             } else {
                 // Many samples: use covariance matrix approach (dim × dim)
-                try self.computeComponentsFromCovariance(&data_matrix, actual_components);
+                try self.computeComponentsFromCovariance(&centered_matrix, actual_components);
             }
         }
 
         /// Project a single vector onto PCA space, returning a freshly allocated coefficient slice.
-        /// - Input: `vector` of length `dim`
+        /// - Input: `vector` slice of length `dim`
         /// - Output: `[]T` of length `num_components` (caller frees)
         /// - For hot paths, prefer `projectInto` to reuse a buffer.
-        pub fn project(self: Self, vector: Vec) ![]T {
+        pub fn project(self: Self, vector: []const T) ![]T {
             if (self.num_components == 0) return error.NotFitted;
+            if (vector.len != self.dim) return error.DimensionMismatch;
 
-            // Center the vector
-            const centered = vector - self.mean;
+            // Allocate coefficients
+            const coefficients = try self.allocator.alloc(T, self.num_components);
+            errdefer self.allocator.free(coefficients);
 
-            // Project onto components
-            var coefficients = try self.allocator.alloc(T, self.num_components);
-            for (0..self.num_components) |i| {
-                var sum: T = 0;
-                for (0..dim) |j| {
-                    sum += centered[j] * self.components.at(j, i).*;
-                }
-                coefficients[i] = sum;
-            }
-
+            try self.projectInto(coefficients, vector);
             return coefficients;
         }
 
         /// Project a single vector into a caller-provided buffer (avoids allocation).
         /// - `dst.len` must equal `num_components`.
         /// - Writes `components^T * (vector - mean)` into `dst`.
-        pub fn projectInto(self: Self, dst: []T, vector: Vec) !void {
+        pub fn projectInto(self: Self, dst: []T, vector: []const T) !void {
             if (self.num_components == 0) return error.NotFitted;
             if (dst.len != self.num_components) return error.InvalidCoefficients;
+            if (vector.len != self.dim) return error.DimensionMismatch;
 
-            const centered = vector - self.mean;
             for (0..self.num_components) |i| {
                 var sum: T = 0;
-                for (0..dim) |j| {
-                    sum += centered[j] * self.components.at(j, i).*;
+                for (0..self.dim) |j| {
+                    const centered = vector[j] - self.mean[j];
+                    sum += centered * self.components.at(j, i).*;
                 }
                 dst[i] = sum;
             }
@@ -201,17 +201,22 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 
         /// Reconstruct a vector from PCA coefficients: `mean + components * coefficients`.
         /// - `coefficients.len` must equal `num_components`.
-        pub fn reconstruct(self: Self, coefficients: []const T) !Vec {
+        /// - Returns allocated slice of length `dim` (caller must free)
+        pub fn reconstruct(self: Self, coefficients: []const T) ![]T {
             if (self.num_components == 0) return error.NotFitted;
             if (coefficients.len != self.num_components) return error.InvalidCoefficients;
 
+            // Allocate result
+            var result = try self.allocator.alloc(T, self.dim);
+            errdefer self.allocator.free(result);
+
             // Start with mean
-            var result = self.mean;
+            @memcpy(result, self.mean);
 
             // Add weighted components
             for (0..self.num_components) |i| {
                 const weight = coefficients[i];
-                for (0..dim) |j| {
+                for (0..self.dim) |j| {
                     result[j] += weight * self.components.at(j, i).*;
                 }
             }
@@ -219,34 +224,33 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             return result;
         }
 
-        /// Batch-transform: project multiple vectors using a single GEMM.
-        /// - Builds a centered matrix `Xc` (m × dim) and returns `Xc * components` (m × k).
-        /// - Returns a `Matrix(T)` owned by the caller; free with `deinit()`.
-        pub fn transform(self: Self, vectors: []const Vec) !Matrix(T) {
+        /// Batch-transform: project a data matrix onto PCA space.
+        /// - data_matrix: samples matrix (n_samples × dim)
+        /// - Returns: transformed matrix (n_samples × num_components)
+        pub fn transform(self: Self, data_matrix: Matrix(T)) !Matrix(T) {
             if (self.num_components == 0) return error.NotFitted;
-            if (vectors.len == 0) return error.NoVectors;
+            if (data_matrix.cols != self.dim) return error.DimensionMismatch;
+            if (data_matrix.rows == 0) return error.NoVectors;
 
-            // Build centered data matrix (m × dim)
-            const m = vectors.len;
-            var data_matrix: Matrix(T) = try Matrix(T).init(self.allocator, m, dim);
-            errdefer data_matrix.deinit();
-            defer data_matrix.deinit();
-            for (vectors, 0..) |vec, i| {
-                const centered = vec - self.mean;
-                for (0..dim) |j| {
-                    data_matrix.at(i, j).* = centered[j];
+            // Build centered data matrix
+            var centered_matrix: Matrix(T) = try Matrix(T).init(self.allocator, data_matrix.rows, self.dim);
+            defer centered_matrix.deinit();
+
+            for (0..data_matrix.rows) |i| {
+                for (0..self.dim) |j| {
+                    centered_matrix.at(i, j).* = data_matrix.at(i, j).* - self.mean[j];
                 }
             }
 
-            // Compute Xc * components -> (m × k)
-            var ops = try OpsBuilder(T).init(self.allocator, data_matrix);
+            // Compute centered * components
+            var ops = try OpsBuilder(T).init(self.allocator, centered_matrix);
             defer ops.deinit();
             try ops.gemm(false, self.components, false, 1.0, 0.0, null);
             return ops.toOwned();
         }
 
         /// Get the mean vector
-        pub fn getMean(self: Self) Vec {
+        pub fn getMean(self: Self) []const T {
             return self.mean;
         }
 
@@ -280,54 +284,27 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             // Prepare outputs
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.alloc(T, num_components);
-            self.components = try Matrix(T).init(self.allocator, dim, num_components);
+            self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
 
-            if (n <= 64) {
-                // Static SVD fast path
-                var cov_static: SMatrix(T, 64, 64) = .initAll(0);
-                for (0..n) |i| {
-                    for (0..n) |j| {
-                        cov_static.items[i][j] = cov_matrix.at(i, j).*;
-                    }
-                }
-                const result = cov_static.svd(.{
-                    .with_u = true,
-                    .with_v = false,
-                    .mode = .skinny_u,
-                });
-                if (result.converged != 0) return error.SvdFailed;
+            // Compute SVD of covariance matrix
+            var result = try cov_matrix.svd(self.allocator, .{
+                .with_u = true,
+                .with_v = false,
+                .mode = .skinny_u,
+            });
+            defer result.deinit();
+            if (result.converged != 0) return error.SvdFailed;
 
-                for (0..num_components) |i| {
-                    if (i < n) {
-                        self.eigenvalues[i] = result.s.at(i, 0).*;
-                        for (0..dim) |j| {
-                            self.components.at(j, i).* = if (j < n) result.u.at(j, i).* else 0;
-                        }
-                    } else {
-                        self.eigenvalues[i] = 0;
-                        for (0..dim) |j| self.components.at(j, i).* = 0;
+            // Extract eigenvalues and components
+            for (0..num_components) |i| {
+                if (i < n) {
+                    self.eigenvalues[i] = result.s.at(i, 0).*;
+                    for (0..self.dim) |j| {
+                        self.components.at(j, i).* = if (j < n) result.u.at(j, i).* else 0;
                     }
-                }
-            } else {
-                // Dynamic SVD fallback for large dimensions
-                var result = try cov_matrix.svd(self.allocator, .{
-                    .with_u = true,
-                    .with_v = false,
-                    .mode = .skinny_u,
-                });
-                defer result.deinit();
-                if (result.converged != 0) return error.SvdFailed;
-
-                for (0..num_components) |i| {
-                    if (i < n) {
-                        self.eigenvalues[i] = result.s.at(i, 0).*;
-                        for (0..dim) |j| {
-                            self.components.at(j, i).* = result.u.at(j, i).*;
-                        }
-                    } else {
-                        self.eigenvalues[i] = 0;
-                        for (0..dim) |j| self.components.at(j, i).* = 0;
-                    }
+                } else {
+                    self.eigenvalues[i] = 0;
+                    for (0..self.dim) |j| self.components.at(j, i).* = 0;
                 }
             }
         }
@@ -366,75 +343,39 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             // Extract components by projecting data onto eigenvectors
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.alloc(T, num_components);
-            self.components = try Matrix(T).init(self.allocator, dim, num_components);
+            self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
 
-            if (n <= 64) {
-                var gram_static: SMatrix(T, 64, 64) = .initAll(0);
-                for (0..n) |i| {
-                    for (0..n) |j| {
-                        gram_static.items[i][j] = gram_matrix.at(i, j).*;
-                    }
-                }
+            // Compute SVD of Gram matrix
+            var result = try gram_matrix.svd(self.allocator, .{
+                .with_u = true,
+                .with_v = false,
+                .mode = .skinny_u,
+            });
+            defer result.deinit();
+            if (result.converged != 0) return error.SvdFailed;
 
-                const result = gram_static.svd(.{
-                    .with_u = true,
-                    .with_v = false,
-                    .mode = .skinny_u,
-                });
-                if (result.converged != 0) return error.SvdFailed;
+            // Project eigenvectors back to feature space
+            const actual_components = @min(num_components, n);
+            for (0..actual_components) |i| {
+                const eigenval = result.s.at(i, 0).*;
+                self.eigenvalues[i] = eigenval;
 
-                const actual_components = @min(num_components, n);
-                for (0..actual_components) |i| {
-                    const eigenval = result.s.at(i, 0).*;
-                    self.eigenvalues[i] = eigenval;
-
-                    if (eigenval > 1e-10) {
-                        // Principal component: X^T u_i / sqrt((n-1) * eigenval)
-                        for (0..dim) |j| {
-                            var sum: T = 0;
-                            for (0..n) |k| {
-                                sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
-                            }
-                            self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n_samples - 1)));
+                if (eigenval > 1e-10) {
+                    // Principal component: X^T u_i / sqrt((n-1) * eigenval)
+                    for (0..self.dim) |j| {
+                        var sum: T = 0;
+                        for (0..n) |k| {
+                            sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
                         }
-                    } else {
-                        for (0..dim) |j| self.components.at(j, i).* = 0;
+                        self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n_samples - 1)));
                     }
+                } else {
+                    for (0..self.dim) |j| self.components.at(j, i).* = 0;
                 }
-                for (actual_components..num_components) |i| {
-                    self.eigenvalues[i] = 0;
-                    for (0..dim) |j| self.components.at(j, i).* = 0;
-                }
-            } else {
-                var result = try gram_matrix.svd(self.allocator, .{
-                    .with_u = true,
-                    .with_v = false,
-                    .mode = .skinny_u,
-                });
-                defer result.deinit();
-                if (result.converged != 0) return error.SvdFailed;
-
-                const actual_components = @min(num_components, n);
-                for (0..actual_components) |i| {
-                    const eigenval = result.s.at(i, 0).*;
-                    self.eigenvalues[i] = eigenval;
-
-                    if (eigenval > 1e-10) {
-                        for (0..dim) |j| {
-                            var sum: T = 0;
-                            for (0..n) |k| {
-                                sum += data_matrix.at(k, j).* * result.u.at(k, i).*;
-                            }
-                            self.components.at(j, i).* = sum / @sqrt(eigenval * @as(T, @floatFromInt(n_samples - 1)));
-                        }
-                    } else {
-                        for (0..dim) |j| self.components.at(j, i).* = 0;
-                    }
-                }
-                for (actual_components..num_components) |i| {
-                    self.eigenvalues[i] = 0;
-                    for (0..dim) |j| self.components.at(j, i).* = 0;
-                }
+            }
+            for (actual_components..num_components) |i| {
+                self.eigenvalues[i] = 0;
+                for (0..self.dim) |j| self.components.at(j, i).* = 0;
             }
         }
     };
@@ -445,36 +386,43 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
 test "PCA initialization and cleanup" {
     const allocator = std.testing.allocator;
 
-    var pca = PrincipalComponentAnalysis(f64, 2).init(allocator);
+    var pca = try Pca(f64).init(allocator, 2);
     defer pca.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), pca.num_components);
+    try std.testing.expectEqual(@as(usize, 2), pca.dim);
 }
 
 test "PCA on 2D vectors" {
     const allocator = std.testing.allocator;
 
-    // Create simple test vectors
-    const vectors = [_]@Vector(2, f64){
-        .{ 1.0, 2.0 },
-        .{ 3.0, 4.0 },
-        .{ 5.0, 6.0 },
-        .{ 7.0, 8.0 },
-    };
+    // Create data matrix with 4 samples of 2D points
+    var data = try Matrix(f64).init(allocator, 4, 2);
+    defer data.deinit();
+    data.at(0, 0).* = 1.0;
+    data.at(0, 1).* = 2.0;
+    data.at(1, 0).* = 3.0;
+    data.at(1, 1).* = 4.0;
+    data.at(2, 0).* = 5.0;
+    data.at(2, 1).* = 6.0;
+    data.at(3, 0).* = 7.0;
+    data.at(3, 1).* = 8.0;
 
-    var pca = PrincipalComponentAnalysis(f64, 2).init(allocator);
+    var pca = try Pca(f64).init(allocator, 2);
     defer pca.deinit();
 
-    try pca.fit(&vectors, null);
+    try pca.fit(data, null);
 
     // Should have fitted successfully
     try std.testing.expect(pca.num_components > 0);
 
     // Test projection and reconstruction
-    const coeffs = try pca.project(.{ 4.0, 5.0 });
+    const test_vec = [_]f64{ 4.0, 5.0 };
+    const coeffs = try pca.project(&test_vec);
     defer allocator.free(coeffs);
 
     const reconstructed = try pca.reconstruct(coeffs);
+    defer allocator.free(reconstructed);
 
     // Reconstruction should be close to original (within numerical precision)
     try std.testing.expect(@abs(reconstructed[0] - 4.0) < 1e-10);
@@ -494,41 +442,53 @@ test "PCA on image color data using Point conversion" {
     image.data[2] = Rgb{ .r = 170, .g = 170, .b = 170 }; // Light gray
     image.data[3] = Rgb{ .r = 255, .g = 255, .b = 255 }; // White
 
-    // Convert to color points using Point's fromColor method
-    var color_points = try allocator.alloc(@Vector(3, f64), image.data.len);
-    defer allocator.free(color_points);
+    // Convert to color matrix (4 samples × 3 dimensions)
+    var color_matrix = try Matrix(f64).init(allocator, 4, 3);
+    defer color_matrix.deinit();
 
     for (image.data, 0..) |pixel, i| {
         const point = Point3.fromColor(pixel);
-        color_points[i] = point.asVector();
+        const vec = point.asVector();
+        color_matrix.at(i, 0).* = vec[0];
+        color_matrix.at(i, 1).* = vec[1];
+        color_matrix.at(i, 2).* = vec[2];
     }
 
     // Apply PCA to color data
-    var pca = PrincipalComponentAnalysis(f64, 3).init(allocator);
+    var pca = try Pca(f64).init(allocator, 3);
     defer pca.deinit();
 
-    try pca.fit(color_points, 1); // Keep only 1 component
+    try pca.fit(color_matrix, 1); // Keep only 1 component
 
     // Test basic functionality
     try std.testing.expect(pca.num_components == 1);
 
     // Project and reconstruct a point
-    const coeffs = try pca.project(color_points[0]);
+    const test_color = [_]f64{ 0, 0, 0 }; // Black
+    const coeffs = try pca.project(&test_color);
     defer allocator.free(coeffs);
 
     const reconstructed = try pca.reconstruct(coeffs);
-    _ = reconstructed; // Just verify it works
+    defer allocator.free(reconstructed);
+    // Just verify it works - reconstruction is used in defer above
 }
 
 test "PCA Gram path normalization and direction" {
     const allocator = std.testing.allocator;
 
     // Two 3D samples along x-axis -> triggers Gram path (n_samples <= dim)
-    const vectors = [_]@Vector(3, f64){ .{ 1.0, 0.0, 0.0 }, .{ 3.0, 0.0, 0.0 } };
+    var data = try Matrix(f64).init(allocator, 2, 3);
+    defer data.deinit();
+    data.at(0, 0).* = 1.0;
+    data.at(0, 1).* = 0.0;
+    data.at(0, 2).* = 0.0;
+    data.at(1, 0).* = 3.0;
+    data.at(1, 1).* = 0.0;
+    data.at(1, 2).* = 0.0;
 
-    var pca = PrincipalComponentAnalysis(f64, 3).init(allocator);
+    var pca = try Pca(f64).init(allocator, 3);
     defer pca.deinit();
-    try pca.fit(&vectors, 1);
+    try pca.fit(data, 1);
 
     // First eigenvalue should be 2 (since covariance on centered data has [[2,0,0],...])
     try std.testing.expect(@abs(pca.eigenvalues[0] - 2.0) < 1e-9);
@@ -542,12 +502,13 @@ test "PCA Gram path normalization and direction" {
     try std.testing.expect(@abs(c0z) < 1e-12);
 
     // Batch transform should match per-vector projection
-    var coeffs_matrix = try pca.transform(&vectors);
+    var coeffs_matrix = try pca.transform(data);
     defer coeffs_matrix.deinit();
 
+    const test_vec = [_]f64{ 1.0, 0.0, 0.0 };
     const coeffs0 = try allocator.alloc(f64, pca.num_components);
     defer allocator.free(coeffs0);
-    try pca.projectInto(coeffs0, vectors[0]);
+    try pca.projectInto(coeffs0, &test_vec);
 
     try std.testing.expect(@abs(coeffs0[0] - coeffs_matrix.at(0, 0).*) < 1e-12);
 }
