@@ -318,104 +318,6 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
     };
 }
 
-// Image-to-Points Conversion Utilities
-
-/// Generic function to convert any color type to a point using reflection.
-/// Works with any struct with numeric fields (u8, f32, etc.).
-pub fn colorToPoint(comptime ColorType: type, color: ColorType) @Vector(std.meta.fields(ColorType).len, f64) {
-    const fields = std.meta.fields(ColorType);
-    var point: @Vector(fields.len, f64) = undefined;
-
-    inline for (fields, 0..) |field, i| {
-        const value = @field(color, field.name);
-        const field_type = @TypeOf(value);
-
-        // Convert to normalized f64 based on field type
-        point[i] = switch (@typeInfo(field_type)) {
-            .int => @as(f64, @floatFromInt(value)) / 255.0, // Assume u8 values are 0-255
-            .float => @as(f64, @floatCast(value)), // Assume float values are already normalized
-            else => @compileError("Unsupported color field type: " ++ @typeName(field_type)),
-        };
-    }
-
-    return point;
-}
-
-/// Generic function to convert a point back to any color type using reflection.
-/// Works with any struct with numeric fields (u8, f32, etc.).
-pub fn pointToColor(comptime ColorType: type, point: @Vector(std.meta.fields(ColorType).len, f64)) ColorType {
-    const fields = std.meta.fields(ColorType);
-    var color: ColorType = undefined;
-
-    inline for (fields, 0..) |field, i| {
-        const field_type = field.type;
-        const value = point[i];
-
-        // Convert from normalized f64 based on field type
-        @field(color, field.name) = switch (@typeInfo(field_type)) {
-            .int => @intFromFloat(@round(std.math.clamp(value * 255.0, 0, 255))),
-            .float => @floatCast(value),
-            else => @compileError("Unsupported color field type: " ++ @typeName(field_type)),
-        };
-    }
-
-    return color;
-}
-
-/// Generic function to convert any image to color points using reflection.
-/// Works with any color type - RGB, RGBA, HSL, Lab, etc.
-pub fn imageToColorPoints(comptime ColorType: type, allocator: Allocator, image: Image(ColorType)) ![]@Vector(std.meta.fields(ColorType).len, f64) {
-    const num_channels = std.meta.fields(ColorType).len;
-    var points = try allocator.alloc(@Vector(num_channels, f64), image.data.len);
-
-    for (image.data, 0..) |pixel, i| {
-        points[i] = colorToPoint(ColorType, pixel);
-    }
-
-    return points;
-}
-
-/// Generic function to convert color points back to an image using reflection.
-/// Works with any color type - RGB, RGBA, HSL, Lab, etc.
-pub fn colorPointsToImage(comptime ColorType: type, allocator: Allocator, points: []const @Vector(std.meta.fields(ColorType).len, f64), rows: usize, cols: usize) !Image(ColorType) {
-    assert(points.len == rows * cols);
-
-    var image = try Image(ColorType).init(allocator, rows, cols);
-
-    for (points, 0..) |point, i| {
-        image.data[i] = pointToColor(ColorType, point);
-    }
-
-    return image;
-}
-
-/// Convert a grayscale image to 1D intensity points.
-/// Special case for u8 images (single intensity value).
-pub fn imageToIntensityPoints(allocator: Allocator, image: Image(u8)) ![]@Vector(1, f64) {
-    var points = try allocator.alloc(@Vector(1, f64), image.data.len);
-
-    for (image.data, 0..) |pixel, i| {
-        points[i] = .{@as(f64, @floatFromInt(pixel)) / 255.0};
-    }
-
-    return points;
-}
-
-/// Convert intensity points back to a grayscale image.
-/// Reconstructs an image from 1D intensity points.
-pub fn intensityPointsToImage(allocator: Allocator, points: []const @Vector(1, f64), rows: usize, cols: usize) !Image(u8) {
-    assert(points.len == rows * cols);
-
-    var image = try Image(u8).init(allocator, rows, cols);
-
-    for (points, 0..) |point, i| {
-        const intensity = std.math.clamp(point[0] * 255.0, 0, 255);
-        image.data[i] = @intFromFloat(@round(intensity));
-    }
-
-    return image;
-}
-
 // Tests
 
 test "PCA initialization and cleanup" {
@@ -457,77 +359,9 @@ test "PCA on 2D vectors" {
     try std.testing.expect(@abs(reconstructed[1] - 5.0) < 1e-10);
 }
 
-test "Generic color to point conversion" {
-    _ = std.testing.allocator;
-
-    // Test with RGB color
-    const rgb_color = Rgb{ .r = 255, .g = 128, .b = 0 };
-    const rgb_point = colorToPoint(Rgb, rgb_color);
-
-    try std.testing.expectEqual(@as(f64, 1.0), rgb_point[0]); // R
-    try std.testing.expectEqual(@as(f64, 128.0 / 255.0), rgb_point[1]); // G
-    try std.testing.expectEqual(@as(f64, 0.0), rgb_point[2]); // B
-
-    // Convert back
-    const recovered_rgb = pointToColor(Rgb, rgb_point);
-    try std.testing.expectEqual(rgb_color.r, recovered_rgb.r);
-    try std.testing.expectEqual(rgb_color.g, recovered_rgb.g);
-    try std.testing.expectEqual(rgb_color.b, recovered_rgb.b);
-
-    // Test with RGBA color
-    const rgba_color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
-    const rgba_point = colorToPoint(Rgba, rgba_color);
-
-    try std.testing.expectEqual(@as(f64, 1.0), rgba_point[0]); // R
-    try std.testing.expectEqual(@as(f64, 0.0), rgba_point[1]); // G
-    try std.testing.expectEqual(@as(f64, 0.0), rgba_point[2]); // B
-    try std.testing.expectEqual(@as(f64, 128.0 / 255.0), rgba_point[3]); // A
-
-    const recovered_rgba = pointToColor(Rgba, rgba_point);
-    try std.testing.expectEqual(rgba_color.r, recovered_rgba.r);
-    try std.testing.expectEqual(rgba_color.g, recovered_rgba.g);
-    try std.testing.expectEqual(rgba_color.b, recovered_rgba.b);
-    try std.testing.expectEqual(rgba_color.a, recovered_rgba.a);
-}
-
-test "Generic image to color points conversion" {
+test "PCA on image color data using Point conversion" {
     const allocator = std.testing.allocator;
-
-    // Create a simple 2x2 RGB image
-    var image = try Image(Rgb).init(allocator, 2, 2);
-    defer image.deinit(allocator);
-
-    image.data[0] = Rgb{ .r = 255, .g = 0, .b = 0 }; // Red
-    image.data[1] = Rgb{ .r = 0, .g = 255, .b = 0 }; // Green
-    image.data[2] = Rgb{ .r = 0, .g = 0, .b = 255 }; // Blue
-    image.data[3] = Rgb{ .r = 255, .g = 255, .b = 255 }; // White
-
-    // Convert to color points using generic function
-    const color_points = try imageToColorPoints(Rgb, allocator, image);
-    defer allocator.free(color_points);
-
-    // Check conversions
-    try std.testing.expectEqual(@as(usize, 4), color_points.len);
-    try std.testing.expectEqual(@as(f64, 1.0), color_points[0][0]); // Red pixel
-    try std.testing.expectEqual(@as(f64, 0.0), color_points[0][1]);
-    try std.testing.expectEqual(@as(f64, 0.0), color_points[0][2]);
-
-    try std.testing.expectEqual(@as(f64, 0.0), color_points[1][0]); // Green pixel
-    try std.testing.expectEqual(@as(f64, 1.0), color_points[1][1]);
-    try std.testing.expectEqual(@as(f64, 0.0), color_points[1][2]);
-
-    // Convert back to image using generic function
-    var reconstructed = try colorPointsToImage(Rgb, allocator, color_points, 2, 2);
-    defer reconstructed.deinit(allocator);
-
-    // Check that reconstruction matches original
-    try std.testing.expectEqual(image.data[0].r, reconstructed.data[0].r);
-    try std.testing.expectEqual(image.data[0].g, reconstructed.data[0].g);
-    try std.testing.expectEqual(image.data[0].b, reconstructed.data[0].b);
-}
-
-test "PCA on image color data" {
-    const allocator = std.testing.allocator;
+    const Point3 = @import("geometry/Point.zig").Point(3, f64);
 
     // Create a simple gradient image
     var image = try Image(Rgb).init(allocator, 2, 2);
@@ -538,9 +372,14 @@ test "PCA on image color data" {
     image.data[2] = Rgb{ .r = 170, .g = 170, .b = 170 }; // Light gray
     image.data[3] = Rgb{ .r = 255, .g = 255, .b = 255 }; // White
 
-    // Convert to color points
-    const color_points = try imageToColorPoints(Rgb, allocator, image);
+    // Convert to color points using Point's fromColor method
+    var color_points = try allocator.alloc(@Vector(3, f64), image.data.len);
     defer allocator.free(color_points);
+
+    for (image.data, 0..) |pixel, i| {
+        const point = Point3.fromColor(pixel);
+        color_points[i] = point.asVector();
+    }
 
     // Apply PCA to color data
     var pca = PrincipalComponentAnalysis(f64, 3).init(allocator);

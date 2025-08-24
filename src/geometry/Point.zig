@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const isColor = @import("../color.zig").isColor;
+
 /// A unified point type supporting arbitrary dimensions with SIMD acceleration.
 /// Common dimensions 2D, 3D, 4D have convenient x(), y(), z(), w() accessors.
 /// Higher dimensions use at(index) for access.
@@ -211,6 +213,86 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return Point(dim, U){ .vec = result };
         }
 
+        // Color conversion methods
+        /// Create a Point from any color type using reflection.
+        /// Works with any color type recognized by isColor.
+        /// The number of fields must match the Point dimension.
+        pub fn fromColor(color: anytype) Self {
+            const ColorType = @TypeOf(color);
+            comptime assert(isColor(ColorType));
+
+            const fields = std.meta.fields(ColorType);
+            comptime assert(fields.len == dim);
+
+            var vec: @Vector(dim, T) = undefined;
+            inline for (fields, 0..) |field, i| {
+                const value = @field(color, field.name);
+                const field_type = @TypeOf(value);
+
+                // Convert to T based on field type
+                vec[i] = switch (@typeInfo(field_type)) {
+                    .int => blk: {
+                        // Assume u8 values are 0-255, normalize to 0-1 for float Points
+                        if (@typeInfo(T) == .float) {
+                            break :blk @as(T, @floatFromInt(value)) / 255.0;
+                        } else {
+                            break :blk @as(T, @intCast(value));
+                        }
+                    },
+                    .float => blk: {
+                        if (@typeInfo(T) == .float) {
+                            break :blk @as(T, @floatCast(value));
+                        } else {
+                            // Convert float to int by scaling and rounding
+                            break :blk @as(T, @intFromFloat(@round(value * 255.0)));
+                        }
+                    },
+                    else => @compileError("Unsupported color field type: " ++ @typeName(field_type)),
+                };
+            }
+
+            return .{ .vec = vec };
+        }
+
+        /// Convert this Point to any color type using reflection.
+        /// Works with any struct with numeric fields (u8, f32, etc.).
+        /// The number of fields must match the Point dimension.
+        pub fn toColor(self: Self, comptime ColorType: type) ColorType {
+            const fields = std.meta.fields(ColorType);
+            comptime assert(fields.len == dim);
+
+            var color: ColorType = undefined;
+            inline for (fields, 0..) |field, i| {
+                const field_type = field.type;
+                const value = self.vec[i];
+
+                // Convert from T based on field type
+                @field(color, field.name) = switch (@typeInfo(field_type)) {
+                    .int => blk: {
+                        if (@typeInfo(T) == .float) {
+                            // Assume we're converting from normalized 0-1 to 0-255
+                            const clamped = std.math.clamp(value, 0, 1);
+                            break :blk @as(field_type, @intFromFloat(@round(clamped * 255.0)));
+                        } else {
+                            break :blk @as(field_type, @intCast(std.math.clamp(value, 0, 255)));
+                        }
+                    },
+                    .float => blk: {
+                        if (@typeInfo(T) == .float) {
+                            break :blk @as(field_type, @floatCast(value));
+                        } else {
+                            // Convert int to normalized float
+                            const float_val: field_type = @as(field_type, @floatFromInt(value)) / 255.0;
+                            break :blk float_val;
+                        }
+                    },
+                    else => @compileError("Unsupported color field type: " ++ @typeName(field_type)),
+                };
+            }
+
+            return color;
+        }
+
         // Homogeneous coordinate conversion for 3D points
         /// Convert 3D homogeneous point to 2D by dividing by Z
         pub fn to2dHomogeneous(self: Self) Point(2, T) {
@@ -313,4 +395,39 @@ test "3D cross product" {
     try std.testing.expectEqual(@as(f64, 0.0), k.x());
     try std.testing.expectEqual(@as(f64, 0.0), k.y());
     try std.testing.expectEqual(@as(f64, 1.0), k.z());
+}
+
+test "Point color conversion" {
+    // Import color types for testing
+    const Rgb = @import("../color.zig").Rgb;
+    const Rgba = @import("../color.zig").Rgba;
+
+    // Test RGB to Point conversion (float point)
+    const rgb_color = Rgb{ .r = 255, .g = 128, .b = 0 };
+    const point_from_rgb = Point(3, f64).fromColor(rgb_color);
+
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), point_from_rgb.x(), 0.01); // R normalized
+    try std.testing.expectApproxEqAbs(@as(f64, 128.0 / 255.0), point_from_rgb.y(), 0.01); // G normalized
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), point_from_rgb.z(), 0.01); // B normalized
+
+    // Test Point to RGB conversion
+    const recovered_rgb = point_from_rgb.toColor(Rgb);
+    try std.testing.expectEqual(rgb_color.r, recovered_rgb.r);
+    try std.testing.expectEqual(rgb_color.g, recovered_rgb.g);
+    try std.testing.expectEqual(rgb_color.b, recovered_rgb.b);
+
+    // Test RGBA to Point conversion (4D)
+    const rgba_color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    const point_from_rgba = Point(4, f64).fromColor(rgba_color);
+
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), point_from_rgba.x(), 0.01); // R
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), point_from_rgba.y(), 0.01); // G
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), point_from_rgba.z(), 0.01); // B
+    try std.testing.expectApproxEqAbs(@as(f64, 128.0 / 255.0), point_from_rgba.w(), 0.01); // A
+
+    const recovered_rgba = point_from_rgba.toColor(Rgba);
+    try std.testing.expectEqual(rgba_color.r, recovered_rgba.r);
+    try std.testing.expectEqual(rgba_color.g, recovered_rgba.g);
+    try std.testing.expectEqual(rgba_color.b, recovered_rgba.b);
+    try std.testing.expectEqual(rgba_color.a, recovered_rgba.a);
 }
