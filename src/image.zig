@@ -321,9 +321,9 @@ pub fn Image(comptime T: type) type {
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             const type_name: []const u8 = @typeName(T);
             if (std.mem.lastIndexOfScalar(u8, type_name, '.')) |pos| {
-                try writer.print("Image({s}){ .rows = {d}, .cols = {d} }", .{ type_name[pos + 1 ..], self.rows, self.cols });
+                try writer.print("Image({s}){{ .rows = {d}, .cols = {d} }}", .{ type_name[pos + 1 ..], self.rows, self.cols });
             } else {
-                try writer.print("Image({s}){ .rows = {d}, .cols = {d} }", .{ type_name, self.rows, self.cols });
+                try writer.print("Image({s}){{ .rows = {d}, .cols = {d} }}", .{ type_name, self.rows, self.cols });
             }
         }
 
