@@ -26,7 +26,6 @@ const Allocator = std.mem.Allocator;
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
 const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
-const svd_dyn = @import("matrix/svd.zig");
 const Rgb = @import("color.zig").Rgb;
 const SMatrix = @import("matrix.zig").SMatrix;
 
@@ -273,7 +272,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
                 }
             } else {
                 // Dynamic SVD fallback for large dimensions
-                var result = try svd_dyn.svd(T, self.allocator, cov_matrix, .{
+                var result = try cov_matrix.svd(self.allocator, .{
                     .with_u = true,
                     .with_v = false,
                     .mode = .skinny_u,
@@ -369,7 +368,7 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
                     for (0..dim) |j| self.components.at(j, i).* = 0;
                 }
             } else {
-                var result = try svd_dyn.svd(T, self.allocator, gram_matrix, .{
+                var result = try gram_matrix.svd(self.allocator, .{
                     .with_u = true,
                     .with_v = false,
                     .mode = .skinny_u,
