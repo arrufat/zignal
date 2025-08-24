@@ -17,9 +17,6 @@ pub const BruteForceMatcher = @import("features/matcher.zig").BruteForceMatcher;
 pub const Match = @import("features/matcher.zig").Match;
 pub const MatchStats = @import("features/matcher.zig").MatchStats;
 
-// Re-export useful functions
-pub const filterMatchesRatioTest = @import("features/matcher.zig").filterMatchesRatioTest;
-
 test {
     // Run all feature module tests
     _ = @import("features/KeyPoint.zig");

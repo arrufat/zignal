@@ -225,32 +225,6 @@ pub const BruteForceMatcher = struct {
     }
 };
 
-/// Filter matches using Lowe's ratio test
-pub fn filterMatchesRatioTest(
-    matches: []const []const Match,
-    ratio: f32,
-    allocator: Allocator,
-) ![]Match {
-    var good_matches: ArrayList(Match) = .{};
-    defer good_matches.deinit(allocator);
-
-    for (matches) |knn_matches| {
-        if (knn_matches.len >= 2) {
-            // Apply ratio test
-            if (knn_matches[0].distance < ratio * knn_matches[1].distance) {
-                try good_matches.append(allocator, knn_matches[0]);
-            }
-        } else if (knn_matches.len == 1) {
-            // Only one match, include it if distance is reasonable
-            if (knn_matches[0].distance < 50) {
-                try good_matches.append(allocator, knn_matches[0]);
-            }
-        }
-    }
-
-    return try good_matches.toOwnedSlice(allocator);
-}
-
 /// Compute match statistics
 pub const MatchStats = struct {
     total_matches: usize,
