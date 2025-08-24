@@ -9,6 +9,7 @@ const grayscale_format = @import("grayscale_format.zig");
 const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
+const matrix = @import("matrix.zig");
 const interpolation = @import("interpolation.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
@@ -44,6 +45,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register Image type
     py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch |err| {
         std.log.err("Failed to register Image: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register Matrix type
+    py_utils.registerType(@ptrCast(m), "Matrix", @ptrCast(&matrix.MatrixType)) catch |err| {
+        std.log.err("Failed to register Matrix: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

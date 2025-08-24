@@ -150,21 +150,62 @@ def main():
     zignal_html_content = zignal_html.read_text()
 
     # Check for common indicators of missing type annotations
-    problematic_patterns = [
-        ("(unknown)", "Found '(unknown)' which indicates missing type information"),
-        ("typing.Any", "Found 'typing.Any' which may indicate incomplete type stubs"),
-        # Check for parameters without type annotations - look for param spans without colons
-        (
-            '<span class="param"><span class="n">[^<]+</span></span>',
-            "Found parameter without type annotation",
-        ),
-    ]
 
-    for pattern, message in problematic_patterns:
-        if pattern in zignal_html_content:
-            # Count occurrences for better reporting
-            count = zignal_html_content.count(pattern)
-            validation_errors.append(f"{message} ({count} occurrence{'s' if count != 1 else ''})")
+    # Check for literal "unknown" in parameters
+    unknown_matches = re.findall(
+        r'<span class="name">([^<]+)</span>.*?<span class="n">unknown</span>', zignal_html_content
+    )
+    if unknown_matches:
+        for func_name in unknown_matches:
+            validation_errors.append(
+                f"Function/method '{func_name}' has parameter with type 'unknown'"
+            )
+
+    # Check for *args, **kwargs patterns which indicate missing stub definitions
+    # Find all function/class signatures with *args or **kwargs
+    # Pattern matches: <span class="name">NAME</span> followed by signature containing *args or **kwargs
+
+    # First, find all signatures with *args
+    args_pattern = r'<span class="o">\*</span><span class="n">args</span>'
+
+    # Find all signatures with **kwargs
+    kwargs_pattern = r'<span class="o">\*\*</span><span class="n">kwargs</span>'
+
+    # For each match, backtrack to find the associated function/class name
+    generic_signatures = set()
+
+    # Find all positions of *args and **kwargs
+    for pattern, desc in [(args_pattern, "*args"), (kwargs_pattern, "**kwargs")]:
+        for match in re.finditer(pattern, zignal_html_content):
+            # Look backwards from the match position to find the nearest <span class="name">
+            pos = match.start()
+            # Get substring before the match (up to 500 chars should be enough)
+            before = zignal_html_content[max(0, pos - 500) : pos]
+
+            # Find the last occurrence of <span class="name">...</span> before *args/**kwargs
+            name_match = re.findall(r'<span class="name">([^<]+)</span>', before)
+            if name_match:
+                # Get the last (nearest) name
+                func_name = name_match[-1]
+                # Make sure this is part of a signature (has <span class="signature after it)
+                if (
+                    '<span class="signature'
+                    in before[before.rfind(f'<span class="name">{func_name}</span>') :]
+                ):
+                    generic_signatures.add(func_name)
+
+    if generic_signatures:
+        for class_or_func in sorted(generic_signatures):
+            validation_errors.append(
+                f"'{class_or_func}' is using generic (*args, **kwargs) - needs proper type stub"
+            )
+
+    # Check for typing.Any which may indicate incomplete stubs
+    if "typing.Any" in zignal_html_content:
+        count = zignal_html_content.count("typing.Any")
+        validation_errors.append(
+            f"Found 'typing.Any' which may indicate incomplete type stubs ({count} occurrence{'s' if count != 1 else ''})"
+        )
 
     # Match function definitions and check if they have return type annotations
     func_pattern = r'<span class="def">def</span>\s*<span class="name">([^<]+)</span><span class="signature[^"]*">([^<]+)</span>'

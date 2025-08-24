@@ -11,6 +11,7 @@ const color_factory = @import("color_factory.zig");
 const image_module = @import("image.zig");
 const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
+const matrix_module = @import("matrix.zig");
 const fdm_module = @import("fdm.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
@@ -428,6 +429,19 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &image_module.image_special_methods_metadata,
     });
 
+    // Generate Matrix class from metadata
+    const matrix_methods = stub_metadata.extractMethodInfo(&matrix_module.matrix_methods_metadata);
+    const matrix_properties = stub_metadata.extractPropertyInfo(&matrix_module.matrix_properties_metadata);
+    const matrix_doc = std.mem.span(matrix_module.MatrixType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Matrix",
+        .doc = matrix_doc,
+        .methods = &matrix_methods,
+        .properties = &matrix_properties,
+        .bases = &.{},
+        .special_methods = &matrix_module.matrix_special_methods_metadata,
+    });
+
     // Generate Canvas class from metadata
     const canvas_methods = stub_metadata.extractMethodInfo(&canvas_module.canvas_methods_metadata);
     const canvas_properties = stub_metadata.extractPropertyInfo(&canvas_module.canvas_properties_metadata);
@@ -500,6 +514,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Rectangle as Rectangle,\n");
     try stub.write("    BitmapFont as BitmapFont,\n");
     try stub.write("    Image as Image,\n");
+    try stub.write("    Matrix as Matrix,\n");
     try stub.write("    Canvas as Canvas,\n");
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
     try stub.write("    BlendMode as BlendMode,\n");
