@@ -1,22 +1,37 @@
 //! Principal Component Analysis (PCA) for dimensionality reduction and feature extraction.
 //!
-//! This implementation works with arbitrary-dimensional vectors and points,
-//! providing a unified interface for PCA on geometric data, color spaces, and more.
+//! - Works on arbitrary-dimensional vectors using Zig's SIMD vectors (`@Vector(dim, T)`).
+//! - Supports both covariance (dim × dim) and Gram (n × n) paths automatically.
+//! - Components are stored column-wise in a matrix of shape `dim × k` (orthonormal).
+//! - Eigenvalues are singular values squared of centered data, scaled by `1/(n-1)` (variances).
 //!
-//! ## Example
+//! Shapes and conventions
+//! - Input vectors: `Vec = @Vector(dim, T)`.
+//! - `components`: `Matrix(T)` with shape `dim × k` where each column is a principal direction.
+//! - `eigenvalues`: `[]T` length `k`, sorted descending.
+//! - Projection of a vector `x`: `coeffs = components^T * (x - mean)` (length `k`).
+//! - Reconstruction: `x_hat = mean + components * coeffs`.
+//!
+//! Example
 //! ```zig
-//! // 2D geometric points
 //! const points_2d = [_]@Vector(2, f64){ .{1.0, 2.0}, .{3.0, 4.0}, .{5.0, 6.0} };
 //! var pca_2d = PrincipalComponentAnalysis(f64, 2).init(allocator);
-//! try pca_2d.fit(&points_2d, null);
+//! defer pca_2d.deinit();
+//! try pca_2d.fit(&points_2d, null); // keep all possible components
 //!
-//! // Project and reconstruct
+//! // Project (allocates a slice owned by caller)
 //! const coeffs = try pca_2d.project(.{2.0, 3.0});
+//! defer allocator.free(coeffs);
 //! const reconstructed = try pca_2d.reconstruct(coeffs);
 //!
-//! // Convert Points to vectors if needed
-//! const point = Point(2, f64).point(.{ 1.0, 2.0 });
-//! const coeffs = try pca_2d.project(point.asVector());
+//! // No-alloc projection into a caller-provided buffer
+//! var tmp = try allocator.alloc(f64, pca_2d.num_components);
+//! defer allocator.free(tmp);
+//! try pca_2d.projectInto(tmp, .{2.0, 3.0});
+//!
+//! // Batch transform (m × k matrix)
+//! var coeffs_mat = try pca_2d.transform(&points_2d);
+//! defer coeffs_mat.deinit();
 //! ```
 
 const std = @import("std");
@@ -73,9 +88,14 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
         }
 
-        /// Fit PCA model to a set of vectors.
-        /// - vectors: Training data as vectors
-        /// - num_components: Number of components to retain (null = keep all possible)
+        /// Fit the PCA model on centered data derived from `vectors`.
+        /// - vectors: training samples (length n), each `@Vector(dim, T)`
+        /// - num_components: number of components to retain; when null keeps `min(n-1, dim)`
+        ///
+        /// Notes:
+        /// - Uses covariance path when `n > dim`, Gram path otherwise.
+        /// - Replaces previous `components`/`eigenvalues` if already fitted.
+        /// - Returns `error.InsufficientData` for `n < 2` and `error.InvalidComponents` for `0`.
         pub fn fit(self: *Self, vectors: []const Vec, num_components: ?usize) !void {
             if (vectors.len == 0) return error.NoVectors;
             if (vectors.len == 1) return error.InsufficientData;
@@ -126,8 +146,10 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
         }
 
-        /// Project a vector onto the principal components.
-        /// Returns the coefficients in PCA space.
+        /// Project a single vector onto PCA space, returning a freshly allocated coefficient slice.
+        /// - Input: `vector` of length `dim`
+        /// - Output: `[]T` of length `num_components` (caller frees)
+        /// - For hot paths, prefer `projectInto` to reuse a buffer.
         pub fn project(self: Self, vector: Vec) ![]T {
             if (self.num_components == 0) return error.NotFitted;
 
@@ -147,8 +169,9 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             return coefficients;
         }
 
-        /// Project a vector into the provided buffer (avoids allocation).
-        /// The slice must have length equal to `num_components`.
+        /// Project a single vector into a caller-provided buffer (avoids allocation).
+        /// - `dst.len` must equal `num_components`.
+        /// - Writes `components^T * (vector - mean)` into `dst`.
         pub fn projectInto(self: Self, dst: []T, vector: Vec) !void {
             if (self.num_components == 0) return error.NotFitted;
             if (dst.len != self.num_components) return error.InvalidCoefficients;
@@ -163,7 +186,8 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
             }
         }
 
-        /// Reconstruct a vector from PCA coefficients.
+        /// Reconstruct a vector from PCA coefficients: `mean + components * coefficients`.
+        /// - `coefficients.len` must equal `num_components`.
         pub fn reconstruct(self: Self, coefficients: []const T) !Vec {
             if (self.num_components == 0) return error.NotFitted;
             if (coefficients.len != self.num_components) return error.InvalidCoefficients;
@@ -183,7 +207,8 @@ pub fn PrincipalComponentAnalysis(comptime T: type, comptime dim: usize) type {
         }
 
         /// Batch-transform: project multiple vectors using a single GEMM.
-        /// Returns a matrix of shape (vectors.len × num_components) with one row per input vector.
+        /// - Builds a centered matrix `Xc` (m × dim) and returns `Xc * components` (m × k).
+        /// - Returns a `Matrix(T)` owned by the caller; free with `deinit()`.
         pub fn transform(self: Self, vectors: []const Vec) !Matrix(T) {
             if (self.num_components == 0) return error.NotFitted;
             if (vectors.len == 0) return error.NoVectors;
