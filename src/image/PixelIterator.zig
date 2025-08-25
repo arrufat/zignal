@@ -107,8 +107,8 @@ test "PixelIterator with views" {
     // Create a view (2x2 from position 1,1)
     const view = img.view(Rectangle(usize){ .l = 1, .t = 1, .r = 3, .b = 3 });
 
-    // Test that view is indeed a view
-    try std.testing.expect(view.isView());
+    // Test that view is not contiguous (has padding between rows)
+    try std.testing.expect(!view.isContiguous());
 
     // Verify view dimensions
     try std.testing.expectEqual(@as(usize, 2), view.rows);
