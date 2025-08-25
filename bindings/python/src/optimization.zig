@@ -240,10 +240,7 @@ const solve_assignment_problem_doc =
     \\
     \\for p in [OptimizationPolicy.MIN, OptimizationPolicy.MAX]:
     \\    result = solve_assignment_problem(matrix, p)
-    \\    if p == OptimizationPolicy.MIN:
-    \\        print("minimum cost")
-    \\    else:
-    \\        print("maximum profit")
+    \\    print("minimum cost") if p == OptimizationPolicy.MIN else print("maxium profit")
     \\    print(f"  - Total cost:  {result.total_cost}")
     \\    print(f"  - Assignments: {result.assignments}")
     \\```
