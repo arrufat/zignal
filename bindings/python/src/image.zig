@@ -21,11 +21,12 @@ const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 const image_class_doc =
+    \\Image for processing and manipulation.
     \\
-    \\Image for processing and manipulation.\n\n
-    \\This object is iterable: iterating yields (row, col, pixel) in native\n
-    \\dtype (Grayscale→int, Rgb→Rgb, Rgba→Rgba) in row-major order. For bulk\n
-    \\numeric work, prefer to_numpy().
+    \\This object is iterable: iterating yields (row, col, pixel) in native
+    \\dtype in row-major order.
+    \\
+    \\For bulk numeric work, prefer to_numpy().
 ;
 
 pub const ImageObject = extern struct {
