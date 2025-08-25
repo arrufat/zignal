@@ -184,7 +184,11 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Compute 3D cross product with another point
         pub fn cross(self: Self, other: Self) Self {
             comptime assert(dim == 3);
-            return .point(.{ self.y() * other.z() - self.z() * other.y(), self.z() * other.x() - self.x() * other.z(), self.x() * other.y() - self.y() * other.x() });
+            return .point(.{
+                self.y() * other.z() - self.z() * other.y(),
+                self.z() * other.x() - self.x() * other.z(),
+                self.x() * other.y() - self.y() * other.x(),
+            });
         }
 
         // Direct vector/array access
