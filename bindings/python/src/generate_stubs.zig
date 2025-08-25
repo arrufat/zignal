@@ -18,6 +18,7 @@ const convex_hull_module = @import("convex_hull.zig");
 const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
 const interpolation_module = @import("interpolation.zig");
+const optimization_module = @import("optimization.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -215,7 +216,7 @@ fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.Cla
     // Generate special methods if provided
     if (class_info.special_methods) |special_methods| {
         for (special_methods) |method| {
-            // Write method signature
+            // Write method signature normally
             try stub.writef("    def {s}({s}) -> {s}:", .{
                 method.name,
                 method.params,
@@ -313,7 +314,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         \\from __future__ import annotations
         \\
         \\from enum import IntEnum
-        \\from typing import TypeAlias
+        \\from typing import TypeAlias, Optional, overload
         \\
         \\import numpy as np
         \\from numpy.typing import NDArray
@@ -414,6 +415,30 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .doc = canvas_module.draw_mode_doc,
         .zig_type = zignal.DrawMode,
         .value_docs = &canvas_module.draw_mode_values,
+    });
+
+    // Generate OptimizationPolicy enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "OptimizationPolicy",
+        .base = "IntEnum",
+        .doc = optimization_module.optimization_policy_doc,
+        .zig_type = zignal.optimization.OptimizationPolicy,
+        .value_docs = &[_]stub_metadata.EnumValueDoc{
+            .{ .name = "MIN", .doc = "Minimize total cost" },
+            .{ .name = "MAX", .doc = "Maximize total cost (profit)" },
+        },
+    });
+
+    // Generate Assignment class from metadata
+    const assignment_properties = stub_metadata.extractPropertyInfo(&optimization_module.assignment_properties_metadata);
+    const assignment_doc = std.mem.span(optimization_module.AssignmentType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Assignment",
+        .doc = assignment_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &assignment_properties,
+        .bases = &.{},
+        .special_methods = null,
     });
 
     // Generate Image class from metadata
@@ -519,8 +544,11 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    InterpolationMethod as InterpolationMethod,\n");
     try stub.write("    BlendMode as BlendMode,\n");
     try stub.write("    DrawMode as DrawMode,\n");
+    try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");
+    try stub.write("    Assignment as Assignment,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");
+    try stub.write("    solve_assignment_problem as solve_assignment_problem,\n");
     try stub.write("    # Type aliases\n");
     try stub.write("    Point as Point,\n");
     try stub.write("    Size as Size,\n");

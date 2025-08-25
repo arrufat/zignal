@@ -11,6 +11,7 @@ const fdm = @import("fdm.zig");
 const image = @import("image.zig");
 const matrix = @import("matrix.zig");
 const interpolation = @import("interpolation.zig");
+const optimization = @import("optimization.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
@@ -32,8 +33,8 @@ var zignal_module = c.PyModuleDef{
     .m_free = null,
 };
 
-// Module function metadata - empty now since we removed the function
-pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{};
+// Module function metadata - combines functions from various modules
+pub const module_functions_metadata = optimization.module_functions_metadata;
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);
@@ -66,6 +67,20 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register InterpolationMethod enum
     interpolation.registerInterpolationMethod(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register InterpolationMethod: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register OptimizationPolicy enum
+    optimization.registerOptimizationPolicy(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register OptimizationPolicy: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register Assignment type
+    py_utils.registerType(@ptrCast(m), "Assignment", @ptrCast(&optimization.AssignmentType)) catch |err| {
+        std.log.err("Failed to register Assignment: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
