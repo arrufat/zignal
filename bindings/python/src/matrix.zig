@@ -19,9 +19,12 @@ const matrix_class_doc =
     \\import zignal
     \\import numpy as np
     \\
-    \\# Create from dimensions
-    \\m = zignal.Matrix(3, 4)  # 3x4 matrix of zeros
-    \\m = zignal.Matrix(3, 4, fill_value=1.0)  # filled with 1.0
+    \\# Create from list of lists
+    \\m = zignal.Matrix([[1, 2, 3], [4, 5, 6]])
+    \\
+    \\# Create with dimensions using full()
+    \\m = zignal.Matrix.full(3, 4)  # 3x4 matrix of zeros
+    \\m = zignal.Matrix.full(3, 4, fill_value=1.0)  # filled with 1.0
     \\
     \\# From numpy (zero-copy for float64 contiguous arrays)
     \\arr = np.random.randn(10, 5)
@@ -53,21 +56,21 @@ fn matrix_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 const matrix_init_doc =
-    \\Create a new Matrix with the specified dimensions.
+    \\Create a new Matrix from a list of lists.
     \\
     \\## Parameters
-    \\- `rows` (int): Number of rows
-    \\- `cols` (int): Number of columns
-    \\- `fill_value` (float, optional): Value to fill the matrix with (default: 0.0)
+    \\- `data` (List[List[float]]): List of lists containing matrix data
     \\
     \\## Examples
     \\```python
-    \\m = Matrix(3, 4)  # 3x4 matrix of zeros
-    \\m = Matrix(3, 4, fill_value=1.0)  # 3x4 matrix of ones
+    \\# Create from list of lists
+    \\m = Matrix([[1, 2, 3], [4, 5, 6]])  # 2x3 matrix
+    \\m = Matrix([[1.0, 2.5], [3.7, 4.2]])  # 2x2 matrix
     \\```
 ;
 
 fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
+    _ = kwds; // Not used for list initialization
     const self = @as(*MatrixObject, @ptrCast(self_obj.?));
 
     // Check if already initialized (e.g., from from_numpy)
@@ -75,22 +78,113 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
         return 0;
     }
 
-    // Parse arguments: rows, cols, optional fill_value
+    // Parse single argument: list of lists
+    var list_obj: ?*c.PyObject = null;
+    if (c.PyArg_ParseTuple(args, "O:Matrix", &list_obj) == 0) {
+        return -1;
+    }
+
+    // Check if it's a list
+    if (c.PyList_Check(list_obj) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Matrix() takes a list of lists as argument");
+        return -1;
+    }
+
+    // Initialize from list of lists
+    return matrix_init_from_list(self, list_obj);
+}
+
+const matrix_full_doc =
+    \\Create a Matrix filled with a specified value.
+    \\
+    \\## Parameters
+    \\- `rows` (int): Number of rows
+    \\- `cols` (int): Number of columns
+    \\- `fill_value` (float, optional): Value to fill the matrix with (default: 0.0)
+    \\
+    \\## Returns
+    \\Matrix: A new Matrix of the specified dimensions filled with fill_value
+    \\
+    \\## Examples
+    \\```python
+    \\# Create 3x4 matrix of zeros
+    \\m = Matrix.full(3, 4)
+    \\
+    \\# Create 3x4 matrix of ones
+    \\m = Matrix.full(3, 4, 1.0)
+    \\
+    \\# Create 5x5 matrix filled with 3.14
+    \\m = Matrix.full(5, 5, 3.14)
+    \\```
+;
+
+fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var rows: c_int = 0;
     var cols: c_int = 0;
     var fill_value: f64 = 0.0;
 
     const kwlist = [_:null]?[*:0]const u8{ "rows", "cols", "fill_value", null };
-    const format = std.fmt.comptimePrint("ii|d:Matrix", .{});
+    const format = std.fmt.comptimePrint("ii|d:full", .{});
 
     // TODO: remove @constCast when we don't use Python < 3.13
     if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &rows, &cols, &fill_value) == 0) {
-        return -1;
+        return null;
     }
 
     // Validate dimensions
     if (rows <= 0 or cols <= 0) {
         c.PyErr_SetString(c.PyExc_ValueError, "Matrix dimensions must be positive");
+        return null;
+    }
+
+    // Create new Matrix object
+    const self = @as(?*MatrixObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+    if (self == null) return null;
+
+    // Create the matrix
+    const matrix_ptr = allocator.create(Matrix(f64)) catch {
+        // TODO: Remove explicit cast after Python 3.10 is dropped
+        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        return null;
+    };
+
+    matrix_ptr.* = Matrix(f64).init(allocator, @intCast(rows), @intCast(cols)) catch {
+        allocator.destroy(matrix_ptr);
+        // TODO: Remove explicit cast after Python 3.10 is dropped
+        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate matrix data");
+        return null;
+    };
+
+    // Fill with value
+    @memset(matrix_ptr.items, fill_value);
+
+    self.?.matrix_ptr = matrix_ptr;
+    self.?.owns_memory = true;
+    self.?.numpy_ref = null;
+
+    return @ptrCast(self);
+}
+
+fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
+    // Get dimensions
+    const n_rows = c.PyList_Size(list_obj);
+    if (n_rows == 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Cannot create Matrix from empty list");
+        return -1;
+    }
+
+    // Check first row to get number of columns
+    const first_row = c.PyList_GetItem(list_obj, 0);
+    if (c.PyList_Check(first_row) != 1) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Matrix data must be a list of lists");
+        return -1;
+    }
+
+    const n_cols = c.PyList_Size(first_row);
+    if (n_cols == 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Cannot create Matrix with empty rows");
         return -1;
     }
 
@@ -100,15 +194,53 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
         return -1;
     };
 
-    matrix_ptr.* = Matrix(f64).init(allocator, @intCast(rows), @intCast(cols)) catch {
+    matrix_ptr.* = Matrix(f64).init(allocator, @intCast(n_rows), @intCast(n_cols)) catch {
         allocator.destroy(matrix_ptr);
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate matrix data");
         return -1;
     };
 
-    // Fill with value if non-zero
-    if (fill_value != 0.0) {
-        @memset(matrix_ptr.items, fill_value);
+    // Fill matrix with data from list
+    var row_idx: usize = 0;
+    while (row_idx < @as(usize, @intCast(n_rows))) : (row_idx += 1) {
+        const row_obj = c.PyList_GetItem(list_obj, @intCast(row_idx));
+
+        // Check that this is a list
+        if (c.PyList_Check(row_obj) != 1) {
+            matrix_ptr.deinit();
+            allocator.destroy(matrix_ptr);
+            c.PyErr_SetString(c.PyExc_TypeError, "All rows must be lists");
+            return -1;
+        }
+
+        // Check that row has correct number of columns
+        const row_size = c.PyList_Size(row_obj);
+        if (row_size != n_cols) {
+            matrix_ptr.deinit();
+            allocator.destroy(matrix_ptr);
+            c.PyErr_SetString(c.PyExc_ValueError, "All rows must have the same number of columns");
+            return -1;
+        }
+
+        // Extract values from row
+        var col_idx: usize = 0;
+        while (col_idx < @as(usize, @intCast(n_cols))) : (col_idx += 1) {
+            const item = c.PyList_GetItem(row_obj, @intCast(col_idx));
+
+            // Convert to float
+            const float_obj = c.PyFloat_FromDouble(0); // Create a float to check conversion
+            defer c.Py_XDECREF(float_obj);
+
+            const value = c.PyFloat_AsDouble(item);
+            if (value == -1.0 and c.PyErr_Occurred() != null) {
+                matrix_ptr.deinit();
+                allocator.destroy(matrix_ptr);
+                c.PyErr_SetString(c.PyExc_TypeError, "Matrix elements must be numeric");
+                return -1;
+            }
+
+            matrix_ptr.at(row_idx, col_idx).* = value;
+        }
     }
 
     self.matrix_ptr = matrix_ptr;
@@ -529,6 +661,14 @@ var matrix_as_mapping = c.PyMappingMethods{
 // Metadata for stub generation
 pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
+        .name = "full",
+        .meth = @ptrCast(&matrix_full),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
+        .doc = matrix_full_doc,
+        .params = "cls, rows: int, cols: int, fill_value: float = 0.0",
+        .returns = "Matrix",
+    },
+    .{
         .name = "from_numpy",
         .meth = @ptrCast(&matrix_from_numpy),
         .flags = c.METH_VARARGS | c.METH_CLASS,
@@ -584,7 +724,7 @@ var matrix_getset = stub_metadata.toPyGetSetDefArray(&matrix_properties_metadata
 pub const matrix_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, rows: int, cols: int, fill_value: float = 0.0",
+        .params = "self, data: list[list[float]]",
         .returns = "None",
         .doc = matrix_init_doc,
     },
