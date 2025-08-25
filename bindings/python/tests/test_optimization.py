@@ -1,6 +1,7 @@
 """Test optimization module functionality."""
 
 import pytest
+
 import zignal
 
 

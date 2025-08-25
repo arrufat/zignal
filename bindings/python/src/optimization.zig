@@ -364,7 +364,7 @@ pub const assignment_properties_metadata = [_]stub_metadata.PropertyWithMetadata
         .get = @ptrCast(&assignment_get_assignments),
         .set = null,
         .doc = "List of column indices for each row (None if unassigned)",
-        .type = "List[Optional[int]]",
+        .type = "list[Optional[int]]",
     },
     .{
         .name = "total_cost",
