@@ -234,22 +234,18 @@ const solve_assignment_problem_doc =
     \\
     \\## Examples
     \\```python
-    \\import zignal
+    \\from zignal import Matrix, OptimizationPolicy, solve_assignment_problem
     \\
-    \\# Create cost matrix
-    \\costs = zignal.Matrix([[1, 2, 3],
-    \\                       [4, 5, 6],
-    \\                       [7, 8, 9]])
+    \\matrix = Matrix([[1, 2, 6], [5, 3, 6], [4, 5, 0]])
     \\
-    \\# Solve for minimum cost
-    \\result = zignal.solve_assignment_problem(costs)
-    \\print(f"Total cost: {result.total_cost}")
-    \\for i, j in enumerate(result.assignments):
-    \\    if j is not None:
-    \\        print(f"Row {i} -> Column {j}")
-    \\
-    \\# Solve for maximum profit
-    \\result = zignal.solve_assignment_problem(matrix, zignal.OptimizationPolicy.MAX)
+    \\for p in [OptimizationPolicy.MIN, OptimizationPolicy.MAX]:
+    \\    result = solve_assignment_problem(matrix, p)
+    \\    if p == OptimizationPolicy.MIN:
+    \\        print("minimum cost")
+    \\    else:
+    \\        print("maximum profit")
+    \\    print(f"  - Total cost:  {result.total_cost}")
+    \\    print(f"  - Assignments: {result.assignments}")
     \\```
 ;
 
