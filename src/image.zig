@@ -97,7 +97,7 @@ pub fn Image(comptime T: type) type {
         /// Note: The image should not be a view; this is enforced by an assertion.
         pub fn asBytes(self: Self) []u8 {
             assert(self.rows * self.cols == self.data.len);
-            assert(!self.isView());
+            assert(self.isContiguous());
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
@@ -185,10 +185,11 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Returns true if, and only if, `self` is a view of another image.
-        /// This is determined by checking if the `cols` field differs from the `stride` field.
-        pub fn isView(self: Self) bool {
-            return self.cols != self.stride;
+        /// Returns true if the image data is stored contiguously in memory.
+        /// This is determined by checking if the `cols` field equals the `stride` field.
+        /// When false, there is padding between rows.
+        pub fn isContiguous(self: Self) bool {
+            return self.cols == self.stride;
         }
 
         /// Creates a duplicate of the image with newly allocated memory.
@@ -212,7 +213,7 @@ pub fn Image(comptime T: type) type {
             if (self.data.ptr == dst.data.ptr) {
                 return; // Same underlying data, nothing to copy
             }
-            if (self.isView() or dst.isView()) {
+            if (!self.isContiguous() or !dst.isContiguous()) {
                 // Row-by-row copy for views
                 for (0..self.rows) |r| {
                     const src_row_start = r * self.stride;

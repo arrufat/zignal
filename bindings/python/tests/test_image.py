@@ -106,7 +106,7 @@ class TestImageBinding:
         assert hasattr(img, "insert")
         assert hasattr(img, "psnr")
         assert hasattr(img, "view")
-        assert hasattr(img, "is_view")
+        assert hasattr(img, "is_contiguous")
 
     def test_box_blur_basic(self):
         """Box blur returns same shape and radius 0 is no-op."""
@@ -179,21 +179,37 @@ class TestImageBinding:
         imgarr[0, 0] = [1, 2, 3, 4]
         assert not np.array_equal(cp.to_numpy(), img.to_numpy())
 
-    def test_is_view_property(self):
-        """Test is_view property for regular images and views."""
+    def test_is_contiguous_property(self):
+        """Test is_contiguous property for regular images and views."""
         # Create a regular image
         arr = np.zeros((10, 20, 4), dtype=np.uint8)
         img = zignal.Image.from_numpy(arr)
 
-        # Regular image should not be a view
-        assert img.is_view() is False
+        # Regular image should be contiguous
+        assert img.is_contiguous() is True
 
         # Create a view
         rect = zignal.Rectangle(0, 0, 10, 10)
         view = img.view(rect)
 
-        # View should be marked as a view
-        assert view.is_view() is True
+        # View should not be contiguous (has padding)
+        assert view.is_contiguous() is False
+
+    def test_view_no_args_is_full_image_view(self):
+        """view() with no args returns full image; not considered a view."""
+        arr = np.zeros((10, 20, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        v = img.view()
+        assert v.rows == img.rows
+        assert v.cols == img.cols
+        # Full-image views are contiguous (no padding)
+        assert v.is_contiguous() is True
+
+        v2 = img.view(None)
+        assert v2.rows == img.rows
+        assert v2.cols == img.cols
+        assert v2.is_contiguous() is True
 
     def test_view_basic(self):
         """Test creating a basic view of an image."""
@@ -238,6 +254,24 @@ class TestImageBinding:
         np.testing.assert_array_equal(parent_arr[0, 0], [0, 0, 0, 0])
         np.testing.assert_array_equal(parent_arr[9, 9], [0, 0, 0, 0])
 
+    def test_view_no_args_shares_memory_with_parent(self):
+        """Full-image view shares memory with parent both ways."""
+        arr = np.zeros((5, 7, 4), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+
+        v = img.view()
+        color = (255, 128, 64, 255)
+
+        # Modify the view; parent must reflect change
+        v[0, 0] = color
+        np.testing.assert_array_equal(img.to_numpy()[0, 0], np.array(color, dtype=np.uint8))
+
+        # Modify the parent; view must reflect change
+        img[1, 1] = (10, 20, 30, 255)
+        np.testing.assert_array_equal(
+            v.to_numpy()[1, 1], np.array([10, 20, 30, 255], dtype=np.uint8)
+        )
+
     def test_view_bounds_clipping(self):
         """Test that view bounds are clipped to image dimensions."""
         # Create a small image
@@ -263,14 +297,14 @@ class TestImageBinding:
         view1 = img.view(rect1)
         assert view1.rows == 10
         assert view1.cols == 10
-        assert view1.is_view() == True
+        assert view1.is_contiguous() == False
 
         # Create view of the view
         rect2 = zignal.Rectangle(2, 2, 8, 8)
         view2 = view1.view(rect2)
         assert view2.rows == 6
         assert view2.cols == 6
-        assert view2.is_view() == True
+        assert view2.is_contiguous() == False
 
         # Modify nested view
         view2.fill((100, 100, 100, 255))

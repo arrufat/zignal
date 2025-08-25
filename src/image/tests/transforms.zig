@@ -105,8 +105,8 @@ test "view" {
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
-    try expectEqual(view.isView(), true);
-    try expectEqual(image.isView(), false);
+    try expectEqual(view.isContiguous(), false);
+    try expectEqual(image.isContiguous(), true);
     try expectEqual(view.cols, 8);
     try expectEqual(view.rows, 10);
     try expectEqualDeep(Rectangle(usize){ .l = 0, .t = 0, .r = 8, .b = 10 }, view.getRectangle());
@@ -132,8 +132,8 @@ test "view with getRectangle returns full image" {
     try expectEqual(image.cols, full_view.cols);
 
     // When view covers entire image from (0,0), it has same stride as cols
-    // so isView() returns false (this is expected behavior)
-    try expectEqual(false, full_view.isView());
+    // so isContiguous() returns true (this is expected behavior)
+    try expectEqual(true, full_view.isContiguous());
 
     // Verify all pixels match
     for (0..image.rows) |r| {
