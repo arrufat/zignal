@@ -201,31 +201,49 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     const zignal_dir = b.pathFromRoot(".");
 
     var code: u8 = undefined;
-    const git_hash_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-parse", "--short", "HEAD" }, &code, .Ignore) catch return zignal_version;
-    const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
-    const git_branch_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "branch", "--show-current" }, &code, .Ignore) catch return zignal_version;
-    const git_branch = std.mem.trim(u8, git_branch_raw, " \n\r");
 
-    // For non-master branches, always use total commit count
-    const is_master = std.mem.eql(u8, git_branch, "master");
-    if (!is_master) {
-        const git_count_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
-        const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
-        const dev_prefix = if (git_branch.len > 0) git_branch else "dev";
-        return .{
-            .major = zignal_version.major,
-            .minor = zignal_version.minor,
-            .patch = zignal_version.patch,
-            .pre = b.fmt("{s}.{s}", .{ dev_prefix, commit_count }),
-            .build = commit_hash,
+    // Check if we're exactly on a tagged release
+    _ = b.runAllowFail(
+        &.{ "git", "-C", zignal_dir, "describe", "--tags", "--exact-match" },
+        &code,
+        .Ignore,
+    ) catch {
+        // Not on a tag, need to create a dev version
+        const git_hash_raw = b.runAllowFail(
+            &.{ "git", "-C", zignal_dir, "rev-parse", "--short", "HEAD" },
+            &code,
+            .Ignore,
+        ) catch return zignal_version;
+        const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
+
+        // Get the commit count - either from base tag or total
+        const commit_count = blk: {
+            // Try to find the most recent base version tag (ending with .0)
+            const base_tag_raw = b.runAllowFail(
+                &.{ "git", "-C", zignal_dir, "describe", "--tags", "--match=*.0", "--abbrev=0" },
+                &code,
+                .Ignore,
+            ) catch {
+                // No .0 tags found, fall back to total commit count
+                const git_count_raw = b.runAllowFail(
+                    &.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" },
+                    &code,
+                    .Ignore,
+                ) catch return zignal_version;
+                break :blk std.mem.trim(u8, git_count_raw, " \n\r");
+            };
+            const base_tag = std.mem.trim(u8, base_tag_raw, " \n\r");
+
+            // Count commits since the base tag
+            const count_cmd = b.fmt("{s}..HEAD", .{base_tag});
+            const git_count_raw = b.runAllowFail(
+                &.{ "git", "-C", zignal_dir, "rev-list", "--count", count_cmd },
+                &code,
+                .Ignore,
+            ) catch return zignal_version;
+            break :blk std.mem.trim(u8, git_count_raw, " \n\r");
         };
-    }
 
-    // For master branch, use git describe
-    const git_describe_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "describe", "--tags" }, &code, .Ignore) catch {
-        // If git describe fails (no tags), try to get commit count from git log
-        const git_count_raw = b.runAllowFail(&.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" }, &code, .Ignore) catch return zignal_version;
-        const commit_count = std.mem.trim(u8, git_count_raw, " \n\r");
         return .{
             .major = zignal_version.major,
             .minor = zignal_version.minor,
@@ -234,46 +252,9 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
             .build = commit_hash,
         };
     };
-    const git_describe = std.mem.trim(u8, git_describe_raw, " \n\r");
 
-    switch (std.mem.count(u8, git_describe, "-")) {
-        0 => {
-            // Tagged release version (e.g. 0.1.0).
-            std.debug.assert(std.mem.eql(u8, git_describe, b.fmt("{f}", .{zignal_version})));
-            return zignal_version;
-        },
-        2 => {
-            // Untagged development build (e.g. 2.0.1-57-g9b7de08de).
-            var it = std.mem.splitScalar(u8, git_describe, '-');
-            const previous_tag = it.first();
-            const commit_count = it.next().?;
-            const commit_ghash = it.next().?;
-
-            const previous_version = std.SemanticVersion.parse(previous_tag) catch unreachable;
-
-            // zignal_version must be greater than its previous version.
-            if (zignal_version.order(previous_version) != .gt) {
-                std.log.err("Zignal version {f} must be newer than {f}", .{
-                    zignal_version,
-                    previous_version,
-                });
-                std.process.exit(1);
-            }
-            std.debug.assert(std.mem.startsWith(u8, commit_ghash, "g"));
-
-            return .{
-                .major = zignal_version.major,
-                .minor = zignal_version.minor,
-                .patch = zignal_version.patch,
-                .pre = b.fmt("dev.{s}", .{commit_count}),
-                .build = commit_ghash[1..],
-            };
-        },
-        else => {
-            std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
-            std.process.exit(1);
-        },
-    }
+    // We're exactly on a tag, return the version as-is
+    return zignal_version;
 }
 
 /// Helper function to link Python to an artifact
