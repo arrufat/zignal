@@ -40,9 +40,9 @@ pub fn isGray(self: Lch) bool {
     return self.c == 0;
 }
 
-/// Converts to grayscale using the L* (lightness) component.
+/// Converts to grayscale using proper RGB luminance calculation.
 pub fn toGray(self: Lch) u8 {
-    return @intFromFloat(@round(@max(0, @min(100, self.l)) / 100 * 255));
+    return self.toRgb().toGray();
 }
 
 /// Converts LCh to Lab color space.
