@@ -76,13 +76,13 @@ const image_init_doc =
     \\img = Image(100, 200)
     \\
     \\# Create a 100x200 red image (RGBA)
-    \\img = Image(100, 200, (255, 0, 0))
+    \\img = Image(100, 200, (255, 0, 0, 255))
     \\
     \\# Create a 100x200 grayscale image with mid-gray fill
     \\img = Image(100, 200, 128, dtype=zignal.Grayscale)
     \\
-    \\# Create a 100x200 RGB image
-    \\img = Image(100, 200, (0, 255, 0), dtype=zignal.Rgb)
+    \\# Create a 100x200 RGB image (dtype overrides the color value)
+    \\img = Image(100, 200, (0, 255, 0, 255), dtype=zignal.Rgb)
     \\
     \\# Create an image from numpy array dimensions
     \\img = Image(*arr.shape[:2])
