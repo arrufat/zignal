@@ -1,2 +1,6 @@
 # Note: This package requires building from the full zignal project directory
 # to access build.zig and source files. No pre-built libraries are included.
+
+# Include Python type stub files
+include zignal/*.pyi
+include zignal/py.typed
