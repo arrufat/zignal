@@ -161,7 +161,7 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
 
     // Add blend method if the type has it
     if (@hasDecl(ColorType, "blend")) {
-        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: BlendMode) -> ");
+        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: BlendMode = BlendMode.NORMAL) -> ");
         try stub.writef("{s}: ...\n", .{class_name});
     }
 
@@ -345,25 +345,6 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &pixel_iter_module.pixel_iterator_special_methods_metadata,
     });
 
-    // Generate all color classes
-    inline for (color_registry.color_types) |ColorType| {
-        try generateColorClass(&stub, ColorType);
-    }
-
-    // Generate Color type alias with all color types
-    try stub.write("\n# Union type for any color value\n");
-    try stub.write("Color: TypeAlias = int | RgbTuple | RgbaTuple");
-    inline for (color_registry.color_types) |ColorType| {
-        const class_name = getClassNameFromType(ColorType);
-        try stub.writef(" | {s}", .{class_name});
-    }
-    try stub.write("\n");
-
-    // Add Grayscale sentinel type (format selector for images)
-    try stub.write("\nclass Grayscale:\n");
-    try stub.write("    \"\"\"Grayscale image format (single channel, u8)\"\"\"\n");
-    try stub.write("    ...\n");
-
     // Generate Rectangle class from metadata
     const rectangle_methods = stub_metadata.extractMethodInfo(&rectangle_module.rectangle_methods_metadata);
     const rectangle_properties = stub_metadata.extractPropertyInfo(&rectangle_module.rectangle_properties_metadata);
@@ -428,6 +409,25 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
             .{ .name = "MAX", .doc = "Maximize total cost (profit)" },
         },
     });
+
+    // Generate all color classes
+    inline for (color_registry.color_types) |ColorType| {
+        try generateColorClass(&stub, ColorType);
+    }
+
+    // Generate Color type alias with all color types
+    try stub.write("\n# Union type for any color value\n");
+    try stub.write("Color: TypeAlias = int | RgbTuple | RgbaTuple");
+    inline for (color_registry.color_types) |ColorType| {
+        const class_name = getClassNameFromType(ColorType);
+        try stub.writef(" | {s}", .{class_name});
+    }
+    try stub.write("\n");
+
+    // Add Grayscale sentinel type (format selector for images)
+    try stub.write("\nclass Grayscale:\n");
+    try stub.write("    \"\"\"Grayscale image format (single channel, u8)\"\"\"\n");
+    try stub.write("    ...\n");
 
     // Generate Assignment class from metadata
     const assignment_properties = stub_metadata.extractPropertyInfo(&optimization_module.assignment_properties_metadata);
