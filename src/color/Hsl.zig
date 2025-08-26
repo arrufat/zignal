@@ -39,9 +39,9 @@ pub fn isGray(self: Hsl) bool {
     return self.s == 0;
 }
 
-/// Converts to grayscale using the lightness component.
+/// Converts to grayscale using proper RGB luminance calculation.
 pub fn toGray(self: Hsl) u8 {
-    return @intFromFloat(@round(self.l / 100 * 255));
+    return self.toRgb().toGray();
 }
 
 /// Converts HSL to RGB color space.

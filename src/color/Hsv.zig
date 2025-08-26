@@ -39,9 +39,9 @@ pub fn isGray(self: Hsv) bool {
     return self.s == 0;
 }
 
-/// Converts to grayscale using the value component.
+/// Converts to grayscale using proper RGB luminance calculation.
 pub fn toGray(self: Hsv) u8 {
-    return @intFromFloat(@round(self.v / 100 * 255));
+    return self.toRgb().toGray();
 }
 
 /// Converts HSV to RGB color space.

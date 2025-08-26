@@ -40,9 +40,9 @@ pub fn isGray(self: Lab) bool {
     return self.a == 0 and self.b == 0;
 }
 
-/// Converts to grayscale using the L* (lightness) component.
+/// Converts to grayscale using proper RGB luminance calculation.
 pub fn toGray(self: Lab) u8 {
-    return @intFromFloat(@round(self.l / 100 * 255));
+    return self.toRgb().toGray();
 }
 
 /// Converts CIELAB to RGB color space.

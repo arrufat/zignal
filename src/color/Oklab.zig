@@ -40,9 +40,9 @@ pub fn isGray(self: Oklab) bool {
     return self.a == 0 and self.b == 0;
 }
 
-/// Converts to grayscale using the L (lightness) component.
+/// Converts to grayscale using proper RGB luminance calculation.
 pub fn toGray(self: Oklab) u8 {
-    return @intFromFloat(@round(@max(0, @min(1, self.l)) * 255));
+    return self.toRgb().toGray();
 }
 
 /// Converts Oklab to RGB color space.

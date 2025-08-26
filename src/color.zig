@@ -47,9 +47,9 @@ fn testColorConversion(from: Rgb, to: anytype) !void {
 
 test "convert grayscale" {
     try expectEqual(convertColor(u8, Rgb{ .r = 128, .g = 128, .b = 128 }), 128);
-    try expectEqual(convertColor(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 128);
-    try expectEqual(convertColor(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 128);
-    try expectEqual(convertColor(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 128);
+    try expectEqual(convertColor(u8, Hsl{ .h = 0, .s = 100, .l = 50 }), 54);
+    try expectEqual(convertColor(u8, Hsv{ .h = 0, .s = 100, .v = 50 }), 27);
+    try expectEqual(convertColor(u8, Lab{ .l = 50, .a = 0, .b = 0 }), 119);
 }
 
 test "Rgb fromHex and toHex" {
