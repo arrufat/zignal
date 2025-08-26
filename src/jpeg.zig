@@ -1673,10 +1673,35 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
         return;
     }
 
-    // Color with 4:2:0 chroma subsampling (master's high-quality approach)
+    // Check if we have 4:4:4 (no chroma subsampling)
     const max_h = decoder.components[0].h_sampling;
     const max_v = decoder.components[0].v_sampling;
 
+    if (max_h == 1 and max_v == 1) {
+        // 4:4:4 - no chroma subsampling, each component has same number of blocks
+        for (decoder.block_storage.?, 0..) |*block_set, idx| {
+            // Direct YCbCr to RGB conversion without upsampling
+            for (0..64) |i| {
+                const Y = block_set[0][i];
+                const Cb = block_set[1][i];
+                const Cr = block_set[2][i];
+
+                const ycbcr: Ycbcr = .{
+                    .y = @as(f32, @floatFromInt(Y)),
+                    .cb = @as(f32, @floatFromInt(Cb + 128)),
+                    .cr = @as(f32, @floatFromInt(Cr + 128)),
+                };
+                const rgb = ycbcr.toRgb();
+
+                decoder.rgb_storage.?[idx][0][i] = rgb.r;
+                decoder.rgb_storage.?[idx][1][i] = rgb.g;
+                decoder.rgb_storage.?[idx][2][i] = rgb.b;
+            }
+        }
+        return;
+    }
+
+    // Color with 4:2:0 chroma subsampling
     // Process in MCU units
     var mcu_y: usize = 0;
     while (mcu_y < decoder.block_height) : (mcu_y += max_v) {
