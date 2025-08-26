@@ -951,5 +951,66 @@ class TestFlipMethods:
         assert pixel_after_tb.a == orig_a
 
 
+class TestImageIteration:
+    """Test image iteration functionality."""
+
+    def test_iteration_basic(self):
+        """Test basic iteration returns correct values and order."""
+        # Small 2x3 image for easy verification
+        arr = np.arange(2 * 3 * 4, dtype=np.uint8).reshape(2, 3, 4)
+        img = zignal.Image.from_numpy(arr)
+
+        pixels = list(img)
+        assert len(pixels) == 6  # 2x3 pixels
+
+        # First pixel (0,0)
+        r, c, px = pixels[0]
+        assert (r, c) == (0, 0)
+        assert px == img[0, 0]
+
+        # Last pixel (1,2)
+        r, c, px = pixels[-1]
+        assert (r, c) == (1, 2)
+        assert px == img[1, 2]
+
+    def test_iteration_return_types(self):
+        """Test iteration returns correct types for each format."""
+        # Grayscale returns int
+        gray_img = zignal.Image(2, 2, 128, dtype=zignal.Grayscale)
+        for r, c, pixel in gray_img:
+            assert isinstance(pixel, int)
+            break
+
+        # RGB returns Rgb object
+        rgb_img = zignal.Image(2, 2, (255, 128, 64), dtype=zignal.Rgb)
+        for r, c, pixel in rgb_img:
+            assert isinstance(pixel, zignal.Rgb)
+            break
+
+        # RGBA returns Rgba object
+        rgba_img = zignal.Image(2, 2, (255, 128, 64, 32), dtype=zignal.Rgba)
+        for r, c, pixel in rgba_img:
+            assert isinstance(pixel, zignal.Rgba)
+            break
+
+    def test_view_iteration(self):
+        """Test iteration over image views."""
+        arr = np.arange(6 * 8 * 4, dtype=np.uint8).reshape(6, 8, 4)
+        img = zignal.Image.from_numpy(arr)
+
+        # Create a 4x4 view
+        rect = zignal.Rectangle(2, 1, 6, 5)
+        view = img.view(rect)
+
+        pixels = list(view)
+        assert len(pixels) == 16  # 4x4 view
+
+        # View coordinates are relative to view, values from parent
+        for r, c, px in pixels:
+            assert 0 <= r < 4
+            assert 0 <= c < 4
+            assert px == img[1 + r, 2 + c]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
