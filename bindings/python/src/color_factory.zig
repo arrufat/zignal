@@ -220,22 +220,30 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 methods[index] = c.PyMethodDef{
                     .ml_name = "blend",
                     .ml_meth = @ptrCast(&blendMethod),
-                    .ml_flags = c.METH_VARARGS,
+                    .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS,
                     .ml_doc =
                     \\Blend with another color using the specified blend mode.
                     \\
                     \\## Parameters
                     \\- `overlay`: An RGBA color or tuple (r, g, b, a) with values 0-255
-                    \\- `mode`: BlendMode enum value
+                    \\- `mode`: BlendMode enum value (optional, defaults to NORMAL)
                     \\
                     \\## Examples
                     \\```python
                     \\base = zignal.Rgb(255, 0, 0)
                     \\overlay = zignal.Rgba(0, 255, 0, 128)
-                    \\result = base.blend(overlay, zignal.BlendMode.NORMAL)
                     \\
-                    \\# Or using a tuple
-                    \\result = base.blend((0, 255, 0, 128), zignal.BlendMode.MULTIPLY)
+                    \\# Default mode (NORMAL)
+                    \\result = base.blend(overlay)
+                    \\
+                    \\# Explicit mode with positional argument
+                    \\result = base.blend(overlay, zignal.BlendMode.MULTIPLY)
+                    \\
+                    \\# Explicit mode with keyword argument
+                    \\result = base.blend(overlay, mode=zignal.BlendMode.SCREEN)
+                    \\
+                    \\# Using a tuple
+                    \\result = base.blend((0, 255, 0, 128))
                     \\```
                     ,
                 };
@@ -706,14 +714,17 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         }
 
         /// Blend method implementation
-        pub fn blendMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+        pub fn blendMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
             const self = @as(*ObjectType, @ptrCast(self_obj));
 
-            // Parse arguments: overlay (Rgba or tuple) and mode (BlendMode)
+            // Parse arguments: overlay (required) and mode (optional keyword, defaults to NORMAL)
             var overlay_obj: [*c]c.PyObject = null;
             var mode_obj: [*c]c.PyObject = null;
 
-            if (c.PyArg_ParseTuple(args, "OO", &overlay_obj, &mode_obj) == 0) {
+            // Define keyword names
+            var kwlist = [_:null]?[*:0]const u8{ "overlay", "mode", null };
+
+            if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|O", @ptrCast(&kwlist), &overlay_obj, &mode_obj) == 0) {
                 return null;
             }
 
@@ -763,11 +774,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 return null;
             }
 
-            // Convert mode to Zig BlendMode
-            const mode = convertToZigBlendMode(mode_obj) catch {
-                // Error already set by convertToZigBlendMode
-                return null;
-            };
+            // Convert mode to Zig BlendMode (use NORMAL if not provided)
+            const mode = if (mode_obj != null)
+                convertToZigBlendMode(mode_obj) catch {
+                    // Error already set by convertToZigBlendMode
+                    return null;
+                }
+            else
+                zignal.BlendMode.normal;
 
             // Convert self to Zig color
             const zig_color = objectToZigColor(self);
