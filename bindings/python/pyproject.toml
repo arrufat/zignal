@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zignal-processing"
-version = "0.5.0.dev1"
+version = "0.5.0.dev110"
 description = "Zero-dependency image processing library"
 readme = "README.md"
 authors = [{name = "zignal contributors"}]
@@ -41,6 +41,9 @@ dev-dependencies = [
     "ruff",
     "numpy",
     "pdoc",
+    "setuptools>=45",
+    "wheel",
+    "build",
 ]
 
 [tool.ruff]

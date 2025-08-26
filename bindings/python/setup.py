@@ -150,6 +150,18 @@ class ZigBuildExt(build_ext):
             file=sys.stderr,
         )
 
+        # Copy stub files if they exist in the source directory
+        source_package_dir = Path(__file__).parent / "zignal"
+        dest_package_dir = dest_dir.parent / "zignal"
+
+        stub_files = ["__init__.pyi", "_zignal.pyi", "py.typed"]
+        for stub_file in stub_files:
+            source_stub = source_package_dir / stub_file
+            if source_stub.exists():
+                dest_stub = dest_package_dir / stub_file
+                print(f"DEBUG: Copying stub {source_stub} -> {dest_stub}", file=sys.stderr)
+                shutil.copy2(source_stub, dest_stub)
+
 
 class BinaryDistribution(Distribution):
     """Distribution which always forces a binary package with platform tag."""
