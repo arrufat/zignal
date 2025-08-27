@@ -2267,6 +2267,54 @@ fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     return null;
 }
 
+const image_sobel_doc =
+    \\Apply Sobel edge detection and return the gradient magnitude.
+    \\
+    \\The result is a new grayscale image (`dtype=zignal.Grayscale`) where
+    \\each pixel encodes the edge strength at that location.
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\edges = img.sobel()
+    \\```
+;
+
+fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+
+        var out = Image(u8).empty;
+        switch (pimg.data) {
+            inline .gray, .rgb, .rgba => |img| {
+                img.sobel(allocator, &out) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+            },
+        }
+
+        const pnew = allocator.create(PyImage) catch {
+            out.deinit(allocator);
+            c.Py_DECREF(py_obj);
+            return null;
+        };
+        pnew.* = .{ .data = .{ .gray = out } };
+        result.py_image = pnew;
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
+    }
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 const image_psnr_doc =
     \\Calculate the Peak Signal-to-Noise Ratio (PSNR) between two images.
     \\
@@ -3608,6 +3656,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_gaussian_blur_doc,
         .params = "self, sigma: float",
+        .returns = "Image",
+    },
+    .{
+        .name = "sobel",
+        .meth = @ptrCast(&image_sobel),
+        .flags = c.METH_NOARGS,
+        .doc = image_sobel_doc,
+        .params = "self",
         .returns = "Image",
     },
     .{
