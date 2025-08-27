@@ -74,7 +74,7 @@ pub fn SvdResult(comptime T: type) type {
     };
 }
 
-/// Performs singular value decompostion. Code adapted from dlib's svd4, which is, in turn,
+/// Performs singular value decomposition. Code adapted from dlib's svd4, which is, in turn,
 /// translated to 'C' from the original Algol code in "Hanbook for Automatic Computation, vol. II,
 /// Linear Algebra", Springer-Verlag.  Note that this published algorithm is considered to be
 /// the best and numerically stable approach to computing the real-valued svd and is referenced
