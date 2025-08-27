@@ -6,18 +6,19 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const DisplayFormat = zignal.DisplayFormat;
+const detectJpegComponents = zignal.jpeg.detectComponents;
 
 const canvas = @import("canvas.zig");
-const color_utils = @import("color_utils.zig");
 const color_bindings = @import("color.zig");
+const color_utils = @import("color_utils.zig");
 const grayscale_format = @import("grayscale_format.zig");
-const PyImageMod = @import("PyImage.zig");
-const PyImage = PyImageMod.PyImage;
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
+const PyImageMod = @import("PyImage.zig");
+const PyImage = PyImageMod.PyImage;
 const stub_metadata = @import("stub_metadata.zig");
 
 const image_class_doc =
@@ -629,47 +630,6 @@ fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     self.?.parent_ref = null;
     return @as(?*c.PyObject, @ptrCast(self));
 }
-
-// Minimal JPEG header scan to detect number of components.
-// Returns 1 for grayscale, 3 for color, or null on error.
-fn detectJpegComponents(data: []const u8) ?u8 {
-    if (data.len < 4) return null;
-    // SOI
-    if (!(data[0] == 0xFF and data[1] == 0xD8)) return null;
-    var i: usize = 2;
-    while (i + 3 < data.len) {
-        // Find marker prefix 0xFF
-        if (data[i] != 0xFF) {
-            i += 1;
-            continue;
-        }
-        // Skip fill bytes 0xFF
-        while (i < data.len and data[i] == 0xFF) i += 1;
-        if (i >= data.len) break;
-        const marker = data[i];
-        i += 1;
-        // Markers without length
-        if (marker == 0xD8 or marker == 0xD9 or (marker >= 0xD0 and marker <= 0xD7) or marker == 0x01) {
-            continue;
-        }
-        if (i + 1 >= data.len) break;
-        const len: usize = (@as(usize, data[i]) << 8) | data[i + 1];
-        i += 2;
-        if (len < 2 or i + len - 2 > data.len) break;
-        // SOF0 or SOF2
-        if (marker == 0xC0 or marker == 0xC2) {
-            if (len < 8) break; // need at least up to components byte
-            // length bytes cover: [precision(1), height(2), width(2), components(1), ...]
-            const components = data[i + 5];
-            return components;
-        }
-        i += len - 2;
-    }
-    return null;
-}
-
-// Helper: wrap an Image(T) into a freshly allocated PyImage
-// moved to PyImage.createFrom in PyImage.zig
 
 const image_to_numpy_doc =
     \\Convert the image to a NumPy array (zero-copy when possible).
