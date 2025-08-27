@@ -25,6 +25,45 @@ pub const zigzag = [64]u8{
     53, 60, 61, 54, 47, 55, 62, 63,
 };
 
+/// Lightweight scan to detect number of components declared by the JPEG SOF header.
+/// Returns 1 for grayscale, 3 for color, or null on error/unsupported.
+pub fn detectComponents(data: []const u8) ?u8 {
+    if (data.len < 4) return null;
+    if (!std.mem.eql(u8, data[0..2], &signature)) return null;
+
+    var pos: usize = 2;
+    while (pos + 3 < data.len) {
+        // Find marker prefix 0xFF (skip stuffing bytes)
+        if (data[pos] != 0xFF) {
+            pos += 1;
+            continue;
+        }
+        while (pos < data.len and data[pos] == 0xFF) pos += 1;
+        if (pos >= data.len) break;
+        const marker = data[pos];
+        pos += 1;
+
+        // Markers without a length field
+        if (marker == 0xD8 or marker == 0xD9 or (marker >= 0xD0 and marker <= 0xD7) or marker == 0x01) {
+            continue;
+        }
+
+        if (pos + 1 >= data.len) break;
+        const len: usize = (@as(usize, data[pos]) << 8) | data[pos + 1];
+        pos += 2;
+        if (len < 2 or pos + len - 2 > data.len) break;
+
+        // Baseline or progressive SOF: return component count
+        if (marker == 0xC0 or marker == 0xC2) {
+            if (len < 8) break; // need precision(1) + height(2) + width(2) + components(1)
+            return data[pos + 5];
+        }
+
+        pos += len - 2;
+    }
+    return null;
+}
+
 // JPEG markers
 pub const Marker = enum(u16) {
     // Start of Frame markers
