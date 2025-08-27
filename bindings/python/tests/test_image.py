@@ -97,6 +97,7 @@ class TestImageBinding:
         assert hasattr(img, "box_blur")
         assert hasattr(img, "sharpen")
         assert hasattr(img, "gaussian_blur")
+        assert hasattr(img, "sobel")
         assert hasattr(img, "copy")
         assert hasattr(img, "flip_left_right")
         assert hasattr(img, "flip_top_bottom")
