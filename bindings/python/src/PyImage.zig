@@ -15,21 +15,36 @@ pub const PyImage = struct {
         rgba: Image(Rgba),
     };
 
+    pub const Ownership = enum { owned, borrowed };
     data: Variant,
-    owning: bool = true,
+    ownership: Ownership = .owned,
 
     pub fn initRgba(image: Image(Rgba)) PyImage {
         return .{ .data = .{ .rgba = image } };
     }
 
     pub fn deinit(self: *PyImage, allocator: std.mem.Allocator) void {
-        if (self.owning) {
+        if (self.ownership == .owned) {
             switch (self.data) {
-                .gray => |*img| img.deinit(allocator),
-                .rgb => |*img| img.deinit(allocator),
-                .rgba => |*img| img.deinit(allocator),
+                inline else => |*img| img.deinit(allocator),
             }
         }
+    }
+
+    /// Factory: allocate a PyImage from a concrete Image(T).
+    /// Use Ownership.borrowed for views to avoid double-free.
+    pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Ownership) ?*PyImage {
+        const p = allocator.create(PyImage) catch return null;
+        switch (@TypeOf(image)) {
+            Image(u8) => p.* = .{ .data = .{ .gray = image }, .ownership = ownership },
+            Image(Rgb) => p.* = .{ .data = .{ .rgb = image }, .ownership = ownership },
+            Image(Rgba) => p.* = .{ .data = .{ .rgba = image }, .ownership = ownership },
+            else => {
+                allocator.destroy(p);
+                return null;
+            },
+        }
+        return p;
     }
 
     pub fn rows(self: *const PyImage) usize {
