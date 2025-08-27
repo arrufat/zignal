@@ -1442,9 +1442,9 @@ fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_
             const p11 = @as(f32, @floatFromInt(src_block[@as(usize, @intCast(y1)) * 8 + @as(usize, @intCast(x1))]));
 
             // Bilinear interpolation
-            const interp_x0 = p00 * (1.0 - fx) + p10 * fx;
-            const interp_x1 = p01 * (1.0 - fx) + p11 * fx;
-            const result = interp_x0 * (1.0 - fy) + interp_x1 * fy;
+            const interp_x0 = std.math.lerp(p00, p10, fx);
+            const interp_x1 = std.math.lerp(p01, p11, fx);
+            const result = std.math.lerp(interp_x0, interp_x1, fy);
 
             const dst_idx = dst_y * dst_width + dst_x;
             output[dst_idx] = @intFromFloat(@round(result));
@@ -1673,12 +1673,12 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
         return;
     }
 
-    // Check if we have 4:4:4 (no chroma subsampling)
+    // Check chroma subsampling mode
     const max_h = decoder.components[0].h_sampling;
     const max_v = decoder.components[0].v_sampling;
 
+    // 4:4:4 - no chroma subsampling, each component has same number of blocks
     if (max_h == 1 and max_v == 1) {
-        // 4:4:4 - no chroma subsampling, each component has same number of blocks
         for (decoder.block_storage.?, 0..) |*block_set, idx| {
             // Direct YCbCr to RGB conversion without upsampling
             for (0..64) |i| {
@@ -1701,7 +1701,109 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
         return;
     }
 
-    // Color with 4:2:0 chroma subsampling
+    // 4:2:2 - horizontal chroma subsampling only
+    if (max_h == 2 and max_v == 1) {
+        var mcu_y: usize = 0;
+        while (mcu_y < decoder.block_height) : (mcu_y += 1) {
+            var mcu_x: usize = 0;
+            while (mcu_x < decoder.block_width) : (mcu_x += 2) {
+                const chroma_block_index = mcu_y * decoder.block_width_actual + mcu_x;
+
+                // Process the 2 Y blocks in this MCU
+                for (0..2) |h| {
+                    const y_block_x = mcu_x + h;
+                    if (y_block_x >= decoder.block_width) continue;
+
+                    const y_block_index = mcu_y * decoder.block_width_actual + y_block_x;
+
+                    for (0..64) |pixel_idx| {
+                        const py = pixel_idx / 8;
+                        const px = pixel_idx % 8;
+
+                        const Y = decoder.block_storage.?[y_block_index][0][pixel_idx];
+
+                        // Horizontal interpolation for chroma
+                        const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
+                        const cx0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_x_f)))));
+                        const cx1 = @min(7, cx0 + 1);
+                        const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
+
+                        const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
+                        const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
+
+                        const cb0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx]));
+                        const cb1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx_next]));
+                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
+
+                        const cr0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx]));
+                        const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
+                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
+
+                        const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
+                        const rgb = ycbcr.toRgb();
+
+                        decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
+                        decoder.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
+                        decoder.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // 4:1:1 - 4:1 horizontal chroma subsampling
+    if (max_h == 4 and max_v == 1) {
+        var mcu_y: usize = 0;
+        while (mcu_y < decoder.block_height) : (mcu_y += 1) {
+            var mcu_x: usize = 0;
+            while (mcu_x < decoder.block_width) : (mcu_x += 4) {
+                const chroma_block_index = mcu_y * decoder.block_width_actual + mcu_x;
+
+                // Process the 4 Y blocks in this MCU
+                for (0..4) |h| {
+                    const y_block_x = mcu_x + h;
+                    if (y_block_x >= decoder.block_width) continue;
+
+                    const y_block_index = mcu_y * decoder.block_width_actual + y_block_x;
+
+                    for (0..64) |pixel_idx| {
+                        const py = pixel_idx / 8;
+                        const px = pixel_idx % 8;
+
+                        const Y = decoder.block_storage.?[y_block_index][0][pixel_idx];
+
+                        // Horizontal interpolation for 4:1 chroma
+                        const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.25 - 0.5;
+                        const cx0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_x_f)))));
+                        const cx1 = @min(7, cx0 + 1);
+                        const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
+
+                        const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
+                        const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
+
+                        const cb0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx]));
+                        const cb1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx_next]));
+                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
+
+                        const cr0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx]));
+                        const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
+                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
+
+                        const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
+                        const rgb = ycbcr.toRgb();
+
+                        decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
+                        decoder.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
+                        decoder.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // 4:2:0 chroma subsampling (both horizontal and vertical)
     // Process in MCU units
     var mcu_y: usize = 0;
     while (mcu_y < decoder.block_height) : (mcu_y += max_v) {
@@ -1752,13 +1854,13 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const cr11 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
 
                         // Bilinear interpolation
-                        const cb_interp_x0 = cb00 * (1.0 - fx) + cb10 * fx;
-                        const cb_interp_x1 = cb01 * (1.0 - fx) + cb11 * fx;
-                        const Cb = @as(i32, @intFromFloat(@round(cb_interp_x0 * (1.0 - fy) + cb_interp_x1 * fy)));
+                        const cb_interp_x0 = std.math.lerp(cb00, cb10, fx);
+                        const cb_interp_x1 = std.math.lerp(cb01, cb11, fx);
+                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb_interp_x0, cb_interp_x1, fy))));
 
-                        const cr_interp_x0 = cr00 * (1.0 - fx) + cr10 * fx;
-                        const cr_interp_x1 = cr01 * (1.0 - fx) + cr11 * fx;
-                        const Cr = @as(i32, @intFromFloat(@round(cr_interp_x0 * (1.0 - fy) + cr_interp_x1 * fy)));
+                        const cr_interp_x0 = std.math.lerp(cr00, cr10, fx);
+                        const cr_interp_x1 = std.math.lerp(cr01, cr11, fx);
+                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy))));
 
                         // Convert using library's high-quality YCbCr conversion (KEY: this is what master did!)
                         const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
@@ -1810,7 +1912,7 @@ pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Im
 
 /// Load JPEG file from disk and decode to specified pixel type.
 /// Supports baseline DCT (SOF0) and progressive DCT (SOF2) JPEG formats.
-/// Handles grayscale (1 component) and YCbCr color (3 components) with 4:4:4 and 4:2:0 chroma subsampling (4:2:2/4:1:1 supported with fallback processing).
+/// Handles grayscale (1 component) and YCbCr color (3 components) with 4:4:4, 4:2:2, 4:1:1, and 4:2:0 chroma subsampling.
 ///
 /// Parameters:
 /// - T: Desired output pixel type (u8, Rgb, etc.) - color conversion applied if needed
