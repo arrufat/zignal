@@ -96,7 +96,7 @@ pub fn Rectangle(comptime T: type) type {
             return true;
         }
 
-        /// Grows the given rectangle by expaning its borders by `amount`.
+        /// Grows the given rectangle by expanding its borders by `amount`.
         pub fn grow(self: Self, amount: T) Self {
             return switch (@typeInfo(T)) {
                 .int => .{

@@ -517,7 +517,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
 
     // Create Matrix that references the numpy data
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        // TODO: remove explcit cast when we don't use Python < 3.13
+        // TODO: remove explicit cast when we don't use Python < 3.13
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
         return null;

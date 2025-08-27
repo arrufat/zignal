@@ -17,7 +17,7 @@
 - **Image Scaling Support**: Terminal graphics protocols now support image scaling
   - Sixel: Added optional `width` and `height` fields to `sixel.Options` for image scaling
   - Kitty: Added optional `width` and `height` fields to `kitty.Options` for image scaling
-  - Allows images to be scaled (perserving aspect-ratio) before transmission to terminal
+  - Allows images to be scaled (preserving aspect-ratio) before transmission to terminal
 
 ### Changed
 - **Terminal Architecture**: Refactored terminal state management
@@ -182,7 +182,7 @@ Comprehensive matrix operations:
 - **Example Applications**: Face alignment, data visualization
 
 ### Image Processing
-- **Feature distrubtion matching** for domain adaption
+- **Feature distribution matching** for domain adaption
 
 ### Procedural Generation
 - **Perlin Noise**: High-quality noise generation for textures and terrain
