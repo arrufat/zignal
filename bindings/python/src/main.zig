@@ -9,6 +9,7 @@ const grayscale_format = @import("grayscale_format.zig");
 const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
+const pixel_proxy = @import("pixel_proxy.zig");
 const matrix = @import("matrix.zig");
 const interpolation = @import("interpolation.zig");
 const optimization = @import("optimization.zig");
@@ -49,6 +50,18 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         c.Py_DECREF(m);
         return null;
     };
+
+    // Register RgbPixelProxy type (internal, not exposed in public API)
+    if (c.PyType_Ready(&pixel_proxy.RgbPixelProxyType) < 0) {
+        c.Py_DECREF(m);
+        return null;
+    }
+
+    // Register RgbaPixelProxy type (internal, not exposed in public API)
+    if (c.PyType_Ready(&pixel_proxy.RgbaPixelProxyType) < 0) {
+        c.Py_DECREF(m);
+        return null;
+    }
 
     // Register Matrix type
     py_utils.registerType(@ptrCast(m), "Matrix", @ptrCast(&matrix.MatrixType)) catch |err| {
