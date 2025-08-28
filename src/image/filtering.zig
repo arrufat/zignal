@@ -1450,7 +1450,10 @@ pub fn Filter(comptime T: type) type {
                         const gx = grad_x.at(r, c).*;
                         const gy = grad_y.at(r, c).*;
                         const magnitude = @sqrt(gx * gx + gy * gy);
-                        out.at(r, c).* = @intFromFloat(@max(0, @min(255, magnitude)));
+                        // Scale by 1/4 to match typical Sobel output range
+                        // Max theoretical magnitude is ~1442, so /4 maps to ~360 max
+                        const scaled = magnitude / 4.0;
+                        out.at(r, c).* = @intFromFloat(@max(0, @min(255, scaled)));
                     }
                 }
             }
