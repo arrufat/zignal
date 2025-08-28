@@ -745,7 +745,7 @@ class TestPixelAccess:
     """Test pixel access functionality (getitem/setitem)."""
 
     def test_getitem_returns_rgba(self):
-        """Test that __getitem__ returns an Rgba object."""
+        """Test that __getitem__ returns a pixel with Rgba-like properties."""
         # Create test image
         arr = np.zeros((10, 20, 4), dtype=np.uint8)
         arr[5, 10] = [100, 150, 200, 255]
@@ -753,11 +753,13 @@ class TestPixelAccess:
 
         # Get pixel
         pixel = img[5, 10]
-        assert isinstance(pixel, zignal.Rgba)
+        # Note: pixel is now a proxy object, not a direct Rgba instance
+        # But it should behave like one
         assert pixel.r == 100
         assert pixel.g == 150
         assert pixel.b == 200
         assert pixel.a == 255
+        assert str(pixel) == "Rgba(r=100, g=150, b=200, a=255)"
 
     def test_getitem_bounds_checking(self):
         """Test that __getitem__ raises IndexError for out-of-bounds access."""
@@ -947,6 +949,207 @@ class TestPixelAccess:
         # This test would require creating an uninitialized image,
         # but since Image() constructor doesn't allow direct instantiation,
         # we can't test this case directly from Python
+
+    def test_pixel_field_assignment_rgb(self):
+        """Test that pixel field assignment works for RGB images."""
+        # Create RGB image
+        img = zignal.Image(5, 5, zignal.Rgb(100, 150, 200), dtype=zignal.Rgb)
+
+        # Test field modification through pixel proxy
+        pixel = img[0, 0]
+        assert str(pixel) == "Rgb(r=100, g=150, b=200)"
+
+        # Modify individual fields
+        pixel.r = 255
+        assert img[0, 0].r == 255
+        assert str(img[0, 0]) == "Rgb(r=255, g=150, b=200)"
+
+        pixel.g = 0
+        assert img[0, 0].g == 0
+        assert str(img[0, 0]) == "Rgb(r=255, g=0, b=200)"
+
+        pixel.b = 128
+        assert img[0, 0].b == 128
+        assert str(img[0, 0]) == "Rgb(r=255, g=0, b=128)"
+
+        # Test direct field access (chained)
+        img[1, 1].r = 50
+        img[1, 1].g = 75
+        img[1, 1].b = 100
+        assert str(img[1, 1]) == "Rgb(r=50, g=75, b=100)"
+
+    def test_pixel_field_assignment_rgba(self):
+        """Test that pixel field assignment works for RGBA images."""
+        # Create RGBA image
+        img = zignal.Image(5, 5, zignal.Rgba(100, 150, 200, 255), dtype=zignal.Rgba)
+
+        # Test field modification through pixel proxy
+        pixel = img[0, 0]
+        assert str(pixel) == "Rgba(r=100, g=150, b=200, a=255)"
+
+        # Modify individual fields
+        pixel.r = 255
+        assert img[0, 0].r == 255
+
+        pixel.g = 0
+        assert img[0, 0].g == 0
+
+        pixel.b = 128
+        assert img[0, 0].b == 128
+
+        pixel.a = 127
+        assert img[0, 0].a == 127
+        assert str(img[0, 0]) == "Rgba(r=255, g=0, b=128, a=127)"
+
+        # Test direct field access
+        img[2, 2].a = 64
+        assert img[2, 2].a == 64
+
+    def test_pixel_field_assignment_persistence(self):
+        """Test that pixel field assignments persist across multiple accesses."""
+        img = zignal.Image(3, 3, zignal.Rgb(0, 0, 0), dtype=zignal.Rgb)
+
+        # Set values
+        img[1, 1].r = 255
+        img[1, 1].g = 128
+        img[1, 1].b = 64
+
+        # Access the pixel again and verify values persist
+        pixel = img[1, 1]
+        assert pixel.r == 255
+        assert pixel.g == 128
+        assert pixel.b == 64
+
+        # Modify through new reference
+        pixel.g = 200
+
+        # Verify change is reflected in image
+        assert img[1, 1].g == 200
+
+    def test_pixel_field_assignment_bounds(self):
+        """Test that pixel field assignment enforces value bounds."""
+        img = zignal.Image(2, 2, zignal.Rgb(128, 128, 128), dtype=zignal.Rgb)
+
+        # Test values above 255
+        with pytest.raises(ValueError, match="must be between 0 and 255"):
+            img[0, 0].r = 256
+
+        # Test negative values
+        with pytest.raises(ValueError, match="must be between 0 and 255"):
+            img[0, 0].g = -1
+
+        # Test valid boundary values
+        img[0, 0].r = 0
+        assert img[0, 0].r == 0
+
+        img[0, 0].b = 255
+        assert img[0, 0].b == 255
+
+    def test_pixel_proxy_multiple_references(self):
+        """Test that multiple pixel proxy references work correctly."""
+        img = zignal.Image(3, 3, zignal.Rgb(100, 100, 100), dtype=zignal.Rgb)
+
+        # Get two references to the same pixel
+        pixel1 = img[1, 1]
+        pixel2 = img[1, 1]
+
+        # Modify through first reference
+        pixel1.r = 200
+
+        # Both should see the change
+        assert pixel1.r == 200
+        assert pixel2.r == 200
+        assert img[1, 1].r == 200
+
+        # Modify through second reference
+        pixel2.g = 150
+
+        # All should see the change
+        assert pixel1.g == 150
+        assert pixel2.g == 150
+        assert img[1, 1].g == 150
+
+    def test_pixel_field_assignment_with_whole_pixel_assignment(self):
+        """Test that field assignment works alongside whole pixel assignment."""
+        img = zignal.Image(3, 3, zignal.Rgb(0, 0, 0), dtype=zignal.Rgb)
+
+        # First use whole pixel assignment
+        img[1, 1] = zignal.Rgb(100, 100, 100)
+        assert img[1, 1].r == 100
+        assert img[1, 1].g == 100
+        assert img[1, 1].b == 100
+
+        # Then use field assignment
+        img[1, 1].g = 200
+        assert img[1, 1].r == 100
+        assert img[1, 1].g == 200
+        assert img[1, 1].b == 100
+
+        # Use whole pixel assignment again
+        img[1, 1] = zignal.Rgb(50, 50, 50)
+        assert img[1, 1].r == 50
+        assert img[1, 1].g == 50
+        assert img[1, 1].b == 50
+
+    def test_pixel_proxy_repr(self):
+        """Test that pixel proxy objects have correct string representation."""
+        # RGB image
+        img_rgb = zignal.Image(2, 2, zignal.Rgb(100, 150, 200), dtype=zignal.Rgb)
+        pixel_rgb = img_rgb[0, 0]
+        assert str(pixel_rgb) == "Rgb(r=100, g=150, b=200)"
+        assert repr(pixel_rgb) == "Rgb(r=100, g=150, b=200)"
+
+        # RGBA image
+        img_rgba = zignal.Image(2, 2, zignal.Rgba(100, 150, 200, 255), dtype=zignal.Rgba)
+        pixel_rgba = img_rgba[0, 0]
+        assert str(pixel_rgba) == "Rgba(r=100, g=150, b=200, a=255)"
+        assert repr(pixel_rgba) == "Rgba(r=100, g=150, b=200, a=255)"
+
+    def test_pixel_field_assignment_from_numpy(self):
+        """Test pixel field assignment on images created from numpy arrays."""
+        # Create from numpy RGB
+        arr_rgb = np.zeros((5, 5, 3), dtype=np.uint8)
+        arr_rgb[2, 2] = [100, 150, 200]
+        img_rgb = zignal.Image.from_numpy(arr_rgb)
+
+        # Test field modification
+        img_rgb[2, 2].g = 0
+        assert img_rgb[2, 2].r == 100
+        assert img_rgb[2, 2].g == 0
+        assert img_rgb[2, 2].b == 200
+
+        # Verify change is reflected in numpy view
+        arr_view = img_rgb.to_numpy()
+        assert arr_view[2, 2, 1] == 0  # Green channel
+
+        # Create from numpy RGBA
+        arr_rgba = np.zeros((5, 5, 4), dtype=np.uint8)
+        arr_rgba[3, 3] = [100, 150, 200, 255]
+        img_rgba = zignal.Image.from_numpy(arr_rgba)
+
+        img_rgba[3, 3].a = 128
+        assert img_rgba[3, 3].a == 128
+
+        # Verify change in numpy view
+        arr_view_rgba = img_rgba.to_numpy()
+        assert arr_view_rgba[3, 3, 3] == 128  # Alpha channel
+
+    def test_pixel_field_assignment_grayscale(self):
+        """Test pixel behavior for grayscale images."""
+        # Create grayscale image
+        img = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+
+        # Grayscale pixels should return integers directly
+        pixel = img[0, 0]
+        assert pixel == 128
+        assert isinstance(pixel, int)
+
+        # Direct assignment should still work
+        img[1, 1] = 255
+        assert img[1, 1] == 255
+
+        # Field assignment doesn't apply to grayscale
+        # (no r, g, b fields on integer values)
 
 
 class TestFlipMethods:

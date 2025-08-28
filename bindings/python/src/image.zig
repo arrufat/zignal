@@ -10,8 +10,11 @@ const detectJpegComponents = zignal.jpeg.detectComponents;
 
 const canvas = @import("canvas.zig");
 const color_bindings = @import("color.zig");
+const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const grayscale_format = @import("grayscale_format.zig");
+const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
+const makeRgbProxy = @import("pixel_proxy.zig").makeRgbProxy;
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
@@ -32,11 +35,11 @@ const image_class_doc =
 
 pub const ImageObject = extern struct {
     ob_base: c.PyObject,
-    // Store dynamic image for non-RGBA formats (or future migration)
+    /// Store dynamic image for non-RGBA formats (or future migration)
     py_image: ?*PyImage,
-    // Store reference to NumPy array if created from numpy (for zero-copy)
+    /// Store reference to NumPy array if created from numpy (for zero-copy)
     numpy_ref: ?*c.PyObject,
-    // Store reference to parent Image if this is a view (for memory management)
+    /// Store reference to parent Image if this is a view (for memory management)
     parent_ref: ?*c.PyObject,
 };
 
@@ -2992,35 +2995,11 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
 
     // Variant-specific pixel return
     if (pimg_opt) |pimg| {
-        switch (pimg.data) {
-            .gray => |img| {
-                const gray = img.at(@intCast(row), @intCast(col)).*;
-                return c.PyLong_FromLong(@intCast(gray));
-            },
-            .rgb => |img| {
-                const p = img.at(@intCast(row), @intCast(col)).*;
-                const color_module = @import("color.zig");
-                const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbType), 0);
-                if (rgb_obj == null) return null;
-                const rgb = @as(*color_module.RgbBinding.PyObjectType, @ptrCast(rgb_obj));
-                rgb.field0 = p.r;
-                rgb.field1 = p.g;
-                rgb.field2 = p.b;
-                return rgb_obj;
-            },
-            .rgba => |img| {
-                const p = img.at(@intCast(row), @intCast(col)).*;
-                const color_module = @import("color.zig");
-                const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0);
-                if (rgba_obj == null) return null;
-                const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
-                rgba.field0 = p.r;
-                rgba.field1 = p.g;
-                rgba.field2 = p.b;
-                rgba.field3 = p.a;
-                return rgba_obj;
-            },
-        }
+        return switch (pimg.data) {
+            .gray => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
+            .rgb => return makeRgbProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
+            .rgba => return makeRgbaProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
+        };
     }
 
     // Unreachable; bounds check above should have returned
