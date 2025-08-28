@@ -172,6 +172,21 @@ pub fn build(b: *Build) void {
     const wf = b.addWriteFiles();
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
     py_bindings_step.dependOn(&wf.step);
+
+    std.log.info(
+        \\
+        \\ - zignal: {f}
+        \\ - target: {s}-{s}-{s}
+        \\ - optimize: {s}
+        \\ - zig: {f}
+    , .{
+        version,
+        @tagName(target.result.cpu.arch),
+        @tagName(target.result.os.tag),
+        @tagName(target.result.abi),
+        @tagName(optimize),
+        builtin.zig_version,
+    });
 }
 
 const Build = blk: {
