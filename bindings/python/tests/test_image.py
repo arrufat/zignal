@@ -670,14 +670,75 @@ class TestNumpyIntegration:
 
         # Wrong channels
         arr = np.zeros((10, 20, 2), dtype=np.uint8)
-        with pytest.raises(ValueError, match="3 channels.*or 4 channels"):
+        with pytest.raises(ValueError, match="1 channel.*3 channels.*or 4 channels"):
             zignal.Image.from_numpy(arr)
 
-        # Non-contiguous
-        arr = np.zeros((10, 20, 6), dtype=np.uint8)
-        arr_view = arr[:, :, ::2]  # Non-contiguous view
-        with pytest.raises(ValueError, match="not C-contiguous"):
-            zignal.Image.from_numpy(arr_view)
+        # Incompatible strides (transposed array)
+        arr = np.zeros((10, 20, 3), dtype=np.uint8)
+        arr_transposed = arr.transpose(1, 0, 2)
+        with pytest.raises(ValueError, match="pixels must be contiguous"):
+            zignal.Image.from_numpy(arr_transposed)
+
+    def test_roundtrip_contiguous(self):
+        """Test round-tripping with contiguous images."""
+        # Test RGB
+        img_rgb = zignal.Image(10, 20, (255, 128, 64))
+        arr_rgb = img_rgb.to_numpy()
+        assert arr_rgb.shape == (10, 20, 3)
+        img_rgb2 = zignal.Image.from_numpy(arr_rgb)
+        assert img_rgb == img_rgb2
+
+        # Test RGBA
+        img_rgba = zignal.Image(10, 20, (255, 128, 64, 200), dtype=zignal.Rgba)
+        arr_rgba = img_rgba.to_numpy()
+        assert arr_rgba.shape == (10, 20, 4)
+        img_rgba2 = zignal.Image.from_numpy(arr_rgba)
+        assert img_rgba == img_rgba2
+
+        # Test Grayscale
+        img_gray = zignal.Image(10, 20, 128, dtype=zignal.Grayscale)
+        arr_gray = img_gray.to_numpy()
+        assert arr_gray.shape == (10, 20, 1)
+        img_gray2 = zignal.Image.from_numpy(arr_gray)
+        assert img_gray == img_gray2
+
+    def test_roundtrip_views(self):
+        """Test round-tripping with views (non-contiguous images)."""
+        rect = zignal.Rectangle(2, 2, 8, 8)  # 6x6 view
+
+        # Test RGB view
+        img_rgb = zignal.Image(10, 20, (255, 128, 64))
+        view_rgb = img_rgb.view(rect)
+        arr_view = view_rgb.to_numpy()
+        assert arr_view.shape == (6, 6, 3)
+        assert not arr_view.flags["C_CONTIGUOUS"]  # View is not contiguous
+
+        # Round-trip the view
+        img_rt = zignal.Image.from_numpy(arr_view)
+        arr_rt = img_rt.to_numpy()
+        np.testing.assert_array_equal(arr_view, arr_rt)
+
+        # Test RGBA view
+        img_rgba = zignal.Image(10, 20, (255, 128, 64, 200), dtype=zignal.Rgba)
+        view_rgba = img_rgba.view(rect)
+        arr_view = view_rgba.to_numpy()
+        assert arr_view.shape == (6, 6, 4)
+        assert not arr_view.flags["C_CONTIGUOUS"]
+
+        img_rt = zignal.Image.from_numpy(arr_view)
+        arr_rt = img_rt.to_numpy()
+        np.testing.assert_array_equal(arr_view, arr_rt)
+
+        # Test Grayscale view
+        img_gray = zignal.Image(10, 20, 128, dtype=zignal.Grayscale)
+        view_gray = img_gray.view(rect)
+        arr_view = view_gray.to_numpy()
+        assert arr_view.shape == (6, 6, 1)
+        assert not arr_view.flags["C_CONTIGUOUS"]
+
+        img_rt = zignal.Image.from_numpy(arr_view)
+        arr_rt = img_rt.to_numpy()
+        np.testing.assert_array_equal(arr_view, arr_rt)
 
 
 class TestPixelAccess:
