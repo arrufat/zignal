@@ -399,7 +399,7 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = @as(i32, getScalarWithBorder(src_img, iry, icx, border_mode));
+                                        const pixel_val: i32 = getPixel(u8, src_img, iry, icx, border_mode);
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
@@ -479,7 +479,7 @@ pub fn Filter(comptime T: type) type {
                                     inline for (0..width) |kx| {
                                         const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                         const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = getScalarWithBorder(src_img, iry, icx, border_mode);
+                                        const pixel_val = getPixel(f32, src_img, iry, icx, border_mode);
                                         result += pixel_val * kernel[ky * width + kx];
                                     }
                                 }
@@ -555,7 +555,7 @@ pub fn Filter(comptime T: type) type {
                                         for (0..kernel_width) |kc| {
                                             const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
                                             const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                            const pixel_val = getPixelWithBorder(self, src_r, src_c, border_mode);
+                                            const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
                                             const kernel_val = kernel[kr][kc];
                                             accumulator += as(f32, pixel_val) * as(f32, kernel_val);
                                         }
@@ -642,7 +642,7 @@ pub fn Filter(comptime T: type) type {
                                             for (0..kernel_width) |kc| {
                                                 const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
                                                 const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                                const pixel_val = getPixelWithBorder(self, src_r, src_c, border_mode);
+                                                const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
                                                 const channel_val = @field(pixel_val, field.name);
                                                 const kernel_val = kernel[kr][kc];
                                                 accumulator += as(f32, channel_val) * as(f32, kernel_val);
@@ -707,7 +707,7 @@ pub fn Filter(comptime T: type) type {
                         const ic = @as(isize, @intCast(c));
                         for (kernel_x_int, 0..) |k, i| {
                             const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                            const pixel_val = @as(i32, getScalarWithBorder(src_img, @as(isize, @intCast(r)), icx, border_mode));
+                            const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
                             result += pixel_val * k;
                         }
                     }
@@ -733,7 +733,7 @@ pub fn Filter(comptime T: type) type {
                         const ir = @as(isize, @intCast(r));
                         for (kernel_y_int, 0..) |k, i| {
                             const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                            const pixel_val = @as(i32, getScalarWithBorder(temp_img, iry, @as(isize, @intCast(c)), border_mode));
+                            const pixel_val: i32 = getPixel(u8, temp_img, iry, @as(isize, @intCast(c)), border_mode);
                             result += pixel_val * k;
                         }
                     }
@@ -1074,7 +1074,7 @@ pub fn Filter(comptime T: type) type {
                             } else {
                                 for (kernel_x, 0..) |k, i| {
                                     const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                                    const pixel = getPixelWithBorder(self, @intCast(r), src_c, border_mode);
+                                    const pixel = getPixel(T, self, @as(isize, @intCast(r)), src_c, border_mode);
                                     sum += as(f32, pixel) * k;
                                 }
                             }
@@ -1163,7 +1163,7 @@ pub fn Filter(comptime T: type) type {
                                 } else {
                                     for (kernel_x, 0..) |k, i| {
                                         const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                                        const pixel = getPixelWithBorder(self, @intCast(r), src_c, border_mode);
+                                        const pixel = getPixel(T, self, @as(isize, @intCast(r)), src_c, border_mode);
                                         sum += as(f32, @field(pixel, field.name)) * k;
                                     }
                                 }
@@ -1197,7 +1197,7 @@ pub fn Filter(comptime T: type) type {
                             } else {
                                 for (kernel_y, 0..) |k, i| {
                                     const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                                    const pixel = getPixelWithBorder(temp, src_r, @intCast(c), border_mode);
+                                    const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border_mode);
                                     sum += as(f32, pixel) * k;
                                 }
                             }
@@ -1226,7 +1226,7 @@ pub fn Filter(comptime T: type) type {
                                 } else {
                                     for (kernel_y, 0..) |k, i| {
                                         const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                                        const pixel = getPixelWithBorder(temp, src_r, @intCast(c), border_mode);
+                                        const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border_mode);
                                         sum += as(f32, @field(pixel, field.name)) * k;
                                     }
                                 }
@@ -1463,24 +1463,6 @@ pub fn Filter(comptime T: type) type {
         // Helper Functions - Border handling, kernel processing, utilities
         // ============================================================================
 
-        /// Get pixel value with border handling.
-        fn getPixelWithBorder(self: Self, row: isize, col: isize, border_mode: BorderMode) T {
-            const irows = @as(isize, @intCast(self.rows));
-            const icols = @as(isize, @intCast(self.cols));
-
-            return applyBorderMode(T, row, col, irows, icols, border_mode, self);
-        }
-
-        /// Get scalar pixel value with border handling from an Image.
-        fn getScalarWithBorder(img: anytype, row: isize, col: isize, border_mode: BorderMode) @TypeOf(img.data[0]) {
-            const irows = @as(isize, @intCast(img.rows));
-            const icols = @as(isize, @intCast(img.cols));
-
-            const coords = computeBorderCoords(row, col, irows, icols, border_mode);
-            if (coords.is_zero) return 0;
-            return img.data[@as(usize, @intCast(coords.row)) * img.stride + @as(usize, @intCast(coords.col))];
-        }
-
         /// Common border mode logic that returns adjusted coordinates.
         fn computeBorderCoords(row: isize, col: isize, rows: isize, cols: isize, border_mode: BorderMode) struct { row: isize, col: isize, is_zero: bool } {
             switch (border_mode) {
@@ -1529,11 +1511,13 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
-        /// Apply border mode and return the pixel value.
-        fn applyBorderMode(comptime PixelType: type, row: isize, col: isize, rows: isize, cols: isize, border_mode: BorderMode, self: anytype) PixelType {
-            const coords = computeBorderCoords(row, col, rows, cols, border_mode);
-            if (coords.is_zero) return std.mem.zeroes(PixelType);
-            return self.at(@intCast(coords.row), @intCast(coords.col)).*;
+        /// Get pixel value with border handling.
+        fn getPixel(comptime PixelType: type, img: Image(PixelType), row: isize, col: isize, border_mode: BorderMode) PixelType {
+            const coords = computeBorderCoords(row, col, @intCast(img.rows), @intCast(img.cols), border_mode);
+            return if (coords.is_zero)
+                std.mem.zeroes(PixelType)
+            else
+                img.at(@intCast(coords.row), @intCast(coords.col)).*;
         }
 
         /// Compute integral image sum with boundary checks.
