@@ -8,6 +8,7 @@ const Rgb = zignal.Rgb;
 const DisplayFormat = zignal.DisplayFormat;
 const detectJpegComponents = zignal.jpeg.detectComponents;
 
+const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color_bindings = @import("color.zig");
 const color_registry = @import("color_registry.zig");
@@ -212,12 +213,12 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             // Parse color to grayscale if provided
             if (color_obj != null and color_obj != c.Py_None()) {
-                const gray_value = color_utils.parseColorTo(u8, color_obj) catch {
+                const gray = color_utils.parseColorTo(u8, color_obj) catch {
                     gimg.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
                 };
-                @memset(gimg.data, gray_value);
+                @memset(gimg.data, gray);
             } else {
                 @memset(gimg.data, 0); // Default to black
             }
@@ -380,7 +381,7 @@ fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.py_image) |pimg| {
         var buffer: [96]u8 = undefined;
         const fmt_name = switch (pimg.data) {
-            .gray => "Grayscale",
+            .grayscale => "Grayscale",
             .rgb => "Rgb",
             .rgba => "Rgba",
         };
@@ -420,7 +421,7 @@ fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*
     // Return sentinel type objects: zignal.Grayscale, zignal.Rgb, or zignal.Rgba
     if (self.py_image) |pimg| {
         return switch (pimg.data) {
-            .gray => blk: {
+            .grayscale => blk: {
                 const obj = @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType));
                 c.Py_INCREF(obj);
                 break :blk obj;
@@ -454,7 +455,7 @@ fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
 
     if (self.py_image) |pimg| {
         const is_contiguous = switch (pimg.data) {
-            .gray => |img| img.isContiguous(),
+            .grayscale => |img| img.isContiguous(),
             .rgb => |img| img.isContiguous(),
             .rgba => |img| img.isContiguous(),
         };
@@ -657,7 +658,7 @@ fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .gray => |img| {
+            .grayscale => |img| {
                 // Import numpy
                 const np_module = c.PyImport_ImportModule("numpy") orelse {
                     c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
@@ -1141,7 +1142,7 @@ fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     // Save PNG for current image format
     if (self.py_image) |pimg| {
         const res = switch (pimg.data) {
-            .gray => |img| img.save(allocator, path_slice),
+            .grayscale => |img| img.save(allocator, path_slice),
             .rgb => |img| img.save(allocator, path_slice),
             .rgba => |img| img.save(allocator, path_slice),
         };
@@ -1216,7 +1217,7 @@ fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.Py
     // Execute conversion using underlying Image(T).convert
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .gray => |*img| {
+            .grayscale => |*img| {
                 if (target_gray) {
                     // Same dtype: copy
                     var out = Image(u8).init(allocator, img.rows, img.cols) catch {
@@ -1568,7 +1569,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         defer buffer.deinit(allocator);
         const w = buffer.writer(allocator);
         switch (pimg.data) {
-            .gray => |*img| std.fmt.format(w, "{f}", .{img.display(display_format)}) catch |err| {
+            .grayscale => |*img| std.fmt.format(w, "{f}", .{img.display(display_format)}) catch |err| {
                 if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                 return null;
             },
@@ -1700,7 +1701,7 @@ fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .gray => |*img| img.fill(color),
+            .grayscale => |*img| img.fill(color),
             .rgb => |*img| img.fill(color),
             .rgba => |*img| img.fill(color),
         }
@@ -2153,6 +2154,117 @@ fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyOb
     return null;
 }
 
+const image_blend_doc =
+    \\Blend an overlay image onto this image using the specified blend mode.
+    \\
+    \\Modifies this image in-place. Both images must have the same dimensions.
+    \\The overlay image must have an alpha channel for proper blending.
+    \\
+    \\## Parameters
+    \\- `overlay` (Image): Image to blend onto this image
+    \\- `mode` (BlendMode, optional): Blending mode (default: NORMAL)
+    \\
+    \\## Raises
+    \\- `ValueError`: If images have different dimensions
+    \\- `TypeError`: If overlay is not an Image object
+    \\
+    \\## Examples
+    \\```python
+    \\# Basic alpha blending
+    \\base = Image(100, 100, (255, 0, 0))
+    \\overlay = Image(100, 100, (0, 0, 255, 128))  # Semi-transparent blue
+    \\base.blend(overlay)  # Default NORMAL mode
+    \\
+    \\# Using different blend modes
+    \\base.blend(overlay, zignal.BlendMode.MULTIPLY)
+    \\base.blend(overlay, zignal.BlendMode.SCREEN)
+    \\base.blend(overlay, zignal.BlendMode.OVERLAY)
+    \\```
+;
+
+fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments: overlay image and optional blend mode
+    var overlay_obj: ?*c.PyObject = null;
+    var mode_obj: ?*c.PyObject = null;
+
+    var kwlist = [_:null]?[*:0]u8{ @constCast("overlay"), @constCast("mode"), null };
+    const fmt = std.fmt.comptimePrint("O|O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(&kwlist), &overlay_obj, &mode_obj) == 0) {
+        return null;
+    }
+
+    // Check if overlay is an Image instance
+    if (c.PyObject_IsInstance(overlay_obj, @ptrCast(&ImageType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "overlay must be an Image object");
+        return null;
+    }
+
+    const overlay = @as(*ImageObject, @ptrCast(overlay_obj.?));
+
+    // Get blend mode (default to normal if not specified)
+    var blend_mode = zignal.BlendMode.normal;
+    if (mode_obj != null and mode_obj != c.Py_None()) {
+        blend_mode = blending.convertToZigBlendMode(mode_obj.?) catch {
+            return null; // Error already set by convertToZigBlendMode
+        };
+    }
+
+    // Both images must be initialized
+    if (self.py_image == null or overlay.py_image == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Both images must be initialized");
+        return null;
+    }
+
+    const self_pimg = self.py_image.?;
+    const overlay_pimg = overlay.py_image.?;
+
+    // Check dimensions match
+    const self_rows = self_pimg.rows();
+    const self_cols = self_pimg.cols();
+    const overlay_rows = overlay_pimg.rows();
+    const overlay_cols = overlay_pimg.cols();
+
+    if (self_rows != overlay_rows or self_cols != overlay_cols) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
+        return null;
+    }
+
+    // Overlay must be RGBA
+    const overlay_img = switch (overlay_pimg.data) {
+        .rgba => |img| img,
+        else => {
+            c.PyErr_SetString(c.PyExc_TypeError, "Overlay image must be RGBA type");
+            return null;
+        },
+    };
+
+    // Perform the blend operation based on base image type
+    switch (self_pimg.data) {
+        .grayscale => |base_img| {
+            for (0..self_rows) |row| {
+                for (0..self_cols) |col| {
+                    const base_pixel = base_img.at(row, col).*;
+                    const base_rgb: Rgb = .{ .r = base_pixel, .g = base_pixel, .b = base_pixel };
+                    base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).toGray();
+                }
+            }
+        },
+        inline .rgb, .rgba => |*base_img| {
+            for (0..self_rows) |row| {
+                for (0..self_cols) |col| {
+                    base_img.at(row, col).* = base_img.at(row, col).blend(overlay_img.at(row, col).*, blend_mode);
+                }
+            }
+        },
+    }
+
+    // Return None (Python convention for in-place operations)
+    c.Py_INCREF(c.Py_None());
+    return c.Py_None();
+}
+
 const image_psnr_doc =
     \\Calculate the Peak Signal-to-Noise Ratio (PSNR) between two images.
     \\
@@ -2212,9 +2324,9 @@ fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     // Compute PSNR only when both have the same pixel dtype
     var out_value: f64 = 0;
     switch (a.data) {
-        .gray => |img_a| {
+        .grayscale => |img_a| {
             const img_b = switch (b.data) {
-                .gray => |i| i,
+                .grayscale => |i| i,
                 else => {
                     c.PyErr_SetString(c.PyExc_TypeError, "PSNR requires both images have the same pixel dtype");
                     return null;
@@ -2855,7 +2967,7 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     // Variant-aware in-place insert
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .gray => |*dst| {
+            .grayscale => |*dst| {
                 var src_u8: Image(u8) = undefined;
                 if (source.py_image == null) {
                     c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
@@ -2863,7 +2975,7 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 }
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
-                    .gray => |img| src_u8 = img,
+                    .grayscale => |img| src_u8 = img,
                     .rgb => |img| src_u8 = img.convert(u8, allocator) catch {
                         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
                         return null;
@@ -2885,7 +2997,7 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgb => |img| src_rgb = img,
-                    .gray => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                    .grayscale => |img| src_rgb = img.convert(Rgb, allocator) catch {
                         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
                         return null;
                     },
@@ -2906,7 +3018,7 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgba => |img| src_rgba = img,
-                    .gray => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                    .grayscale => |img| src_rgba = img.convert(Rgba, allocator) catch {
                         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
                         return null;
                     },
@@ -2996,7 +3108,7 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
     // Variant-specific pixel return
     if (pimg_opt) |pimg| {
         return switch (pimg.data) {
-            .gray => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
+            .grayscale => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
             .rgb => return makeRgbProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
             .rgba => return makeRgbaProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
         };
@@ -3283,6 +3395,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = image_sobel_doc,
         .params = "self",
         .returns = "Image",
+    },
+    .{
+        .name = "blend",
+        .meth = @ptrCast(&image_blend),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_blend_doc,
+        .params = "self, overlay: Image, mode: BlendMode = BlendMode.NORMAL",
+        .returns = "None",
     },
     .{
         .name = "psnr",

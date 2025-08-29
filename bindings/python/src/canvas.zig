@@ -102,7 +102,7 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     // Initialize based on image format
     if (image.py_image) |pimg| {
         switch (pimg.data) {
-            .gray => |imgv| {
+            .grayscale => |imgv| {
                 const cptr = allocator.create(Canvas(u8)) catch {
                     c.Py_DECREF(image_obj.?);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Canvas");
