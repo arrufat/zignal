@@ -1637,63 +1637,151 @@ pub fn Filter(comptime T: type) type {
                         }
                     },
                     .@"struct" => {
-                        // Process struct types (RGB, RGBA, etc.)
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                var result_pixel: T = undefined;
+                        // Check if all fields are u8 for optimized integer path
+                        const fields = std.meta.fields(T);
+                        const all_u8 = comptime blk: {
+                            for (fields) |field| {
+                                if (field.type != u8) break :blk false;
+                            }
+                            break :blk true;
+                        };
 
-                                inline for (std.meta.fields(T)) |field| {
-                                    var sum: f32 = 0;
-                                    var count: f32 = 0;
+                        if (all_u8) {
+                            // Optimized integer arithmetic path for u8 types
+                            const SCALE = 256;
 
-                                    // Sample along the motion line
-                                    const num_samples = distance;
-                                    for (0..num_samples) |i| {
-                                        const t = (@as(f32, @floatFromInt(i)) - half_dist + 0.5) / half_dist;
-                                        const dx = t * half_dist * cos_angle;
-                                        const dy = t * half_dist * sin_angle;
+                            // Separate channels using helper
+                            const channels = try channel_ops.splitChannels(T, self, allocator);
+                            defer for (channels) |channel| allocator.free(channel);
 
-                                        const src_x = @as(f32, @floatFromInt(c)) + dx;
-                                        const src_y = @as(f32, @floatFromInt(r)) + dy;
+                            // Allocate output channels
+                            var out_channels: [Self.channels()][]u8 = undefined;
+                            for (&out_channels) |*ch| {
+                                ch.* = try allocator.alloc(u8, self.rows * self.cols);
+                            }
+                            defer for (out_channels) |ch| allocator.free(ch);
 
-                                        // Check bounds
-                                        if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
-                                            src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
-                                        {
+                            // Process each channel independently with integer arithmetic
+                            for (channels, out_channels) |src_channel, dst_channel| {
+                                for (0..self.rows) |r| {
+                                    for (0..self.cols) |c| {
+                                        var sum: i32 = 0;
+                                        var weight_sum: i32 = 0;
 
-                                            // Bilinear interpolation
-                                            const x0 = @as(usize, @intFromFloat(@floor(src_x)));
-                                            const y0 = @as(usize, @intFromFloat(@floor(src_y)));
-                                            const x1 = @min(x0 + 1, self.cols - 1);
-                                            const y1 = @min(y0 + 1, self.rows - 1);
+                                        // Sample along the motion line
+                                        const num_samples = distance;
+                                        for (0..num_samples) |i| {
+                                            const t = (@as(f32, @floatFromInt(i)) - half_dist + 0.5) / half_dist;
+                                            const dx = t * half_dist * cos_angle;
+                                            const dy = t * half_dist * sin_angle;
 
-                                            const fx = src_x - @as(f32, @floatFromInt(x0));
-                                            const fy = src_y - @as(f32, @floatFromInt(y0));
+                                            const src_x = @as(f32, @floatFromInt(c)) + dx;
+                                            const src_y = @as(f32, @floatFromInt(r)) + dy;
 
-                                            const p00 = as(f32, @field(self.at(y0, x0).*, field.name));
-                                            const p01 = as(f32, @field(self.at(y0, x1).*, field.name));
-                                            const p10 = as(f32, @field(self.at(y1, x0).*, field.name));
-                                            const p11 = as(f32, @field(self.at(y1, x1).*, field.name));
+                                            // Check bounds
+                                            if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
+                                                src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
+                                            {
+                                                // Bilinear interpolation with integer arithmetic
+                                                const x0 = @as(usize, @intFromFloat(@floor(src_x)));
+                                                const y0 = @as(usize, @intFromFloat(@floor(src_y)));
+                                                const x1 = @min(x0 + 1, self.cols - 1);
+                                                const y1 = @min(y0 + 1, self.rows - 1);
 
-                                            const value = (1 - fx) * (1 - fy) * p00 +
-                                                fx * (1 - fy) * p01 +
-                                                (1 - fx) * fy * p10 +
-                                                fx * fy * p11;
+                                                // Convert fractional parts to integer weights
+                                                const fx = @as(i32, @intFromFloat(SCALE * (src_x - @as(f32, @floatFromInt(x0)))));
+                                                const fy = @as(i32, @intFromFloat(SCALE * (src_y - @as(f32, @floatFromInt(y0)))));
+                                                const fx_inv = SCALE - fx;
+                                                const fy_inv = SCALE - fy;
 
-                                            sum += value;
-                                            count += 1;
+                                                const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
+                                                const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
+                                                const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
+                                                const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
+
+                                                // Bilinear interpolation: ((1-fx)*(1-fy)*p00 + fx*(1-fy)*p01 + (1-fx)*fy*p10 + fx*fy*p11)
+                                                // The interpolation result has SCALE^2 factor that we need to remove
+                                                const value = @divTrunc(fx_inv * fy_inv * p00 +
+                                                    fx * fy_inv * p01 +
+                                                    fx_inv * fy * p10 +
+                                                    fx * fy * p11, SCALE * SCALE);
+
+                                                sum += value;
+                                                weight_sum += 1; // Simple count of samples
+                                            }
                                         }
+
+                                        // Store result with rounding
+                                        // Now sum is already in pixel value range, weight_sum is just a count
+                                        const result = if (weight_sum > 0)
+                                            @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum + @divTrunc(weight_sum, 2), weight_sum)))))
+                                        else
+                                            src_channel[r * self.cols + c];
+                                        dst_channel[r * self.cols + c] = result;
+                                    }
+                                }
+                            }
+
+                            // Merge channels back
+                            channel_ops.mergeChannels(T, out_channels, out.*);
+                        } else {
+                            // Generic path for non-u8 types - process per pixel
+                            for (0..self.rows) |r| {
+                                for (0..self.cols) |c| {
+                                    var result_pixel: T = undefined;
+
+                                    inline for (fields) |field| {
+                                        var sum: f32 = 0;
+                                        var count: f32 = 0;
+
+                                        // Sample along the motion line
+                                        const num_samples = distance;
+                                        for (0..num_samples) |i| {
+                                            const t = (@as(f32, @floatFromInt(i)) - half_dist + 0.5) / half_dist;
+                                            const dx = t * half_dist * cos_angle;
+                                            const dy = t * half_dist * sin_angle;
+
+                                            const src_x = @as(f32, @floatFromInt(c)) + dx;
+                                            const src_y = @as(f32, @floatFromInt(r)) + dy;
+
+                                            // Check bounds
+                                            if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
+                                                src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
+                                            {
+                                                // Bilinear interpolation
+                                                const x0 = @as(usize, @intFromFloat(@floor(src_x)));
+                                                const y0 = @as(usize, @intFromFloat(@floor(src_y)));
+                                                const x1 = @min(x0 + 1, self.cols - 1);
+                                                const y1 = @min(y0 + 1, self.rows - 1);
+
+                                                const fx = src_x - @as(f32, @floatFromInt(x0));
+                                                const fy = src_y - @as(f32, @floatFromInt(y0));
+
+                                                const p00 = as(f32, @field(self.at(y0, x0).*, field.name));
+                                                const p01 = as(f32, @field(self.at(y0, x1).*, field.name));
+                                                const p10 = as(f32, @field(self.at(y1, x0).*, field.name));
+                                                const p11 = as(f32, @field(self.at(y1, x1).*, field.name));
+
+                                                const value = (1 - fx) * (1 - fy) * p00 +
+                                                    fx * (1 - fy) * p01 +
+                                                    (1 - fx) * fy * p10 +
+                                                    fx * fy * p11;
+
+                                                sum += value;
+                                                count += 1;
+                                            }
+                                        }
+
+                                        const channel_result = if (count > 0) sum / count else as(f32, @field(self.at(r, c).*, field.name));
+                                        @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                            .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                            .float => as(field.type, channel_result),
+                                            else => @compileError("Unsupported field type"),
+                                        };
                                     }
 
-                                    const channel_result = if (count > 0) sum / count else as(f32, @field(self.at(r, c).*, field.name));
-                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
-                                        .float => as(field.type, channel_result),
-                                        else => @compileError("Unsupported field type"),
-                                    };
+                                    out.at(r, c).* = result_pixel;
                                 }
-
-                                out.at(r, c).* = result_pixel;
                             }
                         }
                     },
@@ -1809,81 +1897,191 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            const x = @as(f32, @floatFromInt(c));
-                            const y = @as(f32, @floatFromInt(r));
+                    // Check if all fields are u8 for optimized integer path
+                    const fields = std.meta.fields(T);
+                    const all_u8 = comptime blk: {
+                        for (fields) |field| {
+                            if (field.type != u8) break :blk false;
+                        }
+                        break :blk true;
+                    };
 
-                            // Calculate distance and angle from center
-                            const dx = x - cx;
-                            const dy = y - cy;
-                            const distance = @sqrt(dx * dx + dy * dy);
-                            const angle = std.math.atan2(dy, dx);
+                    if (all_u8) {
+                        // Optimized integer arithmetic path for u8 types
+                        const SCALE = 256;
 
-                            var result_pixel: T = undefined;
+                        // Separate channels using helper
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
+                        defer for (channels) |channel| allocator.free(channel);
 
-                            inline for (std.meta.fields(T)) |field| {
-                                var sum: f32 = 0;
-                                var count: f32 = 0;
+                        // Allocate output channels
+                        var out_channels: [Self.channels()][]u8 = undefined;
+                        for (&out_channels) |*ch| {
+                            ch.* = try allocator.alloc(u8, self.rows * self.cols);
+                        }
+                        defer for (out_channels) |ch| allocator.free(ch);
 
-                                // Number of samples based on distance and strength
-                                const max_samples = 20;
-                                const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
+                        // Process each channel independently with integer arithmetic
+                        for (channels, out_channels) |src_channel, dst_channel| {
+                            for (0..self.rows) |r| {
+                                for (0..self.cols) |c| {
+                                    const x = @as(f32, @floatFromInt(c));
+                                    const y = @as(f32, @floatFromInt(r));
 
-                                for (0..num_samples) |i| {
-                                    const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_samples));
-                                    var sample_x: f32 = undefined;
-                                    var sample_y: f32 = undefined;
+                                    // Calculate distance and angle from center
+                                    const dx = x - cx;
+                                    const dy = y - cy;
+                                    const distance = @sqrt(dx * dx + dy * dy);
+                                    const angle = std.math.atan2(dy, dx);
 
-                                    switch (blur_type) {
-                                        .zoom => {
-                                            const scale = 1.0 - (t * clamped_strength * 0.1);
-                                            sample_x = cx + dx * scale;
-                                            sample_y = cy + dy * scale;
-                                        },
-                                        .spin => {
-                                            const angle_offset = (t - 0.5) * clamped_strength * 0.2;
-                                            const new_angle = angle + angle_offset;
-                                            sample_x = cx + distance * @cos(new_angle);
-                                            sample_y = cy + distance * @sin(new_angle);
-                                        },
+                                    var sum: i32 = 0;
+                                    var weight_sum: i32 = 0;
+
+                                    // Number of samples based on distance and strength
+                                    const max_samples = 20;
+                                    const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
+
+                                    for (0..num_samples) |i| {
+                                        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_samples));
+                                        var sample_x: f32 = undefined;
+                                        var sample_y: f32 = undefined;
+
+                                        switch (blur_type) {
+                                            .zoom => {
+                                                const scale = 1.0 - (t * clamped_strength * 0.1);
+                                                sample_x = cx + dx * scale;
+                                                sample_y = cy + dy * scale;
+                                            },
+                                            .spin => {
+                                                const angle_offset = (t - 0.5) * clamped_strength * 0.2;
+                                                const new_angle = angle + angle_offset;
+                                                sample_x = cx + distance * @cos(new_angle);
+                                                sample_y = cy + distance * @sin(new_angle);
+                                            },
+                                        }
+
+                                        if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
+                                            sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
+                                        {
+                                            const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                            const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                            const x1 = @min(x0 + 1, self.cols - 1);
+                                            const y1 = @min(y0 + 1, self.rows - 1);
+
+                                            // Convert fractional parts to integer weights
+                                            const fx = @as(i32, @intFromFloat(SCALE * (sample_x - @as(f32, @floatFromInt(x0)))));
+                                            const fy = @as(i32, @intFromFloat(SCALE * (sample_y - @as(f32, @floatFromInt(y0)))));
+                                            const fx_inv = SCALE - fx;
+                                            const fy_inv = SCALE - fy;
+
+                                            const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
+                                            const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
+                                            const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
+                                            const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
+
+                                            // Bilinear interpolation with integer arithmetic
+                                            // The interpolation result has SCALE^2 factor that we need to remove
+                                            const value = @divTrunc(fx_inv * fy_inv * p00 +
+                                                fx * fy_inv * p01 +
+                                                fx_inv * fy * p10 +
+                                                fx * fy * p11, SCALE * SCALE);
+
+                                            sum += value;
+                                            weight_sum += 1; // Simple count of samples
+                                        }
                                     }
 
-                                    if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
-                                        sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
-                                    {
-                                        const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
-                                        const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
-                                        const x1 = @min(x0 + 1, self.cols - 1);
-                                        const y1 = @min(y0 + 1, self.rows - 1);
+                                    // Store result with rounding
+                                    // Now sum is already in pixel value range, weight_sum is just a count
+                                    const result = if (weight_sum > 0)
+                                        @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum + @divTrunc(weight_sum, 2), weight_sum)))))
+                                    else
+                                        src_channel[r * self.cols + c];
+                                    dst_channel[r * self.cols + c] = result;
+                                }
+                            }
+                        }
 
-                                        const fx = sample_x - @as(f32, @floatFromInt(x0));
-                                        const fy = sample_y - @as(f32, @floatFromInt(y0));
+                        // Merge channels back
+                        channel_ops.mergeChannels(T, out_channels, out.*);
+                    } else {
+                        // Generic path for non-u8 types - process per pixel
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const x = @as(f32, @floatFromInt(c));
+                                const y = @as(f32, @floatFromInt(r));
 
-                                        const p00 = as(f32, @field(self.at(y0, x0).*, field.name));
-                                        const p01 = as(f32, @field(self.at(y0, x1).*, field.name));
-                                        const p10 = as(f32, @field(self.at(y1, x0).*, field.name));
-                                        const p11 = as(f32, @field(self.at(y1, x1).*, field.name));
+                                // Calculate distance and angle from center
+                                const dx = x - cx;
+                                const dy = y - cy;
+                                const distance = @sqrt(dx * dx + dy * dy);
+                                const angle = std.math.atan2(dy, dx);
 
-                                        const value = (1 - fx) * (1 - fy) * p00 +
-                                            fx * (1 - fy) * p01 +
-                                            (1 - fx) * fy * p10 +
-                                            fx * fy * p11;
+                                var result_pixel: T = undefined;
 
-                                        sum += value;
-                                        count += 1;
+                                inline for (fields) |field| {
+                                    var sum: f32 = 0;
+                                    var count: f32 = 0;
+
+                                    // Number of samples based on distance and strength
+                                    const max_samples = 20;
+                                    const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
+
+                                    for (0..num_samples) |i| {
+                                        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_samples));
+                                        var sample_x: f32 = undefined;
+                                        var sample_y: f32 = undefined;
+
+                                        switch (blur_type) {
+                                            .zoom => {
+                                                const scale = 1.0 - (t * clamped_strength * 0.1);
+                                                sample_x = cx + dx * scale;
+                                                sample_y = cy + dy * scale;
+                                            },
+                                            .spin => {
+                                                const angle_offset = (t - 0.5) * clamped_strength * 0.2;
+                                                const new_angle = angle + angle_offset;
+                                                sample_x = cx + distance * @cos(new_angle);
+                                                sample_y = cy + distance * @sin(new_angle);
+                                            },
+                                        }
+
+                                        if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
+                                            sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
+                                        {
+                                            const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                            const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                            const x1 = @min(x0 + 1, self.cols - 1);
+                                            const y1 = @min(y0 + 1, self.rows - 1);
+
+                                            const fx = sample_x - @as(f32, @floatFromInt(x0));
+                                            const fy = sample_y - @as(f32, @floatFromInt(y0));
+
+                                            const p00 = as(f32, @field(self.at(y0, x0).*, field.name));
+                                            const p01 = as(f32, @field(self.at(y0, x1).*, field.name));
+                                            const p10 = as(f32, @field(self.at(y1, x0).*, field.name));
+                                            const p11 = as(f32, @field(self.at(y1, x1).*, field.name));
+
+                                            const value = (1 - fx) * (1 - fy) * p00 +
+                                                fx * (1 - fy) * p01 +
+                                                (1 - fx) * fy * p10 +
+                                                fx * fy * p11;
+
+                                            sum += value;
+                                            count += 1;
+                                        }
                                     }
+
+                                    const channel_result = if (count > 0) sum / count else as(f32, @field(self.at(r, c).*, field.name));
+                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                        .float => as(field.type, channel_result),
+                                        else => @compileError("Unsupported field type"),
+                                    };
                                 }
 
-                                const channel_result = if (count > 0) sum / count else as(f32, @field(self.at(r, c).*, field.name));
-                                @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
-                                    .float => as(field.type, channel_result),
-                                    else => @compileError("Unsupported field type"),
-                                };
+                                out.at(r, c).* = result_pixel;
                             }
-
-                            out.at(r, c).* = result_pixel;
                         }
                     }
                 },
