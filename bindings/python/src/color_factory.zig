@@ -3,6 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 const isPacked = zignal.meta.isPacked;
 const getSimpleTypeName = zignal.meta.getSimpleTypeName;
+const comptimeLowercase = zignal.meta.comptimeLowercase;
 
 const c = @import("py_utils.zig").c;
 const color_types = @import("color_registry.zig").color_types;
@@ -14,15 +15,6 @@ const createColorPyObject = @import("color.zig").createColorPyObject;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 const convertToZigBlendMode = @import("blending.zig").convertToZigBlendMode;
-
-/// Convert string to lowercase at comptime
-pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
-    comptime var result: [input.len]u8 = undefined;
-    inline for (input, 0..) |char, i| {
-        result[i] = std.ascii.toLower(char);
-    }
-    return result[0..];
-}
 
 /// Automatically generate documentation from type name for color conversion methods
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {

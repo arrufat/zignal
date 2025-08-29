@@ -56,3 +56,14 @@ pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
     }
     return full_name;
 }
+
+/// Converts a comptime string to lowercase.
+/// e.g., "RGB" -> "rgb", "OkLab" -> "oklab"
+pub inline fn comptimeLowercase(comptime input: []const u8) []const u8 {
+    const std = @import("std");
+    comptime var result: [input.len]u8 = undefined;
+    inline for (input, 0..) |char, i| {
+        result[i] = std.ascii.toLower(char);
+    }
+    return result[0..];
+}
