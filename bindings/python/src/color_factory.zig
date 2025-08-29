@@ -217,25 +217,16 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     \\Blend with another color using the specified blend mode.
                     \\
                     \\## Parameters
-                    \\- `overlay`: An RGBA color or tuple (r, g, b, a) with values 0-255
-                    \\- `mode`: BlendMode enum value (optional, defaults to NORMAL)
+                    \\- `overlay`: An `Rgba` color or tuple (r, g, b, a) with values 0-255
+                    \\- `mode`: `BlendMode` enum value (optional, defaults to `BlendMode.NORMAL`)
                     \\
                     \\## Examples
                     \\```python
                     \\base = zignal.Rgb(255, 0, 0)
                     \\overlay = zignal.Rgba(0, 255, 0, 128)
                     \\
-                    \\# Default mode (NORMAL)
                     \\result = base.blend(overlay)
-                    \\
-                    \\# Explicit mode with positional argument
-                    \\result = base.blend(overlay, zignal.BlendMode.MULTIPLY)
-                    \\
-                    \\# Explicit mode with keyword argument
-                    \\result = base.blend(overlay, mode=zignal.BlendMode.SCREEN)
-                    \\
-                    \\# Using a tuple
-                    \\result = base.blend((0, 255, 0, 128))
+                    \\result = base.blend(overlay, mode=zignal.BlendMode.MULTIPLY)
                     \\```
                     ,
                 };
