@@ -868,3 +868,196 @@ test "gaussianBlur preserves color" {
         try expectEqual(true, edge.b < edge.r / 2);
     }
 }
+
+test "linearMotionBlur horizontal" {
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create vertical edge pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 3) 0 else 255;
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    try image.linearMotionBlur(std.testing.allocator, 0, 3, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Edge should be blurred horizontally
+    const edge_val = blurred.at(2, 3).*;
+    try expectEqual(true, edge_val > 0 and edge_val < 255);
+
+    // Top and bottom edges should have similar blur (horizontal motion)
+    const top_edge = blurred.at(0, 3).*;
+    const bottom_edge = blurred.at(4, 3).*;
+    const diff = if (top_edge > bottom_edge) top_edge - bottom_edge else bottom_edge - top_edge;
+    try expectEqual(true, diff < 10); // Should be very similar
+}
+
+test "linearMotionBlur vertical" {
+    var image: Image(u8) = try .init(std.testing.allocator, 7, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create horizontal edge pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (r < 3) 0 else 255;
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    try image.linearMotionBlur(std.testing.allocator, std.math.pi / 2.0, 3, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Edge should be blurred vertically
+    const edge_val = blurred.at(3, 2).*;
+    try expectEqual(true, edge_val > 0 and edge_val < 255);
+
+    // Left and right edges should have similar blur (vertical motion)
+    const left_edge = blurred.at(3, 0).*;
+    const right_edge = blurred.at(3, 4).*;
+    const diff = if (left_edge > right_edge) left_edge - right_edge else right_edge - left_edge;
+    try expectEqual(true, diff < 10); // Should be very similar
+}
+
+test "linearMotionBlur diagonal" {
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create center bright spot
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(2, 2).* = 255;
+
+    var blurred: Image(u8) = .empty;
+    try image.linearMotionBlur(std.testing.allocator, std.math.pi / 4.0, 3, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Should create diagonal streak
+    // Points along the diagonal should have non-zero values
+    try expectEqual(true, blurred.at(1, 1).* > 0);
+    try expectEqual(true, blurred.at(2, 2).* > 0);
+    try expectEqual(true, blurred.at(3, 3).* > 0);
+}
+
+test "linearMotionBlur zero distance" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Create pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c);
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    try image.linearMotionBlur(std.testing.allocator, 0, 0, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Should be identical to original
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, blurred.at(r, c).*);
+        }
+    }
+}
+
+test "linearMotionBlur RGB" {
+    var image: Image(Rgb) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Create colored pattern
+    for (image.data) |*pixel| pixel.* = .{ .r = 0, .g = 0, .b = 0 };
+    image.at(2, 2).* = .{ .r = 255, .g = 128, .b = 64 };
+
+    var blurred: Image(Rgb) = .empty;
+    try image.linearMotionBlur(std.testing.allocator, 0, 3, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Color should be preserved but spread
+    const center = blurred.at(2, 2).*;
+    try expectEqual(true, center.r > center.g);
+    try expectEqual(true, center.g > center.b);
+
+    // Adjacent pixels should have color
+    const adjacent = blurred.at(2, 1).*;
+    try expectEqual(true, adjacent.r > 0);
+}
+
+test "radialMotionBlur zoom" {
+    var image: Image(u8) = try .init(std.testing.allocator, 7, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create ring pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            const dx = @as(f32, @floatFromInt(c)) - 3;
+            const dy = @as(f32, @floatFromInt(r)) - 3;
+            const dist = @sqrt(dx * dx + dy * dy);
+            image.at(r, c).* = if (dist > 1.5 and dist < 2.5) 255 else 0;
+        }
+    }
+
+    const RadialBlurType = @TypeOf(image).RadialBlurType;
+    var blurred: Image(u8) = .empty;
+    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0.5, RadialBlurType.zoom, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Ring should be blurred radially
+    // Center should be relatively unchanged
+    const center_diff = if (image.at(3, 3).* > blurred.at(3, 3).*)
+        image.at(3, 3).* - blurred.at(3, 3).*
+    else
+        blurred.at(3, 3).* - image.at(3, 3).*;
+    try expectEqual(true, center_diff < 20);
+}
+
+test "radialMotionBlur spin" {
+    var image: Image(u8) = try .init(std.testing.allocator, 7, 7);
+    defer image.deinit(std.testing.allocator);
+
+    // Create single bright point off-center
+    for (image.data) |*pixel| pixel.* = 0;
+    image.at(2, 4).* = 255;
+
+    const RadialBlurType = @TypeOf(image).RadialBlurType;
+    var blurred: Image(u8) = .empty;
+    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0.5, RadialBlurType.spin, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Should create arc/spin pattern
+    // Adjacent pixels in tangential direction should have values
+    try expectEqual(true, blurred.at(2, 4).* > 0);
+
+    // Some spreading should occur
+    var non_zero_count: usize = 0;
+    for (blurred.data) |pixel| {
+        if (pixel > 0) non_zero_count += 1;
+    }
+    try expectEqual(true, non_zero_count > 1);
+}
+
+test "radialMotionBlur zero strength" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    // Create pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 3 + c);
+        }
+    }
+
+    const RadialBlurType = @TypeOf(image).RadialBlurType;
+    var blurred: Image(u8) = .empty;
+    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0, RadialBlurType.zoom, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    // Should be identical to original
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(image.at(r, c).*, blurred.at(r, c).*);
+        }
+    }
+}

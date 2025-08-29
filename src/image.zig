@@ -523,6 +523,33 @@ pub fn Image(comptime T: type) type {
             return Filter(T).sobel(self, allocator, out);
         }
 
+        /// Applies linear motion blur to simulate camera or object movement.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `angle`: Direction of motion in radians (0 = horizontal).
+        /// - `distance`: Length of blur in pixels.
+        /// - `out`: Output blurred image.
+        pub fn linearMotionBlur(self: Self, allocator: Allocator, angle: f32, distance: usize, out: *Self) !void {
+            return Filter(T).linearMotionBlur(self, allocator, angle, distance, out);
+        }
+
+        /// Radial blur type for radialMotionBlur.
+        pub const RadialBlurType = Filter(T).RadialBlurType;
+
+        /// Applies radial motion blur (zoom or spin).
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `center_x`: X coordinate of blur center (0.0 to 1.0).
+        /// - `center_y`: Y coordinate of blur center (0.0 to 1.0).
+        /// - `strength`: Blur intensity (0.0 to 1.0).
+        /// - `blur_type`: Type of radial blur (.zoom or .spin).
+        /// - `out`: Output blurred image.
+        pub fn radialMotionBlur(self: Self, allocator: Allocator, center_x: f32, center_y: f32, strength: f32, blur_type: RadialBlurType, out: *Self) !void {
+            return Filter(T).radialMotionBlur(self, allocator, center_x, center_y, strength, blur_type, out);
+        }
+
         /// Calculates the Peak Signal-to-Noise Ratio (PSNR) between two images.
         /// PSNR is a measure of image quality, with higher values indicating better quality.
         /// Returns inf when images are identical (MSE = 0).
