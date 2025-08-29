@@ -5,6 +5,7 @@
 //! processing using SIMD and integer arithmetic.
 
 const std = @import("std");
+const Image = @import("../image.zig").Image;
 
 /// Check if a struct type has an alpha channel (4th field named 'a' or 'alpha')
 pub fn hasAlphaChannel(comptime T: type) bool {
@@ -14,65 +15,99 @@ pub fn hasAlphaChannel(comptime T: type) bool {
     return std.mem.eql(u8, last_field.name, "a") or std.mem.eql(u8, last_field.name, "alpha");
 }
 
-/// Separate RGB channels from a struct image into individual planes.
-/// Allocates and fills 3 channel planes (r, g, b).
-/// The caller is responsible for freeing the returned slices.
-pub fn splitRgbChannels(comptime T: type, image: anytype, allocator: std.mem.Allocator) ![3][]u8 {
+/// Find the uniform value of a channel if all values are the same.
+/// Returns the uniform value if all elements are identical, null otherwise.
+pub fn findUniformValue(comptime T: type, data: []const T) ?T {
+    if (data.len == 0) return null;
+    const first = data[0];
+
+    // Use SIMD for faster checking on larger arrays
+    const vec_len = std.simd.suggestVectorLength(T) orelse 1;
+    if (vec_len > 1 and data.len >= vec_len * 4) {
+        // SIMD path for faster uniformity check
+        const first_vec: @Vector(vec_len, T) = @splat(first);
+        var i: usize = 0;
+        while (i + vec_len <= data.len) : (i += vec_len) {
+            const vec: @Vector(vec_len, T) = data[i..][0..vec_len].*;
+            if (@reduce(.Or, vec != first_vec)) return null;
+        }
+        // Check remaining elements
+        while (i < data.len) : (i += 1) {
+            if (data[i] != first) return null;
+        }
+    } else {
+        // Scalar path for small arrays or non-SIMD types
+        for (data[1..]) |val| {
+            if (val != first) return null;
+        }
+    }
+    return first;
+}
+
+/// Get the common type of all fields in a struct, or compile error if not uniform
+fn FieldTypeOf(comptime T: type) type {
     const fields = std.meta.fields(T);
+    if (fields.len == 0) @compileError("Type " ++ @typeName(T) ++ " has no fields");
+
+    const first_type = fields[0].type;
+    inline for (fields[1..]) |field| {
+        if (field.type != first_type) {
+            @compileError("Fields of " ++ @typeName(T) ++ " are not all the same type");
+        }
+    }
+    return first_type;
+}
+
+/// Separate all channels from a struct image into individual planes.
+/// Allocates and fills channel planes for all fields.
+/// The caller is responsible for freeing the returned slices.
+pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
+    const num_channels = comptime Image(T).channels();
+    const fields = std.meta.fields(T);
+    const FieldType = FieldTypeOf(T);
     const plane_size = image.rows * image.cols;
 
-    const r_channel = try allocator.alloc(u8, plane_size);
-    errdefer allocator.free(r_channel);
-    const g_channel = try allocator.alloc(u8, plane_size);
-    errdefer allocator.free(g_channel);
-    const b_channel = try allocator.alloc(u8, plane_size);
-    errdefer allocator.free(b_channel);
+    var channels: [num_channels][]FieldType = undefined;
 
-    // Single pass for cache efficiency
+    // Allocate each channel with proper error handling
+    var allocated_count: usize = 0;
+    errdefer {
+        for (0..allocated_count) |i| {
+            allocator.free(channels[i]);
+        }
+    }
+
+    inline for (&channels) |*channel| {
+        channel.* = try allocator.alloc(FieldType, plane_size);
+        allocated_count += 1;
+    }
+
+    // Split in single pass for cache efficiency
     var idx: usize = 0;
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             const pixel = image.at(r, c).*;
-            r_channel[idx] = @field(pixel, fields[0].name);
-            g_channel[idx] = @field(pixel, fields[1].name);
-            b_channel[idx] = @field(pixel, fields[2].name);
+            inline for (fields, 0..) |field, i| {
+                channels[i][idx] = @field(pixel, field.name);
+            }
             idx += 1;
         }
     }
 
-    return .{ r_channel, g_channel, b_channel };
+    return channels;
 }
 
-/// Combine RGB channels back into struct image, optionally preserving alpha from original.
-pub fn mergeRgbChannels(
-    comptime T: type,
-    original_image: anytype,
-    r_out: []const u8,
-    g_out: []const u8,
-    b_out: []const u8,
-    out: anytype,
-) void {
-    _ = original_image; // May be used in the future for alpha preservation
+/// Combine channels back into struct image.
+pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
     const fields = std.meta.fields(T);
-    const has_alpha = comptime hasAlphaChannel(T);
 
     var idx: usize = 0;
     for (0..out.rows) |r| {
         for (0..out.cols) |c| {
             var result_pixel: T = undefined;
-            @field(result_pixel, fields[0].name) = r_out[idx];
-            @field(result_pixel, fields[1].name) = g_out[idx];
-            @field(result_pixel, fields[2].name) = b_out[idx];
-
-            // Preserve alpha if present (need to handle resize case where dimensions differ)
-            if (has_alpha) {
-                // For resize operations with alpha channel, set to fully opaque
-                @field(result_pixel, fields[3].name) = 255;
-            } else if (fields.len == 4) {
-                // For non-alpha 4th channel, use zero default
-                @field(result_pixel, fields[3].name) = 0;
+            inline for (fields, 0..) |field, i| {
+                @field(result_pixel, field.name) = channels[i][idx];
             }
-
             out.at(r, c).* = result_pixel;
             idx += 1;
         }

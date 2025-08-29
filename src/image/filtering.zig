@@ -93,47 +93,82 @@ pub fn Filter(comptime T: type) type {
                 },
                 .@"struct" => {
                     const fields = std.meta.fields(T);
-                    const has_alpha = comptime channel_ops.hasAlphaChannel(T);
 
-                    // Check if all RGB fields are u8
+                    // Check if all fields are u8
                     const all_u8 = comptime blk: {
-                        for (fields[0..@min(3, fields.len)]) |field| {
+                        for (fields) |field| {
                             if (field.type != u8) break :blk false;
                         }
                         break :blk true;
                     };
 
-                    if (all_u8 and fields.len >= 3) {
-                        // Optimized path for u8 RGB types
+                    if (all_u8) {
+                        // Optimized path for u8 types
                         const plane_size = self.rows * self.cols;
 
                         // Separate channels
-                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Allocate output planes and integral buffer
-                        var out_channels: [3][]u8 = undefined;
-                        inline for (&out_channels) |*ch| {
-                            ch.* = try allocator.alloc(u8, plane_size);
+                        // Check which channels are uniform to avoid unnecessary allocations
+                        var is_uniform: [channels.len]bool = undefined;
+                        var uniform_values: [channels.len]u8 = undefined;
+                        var non_uniform_count: usize = 0;
+
+                        inline for (channels, 0..) |src_data, i| {
+                            if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                                is_uniform[i] = true;
+                                uniform_values[i] = uniform_val;
+                            } else {
+                                is_uniform[i] = false;
+                                non_uniform_count += 1;
+                            }
+                        }
+
+                        // Allocate output channels
+                        var out_channels: [channels.len][]u8 = undefined;
+                        inline for (&out_channels, is_uniform) |*ch, uniform| {
+                            if (uniform) {
+                                // For uniform channels, we'll just use the source directly
+                                ch.* = &[_]u8{}; // Empty slice as placeholder
+                            } else {
+                                ch.* = try allocator.alloc(u8, plane_size);
+                            }
                         }
                         defer {
-                            inline for (out_channels) |ch| allocator.free(ch);
+                            inline for (out_channels, is_uniform) |ch, uniform| {
+                                if (!uniform and ch.len > 0) allocator.free(ch);
+                            }
                         }
 
-                        const integral_buf = try allocator.alloc(f32, plane_size);
-                        defer allocator.free(integral_buf);
-                        const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
+                        // Only allocate integral buffer if we have non-uniform channels
+                        if (non_uniform_count > 0) {
+                            const integral_buf = try allocator.alloc(f32, plane_size);
+                            defer allocator.free(integral_buf);
+                            const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
-                        // Process all channels with single integral buffer
-                        inline for (channels, out_channels) |src_data, dst_data| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                            integralPlane(u8, src_plane, integral_img);
-                            boxBlurPlane(u8, integral_img, dst_plane, radius);
+                            // Process only non-uniform channels
+                            inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
+                                if (!uniform) {
+                                    const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                                    const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                                    integralPlane(u8, src_plane, integral_img);
+                                    boxBlurPlane(u8, integral_img, dst_plane, radius);
+                                }
+                            }
                         }
 
-                        // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], blurred.*);
+                        // Recombine channels, using uniform values where applicable
+                        var final_channels: [channels.len][]const u8 = undefined;
+                        inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                            if (uniform) {
+                                // For uniform channels, use the source (which has the uniform value)
+                                final_channels[i] = src_ch;
+                            } else {
+                                final_channels[i] = out_ch;
+                            }
+                        }
+                        channel_ops.mergeChannels(T, final_channels, blurred.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -149,12 +184,6 @@ pub fn Filter(comptime T: type) type {
                                 const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                                 inline for (fields, 0..) |f, i| {
-                                    // Skip alpha channel if present
-                                    if (has_alpha and i == 3) {
-                                        @field(blurred.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
-                                        continue;
-                                    }
-
                                     // Use correct integral image indices
                                     const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
 
@@ -233,47 +262,82 @@ pub fn Filter(comptime T: type) type {
                 },
                 .@"struct" => {
                     const fields = std.meta.fields(T);
-                    const has_alpha = comptime channel_ops.hasAlphaChannel(T);
 
-                    // Check if all RGB fields are u8
+                    // Check if all fields are u8
                     const all_u8 = comptime blk: {
-                        for (fields[0..@min(3, fields.len)]) |field| {
+                        for (fields) |field| {
                             if (field.type != u8) break :blk false;
                         }
                         break :blk true;
                     };
 
-                    if (all_u8 and fields.len >= 3) {
-                        // Optimized path for u8 RGB types
+                    if (all_u8) {
+                        // Optimized path for u8 types
                         const plane_size = self.rows * self.cols;
 
                         // Separate channels
-                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Allocate output planes and integral buffer
-                        var out_channels: [3][]u8 = undefined;
-                        inline for (&out_channels) |*ch| {
-                            ch.* = try allocator.alloc(u8, plane_size);
+                        // Check which channels are uniform to avoid unnecessary allocations
+                        var is_uniform: [channels.len]bool = undefined;
+                        var uniform_values: [channels.len]u8 = undefined;
+                        var non_uniform_count: usize = 0;
+
+                        inline for (channels, 0..) |src_data, i| {
+                            if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                                is_uniform[i] = true;
+                                uniform_values[i] = uniform_val;
+                            } else {
+                                is_uniform[i] = false;
+                                non_uniform_count += 1;
+                            }
+                        }
+
+                        // Allocate output channels only for non-uniform channels
+                        var out_channels: [channels.len][]u8 = undefined;
+                        inline for (&out_channels, is_uniform) |*ch, uniform| {
+                            if (uniform) {
+                                // For uniform channels, sharpening doesn't change the value
+                                ch.* = &[_]u8{}; // Empty slice as placeholder
+                            } else {
+                                ch.* = try allocator.alloc(u8, plane_size);
+                            }
                         }
                         defer {
-                            inline for (out_channels) |ch| allocator.free(ch);
+                            inline for (out_channels, is_uniform) |ch, uniform| {
+                                if (!uniform and ch.len > 0) allocator.free(ch);
+                            }
                         }
 
-                        const integral_buf = try allocator.alloc(f32, plane_size);
-                        defer allocator.free(integral_buf);
-                        const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
+                        // Only allocate integral buffer if we have non-uniform channels
+                        if (non_uniform_count > 0) {
+                            const integral_buf = try allocator.alloc(f32, plane_size);
+                            defer allocator.free(integral_buf);
+                            const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
-                        // Process all channels with single integral buffer
-                        inline for (channels, out_channels) |src_data, dst_data| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                            integralPlane(u8, src_plane, integral_img);
-                            sharpenPlane(u8, src_plane, integral_img, dst_plane, radius);
+                            // Process only non-uniform channels
+                            inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
+                                if (!uniform) {
+                                    const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                                    const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                                    integralPlane(u8, src_plane, integral_img);
+                                    sharpenPlane(u8, src_plane, integral_img, dst_plane, radius);
+                                }
+                            }
                         }
 
-                        // Recombine channels
-                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], sharpened.*);
+                        // Recombine channels, using uniform values where applicable
+                        var final_channels: [channels.len][]const u8 = undefined;
+                        inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                            if (uniform) {
+                                // For uniform channels, sharpen result is same as input (2*v - v = v)
+                                final_channels[i] = src_ch;
+                            } else {
+                                final_channels[i] = out_ch;
+                            }
+                        }
+                        channel_ops.mergeChannels(T, final_channels, sharpened.*);
                     } else {
                         // Generic struct path for other color types
                         var sat: Image([Self.channels()]f32) = undefined;
@@ -289,12 +353,6 @@ pub fn Filter(comptime T: type) type {
                                 const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                                 inline for (fields, 0..) |f, i| {
-                                    // Skip alpha channel if present
-                                    if (has_alpha and i == 3) {
-                                        @field(sharpened.at(r, c).*, f.name) = @field(self.at(r, c).*, f.name);
-                                        continue;
-                                    }
-
                                     const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
 
                                     const blurred = sum / area;
@@ -581,38 +639,69 @@ pub fn Filter(comptime T: type) type {
                         break :blk true;
                     };
 
-                    if (all_u8 and (fields.len == 3 or fields.len == 4)) {
+                    if (all_u8) {
                         // Channel separation approach for optimal performance
                         const SCALE = 256;
                         const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
                         const plane_size = self.rows * self.cols;
 
                         // Separate channels using helper
-                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Allocate output planes
-                        var out_channels: [3][]u8 = undefined;
-                        inline for (&out_channels) |*ch| {
-                            ch.* = try allocator.alloc(u8, plane_size);
+                        // Check which channels are uniform to avoid unnecessary processing
+                        var is_uniform: [channels.len]bool = undefined;
+                        var uniform_values: [channels.len]u8 = undefined;
+                        var non_uniform_count: usize = 0;
+
+                        inline for (channels, 0..) |src_data, i| {
+                            if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                                is_uniform[i] = true;
+                                uniform_values[i] = uniform_val;
+                            } else {
+                                is_uniform[i] = false;
+                                non_uniform_count += 1;
+                            }
+                        }
+
+                        // Allocate output planes only for non-uniform channels
+                        var out_channels: [channels.len][]u8 = undefined;
+                        inline for (&out_channels, is_uniform) |*ch, uniform| {
+                            if (uniform) {
+                                // For uniform channels with normalized kernels, output is same as input
+                                ch.* = &[_]u8{}; // Empty slice as placeholder
+                            } else {
+                                ch.* = try allocator.alloc(u8, plane_size);
+                            }
                         }
                         defer {
-                            inline for (out_channels) |ch| allocator.free(ch);
+                            inline for (out_channels, is_uniform) |ch, uniform| {
+                                if (!uniform and ch.len > 0) allocator.free(ch);
+                            }
                         }
 
-                        // Convolve each channel independently using the optimized u8 plane function
-                        inline for (channels, out_channels) |src_data, dst_data| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                            Kernel.convolveU8Plane(src_plane, dst_plane, kernel_int, border_mode);
+                        // Convolve only non-uniform channels
+                        inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
+                            if (!uniform) {
+                                const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                                const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                                Kernel.convolveU8Plane(src_plane, dst_plane, kernel_int, border_mode);
+                            }
                         }
 
-                        // Recombine channels using helper
-                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], out.*);
+                        // Recombine channels, using original values for uniform channels
+                        var final_channels: [channels.len][]const u8 = undefined;
+                        inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                            if (uniform) {
+                                // For uniform channels, convolution with normalized kernel preserves the value
+                                final_channels[i] = src_ch;
+                            } else {
+                                final_channels[i] = out_ch;
+                            }
+                        }
+                        channel_ops.mergeChannels(T, final_channels, out.*);
                     } else {
                         // Generic struct path for other color types
-                        const has_alpha = comptime channel_ops.hasAlphaChannel(T);
-                        const channels_to_process = if (has_alpha) 3 else fields.len;
                         const half_h = Kernel.half_h;
                         const half_w = Kernel.half_w;
 
@@ -620,8 +709,7 @@ pub fn Filter(comptime T: type) type {
                             for (0..self.cols) |c| {
                                 var result_pixel: T = undefined;
 
-                                inline for (0..channels_to_process) |field_idx| {
-                                    const field = fields[field_idx];
+                                inline for (fields) |field| {
                                     var accumulator: f32 = 0;
                                     const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
                                     if (in_interior) {
@@ -655,10 +743,6 @@ pub fn Filter(comptime T: type) type {
                                         .float => as(field.type, accumulator),
                                         else => @compileError("Unsupported field type in struct"),
                                     };
-                                }
-
-                                if (has_alpha) {
-                                    @field(result_pixel, fields[3].name) = @field(self.at(r, c).*, fields[3].name);
                                 }
 
                                 out.at(r, c).* = result_pixel;
@@ -1098,7 +1182,7 @@ pub fn Filter(comptime T: type) type {
                         break :blk true;
                     };
 
-                    if (all_u8 and (fields.len == 3 or fields.len == 4)) {
+                    if (all_u8) {
                         // Channel separation approach for optimal performance
                         const SCALE = 256;
                         const plane_size = self.rows * self.cols;
@@ -1117,33 +1201,67 @@ pub fn Filter(comptime T: type) type {
                         }
 
                         // Separate channels using helper
-                        const channels = try channel_ops.splitRgbChannels(T, self, allocator);
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
                         defer for (channels) |channel| allocator.free(channel);
 
-                        // Allocate output and temp planes
-                        var out_channels: [3][]u8 = undefined;
-                        var temp_channels: [3][]u8 = undefined;
-                        inline for (&out_channels, &temp_channels) |*out_ch, *temp_ch| {
-                            out_ch.* = try allocator.alloc(u8, plane_size);
-                            temp_ch.* = try allocator.alloc(u8, plane_size);
-                        }
-                        defer {
-                            inline for (out_channels, temp_channels) |out_ch, temp_ch| {
-                                allocator.free(out_ch);
-                                allocator.free(temp_ch);
+                        // Check which channels are uniform to avoid unnecessary processing
+                        var is_uniform: [channels.len]bool = undefined;
+                        var uniform_values: [channels.len]u8 = undefined;
+                        var non_uniform_count: usize = 0;
+
+                        inline for (channels, 0..) |src_data, i| {
+                            if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                                is_uniform[i] = true;
+                                uniform_values[i] = uniform_val;
+                            } else {
+                                is_uniform[i] = false;
+                                non_uniform_count += 1;
                             }
                         }
 
-                        // Convolve each channel independently using the optimized u8 plane function
-                        inline for (channels, out_channels, temp_channels) |src_data, dst_data, temp_data| {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                            const tmp_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = temp_data };
-                            convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
+                        // Allocate output and temp planes only for non-uniform channels
+                        var out_channels: [channels.len][]u8 = undefined;
+                        var temp_channels: [channels.len][]u8 = undefined;
+                        inline for (&out_channels, &temp_channels, is_uniform) |*out_ch, *temp_ch, uniform| {
+                            if (uniform) {
+                                // For uniform channels, no processing needed
+                                out_ch.* = &[_]u8{};
+                                temp_ch.* = &[_]u8{};
+                            } else {
+                                out_ch.* = try allocator.alloc(u8, plane_size);
+                                temp_ch.* = try allocator.alloc(u8, plane_size);
+                            }
+                        }
+                        defer {
+                            inline for (out_channels, temp_channels, is_uniform) |out_ch, temp_ch, uniform| {
+                                if (!uniform) {
+                                    if (out_ch.len > 0) allocator.free(out_ch);
+                                    if (temp_ch.len > 0) allocator.free(temp_ch);
+                                }
+                            }
                         }
 
-                        // Recombine channels using helper
-                        channel_ops.mergeRgbChannels(T, self, out_channels[0], out_channels[1], out_channels[2], out.*);
+                        // Convolve only non-uniform channels
+                        inline for (channels, out_channels, temp_channels, is_uniform) |src_data, dst_data, temp_data, uniform| {
+                            if (!uniform) {
+                                const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                                const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                                const tmp_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = temp_data };
+                                convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
+                            }
+                        }
+
+                        // Recombine channels, using original values for uniform channels
+                        var final_channels: [channels.len][]const u8 = undefined;
+                        inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                            if (uniform) {
+                                // For uniform channels, separable convolution preserves the value
+                                final_channels[i] = src_ch;
+                            } else {
+                                final_channels[i] = out_ch;
+                            }
+                        }
+                        channel_ops.mergeChannels(T, final_channels, out.*);
                         return; // Skip the rest of the function
                     }
 
