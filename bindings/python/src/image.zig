@@ -31,6 +31,11 @@ const image_class_doc =
     \\This object is iterable: iterating yields (row, col, pixel) in native
     \\dtype in row-major order.
     \\
+    \\Pixel access via indexing returns a proxy object that allows in-place 
+    \\modification. Use `.item()` on the proxy to extract the color value:
+    \\  pixel = img[row, col]  # Returns pixel proxy
+    \\  color = pixel.item()   # Extracts color object (Rgb/Rgba/int)
+    \\
     \\For bulk numeric work, prefer to_numpy().
 ;
 

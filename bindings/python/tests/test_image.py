@@ -84,3 +84,57 @@ class TestImageSmoke:
         assert gray_pixel != 128
         # Should still be grayscale (single value)
         assert isinstance(gray_pixel, int)
+
+    def test_pixel_proxy_methods(self):
+        """Test that pixel proxy objects have color methods"""
+        # Create RGB image
+        img = zignal.Image(10, 10, (255, 0, 0), dtype=zignal.Rgb)
+        pixel = img[0, 0]
+        assert isinstance(pixel.item(), zignal.Rgb)
+
+        # Test to_gray
+        gray = pixel.to_gray()
+        assert isinstance(gray, int)
+        assert 0 <= gray <= 255
+
+        # Test color conversion
+        hsl = pixel.to_hsl()
+        assert isinstance(hsl, zignal.Hsl)
+
+        lab = pixel.to_lab()
+        assert isinstance(lab, zignal.Lab)
+
+        # Test blend - modifies pixel in place and returns new color
+        blended = pixel.blend((0, 255, 0, 128))
+        assert isinstance(blended, zignal.Rgb)
+        # Pixel should be modified in the image
+        assert img[0, 0].g > 0  # Green component added
+
+        # Test format
+        repr_str = repr(pixel)
+        assert "Rgb" in repr_str
+
+        ansi_str = format(pixel, "ansi")
+        assert "\x1b[" in ansi_str  # ANSI escape sequence
+
+    def test_rgba_pixel_proxy_methods(self):
+        """Test RGBA pixel proxy has all methods"""
+        img = zignal.Image(10, 10, (255, 0, 0, 200), dtype=zignal.Rgba)
+        pixel = img[0, 0]
+        assert isinstance(pixel.item(), zignal.Rgba)
+
+        # Component access
+        assert pixel.r == 255
+        assert pixel.a == 200
+
+        # Methods
+        gray = pixel.to_gray()
+        assert isinstance(gray, int)
+
+        hsl = pixel.to_hsl()
+        assert isinstance(hsl, zignal.Hsl)
+
+        # to_rgb conversion
+        rgb = pixel.to_rgb()
+        assert isinstance(rgb, zignal.Rgb)
+        assert rgb.r == 255
