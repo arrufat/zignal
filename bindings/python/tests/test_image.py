@@ -62,3 +62,25 @@ class TestImageSmoke:
         assert (out.rows, out.cols) == (5, 5)
         with pytest.raises(ValueError):
             img.gaussian_blur(0.0)
+
+    def test_blend_api(self):
+        # Test RGBA base blending
+        base = zignal.Image(5, 5, (255, 0, 0), dtype=zignal.Rgba)
+        overlay = zignal.Image(5, 5, (0, 0, 255, 128), dtype=zignal.Rgba)
+        # Blend modifies in place and returns None
+        result = base.blend(overlay, zignal.BlendMode.NORMAL)
+        assert result is None
+        # Basic check that blending occurred
+        pixel = base[2, 2]
+        assert pixel.r < 255  # Red reduced
+        assert pixel.b > 0  # Blue added
+
+        # Test grayscale base blending
+        gray_base = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        overlay = zignal.Image(5, 5, (255, 0, 0, 128), dtype=zignal.Rgba)
+        gray_base.blend(overlay)
+        gray_pixel = gray_base[2, 2]
+        # Grayscale value should have changed from pure 128
+        assert gray_pixel != 128
+        # Should still be grayscale (single value)
+        assert isinstance(gray_pixel, int)

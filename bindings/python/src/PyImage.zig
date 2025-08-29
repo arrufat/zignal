@@ -10,7 +10,7 @@ const Rgba = zignal.Rgba;
 /// format dispatch behind a single type. Start with RGBA-only; add Gray/RGB incrementally.
 pub const PyImage = struct {
     pub const Variant = union(enum) {
-        gray: Image(u8),
+        grayscale: Image(u8),
         rgb: Image(Rgb),
         rgba: Image(Rgba),
     };
@@ -36,7 +36,7 @@ pub const PyImage = struct {
     pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Ownership) ?*PyImage {
         const p = allocator.create(PyImage) catch return null;
         switch (@TypeOf(image)) {
-            Image(u8) => p.* = .{ .data = .{ .gray = image }, .ownership = ownership },
+            Image(u8) => p.* = .{ .data = .{ .grayscale = image }, .ownership = ownership },
             Image(Rgb) => p.* = .{ .data = .{ .rgb = image }, .ownership = ownership },
             Image(Rgba) => p.* = .{ .data = .{ .rgba = image }, .ownership = ownership },
             else => {
@@ -62,7 +62,7 @@ pub const PyImage = struct {
     /// Return the pixel as Rgba regardless of underlying storage, for uniform Python API.
     pub fn getPixelRgba(self: *const PyImage, row: usize, col: usize) Rgba {
         return switch (self.data) {
-            .gray => |img| blk: {
+            .grayscale => |img| blk: {
                 const v = img.at(row, col).*;
                 break :blk Rgba{ .r = v, .g = v, .b = v, .a = 255 };
             },
@@ -77,7 +77,7 @@ pub const PyImage = struct {
     /// Set a pixel from an Rgba value, converting as needed.
     pub fn setPixelRgba(self: *PyImage, row: usize, col: usize, px: Rgba) void {
         switch (self.data) {
-            .gray => |*img| img.at(row, col).* = px.toGray(),
+            .grayscale => |*img| img.at(row, col).* = px.toGray(),
             .rgb => |*img| img.at(row, col).* = Rgb{ .r = px.r, .g = px.g, .b = px.b },
             .rgba => |*img| img.at(row, col).* = px,
         }
@@ -89,9 +89,9 @@ pub const PyImage = struct {
         // The underlying Image type already has a copy method that handles views correctly
         // Note: Image.copy signature is source.copy(destination)
         switch (self.data) {
-            .gray => |dst_img| {
+            .grayscale => |dst_img| {
                 switch (src.data) {
-                    .gray => |src_img| src_img.copy(dst_img), // src.copy(dst)
+                    .grayscale => |src_img| src_img.copy(dst_img), // src.copy(dst)
                     .rgb => |src_img| {
                         // Convert RGB to gray while copying
                         for (0..dst_img.rows) |r| {
@@ -114,7 +114,7 @@ pub const PyImage = struct {
             },
             .rgb => |dst_img| {
                 switch (src.data) {
-                    .gray => |src_img| {
+                    .grayscale => |src_img| {
                         // Convert gray to RGB while copying
                         for (0..dst_img.rows) |r| {
                             for (0..dst_img.cols) |c| {
@@ -137,7 +137,7 @@ pub const PyImage = struct {
             },
             .rgba => |dst_img| {
                 switch (src.data) {
-                    .gray => |src_img| {
+                    .grayscale => |src_img| {
                         // Convert gray to RGBA while copying
                         for (0..dst_img.rows) |r| {
                             for (0..dst_img.cols) |c| {
