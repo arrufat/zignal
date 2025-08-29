@@ -33,6 +33,7 @@ const Allocator = std.mem.Allocator;
 
 const as = @import("../meta.zig").as;
 const channel_ops = @import("channel_ops.zig");
+const Image = @import("../image.zig").Image;
 
 /// Interpolation method for image resizing and sampling
 ///
@@ -72,7 +73,7 @@ pub const InterpolationMethod = union(enum) {
 /// - method: The interpolation method to use
 ///
 /// Returns the interpolated pixel value or null if the coordinates are out of bounds
-pub fn interpolate(comptime T: type, self: anytype, x: f32, y: f32, method: InterpolationMethod) ?T {
+pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: InterpolationMethod) ?T {
     return switch (method) {
         .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y),
         .bilinear => interpolateBilinear(T, self, x, y),
@@ -95,7 +96,7 @@ pub fn interpolate(comptime T: type, self: anytype, x: f32, y: f32, method: Inte
 /// - Scale=1: Uses memcpy for same-size copies
 /// - 2x upscaling: Specialized fast path for bilinear
 /// - RGB/RGBA images: Channel separation for optimized processing
-pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytype, method: InterpolationMethod) !void {
+pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: InterpolationMethod) !void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         // If dimensions match exactly, just copy the data
@@ -109,8 +110,8 @@ pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytyp
     }
 
     // Channel separation for RGB/RGBA types with u8 components
-    if (comptime isRGBType(T)) {
-        const channels = channel_ops.splitRgbChannels(T, self, allocator) catch {
+    if (comptime isRgb(T)) {
+        const channels = channel_ops.splitChannels(T, self, allocator) catch {
             // Fallback to generic implementation on allocation failure
             resizeGeneric(T, self, out, method);
             return;
@@ -119,43 +120,49 @@ pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytyp
 
         // Allocate output channels
         const out_plane_size = out.rows * out.cols;
-        const r_out = allocator.alloc(u8, out_plane_size) catch {
-            resizeGeneric(T, self, out, method);
-            return;
-        };
-        defer allocator.free(r_out);
-        const g_out = allocator.alloc(u8, out_plane_size) catch {
-            resizeGeneric(T, self, out, method);
-            return;
-        };
-        defer allocator.free(g_out);
-        const b_out = allocator.alloc(u8, out_plane_size) catch {
-            resizeGeneric(T, self, out, method);
-            return;
-        };
-        defer allocator.free(b_out);
+        var out_channels: [channels.len][]u8 = undefined;
+        var allocated_count: usize = 0;
+        errdefer {
+            for (0..allocated_count) |i| {
+                allocator.free(out_channels[i]);
+            }
+        }
+
+        // Allocate each output channel
+        for (&out_channels) |*ch| {
+            ch.* = allocator.alloc(u8, out_plane_size) catch {
+                // Free already allocated channels and fallback
+                for (0..allocated_count) |i| {
+                    allocator.free(out_channels[i]);
+                }
+                resizeGeneric(T, self, out, method);
+                return;
+            };
+            allocated_count += 1;
+        }
+        defer for (out_channels) |ch| allocator.free(ch);
 
         // Resize each channel using optimized plane functions
         switch (method) {
             .nearest_neighbor => {
-                channel_ops.resizePlaneNearestU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneNearestU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneNearestU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+                inline for (channels, out_channels) |src_ch, dst_ch| {
+                    channel_ops.resizePlaneNearestU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                }
             },
             .bilinear => {
-                channel_ops.resizePlaneBilinearU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneBilinearU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneBilinearU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+                inline for (channels, out_channels) |src_ch, dst_ch| {
+                    channel_ops.resizePlaneBilinearU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                }
             },
             .bicubic => {
-                channel_ops.resizePlaneBicubicU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneBicubicU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneBicubicU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+                inline for (channels, out_channels) |src_ch, dst_ch| {
+                    channel_ops.resizePlaneBicubicU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                }
             },
             .catmull_rom => {
-                channel_ops.resizePlaneCatmullRomU8(channels[0], r_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneCatmullRomU8(channels[1], g_out, self.rows, self.cols, out.rows, out.cols);
-                channel_ops.resizePlaneCatmullRomU8(channels[2], b_out, self.rows, self.cols, out.rows, out.cols);
+                inline for (channels, out_channels) |src_ch, dst_ch| {
+                    channel_ops.resizePlaneCatmullRomU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                }
             },
             .mitchell, .lanczos => {
                 // Mitchell and Lanczos are more complex, fall back to generic for now
@@ -166,7 +173,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytyp
         }
 
         // Combine channels back
-        channel_ops.mergeRgbChannels(T, self, r_out, g_out, b_out, out);
+        channel_ops.mergeChannels(T, out_channels, out);
         return;
     }
 
@@ -175,7 +182,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: anytype, out: anytyp
 }
 
 /// Generic resize implementation for non-optimized types
-fn resizeGeneric(comptime T: type, self: anytype, out: anytype, method: InterpolationMethod) void {
+fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: InterpolationMethod) void {
     const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
     const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 
@@ -197,7 +204,7 @@ fn resizeGeneric(comptime T: type, self: anytype, out: anytype, method: Interpol
 }
 
 /// Check if a type is an RGB/RGBA type with u8 components
-fn isRGBType(comptime T: type) bool {
+fn isRgb(comptime T: type) bool {
     const type_info = @typeInfo(T);
     if (type_info != .@"struct") return false;
 
@@ -290,7 +297,7 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
 // Generic Interpolation Functions
 // ============================================================================
 
-fn interpolateNearestNeighbor(comptime T: type, self: anytype, x: f32, y: f32) ?T {
+fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     const col: isize = @intFromFloat(@round(x));
     const row: isize = @intFromFloat(@round(y));
 
@@ -298,7 +305,7 @@ fn interpolateNearestNeighbor(comptime T: type, self: anytype, x: f32, y: f32) ?
     return self.at(@intCast(row), @intCast(col)).*;
 }
 
-fn interpolateBilinear(comptime T: type, self: anytype, x: f32, y: f32) ?T {
+fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     const left: isize = @intFromFloat(@floor(x));
     const top: isize = @intFromFloat(@floor(y));
     const right = left + 1;
@@ -342,27 +349,27 @@ fn interpolateBilinear(comptime T: type, self: anytype, x: f32, y: f32) ?T {
     return temp;
 }
 
-fn interpolateBicubic(comptime T: type, self: anytype, x: f32, y: f32) ?T {
+fn interpolateBicubic(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     return interpolateWithKernel(T, self, x, y, 2, bicubicKernel, .{});
 }
 
-fn interpolateCatmullRom(comptime T: type, self: anytype, x: f32, y: f32) ?T {
+fn interpolateCatmullRom(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     return interpolateWithKernel(T, self, x, y, 2, catmullRomKernel, .{});
 }
 
-fn interpolateLanczos(comptime T: type, self: anytype, x: f32, y: f32) ?T {
+fn interpolateLanczos(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     const a: f32 = 3.0; // Lanczos3
     return interpolateWithKernel(T, self, x, y, 3, lanczosKernel, .{a});
 }
 
-fn interpolateMitchell(comptime T: type, self: anytype, x: f32, y: f32, m_b: f32, m_c: f32) ?T {
+fn interpolateMitchell(comptime T: type, self: Image(T), x: f32, y: f32, m_b: f32, m_c: f32) ?T {
     return interpolateWithKernel(T, self, x, y, 2, mitchellKernel, .{ m_b, m_c });
 }
 
 /// Generic kernel-based interpolation function
 fn interpolateWithKernel(
     comptime T: type,
-    self: anytype,
+    self: Image(T),
     x: f32,
     y: f32,
     comptime window_radius: usize,
