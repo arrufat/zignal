@@ -332,7 +332,7 @@ test "insert and extract inverse relationship" {
         rect: Rectangle(f32),
         angle: f32,
         size: usize,
-        method: @import("../../root.zig").InterpolationMethod,
+        method: @import("../../root.zig").Interpolation,
     }{
         .{ .rect = Rectangle(f32).init(10, 10, 50, 50), .angle = 0, .size = 40, .method = .bilinear },
         .{ .rect = Rectangle(f32).init(15, 15, 45, 45), .angle = std.math.pi / 4.0, .size = 30, .method = .bilinear },

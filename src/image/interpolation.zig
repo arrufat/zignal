@@ -46,7 +46,7 @@ const Image = @import("../image.zig").Image;
 /// | Catmull-Rom | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
 /// | Mitchell    | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
 /// | Lanczos3    | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
-pub const InterpolationMethod = union(enum) {
+pub const Interpolation = union(enum) {
     nearest_neighbor,
     bilinear,
     bicubic,
@@ -73,7 +73,7 @@ pub const InterpolationMethod = union(enum) {
 /// - method: The interpolation method to use
 ///
 /// Returns the interpolated pixel value or null if the coordinates are out of bounds
-pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: InterpolationMethod) ?T {
+pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation) ?T {
     return switch (method) {
         .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y),
         .bilinear => interpolateBilinear(T, self, x, y),
@@ -96,7 +96,7 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 /// - Scale=1: Uses memcpy for same-size copies
 /// - 2x upscaling: Specialized fast path for bilinear
 /// - RGB/RGBA images: Channel separation for optimized processing
-pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: InterpolationMethod) !void {
+pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) !void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         // If dimensions match exactly, just copy the data
@@ -182,7 +182,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
 }
 
 /// Generic resize implementation for non-optimized types
-fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: InterpolationMethod) void {
+fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interpolation) void {
     const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
     const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
 

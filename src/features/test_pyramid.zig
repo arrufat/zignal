@@ -37,7 +37,7 @@ pub fn Image(comptime T: type) type {
         }
 
         // Simple resize using nearest neighbor for testing
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: InterpolationMethod) !void {
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) !void {
             _ = allocator;
             _ = method;
 
@@ -56,7 +56,7 @@ pub fn Image(comptime T: type) type {
 }
 
 // Minimal interpolation support
-pub const InterpolationMethod = enum {
+pub const Interpolation = enum {
     nearest_neighbor,
     bilinear,
 };

@@ -414,13 +414,13 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     });
     // Note: BitmapFont.font8x8() returns a cached singleton
 
-    // Generate InterpolationMethod enum
+    // Generate Interpolation enum
     try generateEnumFromMetadata(&stub, .{
-        .name = "InterpolationMethod",
+        .name = "Interpolation",
         .base = "IntEnum",
-        .doc = interpolation_module.interpolation_method_doc,
-        .zig_type = zignal.InterpolationMethod,
-        .value_docs = &interpolation_module.interpolation_method_values,
+        .doc = interpolation_module.interpolation_doc,
+        .zig_type = zignal.Interpolation,
+        .value_docs = &interpolation_module.interpolation_values,
     });
 
     // Generate BlendMode enum
@@ -587,7 +587,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Image as Image,\n");
     try stub.write("    Matrix as Matrix,\n");
     try stub.write("    Canvas as Canvas,\n");
-    try stub.write("    InterpolationMethod as InterpolationMethod,\n");
+    try stub.write("    Interpolation as Interpolation,\n");
     try stub.write("    BlendMode as BlendMode,\n");
     try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");

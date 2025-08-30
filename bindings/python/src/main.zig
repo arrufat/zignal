@@ -78,9 +78,9 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register InterpolationMethod enum
-    interpolation.registerInterpolationMethod(@ptrCast(m)) catch |err| {
-        std.log.err("Failed to register InterpolationMethod: {}", .{err});
+    // Register Interpolation enum
+    interpolation.registerInterpolation(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register Interpolation: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
