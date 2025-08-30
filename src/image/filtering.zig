@@ -1683,6 +1683,15 @@ pub fn Filter(comptime T: type) type {
                                             col_indices[j] = @as(f32, @floatFromInt(c + j));
                                         }
                                         const row_f32 = @as(f32, @floatFromInt(r));
+                                        const row_vec: @Vector(vec_len, f32) = @splat(row_f32);
+
+                                        // Prepare constants for vectorized operations
+                                        const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
+                                        const scale_f32_vec: @Vector(vec_len, f32) = @splat(@as(f32, SCALE));
+                                        const scale_sq_vec: @Vector(vec_len, i32) = @splat(SCALE * SCALE);
+                                        const zero_f32_vec: @Vector(vec_len, f32) = @splat(0);
+                                        const cols_f32_vec: @Vector(vec_len, f32) = @splat(cols_f32);
+                                        const rows_f32_vec: @Vector(vec_len, f32) = @splat(rows_f32);
 
                                         // Sample along the motion line
                                         const num_samples = distance;
@@ -1693,59 +1702,82 @@ pub fn Filter(comptime T: type) type {
 
                                             // Calculate source coordinates for all pixels in vector
                                             const dx_vec: @Vector(vec_len, f32) = @splat(dx);
+                                            const dy_vec: @Vector(vec_len, f32) = @splat(dy);
                                             const src_x_vec = col_indices + dx_vec;
-                                            const src_y = row_f32 + dy;
+                                            const src_y_vec = row_vec + dy_vec;
 
                                             // Vectorized bounds checking
-                                            const zero_vec: @Vector(vec_len, f32) = @splat(0);
-                                            const cols_vec: @Vector(vec_len, f32) = @splat(cols_f32);
-                                            const in_bounds_x = (src_x_vec >= zero_vec) & (src_x_vec < cols_vec);
-                                            const in_bounds_y = src_y >= 0 and src_y < rows_f32;
+                                            const in_bounds_x = (src_x_vec >= zero_f32_vec) & (src_x_vec < cols_f32_vec);
+                                            const in_bounds_y = (src_y_vec >= zero_f32_vec) & (src_y_vec < rows_f32_vec);
+                                            const in_bounds = in_bounds_x & in_bounds_y;
 
-                                            if (!in_bounds_y) continue;
+                                            // Skip if all pixels are out of bounds
+                                            if (!@reduce(.Or, in_bounds)) continue;
 
-                                            // Process pixels that are in bounds
-                                            // For simplicity, we still need to iterate but now we can batch operations
+                                            // Vectorized floor operations for coordinates
+                                            const x0_f32_vec = @floor(src_x_vec);
+                                            const y0_f32_vec = @floor(src_y_vec);
+
+                                            // Vectorized fractional parts (scaled to integer)
+                                            const fx_vec = @as(@Vector(vec_len, i32), @intFromFloat(scale_f32_vec * (src_x_vec - x0_f32_vec)));
+                                            const fy_vec = @as(@Vector(vec_len, i32), @intFromFloat(scale_f32_vec * (src_y_vec - y0_f32_vec)));
+                                            const fx_inv_vec = scale_vec - fx_vec;
+                                            const fy_inv_vec = scale_vec - fy_vec;
+
+                                            // Convert to integer coordinates
+                                            const x0_ivec = @as(@Vector(vec_len, i32), @intFromFloat(x0_f32_vec));
+                                            const y0_ivec = @as(@Vector(vec_len, i32), @intFromFloat(y0_f32_vec));
+
+                                            // Gather pixels for bilinear interpolation
+                                            // Note: This is still a bottleneck without hardware gather support
+                                            var p00_vec: @Vector(vec_len, i32) = @splat(0);
+                                            var p01_vec: @Vector(vec_len, i32) = @splat(0);
+                                            var p10_vec: @Vector(vec_len, i32) = @splat(0);
+                                            var p11_vec: @Vector(vec_len, i32) = @splat(0);
+
                                             for (0..vec_len) |j| {
-                                                if (!in_bounds_x[j]) continue;
+                                                if (!in_bounds[j]) continue;
 
-                                                const src_x = src_x_vec[j];
-
-                                                // Bilinear interpolation with integer arithmetic
-                                                const x0 = @as(usize, @intFromFloat(@floor(src_x)));
-                                                const y0 = @as(usize, @intFromFloat(@floor(src_y)));
+                                                const x0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.cols - 1)), x0_ivec[j]))));
+                                                const y0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.rows - 1)), y0_ivec[j]))));
                                                 const x1 = @min(x0 + 1, self.cols - 1);
                                                 const y1 = @min(y0 + 1, self.rows - 1);
 
-                                                // Convert fractional parts to integer weights
-                                                const fx = @as(i32, @intFromFloat(SCALE * (src_x - @as(f32, @floatFromInt(x0)))));
-                                                const fy = @as(i32, @intFromFloat(SCALE * (src_y - @as(f32, @floatFromInt(y0)))));
-                                                const fx_inv = SCALE - fx;
-                                                const fy_inv = SCALE - fy;
-
-                                                const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
-                                                const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
-                                                const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
-                                                const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
-
-                                                // Bilinear interpolation
-                                                const value = @divTrunc(fx_inv * fy_inv * p00 +
-                                                    fx * fy_inv * p01 +
-                                                    fx_inv * fy * p10 +
-                                                    fx * fy * p11, SCALE * SCALE);
-
-                                                sum_vec[j] += value;
-                                                weight_vec[j] += 1;
+                                                p00_vec[j] = @as(i32, src_channel[y0 * self.cols + x0]);
+                                                p01_vec[j] = @as(i32, src_channel[y0 * self.cols + x1]);
+                                                p10_vec[j] = @as(i32, src_channel[y1 * self.cols + x0]);
+                                                p11_vec[j] = @as(i32, src_channel[y1 * self.cols + x1]);
                                             }
+
+                                            // Fully vectorized bilinear interpolation
+                                            const interp_vec = @divTrunc(fx_inv_vec * fy_inv_vec * p00_vec +
+                                                fx_vec * fy_inv_vec * p01_vec +
+                                                fx_inv_vec * fy_vec * p10_vec +
+                                                fx_vec * fy_vec * p11_vec, scale_sq_vec);
+
+                                            // Masked accumulation based on bounds
+                                            const in_bounds_mask = @select(i32, in_bounds, @as(@Vector(vec_len, i32), @splat(1)), @as(@Vector(vec_len, i32), @splat(0)));
+                                            sum_vec += interp_vec * in_bounds_mask;
+                                            weight_vec += in_bounds_mask;
                                         }
 
-                                        // Store results
+                                        // Vectorized averaging with safe division
+                                        const zero_weight_mask = weight_vec == @as(@Vector(vec_len, i32), @splat(0));
+                                        const safe_weights = @select(i32, zero_weight_mask, @as(@Vector(vec_len, i32), @splat(1)), weight_vec);
+
+                                        // Vectorized rounding division
+                                        const half_weights = @divTrunc(safe_weights, @as(@Vector(vec_len, i32), @splat(2)));
+                                        const averaged = @divTrunc(sum_vec + half_weights, safe_weights);
+
+                                        // Vectorized clamping to u8 range
+                                        const clamped = @min(@as(@Vector(vec_len, i32), @splat(255)), @max(@as(@Vector(vec_len, i32), @splat(0)), averaged));
+
+                                        // Store results with fallback for zero weights
                                         for (0..vec_len) |j| {
-                                            const result = if (weight_vec[j] > 0)
-                                                @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum_vec[j] + @divTrunc(weight_vec[j], 2), weight_vec[j])))))
+                                            dst_channel[r * self.cols + c + j] = if (zero_weight_mask[j])
+                                                src_channel[r * self.cols + c + j]
                                             else
-                                                src_channel[r * self.cols + c + j];
-                                            dst_channel[r * self.cols + c + j] = result;
+                                                @as(u8, @intCast(clamped[j]));
                                         }
                                     }
 
