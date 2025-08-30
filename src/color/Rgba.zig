@@ -3,7 +3,7 @@ const std = @import("std");
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const blendColors = @import("blending.zig").blendColors;
-const BlendMode = @import("blending.zig").BlendMode;
+const Blending = @import("blending.zig").Blending;
 const Hsl = @import("Hsl.zig");
 const Hsv = @import("Hsv.zig");
 const Lab = @import("Lab.zig");
@@ -132,7 +132,7 @@ pub const Rgba = packed struct {
 
     /// Alpha blends the given RGBA color onto this RGBA color using the specified blend mode.
     /// Returns a new blended color.
-    pub fn blend(self: Rgba, overlay: Rgba, mode: BlendMode) Rgba {
+    pub fn blend(self: Rgba, overlay: Rgba, mode: Blending) Rgba {
         return blendColors(self, overlay, mode);
     }
 };

@@ -6,7 +6,7 @@
 
 const std = @import("std");
 
-const BlendMode = @import("blending.zig").BlendMode;
+const Blending = @import("blending.zig").Blending;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -101,6 +101,6 @@ pub fn toYcbcr(self: Oklab) Ycbcr {
 }
 
 /// Alpha blends the given RGBA color onto this Oklab color and returns the result.
-pub fn blend(self: Oklab, overlay: Rgba, mode: BlendMode) Oklab {
+pub fn blend(self: Oklab, overlay: Rgba, mode: Blending) Oklab {
     return self.toRgb().blend(overlay, mode).toOklab();
 }

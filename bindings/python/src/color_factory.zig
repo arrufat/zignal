@@ -14,7 +14,7 @@ const convertWithValidation = @import("py_utils.zig").convertWithValidation;
 const createColorPyObject = @import("color.zig").createColorPyObject;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
-const convertToZigBlendMode = @import("blending.zig").convertToZigBlendMode;
+const convertToZigBlending = @import("blending.zig").convertToZigBlending;
 
 /// Automatically generate documentation from type name for color conversion methods
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
@@ -218,7 +218,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     \\
                     \\## Parameters
                     \\- `overlay`: An `Rgba` color or tuple (r, g, b, a) with values 0-255
-                    \\- `mode`: `BlendMode` enum value (optional, defaults to `BlendMode.NORMAL`)
+                    \\- `mode`: `Blending` enum value (optional, defaults to `Blending.NORMAL`)
                     \\
                     \\## Examples
                     \\```python
@@ -226,7 +226,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     \\overlay = zignal.Rgba(0, 255, 0, 128)
                     \\
                     \\result = base.blend(overlay)
-                    \\result = base.blend(overlay, mode=zignal.BlendMode.MULTIPLY)
+                    \\result = base.blend(overlay, mode=zignal.Blending.MULTIPLY)
                     \\```
                     ,
                 };
@@ -757,14 +757,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 return null;
             }
 
-            // Convert mode to Zig BlendMode (use NORMAL if not provided)
+            // Convert mode to Zig Blending (use NORMAL if not provided)
             const mode = if (mode_obj != null)
-                convertToZigBlendMode(mode_obj) catch {
-                    // Error already set by convertToZigBlendMode
+                convertToZigBlending(mode_obj) catch {
+                    // Error already set by convertToZigBlending
                     return null;
                 }
             else
-                zignal.BlendMode.normal;
+                zignal.Blending.normal;
 
             // Convert self to Zig color
             const zig_color = objectToZigColor(self);

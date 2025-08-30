@@ -11,7 +11,7 @@ const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
 
 /// Available blending modes for color composition
-pub const BlendMode = enum {
+pub const Blending = enum {
     /// Standard alpha blending. The overlay color is painted on top of the base with transparency.
     normal,
 
@@ -63,7 +63,7 @@ pub const BlendMode = enum {
 /// Blends two RGBA colors using the specified blend mode with proper alpha compositing.
 /// Both colors' alpha channels are taken into account for mathematically correct blending.
 /// Returns a new RGBA color with the blended result.
-pub fn blendColors(base: Rgba, overlay: Rgba, mode: BlendMode) Rgba {
+pub fn blendColors(base: Rgba, overlay: Rgba, mode: Blending) Rgba {
     // Early return for fully transparent overlay
     if (overlay.a == 0) return base;
 

@@ -148,9 +148,9 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register BlendMode enum
-    blending.registerBlendMode(@ptrCast(m)) catch |err| {
-        std.log.err("Failed to register BlendMode: {}", .{err});
+    // Register Blending enum
+    blending.registerBlending(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register Blending: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

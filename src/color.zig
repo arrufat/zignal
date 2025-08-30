@@ -9,7 +9,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const blending = @import("color/blending.zig");
-pub const BlendMode = blending.BlendMode;
+pub const Blending = blending.Blending;
 pub const blendColors = blending.blendColors;
 const conversions = @import("color/conversions.zig");
 pub const convertColor = conversions.convertColor;

@@ -68,7 +68,7 @@ class TestImageSmoke:
         base = zignal.Image(5, 5, (255, 0, 0), dtype=zignal.Rgba)
         overlay = zignal.Image(5, 5, (0, 0, 255, 128), dtype=zignal.Rgba)
         # Blend modifies in place and returns None
-        result = base.blend(overlay, zignal.BlendMode.NORMAL)
+        result = base.blend(overlay, zignal.Blending.NORMAL)
         assert result is None
         # Basic check that blending occurred
         pixel = base[2, 2]
