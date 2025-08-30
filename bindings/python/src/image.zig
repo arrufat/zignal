@@ -2,6 +2,7 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const InterpolationMethod = zignal.InterpolationMethod;
+const MotionBlur = zignal.MotionBlur;
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
@@ -2111,6 +2112,138 @@ fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     return null;
 }
 
+const image_motion_blur_doc =
+    \\Apply motion blur effect to the image.
+    \\
+    \\Motion blur simulates camera or object movement during exposure.
+    \\Three types of motion blur are supported:
+    \\- `MotionBlurLinear`
+    \\- `MotionBlurZoom`
+    \\- `MotionBlurSpin`
+    \\
+    \\## Examples
+    \\```python
+    \\from zignal import Image, MotionBlurLinear, MotionBlurZoom, MotionBlurSpin
+    \\import math
+    \\
+    \\img = Image.load("photo.png")
+    \\
+    \\# Linear motion blur examples
+    \\horizontal_blur = img.motion_blur(MotionBlurLinear(angle=0, distance=30))  # Camera panning
+    \\vertical_blur = img.motion_blur(MotionBlurLinear(angle=math.pi/2, distance=20))  # Camera shake
+    \\diagonal_blur = img.motion_blur(MotionBlurLinear(angle=math.pi/4, distance=25))  # Diagonal motion
+    \\
+    \\# Radial zoom blur examples
+    \\center_zoom = img.motion_blur(MotionBlurZoom(center=(0.5, 0.5), strength=0.7))  # Center zoom burst
+    \\off_center_zoom = img.motion_blur(MotionBlurZoom(center=(0.33, 0.67), strength=0.5))  # Rule of thirds
+    \\subtle_zoom = img.motion_blur(MotionBlurZoom(strength=0.3))  # Subtle effect with defaults
+    \\
+    \\# Radial spin blur examples
+    \\center_spin = img.motion_blur(MotionBlurSpin(center=(0.5, 0.5), strength=0.5))  # Center rotation
+    \\swirl_effect = img.motion_blur(MotionBlurSpin(center=(0.3, 0.3), strength=0.6))  # Off-center swirl
+    \\strong_spin = img.motion_blur(MotionBlurSpin(strength=0.8))  # Strong spin with defaults
+    \\```
+    \\
+    \\## Notes
+    \\- Linear blur preserves image dimensions
+    \\- Radial effects use bilinear interpolation for smooth results
+    \\- Strength values closer to 1.0 produce stronger blur effects
+;
+
+fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const motion_blur = @import("motion_blur.zig");
+
+    // Parse the single argument (config object)
+    var config_obj: ?*c.PyObject = undefined;
+    if (c.PyArg_ParseTuple(args, "O", &config_obj) == 0) {
+        return null;
+    }
+
+    // Check the type of config object and extract parameters
+    const type_obj = c.Py_TYPE(config_obj);
+    const type_name = type_obj.*.tp_name;
+
+    // Helper to compare type names
+    const is_linear = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurLinear");
+    const is_radial_zoom = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurZoom");
+    const is_radial_spin = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurSpin");
+
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+
+                if (is_linear) {
+                    // Extract Linear parameters
+                    const linear = @as(*motion_blur.LinearObject, @ptrCast(config_obj));
+                    const blur_config: MotionBlur = .{
+                        .linear = .{
+                            .angle = @floatCast(linear.angle),
+                            .distance = @intCast(linear.distance),
+                        },
+                    };
+                    img.motionBlur(allocator, blur_config, &out) catch {
+                        c.Py_DECREF(py_obj);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                        return null;
+                    };
+                } else if (is_radial_zoom) {
+                    // Extract RadialZoom parameters
+                    const radial = @as(*motion_blur.RadialZoomObject, @ptrCast(config_obj));
+                    const blur_config: MotionBlur = .{
+                        .radial_zoom = .{
+                            .center_x = @floatCast(radial.center_x),
+                            .center_y = @floatCast(radial.center_y),
+                            .strength = @floatCast(radial.strength),
+                        },
+                    };
+                    img.motionBlur(allocator, blur_config, &out) catch {
+                        c.Py_DECREF(py_obj);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                        return null;
+                    };
+                } else if (is_radial_spin) {
+                    // Extract RadialSpin parameters
+                    const radial = @as(*motion_blur.RadialSpinObject, @ptrCast(config_obj));
+                    const blur_config: MotionBlur = .{
+                        .radial_spin = .{
+                            .center_x = @floatCast(radial.center_x),
+                            .center_y = @floatCast(radial.center_y),
+                            .strength = @floatCast(radial.strength),
+                        },
+                    };
+                    img.motionBlur(allocator, blur_config, &out) catch {
+                        c.Py_DECREF(py_obj);
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                        return null;
+                    };
+                } else {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_TypeError, "config must be MotionBlurLinear, MotionBlurZoom, or MotionBlurSpin");
+                    return null;
+                }
+
+                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    return null;
+                };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
+    }
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 const image_sobel_doc =
     \\Apply Sobel edge detection and return the gradient magnitude.
     \\
@@ -3390,6 +3523,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_gaussian_blur_doc,
         .params = "self, sigma: float",
+        .returns = "Image",
+    },
+    .{
+        .name = "motion_blur",
+        .meth = @ptrCast(&image_motion_blur),
+        .flags = c.METH_VARARGS,
+        .doc = image_motion_blur_doc,
+        .params = "self, config: MotionBlurLinear | MotionBlurZoom | MotionBlurSpin",
         .returns = "Image",
     },
     .{

@@ -523,53 +523,6 @@ pub fn Image(comptime T: type) type {
             return Filter(T).sobel(self, allocator, out);
         }
 
-        /// Motion blur type for unified API.
-        /// Provides different types of motion blur effects to simulate camera or object movement.
-        pub const MotionBlur = union(enum) {
-            /// Linear motion blur simulates straight-line camera or object movement.
-            /// Creates a directional blur effect along the specified angle.
-            linear: struct {
-                /// Direction of motion in radians.
-                /// - 0 = horizontal (left-right)
-                /// - π/2 = vertical (up-down)
-                /// - π/4 = diagonal (45 degrees)
-                angle: f32,
-                /// Length of the blur effect in pixels.
-                /// Larger values create more pronounced motion trails.
-                distance: usize,
-            },
-            /// Radial zoom blur simulates camera zoom or dolly movement.
-            /// Creates a blur effect that radiates outward from or inward to a center point.
-            radial_zoom: struct {
-                /// X coordinate of the zoom center (0.0 to 1.0, normalized).
-                /// 0.5 = center of image horizontally.
-                center_x: f32,
-                /// Y coordinate of the zoom center (0.0 to 1.0, normalized).
-                /// 0.5 = center of image vertically.
-                center_y: f32,
-                /// Intensity of the zoom blur (0.0 to 1.0).
-                /// - 0.0 = no blur
-                /// - 1.0 = maximum blur
-                /// Typically use 0.3-0.7 for realistic effects.
-                strength: f32,
-            },
-            /// Radial spin blur simulates rotational camera or object movement.
-            /// Creates a circular blur effect around a center point, like a spinning wheel.
-            radial_spin: struct {
-                /// X coordinate of the rotation center (0.0 to 1.0, normalized).
-                /// 0.5 = center of image horizontally.
-                center_x: f32,
-                /// Y coordinate of the rotation center (0.0 to 1.0, normalized).
-                /// 0.5 = center of image vertically.
-                center_y: f32,
-                /// Intensity of the spin blur (0.0 to 1.0).
-                /// - 0.0 = no blur
-                /// - 1.0 = maximum blur
-                /// Controls the arc length of the circular blur.
-                strength: f32,
-            },
-        };
-
         /// Applies motion blur effect to the image.
         /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
         ///
@@ -727,6 +680,53 @@ pub fn Image(comptime T: type) type {
         }
     };
 }
+
+/// Motion blur type for unified API.
+/// Provides different types of motion blur effects to simulate camera or object movement.
+pub const MotionBlur = union(enum) {
+    /// Linear motion blur simulates straight-line camera or object movement.
+    /// Creates a directional blur effect along the specified angle.
+    linear: struct {
+        /// Direction of motion in radians.
+        /// - 0 = horizontal (left-right)
+        /// - π/2 = vertical (up-down)
+        /// - π/4 = diagonal (45 degrees)
+        angle: f32,
+        /// Length of the blur effect in pixels.
+        /// Larger values create more pronounced motion trails.
+        distance: usize,
+    },
+    /// Radial zoom blur simulates camera zoom or dolly movement.
+    /// Creates a blur effect that radiates outward from or inward to a center point.
+    radial_zoom: struct {
+        /// X coordinate of the zoom center (0.0 to 1.0, normalized).
+        /// 0.5 = center of image horizontally.
+        center_x: f32,
+        /// Y coordinate of the zoom center (0.0 to 1.0, normalized).
+        /// 0.5 = center of image vertically.
+        center_y: f32,
+        /// Intensity of the zoom blur (0.0 to 1.0).
+        /// - 0.0 = no blur
+        /// - 1.0 = maximum blur
+        /// Typically use 0.3-0.7 for realistic effects.
+        strength: f32,
+    },
+    /// Radial spin blur simulates rotational camera or object movement.
+    /// Creates a circular blur effect around a center point, like a spinning wheel.
+    radial_spin: struct {
+        /// X coordinate of the rotation center (0.0 to 1.0, normalized).
+        /// 0.5 = center of image horizontally.
+        center_x: f32,
+        /// Y coordinate of the rotation center (0.0 to 1.0, normalized).
+        /// 0.5 = center of image vertically.
+        center_y: f32,
+        /// Intensity of the spin blur (0.0 to 1.0).
+        /// - 0.0 = no blur
+        /// - 1.0 = maximum blur
+        /// Controls the arc length of the circular blur.
+        strength: f32,
+    },
+};
 
 // Run all tests
 test {

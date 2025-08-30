@@ -1922,15 +1922,18 @@ pub fn Filter(comptime T: type) type {
                             const dx = x - cx;
                             const dy = dy_from_center; // Use precomputed value
 
-                            // For zoom blur, we don't need angle; for spin we need distance
+                            // Calculate distance for both zoom and spin blur
                             const dist_sq = dx * dx + dy * dy;
-                            const distance = if (blur_type == .spin or dist_sq == 0) @sqrt(dist_sq) else 0;
+                            const distance = @sqrt(dist_sq);
 
                             var sum: f32 = 0;
                             var count: f32 = 0;
 
-                            // Number of samples based on distance and strength
-                            const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
+                            // Number of samples based on strength (and distance for spin)
+                            const num_samples = if (blur_type == .zoom)
+                                @as(usize, @intFromFloat(@max(2, @min(@as(f32, max_samples), clamped_strength * @as(f32, max_samples)))))
+                            else
+                                @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
 
                             for (0..num_samples) |i| {
                                 const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_samples));
@@ -2018,15 +2021,18 @@ pub fn Filter(comptime T: type) type {
                                     const dx = x - cx;
                                     const dy = dy_from_center; // Use precomputed value
 
-                                    // For zoom blur, we don't need angle; for spin we need distance
+                                    // Calculate distance for both zoom and spin blur
                                     const dist_sq = dx * dx + dy * dy;
-                                    const distance = if (blur_type == .spin or dist_sq == 0) @sqrt(dist_sq) else 0;
+                                    const distance = @sqrt(dist_sq);
 
                                     var sum: i32 = 0;
                                     var weight_sum: i32 = 0;
 
-                                    // Number of samples based on distance and strength
-                                    const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
+                                    // Number of samples based on strength (and distance for spin)
+                                    const num_samples = if (blur_type == .zoom)
+                                        @as(usize, @intFromFloat(@max(2, @min(@as(f32, max_samples), clamped_strength * @as(f32, max_samples)))))
+                                    else
+                                        @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
 
                                     for (0..num_samples) |i| {
                                         const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_samples));

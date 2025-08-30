@@ -2,6 +2,7 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 
+const blending = @import("blending.zig");
 const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const ImageObject = @import("image.zig").ImageObject;
@@ -9,7 +10,6 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const PyImageMod = @import("PyImage.zig");
 const PyImage = PyImageMod.PyImage;
-const blending = @import("blending.zig");
 
 // Proxy object layouts
 const RgbPixelProxy = extern struct {
@@ -480,7 +480,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             inline for (color_registry.color_types) |TargetColorType| {
                 // Skip self-conversion - use .item() instead
                 if (TargetColorType == ColorType) continue;
-                
+
                 const method_name = comptime getConversionMethodName(TargetColorType);
 
                 methods[index] = c.PyMethodDef{

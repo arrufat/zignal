@@ -11,6 +11,7 @@ const fdm = @import("fdm.zig");
 const image = @import("image.zig");
 const pixel_proxy = @import("pixel_proxy.zig");
 const matrix = @import("matrix.zig");
+const motion_blur = @import("motion_blur.zig");
 const interpolation = @import("interpolation.zig");
 const optimization = @import("optimization.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
@@ -80,6 +81,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register InterpolationMethod enum
     interpolation.registerInterpolationMethod(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register InterpolationMethod: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register MotionBlur classes
+    motion_blur.registerMotionBlur(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register MotionBlur: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
