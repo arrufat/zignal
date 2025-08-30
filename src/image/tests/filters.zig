@@ -881,7 +881,7 @@ test "linearMotionBlur horizontal" {
     }
 
     var blurred: Image(u8) = .empty;
-    try image.linearMotionBlur(std.testing.allocator, 0, 3, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Edge should be blurred horizontally
@@ -907,7 +907,7 @@ test "linearMotionBlur vertical" {
     }
 
     var blurred: Image(u8) = .empty;
-    try image.linearMotionBlur(std.testing.allocator, std.math.pi / 2.0, 3, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 3 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Edge should be blurred vertically
@@ -930,7 +930,7 @@ test "linearMotionBlur diagonal" {
     image.at(2, 2).* = 255;
 
     var blurred: Image(u8) = .empty;
-    try image.linearMotionBlur(std.testing.allocator, std.math.pi / 4.0, 3, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 3 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Should create diagonal streak
@@ -952,7 +952,7 @@ test "linearMotionBlur zero distance" {
     }
 
     var blurred: Image(u8) = .empty;
-    try image.linearMotionBlur(std.testing.allocator, 0, 0, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 0 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Should be identical to original
@@ -972,7 +972,7 @@ test "linearMotionBlur RGB" {
     image.at(2, 2).* = .{ .r = 255, .g = 128, .b = 64 };
 
     var blurred: Image(Rgb) = .empty;
-    try image.linearMotionBlur(std.testing.allocator, 0, 3, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Color should be preserved but spread
@@ -999,9 +999,8 @@ test "radialMotionBlur zoom" {
         }
     }
 
-    const RadialBlurType = @TypeOf(image).RadialBlurType;
     var blurred: Image(u8) = .empty;
-    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0.5, RadialBlurType.zoom, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Ring should be blurred radially
@@ -1021,9 +1020,8 @@ test "radialMotionBlur spin" {
     for (image.data) |*pixel| pixel.* = 0;
     image.at(2, 4).* = 255;
 
-    const RadialBlurType = @TypeOf(image).RadialBlurType;
     var blurred: Image(u8) = .empty;
-    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0.5, RadialBlurType.spin, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Should create arc/spin pattern
@@ -1049,9 +1047,8 @@ test "radialMotionBlur zero strength" {
         }
     }
 
-    const RadialBlurType = @TypeOf(image).RadialBlurType;
     var blurred: Image(u8) = .empty;
-    try image.radialMotionBlur(std.testing.allocator, 0.5, 0.5, 0, RadialBlurType.zoom, &blurred);
+    try image.motionBlur(std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0 } }, &blurred);
     defer blurred.deinit(std.testing.allocator);
 
     // Should be identical to original
