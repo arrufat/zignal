@@ -4,7 +4,7 @@
 const std = @import("std");
 
 const blendColors = @import("blending.zig").blendColors;
-const BlendMode = @import("blending.zig").BlendMode;
+const Blending = @import("blending.zig").Blending;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -127,7 +127,7 @@ pub fn toYcbcr(self: Rgb) Ycbcr {
 
 /// Alpha blends the given RGBA color onto this RGB color using the specified blend mode.
 /// Returns a new blended color.
-pub fn blend(self: Rgb, overlay: Rgba, mode: BlendMode) Rgb {
+pub fn blend(self: Rgb, overlay: Rgba, mode: Blending) Rgb {
     const blended = blendColors(self.toRgba(255), overlay, mode);
     return .{ .r = blended.r, .g = blended.g, .b = blended.b };
 }

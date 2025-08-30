@@ -34,11 +34,11 @@ def test_equality_duck_typing():
 
 def test_blend_mode_and_blend_smoke():
     # Enum available and usable
-    assert hasattr(zignal, "BlendMode")
+    assert hasattr(zignal, "Blending")
     base = zignal.Rgb(100, 100, 100)
-    res = base.blend(zignal.Rgba(200, 50, 150, 128), zignal.BlendMode.NORMAL)
+    res = base.blend(zignal.Rgba(200, 50, 150, 128), zignal.Blending.NORMAL)
     assert isinstance(res, zignal.Rgb)
 
     # Tuple overlay works
-    res2 = base.blend((200, 50, 150, 128), zignal.BlendMode.MULTIPLY)
+    res2 = base.blend((200, 50, 150, 128), zignal.Blending.MULTIPLY)
     assert isinstance(res2, zignal.Rgb)

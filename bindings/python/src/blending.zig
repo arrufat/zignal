@@ -1,12 +1,12 @@
-//! BlendMode enum for color blending operations
+//! Blending enum for color blending operations
 
 const zignal = @import("zignal");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-// Documentation for the BlendMode enum (used at runtime and for stub generation)
-pub const blend_mode_doc =
+// Documentation for the Blending enum (used at runtime and for stub generation)
+pub const blending_doc =
     \\Blending modes for color composition.
     \\
     \\## Overview
@@ -36,9 +36,9 @@ pub const blend_mode_doc =
     \\overlay = zignal.Rgba(200, 50, 150, 128)
     \\
     \\# Apply different blend modes
-    \\normal = base.blend(overlay, zignal.BlendMode.NORMAL)
-    \\multiply = base.blend(overlay, zignal.BlendMode.MULTIPLY)
-    \\screen = base.blend(overlay, zignal.BlendMode.SCREEN)
+    \\normal = base.blend(overlay, zignal.Blending.NORMAL)
+    \\multiply = base.blend(overlay, zignal.Blending.MULTIPLY)
+    \\screen = base.blend(overlay, zignal.Blending.SCREEN)
     \\```
     \\
     \\## Notes
@@ -48,7 +48,7 @@ pub const blend_mode_doc =
 ;
 
 // Per-value documentation for stub generation
-pub const blend_mode_values = [_]stub_metadata.EnumValueDoc{
+pub const blending_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "NORMAL", .doc = "Standard alpha blending with transparency" },
     .{ .name = "MULTIPLY", .doc = "Darkens by multiplying colors" },
     .{ .name = "SCREEN", .doc = "Lightens by inverting, multiplying, inverting" },
@@ -63,8 +63,8 @@ pub const blend_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "EXCLUSION", .doc = "Like difference but with lower contrast" },
 };
 
-// Register the BlendMode enum
-pub fn registerBlendMode(module: *c.PyObject) !void {
+// Register the Blending enum
+pub fn registerBlending(module: *c.PyObject) !void {
     // Create the enum using Python's enum module
     const enum_module = c.PyImport_ImportModule("enum") orelse return error.ImportFailed;
     defer c.Py_DECREF(enum_module);
@@ -76,7 +76,7 @@ pub fn registerBlendMode(module: *c.PyObject) !void {
     const values = c.PyDict_New() orelse return error.DictCreationFailed;
     defer c.Py_DECREF(values);
 
-    // Add enum values - must match the order in zignal.BlendMode
+    // Add enum values - must match the order in zignal.Blending
     const enum_values = .{
         .{ "NORMAL", 0 },
         .{ "MULTIPLY", 1 },
@@ -100,14 +100,14 @@ pub fn registerBlendMode(module: *c.PyObject) !void {
         }
     }
 
-    // Create the enum class: IntEnum('BlendMode', values)
-    const args = c.PyTuple_Pack(2, c.PyUnicode_FromString("BlendMode"), values) orelse return error.TupleCreationFailed;
+    // Create the enum class: IntEnum('Blending', values)
+    const args = c.PyTuple_Pack(2, c.PyUnicode_FromString("Blending"), values) orelse return error.TupleCreationFailed;
     defer c.Py_DECREF(args);
 
     const blend_mode = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
 
     // Add docstring to the enum
-    const doc_str = c.PyUnicode_FromString(blend_mode_doc) orelse return error.DocStringFailed;
+    const doc_str = c.PyUnicode_FromString(blending_doc) orelse return error.DocStringFailed;
     if (c.PyObject_SetAttrString(blend_mode, "__doc__", doc_str) < 0) {
         c.Py_DECREF(doc_str);
         c.Py_DECREF(blend_mode);
@@ -125,21 +125,21 @@ pub fn registerBlendMode(module: *c.PyObject) !void {
     c.Py_DECREF(module_name);
 
     // Add to module
-    if (c.PyModule_AddObject(module, "BlendMode", blend_mode) < 0) {
+    if (c.PyModule_AddObject(module, "Blending", blend_mode) < 0) {
         c.Py_DECREF(blend_mode);
         return error.ModuleAddFailed;
     }
 }
 
-/// Convert Python BlendMode enum value to Zig enum
-pub fn convertToZigBlendMode(py_obj: *c.PyObject) !zignal.BlendMode {
+/// Convert Python Blending enum value to Zig enum
+pub fn convertToZigBlending(py_obj: *c.PyObject) !zignal.Blending {
     // Check if it's an integer or can be converted to one
     const value = c.PyLong_AsLong(py_obj);
     if (value == -1 and c.PyErr_Occurred() != null) {
         c.PyErr_Clear();
         // Try to get the value attribute if it's an enum member
         const value_attr = c.PyObject_GetAttrString(py_obj, "value") orelse {
-            c.PyErr_SetString(c.PyExc_TypeError, "BlendMode must be an integer or enum member");
+            c.PyErr_SetString(c.PyExc_TypeError, "Blending must be an integer or enum member");
             return error.InvalidType;
         };
         defer c.Py_DECREF(value_attr);
@@ -148,12 +148,12 @@ pub fn convertToZigBlendMode(py_obj: *c.PyObject) !zignal.BlendMode {
             c.PyErr_SetString(c.PyExc_TypeError, "Failed to extract enum value");
             return error.InvalidType;
         }
-        return intToBlendMode(enum_value);
+        return intToBlending(enum_value);
     }
-    return intToBlendMode(value);
+    return intToBlending(value);
 }
 
-fn intToBlendMode(value: c_long) !zignal.BlendMode {
+fn intToBlending(value: c_long) !zignal.Blending {
     return switch (value) {
         0 => .normal,
         1 => .multiply,
@@ -168,7 +168,7 @@ fn intToBlendMode(value: c_long) !zignal.BlendMode {
         10 => .difference,
         11 => .exclusion,
         else => {
-            c.PyErr_SetString(c.PyExc_ValueError, "Invalid BlendMode value");
+            c.PyErr_SetString(c.PyExc_ValueError, "Invalid Blending value");
             return error.InvalidValue;
         },
     };

@@ -318,12 +318,12 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
                 // Parse blend mode
                 const mode = if (mode_obj != null)
-                    blending.convertToZigBlendMode(mode_obj.?) catch {
+                    blending.convertToZigBlending(mode_obj.?) catch {
                         // Error already set
                         return null;
                     }
                 else
-                    zignal.BlendMode.normal;
+                    zignal.Blending.normal;
 
                 // Get current pixel, blend, and write back
                 const current = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));

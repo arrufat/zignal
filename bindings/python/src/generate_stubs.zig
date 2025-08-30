@@ -162,7 +162,7 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
 
     // Add blend method if the type has it
     if (@hasDecl(ColorType, "blend")) {
-        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: BlendMode = BlendMode.NORMAL) -> ");
+        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> ");
         try stub.writef("{s}: ...\n", .{class_name});
     }
 
@@ -423,13 +423,13 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .value_docs = &interpolation_module.interpolation_values,
     });
 
-    // Generate BlendMode enum
+    // Generate Blending enum
     try generateEnumFromMetadata(&stub, .{
-        .name = "BlendMode",
+        .name = "Blending",
         .base = "IntEnum",
-        .doc = blending_module.blend_mode_doc,
-        .zig_type = zignal.BlendMode,
-        .value_docs = &blending_module.blend_mode_values,
+        .doc = blending_module.blending_doc,
+        .zig_type = zignal.Blending,
+        .value_docs = &blending_module.blending_values,
     });
 
     // Generate DrawMode enum
@@ -588,7 +588,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Matrix as Matrix,\n");
     try stub.write("    Canvas as Canvas,\n");
     try stub.write("    Interpolation as Interpolation,\n");
-    try stub.write("    BlendMode as BlendMode,\n");
+    try stub.write("    Blending as Blending,\n");
     try stub.write("    DrawMode as DrawMode,\n");
     try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");
     try stub.write("    Assignment as Assignment,\n");

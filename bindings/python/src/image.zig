@@ -2299,7 +2299,7 @@ const image_blend_doc =
     \\
     \\## Parameters
     \\- `overlay` (Image): Image to blend onto this image
-    \\- `mode` (BlendMode, optional): Blending mode (default: NORMAL)
+    \\- `mode` (Blending, optional): Blending mode (default: NORMAL)
     \\
     \\## Raises
     \\- `ValueError`: If images have different dimensions
@@ -2313,9 +2313,9 @@ const image_blend_doc =
     \\base.blend(overlay)  # Default NORMAL mode
     \\
     \\# Using different blend modes
-    \\base.blend(overlay, zignal.BlendMode.MULTIPLY)
-    \\base.blend(overlay, zignal.BlendMode.SCREEN)
-    \\base.blend(overlay, zignal.BlendMode.OVERLAY)
+    \\base.blend(overlay, zignal.Blending.MULTIPLY)
+    \\base.blend(overlay, zignal.Blending.SCREEN)
+    \\base.blend(overlay, zignal.Blending.OVERLAY)
     \\```
 ;
 
@@ -2341,10 +2341,10 @@ fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const overlay = @as(*ImageObject, @ptrCast(overlay_obj.?));
 
     // Get blend mode (default to normal if not specified)
-    var blend_mode = zignal.BlendMode.normal;
+    var blend_mode = zignal.Blending.normal;
     if (mode_obj != null and mode_obj != c.Py_None()) {
-        blend_mode = blending.convertToZigBlendMode(mode_obj.?) catch {
-            return null; // Error already set by convertToZigBlendMode
+        blend_mode = blending.convertToZigBlending(mode_obj.?) catch {
+            return null; // Error already set by convertToZigBlending
         };
     }
 
@@ -3546,7 +3546,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_blend),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_blend_doc,
-        .params = "self, overlay: Image, mode: BlendMode = BlendMode.NORMAL",
+        .params = "self, overlay: Image, mode: Blending = Blending.NORMAL",
         .returns = "None",
     },
     .{
