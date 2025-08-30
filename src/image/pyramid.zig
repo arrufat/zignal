@@ -200,6 +200,15 @@ test "ImagePyramid basic construction" {
 
         try expectEqual(true, level.rows < prev_level.rows);
         try expectEqual(true, level.cols < prev_level.cols);
+
+        // Check approximate scaling
+        const expected_scale = pyramid.getScale(@intCast(i));
+        const actual_row_scale = @as(f32, @floatFromInt(image.rows)) / @as(f32, @floatFromInt(level.rows));
+        const actual_col_scale = @as(f32, @floatFromInt(image.cols)) / @as(f32, @floatFromInt(level.cols));
+
+        // Should be approximately correct (within rounding)
+        try expectApproxEqAbs(expected_scale, actual_row_scale, 1.0);
+        try expectApproxEqAbs(expected_scale, actual_col_scale, 1.0);
     }
 }
 
