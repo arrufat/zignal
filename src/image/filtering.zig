@@ -1939,24 +1939,38 @@ pub fn Filter(comptime T: type) type {
             const cols_f32 = @as(f32, @floatFromInt(self.cols));
             const rows_f32 = @as(f32, @floatFromInt(self.rows));
 
+            // Precompute trigonometric values for spin blur
+            const max_samples = 20;
+            var cos_table: [max_samples]f32 = undefined;
+            var sin_table: [max_samples]f32 = undefined;
+            if (blur_type == .spin) {
+                for (0..max_samples) |i| {
+                    const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(max_samples));
+                    const angle_offset = (t - 0.5) * clamped_strength * 0.2;
+                    cos_table[i] = @cos(angle_offset);
+                    sin_table[i] = @sin(angle_offset);
+                }
+            }
+
             switch (@typeInfo(T)) {
                 .int, .float => {
                     for (0..self.rows) |r| {
+                        const y = @as(f32, @floatFromInt(r));
+                        const dy_from_center = y - cy; // Constant for this row
+
                         for (0..self.cols) |c| {
                             const x = @as(f32, @floatFromInt(c));
-                            const y = @as(f32, @floatFromInt(r));
-
-                            // Calculate distance and angle from center
                             const dx = x - cx;
-                            const dy = y - cy;
-                            const distance = @sqrt(dx * dx + dy * dy);
-                            const angle = std.math.atan2(dy, dx);
+                            const dy = dy_from_center; // Use precomputed value
+
+                            // For zoom blur, we don't need angle; for spin we need distance
+                            const dist_sq = dx * dx + dy * dy;
+                            const distance = if (blur_type == .spin or dist_sq == 0) @sqrt(dist_sq) else 0;
 
                             var sum: f32 = 0;
                             var count: f32 = 0;
 
                             // Number of samples based on distance and strength
-                            const max_samples = 20;
                             const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
 
                             for (0..num_samples) |i| {
@@ -1972,11 +1986,13 @@ pub fn Filter(comptime T: type) type {
                                         sample_y = cy + dy * scale;
                                     },
                                     .spin => {
-                                        // Sample along a circular arc
-                                        const angle_offset = (t - 0.5) * clamped_strength * 0.2;
-                                        const new_angle = angle + angle_offset;
-                                        sample_x = cx + distance * @cos(new_angle);
-                                        sample_y = cy + distance * @sin(new_angle);
+                                        // Use precomputed trig values to rotate the point
+                                        const idx = (i * max_samples) / num_samples; // Map to precomputed table
+                                        const cos_angle = cos_table[idx];
+                                        const sin_angle = sin_table[idx];
+                                        // Rotate (dx, dy) by the angle offset
+                                        sample_x = cx + dx * cos_angle - dy * sin_angle;
+                                        sample_y = cy + dx * sin_angle + dy * cos_angle;
                                     },
                                 }
 
@@ -2044,21 +2060,22 @@ pub fn Filter(comptime T: type) type {
                         // Process each channel independently with integer arithmetic
                         for (channels, out_channels) |src_channel, dst_channel| {
                             for (0..self.rows) |r| {
+                                const y = @as(f32, @floatFromInt(r));
+                                const dy_from_center = y - cy; // Constant for this row
+
                                 for (0..self.cols) |c| {
                                     const x = @as(f32, @floatFromInt(c));
-                                    const y = @as(f32, @floatFromInt(r));
-
-                                    // Calculate distance and angle from center
                                     const dx = x - cx;
-                                    const dy = y - cy;
-                                    const distance = @sqrt(dx * dx + dy * dy);
-                                    const angle = std.math.atan2(dy, dx);
+                                    const dy = dy_from_center; // Use precomputed value
+
+                                    // For zoom blur, we don't need angle; for spin we need distance
+                                    const dist_sq = dx * dx + dy * dy;
+                                    const distance = if (blur_type == .spin or dist_sq == 0) @sqrt(dist_sq) else 0;
 
                                     var sum: i32 = 0;
                                     var weight_sum: i32 = 0;
 
                                     // Number of samples based on distance and strength
-                                    const max_samples = 20;
                                     const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
 
                                     for (0..num_samples) |i| {
@@ -2073,10 +2090,13 @@ pub fn Filter(comptime T: type) type {
                                                 sample_y = cy + dy * scale;
                                             },
                                             .spin => {
-                                                const angle_offset = (t - 0.5) * clamped_strength * 0.2;
-                                                const new_angle = angle + angle_offset;
-                                                sample_x = cx + distance * @cos(new_angle);
-                                                sample_y = cy + distance * @sin(new_angle);
+                                                // Use precomputed trig values to rotate the point
+                                                const idx = (i * max_samples) / num_samples; // Map to precomputed table
+                                                const cos_angle = cos_table[idx];
+                                                const sin_angle = sin_table[idx];
+                                                // Rotate (dx, dy) by the angle offset
+                                                sample_x = cx + dx * cos_angle - dy * sin_angle;
+                                                sample_y = cy + dx * sin_angle + dy * cos_angle;
                                             },
                                         }
 
@@ -2127,15 +2147,17 @@ pub fn Filter(comptime T: type) type {
                     } else {
                         // Generic path for non-u8 types - process per pixel
                         for (0..self.rows) |r| {
+                            const y = @as(f32, @floatFromInt(r));
+                            const dy_from_center = y - cy; // Constant for this row
+
                             for (0..self.cols) |c| {
                                 const x = @as(f32, @floatFromInt(c));
-                                const y = @as(f32, @floatFromInt(r));
-
-                                // Calculate distance and angle from center
                                 const dx = x - cx;
-                                const dy = y - cy;
-                                const distance = @sqrt(dx * dx + dy * dy);
-                                const angle = std.math.atan2(dy, dx);
+                                const dy = dy_from_center; // Use precomputed value
+
+                                // For zoom blur, we don't need angle; for spin we need distance
+                                const dist_sq = dx * dx + dy * dy;
+                                const distance = if (blur_type == .spin or dist_sq == 0) @sqrt(dist_sq) else 0;
 
                                 var result_pixel: T = undefined;
 
@@ -2144,7 +2166,6 @@ pub fn Filter(comptime T: type) type {
                                     var count: f32 = 0;
 
                                     // Number of samples based on distance and strength
-                                    const max_samples = 20;
                                     const num_samples = @as(usize, @intFromFloat(@max(1, @min(@as(f32, max_samples), distance * clamped_strength * 0.1))));
 
                                     for (0..num_samples) |i| {
@@ -2159,10 +2180,13 @@ pub fn Filter(comptime T: type) type {
                                                 sample_y = cy + dy * scale;
                                             },
                                             .spin => {
-                                                const angle_offset = (t - 0.5) * clamped_strength * 0.2;
-                                                const new_angle = angle + angle_offset;
-                                                sample_x = cx + distance * @cos(new_angle);
-                                                sample_y = cy + distance * @sin(new_angle);
+                                                // Use precomputed trig values to rotate the point
+                                                const idx = (i * max_samples) / num_samples; // Map to precomputed table
+                                                const cos_angle = cos_table[idx];
+                                                const sin_angle = sin_table[idx];
+                                                // Rotate (dx, dy) by the angle offset
+                                                sample_x = cx + dx * cos_angle - dy * sin_angle;
+                                                sample_y = cy + dx * sin_angle + dy * cos_angle;
                                             },
                                         }
 
