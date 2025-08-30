@@ -38,26 +38,25 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return null;
         }
 
+        // Helper function to delegate method calls to the underlying color object
+        fn delegateToColorMethod(self_obj: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
+            // Get the color object via item()
+            const color_obj = itemMethod(self_obj, @ptrCast(@alignCast(args orelse c.PyTuple_New(0)))) orelse return null;
+            defer c.Py_DECREF(color_obj);
+
+            // Get the method from the color object
+            const method_ptr = c.PyObject_GetAttrString(color_obj, method_name);
+            if (method_ptr == null) return null;
+            defer c.Py_DECREF(method_ptr);
+
+            // Call the method with the provided arguments
+            const result = if (args) |a| c.PyObject_CallObject(method_ptr, a) else c.PyObject_CallObject(method_ptr, c.PyTuple_New(0));
+            return result;
+        }
+
         fn repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-            const parent = Self.parentFromObj(self_obj) orelse {
-                return c.PyUnicode_FromString(comptime zignal.meta.getSimpleTypeName(ColorType) ++ "(invalid)");
-            };
-            if (parent.py_image) |pimg| {
-                const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
-                const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
-                var buf: [256]u8 = undefined;
-                var fbs = std.io.fixedBufferStream(&buf);
-                const w = fbs.writer();
-                _ = w.print("{s}(", .{comptime zignal.meta.getSimpleTypeName(ColorType)}) catch return null;
-                inline for (fields, 0..) |f, i| {
-                    if (i != 0) _ = w.print(", ", .{}) catch return null;
-                    _ = w.print("{s}={}", .{ f.name, @field(rgba, f.name) }) catch return null;
-                }
-                _ = w.print(")", .{}) catch return null;
-                const s = fbs.getWritten();
-                return c.PyUnicode_FromStringAndSize(s.ptr, @intCast(s.len));
-            }
-            return c.PyUnicode_FromString(comptime zignal.meta.getSimpleTypeName(ColorType) ++ "(invalid)");
+            // Delegate to the color object's repr
+            return delegateToColorMethod(self_obj, "__repr__", null);
         }
 
         fn dealloc(self_obj: [*c]c.PyObject) callconv(.c) void {
@@ -195,63 +194,15 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return arr;
         }
 
-        // __format__ method implementation
+        // __format__ method implementation - delegate to color object
         fn formatMethod(self_obj: ?*c.PyObject, args: [*c]c.PyObject) callconv(.c) ?*c.PyObject {
-            var format_spec: [*c]const u8 = "";
-
-            if (c.PyArg_ParseTuple(args, "|s:__format__", &format_spec) == 0) {
-                return null;
-            }
-
-            const parent = Self.parentFromObj(self_obj) orelse {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-                return null;
-            };
-
-            if (parent.py_image) |pimg| {
-                const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
-                const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
-
-                // Check format spec
-                if (format_spec[0] != 0) {
-                    const spec_len = std.mem.len(format_spec);
-                    const spec = format_spec[0..spec_len];
-                    if (std.mem.eql(u8, spec, "ansi")) {
-                        // ANSI color formatting
-                        var buf: [64]u8 = undefined;
-                        const formatted = std.fmt.bufPrint(&buf, "\x1b[48;2;{d};{d};{d}m  \x1b[0m", .{ rgba.r, rgba.g, rgba.b }) catch {
-                            c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to format ANSI color");
-                            return null;
-                        };
-                        return c.PyUnicode_FromStringAndSize(formatted.ptr, @intCast(formatted.len));
-                    }
-                }
-
-                // Default formatting (same as repr)
-                return Self.repr(self_obj);
-            }
-
-            c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-            return null;
+            return delegateToColorMethod(self_obj, "__format__", @ptrCast(args));
         }
 
-        // to_gray method implementation
+        // to_gray method implementation - delegate to color object
         fn toGrayMethod(self_obj: ?*c.PyObject, args: [*c]c.PyObject) callconv(.c) ?*c.PyObject {
             _ = args;
-            const parent = Self.parentFromObj(self_obj) orelse {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-                return null;
-            };
-
-            if (parent.py_image) |pimg| {
-                const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
-                const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
-                const gray = rgba.toGray();
-                return c.PyLong_FromLong(@intCast(gray));
-            }
-
-            c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-            return null;
+            return delegateToColorMethod(self_obj, "to_gray", null);
         }
 
         // item method implementation - extract the pixel value as a color object
@@ -357,73 +308,13 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return null;
         }
 
-        // Generate conversion method for a specific target color type
+        // Generate conversion method for a specific target color type - delegate to color object
         fn generateConversionMethod(comptime TargetColorType: type) c.PyCFunction {
+            const method_name = comptime getConversionMethodName(TargetColorType);
             return struct {
                 fn method(self_obj: ?*c.PyObject, args: [*c]c.PyObject) callconv(.c) ?*c.PyObject {
-                    const parent = Self.parentFromObj(self_obj) orelse {
-                        c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-                        return null;
-                    };
-
-                    if (parent.py_image) |pimg| {
-                        const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
-                        const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
-
-                        // Special handling for to_rgba which accepts optional alpha
-                        if (TargetColorType == zignal.Rgba) {
-                            var alpha: u8 = rgba.a;
-                            if (c.PyArg_ParseTuple(args, "|B:to_rgba", &alpha) == 0) {
-                                return null;
-                            }
-
-                            // For RGBA, just return the current value with potentially new alpha
-                            const result = zignal.Rgba{ .r = rgba.r, .g = rgba.g, .b = rgba.b, .a = alpha };
-
-                            // Get the RgbaType and create new object
-                            const color_mod = @import("color.zig");
-                            const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbaType), null, null);
-                            if (obj == null) return null;
-                            const py_obj = @as(*color_mod.RgbaBinding.PyObjectType, @ptrCast(obj));
-                            py_obj.field0 = result.r;
-                            py_obj.field1 = result.g;
-                            py_obj.field2 = result.b;
-                            py_obj.field3 = result.a;
-                            return obj;
-                        }
-
-                        // Convert from RGBA/RGB to target type using generic convertColor
-                        const source_color = if (ColorType == zignal.Rgb)
-                            zignal.Rgb{ .r = rgba.r, .g = rgba.g, .b = rgba.b }
-                        else
-                            rgba;
-
-                        const converted = zignal.convertColor(TargetColorType, source_color);
-
-                        // Create and return new Python object using the factory
-                        const factory_mod = @import("color_factory.zig");
-                        const factory = factory_mod.ColorBinding(TargetColorType);
-                        const color_mod = @import("color.zig");
-                        const type_obj = switch (TargetColorType) {
-                            zignal.Hsl => &color_mod.HslType,
-                            zignal.Hsv => &color_mod.HsvType,
-                            zignal.Lab => &color_mod.LabType,
-                            zignal.Lch => &color_mod.LchType,
-                            zignal.Lms => &color_mod.LmsType,
-                            zignal.Oklab => &color_mod.OklabType,
-                            zignal.Oklch => &color_mod.OklchType,
-                            zignal.Xyb => &color_mod.XybType,
-                            zignal.Xyz => &color_mod.XyzType,
-                            zignal.Ycbcr => &color_mod.YcbcrType,
-                            zignal.Rgb => &color_mod.RgbType,
-                            zignal.Rgba => &color_mod.RgbaType,
-                            else => unreachable,
-                        };
-                        return factory.createPyObject(converted, @ptrCast(type_obj));
-                    }
-
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
-                    return null;
+                    // Delegate to the color object's conversion method
+                    return delegateToColorMethod(self_obj, method_name.ptr, @ptrCast(args));
                 }
             }.method;
         }
