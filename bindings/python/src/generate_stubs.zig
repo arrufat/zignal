@@ -12,6 +12,7 @@ const image_module = @import("image.zig");
 const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
 const matrix_module = @import("matrix.zig");
+const motion_blur_module = @import("motion_blur.zig");
 const fdm_module = @import("fdm.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
@@ -172,8 +173,11 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
 
 /// Generate class from metadata
 fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.ClassInfo) !void {
+    // Class declaration
     try stub.writef("\nclass {s}:\n", .{class_info.name});
-    try stub.writef("    \"\"\"{s}\n\"\"\"\n", .{class_info.doc});
+
+    // Class docstring
+    try stub.writef("    \"\"\"{s}\n    \"\"\"\n", .{class_info.doc});
 
     // Generate methods
     for (class_info.methods) |method| {
@@ -296,6 +300,45 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
     }
 }
 
+/// Generate flat motion blur classes from metadata
+fn generateMotionBlurClasses(stub: *GeneratedStub) !void {
+    // Generate MotionBlurLinear class from metadata
+    const linear_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.linear_properties_metadata);
+    const linear_doc = std.mem.span(motion_blur_module.LinearType.tp_doc);
+    try generateClassFromMetadata(stub, .{
+        .name = "MotionBlurLinear",
+        .doc = linear_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &linear_properties,
+        .bases = &.{},
+        .special_methods = &motion_blur_module.linear_special_methods_metadata,
+    });
+
+    // Generate MotionBlurZoom class from metadata
+    const zoom_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.zoom_properties_metadata);
+    const zoom_doc = std.mem.span(motion_blur_module.ZoomType.tp_doc);
+    try generateClassFromMetadata(stub, .{
+        .name = "MotionBlurZoom",
+        .doc = zoom_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &zoom_properties,
+        .bases = &.{},
+        .special_methods = &motion_blur_module.zoom_special_methods_metadata,
+    });
+
+    // Generate MotionBlurSpin class from metadata
+    const spin_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.spin_properties_metadata);
+    const spin_doc = std.mem.span(motion_blur_module.SpinType.tp_doc);
+    try generateClassFromMetadata(stub, .{
+        .name = "MotionBlurSpin",
+        .doc = spin_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &spin_properties,
+        .bases = &.{},
+        .special_methods = &motion_blur_module.spin_special_methods_metadata,
+    });
+}
+
 /// Generate complete stub file
 fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(gpa);
@@ -409,6 +452,9 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
             .{ .name = "MAX", .doc = "Maximize total cost (profit)" },
         },
     });
+
+    // Generate MotionBlur classes
+    try generateMotionBlurClasses(&stub);
 
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
