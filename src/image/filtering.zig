@@ -1662,9 +1662,75 @@ pub fn Filter(comptime T: type) type {
                             defer for (out_channels) |ch| allocator.free(ch);
 
                             // Process each channel independently with integer arithmetic
+                            const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
                             for (channels, out_channels) |src_channel, dst_channel| {
                                 for (0..self.rows) |r| {
-                                    for (0..self.cols) |c| {
+                                    var c: usize = 0;
+
+                                    // SIMD path: process vec_len pixels at once
+                                    while (c + vec_len <= self.cols) : (c += vec_len) {
+                                        var sum_vec: @Vector(vec_len, i32) = @splat(0);
+                                        var weight_vec: @Vector(vec_len, i32) = @splat(0);
+
+                                        // Sample along the motion line
+                                        const num_samples = distance;
+                                        for (0..num_samples) |i| {
+                                            const t = (@as(f32, @floatFromInt(i)) - half_dist + 0.5) / half_dist;
+                                            const dx = t * half_dist * cos_angle;
+                                            const dy = t * half_dist * sin_angle;
+
+                                            // Calculate source coordinates for all pixels in vector
+                                            const src_y = @as(f32, @floatFromInt(r)) + dy;
+
+                                            // Process each pixel in the vector
+                                            for (0..vec_len) |j| {
+                                                const src_x = @as(f32, @floatFromInt(c + j)) + dx;
+
+                                                // Check bounds
+                                                if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
+                                                    src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
+                                                {
+                                                    // Bilinear interpolation with integer arithmetic
+                                                    const x0 = @as(usize, @intFromFloat(@floor(src_x)));
+                                                    const y0 = @as(usize, @intFromFloat(@floor(src_y)));
+                                                    const x1 = @min(x0 + 1, self.cols - 1);
+                                                    const y1 = @min(y0 + 1, self.rows - 1);
+
+                                                    // Convert fractional parts to integer weights
+                                                    const fx = @as(i32, @intFromFloat(SCALE * (src_x - @as(f32, @floatFromInt(x0)))));
+                                                    const fy = @as(i32, @intFromFloat(SCALE * (src_y - @as(f32, @floatFromInt(y0)))));
+                                                    const fx_inv = SCALE - fx;
+                                                    const fy_inv = SCALE - fy;
+
+                                                    const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
+                                                    const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
+                                                    const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
+                                                    const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
+
+                                                    // Bilinear interpolation
+                                                    const value = @divTrunc(fx_inv * fy_inv * p00 +
+                                                        fx * fy_inv * p01 +
+                                                        fx_inv * fy * p10 +
+                                                        fx * fy * p11, SCALE * SCALE);
+
+                                                    sum_vec[j] += value;
+                                                    weight_vec[j] += 1;
+                                                }
+                                            }
+                                        }
+
+                                        // Store vec_len results
+                                        for (0..vec_len) |j| {
+                                            const result = if (weight_vec[j] > 0)
+                                                @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum_vec[j] + @divTrunc(weight_vec[j], 2), weight_vec[j])))))
+                                            else
+                                                src_channel[r * self.cols + c + j];
+                                            dst_channel[r * self.cols + c + j] = result;
+                                        }
+                                    }
+
+                                    // Scalar fallback for remaining pixels
+                                    while (c < self.cols) : (c += 1) {
                                         var sum: i32 = 0;
                                         var weight_sum: i32 = 0;
 
@@ -1699,20 +1765,18 @@ pub fn Filter(comptime T: type) type {
                                                 const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
                                                 const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
 
-                                                // Bilinear interpolation: ((1-fx)*(1-fy)*p00 + fx*(1-fy)*p01 + (1-fx)*fy*p10 + fx*fy*p11)
-                                                // The interpolation result has SCALE^2 factor that we need to remove
+                                                // Bilinear interpolation
                                                 const value = @divTrunc(fx_inv * fy_inv * p00 +
                                                     fx * fy_inv * p01 +
                                                     fx_inv * fy * p10 +
                                                     fx * fy * p11, SCALE * SCALE);
 
                                                 sum += value;
-                                                weight_sum += 1; // Simple count of samples
+                                                weight_sum += 1;
                                             }
                                         }
 
                                         // Store result with rounding
-                                        // Now sum is already in pixel value range, weight_sum is just a count
                                         const result = if (weight_sum > 0)
                                             @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum + @divTrunc(weight_sum, 2), weight_sum)))))
                                         else
