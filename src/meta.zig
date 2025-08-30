@@ -1,3 +1,5 @@
+const std = @import("std");
+
 /// Converts between numeric types: .@"enum", .int and .float.
 pub inline fn as(comptime T: type, from: anytype) T {
     switch (@typeInfo(@TypeOf(from))) {
@@ -50,7 +52,6 @@ pub inline fn isPacked(comptime T: type) bool {
 /// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
 pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
     const full_name = @typeName(T);
-    const std = @import("std");
     if (std.mem.lastIndexOf(u8, full_name, ".")) |dot_index| {
         return full_name[dot_index + 1 ..];
     }
@@ -60,10 +61,16 @@ pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
 /// Converts a comptime string to lowercase.
 /// e.g., "RGB" -> "rgb", "OkLab" -> "oklab"
 pub inline fn comptimeLowercase(comptime input: []const u8) []const u8 {
-    const std = @import("std");
     comptime var result: [input.len]u8 = undefined;
     inline for (input, 0..) |char, i| {
         result[i] = std.ascii.toLower(char);
     }
     return result[0..];
+}
+
+/// Returns true if and only if all fields of T are of type u8
+pub fn allFieldsAreU8(comptime T: type) bool {
+    return for (std.meta.fields(T)) |field| {
+        if (field.type != u8) break false;
+    } else true;
 }

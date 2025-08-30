@@ -92,17 +92,7 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const fields = std.meta.fields(T);
-
-                    // Check if all fields are u8
-                    const all_u8 = comptime blk: {
-                        for (fields) |field| {
-                            if (field.type != u8) break :blk false;
-                        }
-                        break :blk true;
-                    };
-
-                    if (all_u8) {
+                    if (comptime meta.allFieldsAreU8(T)) {
                         // Optimized path for u8 types
                         const plane_size = self.rows * self.cols;
 
@@ -171,10 +161,10 @@ pub fn Filter(comptime T: type) type {
                         channel_ops.mergeChannels(T, final_channels, blurred.*);
                     } else {
                         // Generic struct path for other color types
+                        const fields = std.meta.fields(T);
                         var sat: Image([Self.channels()]f32) = undefined;
                         try self.integral(allocator, &sat);
                         defer sat.deinit(allocator);
-
                         for (0..self.rows) |r| {
                             for (0..self.cols) |c| {
                                 const r1 = r -| radius;
@@ -261,17 +251,7 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    const fields = std.meta.fields(T);
-
-                    // Check if all fields are u8
-                    const all_u8 = comptime blk: {
-                        for (fields) |field| {
-                            if (field.type != u8) break :blk false;
-                        }
-                        break :blk true;
-                    };
-
-                    if (all_u8) {
+                    if (comptime meta.allFieldsAreU8(T)) {
                         // Optimized path for u8 types
                         const plane_size = self.rows * self.cols;
 
@@ -340,6 +320,7 @@ pub fn Filter(comptime T: type) type {
                         channel_ops.mergeChannels(T, final_channels, sharpened.*);
                     } else {
                         // Generic struct path for other color types
+                        const fields = std.meta.fields(T);
                         var sat: Image([Self.channels()]f32) = undefined;
                         try self.integral(allocator, &sat);
                         defer sat.deinit(allocator);
@@ -631,15 +612,8 @@ pub fn Filter(comptime T: type) type {
                 },
                 .@"struct" => {
                     // Optimized path for u8 structs (RGB, RGBA, etc.)
-                    const fields = std.meta.fields(T);
-                    const all_u8 = comptime blk: {
-                        for (fields) |field| {
-                            if (field.type != u8) break :blk false;
-                        }
-                        break :blk true;
-                    };
 
-                    if (all_u8) {
+                    if (comptime meta.allFieldsAreU8(T)) {
                         // Channel separation approach for optimal performance
                         const SCALE = 256;
                         const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
@@ -702,6 +676,7 @@ pub fn Filter(comptime T: type) type {
                         channel_ops.mergeChannels(T, final_channels, out.*);
                     } else {
                         // Generic struct path for other color types
+                        const fields = std.meta.fields(T);
                         const half_h = Kernel.half_h;
                         const half_w = Kernel.half_w;
 
@@ -1174,15 +1149,7 @@ pub fn Filter(comptime T: type) type {
                 },
                 .@"struct" => {
                     // Optimized path for u8 structs (RGB, RGBA, etc.)
-                    const fields = std.meta.fields(T);
-                    const all_u8 = comptime blk: {
-                        for (fields) |field| {
-                            if (field.type != u8) break :blk false;
-                        }
-                        break :blk true;
-                    };
-
-                    if (all_u8) {
+                    if (comptime meta.allFieldsAreU8(T)) {
                         // Channel separation approach for optimal performance
                         const SCALE = 256;
                         const plane_size = self.rows * self.cols;
@@ -1638,15 +1605,7 @@ pub fn Filter(comptime T: type) type {
                     },
                     .@"struct" => {
                         // Check if all fields are u8 for optimized integer path
-                        const fields = std.meta.fields(T);
-                        const all_u8 = comptime blk: {
-                            for (fields) |field| {
-                                if (field.type != u8) break :blk false;
-                            }
-                            break :blk true;
-                        };
-
-                        if (all_u8) {
+                        if (comptime meta.allFieldsAreU8(T)) {
                             // Optimized integer arithmetic path for u8 types
                             const SCALE = 256;
 
@@ -1665,8 +1624,8 @@ pub fn Filter(comptime T: type) type {
                             const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
 
                             // Cache common conversions
-                            const cols_f32 = @as(f32, @floatFromInt(self.cols));
-                            const rows_f32 = @as(f32, @floatFromInt(self.rows));
+                            const fcols: f32 = @floatFromInt(self.cols);
+                            const frows: f32 = @floatFromInt(self.rows);
 
                             for (channels, out_channels) |src_channel, dst_channel| {
                                 for (0..self.rows) |r| {
@@ -1690,8 +1649,8 @@ pub fn Filter(comptime T: type) type {
                                         const scale_f32_vec: @Vector(vec_len, f32) = @splat(@as(f32, SCALE));
                                         const scale_sq_vec: @Vector(vec_len, i32) = @splat(SCALE * SCALE);
                                         const zero_f32_vec: @Vector(vec_len, f32) = @splat(0);
-                                        const cols_f32_vec: @Vector(vec_len, f32) = @splat(cols_f32);
-                                        const rows_f32_vec: @Vector(vec_len, f32) = @splat(rows_f32);
+                                        const cols_f32_vec: @Vector(vec_len, f32) = @splat(fcols);
+                                        const rows_f32_vec: @Vector(vec_len, f32) = @splat(frows);
 
                                         // Sample along the motion line
                                         const num_samples = distance;
@@ -1796,9 +1755,8 @@ pub fn Filter(comptime T: type) type {
                                             const src_x = @as(f32, @floatFromInt(c)) + dx;
                                             const src_y = @as(f32, @floatFromInt(r)) + dy;
 
-                                            // Check bounds (using cached conversions)
-                                            if (src_x >= 0 and src_x < cols_f32 and
-                                                src_y >= 0 and src_y < rows_f32)
+                                            if (src_x >= 0 and src_x < fcols and
+                                                src_y >= 0 and src_y < frows)
                                             {
                                                 // Bilinear interpolation with integer arithmetic
                                                 const x0 = @as(usize, @intFromFloat(@floor(src_x)));
@@ -1842,6 +1800,7 @@ pub fn Filter(comptime T: type) type {
                             channel_ops.mergeChannels(T, out_channels, out.*);
                         } else {
                             // Generic path for non-u8 types - process per pixel
+                            const fields = std.meta.fields(T);
                             for (0..self.rows) |r| {
                                 for (0..self.cols) |c| {
                                     var result_pixel: T = undefined;
@@ -1936,8 +1895,8 @@ pub fn Filter(comptime T: type) type {
             const clamped_strength = @min(1.0, @max(0.0, strength));
 
             // Cache common conversions
-            const cols_f32 = @as(f32, @floatFromInt(self.cols));
-            const rows_f32 = @as(f32, @floatFromInt(self.rows));
+            const fcols: f32 = @floatFromInt(self.cols);
+            const frows: f32 = @floatFromInt(self.rows);
 
             // Precompute trigonometric values for spin blur
             const max_samples = 20;
@@ -1997,8 +1956,8 @@ pub fn Filter(comptime T: type) type {
                                 }
 
                                 // Check bounds and sample with bilinear interpolation
-                                if (sample_x >= 0 and sample_x < cols_f32 and
-                                    sample_y >= 0 and sample_y < rows_f32)
+                                if (sample_x >= 0 and sample_x < fcols and
+                                    sample_y >= 0 and sample_y < frows)
                                 {
                                     const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                     const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
@@ -2033,16 +1992,7 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    // Check if all fields are u8 for optimized integer path
-                    const fields = std.meta.fields(T);
-                    const all_u8 = comptime blk: {
-                        for (fields) |field| {
-                            if (field.type != u8) break :blk false;
-                        }
-                        break :blk true;
-                    };
-
-                    if (all_u8) {
+                    if (comptime meta.allFieldsAreU8(T)) {
                         // Optimized integer arithmetic path for u8 types
                         const SCALE = 256;
 
@@ -2100,8 +2050,8 @@ pub fn Filter(comptime T: type) type {
                                             },
                                         }
 
-                                        if (sample_x >= 0 and sample_x < cols_f32 and
-                                            sample_y >= 0 and sample_y < rows_f32)
+                                        if (sample_x >= 0 and sample_x < fcols and
+                                            sample_y >= 0 and sample_y < frows)
                                         {
                                             const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                             const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
@@ -2146,6 +2096,7 @@ pub fn Filter(comptime T: type) type {
                         channel_ops.mergeChannels(T, out_channels, out.*);
                     } else {
                         // Generic path for non-u8 types - process per pixel
+                        const fields = std.meta.fields(T);
                         for (0..self.rows) |r| {
                             const y = @as(f32, @floatFromInt(r));
                             const dy_from_center = y - cy; // Constant for this row
@@ -2190,8 +2141,8 @@ pub fn Filter(comptime T: type) type {
                                             },
                                         }
 
-                                        if (sample_x >= 0 and sample_x < cols_f32 and
-                                            sample_y >= 0 and sample_y < rows_f32)
+                                        if (sample_x >= 0 and sample_x < fcols and
+                                            sample_y >= 0 and sample_y < frows)
                                         {
                                             const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                             const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
