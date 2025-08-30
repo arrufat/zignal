@@ -523,31 +523,79 @@ pub fn Image(comptime T: type) type {
             return Filter(T).sobel(self, allocator, out);
         }
 
-        /// Applies linear motion blur to simulate camera or object movement.
+        /// Motion blur type for unified API.
+        /// Provides different types of motion blur effects to simulate camera or object movement.
+        pub const MotionBlur = union(enum) {
+            /// Linear motion blur simulates straight-line camera or object movement.
+            /// Creates a directional blur effect along the specified angle.
+            linear: struct {
+                /// Direction of motion in radians.
+                /// - 0 = horizontal (left-right)
+                /// - π/2 = vertical (up-down)
+                /// - π/4 = diagonal (45 degrees)
+                angle: f32,
+                /// Length of the blur effect in pixels.
+                /// Larger values create more pronounced motion trails.
+                distance: usize,
+            },
+            /// Radial zoom blur simulates camera zoom or dolly movement.
+            /// Creates a blur effect that radiates outward from or inward to a center point.
+            radial_zoom: struct {
+                /// X coordinate of the zoom center (0.0 to 1.0, normalized).
+                /// 0.5 = center of image horizontally.
+                center_x: f32,
+                /// Y coordinate of the zoom center (0.0 to 1.0, normalized).
+                /// 0.5 = center of image vertically.
+                center_y: f32,
+                /// Intensity of the zoom blur (0.0 to 1.0).
+                /// - 0.0 = no blur
+                /// - 1.0 = maximum blur
+                /// Typically use 0.3-0.7 for realistic effects.
+                strength: f32,
+            },
+            /// Radial spin blur simulates rotational camera or object movement.
+            /// Creates a circular blur effect around a center point, like a spinning wheel.
+            radial_spin: struct {
+                /// X coordinate of the rotation center (0.0 to 1.0, normalized).
+                /// 0.5 = center of image horizontally.
+                center_x: f32,
+                /// Y coordinate of the rotation center (0.0 to 1.0, normalized).
+                /// 0.5 = center of image vertically.
+                center_y: f32,
+                /// Intensity of the spin blur (0.0 to 1.0).
+                /// - 0.0 = no blur
+                /// - 1.0 = maximum blur
+                /// Controls the arc length of the circular blur.
+                strength: f32,
+            },
+        };
+
+        /// Applies motion blur effect to the image.
+        /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
         ///
         /// Parameters:
         /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `angle`: Direction of motion in radians (0 = horizontal).
-        /// - `distance`: Length of blur in pixels.
-        /// - `out`: Output blurred image.
-        pub fn linearMotionBlur(self: Self, allocator: Allocator, angle: f32, distance: usize, out: *Self) !void {
-            return Filter(T).linearMotionBlur(self, allocator, angle, distance, out);
-        }
-
-        /// Radial blur type for radialMotionBlur.
-        pub const RadialBlurType = Filter(T).RadialBlurType;
-
-        /// Applies radial motion blur (zoom or spin).
+        /// - `blur_type`: Type and parameters of motion blur to apply.
+        /// - `out`: Output image containing the motion blurred result.
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `center_x`: X coordinate of blur center (0.0 to 1.0).
-        /// - `center_y`: Y coordinate of blur center (0.0 to 1.0).
-        /// - `strength`: Blur intensity (0.0 to 1.0).
-        /// - `blur_type`: Type of radial blur (.zoom or .spin).
-        /// - `out`: Output blurred image.
-        pub fn radialMotionBlur(self: Self, allocator: Allocator, center_x: f32, center_y: f32, strength: f32, blur_type: RadialBlurType, out: *Self) !void {
-            return Filter(T).radialMotionBlur(self, allocator, center_x, center_y, strength, blur_type, out);
+        /// Example usage:
+        /// ```zig
+        /// // Linear motion blur
+        /// try image.motionBlur(allocator, .{ .linear = .{ .angle = 0, .distance = 30 }}, &out);
+        ///
+        /// // Radial zoom blur
+        /// try image.motionBlur(allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.7 }}, &out);
+        ///
+        /// // Radial spin blur
+        /// try image.motionBlur(allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 }}, &out);
+        /// ```
+        pub fn motionBlur(self: Self, allocator: Allocator, blur_type: MotionBlur, out: *Self) !void {
+            const RadialBlurType = Filter(T).RadialBlurType;
+            switch (blur_type) {
+                .linear => |params| try Filter(T).linearMotionBlur(self, allocator, params.angle, params.distance, out),
+                .radial_zoom => |params| try Filter(T).radialMotionBlur(self, allocator, params.center_x, params.center_y, params.strength, RadialBlurType.zoom, out),
+                .radial_spin => |params| try Filter(T).radialMotionBlur(self, allocator, params.center_x, params.center_y, params.strength, RadialBlurType.spin, out),
+            }
         }
 
         /// Calculates the Peak Signal-to-Noise Ratio (PSNR) between two images.
