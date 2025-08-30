@@ -1663,14 +1663,26 @@ pub fn Filter(comptime T: type) type {
 
                             // Process each channel independently with integer arithmetic
                             const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
+
+                            // Cache common conversions
+                            const cols_f32 = @as(f32, @floatFromInt(self.cols));
+                            const rows_f32 = @as(f32, @floatFromInt(self.rows));
+
                             for (channels, out_channels) |src_channel, dst_channel| {
                                 for (0..self.rows) |r| {
                                     var c: usize = 0;
 
-                                    // SIMD path: process vec_len pixels at once
+                                    // SIMD path: process vec_len pixels at once with true vectorization
                                     while (c + vec_len <= self.cols) : (c += vec_len) {
                                         var sum_vec: @Vector(vec_len, i32) = @splat(0);
                                         var weight_vec: @Vector(vec_len, i32) = @splat(0);
+
+                                        // Build coordinate vector for current pixels
+                                        var col_indices: @Vector(vec_len, f32) = undefined;
+                                        for (0..vec_len) |j| {
+                                            col_indices[j] = @as(f32, @floatFromInt(c + j));
+                                        }
+                                        const row_f32 = @as(f32, @floatFromInt(r));
 
                                         // Sample along the motion line
                                         const num_samples = distance;
@@ -1680,46 +1692,54 @@ pub fn Filter(comptime T: type) type {
                                             const dy = t * half_dist * sin_angle;
 
                                             // Calculate source coordinates for all pixels in vector
-                                            const src_y = @as(f32, @floatFromInt(r)) + dy;
+                                            const dx_vec: @Vector(vec_len, f32) = @splat(dx);
+                                            const src_x_vec = col_indices + dx_vec;
+                                            const src_y = row_f32 + dy;
 
-                                            // Process each pixel in the vector
+                                            // Vectorized bounds checking
+                                            const zero_vec: @Vector(vec_len, f32) = @splat(0);
+                                            const cols_vec: @Vector(vec_len, f32) = @splat(cols_f32);
+                                            const in_bounds_x = (src_x_vec >= zero_vec) & (src_x_vec < cols_vec);
+                                            const in_bounds_y = src_y >= 0 and src_y < rows_f32;
+
+                                            if (!in_bounds_y) continue;
+
+                                            // Process pixels that are in bounds
+                                            // For simplicity, we still need to iterate but now we can batch operations
                                             for (0..vec_len) |j| {
-                                                const src_x = @as(f32, @floatFromInt(c + j)) + dx;
+                                                if (!in_bounds_x[j]) continue;
 
-                                                // Check bounds
-                                                if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
-                                                    src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
-                                                {
-                                                    // Bilinear interpolation with integer arithmetic
-                                                    const x0 = @as(usize, @intFromFloat(@floor(src_x)));
-                                                    const y0 = @as(usize, @intFromFloat(@floor(src_y)));
-                                                    const x1 = @min(x0 + 1, self.cols - 1);
-                                                    const y1 = @min(y0 + 1, self.rows - 1);
+                                                const src_x = src_x_vec[j];
 
-                                                    // Convert fractional parts to integer weights
-                                                    const fx = @as(i32, @intFromFloat(SCALE * (src_x - @as(f32, @floatFromInt(x0)))));
-                                                    const fy = @as(i32, @intFromFloat(SCALE * (src_y - @as(f32, @floatFromInt(y0)))));
-                                                    const fx_inv = SCALE - fx;
-                                                    const fy_inv = SCALE - fy;
+                                                // Bilinear interpolation with integer arithmetic
+                                                const x0 = @as(usize, @intFromFloat(@floor(src_x)));
+                                                const y0 = @as(usize, @intFromFloat(@floor(src_y)));
+                                                const x1 = @min(x0 + 1, self.cols - 1);
+                                                const y1 = @min(y0 + 1, self.rows - 1);
 
-                                                    const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
-                                                    const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
-                                                    const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
-                                                    const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
+                                                // Convert fractional parts to integer weights
+                                                const fx = @as(i32, @intFromFloat(SCALE * (src_x - @as(f32, @floatFromInt(x0)))));
+                                                const fy = @as(i32, @intFromFloat(SCALE * (src_y - @as(f32, @floatFromInt(y0)))));
+                                                const fx_inv = SCALE - fx;
+                                                const fy_inv = SCALE - fy;
 
-                                                    // Bilinear interpolation
-                                                    const value = @divTrunc(fx_inv * fy_inv * p00 +
-                                                        fx * fy_inv * p01 +
-                                                        fx_inv * fy * p10 +
-                                                        fx * fy * p11, SCALE * SCALE);
+                                                const p00 = @as(i32, src_channel[y0 * self.cols + x0]);
+                                                const p01 = @as(i32, src_channel[y0 * self.cols + x1]);
+                                                const p10 = @as(i32, src_channel[y1 * self.cols + x0]);
+                                                const p11 = @as(i32, src_channel[y1 * self.cols + x1]);
 
-                                                    sum_vec[j] += value;
-                                                    weight_vec[j] += 1;
-                                                }
+                                                // Bilinear interpolation
+                                                const value = @divTrunc(fx_inv * fy_inv * p00 +
+                                                    fx * fy_inv * p01 +
+                                                    fx_inv * fy * p10 +
+                                                    fx * fy * p11, SCALE * SCALE);
+
+                                                sum_vec[j] += value;
+                                                weight_vec[j] += 1;
                                             }
                                         }
 
-                                        // Store vec_len results
+                                        // Store results
                                         for (0..vec_len) |j| {
                                             const result = if (weight_vec[j] > 0)
                                                 @as(u8, @intCast(@min(255, @max(0, @divTrunc(sum_vec[j] + @divTrunc(weight_vec[j], 2), weight_vec[j])))))
@@ -1744,9 +1764,9 @@ pub fn Filter(comptime T: type) type {
                                             const src_x = @as(f32, @floatFromInt(c)) + dx;
                                             const src_y = @as(f32, @floatFromInt(r)) + dy;
 
-                                            // Check bounds
-                                            if (src_x >= 0 and src_x < @as(f32, @floatFromInt(self.cols)) and
-                                                src_y >= 0 and src_y < @as(f32, @floatFromInt(self.rows)))
+                                            // Check bounds (using cached conversions)
+                                            if (src_x >= 0 and src_x < cols_f32 and
+                                                src_y >= 0 and src_y < rows_f32)
                                             {
                                                 // Bilinear interpolation with integer arithmetic
                                                 const x0 = @as(usize, @intFromFloat(@floor(src_x)));
@@ -1883,6 +1903,10 @@ pub fn Filter(comptime T: type) type {
             // Clamp strength to reasonable range
             const clamped_strength = @min(1.0, @max(0.0, strength));
 
+            // Cache common conversions
+            const cols_f32 = @as(f32, @floatFromInt(self.cols));
+            const rows_f32 = @as(f32, @floatFromInt(self.rows));
+
             switch (@typeInfo(T)) {
                 .int, .float => {
                     for (0..self.rows) |r| {
@@ -1925,8 +1949,8 @@ pub fn Filter(comptime T: type) type {
                                 }
 
                                 // Check bounds and sample with bilinear interpolation
-                                if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
-                                    sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
+                                if (sample_x >= 0 and sample_x < cols_f32 and
+                                    sample_y >= 0 and sample_y < rows_f32)
                                 {
                                     const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                     const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
@@ -2024,8 +2048,8 @@ pub fn Filter(comptime T: type) type {
                                             },
                                         }
 
-                                        if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
-                                            sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
+                                        if (sample_x >= 0 and sample_x < cols_f32 and
+                                            sample_y >= 0 and sample_y < rows_f32)
                                         {
                                             const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                             const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
@@ -2110,8 +2134,8 @@ pub fn Filter(comptime T: type) type {
                                             },
                                         }
 
-                                        if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(self.cols)) and
-                                            sample_y >= 0 and sample_y < @as(f32, @floatFromInt(self.rows)))
+                                        if (sample_x >= 0 and sample_x < cols_f32 and
+                                            sample_y >= 0 and sample_y < rows_f32)
                                         {
                                             const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
                                             const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
