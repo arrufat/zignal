@@ -10,9 +10,9 @@ const clamp = std.math.clamp;
 
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
+const Interpolation = @import("image/interpolation.zig").Interpolation;
 const Rgb = @import("color.zig").Rgb;
 const terminal = @import("terminal.zig");
-const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
 const max_supported_width: usize = 2048;
@@ -68,7 +68,7 @@ pub const Options = struct {
     /// If null, original height is preserved
     height: ?u32,
     /// Interpolation method to use when scaling the image
-    interpolation: InterpolationMethod = .nearest_neighbor,
+    interpolation: Interpolation = .nearest_neighbor,
 
     /// Default options for automatic formatting
     pub const default: Options = .{

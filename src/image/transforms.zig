@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
-const InterpolationMethod = @import("interpolation.zig").InterpolationMethod;
+const Interpolation = @import("interpolation.zig").Interpolation;
 
 /// Rotation bounds result
 pub const RotationBounds = struct { rows: usize, cols: usize };
@@ -43,7 +43,7 @@ pub fn Transform(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: InterpolationMethod) !Rectangle(usize) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(usize) {
             const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
@@ -160,7 +160,7 @@ pub fn Transform(comptime T: type) type {
         ///   with the rotated image data. If `rotated.rows` and `rotated.cols` are both 0, optimal
         ///   dimensions will be computed automatically. The caller is responsible for deallocating
         ///   `rotated.data` if it was allocated by this function.
-        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: InterpolationMethod, rotated: *Self) !void {
+        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation, rotated: *Self) !void {
             const interpolation = @import("interpolation.zig");
 
             // Auto-compute optimal bounds if dimensions are 0
@@ -278,7 +278,7 @@ pub fn Transform(comptime T: type) type {
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: InterpolationMethod) void {
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation) void {
             const interpolation = @import("interpolation.zig");
 
             if (out.rows == 0 or out.cols == 0) return;
@@ -348,7 +348,7 @@ pub fn Transform(comptime T: type) type {
         /// - The source image is scaled to fit the destination rectangle.
         /// - Pixels outside the source bounds are not modified in self.
         /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: InterpolationMethod) void {
+        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: Interpolation) void {
             const interpolation = @import("interpolation.zig");
 
             if (source.rows == 0 or source.cols == 0) return;

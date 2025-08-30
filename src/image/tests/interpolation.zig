@@ -5,7 +5,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const Image = @import("../../image.zig").Image;
-const InterpolationMethod = @import("../interpolation.zig").InterpolationMethod;
+const Interpolation = @import("../interpolation.zig").Interpolation;
 const color = @import("../../color.zig");
 
 // Helper function to create a simple gradient test image
@@ -402,7 +402,7 @@ test "clamping stress test - all kernel methods" {
     }
 
     // Test all kernel-based methods at positions that could cause overshoot
-    const methods = [_]InterpolationMethod{
+    const methods = [_]Interpolation{
         .bicubic,
         .catmull_rom,
         .lanczos,
@@ -565,7 +565,7 @@ test "extreme value edge cases" {
     }
 
     // Test all methods handle extreme values correctly
-    const methods = [_]InterpolationMethod{
+    const methods = [_]Interpolation{
         .nearest_neighbor,
         .bilinear,
         .bicubic,

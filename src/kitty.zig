@@ -10,10 +10,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
+const Interpolation = @import("image/interpolation.zig").Interpolation;
 const png = @import("png.zig");
 const Rgb = @import("color.zig").Rgb;
 const terminal = @import("terminal.zig");
-const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
 
 // Kitty protocol constants
 const max_chunk_size: usize = 4096; // Maximum payload size per escape sequence
@@ -37,7 +37,7 @@ pub const Options = struct {
     /// If null, uses image's natural height or calculates from width to preserve aspect ratio
     height: ?u32 = null,
     /// Interpolation method to use when scaling the image
-    interpolation: InterpolationMethod = .bilinear,
+    interpolation: Interpolation = .bilinear,
 
     /// Default options for automatic formatting
     pub const default: Options = .{

@@ -4,8 +4,8 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-// Documentation for the InterpolationMethod enum (used at runtime and for stub generation)
-pub const interpolation_method_doc =
+// Documentation for the Interpolation enum (used at runtime and for stub generation)
+pub const interpolation_doc =
     \\Interpolation methods for image resizing.
     \\
     \\Performance and quality comparison:
@@ -24,7 +24,7 @@ pub const interpolation_method_doc =
 ;
 
 // Per-value documentation for stub generation
-pub const interpolation_method_values = [_]stub_metadata.EnumValueDoc{
+pub const interpolation_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "NEAREST_NEIGHBOR", .doc = "Fastest, pixelated, good for pixel art" },
     .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
     .{ .name = "BICUBIC", .doc = "Balanced quality/speed, general purpose" },
@@ -33,23 +33,23 @@ pub const interpolation_method_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "LANCZOS", .doc = "Highest quality, slowest, for final output" },
 };
 
-// Python object for InterpolationMethod (empty, it's just an enum)
-pub const InterpolationMethodObject = extern struct {
+// Python object for Interpolation (empty, it's just an enum)
+pub const InterpolationObject = extern struct {
     ob_base: c.PyObject,
 };
 
 // Create the enum type
-pub var InterpolationMethodType = c.PyTypeObject{
+pub var InterpolationType = c.PyTypeObject{
     .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.InterpolationMethod",
+    .tp_name = "zignal.Interpolation",
     .tp_basicsize = 0, // No instance size needed for enum
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
     .tp_doc = "Interpolation methods for image resizing",
     .tp_new = null, // Cannot instantiate
 };
 
-// Register the InterpolationMethod enum
-pub fn registerInterpolationMethod(module: *c.PyObject) !void {
+// Register the Interpolation enum
+pub fn registerInterpolation(module: *c.PyObject) !void {
     // Create the enum using Python's enum module
     const enum_module = c.PyImport_ImportModule("enum") orelse return error.ImportFailed;
     defer c.Py_DECREF(enum_module);
@@ -79,14 +79,14 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
         }
     }
 
-    // Create the enum class: IntEnum('InterpolationMethod', values)
-    const args = c.PyTuple_Pack(2, c.PyUnicode_FromString("InterpolationMethod"), values) orelse return error.TupleCreationFailed;
+    // Create the enum class: IntEnum('Interpolation', values)
+    const args = c.PyTuple_Pack(2, c.PyUnicode_FromString("Interpolation"), values) orelse return error.TupleCreationFailed;
     defer c.Py_DECREF(args);
 
     const interpolation_method = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
 
     // Add docstring to the enum
-    const doc_str = c.PyUnicode_FromString(interpolation_method_doc) orelse return error.DocStringFailed;
+    const doc_str = c.PyUnicode_FromString(interpolation_doc) orelse return error.DocStringFailed;
     if (c.PyObject_SetAttrString(interpolation_method, "__doc__", doc_str) < 0) {
         c.Py_DECREF(doc_str);
         c.Py_DECREF(interpolation_method);
@@ -104,7 +104,7 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
     c.Py_DECREF(module_name);
 
     // Add to module
-    if (c.PyModule_AddObject(module, "InterpolationMethod", interpolation_method) < 0) {
+    if (c.PyModule_AddObject(module, "Interpolation", interpolation_method) < 0) {
         c.Py_DECREF(interpolation_method);
         return error.ModuleAddFailed;
     }
@@ -115,7 +115,7 @@ pub fn registerInterpolationMethod(module: *c.PyObject) !void {
 // ============================================================================
 
 pub const interpolation_enum_info = stub_metadata.EnumInfo{
-    .name = "InterpolationMethod",
+    .name = "Interpolation",
     .doc = "Interpolation methods for image resizing",
-    .zig_type = zignal.InterpolationMethod,
+    .zig_type = zignal.Interpolation,
 };

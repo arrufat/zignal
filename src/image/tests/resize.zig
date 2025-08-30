@@ -174,7 +174,7 @@ test "letterbox interpolation methods comparison" {
     src.at(2, 2).* = 255;
 
     // Test different interpolation methods
-    const methods = [_]@import("../interpolation.zig").InterpolationMethod{
+    const methods = [_]@import("../interpolation.zig").Interpolation{
         .nearest_neighbor,
         .bilinear,
         .bicubic,

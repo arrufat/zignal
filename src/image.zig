@@ -29,7 +29,7 @@ const interpolation = @import("image/interpolation.zig");
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const BorderMode = @import("image/filtering.zig").BorderMode;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
-pub const InterpolationMethod = @import("image/interpolation.zig").InterpolationMethod;
+pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const channel_ops = @import("image/channel_ops.zig");
 
@@ -340,19 +340,19 @@ pub fn Image(comptime T: type) type {
 
         /// Performs interpolation at position x, y using the specified method.
         /// Returns `null` if the coordinates are outside valid bounds for the chosen method.
-        pub fn interpolate(self: Self, x: f32, y: f32, method: @import("image/interpolation.zig").InterpolationMethod) ?T {
+        pub fn interpolate(self: Self, x: f32, y: f32, method: @import("image/interpolation.zig").Interpolation) ?T {
             return interpolation.interpolate(T, self, x, y, method);
         }
 
         /// Resizes an image to fit in out, using the specified interpolation method.
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: @import("image/interpolation.zig").InterpolationMethod) !void {
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: @import("image/interpolation.zig").Interpolation) !void {
             try interpolation.resize(T, allocator, self, out, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
         /// A factor > 1.0 enlarges the image, < 1.0 shrinks it.
         /// The caller is responsible for calling deinit() on the returned image.
-        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: @import("image/interpolation.zig").InterpolationMethod) !Self {
+        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: @import("image/interpolation.zig").Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
             const new_rows = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor)));
@@ -368,7 +368,7 @@ pub fn Image(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: @import("image/interpolation.zig").InterpolationMethod) !Rectangle(usize) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: @import("image/interpolation.zig").Interpolation) !Rectangle(usize) {
             return Transform(T).letterbox(self, allocator, out, method);
         }
 
@@ -382,7 +382,7 @@ pub fn Image(comptime T: type) type {
         ///   with the rotated image data. If `rotated.rows` and `rotated.cols` are both 0, optimal
         ///   dimensions will be computed automatically. The caller is responsible for deallocating
         ///   `rotated.data` if it was allocated by this function.
-        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: @import("image/interpolation.zig").InterpolationMethod, rotated: *Self) !void {
+        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: @import("image/interpolation.zig").Interpolation, rotated: *Self) !void {
             return Transform(T).rotate(self, gpa, angle, method, rotated);
         }
 
@@ -412,7 +412,7 @@ pub fn Image(comptime T: type) type {
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: @import("image/interpolation.zig").InterpolationMethod) void {
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: @import("image/interpolation.zig").Interpolation) void {
             return Transform(T).extract(self, rect, angle, out, method);
         }
 
@@ -431,7 +431,7 @@ pub fn Image(comptime T: type) type {
         /// - The source image is scaled to fit the destination rectangle.
         /// - Pixels outside the source bounds are not modified in self.
         /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: @import("image/interpolation.zig").InterpolationMethod) void {
+        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: @import("image/interpolation.zig").Interpolation) void {
             return Transform(T).insert(self, source, rect, angle, method);
         }
 

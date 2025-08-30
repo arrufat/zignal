@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const InterpolationMethod = zignal.InterpolationMethod;
+const Interpolation = zignal.Interpolation;
 const MotionBlur = zignal.MotionBlur;
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
@@ -1594,7 +1594,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     }
 }
 
-fn pythonToZigInterpolation(py_value: c_long) !InterpolationMethod {
+fn pythonToZigInterpolation(py_value: c_long) !Interpolation {
     return switch (py_value) {
         0 => .nearest_neighbor,
         1 => .bilinear,
@@ -1602,11 +1602,11 @@ fn pythonToZigInterpolation(py_value: c_long) !InterpolationMethod {
         3 => .catmull_rom,
         4 => .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } }, // Default Mitchell parameters
         5 => .lanczos,
-        else => return error.InvalidInterpolationMethod,
+        else => return error.InvalidInterpolation,
     };
 }
 
-fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*ImageObject {
+fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |*img| {
@@ -1628,7 +1628,7 @@ fn image_scale(self: *ImageObject, scale: f32, method: InterpolationMethod) !*Im
     return error.ImageNotInitialized;
 }
 
-fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
+fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |*img| {
@@ -1726,7 +1726,7 @@ const image_resize_doc =
     \\- `size` (float or tuple[int, int]):
     \\  - If float: scale factor (e.g., 0.5 for half size, 2.0 for double size)
     \\  - If tuple: target dimensions as (rows, cols)
-    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
 ;
 
 fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1805,7 +1805,7 @@ fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     }
 }
 
-fn image_letterbox_square(self: *ImageObject, size: usize, method: InterpolationMethod) !*ImageObject {
+fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
         const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
         const result = @as(*ImageObject, @ptrCast(py_obj));
@@ -1835,7 +1835,7 @@ fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation
     return error.ImageNotInitialized;
 }
 
-fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: InterpolationMethod) !*ImageObject {
+fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
         const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return error.OutOfMemory;
         const result = @as(*ImageObject, @ptrCast(py_obj));
@@ -1872,7 +1872,7 @@ const image_rotate_doc =
     \\
     \\## Parameters
     \\- `angle` (float): Rotation angle in radians counter-clockwise.
-    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
     \\
     \\## Examples
     \\```python
@@ -1883,10 +1883,10 @@ const image_rotate_doc =
     \\rotated = img.rotate(math.radians(45))
     \\
     \\# Rotate 90 degrees with nearest neighbor (faster, lower quality)
-    \\rotated = img.rotate(math.radians(90), InterpolationMethod.NEAREST_NEIGHBOR)
+    \\rotated = img.rotate(math.radians(90), Interpolation.NEAREST_NEIGHBOR)
     \\
     \\# Rotate -30 degrees with Lanczos (slower, higher quality)
-    \\rotated = img.rotate(math.radians(-30), InterpolationMethod.LANCZOS)
+    \\rotated = img.rotate(math.radians(-30), Interpolation.LANCZOS)
     \\```
 ;
 
@@ -2764,7 +2764,7 @@ const image_letterbox_doc =
     \\- `size` (int or tuple[int, int]):
     \\  - If int: creates a square output of size x size
     \\  - If tuple: target dimensions as (rows, cols)
-    \\- `method` (`InterpolationMethod`, optional): Interpolation method to use. Default is `InterpolationMethod.BILINEAR`.
+    \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
 ;
 
 fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -2915,7 +2915,7 @@ const image_extract_doc =
     \\- `size` (int or tuple[int, int], optional). If not specified, uses the rectangle's dimensions.
     \\  - If int: output is a square of side `size`
     \\  - If tuple: output size as (rows, cols)
-    \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
+    \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
     \\
     \\## Examples
     \\```python
@@ -3051,7 +3051,7 @@ const image_insert_doc =
     \\- `source` (Image): The image to insert
     \\- `rect` (Rectangle): Destination rectangle where the source will be placed
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
-    \\- `method` (InterpolationMethod, optional): Interpolation method. Default: BILINEAR
+    \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
     \\
     \\## Examples
     \\```python
@@ -3442,7 +3442,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_resize),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_resize_doc,
-        .params = "self, size: float | tuple[int, int], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: float | tuple[int, int], method: Interpolation = Interpolation.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -3450,7 +3450,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_letterbox),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_letterbox_doc,
-        .params = "self, size: int | tuple[int, int], method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, size: int | tuple[int, int], method: Interpolation = Interpolation.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -3458,7 +3458,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_rotate),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_rotate_doc,
-        .params = "self, angle: float, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, angle: float, method: Interpolation = Interpolation.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -3586,7 +3586,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_extract),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_extract_doc,
-        .params = "self, rect: Rectangle, angle: float = 0.0, size: int | tuple[int, int] | None = None, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, rect: Rectangle, angle: float = 0.0, size: int | tuple[int, int] | None = None, method: Interpolation = Interpolation.BILINEAR",
         .returns = "Image",
     },
     .{
@@ -3594,7 +3594,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_insert),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_insert_doc,
-        .params = "self, source: Image, rect: Rectangle, angle: float = 0.0, method: InterpolationMethod = InterpolationMethod.BILINEAR",
+        .params = "self, source: Image, rect: Rectangle, angle: float = 0.0, method: Interpolation = Interpolation.BILINEAR",
         .returns = "None",
     },
 };
