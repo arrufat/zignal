@@ -45,20 +45,6 @@ def main():
         print(result.stderr)
         sys.exit(1)
 
-    # Install the package in development mode
-    print("Installing zignal package in development mode...")
-    install_cmd = []
-    if os.environ.get("UV_PROJECT_ROOT") or (bindings_dir / ".venv").exists():
-        install_cmd = ["uv", "pip", "install", "-e", str(bindings_dir)]
-    else:
-        install_cmd = [sys.executable, "-m", "pip", "install", "-e", str(bindings_dir)]
-
-    result = subprocess.run(install_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print("Error installing package:")
-        print(result.stderr)
-        sys.exit(1)
-
     # Import to verify it works
     try:
         import zignal
