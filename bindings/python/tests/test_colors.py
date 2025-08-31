@@ -1,6 +1,7 @@
 """Bindings-level smoke tests for color types."""
 
 import pytest
+
 import zignal
 
 

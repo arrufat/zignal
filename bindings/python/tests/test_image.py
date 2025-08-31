@@ -1,10 +1,8 @@
-"""Bindings-level smoke tests for Image API.
+"""Bindings-level smoke tests for Image API."""
 
-Focus on wiring and Python surface; algorithms are tested in Zig.
-"""
-
-import pytest
 import numpy as np
+import pytest
+
 import zignal
 
 

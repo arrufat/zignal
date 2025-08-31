@@ -1,4 +1,7 @@
+"""Bindings-level smoke tests for convex hull."""
+
 import pytest
+
 import zignal
 
 

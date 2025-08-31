@@ -1,4 +1,7 @@
+"""Bindings-level smoke tests for bitmap fonts."""
+
 import pytest
+
 import zignal
 
 
