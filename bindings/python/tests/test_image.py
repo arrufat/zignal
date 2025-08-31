@@ -42,6 +42,13 @@ class TestImageSmoke:
         arr = img.to_numpy()
         assert (arr[1, 1] == np.array([5, 6, 7, 255], dtype=np.uint8)).all()
 
+    def test_view_with_tuple(self):
+        """Test that view() accepts tuple input"""
+        img = zignal.Image(4, 4, (0, 0, 0, 0), dtype=zignal.Rgba)
+        # Create view using tuple (left, top, right, bottom)
+        v = img.view((1, 1, 3, 3))
+        assert (v.rows, v.cols) == (2, 2)
+
     def test_numpy_roundtrip_and_validation(self):
         # Round‑trip
         img = zignal.Image(2, 3, (1, 2, 3), dtype=zignal.Rgb)
