@@ -175,8 +175,8 @@ pub fn convertWithValidation(
 }
 
 /// Parse a Python tuple representing a 2D point (x, y)
-/// Returns a Point(2, f32) for use with drawing operations
-pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point(2, f32) {
+/// Returns a Point(2, T) where T can be f32 or f64
+pub fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
     if (point_obj == null) {
         return error.InvalidPoint;
     }
@@ -208,11 +208,11 @@ pub fn parsePointTuple(point_obj: ?*c.PyObject) !Point(2, f32) {
         return error.InvalidPoint;
     }
 
-    return .point(.{ @as(f32, @floatCast(x)), @as(f32, @floatCast(y)) });
+    return .point(.{ @as(T, @floatCast(x)), @as(T, @floatCast(y)) });
 }
 
-/// Parse a Rectangle object to Zignal Rectangle(f32)
-pub fn parseRectangle(rect_obj: ?*c.PyObject) !zignal.Rectangle(f32) {
+/// Parse a Rectangle object to Zignal Rectangle(T)
+pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     const rectangle = @import("rectangle.zig");
 
     if (rect_obj == null) {
@@ -227,11 +227,11 @@ pub fn parseRectangle(rect_obj: ?*c.PyObject) !zignal.Rectangle(f32) {
     }
 
     const rect = @as(*rectangle.RectangleObject, @ptrCast(rect_obj.?));
-    return zignal.Rectangle(f32).init(rect.left, rect.top, rect.right, rect.bottom);
+    return zignal.Rectangle(T).init(@as(T, @floatCast(rect.left)), @as(T, @floatCast(rect.top)), @as(T, @floatCast(rect.right)), @as(T, @floatCast(rect.bottom)));
 }
 
-/// Parse a Python list of point tuples to an allocated slice of Point(2, f32)
-pub fn parsePointList(list_obj: ?*c.PyObject) ![]Point(2, f32) {
+/// Parse a Python list of point tuples to an allocated slice of Point(2, T)
+pub fn parsePointList(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     if (list_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Points list is null");
         return error.InvalidPointList;
@@ -252,7 +252,7 @@ pub fn parsePointList(list_obj: ?*c.PyObject) ![]Point(2, f32) {
     }
 
     // Allocate memory for points
-    const points = allocator.alloc(Point(2, f32), @intCast(size)) catch {
+    const points = allocator.alloc(Point(2, T), @intCast(size)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for points");
         return error.OutOfMemory;
     };
@@ -265,12 +265,17 @@ pub fn parsePointList(list_obj: ?*c.PyObject) ![]Point(2, f32) {
         else
             c.PyTuple_GetItem(list_obj, @intCast(i));
 
-        points[i] = parsePointTuple(item) catch {
+        points[i] = parsePointTuple(T, item) catch {
             return error.InvalidPointList;
         };
     }
 
     return points;
+}
+
+/// Convert a Point(2, f64) back to a Python tuple
+pub fn pointToTuple(point: Point(2, f64)) ?*c.PyObject {
+    return c.PyTuple_Pack(2, c.PyFloat_FromDouble(point.x()), c.PyFloat_FromDouble(point.y()));
 }
 
 /// Set a Python exception with an error message that includes a file path.

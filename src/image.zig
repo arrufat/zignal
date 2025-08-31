@@ -435,6 +435,31 @@ pub fn Image(comptime T: type) type {
             return Transform(T).insert(self, source, rect, angle, method);
         }
 
+        /// Applies a geometric transform to the image using the specified interpolation method.
+        ///
+        /// This method warps an image using a geometric transform (Similarity, Affine, or Projective).
+        /// For each pixel in the output image, it applies the transform to find the corresponding
+        /// location in the source image and samples using the specified interpolation method.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the output image.
+        /// - `transform`: A geometric transform object (SimilarityTransform, AffineTransform, or ProjectiveTransform).
+        /// - `method`: Interpolation method for sampling pixels.
+        /// - `out`: Output image. If empty, will be allocated with specified dimensions.
+        /// - `out_rows`: Number of rows in the output image.
+        /// - `out_cols`: Number of columns in the output image.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// const transform = SimilarityTransform(f32).init(from_points, to_points);
+        /// var warped: Image(T) = .empty;
+        /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
+        /// defer warped.deinit(allocator);
+        /// ```
+        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: @import("image/interpolation.zig").Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
+            return Transform(T).warp(self, allocator, transform, method, out, out_rows, out_cols);
+        }
+
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.

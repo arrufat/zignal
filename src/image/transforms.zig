@@ -514,5 +514,41 @@ pub fn Transform(comptime T: type) type {
                 }
             }
         }
+
+        /// Applies a geometric transform to the image using backward mapping.
+        /// For each pixel in the output, applies the transform to find the corresponding source pixel.
+        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
+            const Point = @import("../geometry/Point.zig").Point;
+            const interpolation = @import("interpolation.zig");
+
+            // Check if output needs allocation or reallocation
+            const needs_alloc = (out.rows == 0 and out.cols == 0) or
+                (out.rows != out_rows or out.cols != out_cols);
+
+            if (needs_alloc) {
+                // Only deinit if image has actual dimensions (not empty)
+                if (out.rows > 0 and out.cols > 0) {
+                    out.deinit(allocator);
+                }
+                out.* = try Self.init(allocator, out_rows, out_cols);
+            }
+
+            // Apply transform to each pixel in the output image
+            for (0..out_rows) |r| {
+                for (0..out_cols) |c| {
+                    // Current pixel in output space
+                    const out_point = Point(2, f32).point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
+
+                    // Transform to source image space using backward mapping
+                    const src_point = transform.project(out_point);
+
+                    // Sample from source image with interpolation
+                    const value = interpolation.interpolate(T, self, src_point.x(), src_point.y(), method) orelse std.mem.zeroes(T);
+
+                    // Write to output image
+                    out.at(r, c).* = value;
+                }
+            }
+        }
     };
 }
