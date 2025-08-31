@@ -211,7 +211,77 @@ pub fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
     return .point(.{ @as(T, @floatCast(x)), @as(T, @floatCast(y)) });
 }
 
-/// Parse a Rectangle object to Zignal Rectangle(T)
+/// Parse a Python tuple representing a rectangle (left, top, right, bottom)
+/// Returns a Rectangle(T) where T can be any numeric type
+pub fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectangle(T) {
+    if (tuple_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple is null");
+        return error.InvalidRectangle;
+    }
+
+    // Check if it's a tuple
+    if (c.PyTuple_Check(tuple_obj) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle must be a tuple of (left, top, right, bottom)");
+        return error.InvalidRectangle;
+    }
+
+    const size = c.PyTuple_Size(tuple_obj);
+    if (size != 4) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Rectangle tuple must have exactly 4 elements (left, top, right, bottom)");
+        return error.InvalidRectangle;
+    }
+
+    // Extract all four coordinates
+    const left_obj = c.PyTuple_GetItem(tuple_obj, 0);
+    const left = c.PyFloat_AsDouble(left_obj);
+    if (left == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple elements must be numbers");
+        return error.InvalidRectangle;
+    }
+
+    const top_obj = c.PyTuple_GetItem(tuple_obj, 1);
+    const top = c.PyFloat_AsDouble(top_obj);
+    if (top == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple elements must be numbers");
+        return error.InvalidRectangle;
+    }
+
+    const right_obj = c.PyTuple_GetItem(tuple_obj, 2);
+    const right = c.PyFloat_AsDouble(right_obj);
+    if (right == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple elements must be numbers");
+        return error.InvalidRectangle;
+    }
+
+    const bottom_obj = c.PyTuple_GetItem(tuple_obj, 3);
+    const bottom = c.PyFloat_AsDouble(bottom_obj);
+    if (bottom == -1.0 and c.PyErr_Occurred() != null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple elements must be numbers");
+        return error.InvalidRectangle;
+    }
+
+    // Convert to target type and return
+    const info = @typeInfo(T);
+    if (info == .float) {
+        return zignal.Rectangle(T).init(
+            @as(T, @floatCast(left)),
+            @as(T, @floatCast(top)),
+            @as(T, @floatCast(right)),
+            @as(T, @floatCast(bottom)),
+        );
+    } else {
+        // For integer types, truncate the float values
+        return zignal.Rectangle(T).init(
+            @as(T, @intFromFloat(left)),
+            @as(T, @intFromFloat(top)),
+            @as(T, @intFromFloat(right)),
+            @as(T, @intFromFloat(bottom)),
+        );
+    }
+}
+
+/// Parse a Rectangle object or tuple to Zignal Rectangle(T)
+/// Accepts either a Rectangle instance or a tuple of (left, top, right, bottom)
 pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     const rectangle = @import("rectangle.zig");
 
@@ -220,9 +290,14 @@ pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangl
         return error.InvalidRectangle;
     }
 
+    // Check if it's a tuple first
+    if (c.PyTuple_Check(rect_obj) != 0) {
+        return parseRectangleTuple(T, rect_obj);
+    }
+
     // Check if it's a Rectangle instance
     if (c.PyObject_IsInstance(rect_obj, @ptrCast(&rectangle.RectangleType)) <= 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Object must be a Rectangle instance");
+        c.PyErr_SetString(c.PyExc_TypeError, "Object must be a Rectangle instance or a tuple of (left, top, right, bottom)");
         return error.InvalidRectangle;
     }
 

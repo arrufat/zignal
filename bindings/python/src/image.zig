@@ -2588,20 +2588,21 @@ const image_view_doc =
     \\are reflected in both. This is a zero-copy operation.
     \\
     \\## Parameters
-    \\- `rect` (`Rectangle | None`, optional): The rectangular region to view. If omitted or `None`, returns a view of the full image.
+    \\- `rect` (`Rectangle | tuple[float, float, float, float] | None`, optional): The rectangular region to view.
+    \\  Can be a Rectangle object or a tuple of (left, top, right, bottom).
+    \\  If omitted or `None`, returns a view of the full image.
     \\
     \\## Examples
     \\```python
-    \\# Create a view of the top-left quadrant
+    \\# Create a view using a Rectangle object
     \\rect = Rectangle(0, 0, img.cols // 2, img.rows // 2)
     \\view = img.view(rect)
     \\
+    \\# Create a view using a tuple (left, top, right, bottom)
+    \\view = img.view((0, 0, img.cols // 2, img.rows // 2))
+    \\
     \\# Modifications to the view affect the parent
     \\view.fill((255, 0, 0))  # Fills the top-left quadrant with red
-    \\
-    \\# Check if an image is a view
-    \\print(view.is_view)  # True
-    \\print(img.is_view)   # False (unless img itself is a view)
     \\```
     \\
     \\## Notes
@@ -3665,7 +3666,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_view),
         .flags = c.METH_VARARGS,
         .doc = image_view_doc,
-        .params = "self, rect: Rectangle | None = None",
+        .params = "self, rect: Rectangle | tuple[float, float, float, float] | None = None",
         .returns = "Image",
     },
     .{
