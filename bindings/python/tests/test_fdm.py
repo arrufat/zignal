@@ -1,8 +1,4 @@
-"""Test Feature Distribution Matching binding functionality.
-
-These tests focus on verifying the Python binding works correctly,
-not testing the FDM algorithm itself (which is tested in Zig).
-"""
+"""Test Feature Distribution Matching binding functionality."""
 
 import pytest
 

@@ -1,9 +1,5 @@
-"""Smoke tests for geometric transforms API.
+"""Smoke tests for geometric transforms API."""
 
-Focus on API surface - methods exist and can be called.
-"""
-
-import pytest
 import zignal
 
 
