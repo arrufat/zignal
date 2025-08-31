@@ -385,22 +385,22 @@ fn makeDrawMethodWithWidth(
 
             // Call the appropriate method based on parameter types
             if (comptime std.mem.eql(u8, name, "draw_line")) {
-                const p1 = py_utils.parsePointTuple(@ptrCast(param_objs[0])) catch return null;
-                const p2 = py_utils.parsePointTuple(@ptrCast(param_objs[1])) catch return null;
+                const p1 = py_utils.parsePointTuple(f32, @ptrCast(param_objs[0])) catch return null;
+                const p2 = py_utils.parsePointTuple(f32, @ptrCast(param_objs[1])) catch return null;
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.drawLine(p1, p2, common.color_gray, common.width, common.mode),
                     .rgb => common.canvas_rgb.?.drawLine(p1, p2, common.color_rgb, common.width, common.mode),
                     .rgba => common.canvas_rgba.?.drawLine(p1, p2, common.color_rgba, common.width, common.mode),
                 }
             } else if (comptime std.mem.eql(u8, name, "draw_rectangle")) {
-                const rect = py_utils.parseRectangle(@ptrCast(param_objs[0])) catch return null;
+                const rect = py_utils.parseRectangle(f32, @ptrCast(param_objs[0])) catch return null;
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.drawRectangle(rect, common.color_gray, common.width, common.mode),
                     .rgb => common.canvas_rgb.?.drawRectangle(rect, common.color_rgb, common.width, common.mode),
                     .rgba => common.canvas_rgba.?.drawRectangle(rect, common.color_rgba, common.width, common.mode),
                 }
             } else if (comptime std.mem.eql(u8, name, "draw_polygon")) {
-                const points = py_utils.parsePointList(@ptrCast(param_objs[0])) catch return null;
+                const points = py_utils.parsePointList(f32, @ptrCast(param_objs[0])) catch return null;
                 defer allocator.free(points);
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.drawPolygon(points, common.color_gray, common.width, common.mode),
@@ -408,7 +408,7 @@ fn makeDrawMethodWithWidth(
                     .rgba => common.canvas_rgba.?.drawPolygon(points, common.color_rgba, common.width, common.mode),
                 }
             } else if (comptime std.mem.eql(u8, name, "draw_circle")) {
-                const center = py_utils.parsePointTuple(@ptrCast(param_objs[0])) catch return null;
+                const center = py_utils.parsePointTuple(f32, @ptrCast(param_objs[0])) catch return null;
                 const radius = py_utils.validateNonNegative(f32, @as(*f64, @ptrCast(@alignCast(parse_args[1]))).*, "Radius") catch return null;
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.drawCircle(center, radius, common.color_gray, common.width, common.mode),
@@ -488,14 +488,14 @@ fn makeFillMethod(
 
             // Call the appropriate method based on parameter types
             if (comptime std.mem.eql(u8, name, "fill_rectangle")) {
-                const rect = py_utils.parseRectangle(@ptrCast(param_objs[0])) catch return null;
+                const rect = py_utils.parseRectangle(f32, @ptrCast(param_objs[0])) catch return null;
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.fillRectangle(rect, common.color_gray, common.mode),
                     .rgb => common.canvas_rgb.?.fillRectangle(rect, common.color_rgb, common.mode),
                     .rgba => common.canvas_rgba.?.fillRectangle(rect, common.color_rgba, common.mode),
                 }
             } else if (comptime std.mem.eql(u8, name, "fill_polygon")) {
-                const points = py_utils.parsePointList(@ptrCast(param_objs[0])) catch return null;
+                const points = py_utils.parsePointList(f32, @ptrCast(param_objs[0])) catch return null;
                 defer allocator.free(points);
                 if (has_error_handling) {
                     switch (common.kind) {
@@ -520,7 +520,7 @@ fn makeFillMethod(
                     }
                 }
             } else if (comptime std.mem.eql(u8, name, "fill_circle")) {
-                const center = py_utils.parsePointTuple(@ptrCast(param_objs[0])) catch return null;
+                const center = py_utils.parsePointTuple(f32, @ptrCast(param_objs[0])) catch return null;
                 const radius = py_utils.validateNonNegative(f32, @as(*f64, @ptrCast(@alignCast(parse_args[1]))).*, "Radius") catch return null;
                 switch (common.kind) {
                     .gray => common.canvas_gray.?.fillCircle(center, radius, common.color_gray, common.mode),
@@ -681,9 +681,9 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     const common = parseDrawArgs(self, color_obj, width, mode) catch return null;
 
     // Convert arguments
-    const p0 = py_utils.parsePointTuple(@ptrCast(p0_obj)) catch return null;
-    const p1 = py_utils.parsePointTuple(@ptrCast(p1_obj)) catch return null;
-    const p2 = py_utils.parsePointTuple(@ptrCast(p2_obj)) catch return null;
+    const p0 = py_utils.parsePointTuple(f32, @ptrCast(p0_obj)) catch return null;
+    const p1 = py_utils.parsePointTuple(f32, @ptrCast(p1_obj)) catch return null;
+    const p2 = py_utils.parsePointTuple(f32, @ptrCast(p2_obj)) catch return null;
 
     switch (common.kind) {
         .gray => common.canvas_gray.?.drawQuadraticBezier(p0, p1, p2, common.color_gray, common.width, common.mode),
@@ -716,10 +716,10 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const common = parseDrawArgs(self, color_obj, width, mode) catch return null;
 
     // Convert arguments
-    const p0 = py_utils.parsePointTuple(@ptrCast(p0_obj)) catch return null;
-    const p1 = py_utils.parsePointTuple(@ptrCast(p1_obj)) catch return null;
-    const p2 = py_utils.parsePointTuple(@ptrCast(p2_obj)) catch return null;
-    const p3 = py_utils.parsePointTuple(@ptrCast(p3_obj)) catch return null;
+    const p0 = py_utils.parsePointTuple(f32, @ptrCast(p0_obj)) catch return null;
+    const p1 = py_utils.parsePointTuple(f32, @ptrCast(p1_obj)) catch return null;
+    const p2 = py_utils.parsePointTuple(f32, @ptrCast(p2_obj)) catch return null;
+    const p3 = py_utils.parsePointTuple(f32, @ptrCast(p3_obj)) catch return null;
 
     switch (common.kind) {
         .gray => common.canvas_gray.?.drawCubicBezier(p0, p1, p2, p3, common.color_gray, common.width, common.mode),
@@ -751,7 +751,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const tension_val = py_utils.validateRange(f32, tension, 0.0, 1.0, "Tension") catch return null;
 
     // Parse points
-    const points = py_utils.parsePointList(@ptrCast(points_obj)) catch return null;
+    const points = py_utils.parsePointList(f32, @ptrCast(points_obj)) catch return null;
     defer allocator.free(points);
 
     switch (common.kind) {
@@ -783,7 +783,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const tension_val = py_utils.validateRange(f32, tension, 0.0, 1.0, "Tension") catch return null;
 
     // Parse points
-    const points = py_utils.parsePointList(@ptrCast(points_obj)) catch return null;
+    const points = py_utils.parsePointList(f32, @ptrCast(points_obj)) catch return null;
     defer allocator.free(points);
 
     switch (common.kind) {
@@ -826,7 +826,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const common = parseDrawArgs(self, color_obj, width, mode) catch return null;
 
     // Convert arguments
-    const center = py_utils.parsePointTuple(@ptrCast(center_obj)) catch return null;
+    const center = py_utils.parsePointTuple(f32, @ptrCast(center_obj)) catch return null;
     const radius_val = @as(f32, @floatCast(radius));
     const start_angle_val = @as(f32, @floatCast(start_angle));
     const end_angle_val = @as(f32, @floatCast(end_angle));
@@ -870,7 +870,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const common = parseFillArgs(self, color_obj, mode) catch return null;
 
     // Convert arguments
-    const center = py_utils.parsePointTuple(@ptrCast(center_obj)) catch return null;
+    const center = py_utils.parsePointTuple(f32, @ptrCast(center_obj)) catch return null;
     // Allow negative radius - the Zig library will handle it gracefully (no-op)
     const radius_val = @as(f32, @floatCast(radius));
     const start_angle_val = @as(f32, @floatCast(start_angle));
@@ -918,7 +918,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     };
     const text = std.mem.span(text_cstr);
 
-    const position = py_utils.parsePointTuple(position_obj) catch return null;
+    const position = py_utils.parsePointTuple(f32, position_obj) catch return null;
 
     const rgba = color_utils.parseColorTo(Rgba, @ptrCast(color_obj)) catch return null;
 

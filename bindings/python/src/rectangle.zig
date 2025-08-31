@@ -10,10 +10,10 @@ const stub_metadata = @import("stub_metadata.zig");
 
 pub const RectangleObject = extern struct {
     ob_base: c.PyObject,
-    left: f32,
-    top: f32,
-    right: f32,
-    bottom: f32,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
 };
 
 fn rectangle_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -54,11 +54,10 @@ fn rectangle_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return -1;
     }
 
-    // Store as f32
-    self.left = @as(f32, @floatCast(left));
-    self.top = @as(f32, @floatCast(top));
-    self.right = @as(f32, @floatCast(right));
-    self.bottom = @as(f32, @floatCast(bottom));
+    self.left = left;
+    self.top = top;
+    self.right = right;
+    self.bottom = bottom;
 
     return 0;
 }

@@ -20,6 +20,7 @@ const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
 const interpolation_module = @import("interpolation.zig");
 const optimization_module = @import("optimization.zig");
+const transforms_module = @import("transforms.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -550,6 +551,46 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &convex_hull_module.convex_hull_special_methods_metadata,
     });
 
+    // Generate Transform classes from metadata
+    // SimilarityTransform
+    const similarity_methods = transforms_module.similarity_methods_metadata;
+    const similarity_properties = transforms_module.similarity_properties_metadata;
+    const similarity_doc = std.mem.span(transforms_module.SimilarityTransformType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "SimilarityTransform",
+        .doc = similarity_doc,
+        .methods = &similarity_methods,
+        .properties = &similarity_properties,
+        .bases = &.{},
+        .special_methods = null,
+    });
+
+    // AffineTransform
+    const affine_methods = transforms_module.affine_methods_metadata;
+    const affine_properties = transforms_module.affine_properties_metadata;
+    const affine_doc = std.mem.span(transforms_module.AffineTransformType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "AffineTransform",
+        .doc = affine_doc,
+        .methods = &affine_methods,
+        .properties = &affine_properties,
+        .bases = &.{},
+        .special_methods = null,
+    });
+
+    // ProjectiveTransform
+    const projective_methods = transforms_module.projective_methods_metadata;
+    const projective_properties = transforms_module.projective_properties_metadata;
+    const projective_doc = std.mem.span(transforms_module.ProjectiveTransformType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "ProjectiveTransform",
+        .doc = projective_doc,
+        .methods = &projective_methods,
+        .properties = &projective_properties,
+        .bases = &.{},
+        .special_methods = null,
+    });
+
     // Generate module-level functions from metadata
     const module_functions = stub_metadata.extractFunctionInfo(&main_module.module_functions_metadata);
     try generateModuleFunctionsFromMetadata(&stub, &module_functions);
@@ -594,6 +635,9 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Assignment as Assignment,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");
+    try stub.write("    SimilarityTransform as SimilarityTransform,\n");
+    try stub.write("    AffineTransform as AffineTransform,\n");
+    try stub.write("    ProjectiveTransform as ProjectiveTransform,\n");
     try stub.write("    solve_assignment_problem as solve_assignment_problem,\n");
     try stub.write("    # Type aliases\n");
     try stub.write("    Point as Point,\n");

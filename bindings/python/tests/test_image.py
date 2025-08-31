@@ -139,6 +139,39 @@ class TestImageSmoke:
         assert isinstance(rgb, zignal.Rgb)
         assert rgb.r == 255
 
+    def test_warp_smoke(self):
+        """Test image warp API exists and is callable."""
+        img = zignal.Image(10, 10)
+
+        # Can warp with similarity
+        sim = zignal.SimilarityTransform([(2, 2), (8, 2)], [(3, 3), (7, 3)])
+        warped = img.warp(sim)
+        assert warped is not None
+
+        # Can warp with affine
+        aff = zignal.AffineTransform([(2, 2), (8, 2), (5, 8)], [(3, 3), (7, 3), (5, 7)])
+        warped = img.warp(aff)
+        assert warped is not None
+
+        # Can warp with projective
+        proj = zignal.ProjectiveTransform(
+            [(1, 1), (9, 1), (9, 9), (1, 9)], [(2, 2), (8, 1), (9, 8), (1, 9)]
+        )
+        warped = img.warp(proj)
+        assert warped is not None
+
+        # Can warp with options
+        warped = img.warp(sim, shape=(20, 20))
+        assert warped is not None
+
+        warped = img.warp(sim, method=zignal.Interpolation.NEAREST_NEIGHBOR)
+        assert warped is not None
+
+        # Works with different image types
+        gray = img.convert(zignal.Grayscale)
+        warped = gray.warp(sim)
+        assert warped is not None
+
     def test_motion_blur_smoke(self):
         """Test motion blur API basics"""
         # Create test image

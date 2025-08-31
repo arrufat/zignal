@@ -93,7 +93,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     }
 
     // Parse the point list
-    const points = py_utils.parsePointList(points_obj) catch {
+    const points = py_utils.parsePointList(f32, points_obj) catch {
         // Error already set by parsePointList
         return null;
     };

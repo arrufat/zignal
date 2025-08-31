@@ -19,6 +19,7 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const rectangle = @import("rectangle.zig");
 const stub_metadata = @import("stub_metadata.zig");
+const transforms = @import("transforms.zig");
 
 // ============================================================================
 // MODULE FUNCTIONS
@@ -165,6 +166,25 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register Grayscale sentinel type
     grayscale_format.registerGrayscaleType(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register Grayscale type: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register transform types
+    py_utils.registerType(@ptrCast(m), "SimilarityTransform", @ptrCast(&transforms.SimilarityTransformType)) catch |err| {
+        std.log.err("Failed to register SimilarityTransform: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    py_utils.registerType(@ptrCast(m), "AffineTransform", @ptrCast(&transforms.AffineTransformType)) catch |err| {
+        std.log.err("Failed to register AffineTransform: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    py_utils.registerType(@ptrCast(m), "ProjectiveTransform", @ptrCast(&transforms.ProjectiveTransformType)) catch |err| {
+        std.log.err("Failed to register ProjectiveTransform: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

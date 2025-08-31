@@ -2629,7 +2629,7 @@ fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
         if (rect_obj == c.Py_None()) {
             use_full = true;
         } else {
-            const frect = py_utils.parseRectangle(rect_obj) catch return null;
+            const frect = py_utils.parseRectangle(f32, rect_obj) catch return null;
             rect = zignal.Rectangle(usize).init(
                 @intFromFloat(@max(0, frect.l)),
                 @intFromFloat(@max(0, frect.t)),
@@ -2839,6 +2839,189 @@ fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 }
 
+const image_warp_doc =
+    \\Apply a geometric transform to the image.
+    \\
+    \\This method warps an image using a geometric transform (Similarity, Affine, or Projective).
+    \\For each pixel in the output image, it applies the transform to find the corresponding
+    \\location in the source image and samples using the specified interpolation method.
+    \\
+    \\## Parameters
+    \\- `transform`: A geometric transform object (SimilarityTransform, AffineTransform, or ProjectiveTransform)
+    \\- `shape` (optional): Output image shape as (rows, cols) tuple. Defaults to input image shape.
+    \\- `method` (optional): Interpolation method. Defaults to Interpolation.BILINEAR.
+    \\
+    \\## Examples
+    \\```python
+    \\# Apply similarity transform
+    \\from_points = [(0, 0), (100, 0), (100, 100)]
+    \\to_points = [(10, 10), (110, 20), (105, 115)]
+    \\transform = SimilarityTransform(from_points, to_points)
+    \\warped = img.warp(transform)
+    \\
+    \\# Apply with custom output size and interpolation
+    \\warped = img.warp(transform, shape=(512, 512), method=Interpolation.BICUBIC)
+    \\```
+;
+
+fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var transform_obj: ?*c.PyObject = null;
+    var shape_obj: ?*c.PyObject = null;
+    var method_value: c_long = 1; // Default to BILINEAR
+
+    const keywords = [_:null]?[*:0]const u8{ "transform", "shape", "method", null };
+    const format = std.fmt.comptimePrint("O|Ol", .{});
+
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&keywords)), &transform_obj, &shape_obj, &method_value) == 0) {
+        return null;
+    }
+
+    // Check if image is initialized
+    if (self.py_image == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
+
+    // Parse interpolation method
+    const method = pythonToZigInterpolation(@intCast(method_value)) catch |err| {
+        switch (err) {
+            error.InvalidInterpolation => {
+                c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+                return null;
+            },
+        }
+    };
+
+    // Determine output dimensions
+    var out_rows = self.py_image.?.rows();
+    var out_cols = self.py_image.?.cols();
+
+    if (shape_obj != null and shape_obj != c.Py_None()) {
+        // Parse shape tuple
+        if (c.PyTuple_Check(shape_obj) == 0) {
+            c.PyErr_SetString(c.PyExc_TypeError, "shape must be a tuple of (rows, cols)");
+            return null;
+        }
+
+        if (c.PyTuple_Size(shape_obj) != 2) {
+            c.PyErr_SetString(c.PyExc_ValueError, "shape must have exactly 2 elements");
+            return null;
+        }
+
+        const rows_obj = c.PyTuple_GetItem(shape_obj, 0);
+        const cols_obj = c.PyTuple_GetItem(shape_obj, 1);
+
+        const rows_val = c.PyLong_AsLong(rows_obj);
+        const cols_val = c.PyLong_AsLong(cols_obj);
+
+        if (rows_val <= 0 or cols_val <= 0) {
+            c.PyErr_SetString(c.PyExc_ValueError, "Output dimensions must be positive");
+            return null;
+        }
+
+        out_rows = @intCast(rows_val);
+        out_cols = @intCast(cols_val);
+    }
+
+    // Import transforms module to check types
+    const transforms = @import("transforms.zig");
+
+    // Create output Python image object
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+
+    // Create PyImage wrapper for the warped result
+    const warped_pyimage = allocator.create(PyImageMod.PyImage) catch {
+        c.Py_DECREF(py_obj);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for warped image");
+        return null;
+    };
+
+    // Apply warp using inline else to handle all image formats generically
+    switch (self.py_image.?.data) {
+        inline else => |img| {
+            var warped_img: @TypeOf(img) = .empty;
+
+            // Determine transform type and apply warp
+            if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
+                const transform = @as(*transforms.SimilarityTransformObject, @ptrCast(transform_obj));
+                const zignal_transform: zignal.SimilarityTransform(f32) = .{
+                    .matrix = .init(.{
+                        .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
+                        .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]) },
+                    }),
+                    .bias = .init(.{
+                        .{@floatCast(transform.bias[0])},
+                        .{@floatCast(transform.bias[1])},
+                    }),
+                };
+                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    allocator.destroy(warped_pyimage);
+                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                    return null;
+                };
+            } else if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
+                const transform = @as(*transforms.AffineTransformObject, @ptrCast(transform_obj));
+                const zignal_transform: zignal.AffineTransform(f32) = .{
+                    .matrix = .init(.{
+                        .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
+                        .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]) },
+                    }),
+                    .bias = .init(.{
+                        .{@floatCast(transform.bias[0])},
+                        .{@floatCast(transform.bias[1])},
+                    }),
+                    .allocator = allocator,
+                };
+                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    allocator.destroy(warped_pyimage);
+                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                    return null;
+                };
+            } else if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
+                const transform = @as(*transforms.ProjectiveTransformObject, @ptrCast(transform_obj));
+                const zignal_transform: zignal.ProjectiveTransform(f32) = .{
+                    .matrix = .init(.{
+                        .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]), @floatCast(transform.matrix[0][2]) },
+                        .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]), @floatCast(transform.matrix[1][2]) },
+                        .{ @floatCast(transform.matrix[2][0]), @floatCast(transform.matrix[2][1]), @floatCast(transform.matrix[2][2]) },
+                    }),
+                };
+                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                    c.Py_DECREF(py_obj);
+                    allocator.destroy(warped_pyimage);
+                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                    return null;
+                };
+            } else {
+                c.Py_DECREF(py_obj);
+                allocator.destroy(warped_pyimage);
+                c.PyErr_SetString(c.PyExc_TypeError, "transform must be a SimilarityTransform, AffineTransform, or ProjectiveTransform");
+                return null;
+            }
+
+            // Create PyImage wrapper for the warped result based on image type
+            warped_pyimage.* = switch (@TypeOf(img)) {
+                zignal.Image(u8) => .{ .data = .{ .grayscale = warped_img }, .ownership = .owned },
+                zignal.Image(Rgb) => .{ .data = .{ .rgb = warped_img }, .ownership = .owned },
+                zignal.Image(Rgba) => .{ .data = .{ .rgba = warped_img }, .ownership = .owned },
+                else => unreachable,
+            };
+        },
+    }
+
+    result.py_image = warped_pyimage;
+    result.numpy_ref = null;
+    result.parent_ref = null;
+
+    return py_obj;
+}
+
 const image_crop_doc =
     \\Extract a rectangular region from the image.
     \\
@@ -2868,7 +3051,7 @@ fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     }
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     if (self.py_image) |pimg| {
         const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
@@ -2953,7 +3136,7 @@ fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     }
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     // Convert method value to Zig enum
     const method = pythonToZigInterpolation(method_value) catch {
@@ -3093,7 +3276,7 @@ fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     const source = @as(*ImageObject, @ptrCast(source_obj.?));
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(rect_obj) catch return null;
+    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     // Convert method value to Zig enum
     const method = pythonToZigInterpolation(method_value) catch {
@@ -3459,6 +3642,14 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = image_rotate_doc,
         .params = "self, angle: float, method: Interpolation = Interpolation.BILINEAR",
+        .returns = "Image",
+    },
+    .{
+        .name = "warp",
+        .meth = @ptrCast(&image_warp),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = image_warp_doc,
+        .params = "self, transform: SimilarityTransform | AffineTransform | ProjectiveTransform, shape: tuple[int, int] | None = None, method: Interpolation = Interpolation.BILINEAR",
         .returns = "Image",
     },
     .{

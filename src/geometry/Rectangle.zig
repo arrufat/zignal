@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
-const as = @import("../meta.zig").as;
+const meta = @import("../meta.zig");
 
 /// A generic rectangle object with some convenience functionality.
 pub fn Rectangle(comptime T: type) type {
@@ -47,12 +47,12 @@ pub fn Rectangle(comptime T: type) type {
         }
 
         /// Casts self's underlying type to U.
-        pub fn cast(self: Self, comptime U: type) Rectangle(U) {
+        pub fn as(self: Self, comptime U: type) Rectangle(U) {
             return .{
-                .l = as(U, self.l),
-                .t = as(U, self.t),
-                .r = as(U, self.r),
-                .b = as(U, self.b),
+                .l = meta.as(U, self.l),
+                .t = meta.as(U, self.t),
+                .r = meta.as(U, self.r),
+                .b = meta.as(U, self.b),
             };
         }
 
@@ -160,7 +160,7 @@ test "Rectangle" {
     try expectEqual(frect.height(), 480);
     try expectEqual(frect.contains(320, 240), true);
     try expectEqual(irect.contains(640, 480), false);
-    try expectEqualDeep(frect.cast(isize), irect);
+    try expectEqualDeep(frect.as(isize), irect);
 }
 
 test "Rectangle grow and shrink" {
