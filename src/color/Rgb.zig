@@ -31,7 +31,7 @@ pub const red: Rgb = .{ .r = 255, .g = 0, .b = 0 };
 pub const green: Rgb = .{ .r = 0, .g = 255, .b = 0 };
 pub const blue: Rgb = .{ .r = 0, .g = 0, .b = 255 };
 
-/// Default formatting with ANSI color output
+/// Default formatting with SGR color output
 pub fn format(self: Rgb, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Rgb, self, writer);
 }

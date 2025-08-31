@@ -29,7 +29,7 @@ const Hsv = @This();
 pub const black: Hsv = .{ .h = 0, .s = 0, .v = 0 };
 pub const white: Hsv = .{ .h = 0, .s = 0, .v = 100 };
 
-/// Default formatting with ANSI color output
+/// Default formatting with SGR color output
 pub fn format(self: Hsv, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Hsv, self, writer);
 }

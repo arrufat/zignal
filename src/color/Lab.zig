@@ -30,7 +30,7 @@ const Lab = @This();
 pub const black: Lab = .{ .l = 0, .a = 0, .b = 0 };
 pub const white: Lab = .{ .l = 100, .a = 0, .b = 0 };
 
-/// Default formatting with ANSI color output
+/// Default formatting with SGR color output
 pub fn format(self: Lab, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Lab, self, writer);
 }

@@ -32,8 +32,8 @@ const Ycbcr = @This();
 pub const black: Ycbcr = .{ .y = 0, .cb = 128, .cr = 128 };
 pub const white: Ycbcr = .{ .y = 255, .cb = 128, .cr = 128 };
 
-/// Formats the Ycbcr color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the Ycbcr color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Ycbcr, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Ycbcr, self, writer);
 }

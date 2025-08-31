@@ -1,6 +1,6 @@
 //! Shared formatting utilities for color types.
 //!
-//! Provides ANSI terminal color formatting for all color types, allowing colors to be
+//! Provides SGR terminal color formatting for all color types, allowing colors to be
 //! displayed with their actual color as background in terminal output.
 
 const std = @import("std");
@@ -33,7 +33,7 @@ pub fn formatColor(
     // Determine text color based on background darkness
     const fg: u8 = getForegroundColor(rgb);
 
-    // Start with ANSI escape codes
+    // Start with the SGR sequence
     try writer.print(
         "\x1b[1m\x1b[38;2;{d};{d};{d}m\x1b[48;2;{d};{d};{d}m{s}{{ ",
         .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, type_name },
@@ -97,7 +97,7 @@ test "RGB color formatting - plain text with {any}" {
     try expectEqualStrings(expected_blue, result_blue);
 }
 
-test "RGB color formatting - ANSI color output" {
+test "RGB color formatting - SGR color output" {
     const red = Rgb{ .r = 255, .g = 0, .b = 0 };
     const dark_color = Rgb{ .r = 50, .g = 50, .b = 50 };
     const light_color = Rgb{ .r = 200, .g = 200, .b = 200 };
@@ -105,11 +105,11 @@ test "RGB color formatting - ANSI color output" {
     var buffer: [512]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    // Test ANSI color formatting with {f}
+    // Test SGR color formatting with {f}
     try std.fmt.format(stream.writer(), "{f}", .{red});
     const result_red = stream.getWritten();
 
-    // Should contain specific ANSI sequences and content
+    // Should contain specific SGR  sequences and content
     const expected_red = "\x1b[1m\x1b[38;2;255;255;255m\x1b[48;2;255;0;0mRgb{ .r = 255, .g = 0, .b = 0 }\x1b[0m";
     try expectEqualStrings(expected_red, result_red);
 
@@ -157,7 +157,7 @@ test "HSL color formatting - plain text with {any}" {
     try expectEqualStrings(expected_blue, result_blue);
 }
 
-test "HSL color formatting - ANSI color output" {
+test "HSL color formatting - SGR  color output" {
     const red_hsl = Hsl{ .h = 0, .s = 100, .l = 50 };
     const dark_hsl = Hsl{ .h = 0, .s = 0, .l = 20 }; // Dark gray
     const light_hsl = Hsl{ .h = 0, .s = 0, .l = 80 }; // Light gray
@@ -165,11 +165,11 @@ test "HSL color formatting - ANSI color output" {
     var buffer: [512]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    // Test ANSI color formatting with HSL color using {f}
+    // Test SGR  color formatting with HSL color using {f}
     try std.fmt.format(stream.writer(), "{f}", .{red_hsl});
     const result_red = stream.getWritten();
 
-    // Should contain specific ANSI sequences and HSL content
+    // Should contain specific SGR  sequences and HSL content
     const expected_red = "\x1b[1m\x1b[38;2;255;255;255m\x1b[48;2;255;0;0mHsl{ .h = 0.00, .s = 100.00, .l = 50.00 }\x1b[0m";
     try expectEqualStrings(expected_red, result_red);
 

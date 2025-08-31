@@ -29,8 +29,8 @@ const Oklch = @This();
 
 pub const black: Oklch = .{ .l = 0, .c = 0, .h = 0 };
 
-/// Formats the Oklch color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the Oklch color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Oklch, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Oklch, self, writer);
 }

@@ -12,13 +12,11 @@ const Image = @import("../image.zig").Image;
 
 /// Display format options
 pub const DisplayFormat = union(enum) {
-    /// Automatically detect the best format (sixel if supported, ANSI otherwise)
+    /// Automatically detect the best format (kitty -> sixel -> sgr)
     auto,
-    /// Force ANSI escape codes output with spaces (universally compatible)
-    ansi_basic,
-    /// ANSI with Unicode half-block characters for 2x vertical resolution
+    /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
     /// Requires a monospace font with Unicode block element support (U+2580)
-    ansi_blocks,
+    sgr,
     /// Braille patterns for 2x4 monochrome resolution
     /// Requires Unicode Braille pattern support (U+2800-U+28FF)
     /// Color images are binarized with threshold
@@ -43,23 +41,11 @@ pub fn DisplayFormatter(comptime T: type) type {
 
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 
-            // Determine if we can fallback to ANSI
+            // Determine if we can fallback to SGR
             const can_fallback = self.display_format == .auto;
 
             fmt: switch (self.display_format) {
-                .ansi_basic => {
-                    for (0..self.image.rows) |r| {
-                        for (0..self.image.cols) |c| {
-                            const pixel = self.image.at(r, c).*;
-                            const rgb = color.convertColor(Rgb, pixel);
-                            try writer.print("\x1b[48;2;{d};{d};{d}m \x1b[0m", .{ rgb.r, rgb.g, rgb.b });
-                        }
-                        if (r < self.image.rows - 1) {
-                            try writer.print("\n", .{});
-                        }
-                    }
-                },
-                .ansi_blocks => {
+                .sgr => {
                     // Process image in 2-row chunks for half-block characters
                     const row_pairs = (self.image.rows + 1) / 2;
 
@@ -154,7 +140,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     } else if (sixel.isSupported()) {
                         continue :fmt .{ .sixel = .default };
                     } else {
-                        continue :fmt .ansi_blocks;
+                        continue :fmt .sgr;
                     }
                 },
                 .sixel => |options| {
@@ -175,7 +161,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (sixel_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .ansi_basic;
+                        continue :fmt .sgr;
                     } else {
                         // Output minimal sixel sequence to indicate failure
                         // This ensures we always output valid sixel when explicitly requested
@@ -200,7 +186,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (kitty_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .ansi_blocks;
+                        continue :fmt .sgr;
                     } else {
                         // Output minimal Kitty sequence to indicate failure
                         // Empty image with delete command

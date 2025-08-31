@@ -28,7 +28,7 @@ pub const Rgba = packed struct {
     pub const white: Rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
     pub const transparent: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
-    /// Default formatting with ANSI color output
+    /// Default formatting with SGR color output
     pub fn format(self: Rgba, writer: *std.Io.Writer) !void {
         return formatting.formatColor(Rgba, self, writer);
     }

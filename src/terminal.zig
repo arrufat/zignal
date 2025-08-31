@@ -112,7 +112,7 @@ const State = struct {
     /// Initialize terminal state for capability detection
     ///
     /// Saves the current terminal settings and prepares for raw mode operations.
-    /// On Windows, enables Virtual Terminal Processing for ANSI sequence support.
+    /// On Windows, enables Virtual Terminal Processing for SGR sequence support.
     /// On POSIX systems, saves the current termios settings.
     ///
     /// Returns an error if terminal initialization fails.
@@ -137,7 +137,7 @@ const State = struct {
                 return error.ConsoleError;
             }
 
-            // Enable Virtual Terminal Processing for ANSI sequences
+            // Enable Virtual Terminal Processing for SGR sequences
             const new_output_mode = original_output_mode | win_api.ENABLE_VIRTUAL_TERMINAL_PROCESSING;
             if (win_api.SetConsoleMode(stdout_handle, new_output_mode) == 0) {
                 return error.ConsoleError;

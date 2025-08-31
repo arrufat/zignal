@@ -30,7 +30,7 @@ const Lch = @This();
 pub const black: Lch = .{ .l = 0, .c = 0, .h = 0 };
 pub const white: Lch = .{ .l = 100, .c = 0, .h = 0 };
 
-/// Default formatting with ANSI color output
+/// Default formatting with SGR color output
 pub fn format(self: Lch, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Lch, self, writer);
 }

@@ -6,7 +6,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
 
-test "image format function" {
+test "image format sgr" {
     const Rgb = color.Rgb;
 
     // Create a small 2x2 RGB image
@@ -23,36 +23,8 @@ test "image format function" {
     var buffer: [256]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    // Force ANSI format for testing
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_basic)});
-    const result = stream.getWritten();
-
-    // The expected output should be:
-    // Row 0: red_bg + green_bg + newline
-    // Row 1: blue_bg + white_bg
-    const expected = "\x1b[48;2;255;0;0m \x1b[0m\x1b[48;2;0;255;0m \x1b[0m\n\x1b[48;2;0;0;255m \x1b[0m\x1b[48;2;255;255;255m \x1b[0m";
-
-    try expectEqualStrings(expected, result);
-}
-
-test "image format ansi_blocks" {
-    const Rgb = color.Rgb;
-
-    // Create a small 2x2 RGB image
-    var image = try Image(Rgb).init(std.testing.allocator, 2, 2);
-    defer image.deinit(std.testing.allocator);
-
-    // Set up a pattern: red, green, blue, white
-    image.at(0, 0).* = Rgb.red;
-    image.at(0, 1).* = Rgb.green;
-    image.at(1, 0).* = Rgb.blue;
-    image.at(1, 1).* = Rgb.white;
-
-    // Test ansi_blocks format
-    var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_blocks)});
+    // Force SGR format for testing
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.sgr)});
     const result = stream.getWritten();
 
     // The expected output should combine two rows into one using half-block character
@@ -63,7 +35,7 @@ test "image format ansi_blocks" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format ansi_blocks odd rows" {
+test "image format sgr odd rows" {
     const Rgb = color.Rgb;
 
     // Create a 3x2 RGB image (odd number of rows)
@@ -78,11 +50,11 @@ test "image format ansi_blocks odd rows" {
     image.at(2, 0).* = Rgb.black;
     image.at(2, 1).* = Rgb{ .r = 128, .g = 128, .b = 128 }; // gray
 
-    // Test ansi_blocks format with odd rows
+    // Test SGR format with odd rows
     var buffer: [512]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.ansi_blocks)});
+    try std.fmt.format(stream.writer(), "{f}", .{image.display(.sgr)});
     const result = stream.getWritten();
 
     // Expected: 2 lines (3 rows compressed to 2 using half-blocks)
