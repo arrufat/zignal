@@ -3,7 +3,7 @@
 //! This module provides a unified interface to image processing functionality.
 //! The main Image struct supports generic pixel types and provides operations for:
 //! - Loading and saving images (PNG, JPEG)
-//! - Terminal display with multiple formats (ANSI, Braille, Sixel, Kitty)
+//! - Terminal display with multiple formats (SGR, Braille, Sixel, Kitty)
 //! - Geometric transforms (resize, rotate, crop, flip)
 //! - Filters (blur, sharpen, edge detection)
 //! - Views for zero-copy sub-image operations
@@ -290,35 +290,30 @@ pub fn Image(comptime T: type) type {
 
         /// Creates a formatter for terminal display with custom options.
         /// Provides fine-grained control over output format, palette modes, and dithering.
-        /// Will still gracefully degrade from sixel to ANSI if needed.
         ///
         /// Display modes:
-        /// - `.ansi_basic`: Uses background colors with spaces (universally compatible)
-        /// - `.ansi_blocks`: Uses Unicode half-block characters for 2x vertical resolution (requires monospace font with U+2580 support)
+        /// - `.sgr`: Uses SGR (Select Graphic Rendition) with Unicode half-block characters (requires monospace font with U+2580 support)
         /// - `.braille`: Uses Braille patterns for 2x4 monochrome resolution (requires Unicode Braille support U+2800-U+28FF, converts to grayscale)
         /// - `.sixel`: Uses the sixel graphics protocol if supported
         /// - `.kitty`: Uses the kitty graphics protocol if supported
-        /// - `.auto`: Automatically selects best available format: kitty -> sixek -> ansi_blocks
+        /// - `.auto`: Automatically selects best available format: kitty -> sixel -> sgr
         ///
         /// Example:
         /// ```zig
         /// const img = try Image(Rgb).load(allocator, "test.png");
-        /// std.debug.print("{f}", .{img.display(.ansi_basic)});     // Basic ANSI
-        /// std.debug.print("{f}", .{img.display(.ansi_blocks)});    // 2x vertical resolution
+        /// std.debug.print("{f}", .{img.display(.sgr)});           // SGR with unicode half blocks
         /// std.debug.print("{f}", .{img.display(.{ .braille = .{ .threshold = 0.5 } })}); // 2x4 monochrome
         /// std.debug.print("{f}", .{img.display(.{ .sixel = .{ .palette_mode = .adaptive } })});
         /// std.debug.print("{f}", .{img.display(.{ .kitty = .default })});  // Kitty graphics protocol
         /// ```
-        pub fn display(self: *const Self, display_format: @import("image/display.zig").DisplayFormat) DisplayFormatter(T) {
+        pub fn display(self: *const Self, display_format: DisplayFormat) DisplayFormatter(T) {
             return DisplayFormatter(T){
                 .image = self,
                 .display_format = display_format,
             };
         }
 
-        /// Formats the image using the best available terminal format.
-        /// Automatically tries sixel with sensible defaults, falling back to ANSI blocks if needed.
-        /// For explicit control over output format, use the display() method instead.
+        /// Displays the image information: color type, rows and cols.
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             const type_name: []const u8 = @typeName(T);
             if (std.mem.lastIndexOfScalar(u8, type_name, '.')) |pos| {

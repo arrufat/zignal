@@ -195,13 +195,13 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 \\## Parameters
                 \\- `format_spec` (str): Format specifier string:
                 \\  - `''` (empty): Returns the default repr() output
-                \\  - `'ansi'`: Returns ANSI-colored terminal representation
+                \\  - `'sgr'`: Returns SGR-colored terminal representation
                 \\
                 \\## Examples
                 \\```python
                 \\color = zignal.Rgb(255, 0, 0)
                 \\print(f"{color}")        # Default repr: Rgb(r=255, g=0, b=0)
-                \\print(f"{color:ansi}")   # ANSI colored output in terminal
+                \\print(f"{color:sgr}")   # SGR colored output in terminal
                 \\```
                 ,
             };
@@ -623,7 +623,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             // Convert C string to Zig slice
             const format_str = std.mem.span(format_spec);
-            if (std.mem.eql(u8, format_str, "ansi")) {
+            if (std.mem.eql(u8, format_str, "sgr")) {
                 // Convert to Zig color
                 const zig_color = objectToZigColor(self);
 
@@ -632,18 +632,18 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 const Rgb = zignal.Rgb;
                 const Oklab = zignal.Oklab;
 
-                // Convert to RGB for ANSI display
+                // Convert to RGB for SGR display
                 const rgb = convertColor(Rgb, zig_color);
 
                 // Determine text color based on background darkness
                 const fg: u8 = if (convertColor(Oklab, rgb).l < 0.5) 255 else 0;
 
-                // Build ANSI formatted string with Python-style repr
+                // Build SGR formatted string with Python-style repr
                 var buffer: [512]u8 = undefined;
                 var stream = std.io.fixedBufferStream(&buffer);
                 const writer = stream.writer();
 
-                // Start with ANSI escape codes and type name
+                // Start with SGR escape codes and type name
                 writer.print(
                     "\x1b[1m\x1b[38;2;{d};{d};{d}m\x1b[48;2;{d};{d};{d}m{s}(",
                     .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, name },
@@ -673,7 +673,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     }
                 }
 
-                // Close parenthesis and reset ANSI codes
+                // Close parenthesis and reset SGR codes
                 writer.print(")\x1b[0m", .{}) catch return null;
 
                 const formatted = stream.getWritten();

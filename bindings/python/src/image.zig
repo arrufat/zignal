@@ -1442,9 +1442,8 @@ const image_format_doc =
     \\## Parameters
     \\- `format_spec` (str): Format specifier for display:
     \\  - `''` (empty): Returns text representation (e.g., 'Image(800x600)')
-    \\  - `'auto'`: Auto-detect best format with progressive degradation: kitty → sixel → blocks
-    \\  - `'ansi'`: Display using ANSI escape codes (spaces with background)
-    \\  - `'blocks'`: Display using ANSI escape codes (half colored half-blocks with background: 2x vertical resolution)
+    \\  - `'auto'`: Auto-detect best format with progressive degradation: kitty → sixel → sgr
+    \\  - `'sgr'`: Display using sgr escape codes (half colored half-blocks with background)
     \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
     \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
     \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel scaled to fit (e.g., 'sixel:800x600')
@@ -1459,8 +1458,7 @@ const image_format_doc =
     \\```python
     \\img = Image.load("photo.png")
     \\print(f"{img}")         # Image(800x600)
-    \\print(f"{img:ansi}")    # Display with ANSI colors
-    \\print(f"{img:blocks}")  # Display with unicode blocks
+    \\print(f"{img:sgr}")     # Display with SGR and unicode half-blocks
     \\print(f"{img:braille}") # Display with braille patterns
     \\print(f"{img:sixel}")   # Display with sixel graphics
     \\print(f"{img:sixel:800x600}")   # Display with sixel, scaled to fit 800x600
@@ -1494,10 +1492,8 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
     // Determine display format based on spec
 
     // Determine display format based on spec
-    const display_format: DisplayFormat = if (std.mem.eql(u8, spec_slice, "ansi"))
-        .ansi_basic
-    else if (std.mem.eql(u8, spec_slice, "blocks"))
-        .ansi_blocks
+    const display_format: DisplayFormat = if (std.mem.eql(u8, spec_slice, "sgr"))
+        .sgr
     else if (std.mem.eql(u8, spec_slice, "braille"))
         .{ .braille = .default }
     else if (std.mem.eql(u8, spec_slice, "sixel"))
@@ -1564,7 +1560,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid kitty format. Use 'kitty' or 'kitty:WIDTHxHEIGHT' (e.g., 'kitty:800x600', 'kitty:800x', 'kitty:x600')");
         return null;
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', or 'auto'");
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', or 'auto'");
         return null;
     };
 
@@ -3852,7 +3848,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .name = "__format__",
         .params = "self, format_spec: str",
         .returns = "str",
-        .doc = "Format image for display. Supports 'ansi', 'blocks', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', and 'auto'.",
+        .doc = "Format image for display. Supports 'sgr', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty:WIDTHxHEIGHT', and 'auto'.",
     },
     .{
         .name = "__eq__",

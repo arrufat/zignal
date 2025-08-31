@@ -336,7 +336,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 .ml_name = "__format__",
                 .ml_meth = @ptrCast(&formatMethod),
                 .ml_flags = c.METH_VARARGS,
-                .ml_doc = "Format the pixel with optional format specifier (supports 'ansi')",
+                .ml_doc = "Format the pixel with optional format specifier (supports 'sgr')",
             };
             index += 1;
 

@@ -30,8 +30,8 @@ const Xyb = @This();
 
 pub const black: Xyb = .{ .x = 0, .y = 0, .b = 0 };
 
-/// Formats the XYB color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the XYB color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Xyb, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Xyb, self, writer);
 }

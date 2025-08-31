@@ -29,7 +29,7 @@ const Hsl = @This();
 pub const black: Hsl = .{ .h = 0, .s = 0, .l = 0 };
 pub const white: Hsl = .{ .h = 0, .s = 0, .l = 100 };
 
-/// Default formatting with ANSI color output
+/// Default formatting with SGR color output
 pub fn format(self: Hsl, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Hsl, self, writer);
 }

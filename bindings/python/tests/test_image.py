@@ -119,8 +119,8 @@ class TestImageSmoke:
         repr_str = repr(pixel)
         assert "Rgb" in repr_str
 
-        ansi_str = format(pixel, "ansi")
-        assert "\x1b[" in ansi_str  # ANSI escape sequence
+        sgr_str = format(pixel, "sgr")
+        assert "\x1b[" in sgr_str  # ANSI escape sequence
 
     def test_rgba_pixel_proxy_methods(self):
         """Test RGBA pixel proxy has all methods"""

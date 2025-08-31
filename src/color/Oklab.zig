@@ -29,8 +29,8 @@ const Oklab = @This();
 
 pub const black: Oklab = .{ .l = 0, .a = 0, .b = 0 };
 
-/// Formats the Oklab color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the Oklab color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Oklab, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Oklab, self, writer);
 }

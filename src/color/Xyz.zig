@@ -29,8 +29,8 @@ const Self = @This();
 
 pub const black: Self = .{ .x = 0, .y = 0, .z = 0 };
 
-/// Formats the CIE XYZ color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the CIE XYZ color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Self, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Self, self, writer);
 }

@@ -27,8 +27,8 @@ const Lms = @This();
 
 pub const black: Lms = .{ .l = 0, .m = 0, .s = 0 };
 
-/// Formats the LMS color for display. Use "color" format for ANSI color output.
-/// Default formatting with ANSI color output
+/// Formats the LMS color for display. Use "color" format for SGR color output.
+/// Default formatting with SGR color output
 pub fn format(self: Lms, writer: *std.Io.Writer) !void {
     return formatting.formatColor(Lms, self, writer);
 }
