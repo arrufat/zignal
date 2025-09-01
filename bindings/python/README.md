@@ -23,7 +23,7 @@ img = zignal.Image(480, 640, color=(30, 144, 255))  # RGB fill
 img = img.gaussian_blur(1.5)
 img = img.resize(0.5, zignal.InterpolationMethod.BILINEAR)
 
-# Pixels and NumPy interop
+# Pixels and NumPy interop with shared memory
 img[10, 20] = zignal.Hsv(60, 100, 100)
 arr = img.to_numpy()                 # (rows, cols, 3) uint8 view
 img2 = zignal.Image.from_numpy(arr)  # zero‑copy with shared memory
@@ -32,7 +32,7 @@ img2 = zignal.Image.from_numpy(arr)  # zero‑copy with shared memory
 canvas = img.canvas()
 canvas.draw_line((10, 10), (100, 60), zignal.Rgb(255, 0, 0))
 
-# Terminal preview (auto: kitty → sixel → blocks)
+# Terminal preview (auto: kitty → sixel → sgr)
 print(f"{img:auto}")
 print(f"{img2:auto}")  # also modified
 
@@ -42,15 +42,15 @@ img.save("out.png")
 
 ## Highlights
 
-- Image ops: load/save, resize, crop, extract/insert, blur/sharpen, flips, letterbox
+- Image ops: load/save, resize/warp, crop/letterbox, extract/insert, blur/sharpen, flips
 - Pixels: direct get/set; slice assignment; NumPy zero‑copy to/from
 - Colors: 12 spaces (Rgb/Rgba, Hsl/Hsv, Lab/Lch, Xyz/Xyb, Oklab/Oklch, Lms, Ycbcr)
 - Canvas: lines, circles, polygons, text via bitmap BDF/PCF fonts
-- Geometry: `Rectangle`, `ConvexHull`
+- Geometry: Rectangle, ConvexHull, SimilarityTransform, AffineTranform, ProjectiveTransform
 - Matrix: float64 matrices with NumPy bridge
-- Terminal: ANSI blocks, Sixel, Kitty (`f"{img:kitty:800x}"`)
-- Advanced: FeatureDistributionMatching, PSNR
-- Core: pure Zig, no external deps
+- Terminal: SGR, Braille, Sixel, Kitty
+- Advanced: FeatureDistributionMatching
+- Core: Zig, no external dependencies
 
 ## Development
 
