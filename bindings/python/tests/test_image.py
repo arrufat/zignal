@@ -183,16 +183,16 @@ class TestImageSmoke:
         img = zignal.Image(10, 10, (255, 0, 0), dtype=zignal.Rgb)
 
         # Test linear motion blur
-        linear_config = zignal.MotionBlurLinear(angle=0.0, distance=3)
+        linear_config = zignal.MotionBlur.linear(angle=0.0, distance=3)
         blurred = img.motion_blur(linear_config)
         assert blurred.rows == 10 and blurred.cols == 10
 
         # Test radial zoom blur with defaults
-        zoom_config = zignal.MotionBlurZoom()
+        zoom_config = zignal.MotionBlur.radial_zoom()
         blurred = img.motion_blur(zoom_config)
         assert blurred.rows == 10 and blurred.cols == 10
 
         # Test radial spin blur with custom center
-        spin_config = zignal.MotionBlurSpin(center=(0.3, 0.7), strength=0.8)
+        spin_config = zignal.MotionBlur.radial_spin(center=(0.3, 0.7), strength=0.8)
         blurred = img.motion_blur(spin_config)
         assert blurred.rows == 10 and blurred.cols == 10

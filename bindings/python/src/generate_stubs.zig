@@ -301,42 +301,18 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
     }
 }
 
-/// Generate flat motion blur classes from metadata
+/// Generate unified MotionBlur class from metadata
 fn generateMotionBlurClasses(stub: *GeneratedStub) !void {
-    // Generate MotionBlurLinear class from metadata
-    const linear_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.linear_properties_metadata);
-    const linear_doc = std.mem.span(motion_blur_module.LinearType.tp_doc);
+    // Generate unified MotionBlur class from metadata
+    const properties = stub_metadata.extractPropertyInfo(&motion_blur_module.motion_blur_properties_metadata);
+    const doc = std.mem.span(motion_blur_module.MotionBlurType.tp_doc);
     try generateClassFromMetadata(stub, .{
-        .name = "MotionBlurLinear",
-        .doc = linear_doc,
-        .methods = &[_]stub_metadata.MethodInfo{},
-        .properties = &linear_properties,
+        .name = "MotionBlur",
+        .doc = doc,
+        .methods = &motion_blur_module.motion_blur_methods_metadata,
+        .properties = &properties,
         .bases = &.{},
-        .special_methods = &motion_blur_module.linear_special_methods_metadata,
-    });
-
-    // Generate MotionBlurZoom class from metadata
-    const zoom_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.zoom_properties_metadata);
-    const zoom_doc = std.mem.span(motion_blur_module.ZoomType.tp_doc);
-    try generateClassFromMetadata(stub, .{
-        .name = "MotionBlurZoom",
-        .doc = zoom_doc,
-        .methods = &[_]stub_metadata.MethodInfo{},
-        .properties = &zoom_properties,
-        .bases = &.{},
-        .special_methods = &motion_blur_module.zoom_special_methods_metadata,
-    });
-
-    // Generate MotionBlurSpin class from metadata
-    const spin_properties = stub_metadata.extractPropertyInfo(&motion_blur_module.spin_properties_metadata);
-    const spin_doc = std.mem.span(motion_blur_module.SpinType.tp_doc);
-    try generateClassFromMetadata(stub, .{
-        .name = "MotionBlurSpin",
-        .doc = spin_doc,
-        .methods = &[_]stub_metadata.MethodInfo{},
-        .properties = &spin_properties,
-        .bases = &.{},
-        .special_methods = &motion_blur_module.spin_special_methods_metadata,
+        .special_methods = &motion_blur_module.motion_blur_special_methods_metadata,
     });
 }
 
@@ -358,7 +334,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         \\from __future__ import annotations
         \\
         \\from enum import IntEnum
-        \\from typing import TypeAlias
+        \\from typing import Literal, TypeAlias
         \\
         \\import numpy as np
         \\from numpy.typing import NDArray
