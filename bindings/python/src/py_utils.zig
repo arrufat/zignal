@@ -302,7 +302,13 @@ pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangl
     }
 
     const rect = @as(*rectangle.RectangleObject, @ptrCast(rect_obj.?));
-    return zignal.Rectangle(T).init(@as(T, @floatCast(rect.left)), @as(T, @floatCast(rect.top)), @as(T, @floatCast(rect.right)), @as(T, @floatCast(rect.bottom)));
+    // Handle integer vs float types
+    const info = @typeInfo(T);
+    return switch (info) {
+        .int => zignal.Rectangle(T).init(@as(T, @intFromFloat(rect.left)), @as(T, @intFromFloat(rect.top)), @as(T, @intFromFloat(rect.right)), @as(T, @intFromFloat(rect.bottom))),
+        .float => zignal.Rectangle(T).init(@as(T, @floatCast(rect.left)), @as(T, @floatCast(rect.top)), @as(T, @floatCast(rect.right)), @as(T, @floatCast(rect.bottom))),
+        else => @compileError("Rectangle type must be integer or float"),
+    };
 }
 
 /// Parse a Python list of point tuples to an allocated slice of Point(2, T)
