@@ -2113,31 +2113,31 @@ const image_motion_blur_doc =
     \\
     \\Motion blur simulates camera or object movement during exposure.
     \\Three types of motion blur are supported:
-    \\- `MotionBlurLinear`
-    \\- `MotionBlurZoom`
-    \\- `MotionBlurSpin`
+    \\- `MotionBlur.linear()` - Linear motion blur
+    \\- `MotionBlur.radial_zoom()` - Radial zoom blur
+    \\- `MotionBlur.radial_spin()` - Radial spin blur
     \\
     \\## Examples
     \\```python
-    \\from zignal import Image, MotionBlurLinear, MotionBlurZoom, MotionBlurSpin
+    \\from zignal import Image, MotionBlur
     \\import math
     \\
     \\img = Image.load("photo.png")
     \\
     \\# Linear motion blur examples
-    \\horizontal_blur = img.motion_blur(MotionBlurLinear(angle=0, distance=30))  # Camera panning
-    \\vertical_blur = img.motion_blur(MotionBlurLinear(angle=math.pi/2, distance=20))  # Camera shake
-    \\diagonal_blur = img.motion_blur(MotionBlurLinear(angle=math.pi/4, distance=25))  # Diagonal motion
+    \\horizontal_blur = img.motion_blur(MotionBlur.linear(angle=0, distance=30))  # Camera panning
+    \\vertical_blur = img.motion_blur(MotionBlur.linear(angle=math.pi/2, distance=20))  # Camera shake
+    \\diagonal_blur = img.motion_blur(MotionBlur.linear(angle=math.pi/4, distance=25))  # Diagonal motion
     \\
     \\# Radial zoom blur examples
-    \\center_zoom = img.motion_blur(MotionBlurZoom(center=(0.5, 0.5), strength=0.7))  # Center zoom burst
-    \\off_center_zoom = img.motion_blur(MotionBlurZoom(center=(0.33, 0.67), strength=0.5))  # Rule of thirds
-    \\subtle_zoom = img.motion_blur(MotionBlurZoom(strength=0.3))  # Subtle effect with defaults
+    \\center_zoom = img.motion_blur(MotionBlur.radial_zoom(center=(0.5, 0.5), strength=0.7))  # Center zoom burst
+    \\off_center_zoom = img.motion_blur(MotionBlur.radial_zoom(center=(0.33, 0.67), strength=0.5))  # Rule of thirds
+    \\subtle_zoom = img.motion_blur(MotionBlur.radial_zoom(strength=0.3))  # Subtle effect with defaults
     \\
     \\# Radial spin blur examples
-    \\center_spin = img.motion_blur(MotionBlurSpin(center=(0.5, 0.5), strength=0.5))  # Center rotation
-    \\swirl_effect = img.motion_blur(MotionBlurSpin(center=(0.3, 0.3), strength=0.6))  # Off-center swirl
-    \\strong_spin = img.motion_blur(MotionBlurSpin(strength=0.8))  # Strong spin with defaults
+    \\center_spin = img.motion_blur(MotionBlur.radial_spin(center=(0.5, 0.5), strength=0.5))  # Center rotation
+    \\swirl_effect = img.motion_blur(MotionBlur.radial_spin(center=(0.3, 0.3), strength=0.6))  # Off-center swirl
+    \\strong_spin = img.motion_blur(MotionBlur.radial_spin(strength=0.8))  # Strong spin with defaults
     \\```
     \\
     \\## Notes
@@ -2156,14 +2156,17 @@ fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
         return null;
     }
 
-    // Check the type of config object and extract parameters
+    // Check that it's a MotionBlur object
     const type_obj = c.Py_TYPE(config_obj);
     const type_name = type_obj.*.tp_name;
 
-    // Helper to compare type names
-    const is_linear = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurLinear");
-    const is_radial_zoom = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurZoom");
-    const is_radial_spin = std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlurSpin");
+    if (!std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlur")) {
+        c.PyErr_SetString(c.PyExc_TypeError, "config must be a MotionBlur object created with MotionBlur.linear(), MotionBlur.radial_zoom(), or MotionBlur.radial_spin()");
+        return null;
+    }
+
+    // Cast to MotionBlurObject to access the blur_type discriminator
+    const blur_obj = @as(*motion_blur.MotionBlurObject, @ptrCast(config_obj));
 
     if (self.py_image) |pimg| {
         const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse return null;
@@ -2173,55 +2176,35 @@ fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
             inline else => |img| {
                 var out = @TypeOf(img).empty;
 
-                if (is_linear) {
-                    // Extract Linear parameters
-                    const linear = @as(*motion_blur.LinearObject, @ptrCast(config_obj));
-                    const blur_config: MotionBlur = .{
+                // Create the appropriate MotionBlur config based on the type
+                const blur_config: MotionBlur = switch (blur_obj.blur_type) {
+                    .linear => .{
                         .linear = .{
-                            .angle = @floatCast(linear.angle),
-                            .distance = @intCast(linear.distance),
+                            .angle = @floatCast(blur_obj.angle),
+                            .distance = @intCast(blur_obj.distance),
                         },
-                    };
-                    img.motionBlur(allocator, blur_config, &out) catch {
-                        c.Py_DECREF(py_obj);
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-                        return null;
-                    };
-                } else if (is_radial_zoom) {
-                    // Extract RadialZoom parameters
-                    const radial = @as(*motion_blur.RadialZoomObject, @ptrCast(config_obj));
-                    const blur_config: MotionBlur = .{
+                    },
+                    .radial_zoom => .{
                         .radial_zoom = .{
-                            .center_x = @floatCast(radial.center_x),
-                            .center_y = @floatCast(radial.center_y),
-                            .strength = @floatCast(radial.strength),
+                            .center_x = @floatCast(blur_obj.center_x),
+                            .center_y = @floatCast(blur_obj.center_y),
+                            .strength = @floatCast(blur_obj.strength),
                         },
-                    };
-                    img.motionBlur(allocator, blur_config, &out) catch {
-                        c.Py_DECREF(py_obj);
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-                        return null;
-                    };
-                } else if (is_radial_spin) {
-                    // Extract RadialSpin parameters
-                    const radial = @as(*motion_blur.RadialSpinObject, @ptrCast(config_obj));
-                    const blur_config: MotionBlur = .{
+                    },
+                    .radial_spin => .{
                         .radial_spin = .{
-                            .center_x = @floatCast(radial.center_x),
-                            .center_y = @floatCast(radial.center_y),
-                            .strength = @floatCast(radial.strength),
+                            .center_x = @floatCast(blur_obj.center_x),
+                            .center_y = @floatCast(blur_obj.center_y),
+                            .strength = @floatCast(blur_obj.strength),
                         },
-                    };
-                    img.motionBlur(allocator, blur_config, &out) catch {
-                        c.Py_DECREF(py_obj);
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
-                        return null;
-                    };
-                } else {
+                    },
+                };
+
+                img.motionBlur(allocator, blur_config, &out) catch {
                     c.Py_DECREF(py_obj);
-                    c.PyErr_SetString(c.PyExc_TypeError, "config must be MotionBlurLinear, MotionBlurZoom, or MotionBlurSpin");
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
-                }
+                };
 
                 const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
                     out.deinit(allocator);
@@ -3718,7 +3701,7 @@ pub const image_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&image_motion_blur),
         .flags = c.METH_VARARGS,
         .doc = image_motion_blur_doc,
-        .params = "self, config: MotionBlurLinear | MotionBlurZoom | MotionBlurSpin",
+        .params = "self, config: MotionBlur",
         .returns = "Image",
     },
     .{
