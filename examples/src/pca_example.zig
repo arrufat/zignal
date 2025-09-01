@@ -197,7 +197,7 @@ pub fn main() !void {
     drawPoints(original_canvas, original_points, original_bounds, Rgb{ .r = 100, .g = 150, .b = 255 }, 3.0); // Light blue points
 
     // 3. Compute PCA
-    var pca = try Pca(f64).init(gpa, 2); // 2D points
+    var pca: Pca(f64) = try .init(gpa);
     defer pca.deinit();
 
     try pca.fit(original_points, null); // Keep all components

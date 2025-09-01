@@ -14,6 +14,7 @@ const matrix = @import("matrix.zig");
 const motion_blur = @import("motion_blur.zig");
 const interpolation = @import("interpolation.zig");
 const optimization = @import("optimization.zig");
+const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
@@ -96,6 +97,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register OptimizationPolicy enum
     optimization.registerOptimizationPolicy(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register OptimizationPolicy: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register PCA type
+    py_utils.registerType(@ptrCast(m), "PCA", @ptrCast(&pca.PCAType)) catch |err| {
+        std.log.err("Failed to register PCA: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
