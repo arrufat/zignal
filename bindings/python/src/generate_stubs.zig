@@ -14,6 +14,7 @@ const main_module = @import("main.zig");
 const matrix_module = @import("matrix.zig");
 const motion_blur_module = @import("motion_blur.zig");
 const fdm_module = @import("fdm.zig");
+const pca_module = @import("pca.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
 const bitmap_font_module = @import("bitmap_font.zig");
@@ -515,6 +516,17 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &fdm_module.fdm_special_methods_metadata,
     });
 
+    // Generate PCA class from metadata
+    const pca_doc = std.mem.span(pca_module.PCAType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "PCA",
+        .doc = pca_doc,
+        .methods = pca_module.pca_class_metadata.methods,
+        .properties = pca_module.pca_class_metadata.properties,
+        .bases = &.{},
+        .special_methods = null,
+    });
+
     // Generate ConvexHull class from metadata
     const convex_hull_methods = stub_metadata.extractMethodInfo(&convex_hull_module.convex_hull_methods_metadata);
     const convex_hull_doc = std.mem.span(convex_hull_module.ConvexHullType.tp_doc);
@@ -610,6 +622,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");
     try stub.write("    Assignment as Assignment,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
+    try stub.write("    PCA as PCA,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");
     try stub.write("    SimilarityTransform as SimilarityTransform,\n");
     try stub.write("    AffineTransform as AffineTransform,\n");

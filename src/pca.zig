@@ -76,25 +76,26 @@ pub fn Pca(comptime T: type) type {
         /// Memory allocator
         allocator: Allocator,
 
-        /// Initialize an empty PCA instance with runtime dimension
-        pub fn init(allocator: Allocator, dim: usize) !Self {
-            assert(dim >= 1);
-            const mean_slice = try allocator.alloc(T, dim);
-            @memset(mean_slice, 0);
+        /// Initialize an empty PCA instance
+        pub fn init(allocator: Allocator) !Self {
             return Self{
-                .mean = mean_slice,
+                .mean = &[_]T{},
                 .components = undefined,
                 .eigenvalues = &[_]T{},
                 .num_components = 0,
-                .dim = dim,
+                .dim = 0,
                 .allocator = allocator,
             };
         }
 
         /// Free allocated memory
         pub fn deinit(self: *Self) void {
-            self.allocator.free(self.mean);
-            self.allocator.free(self.eigenvalues);
+            if (self.mean.len > 0) {
+                self.allocator.free(self.mean);
+            }
+            if (self.eigenvalues.len > 0) {
+                self.allocator.free(self.eigenvalues);
+            }
             if (self.num_components > 0) {
                 self.components.deinit();
             }
@@ -112,9 +113,12 @@ pub fn Pca(comptime T: type) type {
             const n_samples = data_matrix.rows;
             const data_dim = data_matrix.cols;
 
-            if (data_dim != self.dim) return error.DimensionMismatch;
             if (n_samples == 0) return error.NoVectors;
             if (n_samples == 1) return error.InsufficientData;
+
+            // Update dimension and reallocate mean if needed
+            self.mean = try self.allocator.realloc(self.mean, data_dim);
+            self.dim = data_dim;
 
             const max_components = @min(n_samples - 1, self.dim);
             if (num_components) |k| {
@@ -123,11 +127,7 @@ pub fn Pca(comptime T: type) type {
             const requested_components = num_components orelse max_components;
             const actual_components = @min(requested_components, max_components);
 
-            // If this instance was previously fitted, free old allocations
-            if (self.eigenvalues.len > 0) {
-                self.allocator.free(self.eigenvalues);
-                self.eigenvalues = &[_]T{};
-            }
+            // If this instance was previously fitted, clean up old components
             if (self.num_components > 0) {
                 self.components.deinit();
                 self.num_components = 0;
@@ -283,7 +283,7 @@ pub fn Pca(comptime T: type) type {
 
             // Prepare outputs
             self.num_components = num_components;
-            self.eigenvalues = try self.allocator.alloc(T, num_components);
+            self.eigenvalues = try self.allocator.realloc(self.eigenvalues, num_components);
             self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
 
             // Compute SVD of covariance matrix
@@ -342,7 +342,7 @@ pub fn Pca(comptime T: type) type {
 
             // Extract components by projecting data onto eigenvectors
             self.num_components = num_components;
-            self.eigenvalues = try self.allocator.alloc(T, num_components);
+            self.eigenvalues = try self.allocator.realloc(self.eigenvalues, num_components);
             self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
 
             // Compute SVD of Gram matrix
@@ -386,11 +386,11 @@ pub fn Pca(comptime T: type) type {
 test "PCA initialization and cleanup" {
     const allocator = std.testing.allocator;
 
-    var pca = try Pca(f64).init(allocator, 2);
+    var pca = try Pca(f64).init(allocator);
     defer pca.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), pca.num_components);
-    try std.testing.expectEqual(@as(usize, 2), pca.dim);
+    try std.testing.expectEqual(@as(usize, 0), pca.dim);
 }
 
 test "PCA on 2D vectors" {
@@ -408,7 +408,7 @@ test "PCA on 2D vectors" {
     data.at(3, 0).* = 7.0;
     data.at(3, 1).* = 8.0;
 
-    var pca = try Pca(f64).init(allocator, 2);
+    var pca = try Pca(f64).init(allocator);
     defer pca.deinit();
 
     try pca.fit(data, null);
@@ -455,7 +455,7 @@ test "PCA on image color data using Point conversion" {
     }
 
     // Apply PCA to color data
-    var pca = try Pca(f64).init(allocator, 3);
+    var pca = try Pca(f64).init(allocator);
     defer pca.deinit();
 
     try pca.fit(color_matrix, 1); // Keep only 1 component
@@ -486,7 +486,7 @@ test "PCA Gram path normalization and direction" {
     data.at(1, 1).* = 0.0;
     data.at(1, 2).* = 0.0;
 
-    var pca = try Pca(f64).init(allocator, 3);
+    var pca = try Pca(f64).init(allocator);
     defer pca.deinit();
     try pca.fit(data, 1);
 
