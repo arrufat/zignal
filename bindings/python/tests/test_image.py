@@ -47,6 +47,36 @@ class TestImageSmoke:
         v = img.view((1, 1, 3, 3))
         assert (v.rows, v.cols) == (2, 2)
 
+    def test_set_border_smoke(self):
+        img = zignal.Image(4, 4, (10, 20, 30), dtype=zignal.Rgb)
+        rect = zignal.Rectangle(1, 1, 3, 3)
+
+        # Zero border
+        img.set_border(rect)
+        arr = img.to_numpy()
+        # Corners should be zero
+        assert (arr[0, 0] == np.array([0, 0, 0], dtype=np.uint8)).all()
+        assert (arr[0, 3] == np.array([0, 0, 0], dtype=np.uint8)).all()
+        assert (arr[3, 0] == np.array([0, 0, 0], dtype=np.uint8)).all()
+        assert (arr[3, 3] == np.array([0, 0, 0], dtype=np.uint8)).all()
+        # Interior remains original color
+        assert (arr[1, 1] == np.array([10, 20, 30], dtype=np.uint8)).all()
+
+        # Red border
+        img.fill((10, 20, 30))
+        img.set_border(rect, (255, 0, 0))
+        arr = img.to_numpy()
+        assert (arr[0, 0] == np.array([255, 0, 0], dtype=np.uint8)).all()
+        assert (arr[1, 1] == np.array([10, 20, 30], dtype=np.uint8)).all()
+
+    def test_set_border_no_overlap_is_noop(self):
+        img = zignal.Image(3, 3, (7, 8, 9), dtype=zignal.Rgb)
+        arr_before = img.to_numpy().copy()
+        # Rectangle completely outside
+        img.set_border(zignal.Rectangle(10, 10, 20, 20))
+        arr_after = img.to_numpy()
+        assert np.array_equal(arr_before, arr_after)
+
     def test_numpy_roundtrip_and_validation(self):
         # Round‑trip
         img = zignal.Image(2, 3, (1, 2, 3), dtype=zignal.Rgb)
