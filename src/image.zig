@@ -90,15 +90,14 @@ pub fn Image(comptime T: type) type {
 
         /// Fills the entire image with a solid value.
         /// Uses a fast memset when contiguous; otherwise fills row-by-row respecting stride.
-        pub fn fill(self: Self, value: anytype) void {
-            const color = convertColor(T, value);
+        pub fn fill(self: Self, value: T) void {
             if (self.isContiguous()) {
-                @memset(self.data, color);
+                @memset(self.data, value);
             } else {
                 // Respect stride when the image is a view
                 for (0..self.rows) |r| {
                     const start = r * self.stride;
-                    @memset(self.data[start .. start + self.cols], color);
+                    @memset(self.data[start .. start + self.cols], value);
                 }
             }
         }
@@ -107,7 +106,10 @@ pub fn Image(comptime T: type) type {
         /// Efficiently fills only the top/bottom bands and left/right bands per row.
         pub fn setBorder(self: Self, rect: Rectangle(usize), value: T) void {
             const bounds = self.getRectangle();
-            const inner = bounds.intersect(rect) orelse return;
+            const inner = bounds.intersect(rect) orelse {
+                self.fill(value);
+                return;
+            };
 
             // Top band [0, inner.t)
             var r: usize = 0;
