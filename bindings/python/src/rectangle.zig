@@ -284,13 +284,17 @@ const rectangle_intersect_doc =
     \\Calculate the intersection of this rectangle with another.
     \\
     \\## Parameters
-    \\- `other` (Rectangle): The other rectangle to intersect with
+    \\- `other` (Rectangle | tuple[float, float, float, float]): The other rectangle to intersect with
     \\
     \\## Examples
     \\```python
     \\rect1 = Rectangle(0, 0, 100, 100)
     \\rect2 = Rectangle(50, 50, 150, 150)
     \\intersection = rect1.intersect(rect2)
+    \\# Returns Rectangle(50, 50, 100, 100)
+    \\
+    \\# Can also use a tuple
+    \\intersection = rect1.intersect((50, 50, 150, 150))
     \\# Returns Rectangle(50, 50, 100, 100)
     \\
     \\rect3 = Rectangle(200, 200, 250, 250)
@@ -308,19 +312,14 @@ fn rectangle_intersect(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
         return null;
     }
 
-    // Check if it's a Rectangle instance
-    if (c.PyObject_IsInstance(other_obj, @ptrCast(&RectangleType)) <= 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be a Rectangle instance");
-        return null;
-    }
-
-    const other = @as(*RectangleObject, @ptrCast(other_obj.?));
+    // Parse the other rectangle (can be Rectangle or tuple)
+    const other_rect = py_utils.parseRectangle(f64, other_obj) catch return null;
 
     // Calculate intersection bounds
-    const left = @max(self.left, other.left);
-    const top = @max(self.top, other.top);
-    const right = @min(self.right, other.right);
-    const bottom = @min(self.bottom, other.bottom);
+    const left = @max(self.left, other_rect.l);
+    const top = @max(self.top, other_rect.t);
+    const right = @min(self.right, other_rect.r);
+    const bottom = @min(self.bottom, other_rect.b);
 
     // Check if the intersection is empty (for floats, use >=)
     if (left >= right or top >= bottom) {
@@ -336,6 +335,125 @@ fn rectangle_intersect(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
 
     const new_rect = c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
     return new_rect;
+}
+
+const rectangle_iou_doc =
+    \\Calculate the Intersection over Union (IoU) with another rectangle.
+    \\
+    \\## Parameters
+    \\- `other` (Rectangle | tuple[float, float, float, float]): The other rectangle to calculate IoU with
+    \\
+    \\## Returns
+    \\- `float`: IoU value between 0.0 (no overlap) and 1.0 (identical rectangles)
+    \\
+    \\## Examples
+    \\```python
+    \\rect1 = Rectangle(0, 0, 100, 100)
+    \\rect2 = Rectangle(50, 50, 150, 150)
+    \\iou = rect1.iou(rect2)  # Returns ~0.143
+    \\
+    \\# Can also use a tuple
+    \\iou = rect1.iou((0, 0, 100, 100))  # Returns 1.0 (identical)
+    \\
+    \\# Non-overlapping rectangles
+    \\rect3 = Rectangle(200, 200, 250, 250)
+    \\iou = rect1.iou(rect3)  # Returns 0.0
+    \\```
+;
+
+fn rectangle_iou(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+
+    var other_obj: ?*c.PyObject = undefined;
+
+    const format = std.fmt.comptimePrint("O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &other_obj) == 0) {
+        return null;
+    }
+
+    // Parse the other rectangle (can be Rectangle or tuple)
+    const other_rect = py_utils.parseRectangle(f64, other_obj) catch return null;
+
+    // Convert self to Rectangle(f64)
+    const self_rect = Rectangle(f64).init(self.left, self.top, self.right, self.bottom);
+
+    // Calculate IoU
+    const iou_value = self_rect.iou(other_rect);
+
+    return c.PyFloat_FromDouble(iou_value);
+}
+
+const rectangle_overlaps_doc =
+    \\Check if this rectangle overlaps with another based on IoU and coverage thresholds.
+    \\
+    \\## Parameters
+    \\- `other` (Rectangle | tuple[float, float, float, float]): The other rectangle to check overlap with
+    \\- `iou_thresh` (float, optional): IoU threshold for considering overlap. Default: 0.5
+    \\- `coverage_thresh` (float, optional): Coverage threshold for considering overlap. Default: 1.0
+    \\
+    \\## Returns
+    \\- `bool`: True if rectangles overlap enough based on the thresholds
+    \\
+    \\## Description
+    \\Returns True if any of these conditions are met:
+    \\- IoU > iou_thresh
+    \\- intersection.area / self.area > coverage_thresh
+    \\- intersection.area / other.area > coverage_thresh
+    \\
+    \\## Examples
+    \\```python
+    \\rect1 = Rectangle(0, 0, 100, 100)
+    \\rect2 = Rectangle(50, 50, 150, 150)
+    \\
+    \\# Default thresholds
+    \\overlaps = rect1.overlaps(rect2)  # Uses IoU > 0.5
+    \\
+    \\# Custom IoU threshold
+    \\overlaps = rect1.overlaps(rect2, iou_thresh=0.1)  # True
+    \\
+    \\# Coverage threshold (useful for small rectangle inside large)
+    \\small = Rectangle(25, 25, 75, 75)
+    \\overlaps = rect1.overlaps(small, coverage_thresh=0.9)  # True (small is 100% covered)
+    \\
+    \\# Can use tuple
+    \\overlaps = rect1.overlaps((50, 50, 150, 150), iou_thresh=0.1)
+    \\```
+;
+
+fn rectangle_overlaps(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwargs: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+
+    var other_obj: ?*c.PyObject = undefined;
+    var iou_thresh: f64 = 0.5;
+    var coverage_thresh: f64 = 1.0;
+
+    // Parse arguments with keywords
+    var kwlist = [_:null]?[*:0]const u8{ "other", "iou_thresh", "coverage_thresh" };
+    const format = std.fmt.comptimePrint("O|dd", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwargs, format.ptr, @ptrCast(&kwlist), &other_obj, &iou_thresh, &coverage_thresh) == 0) {
+        return null;
+    }
+
+    // Validate thresholds
+    if (iou_thresh < 0 or iou_thresh > 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "iou_thresh must be between 0 and 1");
+        return null;
+    }
+    if (coverage_thresh < 0 or coverage_thresh > 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "coverage_thresh must be between 0 and 1");
+        return null;
+    }
+
+    // Parse the other rectangle (can be Rectangle or tuple)
+    const other_rect = py_utils.parseRectangle(f64, other_obj) catch return null;
+
+    // Convert self to Rectangle(f64)
+    const self_rect = Rectangle(f64).init(self.left, self.top, self.right, self.bottom);
+
+    // Check overlap
+    const overlaps = self_rect.overlaps(other_rect, iou_thresh, coverage_thresh);
+
+    return @ptrCast(py_utils.getPyBool(overlaps));
 }
 
 // Property getters
@@ -431,8 +549,24 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&rectangle_intersect),
         .flags = c.METH_VARARGS,
         .doc = rectangle_intersect_doc,
-        .params = "self, other: Rectangle",
+        .params = "self, other: Rectangle | tuple[float, float, float, float]",
         .returns = "Rectangle | None",
+    },
+    .{
+        .name = "iou",
+        .meth = @ptrCast(&rectangle_iou),
+        .flags = c.METH_VARARGS,
+        .doc = rectangle_iou_doc,
+        .params = "self, other: Rectangle | tuple[float, float, float, float]",
+        .returns = "float",
+    },
+    .{
+        .name = "overlaps",
+        .meth = @ptrCast(&rectangle_overlaps),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = rectangle_overlaps_doc,
+        .params = "self, other: Rectangle | tuple[float, float, float, float], iou_thresh: float = 0.5, coverage_thresh: float = 1.0",
+        .returns = "bool",
     },
 };
 
