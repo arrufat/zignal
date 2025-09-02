@@ -1,5 +1,86 @@
 # Python Bindings Changelog
 
+## [0.5.0] - TBD
+
+### Major Features
+
+#### Scientific Computing
+- **Matrix Class**: Full-featured matrix operations with NumPy interoperability
+  - Zero-copy NumPy conversion
+  - Runtime dimension support
+  - More matrix methods to come
+- **PCA (Principal Component Analysis)**: Complete PCA implementation
+  - Fit, transform, and inverse transform
+  - Batch operations support
+  - Configurable components and centering
+- **Optimization Module**: Hungarian algorithm for assignment problems
+
+#### Advanced Image Processing
+- **Motion Blur**: Linear and spin blur effects
+  - Configurable angle, distance, and strength
+  - SIMD-optimized performance
+- **Convolution & Filtering**:
+  - Gaussian blur with sigma control
+  - Sobel edge detection
+  - Sharpen filter
+- **Image Transforms**: Warp, rotate, and perspective transforms
+  - With multiple interpolation methods
+
+#### Enhanced Image API
+- **Image**: Generic storage (Rgba, Rgb, Grayscale)
+- **Pixel-Level Access**: Direct pixel component assignment
+  - `image[y, x].r = 255` syntax support
+  - Color conversion on pixel proxies
+  - Blend operations at pixel level
+- **NumPy Integration**: Improved strided image support
+  - Handles non-contiguous arrays
+  - Preserves memory layout
+- **Image Operations**:
+  - `copy()`, `dupe()`, `fill()` methods
+  - `view()`, `is_view` property
+  - `crop()`, `extract()`, `insert()` methods
+  - `flip_horizontal()`, `flip_vertical()`, `rotate()`
+  - `set_border()`, `get_rectangle()`
+  - PSNR calculation
+
+#### Drawing Enhancements
+- **Arc Drawing**: Circle arcs with fill support
+  - Start/end angles in degrees
+  - Antialiased rendering
+- **Advanced Blending**: 12 blend modes for compositing
+  - Per-pixel and whole-image blending
+  - Mode selection via Blending enum
+
+### API Improvements
+- **Type Annotations**: Modern Python type hints
+  - Uses `T | None` syntax
+  - Comprehensive stub files (.pyi)
+  - Better IDE autocomplete
+- **Iteration Support**: Images are now iterable
+  - Row-by-row iteration
+  - Pixel iterator access
+- **Comparison Operators**: Color types support equality comparison
+- **Rectangle Enhancements**:
+  - IoU (Intersection over Union) calculation
+  - Overlap detection
+  - Tuple support for intersection
+
+### Breaking Changes
+- **Canvas.draw_text**: Parameter order changed
+  - Old: `draw_text(x, y, text, font, color)`
+  - New: `draw_text(x, y, text, color, font)`
+
+### Bug Fixes
+- Fixed RGBA object detection in Image color initialization
+- Corrected alpha blending in Canvas.fill_rectangle SOFT mode
+- Improved error messages with file paths
+- Fixed None handling in Image.set_border
+
+### Performance
+- SIMD-optimized filtering operations
+- Efficient memory management for views
+- Zero-copy operations where possible
+
 ## [0.4.1] - 2025-08-06
 
 ### Fixed
