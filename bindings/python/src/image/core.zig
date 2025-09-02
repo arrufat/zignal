@@ -13,7 +13,7 @@ const c = py_utils.c;
 
 const canvas = @import("../canvas.zig");
 const color_bindings = @import("../color.zig");
-const color_utils = @import("../color_utils.zig");
+const parseColorTo = @import("../color_utils.zig").parseColorTo;
 const grayscale_format = @import("../grayscale_format.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
@@ -159,27 +159,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
         const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(getImageType()), 0)));
         if (self == null) return null;
         switch (native) {
-            .grayscale => |img| {
-                const p = PyImage.createFrom(allocator, img, .owned) orelse {
-                    var tmp = img;
-                    tmp.deinit(allocator);
-                    c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                self.?.py_image = p;
-            },
-            .rgb => |img| {
-                const p = PyImage.createFrom(allocator, img, .owned) orelse {
-                    var tmp = img;
-                    tmp.deinit(allocator);
-                    c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                self.?.py_image = p;
-            },
-            .rgba => |img| {
+            inline else => |img| {
                 const p = PyImage.createFrom(allocator, img, .owned) orelse {
                     var tmp = img;
                     tmp.deinit(allocator);
@@ -266,9 +246,7 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     // Save PNG for current image format
     if (self.py_image) |pimg| {
         const res = switch (pimg.data) {
-            .grayscale => |img| img.save(allocator, path_slice),
-            .rgb => |img| img.save(allocator, path_slice),
-            .rgba => |img| img.save(allocator, path_slice),
+            inline else => |img| img.save(allocator, path_slice),
         };
         res catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
@@ -310,24 +288,8 @@ pub fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
     if (self.py_image) |pimg| {
         const copy_result = switch (pimg.data) {
-            .grayscale => |img| blk: {
-                const copy = Image(u8).init(allocator, img.rows, img.cols) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-                    return null;
-                };
-                img.copy(copy);
-                break :blk PyImage.createFrom(allocator, copy, .owned);
-            },
-            .rgb => |img| blk: {
-                const copy = Image(Rgb).init(allocator, img.rows, img.cols) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-                    return null;
-                };
-                img.copy(copy);
-                break :blk PyImage.createFrom(allocator, copy, .owned);
-            },
-            .rgba => |img| blk: {
-                const copy = Image(Rgba).init(allocator, img.rows, img.cols) catch {
+            inline else => |img| blk: {
+                const copy = Image(@TypeOf(img.data[0])).init(allocator, img.rows, img.cols) catch {
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                     return null;
                 };
@@ -389,13 +351,9 @@ pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
         return null;
     }
 
-    const color = color_utils.parseColorTo(Rgba, color_obj) catch {
-        return null;
-    };
-
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            inline else => |img| img.fill(color),
+            inline else => |img| img.fill(parseColorTo(@TypeOf(img.data[0]), color_obj) catch return null),
         }
     } else {
         c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -452,25 +410,7 @@ pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     if (self.py_image) |pimg| {
         // Create view based on current image type
         const view_result = switch (pimg.data) {
-            .grayscale => |img| blk: {
-                if (rect_obj) |ro| {
-                    const rect = py_utils.parseRectangle(usize, ro) catch return null;
-                    break :blk PyImage.createFrom(allocator, img.view(rect), .borrowed);
-                } else {
-                    const full_rect = zignal.Rectangle(usize).init(0, 0, img.cols, img.rows);
-                    break :blk PyImage.createFrom(allocator, img.view(full_rect), .borrowed);
-                }
-            },
-            .rgb => |img| blk: {
-                if (rect_obj) |ro| {
-                    const rect = py_utils.parseRectangle(usize, ro) catch return null;
-                    break :blk PyImage.createFrom(allocator, img.view(rect), .borrowed);
-                } else {
-                    const full_rect = zignal.Rectangle(usize).init(0, 0, img.cols, img.rows);
-                    break :blk PyImage.createFrom(allocator, img.view(full_rect), .borrowed);
-                }
-            },
-            .rgba => |img| blk: {
+            inline else => |img| blk: {
                 if (rect_obj) |ro| {
                     const rect = py_utils.parseRectangle(usize, ro) catch return null;
                     break :blk PyImage.createFrom(allocator, img.view(rect), .borrowed);
@@ -530,9 +470,7 @@ pub fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
 
     if (self.py_image) |pimg| {
         const is_contig = switch (pimg.data) {
-            .grayscale => |img| img.isContiguous(),
-            .rgb => |img| img.isContiguous(),
-            .rgba => |img| img.isContiguous(),
+            inline else => |img| img.isContiguous(),
         };
 
         return @ptrCast(py_utils.getPyBool(is_contig));
@@ -555,14 +493,10 @@ pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
     if (self.py_image) |pimg| {
         const rows = switch (pimg.data) {
-            .grayscale => |img| img.rows,
-            .rgb => |img| img.rows,
-            .rgba => |img| img.rows,
+            inline else => |img| img.rows,
         };
         const cols = switch (pimg.data) {
-            .grayscale => |img| img.cols,
-            .rgb => |img| img.cols,
-            .rgba => |img| img.cols,
+            inline else => |img| img.cols,
         };
         const left: f64 = 0.0;
         const top: f64 = 0.0;
@@ -999,9 +933,7 @@ pub fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
     if (self.py_image) |pimg| {
         const rows = switch (pimg.data) {
-            .grayscale => |img| img.rows,
-            .rgb => |img| img.rows,
-            .rgba => |img| img.rows,
+            inline else => |img| img.rows,
         };
         return c.PyLong_FromSize_t(rows);
     }
@@ -1014,9 +946,7 @@ pub fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
     if (self.py_image) |pimg| {
         const cols = switch (pimg.data) {
-            .grayscale => |img| img.cols,
-            .rgb => |img| img.cols,
-            .rgba => |img| img.cols,
+            inline else => |img| img.cols,
         };
         return c.PyLong_FromSize_t(cols);
     }
@@ -1083,23 +1013,16 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c)
         return null;
     }
 
-    const rect = py_utils.parseRectangle(usize, rect_obj.?) catch {
-        return null;
-    };
+    const rect = py_utils.parseRectangle(usize, rect_obj.?) catch return null;
 
     if (self.py_image) |pimg| {
         if (color_obj) |cobj| {
-            const rgba = color_utils.parseColorTo(Rgba, cobj) catch return null;
             switch (pimg.data) {
-                .grayscale => |img| img.setBorder(rect, rgba.toGray()),
-                .rgb => |img| img.setBorder(rect, rgba.toRgb()),
-                .rgba => |img| img.setBorder(rect, rgba),
+                inline else => |img| img.setBorder(rect, parseColorTo(@TypeOf(img.data[0]), cobj) catch return null),
             }
         } else {
             switch (pimg.data) {
-                .grayscale => |img| img.setBorder(rect, 0),
-                .rgb => |img| img.setBorder(rect, std.mem.zeroes(zignal.Rgb)),
-                .rgba => |img| img.setBorder(rect, std.mem.zeroes(Rgba)),
+                inline else => |img| img.setBorder(rect, std.mem.zeroes(@TypeOf(img.data[0]))),
             }
         }
 

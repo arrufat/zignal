@@ -69,13 +69,12 @@ class TestImageSmoke:
         assert (arr[0, 0] == np.array([255, 0, 0], dtype=np.uint8)).all()
         assert (arr[1, 1] == np.array([10, 20, 30], dtype=np.uint8)).all()
 
-    def test_set_border_no_overlap_is_noop(self):
+    def test_set_border_no_overlap_fills_entire_image(self):
         img = zignal.Image(3, 3, (7, 8, 9), dtype=zignal.Rgb)
-        arr_before = img.to_numpy().copy()
-        # Rectangle completely outside
+        # Rectangle completely outside -> whole image becomes zeros
         img.set_border(zignal.Rectangle(10, 10, 20, 20))
         arr_after = img.to_numpy()
-        assert np.array_equal(arr_before, arr_after)
+        assert (arr_after == np.zeros((3, 3, 3), dtype=np.uint8)).all()
 
     def test_set_border_requires_rect(self):
         img = zignal.Image(3, 3, (1, 2, 3), dtype=zignal.Rgb)
