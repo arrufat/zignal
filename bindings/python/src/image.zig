@@ -675,6 +675,14 @@ pub const image_methods_metadata = blk: {
             .returns = "bool",
         },
         .{
+            .name = "get_rectangle",
+            .meth = @ptrCast(&core.image_get_rectangle),
+            .flags = c.METH_NOARGS,
+            .doc = core.image_get_rectangle_doc,
+            .params = "self",
+            .returns = "Rectangle",
+        },
+        .{
             .name = "convert",
             .meth = @ptrCast(&core.image_convert),
             .flags = c.METH_VARARGS,

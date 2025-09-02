@@ -18,6 +18,7 @@ const grayscale_format = @import("../grayscale_format.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const stub_metadata = @import("../stub_metadata.zig");
+const rectangle = @import("../rectangle.zig");
 
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
@@ -542,6 +543,41 @@ pub fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
 }
 
 // ============================================================================
+// IMAGE GET_RECTANGLE
+// ============================================================================
+
+pub const image_get_rectangle_doc =
+    \\Get the full image bounds as a Rectangle(left=0, top=0, right=cols, bottom=rows).
+;
+
+pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    if (self.py_image) |pimg| {
+        const rows = switch (pimg.data) {
+            .grayscale => |img| img.rows,
+            .rgb => |img| img.rows,
+            .rgba => |img| img.rows,
+        };
+        const cols = switch (pimg.data) {
+            .grayscale => |img| img.cols,
+            .rgb => |img| img.cols,
+            .rgba => |img| img.cols,
+        };
+        const left: f64 = 0.0;
+        const top: f64 = 0.0;
+        const right: f64 = @floatFromInt(cols);
+        const bottom: f64 = @floatFromInt(rows);
+        const args_tuple = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
+        defer c.Py_DECREF(args_tuple);
+        const rect_obj = c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
+        return rect_obj;
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
+// ============================================================================
 // IMAGE CONVERT
 // ============================================================================
 
@@ -1016,7 +1052,7 @@ pub const image_set_border_doc =
     \\image bounds.
     \\
     \\## Parameters
-    \\- `rect` (Rectangle | tuple[float, float, float, float]): Inner rectangle to preserve
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): Inner rectangle to preserve.
     \\- `color` (optional): Fill value for border. Accepts the same types as `fill`.
     \\   If omitted, uses zeros for the current dtype (0, Rgb(0,0,0), or Rgba(0,0,0,0)).
     \\
@@ -1026,6 +1062,9 @@ pub const image_set_border_doc =
     \\rect = Rectangle(10, 10, 90, 90)
     \\img.set_border(rect)               # zero border
     \\img.set_border(rect, (255, 0, 0))  # red border
+    \\
+    \\# Common pattern: set a uniform 16px border using shrink()
+    \\img.set_border(img.get_rectangle().shrink(16))
     \\```
 ;
 
@@ -1039,7 +1078,7 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c)
     if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj, &color_obj) == 0) {
         return null;
     }
-    if (rect_obj == null) {
+    if (rect_obj == null or rect_obj.? == c.Py_None()) {
         c.PyErr_SetString(c.PyExc_ValueError, "rect is required");
         return null;
     }
