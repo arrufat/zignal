@@ -617,6 +617,9 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
 
 // Aggregate method metadata from all sub-modules
 pub const image_methods_metadata = blk: {
+    // ========================================================================
+    // Core/Creation methods
+    // ========================================================================
     const core_methods = [_]stub_metadata.MethodWithMetadata{
         .{
             .name = "load",
@@ -708,6 +711,9 @@ pub const image_methods_metadata = blk: {
         },
     };
 
+    // ========================================================================
+    // NumPy interop
+    // ========================================================================
     const numpy_methods = [_]stub_metadata.MethodWithMetadata{
         .{
             .name = "from_numpy",
@@ -727,6 +733,9 @@ pub const image_methods_metadata = blk: {
         },
     };
 
+    // ========================================================================
+    // Geometric transforms
+    // ========================================================================
     const transform_methods = [_]stub_metadata.MethodWithMetadata{
         .{
             .name = "resize",
@@ -802,6 +811,9 @@ pub const image_methods_metadata = blk: {
         },
     };
 
+    // ========================================================================
+    // Filtering/Effects
+    // ========================================================================
     const filter_methods = [_]stub_metadata.MethodWithMetadata{
         .{
             .name = "box_blur",
@@ -853,6 +865,9 @@ pub const image_methods_metadata = blk: {
         },
     };
 
+    // ========================================================================
+    // Special Python methods
+    // ========================================================================
     const special_methods = [_]stub_metadata.MethodWithMetadata{
         .{
             .name = "__format__",
