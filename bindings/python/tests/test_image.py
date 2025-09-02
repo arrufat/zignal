@@ -77,6 +77,21 @@ class TestImageSmoke:
         arr_after = img.to_numpy()
         assert np.array_equal(arr_before, arr_after)
 
+    def test_set_border_requires_rect(self):
+        img = zignal.Image(3, 3, (1, 2, 3), dtype=zignal.Rgb)
+        with pytest.raises(ValueError):
+            img.set_border(None)
+
+    def test_get_rectangle_smoke(self):
+        img = zignal.Image(5, 7)
+        rect = img.get_rectangle()
+        assert isinstance(rect, zignal.Rectangle)
+        # Rectangle stores floats; compare as ints
+        assert int(rect.left) == 0
+        assert int(rect.top) == 0
+        assert int(rect.right) == 7
+        assert int(rect.bottom) == 5
+
     def test_numpy_roundtrip_and_validation(self):
         # Round‑trip
         img = zignal.Image(2, 3, (1, 2, 3), dtype=zignal.Rgb)
