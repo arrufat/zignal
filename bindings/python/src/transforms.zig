@@ -42,13 +42,8 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var to_points_obj: ?*c.PyObject = null;
 
     var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
         return -1;
-    }
-
-    // If no arguments, keep identity transform
-    if (from_points_obj == null or to_points_obj == null) {
-        return 0;
     }
 
     // Parse point lists
@@ -240,13 +235,8 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     var to_points_obj: ?*c.PyObject = null;
 
     var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
         return -1;
-    }
-
-    // If no arguments, keep identity transform
-    if (from_points_obj == null or to_points_obj == null) {
-        return 0;
     }
 
     // Parse point lists
@@ -442,13 +432,8 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var to_points_obj: ?*c.PyObject = null;
 
     var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
         return -1;
-    }
-
-    // If no arguments, keep identity transform
-    if (from_points_obj == null or to_points_obj == null) {
-        return 0;
     }
 
     // Parse point lists
@@ -671,9 +656,9 @@ pub var ProjectiveTransformType = c.PyTypeObject{
 pub const similarity_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, from_points: list[tuple[float, float]] | None = None, to_points: list[tuple[float, float]] | None = None",
+        .params = "self, from_points: list[tuple[float, float]], to_points: list[tuple[float, float]]",
         .returns = "None",
-        .doc = "Create similarity transform from point correspondences. If no points provided, creates identity transform.",
+        .doc = "Create similarity transform from point correspondences.",
     },
     .{
         .name = "project",
@@ -699,9 +684,9 @@ pub const similarity_properties_metadata = [_]stub_metadata.PropertyInfo{
 pub const affine_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, from_points: list[tuple[float, float]] | None = None, to_points: list[tuple[float, float]] | None = None",
+        .params = "self, from_points: list[tuple[float, float]], to_points: list[tuple[float, float]]",
         .returns = "None",
-        .doc = "Create affine transform from point correspondences. If no points provided, creates identity transform.",
+        .doc = "Create affine transform from point correspondences.",
     },
     .{
         .name = "project",
@@ -727,9 +712,9 @@ pub const affine_properties_metadata = [_]stub_metadata.PropertyInfo{
 pub const projective_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, from_points: list[tuple[float, float]] | None = None, to_points: list[tuple[float, float]] | None = None",
+        .params = "self, from_points: list[tuple[float, float]], to_points: list[tuple[float, float]]",
         .returns = "None",
-        .doc = "Create projective transform from point correspondences. If no points provided, creates identity transform.",
+        .doc = "Create projective transform from point correspondences.",
     },
     .{
         .name = "project",
