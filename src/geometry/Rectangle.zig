@@ -148,6 +148,62 @@ pub fn Rectangle(comptime T: type) type {
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
         }
+
+        /// Calculates the Intersection over Union (IoU) of two rectangles.
+        /// Returns a value between 0 (no overlap) and 1 (identical rectangles).
+        pub fn iou(self: Self, other: Self) f64 {
+            const intersection = self.intersect(other) orelse return 0.0;
+            const intersection_area = intersection.area();
+
+            // Calculate union area = area1 + area2 - intersection_area
+            const self_area = self.area();
+            const other_area = other.area();
+            const union_area = self_area + other_area - intersection_area;
+
+            // Handle edge case where both rectangles have zero area
+            if (union_area == 0) return 0.0;
+
+            // Convert to f64 for accurate division
+            return switch (@typeInfo(T)) {
+                .int => @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(union_area)),
+                .float => @as(f64, intersection_area) / @as(f64, union_area),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+        }
+
+        /// Checks if two rectangles overlap "enough" based on IoU and coverage thresholds.
+        /// Returns true if any of these conditions are met:
+        /// - IoU > iou_thresh
+        /// - intersection.area / self.area > coverage_thresh
+        /// - intersection.area / other.area > coverage_thresh
+        pub fn overlaps(self: Self, other: Self, iou_thresh: f64, coverage_thresh: f64) bool {
+            assert(iou_thresh >= 0 and iou_thresh <= 1);
+            assert(coverage_thresh >= 0 and coverage_thresh <= 1);
+
+            const intersection = self.intersect(other) orelse return false;
+            const intersection_area = intersection.area();
+
+            // Check IoU threshold (only if it's a meaningful threshold)
+            if (iou_thresh > 0 and self.iou(other) > iou_thresh) return true;
+
+            // Check coverage thresholds
+            const self_area = self.area();
+            const other_area = other.area();
+
+            const self_coverage = switch (@typeInfo(T)) {
+                .int => if (self_area == 0) 0.0 else @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(self_area)),
+                .float => if (self_area == 0) 0.0 else @as(f64, intersection_area) / @as(f64, self_area),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+
+            const other_coverage = switch (@typeInfo(T)) {
+                .int => if (other_area == 0) 0.0 else @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(other_area)),
+                .float => if (other_area == 0) 0.0 else @as(f64, intersection_area) / @as(f64, other_area),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+
+            return self_coverage > coverage_thresh or other_coverage > coverage_thresh;
+        }
     };
 }
 
@@ -200,6 +256,51 @@ test "Rectangle intersect" {
     // Touching edges (no overlap for floats)
     const fintersection2 = frect1.intersect(frect3);
     try expectEqual(fintersection2, null);
+}
+
+test "Rectangle iou and overlaps" {
+    const expectApproxEqAbs = std.testing.expectApproxEqAbs;
+
+    // Test with integer rectangles
+    const rect1 = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 };
+    const rect2 = Rectangle(i32){ .l = 50, .t = 50, .r = 150, .b = 150 };
+    const rect3 = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 }; // Identical to rect1
+    const rect4 = Rectangle(i32){ .l = 200, .t = 200, .r = 250, .b = 250 }; // No overlap
+    const rect5 = Rectangle(i32){ .l = 25, .t = 25, .r = 75, .b = 75 }; // Completely inside rect1
+
+    // Test IoU calculations
+    // rect1 and rect2: intersection = 50x50 = 2500, union = 10000 + 10000 - 2500 = 17500
+    try expectApproxEqAbs(rect1.iou(rect2), 2500.0 / 17500.0, 0.0001);
+
+    // Identical rectangles should have IoU = 1
+    try expectApproxEqAbs(rect1.iou(rect3), 1.0, 0.0001);
+
+    // Non-overlapping rectangles should have IoU = 0
+    try expectApproxEqAbs(rect1.iou(rect4), 0.0, 0.0001);
+
+    // rect5 completely inside rect1: intersection = 2500, union = 10000
+    try expectApproxEqAbs(rect1.iou(rect5), 2500.0 / 10000.0, 0.0001);
+
+    // Test overlaps with different thresholds
+    // Low IoU threshold
+    try expectEqual(rect1.overlaps(rect2, 0.1, 1.0), true); // IoU ≈ 0.143 > 0.1
+    try expectEqual(rect1.overlaps(rect2, 0.2, 1.0), false); // IoU ≈ 0.143 < 0.2
+
+    // Coverage threshold tests
+    // rect5 is completely inside rect1, so coverage = 1.0 for rect5
+    try expectEqual(rect1.overlaps(rect5, 0.0, 0.9), true); // rect5 is 100% covered
+    try expectEqual(rect5.overlaps(rect1, 0.0, 0.9), true); // Same check from other direction
+
+    // rect1 and rect2: intersection/rect1.area = 2500/10000 = 0.25
+    try expectEqual(rect1.overlaps(rect2, 0.0, 0.24), true); // 25% coverage > 24%
+    try expectEqual(rect1.overlaps(rect2, 0.0, 0.251), false); // 25% coverage < 25.1%
+
+    // Test with float rectangles
+    const frect1 = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 100.0, .b = 100.0 };
+    const frect2 = Rectangle(f32){ .l = 50.0, .t = 50.0, .r = 150.0, .b = 150.0 };
+
+    try expectApproxEqAbs(frect1.iou(frect2), 2500.0 / 17500.0, 0.0001);
+    try expectEqual(frect1.overlaps(frect2, 0.1, 1.0), true);
 
     // Self intersection
     const self_intersection = rect1.intersect(rect1);
