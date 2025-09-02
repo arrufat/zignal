@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.5.0] - 2025-09-02
+
+### Major Features
+
+#### Computer Vision & Feature Detection
+- **ORB Feature Detection**: Complete ORB (Oriented FAST and Rotated BRIEF) implementation
+  - FAST corner detection with non-maximal suppression
+  - Binary descriptor extraction with rotation invariance
+  - Feature matching with Hamming distance
+  - KeyPoint structure with orientation and scale support
+- **Hungarian Algorithm**: Optimal assignment problem solver for feature matching
+- **Image Pyramid**: Multi-scale image representation for feature detection
+
+#### Advanced Image Filtering
+- **Convolution Framework**: Generic convolution with customizable kernels
+  - Gaussian blur with configurable sigma
+  - Difference of Gaussians (DoG) for edge detection
+  - Sobel edge detection with gradient magnitude
+- **Motion Blur Effects**: Linear and radial motion blur with SIMD optimization
+
+#### Image Processing Enhancements
+- **Advanced Blending**: 12 blend modes (normal, multiply, screen, overlay, soft light, etc.)
+- **Image Transforms**: Extraction, insertion, warping, and perspective transforms with interpolation
+- **Channel Operations**: Generic operations on individual color channels
+- **PSNR Calculation**: Peak Signal-to-Noise Ratio for quality assessment
+- **Border Handling**: Set borders, extract rectangles, and handle edge modes
+
+### Architecture Improvements
+- **Refactored Image Module**: Separated into logical sub-modules
+  - Core image operations in `image.zig`
+  - Filtering operations in `image/filtering.zig`
+  - Transform operations in `image/transforms.zig`
+  - Channel operations in `image/channel_ops.zig`
+- **Dynamic SVD**: Separated static and dynamic SVD implementations
+- **Enhanced PCA**: Runtime dimension support with batch operations
+- **Font System Overhaul**: Dynamic Unicode support with full 8x8 character set
+
+### Performance Optimizations
+- SIMD-optimized motion blur and convolution operations
+- Channel-separated processing for improved cache locality
+- Optimized integral image computation
+- Fast paths for axis-aligned image extraction
+- Vectorized filtering with boundary handling
+
+### API Changes
+- **Breaking**: Renamed enums for consistency
+  - `InterpolationMethod` → `Interpolation`
+  - `BlendMode` → `Blending`
+  - ANSI display modes renamed to SGR
+- **Breaking**: Rectangle bounds are now exclusive (was inclusive)
+- **Breaking**: Image constructors renamed for clarity
+  - `initBlank` → `init`
+  - `initFromSlice` → `fromSlice`
+- **Breaking**: `isView` renamed to `isContiguous`
+- Blur methods renamed: `boxBlur` → `blurBox`, added `blurGaussian`
+
+### JPEG Enhancements
+- Support for 4:4:4, 4:2:2, and 4:1:1 chroma subsampling
+- Improved component detection and color space handling
+
+### Bug Fixes
+- Fixed filter operations on non-contiguous image views
+- Corrected integral image boundary access
+- Fixed Sobel gradient magnitude scaling
+- Improved arc antialiasing in canvas drawing
+
 ## [0.4.1] - 2025-08-06
 
 ### Fixed
