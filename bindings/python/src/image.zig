@@ -659,6 +659,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "set_border",
+            .meth = @ptrCast(&core.image_set_border),
+            .flags = c.METH_VARARGS,
+            .doc = core.image_set_border_doc,
+            .params = "self, rect: Rectangle | tuple[float, float, float, float], color: " ++ stub_metadata.COLOR ++ " | None = None",
+            .returns = "None",
+        },
+        .{
             .name = "is_contiguous",
             .meth = @ptrCast(&core.image_is_contiguous),
             .flags = c.METH_NOARGS,

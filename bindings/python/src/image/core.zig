@@ -1003,3 +1003,72 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;
 }
+// ============================================================================
+// IMAGE SET_BORDER
+// ============================================================================
+
+pub const image_set_border_doc =
+    \\Set the image border outside a rectangle to a value.
+    \\
+    \\Sets pixels outside the given rectangle to the provided color/value,
+    \\leaving the interior untouched. The rectangle may be provided as a
+    \\Rectangle or a tuple (left, top, right, bottom). It is clipped to the
+    \\image bounds.
+    \\
+    \\## Parameters
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): Inner rectangle to preserve
+    \\- `color` (optional): Fill value for border. Accepts the same types as `fill`.
+    \\   If omitted, uses zeros for the current dtype (0, Rgb(0,0,0), or Rgba(0,0,0,0)).
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image(100, 100)
+    \\rect = Rectangle(10, 10, 90, 90)
+    \\img.set_border(rect)               # zero border
+    \\img.set_border(rect, (255, 0, 0))  # red border
+    \\```
+;
+
+pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse required rect and optional color
+    var rect_obj: ?*c.PyObject = null;
+    var color_obj: ?*c.PyObject = null;
+    const format = std.fmt.comptimePrint("O|O", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj, &color_obj) == 0) {
+        return null;
+    }
+    if (rect_obj == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "rect is required");
+        return null;
+    }
+
+    const rect = py_utils.parseRectangle(usize, rect_obj.?) catch {
+        return null;
+    };
+
+    if (self.py_image) |pimg| {
+        if (color_obj) |cobj| {
+            const rgba = color_utils.parseColorTo(Rgba, cobj) catch return null;
+            switch (pimg.data) {
+                .grayscale => |img| img.setBorder(rect, rgba.toGray()),
+                .rgb => |img| img.setBorder(rect, rgba.toRgb()),
+                .rgba => |img| img.setBorder(rect, rgba),
+            }
+        } else {
+            switch (pimg.data) {
+                .grayscale => |img| img.setBorder(rect, 0),
+                .rgb => |img| img.setBorder(rect, std.mem.zeroes(zignal.Rgb)),
+                .rgba => |img| img.setBorder(rect, std.mem.zeroes(Rgba)),
+            }
+        }
+
+        const none = c.Py_None();
+        c.Py_INCREF(none);
+        return none;
+    }
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
