@@ -78,7 +78,7 @@ class TestImageSmoke:
 
     def test_set_border_requires_rect(self):
         img = zignal.Image(3, 3, (1, 2, 3), dtype=zignal.Rgb)
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             img.set_border(None)
 
     def test_get_rectangle_smoke(self):

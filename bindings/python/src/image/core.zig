@@ -1008,12 +1008,8 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c)
     if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj, &color_obj) == 0) {
         return null;
     }
-    if (rect_obj == null or rect_obj.? == c.Py_None()) {
-        c.PyErr_SetString(c.PyExc_ValueError, "rect is required");
-        return null;
-    }
 
-    const rect = py_utils.parseRectangle(usize, rect_obj.?) catch return null;
+    const rect = py_utils.parseRectangle(usize, rect_obj) catch return null;
 
     if (self.py_image) |pimg| {
         if (color_obj) |cobj| {
