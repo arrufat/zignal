@@ -619,6 +619,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Interpolation as Interpolation,\n");
     try stub.write("    Blending as Blending,\n");
     try stub.write("    DrawMode as DrawMode,\n");
+    try stub.write("    MotionBlur as MotionBlur,\n");
     try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");
     try stub.write("    Assignment as Assignment,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
