@@ -54,7 +54,7 @@ pub fn Image(comptime T: type) type {
         /// try image.rotateFrom(allocator, center, angle, &rotated); // Auto-sizes to optimal dimensions
         /// defer rotated.deinit(allocator);
         /// ```
-        pub const empty: Self = .{ .rows = 0, .cols = 0, .data = undefined, .stride = 0 };
+        pub const empty: Self = .{ .rows = 0, .cols = 0, .data = &[_]T{}, .stride = 0 };
 
         /// Constructs an image of rows and cols size allocating its own memory.
         /// The image owns the memory and deinit should be called to free it.
@@ -88,9 +88,52 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Fills the entire image with a solid color using @memset.
-        pub fn fill(self: Self, color: anytype) void {
-            @memset(self.data, convertColor(T, color));
+        /// Fills the entire image with a solid value.
+        /// Uses a fast memset when contiguous; otherwise fills row-by-row respecting stride.
+        pub fn fill(self: Self, value: anytype) void {
+            const color = convertColor(T, value);
+            if (self.isContiguous()) {
+                @memset(self.data, color);
+            } else {
+                // Respect stride when the image is a view
+                for (0..self.rows) |r| {
+                    const start = r * self.stride;
+                    @memset(self.data[start .. start + self.cols], color);
+                }
+            }
+        }
+
+        /// Sets the border outside `rect` to `value` (rect is clipped to bounds).
+        /// Efficiently fills only the top/bottom bands and left/right bands per row.
+        pub fn setBorder(self: Self, rect: Rectangle(usize), value: T) void {
+            const bounds = self.getRectangle();
+            const inner = bounds.intersect(rect) orelse return;
+
+            // Top band [0, inner.t)
+            var r: usize = 0;
+            while (r < inner.t) : (r += 1) {
+                const start = r * self.stride;
+                @memset(self.data[start .. start + self.cols], value);
+            }
+
+            // Middle rows [inner.t, inner.b)
+            r = inner.t;
+            while (r < inner.b) : (r += 1) {
+                const row_start = r * self.stride;
+                if (inner.l > 0) {
+                    @memset(self.data[row_start .. row_start + inner.l], value);
+                }
+                if (inner.r < self.cols) {
+                    @memset(self.data[row_start + inner.r .. row_start + self.cols], value);
+                }
+            }
+
+            // Bottom band [inner.b, rows)
+            r = inner.b;
+            while (r < self.rows) : (r += 1) {
+                const start = r * self.stride;
+                @memset(self.data[start .. start + self.cols], value);
+            }
         }
 
         /// Returns the image data reinterpreted as a slice of bytes.
@@ -171,16 +214,21 @@ pub fn Image(comptime T: type) type {
         /// The returned image references the memory of `self`, so there are no allocations
         /// or copies.
         pub fn view(self: Self, rect: Rectangle(usize)) Image(T) {
-            const bounded = Rectangle(usize){
-                .l = rect.l,
-                .t = rect.t,
-                .r = @min(rect.r, self.cols),
-                .b = @min(rect.b, self.rows),
+            const clipped = self.getRectangle().intersect(rect) orelse {
+                return .empty;
             };
+            if (clipped.isEmpty()) {
+                return .empty;
+            }
+
+            const rows = clipped.height();
+            const cols = clipped.width();
+            const start = clipped.t * self.stride + clipped.l;
+            const end = (clipped.b - 1) * self.stride + clipped.r;
             return .{
-                .rows = bounded.height(),
-                .cols = bounded.width(),
-                .data = self.data[bounded.t * self.stride + bounded.l .. (bounded.b - 1) * self.stride + bounded.r],
+                .rows = rows,
+                .cols = cols,
+                .data = self.data[start..end],
                 .stride = self.stride,
             };
         }
@@ -241,28 +289,13 @@ pub fn Image(comptime T: type) type {
         pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
             var result: Image(TargetType) = try .init(allocator, self.rows, self.cols);
             if (T == TargetType) {
-                // For same type, we need to handle views properly
-                if (self.stride == self.cols) {
-                    // Contiguous data, can use memcpy
-                    @memcpy(result.data, self.data);
-                } else {
-                    // Non-contiguous (view), copy row by row
-                    var row: usize = 0;
-                    while (row < self.rows) : (row += 1) {
-                        const src_start = row * self.stride;
-                        const dst_start = row * self.cols;
-                        @memcpy(result.data[dst_start .. dst_start + self.cols], self.data[src_start .. src_start + self.cols]);
-                    }
-                }
+                self.copy(result);
             } else {
-                // Different types, convert pixel by pixel
                 var row: usize = 0;
                 while (row < self.rows) : (row += 1) {
                     var col: usize = 0;
                     while (col < self.cols) : (col += 1) {
-                        const src_idx = row * self.stride + col;
-                        const dst_idx = row * self.cols + col;
-                        result.data[dst_idx] = convertColor(TargetType, self.data[src_idx]);
+                        result.at(row, col).* = convertColor(TargetType, self.at(row, col).*);
                     }
                 }
             }
