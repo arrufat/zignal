@@ -51,8 +51,11 @@ pub fn Transform(comptime T: type) type {
                 return error.InvalidDimensions;
             }
 
-            // Allocate output if not already allocated
-            if (out.data.len == 0) {
+            // Ensure output has a contiguous buffer of the requested size
+            if (out.isContiguous() and out.data.len > 0) {
+                out.data = try allocator.realloc(out.data, out.rows * out.cols);
+                out.stride = out.cols;
+            } else {
                 out.* = try .init(allocator, out.rows, out.cols);
             }
 
@@ -83,9 +86,6 @@ pub fn Transform(comptime T: type) type {
             const offset_row = (out.rows -| scaled_rows) / 2;
             const offset_col = (out.cols -| scaled_cols) / 2;
 
-            // Fill output with zeros (black/transparent padding)
-            @memset(out.data, std.mem.zeroes(T));
-
             // Create rectangle for the letterboxed content
             const content_rect: Rectangle(usize) = .init(
                 offset_col,
@@ -99,6 +99,9 @@ pub fn Transform(comptime T: type) type {
 
             // Resize the image into the view
             try interpolation.resize(T, allocator, self, output_view, method);
+
+            // Zero only the padding bands
+            out.setBorder(content_rect, std.mem.zeroes(T));
 
             return content_rect;
         }
@@ -164,10 +167,16 @@ pub fn Transform(comptime T: type) type {
             const interpolation = @import("interpolation.zig");
 
             // Auto-compute optimal bounds if dimensions are 0
-            const actual_rows, const actual_cols = if (rotated.rows == 0 and rotated.cols == 0) blk: {
+            var actual_rows: usize = undefined;
+            var actual_cols: usize = undefined;
+            if (rotated.rows == 0 and rotated.cols == 0) {
                 const bounds = rotateBounds(self, angle);
-                break :blk .{ bounds.rows, bounds.cols };
-            } else .{ rotated.rows, rotated.cols };
+                actual_rows = bounds.rows;
+                actual_cols = bounds.cols;
+            } else {
+                actual_rows = rotated.rows;
+                actual_cols = rotated.cols;
+            }
 
             // Get the image center
             const center = self.getCenter();
@@ -178,22 +187,21 @@ pub fn Transform(comptime T: type) type {
 
             // Fast paths for orthogonal rotations
             if (@abs(normalized_angle) < epsilon or @abs(normalized_angle - std.math.tau) < epsilon) {
-                // 0° or 360° - copy
-                var array: std.ArrayList(T) = .empty;
-                try array.resize(gpa, actual_rows * actual_cols);
-                rotated.* = .initFromSlice(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
+                // 0° or 360°: return same image dimensions/content
+                actual_rows = self.rows;
+                actual_cols = self.cols;
 
-                const offset_r = (actual_rows -| self.rows) / 2;
-                const offset_c = (actual_cols -| self.cols) / 2;
-
-                for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
-                for (0..@min(self.rows, actual_rows)) |r| {
-                    for (0..@min(self.cols, actual_cols)) |c| {
-                        if (r + offset_r < actual_rows and c + offset_c < actual_cols) {
-                            rotated.at(r + offset_r, c + offset_c).* = self.at(r, c).*;
-                        }
-                    }
+                // Ensure destination buffer is sized appropriately (prefer realloc)
+                const desired_len = actual_rows * actual_cols;
+                if (rotated.isContiguous() and rotated.data.len > 0) {
+                    rotated.data = try gpa.realloc(rotated.data, desired_len);
+                    rotated.rows = actual_rows;
+                    rotated.cols = actual_cols;
+                    rotated.stride = actual_cols;
+                } else {
+                    rotated.* = try .init(gpa, actual_rows, actual_cols);
                 }
+                self.copy(rotated.*);
                 return;
             }
 
@@ -212,10 +220,16 @@ pub fn Transform(comptime T: type) type {
                 return rotate270CCW(self, gpa, actual_rows, actual_cols, rotated);
             }
 
-            // General rotation using inverse transformation
-            var array: std.ArrayList(T) = .empty;
-            try array.resize(gpa, actual_rows * actual_cols);
-            rotated.* = .initFromSlice(actual_rows, actual_cols, try array.toOwnedSlice(gpa));
+            // General rotation using inverse transformation (writes every pixel)
+            const want_len = actual_rows * actual_cols;
+            if (rotated.isContiguous() and rotated.data.len > 0) {
+                rotated.data = try gpa.realloc(rotated.data, want_len);
+                rotated.rows = actual_rows;
+                rotated.cols = actual_cols;
+                rotated.stride = actual_cols;
+            } else {
+                rotated.* = try Self.init(gpa, actual_rows, actual_cols);
+            }
 
             const cos = @cos(angle);
             const sin = @sin(angle);
@@ -261,7 +275,14 @@ pub fn Transform(comptime T: type) type {
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
             const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
             const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
-            chip.* = try .init(allocator, chip_rows, chip_cols);
+            if (chip.rows > 0 and chip.cols > 0 and chip.isContiguous()) {
+                chip.data = try allocator.realloc(chip.data, chip_rows * chip_cols);
+                chip.rows = chip_rows;
+                chip.cols = chip_cols;
+                chip.stride = chip_cols;
+            } else {
+                chip.* = try .init(allocator, chip_rows, chip_cols);
+            }
             copyRect(self, chip_top, chip_left, chip.*);
         }
 
@@ -439,14 +460,18 @@ pub fn Transform(comptime T: type) type {
 
         /// Fast 90-degree counter-clockwise rotation.
         fn rotate90CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .empty;
-            try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
-
-            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
-
             const offset_r = (output_rows -| self.cols) / 2;
             const offset_c = (output_cols -| self.rows) / 2;
+            // Ensure capacity without pre-zero; we will zero only borders after write if needed
+            const desired_len_lr = output_rows * output_cols;
+            if (rotated.isContiguous() and rotated.data.len > 0) {
+                rotated.data = try gpa.realloc(rotated.data, desired_len_lr);
+                rotated.rows = output_rows;
+                rotated.cols = output_cols;
+                rotated.stride = output_cols;
+            } else {
+                rotated.* = try Self.init(gpa, output_rows, output_cols);
+            }
 
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
@@ -457,18 +482,26 @@ pub fn Transform(comptime T: type) type {
                     }
                 }
             }
+            // Zero only padding bands if any
+            if (offset_r != 0 or offset_c != 0) {
+                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
+                rotated.setBorder(inner, std.mem.zeroes(T));
+            }
         }
 
         /// Fast 180-degree rotation.
         fn rotate180(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .empty;
-            try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
-
-            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
-
             const offset_r = (output_rows -| self.rows) / 2;
             const offset_c = (output_cols -| self.cols) / 2;
+            const desired_len_180 = output_rows * output_cols;
+            if (rotated.isContiguous() and rotated.data.len > 0) {
+                rotated.data = try gpa.realloc(rotated.data, desired_len_180);
+                rotated.rows = output_rows;
+                rotated.cols = output_cols;
+                rotated.stride = output_cols;
+            } else {
+                rotated.* = try Self.init(gpa, output_rows, output_cols);
+            }
 
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
@@ -479,18 +512,25 @@ pub fn Transform(comptime T: type) type {
                     }
                 }
             }
+            if (offset_r != 0 or offset_c != 0) {
+                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.cols, offset_r + self.rows);
+                rotated.setBorder(inner, std.mem.zeroes(T));
+            }
         }
 
         /// Fast 270-degree counter-clockwise rotation (90-degree clockwise).
         fn rotate270CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize, rotated: *Self) !void {
-            var array: std.ArrayList(T) = .empty;
-            try array.resize(gpa, output_rows * output_cols);
-            rotated.* = .initFromSlice(output_rows, output_cols, try array.toOwnedSlice(gpa));
-
-            for (rotated.data) |*pixel| pixel.* = std.mem.zeroes(T);
-
             const offset_r = (output_rows -| self.cols) / 2;
             const offset_c = (output_cols -| self.rows) / 2;
+            const desired_len_270 = output_rows * output_cols;
+            if (rotated.isContiguous() and rotated.data.len > 0) {
+                rotated.data = try gpa.realloc(rotated.data, desired_len_270);
+                rotated.rows = output_rows;
+                rotated.cols = output_cols;
+                rotated.stride = output_cols;
+            } else {
+                rotated.* = try Self.init(gpa, output_rows, output_cols);
+            }
 
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
@@ -500,6 +540,10 @@ pub fn Transform(comptime T: type) type {
                         rotated.at(new_r, new_c).* = self.at(r, c).*;
                     }
                 }
+            }
+            if (offset_r != 0 or offset_c != 0) {
+                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
+                rotated.setBorder(inner, std.mem.zeroes(T));
             }
         }
 
@@ -526,11 +570,14 @@ pub fn Transform(comptime T: type) type {
                 (out.rows != out_rows or out.cols != out_cols);
 
             if (needs_alloc) {
-                // Only deinit if image has actual dimensions (not empty)
-                if (out.rows > 0 and out.cols > 0) {
-                    out.deinit(allocator);
+                if (out.rows > 0 and out.cols > 0 and out.isContiguous()) {
+                    out.data = try allocator.realloc(out.data, out_rows * out_cols);
+                    out.rows = out_rows;
+                    out.cols = out_cols;
+                    out.stride = out_cols;
+                } else {
+                    out.* = try Self.init(allocator, out_rows, out_cols);
                 }
-                out.* = try Self.init(allocator, out_rows, out_cols);
             }
 
             // Apply transform to each pixel in the output image

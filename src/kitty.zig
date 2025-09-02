@@ -63,29 +63,11 @@ pub fn fromImage(
     var scaled_image: ?Image(T) = null;
     defer if (scaled_image) |*img| img.deinit(gpa);
 
-    // Handle scaling if dimensions specified
-    if (options.width != null or options.height != null) {
-        // Calculate scale factor preserving aspect ratio
-        var scale_factor: f32 = 1.0;
-
-        if (options.width != null and options.height != null) {
-            // Both specified: use smaller scale to fit within both
-            const scale_x = @as(f32, @floatFromInt(options.width.?)) / @as(f32, @floatFromInt(image.cols));
-            const scale_y = @as(f32, @floatFromInt(options.height.?)) / @as(f32, @floatFromInt(image.rows));
-            scale_factor = @min(scale_x, scale_y);
-        } else if (options.width != null) {
-            // Only width specified
-            scale_factor = @as(f32, @floatFromInt(options.width.?)) / @as(f32, @floatFromInt(image.cols));
-        } else if (options.height != null) {
-            // Only height specified
-            scale_factor = @as(f32, @floatFromInt(options.height.?)) / @as(f32, @floatFromInt(image.rows));
-        }
-
-        // Only scale if factor is different from 1.0
-        if (@abs(scale_factor - 1.0) > 0.001) {
-            scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
-            image_to_encode = scaled_image.?;
-        }
+    // Handle scaling with shared policy (preserve aspect ratio)
+    const scale_factor = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
+    if (@abs(scale_factor - 1.0) > 0.001) {
+        scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
+        image_to_encode = scaled_image.?;
     }
 
     // Encode the (possibly scaled) image as PNG

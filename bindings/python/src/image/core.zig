@@ -394,9 +394,7 @@ pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .grayscale => |img| img.fill(color),
-            .rgb => |img| img.fill(color),
-            .rgba => |img| img.fill(color),
+            inline else => |img| img.fill(color),
         }
     } else {
         c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");

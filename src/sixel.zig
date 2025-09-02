@@ -97,28 +97,11 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-
     // Calculate scaling if needed
     var width = image.cols;
     var height = image.rows;
-    var scale: f32 = 1.0;
-
-    // Calculate scale based on provided dimensions
-    if (options.width != null or options.height != null) {
-        var scale_x: f32 = 1.0;
-        var scale_y: f32 = 1.0;
-
-        if (options.width) |target_width| {
-            scale_x = @as(f32, @floatFromInt(target_width)) / @as(f32, @floatFromInt(width));
-        }
-        if (options.height) |target_height| {
-            scale_y = @as(f32, @floatFromInt(target_height)) / @as(f32, @floatFromInt(height));
-        }
-
-        // Use the smaller scale to ensure image fits within both dimensions
-        scale = @min(scale_x, scale_y);
-
-        // Apply scaling
+    const scale = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
+    if (@abs(scale - 1.0) > 0.0) {
         width = @intFromFloat(@as(f32, @floatFromInt(width)) * scale);
         height = @intFromFloat(@as(f32, @floatFromInt(height)) * scale);
     }

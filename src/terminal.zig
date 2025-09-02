@@ -82,6 +82,21 @@ pub fn isKittySupported() !bool {
     return std.mem.indexOf(u8, response, "\x1b_G") != null;
 }
 
+/// Compute aspect-preserving scale factor given optional target width/height.
+/// Returns 1.0 when both are null, or the smaller scale when both are set.
+pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) f32 {
+    if (width_opt == null and height_opt == null) return 1.0;
+    var scale_x: f32 = 1.0;
+    var scale_y: f32 = 1.0;
+    if (width_opt) |w| {
+        scale_x = @as(f32, @floatFromInt(w)) / @as(f32, @floatFromInt(cols));
+    }
+    if (height_opt) |h| {
+        scale_y = @as(f32, @floatFromInt(h)) / @as(f32, @floatFromInt(rows));
+    }
+    return @min(scale_x, scale_y);
+}
+
 /// Terminal state manager for capability detection
 ///
 /// This struct handles terminal state management for detecting graphics protocol
