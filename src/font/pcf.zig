@@ -184,7 +184,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     const is_compressed = std.mem.endsWith(u8, path, ".gz");
 
     // Read file into memory
-    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
+    const raw_file_contents = try std.fs.cwd().readFileAlloc(path, allocator, .limited(max_file_size));
     defer allocator.free(raw_file_contents);
 
     // Decompress if needed
@@ -209,17 +209,16 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     const arena_allocator = arena.allocator();
 
     // Parse PCF file
-    var stream = std.io.fixedBufferStream(file_contents);
-    const reader = stream.reader();
+    var reader: std.Io.Reader = .fixed(file_contents);
 
     // Read and verify header
-    const header = try reader.readInt(u32, .little);
+    const header = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     if (header != pcf_file_version) {
         return PcfError.InvalidFormat;
     }
 
     // Read table count
-    const table_count = try reader.readInt(u32, .little);
+    const table_count = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     if (table_count == 0 or table_count > max_table_count) {
         return PcfError.InvalidFormat;
     }
@@ -227,10 +226,10 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     // Read table of contents
     const tables = try arena_allocator.alloc(TableEntry, table_count);
     for (tables) |*table| {
-        table.type = try reader.readInt(u32, .little);
-        table.format = try reader.readInt(u32, .little);
-        table.size = try reader.readInt(u32, .little);
-        table.offset = try reader.readInt(u32, .little);
+        table.type = try reader.takeVarInt(u32, .little, @sizeOf(u32));
+        table.format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
+        table.size = try reader.takeVarInt(u32, .little, @sizeOf(u32));
+        table.offset = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     }
 
     // Find required tables
@@ -323,11 +322,10 @@ fn validateTableBounds(data: []const u8, table: TableEntry) !void {
 fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
     try validateTableBounds(data, table);
 
-    var stream = std.io.fixedBufferStream(data[table.offset .. table.offset + table.size]);
-    const reader = stream.reader();
+    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
-    const format = try reader.readInt(u32, .little);
+    const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     const byte_order = getByteOrder(format);
 
     var accel: Accelerator = undefined;
@@ -347,29 +345,29 @@ fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
     // etc.
 
     // Read the boolean flags as individual bytes
-    accel.no_overlap = (try reader.readByte()) != 0;
-    accel.constant_metrics = (try reader.readByte()) != 0;
-    accel.terminal_font = (try reader.readByte()) != 0;
-    accel.constant_width = (try reader.readByte()) != 0;
-    accel.ink_inside = (try reader.readByte()) != 0;
-    accel.ink_metrics = (try reader.readByte()) != 0;
-    accel.draw_direction = (try reader.readByte()) != 0;
-    _ = try reader.readByte(); // padding
+    accel.no_overlap = (try reader.takeByte()) != 0;
+    accel.constant_metrics = (try reader.takeByte()) != 0;
+    accel.terminal_font = (try reader.takeByte()) != 0;
+    accel.constant_width = (try reader.takeByte()) != 0;
+    accel.ink_inside = (try reader.takeByte()) != 0;
+    accel.ink_metrics = (try reader.takeByte()) != 0;
+    accel.draw_direction = (try reader.takeByte()) != 0;
+    _ = try reader.takeByte(); // padding
 
     // Read font metrics
-    accel.font_ascent = try reader.readInt(i32, byte_order);
-    accel.font_descent = try reader.readInt(i32, byte_order);
-    accel.max_overlap = try reader.readInt(i32, byte_order);
+    accel.font_ascent = try reader.takeVarInt(i32, byte_order, @sizeOf(i32));
+    accel.font_descent = try reader.takeVarInt(i32, byte_order, @sizeOf(i32));
+    accel.max_overlap = try reader.takeVarInt(i32, byte_order, @sizeOf(i32));
 
     // Read min bounds
-    accel.min_bounds = try readMetric(reader, byte_order, false);
-    accel.max_bounds = try readMetric(reader, byte_order, false);
+    accel.min_bounds = try readMetric(&reader, byte_order, false);
+    accel.max_bounds = try readMetric(&reader, byte_order, false);
 
     // Read ink bounds if present
     const accel_flags = FormatFlags.decode(table.format);
     if (accel_flags.accel_w_inkbounds) {
-        accel.ink_min_bounds = try readMetric(reader, byte_order, false);
-        accel.ink_max_bounds = try readMetric(reader, byte_order, false);
+        accel.ink_min_bounds = try readMetric(&reader, byte_order, false);
+        accel.ink_max_bounds = try readMetric(&reader, byte_order, false);
     } else {
         accel.ink_min_bounds = null;
         accel.ink_max_bounds = null;
@@ -382,15 +380,14 @@ fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
 fn parseProperties(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !PropertiesInfo {
     try validateTableBounds(data, table);
 
-    var stream = std.io.fixedBufferStream(data[table.offset .. table.offset + table.size]);
-    const reader = stream.reader();
+    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
-    const format = try reader.readInt(u32, .little);
+    const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     const byte_order = getByteOrder(format);
 
     // Read number of properties
-    const prop_count = try reader.readInt(u32, byte_order);
+    const prop_count = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
     if (prop_count > 1000) { // Sanity check
         return PcfError.InvalidTableEntry;
     }
@@ -411,31 +408,30 @@ fn parseProperties(allocator: std.mem.Allocator, data: []const u8, table: TableE
 
     // Read property info
     for (prop_infos) |*prop| {
-        prop.name_offset = try reader.readInt(u32, byte_order);
-        const is_string_byte = try reader.readByte();
+        prop.name_offset = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
+        const is_string_byte = try reader.takeByte();
         prop.is_string = is_string_byte != 0;
-        prop.value = try reader.readInt(i32, byte_order);
+        prop.value = try reader.takeVarInt(i32, byte_order, @sizeOf(i32));
     }
 
     // Skip padding to align to 4 bytes if needed
     if ((prop_count & 3) != 0) {
         const padding = 4 - (prop_count & 3);
-        try reader.skipBytes(padding, .{});
+        try reader.discardAll(padding);
     }
 
     // Read string pool size
-    const string_size = try reader.readInt(u32, byte_order);
-    const remaining = try reader.context.getEndPos() - try reader.context.getPos();
-    if (string_size > remaining) {
+    const string_size = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
+
+    // Calculate remaining bytes in the reader's buffer
+    const remaining_bytes = reader.buffer.len - reader.seek;
+    if (string_size > remaining_bytes) {
         return PcfError.InvalidTableEntry;
     }
 
     // Read string pool
     result.string_pool = try allocator.alloc(u8, string_size);
-    const bytes_read = try reader.read(result.string_pool);
-    if (bytes_read != string_size) {
-        return PcfError.InvalidTableEntry;
-    }
+    try reader.readSliceAll(result.string_pool);
 
     // Resolve property names and string values
     for (prop_infos, 0..) |prop_info, i| {
@@ -491,14 +487,14 @@ fn getStringProperty(properties: []const Property, name: []const u8) ?[]const u8
 }
 
 /// Read metric from stream (handles both compressed and uncompressed formats)
-fn readMetric(reader: anytype, byte_order: std.builtin.Endian, compressed: bool) !Metric {
+fn readMetric(reader: *std.Io.Reader, byte_order: std.builtin.Endian, compressed: bool) !Metric {
     if (compressed) {
         // Read compressed metric (5 bytes, each offset by 0x80)
-        const lsb = try reader.readInt(u8, .little);
-        const rsb = try reader.readInt(u8, .little);
-        const cw = try reader.readInt(u8, .little);
-        const asc = try reader.readInt(u8, .little);
-        const desc = try reader.readInt(u8, .little);
+        const lsb = try reader.takeVarInt(u8, .little, 1);
+        const rsb = try reader.takeVarInt(u8, .little, 1);
+        const cw = try reader.takeVarInt(u8, .little, 1);
+        const asc = try reader.takeVarInt(u8, .little, 1);
+        const desc = try reader.takeVarInt(u8, .little, 1);
 
         return Metric{
             .left_sided_bearing = @as(i16, @intCast(@as(i16, lsb) - 0x80)),
@@ -511,12 +507,12 @@ fn readMetric(reader: anytype, byte_order: std.builtin.Endian, compressed: bool)
     } else {
         // Read uncompressed metric (6 i16 values)
         return Metric{
-            .left_sided_bearing = try reader.readInt(i16, byte_order),
-            .right_sided_bearing = try reader.readInt(i16, byte_order),
-            .character_width = try reader.readInt(i16, byte_order),
-            .ascent = try reader.readInt(i16, byte_order),
-            .descent = try reader.readInt(i16, byte_order),
-            .attributes = try reader.readInt(u16, byte_order),
+            .left_sided_bearing = try reader.takeVarInt(i16, byte_order, 2),
+            .right_sided_bearing = try reader.takeVarInt(i16, byte_order, 2),
+            .character_width = try reader.takeVarInt(i16, byte_order, 2),
+            .ascent = try reader.takeVarInt(i16, byte_order, 2),
+            .descent = try reader.takeVarInt(i16, byte_order, 2),
+            .attributes = try reader.takeVarInt(u16, byte_order, 2),
         };
     }
 }
@@ -525,21 +521,20 @@ fn readMetric(reader: anytype, byte_order: std.builtin.Endian, compressed: bool)
 fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !EncodingEntry {
     try validateTableBounds(data, table);
 
-    var stream = std.io.fixedBufferStream(data[table.offset .. table.offset + table.size]);
-    const reader = stream.reader();
+    var reader = std.Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
-    const format = try reader.readInt(u32, .little);
+    const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     const byte_order = getByteOrder(format);
 
     var encoding: EncodingEntry = undefined;
 
     // Read encoding info
-    encoding.min_char_or_byte2 = try reader.readInt(u16, byte_order);
-    encoding.max_char_or_byte2 = try reader.readInt(u16, byte_order);
-    encoding.min_byte1 = try reader.readInt(u16, byte_order);
-    encoding.max_byte1 = try reader.readInt(u16, byte_order);
-    encoding.default_char = try reader.readInt(u16, byte_order);
+    encoding.min_char_or_byte2 = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
+    encoding.max_char_or_byte2 = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
+    encoding.min_byte1 = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
+    encoding.max_byte1 = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
+    encoding.default_char = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
 
     // Calculate total encodings with overflow protection
     const cols = @as(usize, encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1);
@@ -553,7 +548,7 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     // Read glyph indices
     encoding.glyph_indices = try allocator.alloc(u16, encodings_count);
     for (encoding.glyph_indices) |*index| {
-        index.* = try reader.readInt(u16, byte_order);
+        index.* = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
     }
 
     return encoding;
@@ -569,11 +564,10 @@ const MetricsInfo = struct {
 fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntry, max_glyphs: usize) !MetricsInfo {
     try validateTableBounds(data, table);
 
-    var stream = std.io.fixedBufferStream(data[table.offset .. table.offset + table.size]);
-    const reader = stream.reader();
+    var reader = std.Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
-    const format = try reader.readInt(u32, .little);
+    const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     const byte_order = getByteOrder(format);
 
     const flags = FormatFlags.decode(format);
@@ -583,7 +577,7 @@ fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
 
     if (compressed) {
         // Read compressed metrics count
-        const metrics_count = try reader.readInt(u16, byte_order);
+        const metrics_count = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
         if (metrics_count > max_glyph_count) {
             return PcfError.InvalidGlyphCount;
         }
@@ -593,11 +587,11 @@ fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
         result.metrics = try allocator.alloc(Metric, metrics_count);
 
         for (result.metrics) |*metric| {
-            metric.* = try readMetric(reader, byte_order, true);
+            metric.* = try readMetric(&reader, byte_order, true);
         }
     } else {
         // Read uncompressed metrics count
-        const metrics_count = try reader.readInt(u32, byte_order);
+        const metrics_count = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
         if (metrics_count > max_glyph_count) {
             return PcfError.InvalidGlyphCount;
         }
@@ -607,7 +601,7 @@ fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
         result.metrics = try allocator.alloc(Metric, result.glyph_count);
 
         for (result.metrics) |*metric| {
-            metric.* = try readMetric(reader, byte_order, false);
+            metric.* = try readMetric(&reader, byte_order, false);
         }
     }
 
@@ -634,15 +628,14 @@ const BitmapSizes = struct {
 fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !BitmapInfo {
     try validateTableBounds(data, table);
 
-    var stream = std.io.fixedBufferStream(data[table.offset .. table.offset + table.size]);
-    const reader = stream.reader();
+    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
-    const format = try reader.readInt(u32, .little);
+    const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
     const byte_order = getByteOrder(format);
 
     // Read glyph count
-    const glyph_count = try reader.readInt(u32, byte_order);
+    const glyph_count = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
     if (glyph_count > max_glyph_count) {
         return PcfError.InvalidGlyphCount;
     }
@@ -654,35 +647,26 @@ fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
 
     // Read offsets
     for (result.offsets) |*offset| {
-        offset.* = try reader.readInt(u32, byte_order);
+        offset.* = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
     }
 
     // Read bitmap sizes array
     result.bitmap_sizes = BitmapSizes{
-        .image_width = try reader.readInt(u32, byte_order),
-        .image_height = try reader.readInt(u32, byte_order),
-        .image_size = try reader.readInt(u32, byte_order),
-        .bitmap_count = try reader.readInt(u32, byte_order),
+        .image_width = try reader.takeVarInt(u32, byte_order, @sizeOf(u32)),
+        .image_height = try reader.takeVarInt(u32, byte_order, @sizeOf(u32)),
+        .image_size = try reader.takeVarInt(u32, byte_order, @sizeOf(u32)),
+        .bitmap_count = try reader.takeVarInt(u32, byte_order, @sizeOf(u32)),
     };
 
     // Note: bitmap_count might not always match glyph_count exactly in some PCF files
     // Some fonts may have padding or extra bitmap slots
 
-    // Calculate remaining data size and validate against image_size
-    const remaining = try reader.context.getEndPos() - try reader.context.getPos();
-    const total_size = remaining;
-
-    // Some PCF files may have padding, so allow total_size >= image_size
-    if (total_size < result.bitmap_sizes.image_size) {
-        return PcfError.InvalidBitmapData;
-    }
+    // For fixed reader, we can't easily get remaining bytes,
+    // but we have already validated table bounds, so we can trust image_size
 
     // Read bitmap data - use the actual image size, not total remaining
     result.bitmap_data = try allocator.alloc(u8, result.bitmap_sizes.image_size);
-    const bytes_read = try reader.read(result.bitmap_data);
-    if (bytes_read != result.bitmap_sizes.image_size) {
-        return PcfError.InvalidBitmapData;
-    }
+    try reader.readSliceAll(result.bitmap_data);
 
     return result;
 }
@@ -941,8 +925,7 @@ test "Table bounds validation" {
 
 test "Metric reading" {
     var buffer: [64]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    const writer = stream.writer();
+    var writer = std.Io.Writer.fixed(&buffer);
 
     // Write compressed metric
     try writer.writeByte(0x82); // LSB: 2 (0x82 - 0x80)
@@ -951,10 +934,9 @@ test "Metric reading" {
     try writer.writeByte(0x90); // Ascent: 16 (0x90 - 0x80)
     try writer.writeByte(0x82); // Descent: 2 (0x82 - 0x80)
 
-    var read_stream = std.io.fixedBufferStream(stream.getWritten());
-    const reader = read_stream.reader();
+    var reader: std.Io.Reader = .fixed(buffer[0..writer.end]);
 
-    const metric = try readMetric(reader, .little, true);
+    const metric = try readMetric(&reader, .little, true);
     try testing.expectEqual(@as(i16, 2), metric.left_sided_bearing);
     try testing.expectEqual(@as(i16, 8), metric.right_sided_bearing);
     try testing.expectEqual(@as(i16, 6), metric.character_width);
@@ -967,8 +949,7 @@ test "Properties parsing" {
 
     // Create a minimal properties table with just one integer property for simplicity
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    const writer = stream.writer();
+    var writer: std.Io.Writer = .fixed(&buffer);
 
     // Write format (little endian, no special flags)
     try writer.writeInt(u32, 0x00000000, .little);
@@ -995,11 +976,11 @@ test "Properties parsing" {
     const table = TableEntry{
         .type = @intFromEnum(TableType.properties),
         .format = 0,
-        .size = @intCast(stream.getWritten().len),
+        .size = @intCast(writer.end),
         .offset = 0,
     };
 
-    const props = try parseProperties(allocator, stream.getWritten(), table);
+    const props = try parseProperties(allocator, buffer[0..writer.end], table);
     defer allocator.free(props.properties);
     defer allocator.free(props.string_pool);
 

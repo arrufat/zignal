@@ -640,18 +640,24 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
                 // Build SGR formatted string with Python-style repr
                 var buffer: [512]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buffer);
-                const writer = stream.writer();
+                var offset: usize = 0;
 
                 // Start with SGR escape codes and type name
-                writer.print(
+                const header = std.fmt.bufPrint(
+                    buffer[offset..],
                     "\x1b[1m\x1b[38;2;{d};{d};{d}m\x1b[48;2;{d};{d};{d}m{s}(",
                     .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, name },
                 ) catch return null;
+                offset += header.len;
 
                 // Print each field in Python style (field=value)
                 inline for (fields, 0..) |field, i| {
-                    writer.print("{s}=", .{field.name}) catch return null;
+                    const field_name = std.fmt.bufPrint(
+                        buffer[offset..],
+                        "{s}=",
+                        .{field.name},
+                    ) catch return null;
+                    offset += field_name.len;
 
                     // Format the field value appropriately
                     const value = switch (i) {
@@ -662,21 +668,24 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                         else => unreachable,
                     };
 
-                    switch (field.type) {
-                        u8 => writer.print("{d}", .{value}) catch return null,
-                        f64 => writer.print("{d}", .{value}) catch return null,
-                        else => writer.print("{any}", .{value}) catch return null,
-                    }
+                    const field_value = switch (field.type) {
+                        u8 => std.fmt.bufPrint(buffer[offset..], "{d}", .{value}) catch return null,
+                        f64 => std.fmt.bufPrint(buffer[offset..], "{d}", .{value}) catch return null,
+                        else => std.fmt.bufPrint(buffer[offset..], "{any}", .{value}) catch return null,
+                    };
+                    offset += field_value.len;
 
                     if (i < fields.len - 1) {
-                        writer.print(", ", .{}) catch return null;
+                        const sep = std.fmt.bufPrint(buffer[offset..], ", ", .{}) catch return null;
+                        offset += sep.len;
                     }
                 }
 
                 // Close parenthesis and reset SGR codes
-                writer.print(")\x1b[0m", .{}) catch return null;
+                const footer = std.fmt.bufPrint(buffer[offset..], ")\x1b[0m", .{}) catch return null;
+                offset += footer.len;
 
-                const formatted = stream.getWritten();
+                const formatted = buffer[0..offset];
                 return @ptrCast(c.PyUnicode_FromStringAndSize(formatted.ptr, @intCast(formatted.len)));
             } else if (format_str.len == 0) {
                 // Empty format spec - use repr

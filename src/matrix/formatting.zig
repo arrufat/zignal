@@ -108,11 +108,11 @@ test "static matrix format" {
     m.at(1, 2).* = -5.67;
 
     var buffer: [512]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
     // Test default formatting (scientific notation)
-    try std.fmt.format(stream.writer(), "{f}", .{m});
-    const result_default = stream.getWritten();
+    try stream.print("{f}", .{m});
+    const result_default = buffer[0..stream.end];
     const expected_default =
         \\[ 1.23e0  -4.5e0      7e0 ]
         \\[ 1.01e1     0e0  -5.67e0 ]
@@ -120,9 +120,9 @@ test "static matrix format" {
     try expectEqualStrings(expected_default, result_default);
 
     // Test decimal(2) formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{m.decimal(2)});
-    const result_decimal2 = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{m.decimal(2)});
+    const result_decimal2 = buffer[0..stream.end];
     const expected_decimal2 =
         \\[  1.23  -4.50   7.00 ]
         \\[ 10.10   0.00  -5.67 ]
@@ -130,9 +130,9 @@ test "static matrix format" {
     try expectEqualStrings(expected_decimal2, result_decimal2);
 
     // Test decimal(0) formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{m.decimal(0)});
-    const result_decimal0 = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{m.decimal(0)});
+    const result_decimal0 = buffer[0..stream.end];
     const expected_decimal0 =
         \\[  1  -5   7 ]
         \\[ 10   0  -6 ]
@@ -140,9 +140,9 @@ test "static matrix format" {
     try expectEqualStrings(expected_decimal0, result_decimal0);
 
     // Test scientific formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{m.scientific()});
-    const result_scientific = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{m.scientific()});
+    const result_scientific = buffer[0..stream.end];
     const expected_scientific =
         \\[ 1.23e0  -4.5e0      7e0 ]
         \\[ 1.01e1     0e0  -5.67e0 ]

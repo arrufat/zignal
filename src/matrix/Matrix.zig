@@ -606,11 +606,11 @@ test "dynamic matrix format" {
     dm.at(1, 1).* = 0.57721;
 
     var buffer: [512]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
     // Test default format (scientific notation)
-    try std.fmt.format(stream.writer(), "{f}", .{dm});
-    const result_default = stream.getWritten();
+    try stream.print("{f}", .{dm});
+    const result_default = buffer[0..stream.end];
     const expected_default =
         \\[ 3.14159e0  -2.71828e0 ]
         \\[ 1.41421e0   5.7721e-1 ]
@@ -618,9 +618,9 @@ test "dynamic matrix format" {
     try expectEqualStrings(expected_default, result_default);
 
     // Test decimal(3) formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{dm.decimal(3)});
-    const result_decimal3 = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{dm.decimal(3)});
+    const result_decimal3 = buffer[0..stream.end];
     const expected_decimal3 =
         \\[ 3.142  -2.718 ]
         \\[ 1.414   0.577 ]
@@ -628,9 +628,9 @@ test "dynamic matrix format" {
     try expectEqualStrings(expected_decimal3, result_decimal3);
 
     // Test decimal(0) formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{dm.decimal(0)});
-    const result_decimal0 = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{dm.decimal(0)});
+    const result_decimal0 = buffer[0..stream.end];
     const expected_decimal0 =
         \\[ 3  -3 ]
         \\[ 1   1 ]
@@ -638,9 +638,9 @@ test "dynamic matrix format" {
     try expectEqualStrings(expected_decimal0, result_decimal0);
 
     // Test scientific formatting
-    stream.reset();
-    try std.fmt.format(stream.writer(), "{f}", .{dm.scientific()});
-    const result_scientific = stream.getWritten();
+    stream.end = 0;
+    try stream.print("{f}", .{dm.scientific()});
+    const result_scientific = buffer[0..stream.end];
     const expected_scientific =
         \\[ 3.14159e0  -2.71828e0 ]
         \\[ 1.41421e0   5.7721e-1 ]

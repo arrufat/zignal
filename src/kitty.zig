@@ -97,14 +97,20 @@ pub fn fromImage(
         // Write control data
         try output.appendSlice(gpa, "a=T");
         try output.appendSlice(gpa, ",f=100");
-        try output.writer(gpa).print(",q={d}", .{options.quiet});
+        const q_fmt = try std.fmt.allocPrint(gpa, ",q={d}", .{options.quiet});
+        defer gpa.free(q_fmt);
+        try output.appendSlice(gpa, q_fmt);
 
         // Optional parameters
         if (options.image_id) |id| {
-            try output.writer(gpa).print(",i={d}", .{id});
+            const i_fmt = try std.fmt.allocPrint(gpa, ",i={d}", .{id});
+            defer gpa.free(i_fmt);
+            try output.appendSlice(gpa, i_fmt);
         }
         if (options.placement_id) |id| {
-            try output.writer(gpa).print(",p={d}", .{id});
+            const p_fmt = try std.fmt.allocPrint(gpa, ",p={d}", .{id});
+            defer gpa.free(p_fmt);
+            try output.appendSlice(gpa, p_fmt);
         }
         if (options.delete_after) {
             try output.appendSlice(gpa, ",d=1");
@@ -142,16 +148,22 @@ pub fn fromImage(
             try output.appendSlice(gpa, ",f=100");
 
             // Quiet mode
-            try output.writer(gpa).print(",q={d}", .{options.quiet});
+            const q_fmt = try std.fmt.allocPrint(gpa, ",q={d}", .{options.quiet});
+            defer gpa.free(q_fmt);
+            try output.appendSlice(gpa, q_fmt);
 
             // Optional image ID
             if (options.image_id) |id| {
-                try output.writer(gpa).print(",i={d}", .{id});
+                const i_fmt = try std.fmt.allocPrint(gpa, ",i={d}", .{id});
+                defer gpa.free(i_fmt);
+                try output.appendSlice(gpa, i_fmt);
             }
 
             // Optional placement ID
             if (options.placement_id) |id| {
-                try output.writer(gpa).print(",p={d}", .{id});
+                const p_fmt = try std.fmt.allocPrint(gpa, ",p={d}", .{id});
+                defer gpa.free(p_fmt);
+                try output.appendSlice(gpa, p_fmt);
             }
 
             // Delete after display

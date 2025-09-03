@@ -43,7 +43,9 @@ const GeneratedStub = struct {
     }
 
     fn writef(self: *GeneratedStub, comptime fmt: []const u8, args: anytype) !void {
-        try self.content.writer(self.allocator).print(fmt, args);
+        const formatted = try std.fmt.allocPrint(self.allocator, fmt, args);
+        defer self.allocator.free(formatted);
+        try self.content.appendSlice(self.allocator, formatted);
     }
 };
 

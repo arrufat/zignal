@@ -771,23 +771,37 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyO
             return null;
         };
         defer buffer.deinit(allocator);
-        const writer = buffer.writer(allocator);
 
         switch (pimg.data) {
             .grayscale => |*img| {
-                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                defer allocator.free(formatted);
+                buffer.appendSlice(allocator, formatted) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
             },
             .rgb => |*img| {
-                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                defer allocator.free(formatted);
+                buffer.appendSlice(allocator, formatted) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
             },
             .rgba => |*img| {
-                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                defer allocator.free(formatted);
+                buffer.appendSlice(allocator, formatted) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
