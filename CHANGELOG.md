@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.1] - 2025-09-03
+
+No changes, just fixed a bug in Python
+
 ## [0.5.0] - 2025-09-02
 
 ### Major Features
