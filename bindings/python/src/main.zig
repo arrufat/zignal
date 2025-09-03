@@ -50,7 +50,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Core Types
     // ========================================================================
-    
+
     // Register Image type
     py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch |err| {
         std.log.err("Failed to register Image: {}", .{err});
@@ -68,7 +68,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Geometry & Transforms
     // ========================================================================
-    
+
     // Register Rectangle type
     py_utils.registerType(@ptrCast(m), "Rectangle", @ptrCast(&rectangle.RectangleType)) catch |err| {
         std.log.err("Failed to register Rectangle: {}", .{err});
@@ -105,7 +105,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Drawing & Display
     // ========================================================================
-    
+
     // Register Canvas type
     py_utils.registerType(@ptrCast(m), "Canvas", @ptrCast(&canvas.CanvasType)) catch |err| {
         std.log.err("Failed to register Canvas: {}", .{err});
@@ -130,7 +130,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Color Management
     // ========================================================================
-    
+
     // Register all color types from the registry
     color.registerAllColorTypes(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register color types: {}", .{err});
@@ -155,7 +155,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Image Processing & Analysis
     // ========================================================================
-    
+
     // Register Interpolation enum
     interpolation.registerInterpolation(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register Interpolation: {}", .{err});
@@ -187,7 +187,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Optimization & Utilities
     // ========================================================================
-    
+
     // Register OptimizationPolicy enum
     optimization.registerOptimizationPolicy(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register OptimizationPolicy: {}", .{err});
@@ -212,7 +212,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // ========================================================================
     // Internal Types (not exposed in public API)
     // ========================================================================
-    
+
     // Register RgbPixelProxy type (internal, not exposed in public API)
     if (c.PyType_Ready(&pixel_proxy.RgbPixelProxyType) < 0) {
         c.Py_DECREF(m);

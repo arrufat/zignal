@@ -608,11 +608,196 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     }
 }
 
+/// Parse dimension string like "800x600", "800x", or "x600"
+/// Returns struct with optional width and height
+fn parseDimensions(dims_str: []const u8) !struct { width: ?u32, height: ?u32 } {
+    if (dims_str.len == 0) {
+        return error.InvalidFormat;
+    }
+
+    // Find the 'x' separator
+    const x_pos = std.mem.indexOf(u8, dims_str, "x") orelse return error.InvalidFormat;
+
+    // Parse width (before 'x')
+    const width: ?u32 = if (x_pos == 0) null else blk: {
+        const width_str = dims_str[0..x_pos];
+        break :blk std.fmt.parseInt(u32, width_str, 10) catch return error.InvalidWidth;
+    };
+
+    // Parse height (after 'x')
+    const height: ?u32 = if (x_pos + 1 >= dims_str.len) null else blk: {
+        const height_str = dims_str[x_pos + 1 ..];
+        break :blk std.fmt.parseInt(u32, height_str, 10) catch return error.InvalidHeight;
+    };
+
+    // At least one dimension must be specified
+    if (width == null and height == null) {
+        return error.InvalidFormat;
+    }
+
+    return .{ .width = width, .height = height };
+}
+
+const image_format_doc =
+    \\Format image for display using various terminal graphics protocols.
+    \\
+    \\## Parameters
+    \\- `format_spec` (str): Format specifier for display:
+    \\  - `''` (empty): Returns text representation (e.g., 'Image(800x600)')
+    \\  - `'auto'`: Auto-detect best format with progressive degradation: kitty → sixel → sgr
+    \\  - `'sgr'`: Display using sgr escape codes (half colored half-blocks with background)
+    \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
+    \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
+    \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel scaled to fit (e.g., 'sixel:800x600')
+    \\  - `'sixel:WIDTHx'`: Scale to fit width, maintain aspect ratio (e.g., 'sixel:800x')
+    \\  - `'sixel:xHEIGHT'`: Scale to fit height, maintain aspect ratio (e.g., 'sixel:x600')
+    \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
+    \\  - `'kitty:WIDTHxHEIGHT'`: Display using kitty scaled to fit (e.g., 'kitty:800x600')
+    \\  - `'kitty:WIDTHx'`: Display with specified width, height auto-calculated (e.g., 'kitty:800x')
+    \\  - `'kitty:xHEIGHT'`: Display with specified height, width auto-calculated (e.g., 'kitty:x600')
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\print(f"{img}")         # Image(800x600)
+    \\print(f"{img:sgr}")     # Display with SGR and unicode half-blocks
+    \\print(f"{img:braille}") # Display with braille patterns
+    \\print(f"{img:sixel}")   # Display with sixel graphics
+    \\print(f"{img:sixel:800x600}")   # Display with sixel, scaled to fit 800x600
+    \\print(f"{img:sixel:800x}")      # Display with sixel, scaled to 800px width
+    \\print(f"{img:sixel:x600}")      # Display with sixel, scaled to 600px height
+    \\print(f"{img:kitty}")           # Display with kitty graphics
+    \\print(f"{img:kitty:800x600}")   # Display with kitty, scaled to fit 800x600
+    \\print(f"{img:kitty:800x}")      # Display with kitty, 800 pixels wide
+    \\print(f"{img:kitty:x600}")      # Display with kitty, 600 pixels tall
+    \\```
+;
+
 fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    // TODO: Keep in main file - this is a special display formatting function
-    _ = self_obj;
-    _ = args;
-    return null;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse format_spec argument
+    var format_spec: [*c]const u8 = undefined;
+    const format = std.fmt.comptimePrint("s", .{});
+    if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
+        return null;
+    }
+
+    // Convert C string to Zig slice
+    const spec_slice = std.mem.span(format_spec);
+
+    // If empty format spec, return default repr
+    if (spec_slice.len == 0) {
+        return image_repr(self_obj);
+    }
+
+    // Determine display format based on spec
+    const display_format: DisplayFormat = if (std.mem.eql(u8, spec_slice, "sgr"))
+        .sgr
+    else if (std.mem.eql(u8, spec_slice, "braille"))
+        .{ .braille = .default }
+    else if (std.mem.eql(u8, spec_slice, "sixel"))
+        .{ .sixel = .default }
+    else if (std.mem.startsWith(u8, spec_slice, "sixel:")) blk: {
+        // Parse sixel with dimensions: "sixel:WIDTHxHEIGHT"
+        const dims_str = spec_slice[6..]; // Skip "sixel:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid sixel format. Use 'sixel:WIDTHxHEIGHT', 'sixel:WIDTHx', or 'sixel:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in sixel format",
+                error.InvalidHeight => "Invalid height value in sixel format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create sixel options with custom dimensions
+        break :blk .{ .sixel = .{
+            .palette = .{ .adaptive = .{ .max_colors = 256 } },
+            .dither = .auto,
+            .width = dims.width,
+            .height = dims.height,
+            .interpolation = .nearest_neighbor,
+        } };
+    } else if (std.mem.eql(u8, spec_slice, "kitty"))
+        .{ .kitty = .default }
+    else if (std.mem.startsWith(u8, spec_slice, "kitty:")) blk: {
+        // Parse kitty with dimensions: "kitty:WIDTHxHEIGHT"
+        const dims_str = spec_slice[6..]; // Skip "kitty:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid kitty format. Use 'kitty:WIDTHxHEIGHT', 'kitty:WIDTHx', or 'kitty:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in kitty format",
+                error.InvalidHeight => "Invalid height value in kitty format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create kitty options with custom dimensions (in pixels)
+        break :blk .{
+            .kitty = .{
+                .quiet = 1,
+                .image_id = null,
+                .placement_id = null,
+                .delete_after = false,
+                .enable_chunking = false,
+                .width = dims.width,
+                .height = dims.height,
+                .interpolation = .bilinear,
+            },
+        };
+    } else if (std.mem.eql(u8, spec_slice, "auto"))
+        .auto
+    else if (std.mem.startsWith(u8, spec_slice, "sixel")) {
+        // Invalid sixel format that doesn't match "sixel" or "sixel:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel' or 'sixel:WIDTHxHEIGHT' (e.g., 'sixel:800x600', 'sixel:800x', 'sixel:x600')");
+        return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "kitty")) {
+        // Invalid kitty format that doesn't match "kitty" or "kitty:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid kitty format. Use 'kitty' or 'kitty:WIDTHxHEIGHT' (e.g., 'kitty:800x600', 'kitty:800x', 'kitty:x600')");
+        return null;
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', or 'auto'");
+        return null;
+    };
+
+    // Format image according to display_format and return a string
+    if (self.py_image) |pimg| {
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 4096) catch {
+            c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+            return null;
+        };
+        defer buffer.deinit(allocator);
+        const writer = buffer.writer(allocator);
+
+        switch (pimg.data) {
+            .grayscale => |*img| {
+                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+            },
+            .rgb => |*img| {
+                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+            },
+            .rgba => |*img| {
+                std.fmt.format(writer, "{f}", .{img.display(display_format)}) catch |err| {
+                    if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+            },
+        }
+        return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
+    } else {
+        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        return null;
+    }
 }
 
 // Aggregate method metadata from all sub-modules
