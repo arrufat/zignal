@@ -80,7 +80,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
     if (is_jpeg) {
         // Read file to detect JPEG color space
-        const data = std.fs.cwd().readFileAlloc(allocator, path_slice, 200 * 1024 * 1024) catch |err| {
+        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(200 * 1024 * 1024)) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
@@ -142,7 +142,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
     // PNG: load native dtype (Grayscale, RGB, RGBA)
     if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
-        const data = std.fs.cwd().readFileAlloc(allocator, path_slice, 100 * 1024 * 1024) catch |err| {
+        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(100 * 1024 * 1024)) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };

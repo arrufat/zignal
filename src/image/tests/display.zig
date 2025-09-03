@@ -21,11 +21,11 @@ test "image format sgr" {
 
     // Test that format function works without error
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
     // Force SGR format for testing
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.sgr)});
-    const result = stream.getWritten();
+    try stream.print("{f}", .{image.display(.sgr)});
+    const result = buffer[0..stream.end];
 
     // The expected output should combine two rows into one using half-block character
     // First char: upper=red (fg), lower=blue (bg) with ▀
@@ -52,10 +52,10 @@ test "image format sgr odd rows" {
 
     // Test SGR format with odd rows
     var buffer: [512]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.sgr)});
-    const result = stream.getWritten();
+    try stream.print("{f}", .{image.display(.sgr)});
+    const result = buffer[0..stream.end];
 
     // Expected: 2 lines (3 rows compressed to 2 using half-blocks)
     // Line 1: red/blue, green/white
@@ -89,10 +89,10 @@ test "image format braille" {
 
     // Test braille format with default threshold
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .default })});
-    const result = stream.getWritten();
+    try stream.print("{f}", .{image.display(.{ .braille = .default })});
+    const result = buffer[0..stream.end];
 
     // Expected pattern: dots 2, 4, 6, 8 are on (white pixels)
     // Bit positions: 1, 3, 5, 7
@@ -122,10 +122,10 @@ test "image format braille custom threshold" {
 
     // Test with threshold 0.3 (should turn on pixels > 30% brightness)
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .{ .threshold = 0.3 } })});
-    const result = stream.getWritten();
+    try stream.print("{f}", .{image.display(.{ .braille = .{ .threshold = 0.3 } })});
+    const result = buffer[0..stream.end];
 
     // Expected: pixels with >30% brightness are on
     // That's positions: (1,0)=38%, (1,1)=50%, (2,0)=63%, (2,1)=75%, (3,0)=88%, (3,1)=100%
@@ -157,10 +157,10 @@ test "image format braille large image" {
 
     // Test braille format
     var buffer: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
+    var stream = std.Io.Writer.fixed(&buffer);
 
-    try std.fmt.format(stream.writer(), "{f}", .{image.display(.{ .braille = .default })});
-    const result = stream.getWritten();
+    try stream.print("{f}", .{image.display(.{ .braille = .default })});
+    const result = buffer[0..stream.end];
 
     // Expected: checkerboard pattern creates same pattern in all blocks
     // Each 4x2 block has pattern:

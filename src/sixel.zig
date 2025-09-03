@@ -196,7 +196,9 @@ pub fn fromImage(
     // P1=1 (aspect ratio 1:1), P2=1 (keep background)
     // Note: Some terminals don't respect the height parameter and will show
     // black padding for images whose height is not a multiple of 6
-    try output.writer(gpa).print("\x1bPq\"1;1;{d};{d}", .{ width, height });
+    const header = try std.fmt.allocPrint(gpa, "\x1bPq\"1;1;{d};{d}", .{ width, height });
+    defer gpa.free(header);
+    try output.appendSlice(gpa, header);
 
     // Define palette - unified approach
     var palette_buf: [64]u8 = undefined; // Buffer for building palette strings
@@ -333,18 +335,18 @@ pub fn fromImage(
                 }
             }
             if (more_colors) {
-                try output.writer(gpa).print("$", .{}); // Graphics carriage return
+                try output.appendSlice(gpa, "$"); // Graphics carriage return
             }
         }
 
         // Move to next sixel row if not at end
         if (row + 6 < height) {
-            try output.writer(gpa).print("-", .{}); // Graphics new line
+            try output.appendSlice(gpa, "-"); // Graphics new line
         }
     }
 
     // End sixel sequence with ST
-    try output.writer(gpa).print("\x1b\\", .{});
+    try output.appendSlice(gpa, "\x1b\\");
 
     return output.toOwnedSlice(gpa);
 }

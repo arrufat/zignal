@@ -714,7 +714,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
 ///
 /// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
 pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const png_data = try std.fs.cwd().readFileAlloc(allocator, file_path, 100 * 1024 * 1024);
+    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, std.Io.Limit.limited(100 * 1024 * 1024));
     defer allocator.free(png_data);
 
     var png_image = try decode(allocator, png_data);

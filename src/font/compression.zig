@@ -113,7 +113,7 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
     const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Read entire file into memory
-    const raw_file_contents = try std.fs.cwd().readFileAlloc(allocator, path, max_size);
+    const raw_file_contents = try std.fs.cwd().readFileAlloc(path, allocator, std.Io.Limit.limited(max_size));
     errdefer allocator.free(raw_file_contents);
 
     if (is_compressed) {
