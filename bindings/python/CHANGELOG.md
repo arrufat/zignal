@@ -1,6 +1,12 @@
 # Python Bindings Changelog
 
-## [0.5.0] - TBD
+## [0.5.1] - 2025-09-03
+
+### Bug Fixes
+
+Fix `image.__format__`: it was broken due to a bad refactor
+
+## [0.5.0] - 2025-09-02
 
 ### Major Features
 
