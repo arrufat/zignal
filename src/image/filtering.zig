@@ -2318,63 +2318,56 @@ pub fn Filter(comptime T: type) type {
             // Find zero crossings according to thinning mode (for NMS, start from non-thinned mask)
             var edges = try Image(u8).init(allocator, self.rows, self.cols);
             defer edges.deinit(allocator);
-            const zc_mode: ShenCastan.Thin = if (opts.thin == .nms) .none else opts.thin;
-            try findZeroCrossings(bli, &edges, zc_mode);
+            // For NMS, we start with non-thinned edges, otherwise use forward thinning
+            try findZeroCrossings(bli, &edges, !opts.use_nms);
 
             // Compute gradient magnitudes at edge locations
             var gradients = try Image(f32).init(allocator, self.rows, self.cols);
             defer gradients.deinit(allocator);
-            try computeAdaptiveGradients(gray_float, bli, edges, opts.windowSize, &gradients, allocator);
+            try computeAdaptiveGradients(gray_float, bli, edges, opts.window_size, &gradients, allocator);
 
-            // Determine thresholds (explicit or ratio-based)
+            // Determine thresholds using ratio-based approach
             var t_low: f32 = 0;
             var t_high: f32 = 0;
-            switch (opts.thresholds) {
-                .explicit => |e| {
-                    t_low = e.low;
-                    t_high = e.high;
-                },
-                .ratio => |r| {
-                    // Build histogram of gradient magnitudes at candidate edges
-                    var hist: [256]usize = .{0} ** 256;
-                    var total: usize = 0;
-                    for (0..self.rows) |rr| {
-                        for (0..self.cols) |cc| {
-                            if (edges.at(rr, cc).* == 0) continue;
-                            var g = gradients.at(rr, cc).*;
-                            if (g < 0) g = 0;
-                            if (g > 255) g = 255;
-                            const bin: usize = @intFromFloat(@round(g));
-                            hist[bin] += 1;
-                            total += 1;
-                        }
-                    }
-                    if (total == 0) {
-                        // No candidates -> output all zeros
-                        for (0..self.rows) |rr| {
-                            for (0..self.cols) |cc| {
-                                out.at(rr, cc).* = 0;
-                            }
-                        }
-                        return;
-                    }
-                    const target: usize = @intFromFloat(@floor(@as(f32, @floatFromInt(total)) * r.highRatio));
-                    var cum: usize = 0;
-                    var idx: usize = 0;
-                    while (idx < 256 and cum < target) : (idx += 1) {
-                        cum += hist[idx];
-                    }
-                    // idx is the first bin where cum >= target
-                    t_high = @floatFromInt(@min(idx, 255));
-                    t_low = r.lowRel * t_high;
-                },
+
+            // Build histogram of gradient magnitudes at candidate edges
+            var hist: [256]usize = .{0} ** 256;
+            var total: usize = 0;
+            for (0..self.rows) |rr| {
+                for (0..self.cols) |cc| {
+                    if (edges.at(rr, cc).* == 0) continue;
+                    var g = gradients.at(rr, cc).*;
+                    if (g < 0) g = 0;
+                    if (g > 255) g = 255;
+                    const bin: usize = @intFromFloat(@round(g));
+                    hist[bin] += 1;
+                    total += 1;
+                }
             }
+            if (total == 0) {
+                // No candidates -> output all zeros
+                for (0..self.rows) |rr| {
+                    for (0..self.cols) |cc| {
+                        out.at(rr, cc).* = 0;
+                    }
+                }
+                return;
+            }
+            const target: usize = @intFromFloat(@floor(@as(f32, @floatFromInt(total)) * opts.high_ratio));
+            var cum: usize = 0;
+            var idx: usize = 0;
+            while (idx < 256 and cum < target) : (idx += 1) {
+                cum += hist[idx];
+            }
+            // idx is the first bin where cum >= target
+            t_high = @floatFromInt(@min(idx, 255));
+            t_low = opts.low_rel * t_high;
 
             // Optional non-maximum suppression along gradient direction
             var edges_nms = Image(u8).empty;
             defer if (edges_nms.data.len > 0) edges_nms.deinit(allocator);
             const edges_for_thresh: Image(u8) = blk: {
-                if (opts.thin == .nms) {
+                if (opts.use_nms) {
                     edges_nms = try Image(u8).init(allocator, self.rows, self.cols);
                     try nonMaxSuppressEdges(smoothed, gradients, edges, &edges_nms);
                     break :blk edges_nms;
@@ -2476,7 +2469,7 @@ pub fn Filter(comptime T: type) type {
         /// If `thin` is `.forward`, marks a pixel when it differs from any forward neighbor (E, S, SE, SW)
         /// which avoids double-marking and yields thinner edges. If `.none`, marks any 4-neighbor transition
         /// around the center (thicker edges, useful for debugging/visualization).
-        fn findZeroCrossings(bli: Image(u8), edges: *Image(u8), thin: ShenCastan.Thin) !void {
+        fn findZeroCrossings(bli: Image(u8), edges: *Image(u8), use_forward: bool) !void {
             const rows = bli.rows;
             const cols = bli.cols;
 
@@ -2487,55 +2480,52 @@ pub fn Filter(comptime T: type) type {
                 }
             }
 
-            switch (thin) {
-                .forward => {
-                    // Check transitions with forward neighbors to reduce double-marking
+            if (use_forward) {
+                // Check transitions with forward neighbors to reduce double-marking
+                for (0..rows) |r| {
+                    for (0..cols) |c| {
+                        const center = bli.at(r, c).*;
+                        var mark: bool = false;
+                        // East
+                        if (!mark and c + 1 < cols) mark = (center != bli.at(r, c + 1).*);
+                        // South
+                        if (!mark and r + 1 < rows) mark = (center != bli.at(r + 1, c).*);
+                        // South-East
+                        if (!mark and r + 1 < rows and c + 1 < cols) mark = (center != bli.at(r + 1, c + 1).*);
+                        // South-West
+                        if (!mark and r + 1 < rows and c > 0) mark = (center != bli.at(r + 1, c - 1).*);
+                        if (mark) edges.at(r, c).* = 255;
+                    }
+                }
+            } else {
+                // Mark any 4-neighbor transition (used for NMS)
+                if (rows >= 3 and cols >= 3) {
+                    for (1..rows - 1) |r| {
+                        for (1..cols - 1) |c| {
+                            const center = bli.at(r, c).*;
+                            const left = bli.at(r, c - 1).*;
+                            const right = bli.at(r, c + 1).*;
+                            const top = bli.at(r - 1, c).*;
+                            const bottom = bli.at(r + 1, c).*;
+                            if (center != left or center != right or center != top or center != bottom) {
+                                edges.at(r, c).* = 255;
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback for very small images: safe bounds
                     for (0..rows) |r| {
                         for (0..cols) |c| {
                             const center = bli.at(r, c).*;
-                            var mark: bool = false;
-                            // East
+                            var mark = false;
+                            if (!mark and c > 0) mark = (center != bli.at(r, c - 1).*);
                             if (!mark and c + 1 < cols) mark = (center != bli.at(r, c + 1).*);
-                            // South
+                            if (!mark and r > 0) mark = (center != bli.at(r - 1, c).*);
                             if (!mark and r + 1 < rows) mark = (center != bli.at(r + 1, c).*);
-                            // South-East
-                            if (!mark and r + 1 < rows and c + 1 < cols) mark = (center != bli.at(r + 1, c + 1).*);
-                            // South-West
-                            if (!mark and r + 1 < rows and c > 0) mark = (center != bli.at(r + 1, c - 1).*);
                             if (mark) edges.at(r, c).* = 255;
                         }
                     }
-                },
-                .none, .nms => {
-                    // Mark any 4-neighbor transition
-                    if (rows >= 3 and cols >= 3) {
-                        for (1..rows - 1) |r| {
-                            for (1..cols - 1) |c| {
-                                const center = bli.at(r, c).*;
-                                const left = bli.at(r, c - 1).*;
-                                const right = bli.at(r, c + 1).*;
-                                const top = bli.at(r - 1, c).*;
-                                const bottom = bli.at(r + 1, c).*;
-                                if (center != left or center != right or center != top or center != bottom) {
-                                    edges.at(r, c).* = 255;
-                                }
-                            }
-                        }
-                    } else {
-                        // Fallback for very small images: safe bounds
-                        for (0..rows) |r| {
-                            for (0..cols) |c| {
-                                const center = bli.at(r, c).*;
-                                var mark = false;
-                                if (!mark and c > 0) mark = (center != bli.at(r, c - 1).*);
-                                if (!mark and c + 1 < cols) mark = (center != bli.at(r, c + 1).*);
-                                if (!mark and r > 0) mark = (center != bli.at(r - 1, c).*);
-                                if (!mark and r + 1 < rows) mark = (center != bli.at(r + 1, c).*);
-                                if (mark) edges.at(r, c).* = 255;
-                            }
-                        }
-                    }
-                },
+                }
             }
         }
 

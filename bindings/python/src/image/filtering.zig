@@ -358,6 +358,143 @@ pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     return null;
 }
 
+pub const image_shen_castan_doc =
+    \\Apply Shen-Castan edge detection to the image.
+    \\
+    \\The Shen-Castan algorithm uses ISEF (Infinite Symmetric Exponential Filter)
+    \\for edge detection with adaptive gradient computation and hysteresis thresholding.
+    \\Returns a grayscale image where pixel values indicate edge strength.
+    \\
+    \\## Parameters
+    \\- `smooth` (float, optional): ISEF smoothing factor (0 < smooth < 1). Higher values preserve more detail. Default: 0.9
+    \\- `window_size` (int, optional): Odd window size for local gradient statistics (>= 3). Default: 7
+    \\- `high_ratio` (float, optional): Percentile for high threshold selection (0 < high_ratio < 1). Default: 0.99
+    \\- `low_rel` (float, optional): Low threshold as fraction of high threshold (0 < low_rel < 1). Default: 0.5
+    \\- `hysteresis` (bool, optional): Enable hysteresis edge linking. Default: True
+    \\- `use_nms` (bool, optional): Use non-maximum suppression for single-pixel edges. Default: False
+    \\
+    \\## Returns
+    \\- `Image`: Grayscale edge map
+    \\
+    \\## Examples
+    \\```python
+    \\from zignal import Image
+    \\
+    \\img = Image.load("photo.jpg")
+    \\
+    \\# Use default settings
+    \\edges = img.shen_castan()
+    \\
+    \\# Low-noise settings for clean images
+    \\clean_edges = img.shen_castan(smooth=0.95, high_ratio=0.98)
+    \\
+    \\# High-noise settings for noisy images
+    \\denoised_edges = img.shen_castan(smooth=0.7, window_size=11)
+    \\
+    \\# Single-pixel edges with NMS
+    \\thin_edges = img.shen_castan(use_nms=True)
+    \\```
+;
+
+pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments with defaults matching ShenCastan.zig
+    var smooth: f64 = 0.9;
+    var window_size: c_long = 7;
+    var high_ratio: f64 = 0.99;
+    var low_rel: f64 = 0.5;
+    var hysteresis: c_int = 1; // True by default
+    var use_nms: c_int = 0; // False by default
+
+    var kwlist = [_:null]?[*:0]u8{
+        @constCast("smooth"),
+        @constCast("window_size"),
+        @constCast("high_ratio"),
+        @constCast("low_rel"),
+        @constCast("hysteresis"),
+        @constCast("use_nms"),
+        null,
+    };
+    const format = std.fmt.comptimePrint("|dlddpp", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &smooth, &window_size, &high_ratio, &low_rel, &hysteresis, &use_nms) == 0) {
+        return null;
+    }
+
+    // Validate parameters
+    if (smooth <= 0 or smooth >= 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "smooth must be between 0 and 1");
+        return null;
+    }
+    if (window_size < 3) {
+        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be >= 3");
+        return null;
+    }
+    if (@mod(window_size, 2) == 0) {
+        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be odd");
+        return null;
+    }
+    if (high_ratio <= 0 or high_ratio >= 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "high_ratio must be between 0 and 1");
+        return null;
+    }
+    if (low_rel <= 0 or low_rel >= 1) {
+        c.PyErr_SetString(c.PyExc_ValueError, "low_rel must be between 0 and 1");
+        return null;
+    }
+
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+
+        var out = Image(u8).empty;
+
+        // Create the simplified ShenCastan configuration
+        const opts = zignal.ShenCastan{
+            .smooth = @floatCast(smooth),
+            .window_size = @intCast(window_size),
+            .high_ratio = @floatCast(high_ratio),
+            .low_rel = @floatCast(low_rel),
+            .hysteresis = hysteresis != 0,
+            .use_nms = use_nms != 0,
+        };
+
+        // Apply Shen-Castan edge detection
+        switch (pimg.data) {
+            inline else => |img| {
+                img.shenCastan(allocator, opts, &out) catch |err| {
+                    c.Py_DECREF(py_obj);
+                    if (err == error.InvalidBParameter) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid smoothing parameter (must be between 0 and 1)");
+                    } else if (err == error.WindowSizeMustBeOdd) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Window size must be odd");
+                    } else if (err == error.WindowSizeTooSmall) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Window size must be >= 3");
+                    } else if (err == error.InvalidThreshold) {
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold values");
+                    } else {
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    }
+                    return null;
+                };
+            },
+        }
+
+        const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
+            out.deinit(allocator);
+            c.Py_DECREF(py_obj);
+            return null;
+        };
+        result.py_image = pnew;
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
+    }
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 pub const image_blend_doc =
     \\Blend an overlay image onto this image using the specified blend mode.
     \\
