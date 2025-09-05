@@ -363,18 +363,18 @@ pub const image_shen_castan_doc =
     \\
     \\The Shen-Castan algorithm uses ISEF (Infinite Symmetric Exponential Filter)
     \\for edge detection with adaptive gradient computation and hysteresis thresholding.
-    \\Returns a grayscale image where pixel values indicate edge strength.
+    \\Returns a binary edge map where edges are 255 (white) and non-edges are 0 (black).
     \\
     \\## Parameters
     \\- `smooth` (float, optional): ISEF smoothing factor (0 < smooth < 1). Higher values preserve more detail. Default: 0.9
     \\- `window_size` (int, optional): Odd window size for local gradient statistics (>= 3). Default: 7
     \\- `high_ratio` (float, optional): Percentile for high threshold selection (0 < high_ratio < 1). Default: 0.99
     \\- `low_rel` (float, optional): Low threshold as fraction of high threshold (0 < low_rel < 1). Default: 0.5
-    \\- `hysteresis` (bool, optional): Enable hysteresis edge linking. Default: True
-    \\- `use_nms` (bool, optional): Use non-maximum suppression for single-pixel edges. Default: False
+    \\- `hysteresis` (bool, optional): Enable hysteresis edge linking. When True, weak edges connected to strong edges are preserved. Default: True
+    \\- `use_nms` (bool, optional): Use non-maximum suppression for single-pixel edges. When True, produces thinner edges. Default: False
     \\
     \\## Returns
-    \\- `Image`: Grayscale edge map
+    \\- `Image`: Binary edge map (Grayscale image with values 0 or 255)
     \\
     \\## Examples
     \\```python
@@ -444,10 +444,25 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     }
 
     if (self.py_image) |pimg| {
+        // Additional validation: window_size should not exceed image dimensions
+        const rows = pimg.rows();
+        const cols = pimg.cols();
+        const max_window = @min(rows, cols);
+        if (window_size > max_window) {
+            const msg = std.fmt.allocPrint(allocator, "window_size ({d}) cannot exceed minimum image dimension ({d})\x00", .{ window_size, max_window }) catch {
+                c.PyErr_SetString(c.PyExc_ValueError, "window_size too large for image dimensions");
+                return null;
+            };
+            defer allocator.free(msg);
+            c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+            return null;
+        }
+
         const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
         const result = @as(*ImageObject, @ptrCast(py_obj));
 
         var out = Image(u8).empty;
+        errdefer if (out.data.len > 0) out.deinit(allocator);
 
         // Create the simplified ShenCastan configuration
         const opts = zignal.ShenCastan{
@@ -465,15 +480,17 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                 img.shenCastan(allocator, opts, &out) catch |err| {
                     c.Py_DECREF(py_obj);
                     if (err == error.InvalidBParameter) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid smoothing parameter (must be between 0 and 1)");
+                        c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
                     } else if (err == error.WindowSizeMustBeOdd) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Window size must be odd");
+                        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be odd");
                     } else if (err == error.WindowSizeTooSmall) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Window size must be >= 3");
+                        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be >= 3");
                     } else if (err == error.InvalidThreshold) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold values");
+                        // Since we validate parameters earlier, this likely means high_ratio or low_rel
+                        // was invalid from the core validation (edge case)
+                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold parameters (high_ratio or low_rel out of range)");
                     } else {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for edge detection");
                     }
                     return null;
                 };
