@@ -240,3 +240,49 @@ class TestImageSmoke:
         spin_config = zignal.MotionBlur.radial_spin(center=(0.3, 0.7), strength=0.8)
         blurred = img.motion_blur(spin_config)
         assert blurred.rows == 10 and blurred.cols == 10
+
+    def test_shen_castan_smoke(self):
+        """Test Shen-Castan edge detection API basics"""
+        # Create test image with some structure
+        img = zignal.Image(20, 20, (128, 128, 128), dtype=zignal.Rgb)
+
+        # Test with default parameters
+        edges = img.shen_castan()
+        assert edges.rows == 20 and edges.cols == 20
+        # Result should be grayscale
+        assert edges.dtype == zignal.Grayscale
+
+        # Test with custom parameters - equivalent to old presets
+        # Low noise preset equivalent
+        edges = img.shen_castan(smooth=0.95, high_ratio=0.98)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # High noise preset equivalent
+        edges = img.shen_castan(smooth=0.7, window_size=11)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # Heavy smooth preset equivalent (for very noisy images)
+        edges = img.shen_castan(smooth=0.5, window_size=9, high_ratio=0.95)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # Sensitive preset equivalent
+        edges = img.shen_castan(high_ratio=0.97, low_rel=0.4)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # NMS thinning
+        edges = img.shen_castan(use_nms=True)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # No hysteresis (strong edges only)
+        edges = img.shen_castan(hysteresis=False)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # Test parameter validation
+        with pytest.raises(ValueError):
+            img.shen_castan(smooth=1.5)  # Must be in (0, 1)
+
+        with pytest.raises(ValueError):
+            img.shen_castan(window_size=4)  # Must be odd
+
+        with pytest.raises(ValueError):
+            img.shen_castan(high_ratio=0.0)  # Must be in (0, 1)

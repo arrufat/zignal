@@ -1055,6 +1055,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "shen_castan",
+            .meth = @ptrCast(&filtering.image_shen_castan),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_shen_castan_doc,
+            .params = "self, smooth: float = 0.9, window_size: int = 7, high_ratio: float = 0.99, low_rel: float = 0.5, hysteresis: bool = True, use_nms: bool = False",
+            .returns = "Image",
+        },
+        .{
             .name = "blend",
             .meth = @ptrCast(&filtering.image_blend),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
