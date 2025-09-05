@@ -578,6 +578,23 @@ pub fn Image(comptime T: type) type {
             return Filter(T).sobel(self, allocator, out);
         }
 
+        /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
+        /// Exponential Filter (ISEF). This algorithm provides superior edge localization
+        /// and noise handling compared to traditional methods.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `opts`: Shen-Castan options (smoothing, thresholds, thinning, hysteresis).
+        /// - `out`: Output edge map as binary image (0 or 255).
+        pub fn shenCastan(
+            self: Self,
+            allocator: Allocator,
+            opts: @import("image/ShenCastan.zig"),
+            out: *Image(u8),
+        ) !void {
+            return Filter(T).shenCastan(self, allocator, opts, out);
+        }
+
         /// Applies motion blur effect to the image.
         /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
         ///
@@ -795,4 +812,5 @@ test {
     _ = @import("image/tests/interpolation.zig");
     _ = @import("image/tests/resize.zig");
     _ = @import("image/tests/psnr.zig");
+    _ = @import("image/tests/shen_castan.zig");
 }
