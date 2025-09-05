@@ -25,12 +25,12 @@ const Filter = @import("image/filtering.zig").Filter;
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 
-// Re-export public types for convenience
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const BorderMode = @import("image/filtering.zig").BorderMode;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
+pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const channel_ops = @import("image/channel_ops.zig");
 
 /// A simple image struct that encapsulates the size and the data.
@@ -589,7 +589,7 @@ pub fn Image(comptime T: type) type {
         pub fn shenCastan(
             self: Self,
             allocator: Allocator,
-            opts: @import("image/ShenCastan.zig"),
+            opts: ShenCastan,
             out: *Image(u8),
         ) !void {
             return Filter(T).shenCastan(self, allocator, opts, out);
