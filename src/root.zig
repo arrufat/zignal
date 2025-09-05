@@ -63,6 +63,7 @@ pub const ImageFormat = @import("image.zig").ImageFormat;
 pub const DisplayFormat = @import("image.zig").DisplayFormat;
 pub const BorderMode = @import("image.zig").BorderMode;
 pub const MotionBlur = @import("image.zig").MotionBlur;
+pub const ShenCastan = @import("image/ShenCastan.zig");
 
 // Terminal graphics protocols
 pub const sixel = @import("sixel.zig");
