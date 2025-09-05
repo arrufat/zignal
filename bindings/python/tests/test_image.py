@@ -221,6 +221,23 @@ class TestImageSmoke:
         warped = gray.warp(sim)
         assert warped is not None
 
+    def test_invert(self):
+        """Test color inversion"""
+        # Test grayscale
+        gray = zignal.Image(2, 2, 100, dtype=zignal.Grayscale)
+        inverted = gray.invert()
+        assert inverted[0, 0] == 155  # 255 - 100
+
+        # Test RGB
+        rgb = zignal.Image(1, 1, (0, 128, 255), dtype=zignal.Rgb)
+        inverted = rgb.invert()
+        assert inverted[0, 0].item() == zignal.Rgb(255, 127, 0)
+
+        # Test RGBA (alpha should be preserved)
+        rgba = zignal.Image(1, 1, (0, 128, 255, 64), dtype=zignal.Rgba)
+        inverted = rgba.invert()
+        assert inverted[0, 0].item() == zignal.Rgba(255, 127, 0, 64)
+
     def test_motion_blur_smoke(self):
         """Test motion blur API basics"""
         # Create test image

@@ -9,6 +9,40 @@ const Rgb = color.Rgb;
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 
+test "invert" {
+    // Test grayscale
+    var gray: Image(u8) = try .init(std.testing.allocator, 2, 2);
+    defer gray.deinit(std.testing.allocator);
+
+    gray.at(0, 0).* = 0;
+    gray.at(0, 1).* = 255;
+    gray.at(1, 0).* = 100;
+    gray.at(1, 1).* = 128;
+
+    gray.invert();
+
+    try expectEqual(@as(u8, 255), gray.at(0, 0).*);
+    try expectEqual(@as(u8, 0), gray.at(0, 1).*);
+    try expectEqual(@as(u8, 155), gray.at(1, 0).*);
+    try expectEqual(@as(u8, 127), gray.at(1, 1).*);
+
+    // Test RGB
+    var rgb: Image(Rgb) = try .init(std.testing.allocator, 1, 1);
+    defer rgb.deinit(std.testing.allocator);
+
+    rgb.at(0, 0).* = Rgb{ .r = 0, .g = 128, .b = 255 };
+    rgb.invert();
+    try expectEqualDeep(Rgb{ .r = 255, .g = 127, .b = 0 }, rgb.at(0, 0).*);
+
+    // Test RGBA preserves alpha
+    var rgba: Image(color.Rgba) = try .init(std.testing.allocator, 1, 1);
+    defer rgba.deinit(std.testing.allocator);
+
+    rgba.at(0, 0).* = color.Rgba{ .r = 0, .g = 128, .b = 255, .a = 64 };
+    rgba.invert();
+    try expectEqualDeep(color.Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
+}
+
 test "boxBlur radius 0 with views" {
     var image: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer image.deinit(std.testing.allocator);
