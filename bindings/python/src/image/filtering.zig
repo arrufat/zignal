@@ -139,6 +139,58 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     return null;
 }
 
+pub const image_invert_doc =
+    \\Invert the colors of the image.
+    \\
+    \\Creates a negative/inverted version of the image where:
+    \\- Grayscale pixels: 255 - value
+    \\- RGB pixels: inverts each channel (255 - r, 255 - g, 255 - b)
+    \\- RGBA pixels: inverts RGB channels while preserving alpha
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\inverted = img.invert()
+    \\
+    \\# Works with all image types
+    \\gray = Image(100, 100, 128, dtype=zignal.Grayscale)
+    \\gray_inv = gray.invert()  # pixels become 127
+    \\```
+;
+
+pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    if (self.py_image) |pimg| {
+        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
+        const result = @as(*ImageObject, @ptrCast(py_obj));
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = img.dupe(allocator) catch {
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    return null;
+                };
+                out.invert();
+                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
+                    out.deinit(allocator);
+                    c.Py_DECREF(py_obj);
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+                    return null;
+                };
+                result.py_image = pnew;
+            },
+        }
+        result.numpy_ref = null;
+        result.parent_ref = null;
+        return py_obj;
+    }
+
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 pub const image_sharpen_doc =
     \\Sharpen the image using unsharp masking (2 * self - blur_box).
     \\

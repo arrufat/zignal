@@ -368,6 +368,29 @@ pub fn Image(comptime T: type) type {
             return Transform(T).flipTopBottom(self);
         }
 
+        /// Inverts the colors of an image in-place.
+        /// For grayscale (u8): inverts as 255 - value
+        /// For RGB colors: inverts each channel as 255 - channel
+        /// For RGBA colors: inverts RGB channels but preserves alpha
+        pub fn invert(self: Self) void {
+            const color = @import("color.zig");
+
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const pixel = self.at(r, c);
+                    switch (T) {
+                        u8 => pixel.* = 255 - pixel.*,
+                        color.Rgb, color.Rgba => {
+                            pixel.r = 255 - pixel.r;
+                            pixel.g = 255 - pixel.g;
+                            pixel.b = 255 - pixel.b;
+                        },
+                        else => @compileError("invert() currently only supports u8, Rgb, and Rgba pixel types"),
+                    }
+                }
+            }
+        }
+
         /// Performs interpolation at position x, y using the specified method.
         /// Returns `null` if the coordinates are outside valid bounds for the chosen method.
         pub fn interpolate(self: Self, x: f32, y: f32, method: @import("image/interpolation.zig").Interpolation) ?T {
