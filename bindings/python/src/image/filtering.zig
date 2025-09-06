@@ -14,6 +14,7 @@ const c = py_utils.c;
 const blending = @import("../blending.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
+const moveImageToPython = @import("../image.zig").moveImageToPython;
 
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
@@ -51,27 +52,17 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     }
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.boxBlur(allocator, &out, @intCast(radius_long)) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return null;
     }
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;
@@ -109,13 +100,10 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     }
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.gaussianBlur(allocator, @floatCast(sigma), &out) catch |err| {
-                    c.Py_DECREF(py_obj);
                     if (err == error.InvalidSigma) {
                         c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
                     } else {
@@ -123,17 +111,10 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
                     }
                     return null;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return null;
     }
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;
@@ -163,28 +144,17 @@ pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = img.dupe(allocator) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                     return null;
                 };
                 out.invert();
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return null;
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -222,27 +192,17 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.sharpen(allocator, &out, @intCast(radius_long)) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return null;
     }
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;
@@ -309,9 +269,6 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
     const blur_obj = @as(*motion_blur.MotionBlurObject, @ptrCast(config_obj));
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
-
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
@@ -341,22 +298,13 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c
                 };
 
                 img.motionBlur(allocator, blur_config, &out) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
 
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -381,29 +329,16 @@ pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
-
         var out = Image(u8).empty;
         switch (pimg.data) {
             inline else => |img| {
                 img.sobel(allocator, &out) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
             },
         }
-
-        const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-            out.deinit(allocator);
-            c.Py_DECREF(py_obj);
-            return null;
-        };
-        result.py_image = pnew;
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -510,11 +445,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
             return null;
         }
 
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
-
         var out = Image(u8).empty;
-        errdefer if (out.data.len > 0) out.deinit(allocator);
 
         // Create the simplified ShenCastan configuration
         const opts = zignal.ShenCastan{
@@ -530,7 +461,6 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         switch (pimg.data) {
             inline else => |img| {
                 img.shenCastan(allocator, opts, &out) catch |err| {
-                    c.Py_DECREF(py_obj);
                     if (err == error.InvalidBParameter) {
                         c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
                     } else if (err == error.WindowSizeMustBeOdd) {
@@ -538,8 +468,6 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                     } else if (err == error.WindowSizeTooSmall) {
                         c.PyErr_SetString(c.PyExc_ValueError, "window_size must be >= 3");
                     } else if (err == error.InvalidThreshold) {
-                        // Since we validate parameters earlier, this likely means high_ratio or low_rel
-                        // was invalid from the core validation (edge case)
                         c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold parameters (high_ratio or low_rel out of range)");
                     } else {
                         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for edge detection");
@@ -549,15 +477,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
             },
         }
 
-        const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-            out.deinit(allocator);
-            c.Py_DECREF(py_obj);
-            return null;
-        };
-        result.py_image = pnew;
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
