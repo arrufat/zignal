@@ -616,8 +616,9 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Get blend mode (default to normal if not specified)
     var blend_mode = zignal.Blending.normal;
     if (mode_obj != null and mode_obj != c.Py_None()) {
-        blend_mode = blending.convertToZigBlending(mode_obj.?) catch {
-            return null; // Error already set by convertToZigBlending
+        const enum_utils = @import("../enum_utils.zig");
+        blend_mode = enum_utils.pyToEnum(zignal.Blending, mode_obj.?) catch {
+            return null; // Error already set
         };
     }
 

@@ -14,7 +14,7 @@ const convertWithValidation = @import("py_utils.zig").convertWithValidation;
 const createColorPyObject = @import("color.zig").createColorPyObject;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
-const convertToZigBlending = @import("blending.zig").convertToZigBlending;
+const enum_utils = @import("enum_utils.zig");
 
 /// Automatically generate documentation from type name for color conversion methods
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
@@ -768,8 +768,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             // Convert mode to Zig Blending (use NORMAL if not provided)
             const mode = if (mode_obj != null)
-                convertToZigBlending(mode_obj) catch {
-                    // Error already set by convertToZigBlending
+                enum_utils.pyToEnum(zignal.Blending, mode_obj) catch {
+                    // Error already set by enum_utils
                     return null;
                 }
             else

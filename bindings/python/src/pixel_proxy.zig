@@ -268,8 +268,9 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 };
 
                 // Parse blend mode
+                const enum_utils = @import("enum_utils.zig");
                 const mode = if (mode_obj != null)
-                    blending.convertToZigBlending(mode_obj.?) catch {
+                    enum_utils.pyToEnum(zignal.Blending, mode_obj.?) catch {
                         // Error already set
                         return null;
                     }

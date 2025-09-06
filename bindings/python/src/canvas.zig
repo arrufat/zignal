@@ -13,6 +13,7 @@ pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const color_utils = @import("color_utils.zig");
 const stub_metadata = @import("stub_metadata.zig");
+const enum_utils = @import("enum_utils.zig");
 const PyImageMod = @import("PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const Kind = enum(u8) { gray, rgb, rgba };
@@ -1299,53 +1300,4 @@ pub var CanvasType = c.PyTypeObject{
     .tp_new = canvas_new,
 };
 
-pub fn registerDrawMode(module: *c.PyObject) !void {
-    // Create the enum type
-    const enum_dict = c.PyDict_New() orelse return error.DictCreationFailed;
-    defer c.Py_DECREF(enum_dict);
-
-    // Add enum values
-    const fast_value = c.PyLong_FromLong(0) orelse return error.ValueCreationFailed;
-    defer c.Py_DECREF(fast_value);
-    if (c.PyDict_SetItemString(enum_dict, "FAST", fast_value) < 0) return error.DictSetFailed;
-
-    const soft_value = c.PyLong_FromLong(1) orelse return error.ValueCreationFailed;
-    defer c.Py_DECREF(soft_value);
-    if (c.PyDict_SetItemString(enum_dict, "SOFT", soft_value) < 0) return error.DictSetFailed;
-
-    // Create enum class
-    const enum_module = c.PyImport_ImportModule("enum") orelse return error.ImportFailed;
-    defer c.Py_DECREF(enum_module);
-
-    const int_enum = c.PyObject_GetAttrString(enum_module, "IntEnum") orelse return error.AttributeFailed;
-    defer c.Py_DECREF(int_enum);
-
-    const args = c.Py_BuildValue("(sO)", "DrawMode", enum_dict) orelse return error.TupleCreationFailed;
-    defer c.Py_DECREF(args);
-
-    const draw_mode_type = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
-
-    // Set docstring
-    const doc_str = c.PyUnicode_FromString(draw_mode_doc) orelse return error.DocStringFailed;
-    defer c.Py_DECREF(doc_str);
-
-    if (c.PyObject_SetAttrString(draw_mode_type, "__doc__", doc_str) < 0) {
-        c.Py_DECREF(draw_mode_type);
-        return error.DocStringSetFailed;
-    }
-
-    // Set __module__ attribute to help pdoc recognize it as a top-level class
-    const module_name = c.PyUnicode_FromString("zignal") orelse return error.ModuleNameFailed;
-    defer c.Py_DECREF(module_name);
-
-    if (c.PyObject_SetAttrString(draw_mode_type, "__module__", module_name) < 0) {
-        c.Py_DECREF(draw_mode_type);
-        return error.ModuleSetFailed;
-    }
-
-    // Add to module
-    if (c.PyModule_AddObject(module, "DrawMode", draw_mode_type) < 0) {
-        c.Py_DECREF(draw_mode_type);
-        return error.ModuleAddFailed;
-    }
-}
+// No runtime wrapper; DrawMode is registered via enum_utils.registerEnum in main

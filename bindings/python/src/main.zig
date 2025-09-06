@@ -1,5 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
+const zignal = @import("zignal");
 
 const bitmap_font = @import("bitmap_font.zig");
 const blending = @import("blending.zig");
@@ -21,6 +22,7 @@ const c = py_utils.c;
 const rectangle = @import("rectangle.zig");
 const stub_metadata = @import("stub_metadata.zig");
 const transforms = @import("transforms.zig");
+const enum_utils = @import("enum_utils.zig");
 
 // ============================================================================
 // MODULE FUNCTIONS
@@ -113,8 +115,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register DrawMode enum
-    canvas.registerDrawMode(@ptrCast(m)) catch |err| {
+    enum_utils.registerEnum(zignal.DrawMode, @ptrCast(m), canvas.draw_mode_doc) catch |err| {
         std.log.err("Failed to register DrawMode: {}", .{err});
         c.Py_DECREF(m);
         return null;
@@ -138,15 +139,14 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register Blending enum
-    blending.registerBlending(@ptrCast(m)) catch |err| {
+    enum_utils.registerEnum(zignal.Blending, @ptrCast(m), blending.blending_doc) catch |err| {
         std.log.err("Failed to register Blending: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
 
     // Register Grayscale sentinel type
-    grayscale_format.registerGrayscaleType(@ptrCast(m)) catch |err| {
+    py_utils.registerType(@ptrCast(m), "Grayscale", @ptrCast(&grayscale_format.GrayscaleType)) catch |err| {
         std.log.err("Failed to register Grayscale type: {}", .{err});
         c.Py_DECREF(m);
         return null;
@@ -156,8 +156,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Image Processing & Analysis
     // ========================================================================
 
-    // Register Interpolation enum
-    interpolation.registerInterpolation(@ptrCast(m)) catch |err| {
+    enum_utils.registerEnum(zignal.Interpolation, @ptrCast(m), interpolation.interpolation_doc) catch |err| {
         std.log.err("Failed to register Interpolation: {}", .{err});
         c.Py_DECREF(m);
         return null;
@@ -188,8 +187,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Optimization & Utilities
     // ========================================================================
 
-    // Register OptimizationPolicy enum
-    optimization.registerOptimizationPolicy(@ptrCast(m)) catch |err| {
+    enum_utils.registerEnum(zignal.optimization.OptimizationPolicy, @ptrCast(m), optimization.optimization_policy_doc) catch |err| {
         std.log.err("Failed to register OptimizationPolicy: {}", .{err});
         c.Py_DECREF(m);
         return null;
