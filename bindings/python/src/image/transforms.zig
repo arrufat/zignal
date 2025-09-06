@@ -17,6 +17,7 @@ const enum_utils = @import("../enum_utils.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const transforms = @import("../transforms.zig");
+const moveImageToPython = @import("../image.zig").moveImageToPython;
 
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
@@ -46,18 +47,9 @@ fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObj
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |*img| {
-                var out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
-                const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return error.OutOfMemory;
-                const result = @as(*ImageObject, @ptrCast(py_obj));
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
-                result.py_image = pnew;
-                result.numpy_ref = null;
-                result.parent_ref = null;
-                return result;
+                const out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
+                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
+                return wrapped;
             },
         }
     }
@@ -68,19 +60,10 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |*img| {
-                var out = @TypeOf(img.*).init(allocator, rows, cols) catch return error.OutOfMemory;
+                const out = @TypeOf(img.*).init(allocator, rows, cols) catch return error.OutOfMemory;
                 img.resize(allocator, out, method) catch return error.OutOfMemory;
-                const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return error.OutOfMemory;
-                const result = @as(*ImageObject, @ptrCast(py_obj));
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
-                result.py_image = pnew;
-                result.numpy_ref = null;
-                result.parent_ref = null;
-                return result;
+                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
+                return wrapped;
             },
         }
     }
@@ -89,60 +72,37 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
 
 fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return error.OutOfMemory;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).init(allocator, rows, cols) catch {
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
+                var out = @TypeOf(img).init(allocator, rows, cols) catch return error.OutOfMemory;
                 _ = img.letterbox(allocator, &out, method) catch {
                     out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
                     return error.OutOfMemory;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
-                result.py_image = pnew;
+                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
+                return wrapped;
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return result;
+        // Unreachable: switch returns in both cases
+        return error.OutOfMemory;
     }
     return error.ImageNotInitialized;
 }
 
 fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation) !*ImageObject {
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return error.OutOfMemory;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).init(allocator, size, size) catch {
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
+                var out = @TypeOf(img).init(allocator, size, size) catch return error.OutOfMemory;
                 _ = img.letterbox(allocator, &out, method) catch {
                     out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
                     return error.OutOfMemory;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return error.OutOfMemory;
-                };
-                result.py_image = pnew;
+                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
+                return wrapped;
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return result;
+        return error.OutOfMemory;
     }
     return error.ImageNotInitialized;
 }
@@ -364,27 +324,16 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const method = tagToInterpolation(tag_rotate);
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.rotate(allocator, @floatCast(angle), method, &out) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
     }
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;
@@ -473,17 +422,6 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         out_cols = @intCast(cols_val);
     }
 
-    // Create output Python image object
-    const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-    const result = @as(*ImageObject, @ptrCast(py_obj));
-
-    // Create PyImage wrapper for the warped result
-    const warped_pyimage = allocator.create(PyImageMod.PyImage) catch {
-        c.Py_DECREF(py_obj);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for warped image");
-        return null;
-    };
-
     // Apply warp using inline else to handle all image formats generically
     switch (self.py_image.?.data) {
         inline else => |img| {
@@ -503,8 +441,6 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     }),
                 };
                 img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
-                    c.Py_DECREF(py_obj);
-                    allocator.destroy(warped_pyimage);
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
@@ -522,8 +458,6 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     .allocator = allocator,
                 };
                 img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
-                    c.Py_DECREF(py_obj);
-                    allocator.destroy(warped_pyimage);
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
@@ -537,33 +471,19 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     }),
                 };
                 img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
-                    c.Py_DECREF(py_obj);
-                    allocator.destroy(warped_pyimage);
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
             } else {
-                c.Py_DECREF(py_obj);
-                allocator.destroy(warped_pyimage);
                 c.PyErr_SetString(c.PyExc_TypeError, "transform must be a SimilarityTransform, AffineTransform, or ProjectiveTransform");
                 return null;
             }
 
-            // Create PyImage wrapper for the warped result based on image type
-            warped_pyimage.* = switch (@TypeOf(img)) {
-                zignal.Image(u8) => .{ .data = .{ .grayscale = warped_img }, .ownership = .owned },
-                zignal.Image(Rgb) => .{ .data = .{ .rgb = warped_img }, .ownership = .owned },
-                zignal.Image(Rgba) => .{ .data = .{ .rgba = warped_img }, .ownership = .owned },
-                else => unreachable,
-            };
+            return @ptrCast(moveImageToPython(warped_img) orelse return null);
         },
     }
-
-    result.py_image = warped_pyimage;
-    result.numpy_ref = null;
-    result.parent_ref = null;
-
-    return py_obj;
+    // Should not reach here because switch returns
+    return null;
 }
 
 pub const image_flip_left_right_doc =
@@ -580,28 +500,16 @@ pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = img.dupe(allocator) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                     return null;
                 };
                 out.flipLeftRight();
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -622,28 +530,16 @@ pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
                 var out = img.dupe(allocator) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                     return null;
                 };
                 out.flipTopBottom();
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -682,33 +578,21 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |*img| {
                 var out = @TypeOf(img.*).init(allocator, img.rows, img.cols) catch {
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
                     return null;
                 };
                 img.crop(allocator, rect, &out) catch {
                     out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
                     return null;
                 };
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
+        return null;
     }
 
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
@@ -827,27 +711,16 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     if (self.py_image) |pimg| {
-        const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
-        const result = @as(*ImageObject, @ptrCast(py_obj));
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).init(allocator, out_rows, out_cols) catch {
-                    c.Py_DECREF(py_obj);
+                const out = @TypeOf(img).init(allocator, out_rows, out_cols) catch {
                     c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                     return null;
                 };
                 img.extract(rect, @floatCast(angle), out, method);
-                const pnew = PyImage.createFrom(allocator, out, .owned) orelse {
-                    out.deinit(allocator);
-                    c.Py_DECREF(py_obj);
-                    return null;
-                };
-                result.py_image = pnew;
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        result.numpy_ref = null;
-        result.parent_ref = null;
-        return py_obj;
     }
     c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
     return null;

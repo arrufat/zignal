@@ -35,6 +35,12 @@ const PyImageMod = @import("PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const stub_metadata = @import("stub_metadata.zig");
 
+pub const ImageVariant = union(enum) {
+    grayscale: Image(u8),
+    rgb: Image(Rgb),
+    rgba: Image(Rgba),
+};
+
 const image_class_doc =
     \\Image for processing and manipulation.
     \\
@@ -1184,6 +1190,41 @@ var image_as_mapping = c.PyMappingMethods{
 // Function to get ImageType pointer for sub-modules
 pub fn getImageType() *c.PyTypeObject {
     return &ImageType;
+}
+
+/// Create a new Python Image object by moving ownership from a Zignal image.
+/// The input must be a fully-initialized, owned `zignal.Image(T)` where `T` is one of: `u8`, `Rgb`, or `Rgba`.
+/// On success, returns the newly allocated Image instance; on failure, sets a Python exception,
+/// deinitializes the input image, and returns null.
+pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
+    comptime switch (@TypeOf(owned_img)) {
+        zignal.Image(u8),
+        zignal.Image(Rgb),
+        zignal.Image(Rgba),
+        => {},
+        else => @compileError("moveImageToPython expects zignal.Image(u8|Rgb|Rgba)"),
+    };
+
+    const py_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse {
+        var tmp = owned_img;
+        tmp.deinit(allocator);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Image object");
+        return null;
+    };
+    const result = @as(*ImageObject, @ptrCast(py_obj));
+
+    const pnew = PyImage.createFrom(allocator, owned_img, .owned) orelse {
+        var tmp = owned_img;
+        tmp.deinit(allocator);
+        c.Py_DECREF(py_obj);
+        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+        return null;
+    };
+
+    result.py_image = pnew;
+    result.numpy_ref = null;
+    result.parent_ref = null;
+    return result;
 }
 
 pub var ImageType = c.PyTypeObject{
