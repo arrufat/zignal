@@ -8,6 +8,7 @@ const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
+const enum_utils = @import("enum_utils.zig");
 
 const matrix_module = @import("matrix.zig");
 const MatrixObject = matrix_module.MatrixObject;
@@ -22,58 +23,7 @@ pub const optimization_policy_doc =
     \\Determines whether to minimize or maximize the total cost.
 ;
 
-var OptimizationPolicyType: c.PyTypeObject = undefined;
-
-pub fn registerOptimizationPolicy(module: *c.PyObject) !void {
-    // Create enum module
-    const enum_module = c.PyImport_ImportModule("enum") orelse return error.ImportFailed;
-    defer c.Py_DECREF(enum_module);
-
-    // Get IntEnum class
-    const int_enum = c.PyObject_GetAttrString(enum_module, "IntEnum") orelse return error.GetAttrFailed;
-    defer c.Py_DECREF(int_enum);
-
-    // Create enum values dict
-    const values = c.PyDict_New() orelse return error.DictCreationFailed;
-    defer c.Py_DECREF(values);
-
-    // Add MIN = 0
-    const min_val = c.PyLong_FromLong(@intFromEnum(optimization.OptimizationPolicy.min));
-    if (min_val == null) return error.ValueCreationFailed;
-    defer c.Py_DECREF(min_val);
-    if (c.PyDict_SetItemString(values, "MIN", min_val) < 0) return error.DictSetFailed;
-
-    // Add MAX = 1
-    const max_val = c.PyLong_FromLong(@intFromEnum(optimization.OptimizationPolicy.max));
-    if (max_val == null) return error.ValueCreationFailed;
-    defer c.Py_DECREF(max_val);
-    if (c.PyDict_SetItemString(values, "MAX", max_val) < 0) return error.DictSetFailed;
-
-    // Create tuple for enum class creation
-    const args = c.PyTuple_Pack(2, c.PyUnicode_FromString("OptimizationPolicy"), values) orelse return error.TupleCreationFailed;
-    defer c.Py_DECREF(args);
-
-    // Create the enum class
-    const optimization_policy = c.PyObject_CallObject(int_enum, args) orelse return error.CallFailed;
-    defer c.Py_DECREF(optimization_policy);
-
-    // Set docstring
-    const doc_str = c.PyUnicode_FromString(optimization_policy_doc);
-    if (doc_str != null) {
-        _ = c.PyObject_SetAttrString(optimization_policy, "__doc__", doc_str);
-        c.Py_DECREF(doc_str);
-    }
-
-    // Add to module
-    c.Py_INCREF(optimization_policy);
-    if (c.PyModule_AddObject(module, "OptimizationPolicy", optimization_policy) < 0) {
-        c.Py_DECREF(optimization_policy);
-        return error.ModuleAddFailed;
-    }
-
-    // Store the type for later use
-    OptimizationPolicyType = @as(*c.PyTypeObject, @ptrCast(optimization_policy)).*;
-}
+// No runtime wrapper; OptimizationPolicy is registered via enum_utils.registerEnum in main
 
 // ============================================================================
 // ASSIGNMENT TYPE
@@ -277,40 +227,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     // Parse policy (default to MIN)
     var policy = optimization.OptimizationPolicy.min;
     if (policy_obj != null) {
-        // Get the integer value from the enum
-        const value = c.PyLong_AsLong(policy_obj);
-        if (value == -1 and c.PyErr_Occurred() != null) {
-            // Not an integer, check if it has a 'value' attribute (enum)
-            c.PyErr_Clear();
-            const value_attr = c.PyObject_GetAttrString(policy_obj, "value");
-            if (value_attr == null) {
-                c.PyErr_SetString(c.PyExc_TypeError, "policy must be an OptimizationPolicy enum value");
-                return null;
-            }
-            defer c.Py_DECREF(value_attr);
-
-            const enum_value = c.PyLong_AsLong(value_attr);
-            if (enum_value == -1 and c.PyErr_Occurred() != null) {
-                return null;
-            }
-            policy = switch (enum_value) {
-                0 => optimization.OptimizationPolicy.min,
-                1 => optimization.OptimizationPolicy.max,
-                else => {
-                    c.PyErr_SetString(c.PyExc_ValueError, "Invalid OptimizationPolicy value");
-                    return null;
-                },
-            };
-        } else {
-            policy = switch (value) {
-                0 => optimization.OptimizationPolicy.min,
-                1 => optimization.OptimizationPolicy.max,
-                else => {
-                    c.PyErr_SetString(c.PyExc_ValueError, "Invalid OptimizationPolicy value");
-                    return null;
-                },
-            };
-        }
+        policy = enum_utils.pyToEnum(optimization.OptimizationPolicy, policy_obj.?) catch return null;
     }
 
     // Solve the assignment problem

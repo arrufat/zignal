@@ -24,7 +24,4 @@ pub var GrayscaleType = c.PyTypeObject{
     .tp_str = grayscale_repr,
 };
 
-pub fn registerGrayscaleType(module: [*c]c.PyObject) !void {
-    // Add the type object to the module under the name "Grayscale"
-    try py_utils.registerType(@ptrCast(module), "Grayscale", @ptrCast(&GrayscaleType));
-}
+// No wrapper; main registers this type with py_utils.registerType

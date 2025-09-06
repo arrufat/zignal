@@ -12,6 +12,7 @@ const Point = zignal.Point;
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
+const enum_utils = @import("../enum_utils.zig");
 
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
@@ -21,16 +22,16 @@ const transforms = @import("../transforms.zig");
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
 
-// Helper functions
-fn pythonToZigInterpolation(py_value: c_long) !Interpolation {
-    return switch (py_value) {
-        0 => .nearest_neighbor,
-        1 => .bilinear,
-        2 => .bicubic,
-        3 => .catmull_rom,
-        4 => .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } }, // Default Mitchell parameters
-        5 => .lanczos,
-        else => return error.InvalidInterpolation,
+// Helper: map Interpolation tag to union value (defaults for parameterized variants)
+const InterpTag = @typeInfo(Interpolation).@"union".tag_type.?;
+fn tagToInterpolation(tag: InterpTag) Interpolation {
+    return switch (tag) {
+        .nearest_neighbor => .nearest_neighbor,
+        .bilinear => .bilinear,
+        .bicubic => .bicubic,
+        .catmull_rom => .catmull_rom,
+        .mitchell => .{ .mitchell = .default },
+        .lanczos => .lanczos,
     };
 }
 
@@ -175,11 +176,11 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     }
 
-    // Convert method value to Zig enum
-    const method = pythonToZigInterpolation(method_value) catch {
+    const tag_resize = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
         return null;
     };
+    const method = tagToInterpolation(tag_resize);
 
     // Check if argument is a number (scale) or tuple (dimensions)
     if (c.PyFloat_Check(shape_or_scale) != 0 or c.PyLong_Check(shape_or_scale) != 0) {
@@ -264,11 +265,11 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         return null;
     }
 
-    // Convert method value to Zig enum
-    const method = pythonToZigInterpolation(method_value) catch {
+    const tag_letterbox = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
         return null;
     };
+    const method = tagToInterpolation(tag_letterbox);
 
     // Check if argument is a number (square) or tuple (dimensions)
     if (c.PyLong_Check(size) != 0) {
@@ -356,11 +357,11 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     }
 
-    // Convert method value to Zig enum
-    const method = pythonToZigInterpolation(method_value) catch {
+    const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
         return null;
     };
+    const method = tagToInterpolation(tag_rotate);
 
     if (self.py_image) |pimg| {
         const py_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse return null;
@@ -435,15 +436,11 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    // Parse interpolation method
-    const method = pythonToZigInterpolation(@intCast(method_value)) catch |err| {
-        switch (err) {
-            error.InvalidInterpolation => {
-                c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
-                return null;
-            },
-        }
+    const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch {
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        return null;
     };
+    const method = tagToInterpolation(tag_warp);
 
     // Determine output dimensions
     var out_rows = self.py_image.?.rows();
@@ -769,11 +766,11 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
-    // Convert method value to Zig enum
-    const method = pythonToZigInterpolation(method_value) catch {
+    const tag_extract = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
         return null;
     };
+    const method = tagToInterpolation(tag_extract);
 
     // Determine output size
     var out_rows: usize = @intFromFloat(@round(rect.height()));
@@ -909,11 +906,11 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
-    // Convert method value to Zig enum
-    const method = pythonToZigInterpolation(method_value) catch {
+    const tag_insert = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
         return null;
     };
+    const method = tagToInterpolation(tag_insert);
 
     // Variant-aware in-place insert
     if (self.py_image) |pimg| {
