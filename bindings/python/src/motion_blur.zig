@@ -102,22 +102,20 @@ fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]
     var angle: f64 = 0.0;
     var distance: c_long = 0;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("angle"), @constCast("distance"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "dl", @ptrCast(&kwlist), &angle, &distance) == 0) {
+    const kw = comptime py_utils.kw(&.{ "angle", "distance" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "dl", @ptrCast(@constCast(&kw)), &angle, &distance) == 0) {
         return null;
     }
 
-    if (distance < 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "distance must be non-negative");
-        return null;
-    }
+    const dist = py_utils.validateNonNegative(u32, distance, "distance") catch return null;
 
     // Create new instance
     const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
     if (self) |obj| {
         obj.blur_type = .linear;
         obj.angle = angle;
-        obj.distance = distance;
+        obj.distance = @intCast(dist);
         // Other fields keep their defaults
         obj.center_x = 0.5;
         obj.center_y = 0.5;
@@ -133,8 +131,9 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     var center_tuple: [*c]c.PyObject = null;
     var strength: f64 = 0.5;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("center"), @constCast("strength"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(&kwlist), &center_tuple, &strength) == 0) {
+    const kw = comptime py_utils.kw(&.{ "center", "strength" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(@constCast(&kw)), &center_tuple, &strength) == 0) {
         return null;
     }
 
@@ -148,20 +147,11 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
             return null;
         }
 
-        if (center_x < 0.0 or center_x > 1.0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "center[0] must be between 0.0 and 1.0");
-            return null;
-        }
-        if (center_y < 0.0 or center_y > 1.0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "center[1] must be between 0.0 and 1.0");
-            return null;
-        }
+        _ = py_utils.validateRange(f64, center_x, 0.0, 1.0, "center[0]") catch return null;
+        _ = py_utils.validateRange(f64, center_y, 0.0, 1.0, "center[1]") catch return null;
     }
 
-    if (strength < 0.0 or strength > 1.0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "strength must be between 0.0 and 1.0");
-        return null;
-    }
+    const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
     const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
@@ -169,7 +159,7 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
         obj.blur_type = .radial_zoom;
         obj.center_x = center_x;
         obj.center_y = center_y;
-        obj.strength = strength;
+        obj.strength = strength_val;
         // Linear fields keep their defaults
         obj.angle = 0.0;
         obj.distance = 0;
@@ -184,8 +174,9 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     var center_tuple: [*c]c.PyObject = null;
     var strength: f64 = 0.5;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("center"), @constCast("strength"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(&kwlist), &center_tuple, &strength) == 0) {
+    const kw = comptime py_utils.kw(&.{ "center", "strength" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(@constCast(&kw)), &center_tuple, &strength) == 0) {
         return null;
     }
 
@@ -199,20 +190,11 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
             return null;
         }
 
-        if (center_x < 0.0 or center_x > 1.0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "center[0] must be between 0.0 and 1.0");
-            return null;
-        }
-        if (center_y < 0.0 or center_y > 1.0) {
-            c.PyErr_SetString(c.PyExc_ValueError, "center[1] must be between 0.0 and 1.0");
-            return null;
-        }
+        _ = py_utils.validateRange(f64, center_x, 0.0, 1.0, "center[0]") catch return null;
+        _ = py_utils.validateRange(f64, center_y, 0.0, 1.0, "center[1]") catch return null;
     }
 
-    if (strength < 0.0 or strength > 1.0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "strength must be between 0.0 and 1.0");
-        return null;
-    }
+    const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
     const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
@@ -220,7 +202,7 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
         obj.blur_type = .radial_spin;
         obj.center_x = center_x;
         obj.center_y = center_y;
-        obj.strength = strength;
+        obj.strength = strength_val;
         // Linear fields keep their defaults
         obj.angle = 0.0;
         obj.distance = 0;
@@ -232,7 +214,6 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
 // ============================================================================
 // Property Getters
 // ============================================================================
-
 fn get_type(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
@@ -244,40 +225,12 @@ fn get_type(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObj
     return c.PyUnicode_FromString(type_str);
 }
 
-fn get_angle(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
-    if (self.blur_type != .linear) {
-        return py_utils.getPyNone();
-    }
-    return c.PyFloat_FromDouble(self.angle);
+// Predicates for optional properties
+fn is_linear(self: *MotionBlurObject) bool {
+    return self.blur_type == .linear;
 }
-
-fn get_distance(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
-    if (self.blur_type != .linear) {
-        return py_utils.getPyNone();
-    }
-    return c.PyLong_FromLong(self.distance);
-}
-
-fn get_center(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
-    if (self.blur_type == .linear) {
-        return py_utils.getPyNone();
-    }
-    return c.Py_BuildValue("(dd)", self.center_x, self.center_y);
-}
-
-fn get_strength(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
-    if (self.blur_type == .linear) {
-        return py_utils.getPyNone();
-    }
-    return c.PyFloat_FromDouble(self.strength);
+fn is_not_linear(self: *MotionBlurObject) bool {
+    return self.blur_type != .linear;
 }
 
 // ============================================================================
@@ -344,28 +297,28 @@ var motion_blur_getset = [_]c.PyGetSetDef{
     },
     .{
         .name = "angle",
-        .get = get_angle,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "angle", is_linear))),
         .set = null,
         .doc = "Blur angle in radians (linear only)",
         .closure = null,
     },
     .{
         .name = "distance",
-        .get = get_distance,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "distance", is_linear))),
         .set = null,
         .doc = "Blur distance in pixels (linear only)",
         .closure = null,
     },
     .{
         .name = "center",
-        .get = get_center,
+        .get = @ptrCast(@alignCast(py_utils.getterTuple2FieldsWhere(MotionBlurObject, "center_x", "center_y", is_not_linear))),
         .set = null,
         .doc = "Normalized center position (zoom/spin only)",
         .closure = null,
     },
     .{
         .name = "strength",
-        .get = get_strength,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "strength", is_not_linear))),
         .set = null,
         .doc = "Blur strength 0.0-1.0 (zoom/spin only)",
         .closure = null,
@@ -401,28 +354,28 @@ pub const motion_blur_properties_metadata = [_]stub_metadata.PropertyWithMetadat
     },
     .{
         .name = "angle",
-        .get = get_angle,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "angle", is_linear))),
         .set = null,
         .doc = "Blur angle in radians (linear only)",
         .type = "float | None",
     },
     .{
         .name = "distance",
-        .get = get_distance,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "distance", is_linear))),
         .set = null,
         .doc = "Blur distance in pixels (linear only)",
         .type = "int | None",
     },
     .{
         .name = "center",
-        .get = get_center,
+        .get = @ptrCast(@alignCast(py_utils.getterTuple2FieldsWhere(MotionBlurObject, "center_x", "center_y", is_not_linear))),
         .set = null,
         .doc = "Normalized center position (zoom/spin only)",
         .type = "tuple[float, float] | None",
     },
     .{
         .name = "strength",
-        .get = get_strength,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalFieldWhere(MotionBlurObject, "strength", is_not_linear))),
         .set = null,
         .doc = "Blur strength 0.0-1.0 (zoom/spin only)",
         .type = "float | None",

@@ -248,8 +248,9 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             var overlay_obj: ?*c.PyObject = null;
             var mode_obj: ?*c.PyObject = null;
 
-            var kwlist = [_:null]?[*:0]const u8{ "overlay", "mode", null };
-            if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|O:blend", @ptrCast(&kwlist), &overlay_obj, &mode_obj) == 0) {
+            const kw = comptime @import("py_utils.zig").kw(&.{ "overlay", "mode" });
+            // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+            if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|O:blend", @ptrCast(@constCast(&kw)), &overlay_obj, &mode_obj) == 0) {
                 return null;
             }
 

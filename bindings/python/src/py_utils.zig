@@ -67,6 +67,168 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
     };
 }
 
+/// Build a field getter function pointer for a Python-exposed struct.
+/// The returned pointer matches Python's `getter` signature and uses
+/// `convertToPython` to return a new Python object for the field value.
+pub fn getterForField(comptime Obj: type, comptime field_name: []const u8) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            _ = closure;
+            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const val = @field(self, field_name);
+            return convertToPython(val);
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
+/// Auto-generate a PyGetSetDef array for simple field-backed properties.
+/// - Obj: the Python object struct type (e.g., RectangleObject)
+/// - field_names: comptime list of field names to expose (e.g., &.{"left", "top"})
+/// Returns an array with a trailing sentinel entry.
+pub fn autoGetSet(
+    comptime Obj: type,
+    comptime field_names: []const []const u8,
+) [field_names.len + 1]c.PyGetSetDef {
+    comptime {
+        var defs: [field_names.len + 1]c.PyGetSetDef = undefined;
+        for (field_names, 0..) |fname, i| {
+            defs[i] = .{
+                .name = fname.ptr,
+                .get = @ptrCast(@alignCast(getterForField(Obj, fname))),
+                .set = null,
+                .doc = null,
+                .closure = null,
+            };
+        }
+        defs[field_names.len] = .{ .name = null, .get = null, .set = null, .doc = null, .closure = null };
+        return defs;
+    }
+}
+
+/// Build a getter that returns an optional field: the field value if Predicate(self) is true,
+/// otherwise Python None. Useful when a field is only meaningful under certain modes.
+pub fn getterOptionalFieldWhere(
+    comptime Obj: type,
+    comptime field_name: []const u8,
+    comptime Predicate: fn (*Obj) bool,
+) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            const self = @as(*Obj, @ptrCast(self_obj.?));
+            if (!Predicate(self)) return getPyNone();
+            const val = @field(self, field_name);
+            return convertToPython(val);
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
+/// Build a getter that packs two fields into a tuple when Predicate(self) is true,
+/// otherwise returns Python None. Uses Py_BuildValue with (NN) and steals references
+/// of the intermediate objects created via convertToPython.
+pub fn getterTuple2FieldsWhere(
+    comptime Obj: type,
+    comptime field0: []const u8,
+    comptime field1: []const u8,
+    comptime Predicate: fn (*Obj) bool,
+) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            const self = @as(*Obj, @ptrCast(self_obj.?));
+            if (!Predicate(self)) return getPyNone();
+            const a = convertToPython(@field(self, field0)) orelse return null;
+            const b = convertToPython(@field(self, field1)) orelse {
+                c.Py_DECREF(a);
+                return null;
+            };
+            const tup = c.Py_BuildValue("(NN)", a, b);
+            return tup; // steals references to a and b
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
+/// Build a getter that returns a 2-tuple from an array field's two indices.
+/// Example: struct { bias: [2]f64 } → returns (bias[0], bias[1]).
+pub fn getterTuple2FromArrayField(
+    comptime Obj: type,
+    comptime array_field: []const u8,
+    comptime idx0: usize,
+    comptime idx1: usize,
+) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const arr = @field(self, array_field);
+            const a = convertToPython(arr[idx0]) orelse return null;
+            const b = convertToPython(arr[idx1]) orelse {
+                c.Py_DECREF(a);
+                return null;
+            };
+            return c.Py_BuildValue("(NN)", a, b);
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
+/// Build a getter that returns a nested Python list from a fixed-size 2D array field.
+/// Example: struct { matrix: [2][2]f64 } → returns [[a,b],[c,d]].
+pub fn getterMatrixNested(
+    comptime Obj: type,
+    comptime field_name: []const u8,
+    comptime rows: usize,
+    comptime cols: usize,
+) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const mat = @field(self, field_name);
+
+            const outer = c.PyList_New(@intCast(rows));
+            if (outer == null) return null;
+
+            var i: usize = 0;
+            while (i < rows) : (i += 1) {
+                const row_list = c.PyList_New(@intCast(cols));
+                if (row_list == null) {
+                    c.Py_DECREF(outer);
+                    return null;
+                }
+
+                var j: usize = 0;
+                while (j < cols) : (j += 1) {
+                    const val_obj = convertToPython(mat[i][j]);
+                    if (val_obj == null) {
+                        c.Py_DECREF(row_list);
+                        c.Py_DECREF(outer);
+                        return null;
+                    }
+                    // PyList_SetItem steals reference to val_obj
+                    _ = c.PyList_SetItem(row_list, @intCast(j), val_obj);
+                }
+
+                // PyList_SetItem steals reference to row_list
+                _ = c.PyList_SetItem(outer, @intCast(i), row_list);
+            }
+
+            return outer;
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
+/// Build a getter that returns a constant string (new Python str on each call).
+pub fn getterStaticString(comptime text: []const u8) *const anyopaque {
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            _ = self_obj;
+            return c.PyUnicode_FromString(text.ptr);
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
 /// Error set for conversion failures
 pub const ConversionError = error{
     not_python_object,
@@ -481,4 +643,31 @@ pub fn validateNonNull(comptime T: type, ptr: ?T, name: []const u8) !T {
         return error.NullPointer;
     }
     return ptr.?;
+}
+
+/// Convenience function for strictly positive values (> 0)
+pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
+    const info = @typeInfo(T);
+    const max = if (info == .float) std.math.inf(T) else std.math.maxInt(T);
+    return validateRange(T, value, 1, max, name);
+}
+
+/// Build a Python kwlist for PyArg_ParseTupleAndKeywords from a comptime list of names.
+/// Usage: `const kw = py_utils.kw(&.{ "size", "method" });`
+/// Pass to CPython with: `@ptrCast(@constCast(&kw))`.
+///
+/// Notes on Python versions:
+/// - CPython < 3.13 expects a non-const kwlist pointer; we use `@constCast(&kw)` for compatibility.
+/// - Once the minimum supported Python is >= 3.13, we can drop the `@constCast` at call sites
+///   and pass `&kw` directly.
+pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
+    comptime {
+        var out: [names.len + 1]?[*:0]const u8 = undefined;
+        for (names, 0..) |nm, i| {
+            // Convert Zig string literal to C string pointer
+            out[i] = @ptrCast(@constCast(nm));
+        }
+        out[names.len] = null;
+        return out;
+    }
 }

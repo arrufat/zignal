@@ -136,9 +136,9 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     var matrix_obj: ?*c.PyObject = null;
     var num_components: c.Py_ssize_t = -1; // -1 means not provided
 
-    const kwlist = [_]?[*:0]const u8{ "data", "num_components", null };
-    // TODO: remove @constCast when we don't use Python < 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|n:fit", @ptrCast(@constCast(&kwlist)), &matrix_obj, &num_components) == 0) {
+    const kw = comptime py_utils.kw(&.{ "data", "num_components" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|n:fit", @ptrCast(@constCast(&kw)), &matrix_obj, &num_components) == 0) {
         return null;
     }
 

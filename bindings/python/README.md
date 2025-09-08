@@ -62,6 +62,10 @@ img.save("out.png")
 If Python headers/libs aren’t auto‑detected during build, set:
 `PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, `PYTHON_LIB_NAME`.
 
+## Binding New Functionality
+
+See BINDINGS_GUIDE.md for patterns and conventions to expose new Zignal APIs to Python (kwlists, validators, enums, image wrapping, stubs).
+
 ## License
 
 MIT

@@ -41,8 +41,9 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
         return -1;
     }
 
@@ -141,42 +142,9 @@ fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 // Property getters for matrix and bias
-fn similarity_get_matrix(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
+// matrix getter generated via generic helper
 
-    // Create a 2x2 nested list
-    const row0 = c.PyList_New(2) orelse return null;
-    const row1 = c.PyList_New(2) orelse return null;
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 0, c.PyFloat_FromDouble(self.matrix[0][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 1, c.PyFloat_FromDouble(self.matrix[0][1]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 0, c.PyFloat_FromDouble(self.matrix[1][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 1, c.PyFloat_FromDouble(self.matrix[1][1]));
-
-    const matrix = c.PyList_New(2) orelse {
-        c.Py_DECREF(row0);
-        c.Py_DECREF(row1);
-        return null;
-    };
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 0, row0);
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 1, row1);
-
-    return matrix;
-}
-
-fn similarity_get_bias(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
-    return c.PyTuple_Pack(2, c.PyFloat_FromDouble(self.bias[0]), c.PyFloat_FromDouble(self.bias[1]));
-}
+// bias getter generated via generic helper
 
 var similarity_methods = [_]c.PyMethodDef{
     .{ .ml_name = "project", .ml_meth = @ptrCast(&similarity_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
@@ -184,8 +152,8 @@ var similarity_methods = [_]c.PyMethodDef{
 };
 
 var similarity_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = similarity_get_matrix, .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = similarity_get_bias, .set = null, .doc = "Translation vector (x, y)", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(SimilarityTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
+    .{ .name = "bias", .get = @ptrCast(@alignCast(py_utils.getterTuple2FromArrayField(SimilarityTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
@@ -234,8 +202,9 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
         return -1;
     }
 
@@ -337,42 +306,9 @@ fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 // Property getters for matrix and bias
-fn affine_get_matrix(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
+// matrix getter generated via generic helper
 
-    // Create a 2x2 nested list
-    const row0 = c.PyList_New(2) orelse return null;
-    const row1 = c.PyList_New(2) orelse return null;
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 0, c.PyFloat_FromDouble(self.matrix[0][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 1, c.PyFloat_FromDouble(self.matrix[0][1]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 0, c.PyFloat_FromDouble(self.matrix[1][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 1, c.PyFloat_FromDouble(self.matrix[1][1]));
-
-    const matrix = c.PyList_New(2) orelse {
-        c.Py_DECREF(row0);
-        c.Py_DECREF(row1);
-        return null;
-    };
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 0, row0);
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 1, row1);
-
-    return matrix;
-}
-
-fn affine_get_bias(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
-    return c.PyTuple_Pack(2, c.PyFloat_FromDouble(self.bias[0]), c.PyFloat_FromDouble(self.bias[1]));
-}
+// bias getter generated via generic helper
 
 var affine_methods = [_]c.PyMethodDef{
     .{ .ml_name = "project", .ml_meth = @ptrCast(&affine_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
@@ -380,8 +316,8 @@ var affine_methods = [_]c.PyMethodDef{
 };
 
 var affine_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = affine_get_matrix, .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = affine_get_bias, .set = null, .doc = "Translation vector (x, y)", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(AffineTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
+    .{ .name = "bias", .get = @ptrCast(@alignCast(py_utils.getterTuple2FromArrayField(AffineTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
@@ -431,8 +367,9 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("from_points"), @constCast("to_points"), null };
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(&kwlist), &from_points_obj, &to_points_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
         return -1;
     }
 
@@ -577,52 +514,7 @@ fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 // Property getter for matrix
-fn projective_get_matrix(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
-
-    // Create a 3x3 nested list
-    const row0 = c.PyList_New(3) orelse return null;
-    const row1 = c.PyList_New(3) orelse return null;
-    const row2 = c.PyList_New(3) orelse return null;
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 0, c.PyFloat_FromDouble(self.matrix[0][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 1, c.PyFloat_FromDouble(self.matrix[0][1]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row0, 2, c.PyFloat_FromDouble(self.matrix[0][2]));
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 0, c.PyFloat_FromDouble(self.matrix[1][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 1, c.PyFloat_FromDouble(self.matrix[1][1]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row1, 2, c.PyFloat_FromDouble(self.matrix[1][2]));
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row2, 0, c.PyFloat_FromDouble(self.matrix[2][0]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row2, 1, c.PyFloat_FromDouble(self.matrix[2][1]));
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(row2, 2, c.PyFloat_FromDouble(self.matrix[2][2]));
-
-    const matrix = c.PyList_New(3) orelse {
-        c.Py_DECREF(row0);
-        c.Py_DECREF(row1);
-        c.Py_DECREF(row2);
-        return null;
-    };
-
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 0, row0);
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 1, row1);
-    // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-    _ = c.PyList_SetItem(matrix, 2, row2);
-
-    return matrix;
-}
+// matrix getter generated via generic helper
 
 var projective_methods = [_]c.PyMethodDef{
     .{ .ml_name = "project", .ml_meth = @ptrCast(&projective_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
@@ -631,7 +523,7 @@ var projective_methods = [_]c.PyMethodDef{
 };
 
 var projective_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = projective_get_matrix, .set = null, .doc = "3x3 homogeneous transformation matrix", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(ProjectiveTransformObject, "matrix", 3, 3))), .set = null, .doc = "3x3 homogeneous transformation matrix", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
