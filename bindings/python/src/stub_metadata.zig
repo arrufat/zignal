@@ -4,9 +4,6 @@
 
 const c = @import("py_utils.zig").c;
 
-// Shared color type strings for consistent stub generation
-pub const COLOR = "Color";
-
 // Python method flags constants (matching Python C API values)
 pub const METH_CLASS = 0x0010;
 pub const METH_STATIC = 0x0020;

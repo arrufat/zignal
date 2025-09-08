@@ -855,7 +855,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&core.image_fill),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_fill_doc,
-            .params = "self, color: " ++ stub_metadata.COLOR,
+            .params = "self, color: Color",
             .returns = "None",
         },
         .{
@@ -871,7 +871,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&core.image_set_border),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_set_border_doc,
-            .params = "self, rect: Rectangle | tuple[float, float, float, float], color: " ++ stub_metadata.COLOR ++ " | None = None",
+            .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color | None = None",
             .returns = "None",
         },
         .{
@@ -1136,7 +1136,7 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, rows: int, cols: int, color: " ++ stub_metadata.COLOR ++ " | None = None, dtype = Grayscale | Rgb | Rgba",
+        .params = "self, rows: int, cols: int, color: Color | None = None, dtype = Grayscale | Rgb | Rgba",
         .returns = "None",
         .doc = image_init_doc,
     },
@@ -1158,7 +1158,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
     .{
         .name = "__setitem__",
-        .params = "self, key: tuple[int, int] | slice, value: " ++ stub_metadata.COLOR ++ " | Image",
+        .params = "self, key: tuple[int, int] | slice, value: Color | Image",
         .returns = "None",
     },
     .{
