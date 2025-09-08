@@ -325,7 +325,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     }
 
     // Parse color and fill
-    const rgba = color_utils.parseColorTo(Rgba, @ptrCast(color_obj)) catch return null;
+    const rgba = color_utils.parseColor(Rgba, @ptrCast(color_obj)) catch return null;
     if (self.py_canvas) |canvas| {
         canvas.fill(rgba);
     } else {
@@ -352,7 +352,7 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const p1 = py_utils.parsePointTuple(f32, params.p1) catch return null;
     const p2 = py_utils.parsePointTuple(f32, params.p2) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -387,7 +387,7 @@ fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     const rect = py_utils.parseRectangle(f32, params.rect) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -422,7 +422,7 @@ fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
 
     const points = py_utils.parsePointList(f32, params.points) catch return null;
     defer allocator.free(points);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -458,7 +458,7 @@ fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
     const center = py_utils.parsePointTuple(f32, params.center) catch return null;
     const radius = py_utils.validateNonNegative(f32, params.radius, "Radius") catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -493,7 +493,7 @@ fn canvas_fill_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     const rect = py_utils.parseRectangle(f32, params.rect) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
 
@@ -525,7 +525,7 @@ fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
 
     const points = py_utils.parsePointList(f32, params.points) catch return null;
     defer allocator.free(points);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
 
@@ -561,7 +561,7 @@ fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
     const center = py_utils.parsePointTuple(f32, params.center) catch return null;
     const radius = py_utils.validateNonNegative(f32, params.radius, "Radius") catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
 
@@ -599,7 +599,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     const p0 = py_utils.parsePointTuple(f32, params.p0) catch return null;
     const p1 = py_utils.parsePointTuple(f32, params.p1) catch return null;
     const p2 = py_utils.parsePointTuple(f32, params.p2) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -629,7 +629,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const p1 = py_utils.parsePointTuple(f32, params.p1) catch return null;
     const p2 = py_utils.parsePointTuple(f32, params.p2) catch return null;
     const p3 = py_utils.parsePointTuple(f32, params.p3) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -655,7 +655,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     const points = py_utils.parsePointList(f32, params.points) catch return null;
     defer allocator.free(points);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const tension_val = py_utils.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
@@ -681,7 +681,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     const points = py_utils.parsePointList(f32, params.points) catch return null;
     defer allocator.free(points);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const tension_val = py_utils.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -714,7 +714,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const radius_val: f32 = @floatCast(params.radius);
     const start_angle_val: f32 = @floatCast(params.start_angle);
     const end_angle_val: f32 = @floatCast(params.end_angle);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = py_utils.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
@@ -747,7 +747,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const radius_val: f32 = @floatCast(params.radius);
     const start_angle_val: f32 = @floatCast(params.start_angle);
     const end_angle_val: f32 = @floatCast(params.end_angle);
-    const rgba = color_utils.parseColorTo(Rgba, params.color) catch return null;
+    const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);
 
@@ -782,7 +782,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const text = std.mem.span(text_cstr);
 
     const position = py_utils.parsePointTuple(f32, params.position) catch return null;
-    const rgba = color_utils.parseColorTo(Rgba, @ptrCast(params.color)) catch return null;
+    const rgba = color_utils.parseColor(Rgba, @ptrCast(params.color)) catch return null;
 
     const mode_val = py_utils.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
     const draw_mode: DrawMode = @enumFromInt(mode_val);

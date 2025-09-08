@@ -80,7 +80,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
             var equal = false;
             const other: ?*c.PyObject = @ptrCast(other_obj);
-            const parsed = color_utils.parseColorTo(zignal.Rgba, other) catch null;
+            const parsed = color_utils.parseColor(zignal.Rgba, other) catch null;
             if (parsed) |rgba| {
                 if (std.meta.eql(ColorType, zignal.Rgb)) {
                     equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and rgba.a == 255);
@@ -263,7 +263,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
 
                 // Parse overlay color
-                const overlay = color_utils.parseColorTo(zignal.Rgba, overlay_obj) catch {
+                const overlay = color_utils.parseColor(zignal.Rgba, overlay_obj) catch {
                     // Error already set by parseColorTo
                     return null;
                 };
