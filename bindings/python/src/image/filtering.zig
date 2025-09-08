@@ -40,22 +40,20 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
     // Parse arguments
     var radius_long: c_long = 0;
-    var kwlist = [_:null]?[*:0]u8{ @constCast("radius"), null };
+    const kw = comptime py_utils.kw(&.{"radius"});
     const format = std.fmt.comptimePrint("l", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &radius_long) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
         return null;
     }
 
-    if (radius_long < 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "radius must be >= 0");
-        return null;
-    }
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
-                img.boxBlur(allocator, &out, @intCast(radius_long)) catch {
+                img.boxBlur(allocator, &out, @intCast(radius)) catch {
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
@@ -87,23 +85,25 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
 
     // Parse arguments
     var sigma: f64 = 0;
-    var kwlist = [_:null]?[*:0]u8{ @constCast("sigma"), null };
+    const kw = comptime py_utils.kw(&.{"sigma"});
     const format = std.fmt.comptimePrint("d", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &sigma) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &sigma) == 0) {
         return null;
     }
 
     // Validate sigma: must be finite and > 0
-    if (!std.math.isFinite(sigma) or sigma <= 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "sigma must be > 0");
+    if (!std.math.isFinite(sigma)) {
+        c.PyErr_SetString(c.PyExc_ValueError, "sigma must be finite");
         return null;
     }
+    const sigma_pos = py_utils.validatePositive(f64, sigma, "sigma") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
-                img.gaussianBlur(allocator, @floatCast(sigma), &out) catch |err| {
+                img.gaussianBlur(allocator, @floatCast(sigma_pos), &out) catch |err| {
                     if (err == error.InvalidSigma) {
                         c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
                     } else {
@@ -180,22 +180,19 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     // Parse arguments
     var radius_long: c_long = 0;
-    var kwlist = [_:null]?[*:0]u8{ @constCast("radius"), null };
+    const kw = comptime py_utils.kw(&.{"radius"});
     const format = std.fmt.comptimePrint("l", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &radius_long) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
         return null;
     }
-
-    if (radius_long < 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "radius must be >= 0");
-        return null;
-    }
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
                 var out = @TypeOf(img).empty;
-                img.sharpen(allocator, &out, @intCast(radius_long)) catch {
+                img.sharpen(allocator, &out, @intCast(radius)) catch {
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
@@ -394,17 +391,10 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     var hysteresis: c_int = 1; // True by default
     var use_nms: c_int = 0; // False by default
 
-    var kwlist = [_:null]?[*:0]u8{
-        @constCast("smooth"),
-        @constCast("window_size"),
-        @constCast("high_ratio"),
-        @constCast("low_rel"),
-        @constCast("hysteresis"),
-        @constCast("use_nms"),
-        null,
-    };
+    const kw = comptime py_utils.kw(&.{ "smooth", "window_size", "high_ratio", "low_rel", "hysteresis", "use_nms" });
     const format = std.fmt.comptimePrint("|dlddpp", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(&kwlist), &smooth, &window_size, &high_ratio, &low_rel, &hysteresis, &use_nms) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &smooth, &window_size, &high_ratio, &low_rel, &hysteresis, &use_nms) == 0) {
         return null;
     }
 
@@ -519,9 +509,10 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var overlay_obj: ?*c.PyObject = null;
     var mode_obj: ?*c.PyObject = null;
 
-    var kwlist = [_:null]?[*:0]u8{ @constCast("overlay"), @constCast("mode"), null };
+    const kw = comptime py_utils.kw(&.{ "overlay", "mode" });
     const fmt = std.fmt.comptimePrint("O|O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(&kwlist), &overlay_obj, &mode_obj) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(@constCast(&kw)), &overlay_obj, &mode_obj) == 0) {
         return null;
     }
 

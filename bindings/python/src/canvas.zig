@@ -331,17 +331,16 @@ fn makeDrawMethodWithWidth(
         fn method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             const self = @as(*CanvasObject, @ptrCast(self_obj.?));
 
-            // Build kwlist at comptime
-            const kwlist = comptime blk: {
-                var list: [param_count + 4][*c]const u8 = undefined;
+            // Build kwlist at comptime via helper
+            const kw = comptime blk: {
+                var names: [param_count + 3][]const u8 = undefined;
                 for (param_names, 0..) |pname, i| {
-                    list[i] = pname.ptr;
+                    names[i] = pname;
                 }
-                list[param_count] = "color";
-                list[param_count + 1] = "width";
-                list[param_count + 2] = "mode";
-                list[param_count + 3] = null;
-                break :blk list;
+                names[param_count] = "color";
+                names[param_count + 1] = "width";
+                names[param_count + 2] = "mode";
+                break :blk py_utils.kw(&names);
             };
 
             // Parse arguments - use generic vars array
@@ -364,17 +363,20 @@ fn makeDrawMethodWithWidth(
             // Call PyArg_ParseTupleAndKeywords with variable arguments
             switch (param_count) {
                 1 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
+                    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
                         return null;
                     }
                 },
                 2 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4]) == 0) {
+                    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4]) == 0) {
                         return null;
                     }
                 },
                 3 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4], parse_args[5]) == 0) {
+                    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), parse_args[0], parse_args[1], parse_args[2], parse_args[3], parse_args[4], parse_args[5]) == 0) {
                         return null;
                     }
                 },
@@ -442,16 +444,15 @@ fn makeFillMethod(
         fn method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             const self = @as(*CanvasObject, @ptrCast(self_obj.?));
 
-            // Build kwlist at comptime
-            const kwlist = comptime blk: {
-                var list: [param_count + 3][*c]const u8 = undefined;
+            // Build kwlist at comptime via helper
+            const kw = comptime blk: {
+                var names: [param_count + 2][]const u8 = undefined;
                 for (param_names, 0..) |pname, i| {
-                    list[i] = pname.ptr;
+                    names[i] = pname;
                 }
-                list[param_count] = "color";
-                list[param_count + 1] = "mode";
-                list[param_count + 2] = null;
-                break :blk list;
+                names[param_count] = "color";
+                names[param_count + 1] = "mode";
+                break :blk py_utils.kw(&names);
             };
 
             // Parse arguments
@@ -472,12 +473,14 @@ fn makeFillMethod(
             // Call PyArg_ParseTupleAndKeywords with variable arguments
             switch (param_count) {
                 1 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2]) == 0) {
+                    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), parse_args[0], parse_args[1], parse_args[2]) == 0) {
                         return null;
                     }
                 },
                 2 => {
-                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
+                    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+                    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), parse_args[0], parse_args[1], parse_args[2], parse_args[3]) == 0) {
                         return null;
                     }
                 },
@@ -672,10 +675,11 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     var width: c_long = 1;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "p0", "p1", "p2", "color", "width", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "p0", "p1", "p2", "color", "width", "mode" });
     const format = std.fmt.comptimePrint("OOOO|ll", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &p0_obj, &p1_obj, &p2_obj, &color_obj, &width, &mode) == 0) {
         return null;
     }
 
@@ -707,10 +711,11 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     var width: c_long = 1;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "p0", "p1", "p2", "p3", "color", "width", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "p0", "p1", "p2", "p3", "color", "width", "mode" });
     const format = std.fmt.comptimePrint("OOOOO|ll", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &p0_obj, &p1_obj, &p2_obj, &p3_obj, &color_obj, &width, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &p0_obj, &p1_obj, &p2_obj, &p3_obj, &color_obj, &width, &mode) == 0) {
         return null;
     }
 
@@ -741,10 +746,11 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     var tension: f64 = 0.5;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "points", "color", "width", "tension", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "points", "color", "width", "tension", "mode" });
     const format = std.fmt.comptimePrint("OO|ldl", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &points_obj, &color_obj, &width, &tension, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &points_obj, &color_obj, &width, &tension, &mode) == 0) {
         return null;
     }
 
@@ -773,10 +779,11 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     var tension: f64 = 0.5;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "points", "color", "tension", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "points", "color", "tension", "mode" });
     const format = std.fmt.comptimePrint("OO|dl", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &points_obj, &color_obj, &tension, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &points_obj, &color_obj, &tension, &mode) == 0) {
         return null;
     }
 
@@ -817,10 +824,11 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var width: c_long = 1;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "center", "radius", "start_angle", "end_angle", "color", "width", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "center", "radius", "start_angle", "end_angle", "color", "width", "mode" });
     const format = std.fmt.comptimePrint("OdddO|ll", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &width, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &width, &mode) == 0) {
         return null;
     }
 
@@ -861,10 +869,11 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var color_obj: ?*c.PyObject = undefined;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "center", "radius", "start_angle", "end_angle", "color", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "center", "radius", "start_angle", "end_angle", "color", "mode" });
     const format = std.fmt.comptimePrint("OdddO|l", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &center_obj, &radius, &start_angle, &end_angle, &color_obj, &mode) == 0) {
         return null;
     }
 
@@ -906,10 +915,11 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     var scale: f64 = 1.0;
     var mode: c_long = 0;
 
-    const kwlist = [_][*c]const u8{ "text", "position", "color", "font", "scale", "mode", null };
+    const kw = comptime py_utils.kw(&.{ "text", "position", "color", "font", "scale", "mode" });
     const format = std.fmt.comptimePrint("OOO|Odl:draw_text", .{});
 
-    if (c.PyArg_ParseTupleAndKeywords(args, @constCast(kwds), format.ptr, @ptrCast(@constCast(&kwlist)), &text_obj, &position_obj, &color_obj, &font_obj, &scale, &mode) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13 (and remove @constCast on kwds)
+    if (c.PyArg_ParseTupleAndKeywords(args, @constCast(kwds), format.ptr, @ptrCast(@constCast(&kw)), &text_obj, &position_obj, &color_obj, &font_obj, &scale, &mode) == 0) {
         return null;
     }
 

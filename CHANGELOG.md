@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Python Bindings
+- Consolidated CPython type registration in `bindings/python/src/main.zig` via a compile‑time table + loop.
+- Added `py_utils.kw(...)` helper to build CPython kwlists; adopted across transforms, canvas (including macro‑generated methods), filtering, matrix, PCA, motion blur, pixel proxy, rectangle.
+- Introduced numeric validators in `py_utils.zig` and normalized error messages:
+  - `validatePositive`, `validateNonNegative`, `validateRange` used for consistent ValueError messages.
+  - Standardized tuple messages to "size/shape must be a 2‑tuple of (rows, cols)".
+- Unified enum registration/parsing using `enum_utils.zig` (DrawMode, Blending, Interpolation, OptimizationPolicy).
+- Reduced boilerplate for returning new images with `moveImageToPython`.
+- All Python tests pass (`uv run pytest`), stubs generate successfully.
+
 ## [0.5.1] - 2025-09-03
 
 No changes, just fixed a bug in Python
@@ -258,4 +270,3 @@ Comprehensive matrix operations:
 - **Perlin Noise**: High-quality noise generation for textures and terrain
 - **Configurable**: Adjustable frequency, amplitude, and octaves
 - **2D/3D Support**: Generate noise in multiple dimensions
-

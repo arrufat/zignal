@@ -50,80 +50,40 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     if (m == null) return null;
 
     // ========================================================================
-    // Core Types
+    // Consolidated Type Registration
     // ========================================================================
-
-    // Register Image type
-    py_utils.registerType(@ptrCast(m), "Image", @ptrCast(&image.ImageType)) catch |err| {
-        std.log.err("Failed to register Image: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
+    const TypeReg = struct {
+        name: []const u8,
+        ty: *c.PyTypeObject,
     };
 
-    // Register Matrix type
-    py_utils.registerType(@ptrCast(m), "Matrix", @ptrCast(&matrix.MatrixType)) catch |err| {
-        std.log.err("Failed to register Matrix: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
+    const type_table = [_]TypeReg{
+        .{ .name = "Image", .ty = @ptrCast(&image.ImageType) },
+        .{ .name = "Matrix", .ty = @ptrCast(&matrix.MatrixType) },
+        .{ .name = "Rectangle", .ty = @ptrCast(&rectangle.RectangleType) },
+        .{ .name = "ConvexHull", .ty = @ptrCast(&convex_hull.ConvexHullType) },
+        .{ .name = "SimilarityTransform", .ty = @ptrCast(&transforms.SimilarityTransformType) },
+        .{ .name = "AffineTransform", .ty = @ptrCast(&transforms.AffineTransformType) },
+        .{ .name = "ProjectiveTransform", .ty = @ptrCast(&transforms.ProjectiveTransformType) },
+        .{ .name = "Canvas", .ty = @ptrCast(&canvas.CanvasType) },
+        .{ .name = "BitmapFont", .ty = @ptrCast(&bitmap_font.BitmapFontType) },
+        .{ .name = "Grayscale", .ty = @ptrCast(&grayscale_format.GrayscaleType) },
+        .{ .name = "PCA", .ty = @ptrCast(&pca.PCAType) },
+        .{ .name = "FeatureDistributionMatching", .ty = @ptrCast(&fdm.FeatureDistributionMatchingType) },
+        .{ .name = "Assignment", .ty = @ptrCast(&optimization.AssignmentType) },
+        .{ .name = "PixelIterator", .ty = @ptrCast(&pixel_iterator.PixelIteratorType) },
     };
 
-    // ========================================================================
-    // Geometry & Transforms
-    // ========================================================================
-
-    // Register Rectangle type
-    py_utils.registerType(@ptrCast(m), "Rectangle", @ptrCast(&rectangle.RectangleType)) catch |err| {
-        std.log.err("Failed to register Rectangle: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register ConvexHull type
-    py_utils.registerType(@ptrCast(m), "ConvexHull", @ptrCast(&convex_hull.ConvexHullType)) catch |err| {
-        std.log.err("Failed to register ConvexHull: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register transform types
-    py_utils.registerType(@ptrCast(m), "SimilarityTransform", @ptrCast(&transforms.SimilarityTransformType)) catch |err| {
-        std.log.err("Failed to register SimilarityTransform: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    py_utils.registerType(@ptrCast(m), "AffineTransform", @ptrCast(&transforms.AffineTransformType)) catch |err| {
-        std.log.err("Failed to register AffineTransform: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    py_utils.registerType(@ptrCast(m), "ProjectiveTransform", @ptrCast(&transforms.ProjectiveTransformType)) catch |err| {
-        std.log.err("Failed to register ProjectiveTransform: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // ========================================================================
-    // Drawing & Display
-    // ========================================================================
-
-    // Register Canvas type
-    py_utils.registerType(@ptrCast(m), "Canvas", @ptrCast(&canvas.CanvasType)) catch |err| {
-        std.log.err("Failed to register Canvas: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
+    inline for (type_table) |entry| {
+        py_utils.registerType(@ptrCast(m), entry.name, entry.ty) catch |err| {
+            std.log.err("Failed to register {s}: {}", .{ entry.name, err });
+            c.Py_DECREF(m);
+            return null;
+        };
+    }
 
     enum_utils.registerEnum(zignal.DrawMode, @ptrCast(m), canvas.draw_mode_doc) catch |err| {
         std.log.err("Failed to register DrawMode: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register BitmapFont type
-    py_utils.registerType(@ptrCast(m), "BitmapFont", @ptrCast(&bitmap_font.BitmapFontType)) catch |err| {
-        std.log.err("Failed to register BitmapFont: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
@@ -145,13 +105,6 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register Grayscale sentinel type
-    py_utils.registerType(@ptrCast(m), "Grayscale", @ptrCast(&grayscale_format.GrayscaleType)) catch |err| {
-        std.log.err("Failed to register Grayscale type: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
     // ========================================================================
     // Image Processing & Analysis
     // ========================================================================
@@ -169,40 +122,12 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    // Register PCA type
-    py_utils.registerType(@ptrCast(m), "PCA", @ptrCast(&pca.PCAType)) catch |err| {
-        std.log.err("Failed to register PCA: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register FeatureDistributionMatching type
-    py_utils.registerType(@ptrCast(m), "FeatureDistributionMatching", @ptrCast(&fdm.FeatureDistributionMatchingType)) catch |err| {
-        std.log.err("Failed to register FeatureDistributionMatching: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
     // ========================================================================
     // Optimization & Utilities
     // ========================================================================
 
     enum_utils.registerEnum(zignal.optimization.OptimizationPolicy, @ptrCast(m), optimization.optimization_policy_doc) catch |err| {
         std.log.err("Failed to register OptimizationPolicy: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register Assignment type
-    py_utils.registerType(@ptrCast(m), "Assignment", @ptrCast(&optimization.AssignmentType)) catch |err| {
-        std.log.err("Failed to register Assignment: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // Register PixelIterator type
-    py_utils.registerType(@ptrCast(m), "PixelIterator", @ptrCast(&pixel_iterator.PixelIteratorType)) catch |err| {
-        std.log.err("Failed to register PixelIterator: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

@@ -203,11 +203,11 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     var matrix_obj: ?*c.PyObject = null;
     var policy_obj: ?*c.PyObject = null;
 
-    const kwlist = [_:null]?[*:0]const u8{ "cost_matrix", "policy", null };
+    const kw = comptime py_utils.kw(&.{ "cost_matrix", "policy" });
     const format = std.fmt.comptimePrint("O|O:solve_assignment_problem", .{});
 
-    // TODO: remove @constCast when we don't use Python < 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &matrix_obj, &policy_obj) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &matrix_obj, &policy_obj) == 0) {
         return null;
     }
 

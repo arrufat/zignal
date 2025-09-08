@@ -123,19 +123,17 @@ fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     var cols: c_int = 0;
     var fill_value: f64 = 0.0;
 
-    const kwlist = [_:null]?[*:0]const u8{ "rows", "cols", "fill_value", null };
+    const kw = comptime py_utils.kw(&.{ "rows", "cols", "fill_value" });
     const format = std.fmt.comptimePrint("ii|d:full", .{});
 
-    // TODO: remove @constCast when we don't use Python < 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kwlist)), &rows, &cols, &fill_value) == 0) {
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &rows, &cols, &fill_value) == 0) {
         return null;
     }
 
     // Validate dimensions
-    if (rows <= 0 or cols <= 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix dimensions must be positive");
-        return null;
-    }
+    const rows_pos = py_utils.validatePositive(usize, rows, "rows") catch return null;
+    const cols_pos = py_utils.validatePositive(usize, cols, "cols") catch return null;
 
     // Create new Matrix object
     const self = @as(?*MatrixObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
@@ -143,15 +141,15 @@ fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Create the matrix
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        // TODO: Remove explicit cast after Python 3.10 is dropped
+        // TODO(py3.10): remove explicit cast once Python 3.10 support is dropped
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
         return null;
     };
 
-    matrix_ptr.* = Matrix(f64).init(allocator, @intCast(rows), @intCast(cols)) catch {
+    matrix_ptr.* = Matrix(f64).init(allocator, rows_pos, cols_pos) catch {
         allocator.destroy(matrix_ptr);
-        // TODO: Remove explicit cast after Python 3.10 is dropped
+        // TODO(py3.10): remove explicit cast once Python 3.10 support is dropped
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate matrix data");
         return null;
@@ -356,12 +354,6 @@ fn matrix_shape_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
 
     c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
     return null;
-}
-
-fn matrix_dtype_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    _ = self_obj;
-    return c.PyUnicode_FromString("float64");
 }
 
 const matrix_to_numpy_doc =
@@ -712,7 +704,7 @@ pub const matrix_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
     .{
         .name = "dtype",
-        .get = matrix_dtype_getter,
+        .get = @ptrCast(@alignCast(py_utils.getterStaticString("float64"))),
         .set = null,
         .doc = "Data type (always 'float64')",
         .type = "str",

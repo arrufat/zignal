@@ -1,5 +1,24 @@
 # Python Bindings Changelog
 
+## [Unreleased]
+
+### Added
+- `py_utils.kw(&.{ ... })` helper for building CPython kwlists at comptime.
+- `validatePositive`, `validateNonNegative`, `validateRange` numeric validators with consistent error messages.
+- Binding conventions documented (see BINDINGS_GUIDE.md) for enums, arg parsing, image wrapping, and exceptions.
+
+### Changed
+- Consolidated type registration in `src/main.zig` using a compile‑time table.
+- Adopted kw helper across the codebase (transforms, canvas, filtering, matrix, PCA, motion blur, pixel proxy, rectangle).
+- Normalized tuple error messages to "size/shape must be a 2‑tuple of (rows, cols)".
+- Moved new‑image return paths to `moveImageToPython` to reduce duplication.
+
+### Fixed
+- Improved consistency of Python exceptions (TypeError vs ValueError) and messages across APIs.
+
+### Quality
+- 77 tests passing with `uv run pytest`; stubs regenerated via `zig build python-stubs`.
+
 ## [0.5.1] - 2025-09-03
 
 ### Bug Fixes
