@@ -90,7 +90,7 @@ const image_init_doc =
     \\  - RGBA tuple (r, g, b, a) with values 0-255
     \\  - Any color object (Rgb, Hsl, Hsv, etc.)
     \\  - Defaults to transparent (0, 0, 0, 0)
-    \\- `dtype` (type, keyword-only): Pixel data type specifying storage type.
+    \\- `dtype` (type, optional): Pixel data type specifying storage type.
     \\  - `zignal.Grayscale` → single-channel u8 (NumPy shape (H, W, 1))
     \\  - `zignal.Rgb` (default) → 3-channel RGB (NumPy shape (H, W, 3))
     \\  - `zignal.Rgba` → 4-channel RGBA (NumPy shape (H, W, 4))
@@ -137,31 +137,30 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         other, // Other color object
     };
 
-    // Parse arguments: rows, cols, optional color, keyword-only dtype
-    var rows: c_int = 0;
-    var cols: c_int = 0;
-    var color_obj: ?*c.PyObject = null;
-    var dtype_obj: ?*c.PyObject = null;
-
-    const kw = comptime py_utils.kw(&.{ "rows", "cols", "color", "dtype" });
-    const fmt = std.fmt.comptimePrint("ii|O$O", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(@constCast(&kw)), &rows, &cols, &color_obj, &dtype_obj) == 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols, color=None, *, dtype=...) arguments");
+    // Parse arguments: rows, cols, optional color, optional dtype
+    const Params = struct {
+        rows: c_int,
+        cols: c_int,
+        color: ?*c.PyObject = null, // Optional with default
+        dtype: ?*c.PyObject = null, // Optional with default (was keyword-only, now regular optional)
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch {
+        c.PyErr_SetString(c.PyExc_TypeError, "Image() requires (rows, cols, color=None, dtype=None) arguments");
         return -1;
-    }
+    };
 
     // Validate dimensions - validateRange now properly handles negative values when converting to usize
-    const validated_rows = py_utils.validateRange(usize, rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
-    const validated_cols = py_utils.validateRange(usize, cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
+    const validated_rows = py_utils.validateRange(usize, params.rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
+    const validated_cols = py_utils.validateRange(usize, params.cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
 
     // Detect color input type
     var color_type = ColorInputType.none;
-    if (color_obj != null and color_obj != c.Py_None()) {
-        if (c.PyLong_Check(color_obj) != 0) {
+    if (params.color != null and params.color != c.Py_None()) {
+        if (c.PyLong_Check(params.color) != 0) {
             color_type = .grayscale;
-        } else if (c.PyTuple_Check(color_obj) != 0) {
-            const tuple_size = c.PyTuple_Size(color_obj);
+        } else if (c.PyTuple_Check(params.color) != 0) {
+            const tuple_size = c.PyTuple_Size(params.color);
             if (tuple_size == 3) {
                 color_type = .rgb_tuple;
             } else if (tuple_size == 4) {
@@ -170,9 +169,9 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
                 c.PyErr_SetString(c.PyExc_ValueError, "Color tuple must have 3 or 4 elements");
                 return -1;
             }
-        } else if (c.PyObject_IsInstance(color_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
+        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.RgbaType)) == 1) {
             color_type = .rgba_object;
-        } else if (c.PyObject_IsInstance(color_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
+        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.RgbType)) == 1) {
             color_type = .rgb_object;
         } else {
             color_type = .other;
@@ -183,7 +182,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     const ImageFormat = enum { grayscale, rgb, rgba };
     var target_format: ImageFormat = undefined;
 
-    if (dtype_obj) |fmt_obj| {
+    if (params.dtype) |fmt_obj| {
         // Explicit dtype specified
         // TODO: Remove explicit cast after Python 3.10 is dropped
         const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
@@ -233,8 +232,8 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             };
 
             // Parse color to grayscale if provided
-            if (color_obj != null and color_obj != c.Py_None()) {
-                const gray = color_utils.parseColorTo(u8, color_obj) catch {
+            if (params.color != null and params.color != c.Py_None()) {
+                const gray = color_utils.parseColorTo(u8, params.color) catch {
                     gimg.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -261,8 +260,8 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             };
 
             // Parse color to RGB if provided
-            if (color_obj != null and color_obj != c.Py_None()) {
-                const rgb_color = color_utils.parseColorTo(Rgb, color_obj) catch {
+            if (params.color != null and params.color != c.Py_None()) {
+                const rgb_color = color_utils.parseColorTo(Rgb, params.color) catch {
                     rimg.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -289,8 +288,8 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             };
 
             // Parse color to RGBA if provided
-            if (color_obj != null and color_obj != c.Py_None()) {
-                const rgba_color = color_utils.parseColorTo(Rgba, color_obj) catch {
+            if (params.color != null and params.color != c.Py_None()) {
+                const rgba_color = color_utils.parseColorTo(Rgba, params.color) catch {
                     image.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -680,18 +679,18 @@ const image_format_doc =
     \\```
 ;
 
-fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse format_spec argument
-    var format_spec: [*c]const u8 = undefined;
-    const format = std.fmt.comptimePrint("s", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
-        return null;
-    }
+    const Params = struct {
+        format_spec: [*c]const u8,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Convert C string to Zig slice
-    const spec_slice = std.mem.span(format_spec);
+    const spec_slice = std.mem.span(params.format_spec);
 
     // If empty format spec, return default repr
     if (spec_slice.len == 0) {
@@ -830,7 +829,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "load",
             .meth = @ptrCast(&core.image_load),
-            .flags = c.METH_VARARGS | c.METH_CLASS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
             .doc = core.image_load_doc,
             .params = "cls, path: str",
             .returns = "Image",
@@ -838,7 +837,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "save",
             .meth = @ptrCast(&core.image_save),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_save_doc,
             .params = "self, path: str",
             .returns = "None",
@@ -854,7 +853,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "fill",
             .meth = @ptrCast(&core.image_fill),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_fill_doc,
             .params = "self, color: " ++ stub_metadata.COLOR,
             .returns = "None",
@@ -862,7 +861,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "view",
             .meth = @ptrCast(&core.image_view),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_view_doc,
             .params = "self, rect: Rectangle | tuple[float, float, float, float] | None = None",
             .returns = "Image",
@@ -870,7 +869,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "set_border",
             .meth = @ptrCast(&core.image_set_border),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_set_border_doc,
             .params = "self, rect: Rectangle | tuple[float, float, float, float], color: " ++ stub_metadata.COLOR ++ " | None = None",
             .returns = "None",
@@ -894,7 +893,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "convert",
             .meth = @ptrCast(&core.image_convert),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_convert_doc,
             .params = "self, dtype: Grayscale | Rgb | Rgba",
             .returns = "Image",
@@ -910,7 +909,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "psnr",
             .meth = @ptrCast(&core.image_psnr),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_psnr_doc,
             .params = "self, other: Image",
             .returns = "float",
@@ -924,7 +923,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "from_numpy",
             .meth = @ptrCast(&numpy_interop.image_from_numpy),
-            .flags = c.METH_VARARGS | c.METH_CLASS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
             .doc = numpy_interop.image_from_numpy_doc,
             .params = "cls, array: NDArray[np.uint8]",
             .returns = "Image",
@@ -994,7 +993,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "crop",
             .meth = @ptrCast(&transforms.image_crop),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_crop_doc,
             .params = "self, rect: Rectangle",
             .returns = "Image",
@@ -1056,7 +1055,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "motion_blur",
             .meth = @ptrCast(&filtering.image_motion_blur),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = filtering.image_motion_blur_doc,
             .params = "self, config: MotionBlur",
             .returns = "Image",
@@ -1094,7 +1093,7 @@ pub const image_methods_metadata = blk: {
         .{
             .name = "__format__",
             .meth = @ptrCast(&image_format),
-            .flags = c.METH_VARARGS,
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = "Format image for display",
             .params = "self, format_spec: str",
             .returns = "str",

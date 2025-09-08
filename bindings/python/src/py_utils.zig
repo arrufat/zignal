@@ -671,3 +671,132 @@ pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
         return out;
     }
 }
+
+/// Parse Python arguments into a struct using automatic type detection.
+/// The struct fields define both the parameter names and types.
+/// Optional fields (e.g., `?f64`) are automatically handled with a `|` separator.
+///
+/// Usage:
+/// ```zig
+/// const Params = struct {
+///     x: f64,                    // Required
+///     y: f64,                    // Required
+///     width: ?f64 = null,        // Optional with default
+///     height: ?f64 = null,       // Optional with default
+/// };
+/// var params: Params = undefined;
+/// py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+/// ```
+pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: *T) !void {
+    const type_info = @typeInfo(T);
+    const fields = switch (type_info) {
+        .@"struct" => |s| s.fields,
+        else => @compileError("parseArgs expects a struct type, got: " ++ @typeName(T)),
+    };
+
+    // Build format string at comptime with automatic | separator
+    const format = comptime blk: {
+        // Validate field ordering and find where to insert |
+        var first_optional_idx: ?usize = null;
+
+        for (fields, 0..) |field, i| {
+            const has_default = field.default_value_ptr != null;
+
+            if (!has_default) {
+                // Required field - must not come after optional
+                if (first_optional_idx != null) {
+                    @compileError("Required field '" ++ field.name ++ "' cannot come after optional fields. Once a field has a default value, all subsequent fields must also have defaults.");
+                }
+            } else {
+                // Optional field - mark first occurrence
+                if (first_optional_idx == null) {
+                    first_optional_idx = i;
+                }
+            }
+        }
+
+        var format_buf: [fields.len * 2 + 2]u8 = undefined; // +2 for | and null
+        var format_len: usize = 0;
+
+        for (fields, 0..) |field, i| {
+            // Insert | before first optional field (if any)
+            if (first_optional_idx != null and i == first_optional_idx.?) {
+                format_buf[format_len] = '|';
+                format_len += 1;
+            }
+
+            // Get the actual type (unwrap optional if needed)
+            const actual_type = if (@typeInfo(field.type) == .optional)
+                @typeInfo(field.type).optional.child
+            else
+                field.type;
+
+            const type_chars = switch (@typeInfo(actual_type)) {
+                .float => "d",
+                .int => |info| blk2: {
+                    if (info.signedness == .signed) {
+                        if (info.bits <= 32) break :blk2 "i";
+                        break :blk2 "l";
+                    } else {
+                        if (info.bits <= 32) break :blk2 "I";
+                        break :blk2 "k";
+                    }
+                },
+                .pointer => |ptr| blk2: {
+                    if (ptr.child == c.PyObject) break :blk2 "O";
+                    if (ptr.child == u8 and ptr.size == .c) break :blk2 "s";
+                    @compileError("Unsupported pointer type: " ++ @typeName(actual_type));
+                },
+                else => @compileError("Unsupported type: " ++ @typeName(actual_type)),
+            };
+            for (type_chars) |ch| {
+                format_buf[format_len] = ch;
+                format_len += 1;
+            }
+        }
+
+        format_buf[format_len] = 0; // null terminate
+        const final = format_buf[0..format_len :0].*;
+        break :blk final;
+    };
+
+    // Build names array at comptime
+    const names = comptime blk: {
+        var result: [fields.len][]const u8 = undefined;
+        for (fields, 0..) |field, i| {
+            result[i] = field.name;
+        }
+        break :blk result;
+    };
+
+    // Build keywords list
+    const keywords = comptime kw(&names);
+
+    // Initialize struct with defaults - especially important for optional fields
+    inline for (fields) |field| {
+        if (field.default_value_ptr) |default_ptr| {
+            const default_value = @as(*const field.type, @ptrCast(@alignCast(default_ptr))).*;
+            @field(out.*, field.name) = default_value;
+        } else if (@typeInfo(field.type) == .optional) {
+            @field(out.*, field.name) = null;
+        }
+    }
+
+    // Build argument tuple
+    var arg_tuple: std.meta.Tuple(&[_]type{*anyopaque} ** fields.len) = undefined;
+    inline for (fields, 0..) |field, i| {
+        arg_tuple[i] = @ptrCast(&@field(out.*, field.name));
+    }
+
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    const result = @call(.auto, c.PyArg_ParseTupleAndKeywords, .{
+        args,
+        kwds,
+        &format,
+        @as([*c][*c]u8, @ptrCast(@constCast(&keywords))),
+    } ++ arg_tuple);
+
+    if (result == 0) {
+        return error.ArgumentParseError;
+    }
+}

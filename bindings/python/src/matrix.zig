@@ -70,7 +70,6 @@ const matrix_init_doc =
 ;
 
 fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    _ = kwds; // Not used for list initialization
     const self = @as(*MatrixObject, @ptrCast(self_obj.?));
 
     // Check if already initialized (e.g., from from_numpy)
@@ -80,7 +79,8 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Parse single argument: list of lists
     var list_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O:Matrix", &list_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{"data"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:Matrix", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
         return -1;
     }
 
@@ -455,10 +455,11 @@ const matrix_from_numpy_doc =
     \\```
 ;
 
-fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var array_obj: ?*c.PyObject = undefined;
+    const kw = comptime py_utils.kw(&.{"array"});
     const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &array_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &array_obj) == 0) {
         return null;
     }
 
@@ -663,7 +664,7 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
         .name = "from_numpy",
         .meth = @ptrCast(&matrix_from_numpy),
-        .flags = c.METH_VARARGS | c.METH_CLASS,
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
         .doc = matrix_from_numpy_doc,
         .params = "cls, array: NDArray[np.float64]",
         .returns = "Matrix",

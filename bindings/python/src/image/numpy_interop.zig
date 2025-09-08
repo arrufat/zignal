@@ -336,11 +336,12 @@ pub const image_from_numpy_doc =
     \\```
 ;
 
-pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var array_obj: ?*c.PyObject = undefined;
 
+    const kw = comptime py_utils.kw(&.{"array"});
     const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &array_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &array_obj) == 0) {
         return null;
     }
 

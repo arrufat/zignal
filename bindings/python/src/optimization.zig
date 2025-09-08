@@ -200,16 +200,14 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     _ = self;
 
     // Parse arguments
-    var matrix_obj: ?*c.PyObject = null;
-    var policy_obj: ?*c.PyObject = null;
-
-    const kw = comptime py_utils.kw(&.{ "cost_matrix", "policy" });
-    const format = std.fmt.comptimePrint("O|O:solve_assignment_problem", .{});
-
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &matrix_obj, &policy_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        cost_matrix: ?*c.PyObject,
+        policy: ?*c.PyObject = null, // Optional with default
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    const matrix_obj = params.cost_matrix;
+    const policy_obj = params.policy;
 
     // Check matrix type
     const matrix_type_obj = @as(*c.PyObject, @ptrCast(&matrix_module.MatrixType));

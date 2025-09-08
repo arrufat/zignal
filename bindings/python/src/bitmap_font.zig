@@ -61,10 +61,11 @@ const bitmap_font_load_doc =
     \\```
 ;
 
-fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var file_path: [*c]const u8 = undefined;
 
-    if (c.PyArg_ParseTuple(args, "s", &file_path) == 0) {
+    const kw = comptime py_utils.kw(&.{"path"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "s", @ptrCast(@constCast(&kw)), &file_path) == 0) {
         return null;
     }
 
@@ -146,7 +147,7 @@ pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
         .name = "load",
         .meth = @ptrCast(&bitmap_font_load),
-        .flags = c.METH_VARARGS | c.METH_CLASS,
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
         .doc = bitmap_font_load_doc,
         .params = "cls, path: str",
         .returns = "BitmapFont",
