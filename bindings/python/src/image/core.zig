@@ -13,7 +13,7 @@ const c = py_utils.c;
 
 const canvas = @import("../canvas.zig");
 const color_bindings = @import("../color.zig");
-const parseColorTo = @import("../color_utils.zig").parseColorTo;
+const parseColorTo = @import("../color_utils.zig").parseColor;
 const grayscale_format = @import("../grayscale_format.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;

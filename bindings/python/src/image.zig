@@ -233,7 +233,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             // Parse color to grayscale if provided
             if (params.color != null and params.color != c.Py_None()) {
-                const gray = color_utils.parseColorTo(u8, params.color) catch {
+                const gray = color_utils.parseColor(u8, params.color) catch {
                     gimg.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -261,7 +261,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             // Parse color to RGB if provided
             if (params.color != null and params.color != c.Py_None()) {
-                const rgb_color = color_utils.parseColorTo(Rgb, params.color) catch {
+                const rgb_color = color_utils.parseColor(Rgb, params.color) catch {
                     rimg.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -289,7 +289,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             // Parse color to RGBA if provided
             if (params.color != null and params.color != c.Py_None()) {
-                const rgba_color = color_utils.parseColorTo(Rgba, params.color) catch {
+                const rgba_color = color_utils.parseColor(Rgba, params.color) catch {
                     image.deinit(allocator);
                     // Error already set by parseColorTo
                     return -1;
@@ -530,7 +530,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     }
 
     // Parse the color value using parseColorTo
-    const color = color_utils.parseColorTo(Rgba, value) catch {
+    const color = color_utils.parseColor(Rgba, value) catch {
         // Error already set by parseColorTo
         return -1;
     };

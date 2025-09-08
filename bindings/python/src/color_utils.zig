@@ -71,7 +71,7 @@ fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
 /// On error, sets one of these Python exceptions:
 /// - TypeError: For invalid input types
 /// - ValueError: For out-of-range color values (not 0-255)
-pub fn parseColorTo(comptime T: type, color_obj: ?*c.PyObject) !T {
+pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
     if (color_obj == null) {
         return error.InvalidColor;
     }
