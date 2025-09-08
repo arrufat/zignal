@@ -243,13 +243,14 @@ pub const image_motion_blur_doc =
     \\- Strength values closer to 1.0 produce stronger blur effects
 ;
 
-pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
     const motion_blur = @import("../motion_blur.zig");
 
     // Parse the single argument (config object)
     var config_obj: ?*c.PyObject = undefined;
-    if (c.PyArg_ParseTuple(args, "O", &config_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{"config"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &config_obj) == 0) {
         return null;
     }
 

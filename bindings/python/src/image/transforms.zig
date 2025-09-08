@@ -550,18 +550,18 @@ pub const image_crop_doc =
     \\```
 ;
 
-pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse Rectangle argument
-    var rect_obj: ?*c.PyObject = undefined;
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        rect: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
+    const rect = py_utils.parseRectangle(f32, params.rect) catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {

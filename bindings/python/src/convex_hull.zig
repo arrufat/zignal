@@ -76,7 +76,7 @@ const convex_hull_find_doc =
     \\```
 ;
 
-fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ConvexHullObject, @ptrCast(self_obj.?));
 
     // Check if hull is initialized
@@ -86,11 +86,12 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     }
 
     // Parse points argument
-    var points_obj: ?*c.PyObject = undefined;
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &points_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    const points_obj = params.points;
 
     // Parse the point list
     const points = py_utils.parsePointList(f32, points_obj) catch {
@@ -155,7 +156,7 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
         .name = "find",
         .meth = @ptrCast(&convex_hull_find),
-        .flags = c.METH_VARARGS,
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = convex_hull_find_doc,
         .params = "self, points: list[tuple[float, float]]",
         .returns = "list[tuple[float, float]] | None",

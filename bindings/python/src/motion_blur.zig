@@ -99,14 +99,14 @@ fn motion_blur_repr(self_obj: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
 fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
     _ = type_obj;
 
-    var angle: f64 = 0.0;
-    var distance: c_long = 0;
-
-    const kw = comptime py_utils.kw(&.{ "angle", "distance" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "dl", @ptrCast(@constCast(&kw)), &angle, &distance) == 0) {
-        return null;
-    }
+    const Params = struct {
+        angle: f64,
+        distance: c_long,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    const angle = params.angle;
+    const distance = params.distance;
 
     const dist = py_utils.validateNonNegative(u32, distance, "distance") catch return null;
 
@@ -128,14 +128,14 @@ fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]
 fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
     _ = type_obj;
 
-    var center_tuple: [*c]c.PyObject = null;
-    var strength: f64 = 0.5;
-
-    const kw = comptime py_utils.kw(&.{ "center", "strength" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(@constCast(&kw)), &center_tuple, &strength) == 0) {
-        return null;
-    }
+    const Params = struct {
+        center: ?*c.PyObject = null, // Optional with default
+        strength: f64 = 0.5, // Optional with default
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    const center_tuple = params.center;
+    const strength = params.strength;
 
     var center_x: f64 = 0.5;
     var center_y: f64 = 0.5;
@@ -171,14 +171,14 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
 fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
     _ = type_obj;
 
-    var center_tuple: [*c]c.PyObject = null;
-    var strength: f64 = 0.5;
-
-    const kw = comptime py_utils.kw(&.{ "center", "strength" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "|Od", @ptrCast(@constCast(&kw)), &center_tuple, &strength) == 0) {
-        return null;
-    }
+    const Params = struct {
+        center: ?*c.PyObject = null, // Optional with default
+        strength: f64 = 0.5, // Optional with default
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    const center_tuple = params.center;
+    const strength = params.strength;
 
     var center_x: f64 = 0.5;
     var center_y: f64 = 0.5;

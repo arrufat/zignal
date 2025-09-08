@@ -1,6 +1,6 @@
 const std = @import("std");
-const zignal = @import("zignal");
 
+const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Rgba = zignal.Rgba;
@@ -9,7 +9,10 @@ const Rgba = zignal.Rgba;
 /// Internally it stores one of Image(u8), Image(Rgb), or Image(Rgba) and centralizes
 /// format dispatch behind a single type. Start with RGBA-only; add Gray/RGB incrementally.
 pub const PyImage = struct {
-    pub const Variant = union(enum) {
+    /// Data type enum with u8 backing for extern compatibility
+    pub const DType = enum(u8) { grayscale, rgb, rgba };
+
+    pub const Variant = union(DType) {
         grayscale: Image(u8),
         rgb: Image(Rgb),
         rgba: Image(Rgba),

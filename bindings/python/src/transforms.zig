@@ -88,11 +88,12 @@ fn similarity_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
-fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
 
     var point_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O", &point_obj) == 0) return null;
+    const kw = comptime py_utils.kw(&.{"points"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
@@ -147,7 +148,7 @@ fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // bias getter generated via generic helper
 
 var similarity_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "project", .ml_meth = @ptrCast(&similarity_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
+    .{ .ml_name = "project", .ml_meth = @ptrCast(&similarity_project), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
@@ -252,11 +253,12 @@ fn affine_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
-fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
 
     var point_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O", &point_obj) == 0) return null;
+    const kw = comptime py_utils.kw(&.{"points"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
@@ -311,7 +313,7 @@ fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // bias getter generated via generic helper
 
 var affine_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "project", .ml_meth = @ptrCast(&affine_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
+    .{ .ml_name = "project", .ml_meth = @ptrCast(&affine_project), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
@@ -413,11 +415,12 @@ fn projective_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
-fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
 
     var point_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O", &point_obj) == 0) return null;
+    const kw = comptime py_utils.kw(&.{"points"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
@@ -517,7 +520,7 @@ fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // matrix getter generated via generic helper
 
 var projective_methods = [_]c.PyMethodDef{
-    .{ .ml_name = "project", .ml_meth = @ptrCast(&projective_project), .ml_flags = c.METH_VARARGS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
+    .{ .ml_name = "project", .ml_meth = @ptrCast(&projective_project), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
     .{ .ml_name = "inverse", .ml_meth = @ptrCast(&projective_inverse), .ml_flags = c.METH_NOARGS, .ml_doc = "Get inverse transform, or None if not invertible." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };

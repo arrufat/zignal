@@ -60,13 +60,14 @@ pub const image_load_doc =
     \\```
 ;
 
-pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = type_obj;
 
     // Parse file path argument
     var file_path: [*c]const u8 = undefined;
     const format = std.fmt.comptimePrint("s", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
+    const kw = comptime py_utils.kw(&.{"path"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &file_path) == 0) {
         return null;
     }
 
@@ -163,13 +164,14 @@ pub const image_save_doc =
     \\```
 ;
 
-pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse file path argument
     var file_path: [*c]const u8 = undefined;
     const format = std.fmt.comptimePrint("s", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &file_path) == 0) {
+    const kw2 = comptime py_utils.kw(&.{"path"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw2)), &file_path) == 0) {
         return null;
     }
 
@@ -265,13 +267,14 @@ pub const image_fill_doc =
     \\```
 ;
 
-pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse the color argument (already validated in init)
     var color_obj: ?*c.PyObject = undefined;
     const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &color_obj) == 0) {
+    const kw3 = comptime py_utils.kw(&.{"color"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw3)), &color_obj) == 0) {
         return null;
     }
 
@@ -321,13 +324,14 @@ pub const image_view_doc =
     \\```
 ;
 
-pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse optional rectangle argument
     var rect_obj: ?*c.PyObject = null;
     const format = std.fmt.comptimePrint("|O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj) == 0) {
+    const kw4 = comptime py_utils.kw(&.{"rect"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw4)), &rect_obj) == 0) {
         return null;
     }
 
@@ -448,13 +452,14 @@ pub const image_convert_doc =
     \\Returns a new Image with the requested format.
 ;
 
-pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse one argument: target dtype sentinel or instance of Rgb/Rgba
     var dtype_obj: ?*c.PyObject = null;
+    const kw = comptime py_utils.kw(&.{"dtype"});
     const fmt = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTuple(args, fmt.ptr, &dtype_obj) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(@constCast(&kw)), &dtype_obj) == 0) {
         return null;
     }
 
@@ -627,13 +632,14 @@ pub const image_psnr_doc =
     \\```
 ;
 
-pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse other image argument
     var other_obj: ?*c.PyObject = undefined;
     const format = std.fmt.comptimePrint("O!", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, getImageType(), &other_obj) == 0) {
+    const kw5 = comptime py_utils.kw(&.{"other"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw5)), getImageType(), &other_obj) == 0) {
         return null;
     }
 
@@ -819,14 +825,15 @@ pub const image_set_border_doc =
     \\```
 ;
 
-pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = @as(*ImageObject, @ptrCast(self_obj.?));
 
     // Parse required rect and optional color
     var rect_obj: ?*c.PyObject = null;
     var color_obj: ?*c.PyObject = null;
     const format = std.fmt.comptimePrint("O|O", .{});
-    if (c.PyArg_ParseTuple(args, format.ptr, &rect_obj, &color_obj) == 0) {
+    const kw6 = comptime py_utils.kw(&.{ "rect", "color" });
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw6)), &rect_obj, &color_obj) == 0) {
         return null;
     }
 

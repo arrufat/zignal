@@ -203,7 +203,6 @@ const pca_project_doc =
 ;
 
 fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = kwds;
     const self = @as(*PCAObject, @ptrCast(self_obj.?));
 
     if (self.pca_ptr == null) {
@@ -213,7 +212,8 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Parse single argument: list of floats
     var list_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O:project", &list_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{"vector"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:project", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
         return null;
     }
 
@@ -302,7 +302,6 @@ const pca_transform_doc =
 ;
 
 fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = kwds;
     const self = @as(*PCAObject, @ptrCast(self_obj.?));
 
     if (self.pca_ptr == null) {
@@ -312,7 +311,8 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 
     // Parse single argument: Matrix
     var matrix_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O:transform", &matrix_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{"data"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:transform", @ptrCast(@constCast(&kw)), &matrix_obj) == 0) {
         return null;
     }
 
@@ -395,7 +395,6 @@ const pca_reconstruct_doc =
 ;
 
 fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = kwds;
     const self = @as(*PCAObject, @ptrCast(self_obj.?));
 
     if (self.pca_ptr == null) {
@@ -405,7 +404,8 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Parse single argument: list of floats
     var list_obj: ?*c.PyObject = null;
-    if (c.PyArg_ParseTuple(args, "O:reconstruct", &list_obj) == 0) {
+    const kw = comptime py_utils.kw(&.{"coefficients"});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:reconstruct", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
         return null;
     }
 
