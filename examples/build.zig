@@ -25,7 +25,6 @@ pub fn build(b: *std.Build) void {
         "image_demo",
         "orb_demo",
         "motion_blur_demo",
-        "shen_castan_demo",
     };
 
     // Build exec_examples with run steps and check compilation

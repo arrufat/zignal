@@ -166,10 +166,13 @@ pub fn Image(comptime T: type) type {
         /// Saves the image to a file in PNG format.
         /// Returns an error if the file path doesn't end in `.png` or `.PNG`.
         pub fn save(self: Self, allocator: Allocator, file_path: []const u8) !void {
-            if (!std.mem.endsWith(u8, file_path, ".png") and !std.mem.endsWith(u8, file_path, ".PNG")) {
+            if (std.ascii.endsWithIgnoreCase(file_path, ".png")) {
+                try png.save(T, allocator, self, file_path);
+            } else if (std.ascii.endsWithIgnoreCase(file_path, ".jpg") or std.ascii.endsWithIgnoreCase(file_path, ".jpeg")) {
+                try jpeg.save(T, allocator, self, file_path);
+            } else {
                 return error.UnsupportedImageFormat;
             }
-            try png.save(T, allocator, self, file_path);
         }
 
         /// Returns the total number of pixels in the image (rows * cols).
