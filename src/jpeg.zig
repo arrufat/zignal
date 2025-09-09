@@ -1,5 +1,6 @@
-//! Pure Zig JPEG decoder implementation.
-//! Supports baseline and progressive DCT JPEG images with full compatibility.
+//! Pure Zig JPEG decoder and baseline encoder implementation.
+//! Decoder supports baseline and progressive DCT JPEG images.
+//! Encoder implements baseline (SOF0) JPEG with 4:4:4 sampling and adjustable quality.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -24,6 +25,773 @@ pub const zigzag = [64]u8{
     58, 59, 52, 45, 38, 31, 39, 46,
     53, 60, 61, 54, 47, 55, 62, 63,
 };
+
+// -----------------------------
+// Encoder: public API and types
+// -----------------------------
+
+pub const Subsampling = enum {
+    yuv444,
+    yuv422,
+    yuv420,
+};
+
+pub const EncodeOptions = struct {
+    quality: u8 = 90,
+    subsampling: Subsampling = .yuv420,
+    density_dpi: u16 = 72,
+    comment: ?[]const u8 = null,
+    pub const default: EncodeOptions = .{};
+};
+
+/// Save Image to JPEG file with baseline encoding.
+pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+    const bytes = try encodeImage(T, allocator, image, .{ .subsampling = .yuv420 });
+    defer allocator.free(bytes);
+
+    const file = try std.fs.cwd().createFile(file_path, .{});
+    defer file.close();
+    try file.writeAll(bytes);
+}
+
+/// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman).
+/// Supports grayscale (u8) and RGB (Rgb). Other types are converted to RGB.
+pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    // Validate image dimensions
+    if (image.rows == 0 or image.cols == 0) {
+        return error.InvalidImageDimensions;
+    }
+    if (image.rows > 65535 or image.cols > 65535) {
+        return error.ImageTooLarge;
+    }
+
+    switch (T) {
+        u8 => return encodeGrayscale(allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options),
+        Rgb => return encodeRgb(allocator, image, options),
+        else => return encodeRgb(allocator, try image.convert(Rgb, allocator), options),
+    }
+}
+
+// -----------------------------
+// Encoder: internals
+// -----------------------------
+
+const StdTables = struct {
+    // Base quantization tables (ITU T.81, Annex K)
+    const q_luma_base: [64]u8 = .{
+        16, 11, 10, 16, 24,  40,  51,  61,
+        12, 12, 14, 19, 26,  58,  60,  55,
+        14, 13, 16, 24, 40,  57,  69,  56,
+        14, 17, 22, 29, 51,  87,  80,  62,
+        18, 22, 37, 56, 68,  109, 103, 77,
+        24, 35, 55, 64, 81,  104, 113, 92,
+        49, 64, 78, 87, 103, 121, 120, 101,
+        72, 92, 95, 98, 112, 100, 103, 99,
+    };
+    const q_chroma_base: [64]u8 = .{
+        17, 18, 24, 47, 99, 99, 99, 99,
+        18, 21, 26, 66, 99, 99, 99, 99,
+        24, 26, 56, 99, 99, 99, 99, 99,
+        47, 66, 99, 99, 99, 99, 99, 99,
+        99, 99, 99, 99, 99, 99, 99, 99,
+        99, 99, 99, 99, 99, 99, 99, 99,
+        99, 99, 99, 99, 99, 99, 99, 99,
+        99, 99, 99, 99, 99, 99, 99, 99,
+    };
+
+    // Standard Huffman tables (bits and values)
+    // Luminance DC
+    const bits_dc_luma: [16]u8 = .{ 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+    const val_dc_luma: [12]u8 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    // Chrominance DC
+    const bits_dc_chroma: [16]u8 = .{ 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+    const val_dc_chroma: [12]u8 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+
+    // Luminance AC
+    const bits_ac_luma: [16]u8 = .{ 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125 };
+    const val_ac_luma: [162]u8 = .{
+        0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07,
+        0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0,
+        0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0a, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x25, 0x26, 0x27, 0x28,
+        0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
+        0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+        0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+        0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+        0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5,
+        0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2,
+        0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+        0xf9, 0xfa,
+    };
+    // Chrominance AC
+    const bits_ac_chroma: [16]u8 = .{ 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119 };
+    const val_ac_chroma: [162]u8 = .{
+        0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71,
+        0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33, 0x52, 0xf0,
+        0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16, 0x24, 0x34, 0xe1, 0x25, 0xf1, 0x17, 0x18, 0x19, 0x1a, 0x26,
+        0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+        0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+        0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+        0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5,
+        0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3,
+        0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda,
+        0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+        0xf9, 0xfa,
+    };
+};
+
+const HuffmanEncoder = struct {
+    codes: [256]u16 = [1]u16{0} ** 256,
+    sizes: [256]u8 = [1]u8{0} ** 256,
+};
+
+fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {
+    var enc = HuffmanEncoder{};
+    var code: u16 = 0;
+    var k: usize = 0;
+    for (0..16) |i| {
+        const nb = bits[i];
+        for (0..nb) |_| {
+            const sym = vals[k];
+            enc.codes[sym] = code;
+            enc.sizes[sym] = @intCast(i + 1);
+            code += 1;
+            k += 1;
+        }
+        code = code << 1;
+    }
+    return enc;
+}
+
+const EntropyWriter = struct {
+    gpa: Allocator,
+    data: std.ArrayList(u8),
+    bit_buf: u32 = 0,
+    bit_count: u5 = 0,
+
+    pub fn init(gpa: Allocator) EntropyWriter {
+        return .{ .gpa = gpa, .data = .empty };
+    }
+    pub fn deinit(self: *EntropyWriter) void {
+        self.data.deinit(self.gpa);
+    }
+
+    fn writeByte(self: *EntropyWriter, b: u8) !void {
+        try self.data.append(self.gpa, b);
+        if (b == 0xFF) try self.data.append(self.gpa, 0x00);
+    }
+    fn writeBits(self: *EntropyWriter, code: u32, size: u5) !void {
+        self.bit_buf = (self.bit_buf << size) | (code & ((@as(u32, 1) << size) - 1));
+        self.bit_count += size;
+        while (self.bit_count >= 8) {
+            const shard = (self.bit_buf >> (self.bit_count - 8)) & 0xFF;
+            const out: u8 = @intCast(shard);
+            try self.writeByte(out);
+            self.bit_count -= 8;
+        }
+    }
+    fn flush(self: *EntropyWriter) !void {
+        if (self.bit_count > 0) {
+            const pad: u5 = 8 - self.bit_count;
+            try self.writeBits((@as(u32, 1) << pad) - 1, pad);
+        }
+    }
+};
+
+fn writeMarker(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16) !void {
+    try dst.append(gpa, 0xFF);
+    try dst.append(gpa, @intCast(marker & 0xFF));
+}
+
+fn writeSegment(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16, payload: []const u8) !void {
+    try writeMarker(dst, gpa, marker);
+    const len: u16 = @intCast(payload.len + 2);
+    try dst.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, len, .big)));
+    try dst.appendSlice(gpa, payload);
+}
+
+fn scaleQuantTables(quality: u8, ql: *[64]u8, qc: *[64]u8) void {
+    const q = @max(@as(u8, 1), @min(@as(u8, 100), quality));
+    const scale: i32 = if (q < 50)
+        @divTrunc(@as(i32, 5000), @as(i32, q))
+    else
+        200 - @as(i32, q) * 2;
+    for (0..64) |i| {
+        const l = @divTrunc((@as(i32, StdTables.q_luma_base[i]) * scale + 50), 100);
+        const c = @divTrunc((@as(i32, StdTables.q_chroma_base[i]) * scale + 50), 100);
+        ql[i] = @intCast(@max(1, @min(255, l)));
+        qc[i] = @intCast(@max(1, @min(255, c)));
+    }
+}
+
+fn writeDQT(dst: *std.ArrayList(u8), gpa: Allocator, ql: *const [64]u8, qc: *const [64]u8) !void {
+    var tmp = std.ArrayList(u8).empty;
+    defer tmp.deinit(gpa);
+
+    // Luma table (8-bit precision, id 0)
+    try tmp.append(gpa, 0x00);
+    for (0..64) |i| try tmp.append(gpa, ql[zigzag[i]]);
+
+    // Chroma table (8-bit precision, id 1)
+    try tmp.append(gpa, 0x01);
+    for (0..64) |i| try tmp.append(gpa, qc[zigzag[i]]);
+
+    try writeSegment(dst, gpa, 0xFFDB, tmp.items);
+}
+
+fn writeSOF0(dst: *std.ArrayList(u8), gpa: Allocator, width: u16, height: u16, grayscale: bool, subsampling: Subsampling) !void {
+    var tmp = std.ArrayList(u8).empty;
+    defer tmp.deinit(gpa);
+    try tmp.append(gpa, 8); // precision
+    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, height, .big)));
+    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, width, .big)));
+    if (grayscale) {
+        try tmp.append(gpa, 1);
+        try tmp.append(gpa, 1); // comp id
+        try tmp.append(gpa, 0x11); // sampling 1x1
+        try tmp.append(gpa, 0); // quant table id 0
+    } else {
+        try tmp.append(gpa, 3);
+        // Y
+        try tmp.append(gpa, 1);
+        const y_sampling: u8 = switch (subsampling) {
+            .yuv444 => 0x11,
+            .yuv422 => 0x21,
+            .yuv420 => 0x22,
+        };
+        try tmp.append(gpa, y_sampling);
+        try tmp.append(gpa, 0);
+        // Cb
+        try tmp.append(gpa, 2);
+        try tmp.append(gpa, 0x11);
+        try tmp.append(gpa, 1);
+        // Cr
+        try tmp.append(gpa, 3);
+        try tmp.append(gpa, 0x11);
+        try tmp.append(gpa, 1);
+    }
+    try writeSegment(dst, gpa, 0xFFC0, tmp.items);
+}
+
+fn writeAPP0_JFIF(dst: *std.ArrayList(u8), gpa: Allocator, density_dpi: u16) !void {
+    var tmp = std.ArrayList(u8).empty;
+    defer tmp.deinit(gpa);
+    try tmp.appendSlice(gpa, "JFIF\x00");
+    try tmp.append(gpa, 1); // version major
+    try tmp.append(gpa, 1); // version minor
+    try tmp.append(gpa, 1); // units: dots per inch
+    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
+    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
+    try tmp.append(gpa, 0); // x thumbnail
+    try tmp.append(gpa, 0); // y thumbnail
+    try writeSegment(dst, gpa, 0xFFE0, tmp.items);
+}
+
+fn writeCOM(dst: *std.ArrayList(u8), gpa: Allocator, comment: []const u8) !void {
+    try writeSegment(dst, gpa, 0xFFFE, comment);
+}
+
+fn writeDHT(dst: *std.ArrayList(u8), gpa: Allocator) !void {
+    var tmp = std.ArrayList(u8).empty;
+    defer tmp.deinit(gpa);
+
+    // DC Luma (class 0, id 0)
+    try tmp.append(gpa, 0x00);
+    try tmp.appendSlice(gpa, &StdTables.bits_dc_luma);
+    try tmp.appendSlice(gpa, &StdTables.val_dc_luma);
+    // AC Luma (class 1, id 0)
+    try tmp.append(gpa, 0x10);
+    try tmp.appendSlice(gpa, &StdTables.bits_ac_luma);
+    try tmp.appendSlice(gpa, &StdTables.val_ac_luma);
+    // DC Chroma (class 0, id 1)
+    try tmp.append(gpa, 0x01);
+    try tmp.appendSlice(gpa, &StdTables.bits_dc_chroma);
+    try tmp.appendSlice(gpa, &StdTables.val_dc_chroma);
+    // AC Chroma (class 1, id 1)
+    try tmp.append(gpa, 0x11);
+    try tmp.appendSlice(gpa, &StdTables.bits_ac_chroma);
+    try tmp.appendSlice(gpa, &StdTables.val_ac_chroma);
+
+    try writeSegment(dst, gpa, 0xFFC4, tmp.items);
+}
+
+fn writeSOS(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
+    var tmp = std.ArrayList(u8).empty;
+    defer tmp.deinit(gpa);
+    if (grayscale) {
+        try tmp.append(gpa, 1);
+        try tmp.append(gpa, 1); // component id
+        try tmp.append(gpa, 0x00); // DC 0, AC 0
+    } else {
+        try tmp.append(gpa, 3);
+        try tmp.append(gpa, 1); // Y
+        try tmp.append(gpa, 0x00);
+        try tmp.append(gpa, 2); // Cb
+        try tmp.append(gpa, 0x11);
+        try tmp.append(gpa, 3); // Cr
+        try tmp.append(gpa, 0x11);
+    }
+    try tmp.append(gpa, 0); // Ss
+    try tmp.append(gpa, 63); // Se
+    try tmp.append(gpa, 0); // Ah/Al
+    try writeSegment(dst, gpa, 0xFFDA, tmp.items);
+}
+
+fn magnitudeCategory(value: i32) u5 {
+    if (value == 0) return 0;
+    var v: u32 = @intCast(if (value < 0) -value else value);
+    var c: u5 = 0;
+    while (v != 0) : (v >>= 1) c += 1;
+    return c;
+}
+
+fn magnitudeBits(value: i32, mag: u5) u32 {
+    if (mag == 0) return 0;
+    if (value >= 0) return @intCast(value);
+    const base: i32 = (@as(i32, 1) << @intCast(mag)) - 1;
+    return @intCast(base + value);
+}
+
+// -----------------------------
+// Forward DCT - Loeffler-Ligtenberg-Moschytz (LLM) algorithm
+// -----------------------------
+
+// LLM DCT constants in 13-bit fixed point (CONST_BITS = 13)
+inline fn FIX(comptime x: f32) i32 {
+    return @as(i32, @intFromFloat(x * (1 << 13) + 0.5));
+}
+
+const FIX_0_298631336: i32 = FIX(0.298631336);
+const FIX_0_390180644: i32 = FIX(0.390180644);
+const FIX_0_541196100: i32 = FIX(0.541196100);
+const FIX_0_765366865: i32 = FIX(0.765366865);
+const FIX_0_899976223: i32 = FIX(0.899976223);
+const FIX_1_175875602: i32 = FIX(1.175875602);
+const FIX_1_501321110: i32 = FIX(1.501321110);
+const FIX_1_847759065: i32 = FIX(1.847759065);
+const FIX_1_961570560: i32 = FIX(1.961570560);
+const FIX_2_053119869: i32 = FIX(2.053119869);
+const FIX_2_562915447: i32 = FIX(2.562915447);
+const FIX_3_072711026: i32 = FIX(3.072711026);
+
+inline fn DESCALE(x: i64, n: u5) i32 {
+    const add: i64 = @as(i64, 1) << (n - 1);
+    return @intCast((x + add) >> n);
+}
+
+// Integer forward DCT based on libjpeg's jfdctint.c implementation
+// This is an accurate integer implementation using the
+// Loeffler, Ligtenberg and Moschytz algorithm with 12 multiplies and 32 adds.
+fn fdct8x8_llm(src: *const [64]i32, dst: *[64]i32) void {
+    const CONST_BITS: u5 = 13;
+    const PASS1_BITS: u5 = 2;
+
+    var data: [64]i32 = undefined;
+
+    // Pass 1: process rows.
+    // Note results are scaled up by sqrt(8) compared to a true DCT;
+    // furthermore, we scale the results by 2**PASS1_BITS.
+    for (0..8) |y| {
+        const tmp0: i64 = src[y * 8 + 0] + src[y * 8 + 7];
+        const tmp7: i64 = src[y * 8 + 0] - src[y * 8 + 7];
+        const tmp1: i64 = src[y * 8 + 1] + src[y * 8 + 6];
+        const tmp6: i64 = src[y * 8 + 1] - src[y * 8 + 6];
+        const tmp2: i64 = src[y * 8 + 2] + src[y * 8 + 5];
+        const tmp5: i64 = src[y * 8 + 2] - src[y * 8 + 5];
+        const tmp3: i64 = src[y * 8 + 3] + src[y * 8 + 4];
+        const tmp4: i64 = src[y * 8 + 3] - src[y * 8 + 4];
+
+        // Even part per LL&M figure 1 --- note that published figure is faulty;
+        // rotator "sqrt(2)*c1" should be "sqrt(2)*c6".
+        const tmp10 = tmp0 + tmp3;
+        const tmp13 = tmp0 - tmp3;
+        const tmp11 = tmp1 + tmp2;
+        const tmp12 = tmp1 - tmp2;
+
+        data[y * 8 + 0] = @intCast((tmp10 + tmp11) << PASS1_BITS);
+        data[y * 8 + 4] = @intCast((tmp10 - tmp11) << PASS1_BITS);
+
+        const z1 = (tmp12 + tmp13) * FIX_0_541196100;
+        data[y * 8 + 2] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS - PASS1_BITS);
+        data[y * 8 + 6] = DESCALE(z1 + tmp12 * (-FIX_1_847759065), CONST_BITS - PASS1_BITS);
+
+        // Odd part per figure 8 --- note paper omits factor of sqrt(2).
+        // cK represents cos(K*pi/16).
+        // i0..i3 in the paper are tmp4..tmp7 here.
+        var z1_odd = tmp4 + tmp7;
+        var z2 = tmp5 + tmp6;
+        var z3 = tmp4 + tmp6;
+        var z4 = tmp5 + tmp7;
+        const z5 = (z3 + z4) * FIX_1_175875602; // sqrt(2) * c3
+
+        const t4 = tmp4 * FIX_0_298631336; // sqrt(2) * (-c1+c3+c5-c7)
+        const t5 = tmp5 * FIX_2_053119869; // sqrt(2) * ( c1+c3-c5+c7)
+        const t6 = tmp6 * FIX_3_072711026; // sqrt(2) * ( c1+c3+c5-c7)
+        const t7 = tmp7 * FIX_1_501321110; // sqrt(2) * ( c1+c3-c5-c7)
+        z1_odd = z1_odd * (-FIX_0_899976223); // sqrt(2) * (c7-c3)
+        z2 = z2 * (-FIX_2_562915447); // sqrt(2) * (-c1-c3)
+        z3 = z3 * (-FIX_1_961570560); // sqrt(2) * (-c3-c5)
+        z4 = z4 * (-FIX_0_390180644); // sqrt(2) * (c5-c3)
+
+        z3 += z5;
+        z4 += z5;
+
+        data[y * 8 + 7] = DESCALE(t4 + z1_odd + z3, CONST_BITS - PASS1_BITS);
+        data[y * 8 + 5] = DESCALE(t5 + z2 + z4, CONST_BITS - PASS1_BITS);
+        data[y * 8 + 3] = DESCALE(t6 + z2 + z3, CONST_BITS - PASS1_BITS);
+        data[y * 8 + 1] = DESCALE(t7 + z1_odd + z4, CONST_BITS - PASS1_BITS);
+    }
+
+    // Pass 2: process columns.
+    // We remove the PASS1_BITS scaling, but leave the results scaled up
+    // by an overall factor of 8.
+    for (0..8) |x| {
+        const tmp0: i64 = data[0 * 8 + x] + data[7 * 8 + x];
+        const tmp7: i64 = data[0 * 8 + x] - data[7 * 8 + x];
+        const tmp1: i64 = data[1 * 8 + x] + data[6 * 8 + x];
+        const tmp6: i64 = data[1 * 8 + x] - data[6 * 8 + x];
+        const tmp2: i64 = data[2 * 8 + x] + data[5 * 8 + x];
+        const tmp5: i64 = data[2 * 8 + x] - data[5 * 8 + x];
+        const tmp3: i64 = data[3 * 8 + x] + data[4 * 8 + x];
+        const tmp4: i64 = data[3 * 8 + x] - data[4 * 8 + x];
+
+        // Even part
+        const tmp10 = tmp0 + tmp3;
+        const tmp13 = tmp0 - tmp3;
+        const tmp11 = tmp1 + tmp2;
+        const tmp12 = tmp1 - tmp2;
+
+        dst[0 * 8 + x] = DESCALE(tmp10 + tmp11, PASS1_BITS);
+        dst[4 * 8 + x] = DESCALE(tmp10 - tmp11, PASS1_BITS);
+
+        const z1 = (tmp12 + tmp13) * FIX_0_541196100;
+        dst[2 * 8 + x] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS + PASS1_BITS);
+        dst[6 * 8 + x] = DESCALE(z1 + tmp12 * (-FIX_1_847759065), CONST_BITS + PASS1_BITS);
+
+        // Odd part
+        var z1_odd = tmp4 + tmp7;
+        var z2 = tmp5 + tmp6;
+        var z3 = tmp4 + tmp6;
+        var z4 = tmp5 + tmp7;
+        const z5 = (z3 + z4) * FIX_1_175875602;
+
+        const t4 = tmp4 * FIX_0_298631336;
+        const t5 = tmp5 * FIX_2_053119869;
+        const t6 = tmp6 * FIX_3_072711026;
+        const t7 = tmp7 * FIX_1_501321110;
+        z1_odd = z1_odd * (-FIX_0_899976223);
+        z2 = z2 * (-FIX_2_562915447);
+        z3 = z3 * (-FIX_1_961570560);
+        z4 = z4 * (-FIX_0_390180644);
+
+        z3 += z5;
+        z4 += z5;
+
+        dst[7 * 8 + x] = DESCALE(t4 + z1_odd + z3, CONST_BITS + PASS1_BITS);
+        dst[5 * 8 + x] = DESCALE(t5 + z2 + z4, CONST_BITS + PASS1_BITS);
+        dst[3 * 8 + x] = DESCALE(t6 + z2 + z3, CONST_BITS + PASS1_BITS);
+        dst[1 * 8 + x] = DESCALE(t7 + z1_odd + z4, CONST_BITS + PASS1_BITS);
+    }
+}
+
+// Reciprocal-based quantization (fold normalization/scaling into the divisor).
+const RECIP_SHIFT: u5 = 24; // high precision for reciprocals
+
+fn buildQuantRecipLLM(divisors_out: *[64]u32, qtbl: *const [64]u8) void {
+    // For LLM DCT (libjpeg-style), the output is scaled by 8
+    // We need to divide by 8 * quantization value
+    for (0..64) |idx| {
+        const q = @as(f64, @floatFromInt(qtbl[idx]));
+        const scale = 8.0; // Overall factor of 8 from the DCT
+        const recip_f = (@as(f64, @floatFromInt(1 << RECIP_SHIFT))) / (q * scale);
+        const recip_u: u32 = @intFromFloat(@round(@max(0.0, @min(4_294_967_295.0, recip_f))));
+        divisors_out[idx] = recip_u;
+    }
+}
+
+inline fn quantizeWithRecip(val: i32, recip: u32) i32 {
+    if (val == 0) return 0;
+    const a: i64 = if (val < 0) -@as(i64, val) else val;
+    const prod: i64 = a * @as(i64, recip);
+    var q: i64 = (prod + (@as(i64, 1) << (RECIP_SHIFT - 1))) >> RECIP_SHIFT;
+    if (val < 0) q = -q;
+    return @intCast(q);
+}
+
+// Helper function to encode a single 8x8 block
+fn encodeBlock(
+    block: *const [64]i32,
+    quant_recip: *const [64]u32,
+    writer: *EntropyWriter,
+    dc_encoder: *const HuffmanEncoder,
+    ac_encoder: *const HuffmanEncoder,
+    prev_dc: *i32,
+) !void {
+    var dct: [64]i32 = undefined;
+    fdct8x8_llm(block, &dct);
+
+    var coeffs: [64]i32 = undefined;
+    // Quantization using reciprocal divisors (JPEG normalization folded in)
+    for (0..64) |i| coeffs[i] = quantizeWithRecip(dct[i], quant_recip[i]);
+
+    // Encode DC coefficient
+    const dc_coeff = coeffs[0];
+    const diff = dc_coeff - prev_dc.*;
+    prev_dc.* = dc_coeff;
+
+    const mag = magnitudeCategory(diff);
+    try writer.writeBits(@intCast(dc_encoder.codes[mag]), @as(u5, @intCast(dc_encoder.sizes[mag])));
+    if (mag > 0) try writer.writeBits(magnitudeBits(diff, mag), mag);
+
+    // Encode AC coefficients
+    var run: u8 = 0;
+    for (1..64) |k| {
+        const v = coeffs[zigzag[k]];
+        if (v == 0) {
+            run += 1;
+            if (run == 16) {
+                try writer.writeBits(@intCast(ac_encoder.codes[0xF0]), @as(u5, @intCast(ac_encoder.sizes[0xF0])));
+                run = 0;
+            }
+        } else {
+            while (run >= 16) : (run -= 16) {
+                try writer.writeBits(@intCast(ac_encoder.codes[0xF0]), @as(u5, @intCast(ac_encoder.sizes[0xF0])));
+            }
+            const amag = magnitudeCategory(v);
+            const sym: u8 = (run << 4) | @as(u8, amag);
+            try writer.writeBits(@intCast(ac_encoder.codes[sym]), @as(u5, @intCast(ac_encoder.sizes[sym])));
+            try writer.writeBits(magnitudeBits(v, amag), amag);
+            run = 0;
+        }
+    }
+    if (run > 0) try writer.writeBits(@intCast(ac_encoder.codes[0x00]), @as(u5, @intCast(ac_encoder.sizes[0x00])));
+}
+
+fn encodeBlocksRgb(
+    image: Image(Rgb),
+    subsampling: Subsampling,
+    ql_recip: *const [64]u32,
+    qc_recip: *const [64]u32,
+    writer: *EntropyWriter,
+    dc_luma: *const HuffmanEncoder,
+    ac_luma: *const HuffmanEncoder,
+    dc_chroma: *const HuffmanEncoder,
+    ac_chroma: *const HuffmanEncoder,
+) !void {
+    const rows: usize = image.rows;
+    const cols: usize = image.cols;
+    const h_max: usize = switch (subsampling) {
+        .yuv444 => 1,
+        .yuv422 => 2,
+        .yuv420 => 2,
+    };
+    const v_max: usize = switch (subsampling) {
+        .yuv444 => 1,
+        .yuv422 => 1,
+        .yuv420 => 2,
+    };
+    const mcu_rows: usize = (rows + (8 * v_max) - 1) / (8 * v_max);
+    const mcu_cols: usize = (cols + (8 * h_max) - 1) / (8 * h_max);
+
+    var prev_dc_y: i32 = 0;
+    var prev_dc_cb: i32 = 0;
+    var prev_dc_cr: i32 = 0;
+
+    var block: [64]i32 = undefined;
+
+    for (0..mcu_rows) |mcu_y| {
+        for (0..mcu_cols) |mcu_x| {
+            // Encode Y blocks (h_max * v_max blocks per MCU)
+            for (0..v_max) |vy| {
+                for (0..h_max) |hx| {
+                    const px0 = mcu_x * 8 * h_max + hx * 8;
+                    const py0 = mcu_y * 8 * v_max + vy * 8;
+                    for (0..8) |y| {
+                        const iy = @min(rows - 1, py0 + y);
+                        for (0..8) |x| {
+                            const ix = @min(cols - 1, px0 + x);
+                            const rgb = image.at(iy, ix).*;
+                            const ycbcr = convertColor(Ycbcr, rgb);
+                            block[y * 8 + x] = @as(i32, ycbcr.y) - 128;
+                        }
+                    }
+                    try encodeBlock(&block, ql_recip, writer, dc_luma, ac_luma, &prev_dc_y);
+                }
+            }
+
+            // Encode Cb block for this MCU (downsampled if needed)
+            const mcu_px0 = mcu_x * 8 * h_max;
+            const mcu_py0 = mcu_y * 8 * v_max;
+            for (0..8) |y| {
+                for (0..8) |x| {
+                    const sx0 = mcu_px0 + x * h_max;
+                    const sy0 = mcu_py0 + y * v_max;
+                    var sum_cb: i32 = 0;
+                    var count: usize = 0;
+                    for (0..v_max) |dy| {
+                        const sy = @min(rows - 1, sy0 + dy);
+                        for (0..h_max) |dx| {
+                            const sx = @min(cols - 1, sx0 + dx);
+                            const ycbcr = convertColor(Ycbcr, image.at(sy, sx).*);
+                            sum_cb += ycbcr.cb;
+                            count += 1;
+                        }
+                    }
+                    const avg_cb = @divTrunc(sum_cb, @as(i32, @intCast(count)));
+                    block[y * 8 + x] = avg_cb - 128;
+                }
+            }
+            try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cb);
+
+            // Encode Cr block for this MCU (downsampled if needed)
+            for (0..8) |y| {
+                for (0..8) |x| {
+                    const sx0 = mcu_px0 + x * h_max;
+                    const sy0 = mcu_py0 + y * v_max;
+                    var sum_cr: i32 = 0;
+                    var count: usize = 0;
+                    for (0..v_max) |dy| {
+                        const sy = @min(rows - 1, sy0 + dy);
+                        for (0..h_max) |dx| {
+                            const sx = @min(cols - 1, sx0 + dx);
+                            const ycbcr = convertColor(Ycbcr, image.at(sy, sx).*);
+                            sum_cr += ycbcr.cr;
+                            count += 1;
+                        }
+                    }
+                    const avg_cr = @divTrunc(sum_cr, @as(i32, @intCast(count)));
+                    block[y * 8 + x] = avg_cr - 128;
+                }
+            }
+            try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cr);
+        }
+    }
+}
+
+fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+
+    // SOI
+    try out.append(allocator, 0xFF);
+    try out.append(allocator, 0xD8);
+
+    try writeAPP0_JFIF(&out, allocator, options.density_dpi);
+    if (options.comment) |c| try writeCOM(&out, allocator, c);
+
+    var ql: [64]u8 = undefined;
+    var qc: [64]u8 = undefined;
+    scaleQuantTables(options.quality, &ql, &qc);
+    try writeDQT(&out, allocator, &ql, &qc);
+    try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
+    try writeDHT(&out, allocator);
+    try writeSOS(&out, allocator, false);
+
+    // Entropy-coded data
+    var ew = EntropyWriter.init(allocator);
+    defer ew.deinit();
+
+    // Build Huffman encoders
+    const dc_luma = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma);
+    const ac_luma = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma);
+    const dc_chroma = buildHuffmanEncoder(&StdTables.bits_dc_chroma, &StdTables.val_dc_chroma);
+    const ac_chroma = buildHuffmanEncoder(&StdTables.bits_ac_chroma, &StdTables.val_ac_chroma);
+
+    // Build reciprocal quantization tables with folded normalization/scaling
+    var ql_recip: [64]u32 = undefined;
+    var qc_recip: [64]u32 = undefined;
+    buildQuantRecipLLM(&ql_recip, &ql);
+    buildQuantRecipLLM(&qc_recip, &qc);
+
+    try encodeBlocksRgb(image, options.subsampling, &ql_recip, &qc_recip, &ew, &dc_luma, &ac_luma, &dc_chroma, &ac_chroma);
+    try ew.flush();
+
+    // Append entropy-coded bytes into output
+    try out.appendSlice(allocator, ew.data.items);
+
+    // EOI
+    try out.append(allocator, 0xFF);
+    try out.append(allocator, 0xD9);
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: u32, options: EncodeOptions) ![]u8 {
+    _ = options.subsampling; // not used for grayscale
+
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+
+    // SOI
+    try out.append(allocator, 0xFF);
+    try out.append(allocator, 0xD8);
+
+    try writeAPP0_JFIF(&out, allocator, options.density_dpi);
+    if (options.comment) |c| try writeCOM(&out, allocator, c);
+
+    var ql: [64]u8 = undefined;
+    var dummy: [64]u8 = undefined;
+    scaleQuantTables(options.quality, &ql, &dummy);
+    // Only luma table used
+    var tmp_dqt = std.ArrayList(u8).empty;
+    defer tmp_dqt.deinit(allocator);
+    try tmp_dqt.append(allocator, 0x00);
+    for (0..64) |i| try tmp_dqt.append(allocator, ql[zigzag[i]]);
+    try writeSegment(&out, allocator, 0xFFDB, tmp_dqt.items);
+
+    try writeSOF0(&out, allocator, @intCast(width), @intCast(height), true, .yuv444);
+
+    // DHT: only DC/AC luma
+    var tmp_dht = std.ArrayList(u8).empty;
+    defer tmp_dht.deinit(allocator);
+    try tmp_dht.appendSlice(allocator, &[_]u8{0x00});
+    try tmp_dht.appendSlice(allocator, &StdTables.bits_dc_luma);
+    try tmp_dht.appendSlice(allocator, &StdTables.val_dc_luma);
+    try tmp_dht.appendSlice(allocator, &[_]u8{0x10});
+    try tmp_dht.appendSlice(allocator, &StdTables.bits_ac_luma);
+    try tmp_dht.appendSlice(allocator, &StdTables.val_ac_luma);
+    try writeSegment(&out, allocator, 0xFFC4, tmp_dht.items);
+
+    try writeSOS(&out, allocator, true);
+
+    var ew = EntropyWriter.init(allocator);
+    defer ew.deinit();
+
+    const dc = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma);
+    const ac = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma);
+
+    // Build reciprocal quantization table with folded normalization/scaling
+    var ql_recip: [64]u32 = undefined;
+    buildQuantRecipLLM(&ql_recip, &ql);
+
+    var prev_dc: i32 = 0;
+
+    const rows: usize = @intCast(height);
+    const cols: usize = @intCast(width);
+    const block_rows: usize = (rows + 7) / 8;
+    const block_cols: usize = (cols + 7) / 8;
+    var block: [64]i32 = undefined;
+
+    for (0..block_rows) |br| {
+        for (0..block_cols) |bc| {
+            for (0..8) |y| {
+                const iy = @min(rows - 1, br * 8 + y);
+                for (0..8) |x| {
+                    const ix = @min(cols - 1, bc * 8 + x);
+                    const v: u8 = bytes[iy * cols + ix];
+                    // Convert to fixed-point, center at 128
+                    block[y * 8 + x] = @as(i32, @intCast(v)) - 128;
+                }
+            }
+            try encodeBlock(&block, &ql_recip, &ew, &dc, &ac, &prev_dc);
+        }
+    }
+
+    try ew.flush();
+    try out.appendSlice(allocator, ew.data.items);
+    try out.append(allocator, 0xFF);
+    try out.append(allocator, 0xD9);
+    return out.toOwnedSlice(allocator);
+}
 
 /// Lightweight scan to detect number of components declared by the JPEG SOF header.
 /// Returns 1 for grayscale, 3 for color, or null on error/unsupported.
@@ -254,9 +1022,6 @@ pub const JpegDecoder = struct {
                 return value;
             }
         }
-
-        // Debug info for invalid Huffman codes (commented out for now)
-        // std.debug.print("DEBUG: Invalid Huffman code: 0x{X} (length tried up to 16)\n", .{code});
 
         return error.InvalidHuffmanCode;
     }
@@ -724,7 +1489,6 @@ pub const BitReader = struct {
                     byte_curr = self.data[self.byte_pos];
                     self.byte_pos += 1;
                 } else {
-                    std.debug.print("DEBUG: Found marker 0xFF{X:0>2} - ending scan\n", .{byte_next});
                     self.byte_pos -= 2;
                     return error.UnexpectedEndOfData;
                 }
@@ -1699,11 +2463,11 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
     if (decoder.block_storage == null) return error.BlockStorageNotAllocated;
 
     if (decoder.num_components == 1) {
-        // Grayscale - just copy Y to all RGB channels
+        // Grayscale - blocks already level-shifted in IDCT
         for (decoder.block_storage.?, 0..) |*block_set, idx| {
             for (0..64) |i| {
                 const y_val = block_set[0][i];
-                const rgb_val: u8 = @intCast(std.math.clamp(y_val + 128, 0, 255));
+                const rgb_val: u8 = @intCast(std.math.clamp(y_val, 0, 255));
                 decoder.rgb_storage.?[idx][0][i] = rgb_val; // R
                 decoder.rgb_storage.?[idx][1][i] = rgb_val; // G
                 decoder.rgb_storage.?[idx][2][i] = rgb_val; // B
@@ -1726,9 +2490,9 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                 const Cr = block_set[2][i];
 
                 const ycbcr: Ycbcr = .{
-                    .y = @as(f32, @floatFromInt(Y)),
-                    .cb = @as(f32, @floatFromInt(Cb + 128)),
-                    .cr = @as(f32, @floatFromInt(Cr + 128)),
+                    .y = @intCast(@min(255, @max(0, Y))),
+                    .cb = @intCast(@min(255, @max(0, Cb + 128))),
+                    .cr = @intCast(@min(255, @max(0, Cr + 128))),
                 };
                 const rgb = ycbcr.toRgb();
 
@@ -1778,7 +2542,11 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
                         const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
 
-                        const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
+                        const ycbcr: Ycbcr = .{
+                            .y = @intCast(@min(255, @max(0, Y))),
+                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
+                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                        };
                         const rgb = ycbcr.toRgb();
 
                         decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
@@ -1829,7 +2597,11 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
                         const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
 
-                        const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
+                        const ycbcr: Ycbcr = .{
+                            .y = @intCast(@min(255, @max(0, Y))),
+                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
+                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                        };
                         const rgb = ycbcr.toRgb();
 
                         decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
@@ -1901,8 +2673,11 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const cr_interp_x1 = std.math.lerp(cr01, cr11, fx);
                         const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy))));
 
-                        // Convert using library's high-quality YCbCr conversion (KEY: this is what master did!)
-                        const ycbcr: Ycbcr = .{ .y = @as(f32, @floatFromInt(Y)), .cb = @as(f32, @floatFromInt(Cb + 128)), .cr = @as(f32, @floatFromInt(Cr + 128)) };
+                        const ycbcr: Ycbcr = .{
+                            .y = @intCast(@min(255, @max(0, Y))),
+                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
+                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                        };
                         const rgb = ycbcr.toRgb();
 
                         // Store RGB in separate storage to avoid overwriting chroma data
@@ -2007,6 +2782,136 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
     try renderRgbBlocksToPixels(T, &decoder, &img);
 
     return img;
+}
+
+test "JPEG encode -> decode RGB roundtrip" {
+    const gpa = std.testing.allocator;
+
+    var img = try Image(Rgb).init(gpa, 16, 16);
+    defer img.deinit(gpa);
+    for (0..img.rows) |y| {
+        for (0..img.cols) |x| {
+            const r: u8 = @intCast((x * 255) / (img.cols - 1));
+            const g: u8 = @intCast((y * 255) / (img.rows - 1));
+            const b: u8 = @intCast(((x + y) * 255) / (img.cols + img.rows - 2));
+            img.at(y, x).* = .{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 85 });
+    defer gpa.free(bytes);
+
+    var decoder = try decode(gpa, bytes);
+    defer decoder.deinit();
+    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
+    try dequantizeAllBlocks(&decoder);
+    idctAllBlocks(&decoder);
+    try ycbcrToRgbAllBlocks(&decoder);
+    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    defer out.deinit(gpa);
+    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+
+    const ps = try img.psnr(out);
+    try std.testing.expect(ps > 40.0);
+}
+
+test "JPEG encode -> decode grayscale roundtrip" {
+    const gpa = std.testing.allocator;
+    var img = try Image(u8).init(gpa, 16, 16);
+    defer img.deinit(gpa);
+    for (0..img.rows) |y| {
+        for (0..img.cols) |x| {
+            img.at(y, x).* = @intCast(((x + y) * 255) / (img.cols + img.rows - 2));
+        }
+    }
+    const bytes = try encodeImage(u8, gpa, img, .{ .quality = 85 });
+    defer gpa.free(bytes);
+
+    var decoder = try decode(gpa, bytes);
+    defer decoder.deinit();
+    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
+    try dequantizeAllBlocks(&decoder);
+    idctAllBlocks(&decoder);
+    try ycbcrToRgbAllBlocks(&decoder);
+    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    defer out.deinit(gpa);
+    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+
+    // Convert original gray to RGB for PSNR
+    var gray_rgb = try img.convert(Rgb, gpa);
+    defer gray_rgb.deinit(gpa);
+    const ps = try gray_rgb.psnr(out);
+    try std.testing.expect(ps > 45);
+}
+
+test "JPEG subsampling 4:2:2 roundtrip" {
+    const gpa = std.testing.allocator;
+
+    // Non-multiple-of-MCU dimensions to exercise padding
+    const rows: usize = 19;
+    const cols: usize = 25;
+
+    var img = try Image(Rgb).init(gpa, rows, cols);
+    defer img.deinit(gpa);
+    for (0..rows) |y| {
+        for (0..cols) |x| {
+            const r: u8 = @intCast((x * 255) / (cols - 1));
+            const g: u8 = @intCast((y * 255) / (rows - 1));
+            const b: u8 = @intCast(((x * y) * 255) / ((cols - 1) * (rows - 1))); // mild cross term
+            img.at(y, x).* = .{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
+    defer gpa.free(bytes);
+
+    var decoder = try decode(gpa, bytes);
+    defer decoder.deinit();
+    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
+    try dequantizeAllBlocks(&decoder);
+    idctAllBlocks(&decoder);
+    try ycbcrToRgbAllBlocks(&decoder);
+    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    defer out.deinit(gpa);
+    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+
+    const ps = try img.psnr(out);
+    try std.testing.expect(ps > 40);
+}
+
+test "JPEG subsampling 4:2:0 roundtrip" {
+    const gpa = std.testing.allocator;
+
+    // Non-multiple-of-MCU dimensions (MCU is 16x16 for 4:2:0)
+    const rows: usize = 64;
+    const cols: usize = 48;
+
+    var img = try Image(Rgb).init(gpa, rows, cols);
+    defer img.deinit(gpa);
+    for (0..rows) |y| {
+        for (0..cols) |x| {
+            const r: u8 = @intCast((x * 255) / (cols - 1));
+            const g: u8 = @intCast((y * 255) / (rows - 1));
+            const b: u8 = @intCast(((x + 2 * y) * 255) / (cols - 1 + 2 * (rows - 1)));
+            img.at(y, x).* = .{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
+    defer gpa.free(bytes);
+
+    var decoder = try decode(gpa, bytes);
+    defer decoder.deinit();
+    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
+    try dequantizeAllBlocks(&decoder);
+    idctAllBlocks(&decoder);
+    try ycbcrToRgbAllBlocks(&decoder);
+    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    defer out.deinit(gpa);
+    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+
+    const ps = try img.psnr(out);
+    try std.testing.expect(ps > 45);
 }
 
 // Basic tests

@@ -341,7 +341,15 @@ test "comprehensive color conversion method validation and round-trip testing" {
                 for (test_colors) |test_rgb| {
                     const intermediate_color = convertColor(ColorType, test_rgb);
                     const recovered_rgb = intermediate_color.toRgb();
-                    try expectEqualDeep(test_rgb, recovered_rgb);
+                    // Allow small differences for integer-based color spaces like YCbCr
+                    if (ColorType == Ycbcr) {
+                        // Integer YCbCr conversion can have rounding errors
+                        try expect(@abs(@as(i16, test_rgb.r) - @as(i16, recovered_rgb.r)) <= 1);
+                        try expect(@abs(@as(i16, test_rgb.g) - @as(i16, recovered_rgb.g)) <= 1);
+                        try expect(@abs(@as(i16, test_rgb.b) - @as(i16, recovered_rgb.b)) <= 1);
+                    } else {
+                        try expectEqualDeep(test_rgb, recovered_rgb);
+                    }
                 }
             }
 

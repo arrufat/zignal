@@ -20,11 +20,11 @@ const Xyb = @import("Xyb.zig");
 const Xyz = @import("Xyz.zig");
 
 /// Y component (luma/brightness) in range [0, 255]
-y: f32,
+y: u8,
 /// Cb component (blue-difference chroma) in range [0, 255] (128 = neutral)
-cb: f32,
+cb: u8,
 /// Cr component (red-difference chroma) in range [0, 255] (128 = neutral)
-cr: f32,
+cr: u8,
 
 const Ycbcr = @This();
 
@@ -95,7 +95,7 @@ pub fn toXyb(self: Ycbcr) Xyb {
 
 /// Converts to grayscale using the Y (luma) component.
 pub fn toGray(self: Ycbcr) u8 {
-    return @intFromFloat(@max(0, @min(255, @round(self.y))));
+    return self.y;
 }
 
 /// Alpha blends this color with another RGBA color using the specified blend mode and returns the result.
