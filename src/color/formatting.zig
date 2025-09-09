@@ -31,7 +31,7 @@ pub fn formatColor(
     const rgb = convertColor(Rgb, self);
 
     // Determine text color based on background darkness
-    const fg: u8 = getForegroundColor(rgb);
+    const fg: u8 = if (rgb.toOklab().l < 0.5) 255 else 0;
 
     // Start with the SGR sequence
     try writer.print(
@@ -59,12 +59,6 @@ pub fn formatColor(
 
     // Close and reset
     try writer.print(" }}\x1b[0m", .{});
-}
-
-/// Returns appropriate foreground color (255 for light text, 0 for dark text) based on OkLab
-/// lightness.
-fn getForegroundColor(rgb: anytype) u8 {
-    return if (convertColor(Oklab, rgb).l < 0.5) 255 else 0;
 }
 
 // Tests for color formatting functionality
@@ -180,22 +174,6 @@ test "HSL color formatting - SGR  color output" {
     const result_light = buffer[0..stream.end];
     const expected_light = "\x1b[1m\x1b[38;2;0;0;0m\x1b[48;2;204;204;204mHsl{ .h = 0.00, .s = 0.00, .l = 80.00 }\x1b[0m";
     try expectEqualStrings(expected_light, result_light);
-}
-
-test "getForegroundColor function" {
-    // Test dark colors (should return 255 for light text)
-    const dark_rgb = Rgb{ .r = 50, .g = 50, .b = 50 };
-    try expect(getForegroundColor(dark_rgb) == 255);
-
-    const black_rgb = Rgb{ .r = 0, .g = 0, .b = 0 };
-    try expect(getForegroundColor(black_rgb) == 255);
-
-    // Test light colors (should return 0 for dark text)
-    const light_rgb = Rgb{ .r = 200, .g = 200, .b = 200 };
-    try expect(getForegroundColor(light_rgb) == 0);
-
-    const white_rgb = Rgb{ .r = 255, .g = 255, .b = 255 };
-    try expect(getForegroundColor(white_rgb) == 0);
 }
 
 test "formatColor function edge cases" {

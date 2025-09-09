@@ -206,12 +206,12 @@
     }
 
     function rgb2ycbcr(r, g, b) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.rgb2ycbcr(r, g, b, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromRgb() {
@@ -320,12 +320,12 @@
     }
 
     function hsl2ycbcr(h, s, l) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.hsl2ycbcr(h, s, l, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromHsl() {
@@ -435,12 +435,12 @@
     }
 
     function hsv2ycbcr(h, s, v) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.hsv2ycbcr(h, s, v, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromHsv() {
@@ -550,12 +550,12 @@
     }
 
     function xyz2ycbcr(x, y, z) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.xyz2ycbcr(x, y, z, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromXyz() {
@@ -665,12 +665,12 @@
     }
 
     function lab2ycbcr(l, a, b) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.lab2ycbcr(l, a, b, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromLab() {
@@ -780,12 +780,12 @@
     }
 
     function lms2ycbcr(l, m, s) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.lms2ycbcr(l, m, s, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromLms() {
@@ -892,12 +892,12 @@
     }
 
     function oklab2ycbcr(l, a, b) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.oklab2ycbcr(l, a, b, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromOklab() {
@@ -1007,12 +1007,12 @@
     }
 
     function oklch2ycbcr(l, c, h) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.oklch2ycbcr(l, c, h, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromOklch() {
@@ -1120,12 +1120,12 @@
     }
 
     function xyb2ycbcr(x, y, b) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.xyb2ycbcr(x, y, b, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromXyb() {
@@ -1230,12 +1230,12 @@
     }
 
     function lch2ycbcr(l, c, h) {
-      const outPtr = wasmExports.alloc(3 * 4);
-      const out = new Float64Array(wasmExports.memory.buffer, outPtr, 3);
+      const outPtr = wasmExports.alloc(3);
+      const out = new Uint8Array(wasmExports.memory.buffer, outPtr, 3);
       wasmExports.lch2ycbcr(l, c, h, outPtr);
-      document.getElementById("ycbcr-y").value = out[0].toFixed(6);
-      document.getElementById("ycbcr-cb").value = out[1].toFixed(6);
-      document.getElementById("ycbcr-cr").value = out[2].toFixed(6);
+      document.getElementById("ycbcr-y").value = out[0];
+      document.getElementById("ycbcr-cb").value = out[1];
+      document.getElementById("ycbcr-cr").value = out[2];
     }
 
     function updateFromLch() {
