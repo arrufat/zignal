@@ -266,3 +266,39 @@ test "imageToKitty with options" {
     try testing.expect(std.mem.indexOf(u8, kitty_data, "p=7") != null);
     try testing.expect(std.mem.indexOf(u8, kitty_data, "d=1") != null);
 }
+
+test "imageToKitty with scaling" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Create a small 4x4 test image
+    var img = try Image(Rgb).init(allocator, 4, 4);
+    defer img.deinit(allocator);
+
+    // Fill with a pattern
+    for (0..4) |y| {
+        for (0..4) |x| {
+            const val = @as(u8, @intCast((x + y) * 32));
+            img.at(y, x).* = Rgb{ .r = val, .g = val, .b = val };
+        }
+    }
+
+    // Test scaling up to 16x16
+    const options = Options{
+        .width = 16,
+        .height = 16,
+        .interpolation = .bilinear,
+    };
+
+    const kitty_data = try fromImage(Rgb, img, allocator, options);
+    defer allocator.free(kitty_data);
+
+    // Should produce valid kitty output
+    try testing.expect(std.mem.startsWith(u8, kitty_data, "\x1b_G"));
+    try testing.expect(std.mem.endsWith(u8, kitty_data, "\x1b\\"));
+
+    // The actual image data should be larger due to scaling
+    // We can't easily verify the exact size due to PNG compression,
+    // but we can check that it produces valid output
+    try testing.expect(kitty_data.len > 100);
+}
