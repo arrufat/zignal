@@ -648,34 +648,41 @@ const image_format_doc =
     \\Format image for display using various terminal graphics protocols.
     \\
     \\## Parameters
-    \\- `format_spec` (str): Format specifier for display:
-    \\  - `''` (empty): Returns text representation (e.g., 'Image(800x600)')
-    \\  - `'auto'`: Auto-detect best format with progressive degradation: kitty → sixel → sgr
-    \\  - `'sgr'`: Display using sgr escape codes (half colored half-blocks with background)
-    \\  - `'braille'`: Display using Braille patterns (good for monochrome images)
-    \\  - `'sixel'`: Display using sixel graphics protocol (up to 256 colors)
-    \\  - `'sixel:WIDTHxHEIGHT'`: Display using sixel scaled to fit (e.g., 'sixel:800x600')
-    \\  - `'sixel:WIDTHx'`: Scale to fit width, maintain aspect ratio (e.g., 'sixel:800x')
-    \\  - `'sixel:xHEIGHT'`: Scale to fit height, maintain aspect ratio (e.g., 'sixel:x600')
-    \\  - `'kitty'`: Display using kitty graphics protocol (24-bit color)
-    \\  - `'kitty:WIDTHxHEIGHT'`: Display using kitty scaled to fit (e.g., 'kitty:800x600')
-    \\  - `'kitty:WIDTHx'`: Display with specified width, height auto-calculated (e.g., 'kitty:800x')
-    \\  - `'kitty:xHEIGHT'`: Display with specified height, width auto-calculated (e.g., 'kitty:x600')
+    \\- `format_spec` (str): Format specifier with optional size constraints
+    \\
+    \\  **Pattern:** `format` or `format:WIDTHxHEIGHT` or `format:WIDTHx` or `format:xHEIGHT`
+    \\
+    \\  **Formats:**
+    \\  - `''` (empty): Text representation (e.g., 'Image(800x600)')
+    \\  - `'auto'`: Auto-detect best format (kitty → sixel → sgr)
+    \\  - `'sgr'`: Unicode half-blocks with 24-bit color
+    \\  - `'braille'`: Braille patterns (monochrome, 2x4 resolution per character)
+    \\  - `'sixel'`: Sixel graphics protocol (up to 256 colors)
+    \\  - `'kitty'`: Kitty graphics protocol (full 24-bit color)
+    \\
+    \\  **Size constraints (optional):**
+    \\  All size parameters maintain the original aspect ratio:
+    \\  - `:WIDTHxHEIGHT` - Scale to fit within WIDTH×HEIGHT box
+    \\  - `:WIDTHx` - Constrain width to WIDTH pixels
+    \\  - `:xHEIGHT` - Constrain height to HEIGHT pixels
     \\
     \\## Examples
     \\```python
-    \\img = Image.load("photo.png")
-    \\print(f"{img}")         # Image(800x600)
-    \\print(f"{img:sgr}")     # Display with SGR and unicode half-blocks
-    \\print(f"{img:braille}") # Display with braille patterns
-    \\print(f"{img:sixel}")   # Display with sixel graphics
-    \\print(f"{img:sixel:800x600}")   # Display with sixel, scaled to fit 800x600
-    \\print(f"{img:sixel:800x}")      # Display with sixel, scaled to 800px width
-    \\print(f"{img:sixel:x600}")      # Display with sixel, scaled to 600px height
-    \\print(f"{img:kitty}")           # Display with kitty graphics
-    \\print(f"{img:kitty:800x600}")   # Display with kitty, scaled to fit 800x600
-    \\print(f"{img:kitty:800x}")      # Display with kitty, 800 pixels wide
-    \\print(f"{img:kitty:x600}")      # Display with kitty, 600 pixels tall
+    \\img = Image.load("photo.png")  # e.g., 1920x1080
+    \\
+    \\# Basic display formats
+    \\print(f"{img}")           # Text: Image(1920x1080)
+    \\print(f"{img:sgr}")       # Display with unicode half-blocks
+    \\print(f"{img:braille}")   # Display with braille patterns
+    \\print(f"{img:sixel}")     # Display with sixel graphics
+    \\print(f"{img:kitty}")     # Display with kitty graphics
+    \\print(f"{img:auto}")      # Auto-detect best format
+    \\
+    \\# With size constraints (aspect ratio always preserved)
+    \\print(f"{img:sgr:400x300}")     # Fit within 400x300 (actual: 400x225)
+    \\print(f"{img:braille:200x}")    # Width=200, height auto-calculated
+    \\print(f"{img:sixel:x150}")      # Height=150, width auto-calculated
+    \\print(f"{img:auto:500x500}")    # Fit within 500x500 box
     \\```
 ;
 
@@ -699,10 +706,49 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
 
     // Determine display format based on spec
     const display_format: DisplayFormat = if (std.mem.eql(u8, spec_slice, "sgr"))
-        .sgr
-    else if (std.mem.eql(u8, spec_slice, "braille"))
+        .{ .sgr = .default }
+    else if (std.mem.startsWith(u8, spec_slice, "sgr:")) blk: {
+        // Parse sgr with dimensions: "sgr:WIDTHxHEIGHT"
+        const dims_str = spec_slice[4..]; // Skip "sgr:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid sgr format. Use 'sgr:WIDTHxHEIGHT', 'sgr:WIDTHx', or 'sgr:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in sgr format",
+                error.InvalidHeight => "Invalid height value in sgr format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create sgr options with custom dimensions
+        break :blk .{ .sgr = .{
+            .width = dims.width,
+            .height = dims.height,
+        } };
+    } else if (std.mem.eql(u8, spec_slice, "braille"))
         .{ .braille = .default }
-    else if (std.mem.eql(u8, spec_slice, "sixel"))
+    else if (std.mem.startsWith(u8, spec_slice, "braille:")) blk: {
+        // Parse braille with dimensions: "braille:WIDTHxHEIGHT"
+        const dims_str = spec_slice[8..]; // Skip "braille:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid braille format. Use 'braille:WIDTHxHEIGHT', 'braille:WIDTHx', or 'braille:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in braille format",
+                error.InvalidHeight => "Invalid height value in braille format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create braille options with custom dimensions
+        break :blk .{ .braille = .{
+            .threshold = 0.5,
+            .width = dims.width,
+            .height = dims.height,
+        } };
+    } else if (std.mem.eql(u8, spec_slice, "sixel"))
         .{ .sixel = .default }
     else if (std.mem.startsWith(u8, spec_slice, "sixel:")) blk: {
         // Parse sixel with dimensions: "sixel:WIDTHxHEIGHT"
@@ -756,8 +802,35 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
             },
         };
     } else if (std.mem.eql(u8, spec_slice, "auto"))
-        .auto
-    else if (std.mem.startsWith(u8, spec_slice, "sixel")) {
+        .{ .auto = .default }
+    else if (std.mem.startsWith(u8, spec_slice, "auto:")) blk: {
+        // Parse auto with dimensions: "auto:WIDTHxHEIGHT"
+        const dims_str = spec_slice[5..]; // Skip "auto:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid auto format. Use 'auto:WIDTHxHEIGHT', 'auto:WIDTHx', or 'auto:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in auto format",
+                error.InvalidHeight => "Invalid height value in auto format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create auto options with custom dimensions
+        break :blk .{ .auto = .{
+            .width = dims.width,
+            .height = dims.height,
+        } };
+    } else if (std.mem.startsWith(u8, spec_slice, "sgr")) {
+        // Invalid sgr format that doesn't match "sgr" or "sgr:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sgr format. Use 'sgr' or 'sgr:WIDTHxHEIGHT' (e.g., 'sgr:800x600', 'sgr:800x', 'sgr:x600')");
+        return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "braille")) {
+        // Invalid braille format that doesn't match "braille" or "braille:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid braille format. Use 'braille' or 'braille:WIDTHxHEIGHT' (e.g., 'braille:800x600', 'braille:800x', 'braille:x600')");
+        return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "sixel")) {
         // Invalid sixel format that doesn't match "sixel" or "sixel:..."
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid sixel format. Use 'sixel' or 'sixel:WIDTHxHEIGHT' (e.g., 'sixel:800x600', 'sixel:800x', 'sixel:x600')");
         return null;
@@ -765,8 +838,12 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         // Invalid kitty format that doesn't match "kitty" or "kitty:..."
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid kitty format. Use 'kitty' or 'kitty:WIDTHxHEIGHT' (e.g., 'kitty:800x600', 'kitty:800x', 'kitty:x600')");
         return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "auto")) {
+        // Invalid auto format that doesn't match "auto" or "auto:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid auto format. Use 'auto' or 'auto:WIDTHxHEIGHT' (e.g., 'auto:800x600', 'auto:800x', 'auto:x600')");
+        return null;
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', or 'auto'");
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'sgr:WIDTHxHEIGHT', 'braille', 'braille:WIDTHxHEIGHT', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', 'auto', or 'auto:WIDTHxHEIGHT'");
         return null;
     };
 
@@ -1165,7 +1242,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .name = "__format__",
         .params = "self, format_spec: str",
         .returns = "str",
-        .doc = "Format image for display. Supports 'sgr', 'braille', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty:WIDTHxHEIGHT', and 'auto'.",
+        .doc = "Format image for display. Pattern: format[:WIDTHxHEIGHT] where format is 'auto', 'sgr', 'braille', 'sixel', or 'kitty'.",
     },
     .{
         .name = "__eq__",
