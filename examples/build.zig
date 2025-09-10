@@ -24,7 +24,6 @@ pub fn build(b: *std.Build) void {
         "pca_example",
         "make_logo",
         "image_demo",
-        "orb_demo",
         "motion_blur_demo",
     };
 
