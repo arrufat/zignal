@@ -6,24 +6,52 @@
     <title>ORB Feature Matching</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-      #image-container {
+      #upload-area {
         display: flex;
         gap: 20px;
         justify-content: center;
         margin: 20px 0;
       }
-      .canvas-wrapper {
+      .upload-box {
+        width: 200px;
+        height: 150px;
+        border: 2px dashed #666;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        background: #222;
         position: relative;
       }
-      .canvas-wrapper canvas {
-        cursor: pointer;
-        border: 2px dashed #666;
-        background: #222;
+      .upload-box.has-image {
+        border-color: #4a9eff;
+        border-style: solid;
       }
-      .canvas-wrapper.has-image canvas {
+      .upload-box img {
+        max-width: 100%;
+        max-height: 100%;
+        position: absolute;
+      }
+      .upload-label {
+        color: #888;
+        text-align: center;
+        pointer-events: none;
+      }
+      #result-area {
+        text-align: center;
+        margin: 20px auto;
+      }
+      #result-canvas {
         border: 2px solid #444;
+        background: #222;
+        display: none;
+        max-width: 100%;
+        height: auto;
       }
-      /* SVG positioning handled by JavaScript */
+      #result-canvas.visible {
+        display: inline-block;
+      }
       .controls {
         text-align: center;
         margin: 20px 0;
@@ -56,59 +84,52 @@
   <body>
     <div class="header">
       <h1>ORB Feature Matching</h1>
-      <p>Detect and match ORB features between two images using WebAssembly</p>
+      <p>Detect and match ORB features between two images</p>
     </div>
+
     <div class="instructions">
-      Click or drag images to load them. Then click "Detect & Match" to find matching features.
+      Click or drag to upload images, then click "Match Features".
     </div>
-    <div id="image-container">
-      <div class="canvas-wrapper" id="wrapper1">
-        <h3>Image 1</h3>
-        <canvas id="canvas1" width="400" height="300"></canvas>
+
+    <div id="upload-area">
+      <div class="upload-box" id="upload1">
+        <img id="preview1" style="display: none;">
+        <div class="upload-label">Click or drag<br>Image 1</div>
       </div>
-      <div class="canvas-wrapper" id="wrapper2">
-        <h3>Image 2</h3>
-        <canvas id="canvas2" width="400" height="300"></canvas>
+      <div class="upload-box" id="upload2">
+        <img id="preview2" style="display: none;">
+        <div class="upload-label">Click or drag<br>Image 2</div>
       </div>
     </div>
-    <svg id="match-lines" style="position: absolute; width: 100%; height: 100%; display: none;">
-    </svg>
+
     <div class="controls">
-      <button id="match-button" disabled>Detect & Match Features</button>
-      <button id="clear-button">Clear Visualization</button>
-      <label>
-        <input type="checkbox" id="show-keypoints" checked>
-        Show Keypoints
-      </label>
-      <label>
-        <input type="checkbox" id="show-matches" checked>
-        Show Matches
-      </label>
+      <button id="match-button" disabled>Match Features</button>
+      <button id="clear-button">Clear</button>
     </div>
+
+    <div id="stats">
+      <div class="stat-row">Image 1: <span id="features1">-</span> features</div>
+      <div class="stat-row">Image 2: <span id="features2">-</span> features</div>
+      <div class="stat-row">Matches: <span id="matches">-</span></div>
+      <div class="stat-row">Average distance: <span id="avg-distance">-</span></div>
+      <div class="stat-row">Processing time: <span id="time">-</span> ms</div>
+    </div>
+
     <div class="legend">
       Match Quality:
-      <span style="background: #00ff00; color: black;">Excellent</span>
-      <span style="background: #ffff00; color: black;">Good</span>
-      <span style="background: #ff8800; color: black;">Fair</span>
-      <span style="background: #ff0000; color: white;">Poor</span>
+      <span style="background: #00ff00; color: black;">Excellent (<30)</span>
+      <span style="background: #ffff00; color: black;">Good (30-50)</span>
+      <span style="background: #ff8800; color: black;">Fair (50-70)</span>
+      <span style="background: #ff0000; color: white;">Poor (>70)</span>
     </div>
-    <div id="stats">
-      <div class="stat-row">Image 1:
-        <span id="features1">-</span>
-        features detected</div>
-      <div class="stat-row">Image 2:
-        <span id="features2">-</span>
-        features detected</div>
-      <div class="stat-row">Matches:
-        <span id="matches">-</span></div>
-      <div class="stat-row">Average distance:
-        <span id="avg-distance">-</span></div>
-      <div class="stat-row">Processing time:
-        <span id="time">-</span>
-        ms</div>
+
+    <div id="result-area">
+      <canvas id="result-canvas"></canvas>
     </div>
+
     <input type="file" id="file1" style="display: none;" accept="image/*">
     <input type="file" id="file2" style="display: none;" accept="image/*">
+
     <script src="./feature_matching.js"></script>
   </body>
 </html>

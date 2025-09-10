@@ -3,284 +3,325 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const BruteForceMatcher = zignal.BruteForceMatcher;
+const Canvas = zignal.Canvas;
 const Image = zignal.Image;
 const Orb = zignal.Orb;
+const Point = zignal.Point;
 const Rgba = zignal.Rgba;
 
+// WASM-specific imports
 const js = @import("js.zig");
 pub const alloc = js.alloc;
 pub const free = js.free;
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = js.logFn,
     .log_level = std.log.default_level,
 };
 
-pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
-    _ = st;
-    _ = addr;
-    std.log.err("panic: {s}", .{msg});
-    @trap();
-}
-
-// Export memory management functions from js.zig
-/// Detect ORB features in an image
-/// Returns: [num_features, kp1_x, kp1_y, kp1_size, kp1_angle, kp2_x, ...]
-pub export fn detectFeatures(
-    image_ptr: [*]Rgba,
-    rows: usize,
-    cols: usize,
-    result_ptr: [*]f32,
-    max_features: usize,
-) usize {
-    const allocator = std.heap.wasm_allocator;
-
-    const img_size = rows * cols;
-    const img: Image(Rgba) = .initFromSlice(rows, cols, image_ptr[0..img_size]);
-
-    // Convert to grayscale
-    var gray = img.convert(u8, allocator) catch |err| {
-        std.log.err("Failed to convert to grayscale: {}", .{err});
-        return 0;
-    };
-    defer gray.deinit(allocator);
-
-    // Create ORB detector
-    var orb: Orb = .{
-        .n_features = @intCast(@min(max_features, 500)),
-        .scale_factor = 1.2,
-        .n_levels = 8,
-        .fast_threshold = 20,
-    };
-
-    // Detect features
-    const features = orb.detectAndCompute(gray, allocator) catch |err| {
-        std.log.err("Failed to detect features: {}", .{err});
-        return 0;
-    };
-    defer allocator.free(features.keypoints);
-    defer allocator.free(features.descriptors);
-
-    // Copy keypoints to result buffer
-    const num_features = features.keypoints.len;
-    result_ptr[0] = @floatFromInt(num_features);
-
-    var idx: usize = 1;
-    for (features.keypoints) |kp| {
-        result_ptr[idx] = kp.x;
-        result_ptr[idx + 1] = kp.y;
-        result_ptr[idx + 2] = kp.size;
-        result_ptr[idx + 3] = kp.angle;
-        result_ptr[idx + 4] = @floatFromInt(kp.octave);
-        idx += 5;
-    }
-
-    // Store descriptors after keypoints
-    // Each descriptor is 32 bytes (256 bits)
-    const desc_start = 1 + num_features * 5;
-    for (features.descriptors, 0..) |desc, i| {
-        // Convert descriptor bytes to floats for easier JS handling
-        for (desc.bits, 0..) |byte, j| {
-            result_ptr[desc_start + i * 32 + j] = @floatFromInt(byte);
-        }
-    }
-
-    return num_features;
-}
-
-/// Match features between two images
-/// Input format: [num_features1, kp1_data..., desc1_data..., num_features2, kp2_data..., desc2_data...]
-/// Output format: [num_matches, idx1_1, idx2_1, distance_1, idx1_2, idx2_2, distance_2, ...]
-pub export fn matchFeatures(
-    data1_ptr: [*]f32,
-    data2_ptr: [*]f32,
-    result_ptr: [*]f32,
-    max_distance: f32,
-) usize {
-    const allocator = std.heap.wasm_allocator;
-
-    // Parse first image features
-    const num_features1: usize = @intFromFloat(data1_ptr[0]);
-    const desc1_start = 1 + num_features1 * 5;
-
-    // Parse second image features
-    const num_features2: usize = @intFromFloat(data2_ptr[0]);
-    const desc2_start = 1 + num_features2 * 5;
-
-    if (num_features1 == 0 or num_features2 == 0) {
-        result_ptr[0] = 0;
-        return 0;
-    }
-
-    // Reconstruct descriptors
-    const descriptors1 = allocator.alloc(zignal.BinaryDescriptor, num_features1) catch |err| {
-        std.log.err("Failed to allocate descriptors1: {}", .{err});
-        result_ptr[0] = 0;
-        return 0;
-    };
-    defer allocator.free(descriptors1);
-
-    const descriptors2 = allocator.alloc(zignal.BinaryDescriptor, num_features2) catch |err| {
-        std.log.err("Failed to allocate descriptors2: {}", .{err});
-        result_ptr[0] = 0;
-        return 0;
-    };
-    defer allocator.free(descriptors2);
-
-    // Convert float arrays back to descriptors
-    for (0..num_features1) |i| {
-        for (0..32) |j| {
-            descriptors1[i].bits[j] = @intFromFloat(data1_ptr[desc1_start + i * 32 + j]);
-        }
-    }
-
-    for (0..num_features2) |i| {
-        for (0..32) |j| {
-            descriptors2[i].bits[j] = @intFromFloat(data2_ptr[desc2_start + i * 32 + j]);
-        }
-    }
-
-    // Match features
-    const matcher: BruteForceMatcher = .{
-        .max_distance = @intFromFloat(max_distance),
-        .cross_check = true,
-        .ratio_threshold = 0.75, // Add Lowe's ratio test for better matching
-    };
-
-    const matches = matcher.match(descriptors1, descriptors2, allocator) catch |err| {
-        std.log.err("Failed to match features: {}", .{err});
-        result_ptr[0] = 0;
-        return 0;
-    };
-    defer allocator.free(matches);
-
-    // Copy matches to result
-    result_ptr[0] = @floatFromInt(matches.len);
-
-    var idx: usize = 1;
-    for (matches) |match| {
-        result_ptr[idx] = @floatFromInt(match.query_idx);
-        result_ptr[idx + 1] = @floatFromInt(match.train_idx);
-        result_ptr[idx + 2] = match.distance;
-        idx += 3;
-    }
-
-    return matches.len;
-}
-
-/// Detect and match features between two images in one call
-/// Returns matches and keypoints for both images
-pub export fn detectAndMatch(
-    image1_ptr: [*]Rgba,
-    rows1: usize,
-    cols1: usize,
-    image2_ptr: [*]Rgba,
-    rows2: usize,
-    cols2: usize,
-    result_ptr: [*]f32,
-    max_features: usize,
-    max_distance: f32,
-) usize {
-    const allocator = std.heap.wasm_allocator;
-
-    // Process first image
-    const img1_size = rows1 * cols1;
-    const img1: Image(Rgba) = .initFromSlice(rows1, cols1, image1_ptr[0..img1_size]);
-
-    var gray1 = img1.convert(u8, allocator) catch |err| {
-        std.log.err("Failed to convert image1 to grayscale: {}", .{err});
-        return 0;
-    };
+// Shared visualization function that creates a combined image with matches drawn
+fn createMatchVisualization(
+    allocator: std.mem.Allocator,
+    img1_rgba: Image(Rgba),
+    img2_rgba: Image(Rgba),
+    n_features: u16,
+) !Image(Rgba) {
+    // Convert directly to grayscale for feature detection
+    var gray1 = try img1_rgba.convert(u8, allocator);
     defer gray1.deinit(allocator);
 
-    // Process second image
-    const img2_size = rows2 * cols2;
-    const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
-
-    var gray2 = img2.convert(u8, allocator) catch |err| {
-        std.log.err("Failed to convert image2 to grayscale: {}", .{err});
-        return 0;
-    };
+    var gray2 = try img2_rgba.convert(u8, allocator);
     defer gray2.deinit(allocator);
 
     // Create ORB detector
     var orb: Orb = .{
-        .n_features = @intCast(@min(max_features, 500)),
+        .n_features = n_features,
         .scale_factor = 1.2,
         .n_levels = 8,
         .fast_threshold = 20,
     };
 
     // Detect features in both images
-    const features1 = orb.detectAndCompute(gray1, allocator) catch |err| {
-        std.log.err("Failed to detect features in image1: {}", .{err});
-        return 0;
+    const features1 = try orb.detectAndCompute(gray1, allocator);
+    defer allocator.free(features1.keypoints);
+    defer allocator.free(features1.descriptors);
+
+    const features2 = try orb.detectAndCompute(gray2, allocator);
+    defer allocator.free(features2.keypoints);
+    defer allocator.free(features2.descriptors);
+
+    std.log.info("Image 1: {} features detected", .{features1.keypoints.len});
+    std.log.info("Image 2: {} features detected", .{features2.keypoints.len});
+
+    // Match features
+    const matcher: BruteForceMatcher = .{
+        .max_distance = 80,
+        .cross_check = true,
+        .ratio_threshold = 0.75,
+    };
+
+    const matches = try matcher.match(features1.descriptors, features2.descriptors, allocator);
+    defer allocator.free(matches);
+
+    std.log.info("Found {} matches between images", .{matches.len});
+
+    // Create visualization: concatenate images side by side
+    const gap = 10;
+    const combined_width = img1_rgba.cols + gap + img2_rgba.cols;
+    const combined_height = @max(img1_rgba.rows, img2_rgba.rows);
+    var viz = try Image(Rgba).init(allocator, combined_height, combined_width);
+    errdefer viz.deinit(allocator);
+
+    // Fill with dark background
+    for (0..viz.rows) |y| {
+        for (0..viz.cols) |x| {
+            viz.at(y, x).* = .{ .r = 30, .g = 30, .b = 30, .a = 255 };
+        }
+    }
+
+    // Copy first image to left side
+    for (0..img1_rgba.rows) |y| {
+        for (0..img1_rgba.cols) |x| {
+            viz.at(y, x).* = img1_rgba.at(y, x).*;
+        }
+    }
+
+    // Copy second image to right side
+    const offset_x = img1_rgba.cols + gap;
+    for (0..img2_rgba.rows) |y| {
+        for (0..img2_rgba.cols) |x| {
+            viz.at(y, x + offset_x).* = img2_rgba.at(y, x).*;
+        }
+    }
+
+    // Draw matches and keypoints
+    var canvas: Canvas(Rgba) = .init(allocator, viz);
+
+    // Define colors for different octaves
+    const octave_colors = [_]Rgba{
+        .{ .r = 255, .g = 0, .b = 0, .a = 255 }, // Red
+        .{ .r = 0, .g = 255, .b = 0, .a = 255 }, // Green
+        .{ .r = 0, .g = 0, .b = 255, .a = 255 }, // Blue
+        .{ .r = 255, .g = 255, .b = 0, .a = 255 }, // Yellow
+        .{ .r = 255, .g = 0, .b = 255, .a = 255 }, // Magenta
+        .{ .r = 0, .g = 255, .b = 255, .a = 255 }, // Cyan
+        .{ .r = 255, .g = 128, .b = 0, .a = 255 }, // Orange
+        .{ .r = 128, .g = 0, .b = 255, .a = 255 }, // Purple
+    };
+
+    // Draw match lines first (so they appear under keypoints)
+    for (matches) |match| {
+        const kp1 = features1.keypoints[match.query_idx];
+        const kp2 = features2.keypoints[match.train_idx];
+
+        // Points in combined image
+        const p1: Point(2, f32) = .point(.{ kp1.x, kp1.y });
+        const p2: Point(2, f32) = .point(.{ kp2.x + @as(f32, @floatFromInt(offset_x)), kp2.y });
+
+        // Color based on match quality
+        const color = if (match.distance < 30)
+            Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 } // Green - excellent
+        else if (match.distance < 50)
+            Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 } // Yellow - good
+        else if (match.distance < 70)
+            Rgba{ .r = 255, .g = 128, .b = 0, .a = 255 } // Orange - fair
+        else
+            Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }; // Red - poor
+
+        canvas.drawLine(p1, p2, color, 2, .soft);
+    }
+
+    // Draw keypoints for first image
+    for (features1.keypoints) |kp| {
+        const color_idx = @min(@as(usize, @intCast(kp.octave)), octave_colors.len - 1);
+        const color = octave_colors[color_idx];
+        const center: Point(2, f32) = .point(.{ kp.x, kp.y });
+
+        // Draw circle
+        const radius = @max(3.0, kp.size / 2);
+        canvas.drawCircle(center, radius, color, 2, .soft);
+
+        // Draw orientation line
+        const angle_rad = std.math.degreesToRadians(kp.angle);
+        const line_length = radius * 2;
+        const end_x = kp.x + @cos(angle_rad) * line_length;
+        const end_y = kp.y + @sin(angle_rad) * line_length;
+        const end_point: Point(2, f32) = .point(.{ end_x, end_y });
+        canvas.drawLine(center, end_point, color, 1, .soft);
+    }
+
+    // Draw keypoints for second image
+    for (features2.keypoints) |kp| {
+        const color_idx = @min(@as(usize, @intCast(kp.octave)), octave_colors.len - 1);
+        const color = octave_colors[color_idx];
+        const center_x = kp.x + @as(f32, @floatFromInt(offset_x));
+        const center_y = kp.y;
+        const center: Point(2, f32) = .point(.{ center_x, center_y });
+
+        // Draw circle
+        const radius = @max(3.0, kp.size / 2);
+        canvas.drawCircle(center, radius, color, 2, .soft);
+
+        // Draw orientation line
+        const angle_rad = std.math.degreesToRadians(kp.angle);
+        const line_length = radius * 2;
+        const end_x = center_x + @cos(angle_rad) * line_length;
+        const end_y = center_y + @sin(angle_rad) * line_length;
+        const end_point: Point(2, f32) = .point(.{ end_x, end_y });
+        canvas.drawLine(center, end_point, color, 1, .soft);
+    }
+
+    // Log statistics
+    if (matches.len > 0) {
+        var total_distance: f32 = 0;
+        var min_distance: f32 = std.math.inf(f32);
+        var max_distance: f32 = 0;
+
+        for (matches) |match| {
+            total_distance += match.distance;
+            min_distance = @min(min_distance, match.distance);
+            max_distance = @max(max_distance, match.distance);
+        }
+
+        const avg_distance = total_distance / @as(f32, @floatFromInt(matches.len));
+        std.log.info("Match statistics: avg={d:.2}, min={d:.2}, max={d:.2}", .{ avg_distance, min_distance, max_distance });
+    }
+
+    return viz;
+}
+
+// WASM export function for feature matching - writes directly to output buffer
+pub export fn matchAndVisualize(
+    image1_ptr: [*]Rgba,
+    rows1: usize,
+    cols1: usize,
+    image2_ptr: [*]Rgba,
+    rows2: usize,
+    cols2: usize,
+    result_ptr: [*]Rgba,
+    result_rows: usize,
+    result_cols: usize,
+) void {
+    const allocator = std.heap.wasm_allocator;
+
+    // Create images from input data
+    const img1_size = rows1 * cols1;
+    const img1: Image(Rgba) = .initFromSlice(rows1, cols1, image1_ptr[0..img1_size]);
+
+    const img2_size = rows2 * cols2;
+    const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
+
+    // Use the shared visualization function directly with RGBA
+    var viz = createMatchVisualization(allocator, img1, img2, 300) catch |err| {
+        std.log.err("Failed to create visualization: {}", .{err});
+        return;
+    };
+    defer viz.deinit(allocator);
+
+    // Create output image view
+    const result_size = result_rows * result_cols;
+    var result: Image(Rgba) = .initFromSlice(result_rows, result_cols, result_ptr[0..result_size]);
+
+    // Copy RGBA visualization to result
+    for (0..@min(viz.rows, result_rows)) |y| {
+        for (0..@min(viz.cols, result_cols)) |x| {
+            result.at(y, x).* = viz.at(y, x).*;
+        }
+    }
+}
+
+// WASM export function to get match statistics
+pub export fn getMatchStats(
+    image1_ptr: [*]Rgba,
+    rows1: usize,
+    cols1: usize,
+    image2_ptr: [*]Rgba,
+    rows2: usize,
+    cols2: usize,
+    stats_ptr: [*]f32,
+) void {
+    const allocator = std.heap.wasm_allocator;
+
+    // Create images from input data
+    const img1_size = rows1 * cols1;
+    const img1: Image(Rgba) = .initFromSlice(rows1, cols1, image1_ptr[0..img1_size]);
+
+    const img2_size = rows2 * cols2;
+    const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
+
+    // Convert to grayscale
+    var gray1 = img1.convert(u8, allocator) catch {
+        for (0..6) |i| stats_ptr[i] = 0;
+        return;
+    };
+    defer gray1.deinit(allocator);
+
+    var gray2 = img2.convert(u8, allocator) catch {
+        for (0..6) |i| stats_ptr[i] = 0;
+        return;
+    };
+    defer gray2.deinit(allocator);
+
+    // Detect features
+    var orb: Orb = .{
+        .n_features = 300,
+        .scale_factor = 1.2,
+        .n_levels = 8,
+        .fast_threshold = 20,
+    };
+
+    const features1 = orb.detectAndCompute(gray1, allocator) catch {
+        for (0..6) |i| stats_ptr[i] = 0;
+        return;
     };
     defer allocator.free(features1.keypoints);
     defer allocator.free(features1.descriptors);
 
-    const features2 = orb.detectAndCompute(gray2, allocator) catch |err| {
-        std.log.err("Failed to detect features in image2: {}", .{err});
-        return 0;
+    const features2 = orb.detectAndCompute(gray2, allocator) catch {
+        stats_ptr[0] = @floatFromInt(features1.keypoints.len);
+        for (1..6) |i| stats_ptr[i] = 0;
+        return;
     };
     defer allocator.free(features2.keypoints);
     defer allocator.free(features2.descriptors);
 
     // Match features
     const matcher: BruteForceMatcher = .{
-        .max_distance = @intFromFloat(max_distance),
+        .max_distance = 80,
         .cross_check = true,
-        .ratio_threshold = 0.75, // Add Lowe's ratio test for better matching
+        .ratio_threshold = 0.75,
     };
 
-    const matches = matcher.match(features1.descriptors, features2.descriptors, allocator) catch |err| {
-        std.log.err("Failed to match features: {}", .{err});
-        return 0;
+    const matches = matcher.match(features1.descriptors, features2.descriptors, allocator) catch {
+        stats_ptr[0] = @floatFromInt(features1.keypoints.len);
+        stats_ptr[1] = @floatFromInt(features2.keypoints.len);
+        for (2..6) |i| stats_ptr[i] = 0;
+        return;
     };
     defer allocator.free(matches);
 
-    // Pack result: [num_kp1, kp1_data..., num_kp2, kp2_data..., num_matches, match_data...]
-    var idx: usize = 0;
+    // Calculate statistics
+    stats_ptr[0] = @floatFromInt(features1.keypoints.len);
+    stats_ptr[1] = @floatFromInt(features2.keypoints.len);
+    stats_ptr[2] = @floatFromInt(matches.len);
 
-    // Pack keypoints from image 1
-    result_ptr[idx] = @floatFromInt(features1.keypoints.len);
-    idx += 1;
-    for (features1.keypoints) |kp| {
-        result_ptr[idx] = kp.x;
-        result_ptr[idx + 1] = kp.y;
-        result_ptr[idx + 2] = kp.size;
-        result_ptr[idx + 3] = kp.angle;
-        result_ptr[idx + 4] = @floatFromInt(kp.octave);
-        idx += 5;
+    if (matches.len > 0) {
+        var total_distance: f32 = 0;
+        var min_distance: f32 = std.math.inf(f32);
+        var max_distance: f32 = 0;
+
+        for (matches) |match| {
+            total_distance += match.distance;
+            min_distance = @min(min_distance, match.distance);
+            max_distance = @max(max_distance, match.distance);
+        }
+
+        stats_ptr[3] = total_distance / @as(f32, @floatFromInt(matches.len));
+        stats_ptr[4] = min_distance;
+        stats_ptr[5] = max_distance;
+    } else {
+        stats_ptr[3] = 0;
+        stats_ptr[4] = 0;
+        stats_ptr[5] = 0;
     }
-
-    // Pack keypoints from image 2
-    result_ptr[idx] = @floatFromInt(features2.keypoints.len);
-    idx += 1;
-    for (features2.keypoints) |kp| {
-        result_ptr[idx] = kp.x;
-        result_ptr[idx + 1] = kp.y;
-        result_ptr[idx + 2] = kp.size;
-        result_ptr[idx + 3] = kp.angle;
-        result_ptr[idx + 4] = @floatFromInt(kp.octave);
-        idx += 5;
-    }
-
-    // Pack matches
-    result_ptr[idx] = @floatFromInt(matches.len);
-    idx += 1;
-    for (matches) |match| {
-        result_ptr[idx] = @floatFromInt(match.query_idx);
-        result_ptr[idx + 1] = @floatFromInt(match.train_idx);
-        result_ptr[idx + 2] = match.distance;
-        idx += 3;
-    }
-
-    std.log.info("Detected {} and {} features, found {} matches", .{
-        features1.keypoints.len,
-        features2.keypoints.len,
-        matches.len,
-    });
-
-    return idx;
 }
