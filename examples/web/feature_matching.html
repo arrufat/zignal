@@ -61,6 +61,19 @@
         font-size: 16px;
         margin: 0 5px;
       }
+      #parameters label {
+        display: block;
+        margin-bottom: 5px;
+        color: #ccc;
+      }
+      #parameters input[type="range"] {
+        width: 100%;
+        margin-bottom: 10px;
+      }
+      #parameters h3 {
+        color: #fff;
+        margin: 20px 0 10px 0;
+      }
       #stats {
         text-align: center;
         margin: 20px 0;
@@ -105,6 +118,45 @@
     <div class="controls">
       <button id="match-button" disabled>Match Features</button>
       <button id="clear-button">Clear</button>
+      <button id="toggle-params">Parameters ▼</button>
+    </div>
+
+    <div id="parameters" style="display: none; background: #333; padding: 20px; margin: 20px auto; max-width: 800px; border-radius: 8px;">
+      <h3 style="margin-top: 0;">ORB Parameters</h3>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+        <div>
+          <label for="n-features">Max Features: <span id="n-features-value">300</span></label>
+          <input type="range" id="n-features" min="50" max="1000" value="300" step="50">
+        </div>
+        <div>
+          <label for="scale-factor">Scale Factor: <span id="scale-factor-value">1.2</span></label>
+          <input type="range" id="scale-factor" min="1.1" max="2.0" value="1.2" step="0.1">
+        </div>
+        <div>
+          <label for="n-levels">Pyramid Levels: <span id="n-levels-value">8</span></label>
+          <input type="range" id="n-levels" min="3" max="12" value="8" step="1">
+        </div>
+        <div>
+          <label for="fast-threshold">FAST Threshold: <span id="fast-threshold-value">20</span></label>
+          <input type="range" id="fast-threshold" min="5" max="50" value="20" step="5">
+        </div>
+      </div>
+
+      <h3>Matcher Parameters</h3>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+        <div>
+          <label for="max-distance">Max Distance: <span id="max-distance-value">80</span></label>
+          <input type="range" id="max-distance" min="20" max="256" value="80" step="10">
+        </div>
+        <div>
+          <label for="ratio-threshold">Ratio Threshold: <span id="ratio-threshold-value">0.75</span></label>
+          <input type="range" id="ratio-threshold" min="0.3" max="1.0" value="0.75" step="0.05">
+        </div>
+        <div>
+          <input type="checkbox" id="cross-check" checked>
+          <label for="cross-check" style="display: inline; margin-left: 5px;">Cross-Check Validation</label>
+        </div>
+      </div>
     </div>
 
     <div id="stats">

@@ -20,11 +20,17 @@ pub const std_options: std.Options = .{
 };
 
 // Shared visualization function that creates a combined image with matches drawn
-fn createMatchVisualization(
+fn createMatchVisualizationWithParams(
     allocator: std.mem.Allocator,
     img1_rgba: Image(Rgba),
     img2_rgba: Image(Rgba),
     n_features: u16,
+    scale_factor: f32,
+    n_levels: u8,
+    fast_threshold: u8,
+    max_distance: u32,
+    cross_check: bool,
+    ratio_threshold: f32,
 ) !Image(Rgba) {
     // Convert directly to grayscale for feature detection
     var gray1 = try img1_rgba.convert(u8, allocator);
@@ -33,12 +39,12 @@ fn createMatchVisualization(
     var gray2 = try img2_rgba.convert(u8, allocator);
     defer gray2.deinit(allocator);
 
-    // Create ORB detector
+    // Create ORB detector with custom parameters
     var orb: Orb = .{
         .n_features = n_features,
-        .scale_factor = 1.2,
-        .n_levels = 8,
-        .fast_threshold = 20,
+        .scale_factor = scale_factor,
+        .n_levels = n_levels,
+        .fast_threshold = fast_threshold,
     };
 
     // Detect features in both images
@@ -53,11 +59,11 @@ fn createMatchVisualization(
     std.log.info("Image 1: {} features detected", .{features1.keypoints.len});
     std.log.info("Image 2: {} features detected", .{features2.keypoints.len});
 
-    // Match features
+    // Match features with custom parameters
     const matcher: BruteForceMatcher = .{
-        .max_distance = 80,
-        .cross_check = true,
-        .ratio_threshold = 0.75,
+        .max_distance = max_distance,
+        .cross_check = cross_check,
+        .ratio_threshold = ratio_threshold,
     };
 
     const matches = try matcher.match(features1.descriptors, features2.descriptors, allocator);
@@ -174,17 +180,17 @@ fn createMatchVisualization(
     // Log statistics
     if (matches.len > 0) {
         var total_distance: f32 = 0;
-        var min_distance: f32 = std.math.inf(f32);
-        var max_distance: f32 = 0;
+        var min_dist: f32 = std.math.inf(f32);
+        var max_dist: f32 = 0;
 
         for (matches) |match| {
             total_distance += match.distance;
-            min_distance = @min(min_distance, match.distance);
-            max_distance = @max(max_distance, match.distance);
+            min_dist = @min(min_dist, match.distance);
+            max_dist = @max(max_dist, match.distance);
         }
 
         const avg_distance = total_distance / @as(f32, @floatFromInt(matches.len));
-        std.log.info("Match statistics: avg={d:.2}, min={d:.2}, max={d:.2}", .{ avg_distance, min_distance, max_distance });
+        std.log.info("Match statistics: avg={d:.2}, min={d:.2}, max={d:.2}", .{ avg_distance, min_dist, max_dist });
     }
 
     return viz;
@@ -201,6 +207,13 @@ pub export fn matchAndVisualize(
     result_ptr: [*]Rgba,
     result_rows: usize,
     result_cols: usize,
+    n_features: u16,
+    scale_factor: f32,
+    n_levels: u8,
+    fast_threshold: u8,
+    max_distance: u32,
+    cross_check: bool,
+    ratio_threshold: f32,
 ) void {
     const allocator = std.heap.wasm_allocator;
 
@@ -211,8 +224,8 @@ pub export fn matchAndVisualize(
     const img2_size = rows2 * cols2;
     const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
 
-    // Use the shared visualization function directly with RGBA
-    var viz = createMatchVisualization(allocator, img1, img2, 300) catch |err| {
+    // Use the shared visualization function with custom parameters
+    var viz = createMatchVisualizationWithParams(allocator, img1, img2, n_features, scale_factor, n_levels, fast_threshold, max_distance, cross_check, ratio_threshold) catch |err| {
         std.log.err("Failed to create visualization: {}", .{err});
         return;
     };
@@ -239,6 +252,13 @@ pub export fn getMatchStats(
     rows2: usize,
     cols2: usize,
     stats_ptr: [*]f32,
+    n_features: u16,
+    scale_factor: f32,
+    n_levels: u8,
+    fast_threshold: u8,
+    max_distance: u32,
+    cross_check: bool,
+    ratio_threshold: f32,
 ) void {
     const allocator = std.heap.wasm_allocator;
 
@@ -262,12 +282,12 @@ pub export fn getMatchStats(
     };
     defer gray2.deinit(allocator);
 
-    // Detect features
+    // Detect features with custom parameters
     var orb: Orb = .{
-        .n_features = 300,
-        .scale_factor = 1.2,
-        .n_levels = 8,
-        .fast_threshold = 20,
+        .n_features = n_features,
+        .scale_factor = scale_factor,
+        .n_levels = n_levels,
+        .fast_threshold = fast_threshold,
     };
 
     const features1 = orb.detectAndCompute(gray1, allocator) catch {
@@ -285,11 +305,11 @@ pub export fn getMatchStats(
     defer allocator.free(features2.keypoints);
     defer allocator.free(features2.descriptors);
 
-    // Match features
+    // Match features with custom parameters
     const matcher: BruteForceMatcher = .{
-        .max_distance = 80,
-        .cross_check = true,
-        .ratio_threshold = 0.75,
+        .max_distance = max_distance,
+        .cross_check = cross_check,
+        .ratio_threshold = ratio_threshold,
     };
 
     const matches = matcher.match(features1.descriptors, features2.descriptors, allocator) catch {
@@ -307,18 +327,18 @@ pub export fn getMatchStats(
 
     if (matches.len > 0) {
         var total_distance: f32 = 0;
-        var min_distance: f32 = std.math.inf(f32);
-        var max_distance: f32 = 0;
+        var min_dist: f32 = std.math.inf(f32);
+        var max_dist: f32 = 0;
 
         for (matches) |match| {
             total_distance += match.distance;
-            min_distance = @min(min_distance, match.distance);
-            max_distance = @max(max_distance, match.distance);
+            min_dist = @min(min_dist, match.distance);
+            max_dist = @max(max_dist, match.distance);
         }
 
         stats_ptr[3] = total_distance / @as(f32, @floatFromInt(matches.len));
-        stats_ptr[4] = min_distance;
-        stats_ptr[5] = max_distance;
+        stats_ptr[4] = min_dist;
+        stats_ptr[5] = max_dist;
     } else {
         stats_ptr[3] = 0;
         stats_ptr[4] = 0;

@@ -7,8 +7,19 @@
   const file2 = document.getElementById("file2");
   const matchButton = document.getElementById("match-button");
   const clearButton = document.getElementById("clear-button");
+  const toggleParamsButton = document.getElementById("toggle-params");
+  const parametersDiv = document.getElementById("parameters");
   const resultCanvas = document.getElementById("result-canvas");
   const ctx = resultCanvas.getContext("2d");
+
+  // Parameter controls
+  const nFeaturesSlider = document.getElementById("n-features");
+  const scaleFactorSlider = document.getElementById("scale-factor");
+  const nLevelsSlider = document.getElementById("n-levels");
+  const fastThresholdSlider = document.getElementById("fast-threshold");
+  const maxDistanceSlider = document.getElementById("max-distance");
+  const ratioThresholdSlider = document.getElementById("ratio-threshold");
+  const crossCheckCheckbox = document.getElementById("cross-check");
 
   let image1Data = null;
   let image2Data = null;
@@ -36,7 +47,7 @@
         // Create canvas to get image data
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
-        
+
         // Limit size for performance
         const maxSize = 800;
         let width = img.width;
@@ -46,11 +57,11 @@
           width = Math.floor(width * scale);
           height = Math.floor(height * scale);
         }
-        
+
         canvas.width = width;
         canvas.height = height;
         ctx.drawImage(img, 0, 0, width, height);
-        
+
         const imageData = ctx.getImageData(0, 0, width, height);
         if (imageNum === 1) {
           image1Data = { data: imageData, width, height };
@@ -95,6 +106,37 @@
   setupDragDrop(upload2, 2);
 
   // Clear button
+  // Toggle parameters visibility
+  toggleParamsButton.addEventListener("click", () => {
+    if (parametersDiv.style.display === "none") {
+      parametersDiv.style.display = "block";
+      toggleParamsButton.textContent = "Parameters ▲";
+    } else {
+      parametersDiv.style.display = "none";
+      toggleParamsButton.textContent = "Parameters ▼";
+    }
+  });
+
+  // Update parameter value displays
+  nFeaturesSlider.addEventListener("input", (e) => {
+    document.getElementById("n-features-value").textContent = e.target.value;
+  });
+  scaleFactorSlider.addEventListener("input", (e) => {
+    document.getElementById("scale-factor-value").textContent = e.target.value;
+  });
+  nLevelsSlider.addEventListener("input", (e) => {
+    document.getElementById("n-levels-value").textContent = e.target.value;
+  });
+  fastThresholdSlider.addEventListener("input", (e) => {
+    document.getElementById("fast-threshold-value").textContent = e.target.value;
+  });
+  maxDistanceSlider.addEventListener("input", (e) => {
+    document.getElementById("max-distance-value").textContent = e.target.value;
+  });
+  ratioThresholdSlider.addEventListener("input", (e) => {
+    document.getElementById("ratio-threshold-value").textContent = e.target.value;
+  });
+
   clearButton.addEventListener("click", () => {
     image1Data = null;
     image2Data = null;
@@ -104,7 +146,7 @@
     upload2.classList.remove("has-image");
     resultCanvas.classList.remove("visible");
     matchButton.disabled = true;
-    
+
     document.getElementById("features1").textContent = "-";
     document.getElementById("features2").textContent = "-";
     document.getElementById("matches").textContent = "-";
@@ -125,7 +167,7 @@
     const size1 = image1Data.height * image1Data.width * 4;
     const size2 = image2Data.height * image2Data.width * 4;
     const resultSize = resultHeight * resultWidth * 4;
-    
+
     const img1Ptr = wasm_exports.alloc(size1) >>> 0;
     const img2Ptr = wasm_exports.alloc(size2) >>> 0;
     const resultPtr = wasm_exports.alloc(resultSize) >>> 0;
@@ -139,22 +181,21 @@
     img1Array.set(image1Data.data.data);
     img2Array.set(image2Data.data.data);
 
-    // Call WASM to create visualization
-    wasm_exports.matchAndVisualize(
-      img1Ptr,
-      image1Data.height,
-      image1Data.width,
-      img2Ptr,
-      image2Data.height,
-      image2Data.width,
-      resultPtr,
-      resultHeight,
-      resultWidth
-    );
+    // Get current parameter values
+    const nFeatures = parseInt(nFeaturesSlider.value);
+    const scaleFactor = parseFloat(scaleFactorSlider.value);
+    const nLevels = parseInt(nLevelsSlider.value);
+    const fastThreshold = parseInt(fastThresholdSlider.value);
+    const maxDistance = parseInt(maxDistanceSlider.value);
+    const crossCheck = crossCheckCheckbox.checked;
+    const ratioThreshold = parseFloat(ratioThresholdSlider.value);
+
+    // Call WASM to create visualization with parameters
+    wasm_exports.matchAndVisualize(img1Ptr, image1Data.height, image1Data.width, img2Ptr, image2Data.height, image2Data.width, resultPtr, resultHeight, resultWidth, nFeatures, scaleFactor, nLevels, fastThreshold, maxDistance, crossCheck, ratioThreshold);
 
     // Get result pixels
     const resultData = new Uint8ClampedArray(wasm_exports.memory.buffer, resultPtr, resultSize);
-    
+
     // Display result
     resultCanvas.width = resultWidth;
     resultCanvas.height = resultHeight;
@@ -162,16 +203,8 @@
     ctx.putImageData(imageData, 0, 0);
     resultCanvas.classList.add("visible");
 
-    // Get statistics
-    wasm_exports.getMatchStats(
-      img1Ptr,
-      image1Data.height,
-      image1Data.width,
-      img2Ptr,
-      image2Data.height,
-      image2Data.width,
-      statsPtr
-    );
+    // Get statistics with same parameters
+    wasm_exports.getMatchStats(img1Ptr, image1Data.height, image1Data.width, img2Ptr, image2Data.height, image2Data.width, statsPtr, nFeatures, scaleFactor, nLevels, fastThreshold, maxDistance, crossCheck, ratioThreshold);
 
     const stats = new Float32Array(wasm_exports.memory.buffer, statsPtr, 6);
     document.getElementById("features1").textContent = Math.floor(stats[0]);
@@ -202,12 +235,12 @@
             return performance.now();
           },
         },
-      })
+      }),
     )
     .then((obj) => {
       wasm_exports = obj.instance.exports;
       console.log("WASM module loaded successfully");
-      
+
       // Enable match button if images already loaded
       if (image1Data && image2Data) {
         matchButton.disabled = false;
