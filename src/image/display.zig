@@ -58,29 +58,45 @@ pub fn DisplayFormatter(comptime T: type) type {
         const Self = @This();
 
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            // Setup allocator once for potential scaling
+            var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+            defer arena.deinit();
+            const allocator = arena.allocator();
 
-            // Determine if we can fallback to SGR
-            const can_fallback = @as(std.meta.Tag(@TypeOf(self.display_format)), self.display_format) == .auto;
+            // Prepare scaled image for sgr/braille if needed
+            var image_to_display = self.image;
+            var scaled_image: ?Image(T) = null;
+            defer if (scaled_image) |*img| img.deinit(allocator);
 
-            fmt: switch (self.display_format) {
+            // Handle scaling for sgr and braille (sixel/kitty do their own)
+            switch (self.display_format) {
                 .sgr => |options| {
-                    // Handle scaling if needed
-                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-                    defer arena.deinit();
-                    const allocator = arena.allocator();
-
-                    var image_to_display = self.image;
-                    var scaled_image: ?Image(T) = null;
-                    defer if (scaled_image) |*img| img.deinit(allocator);
-
                     const scale_factor = terminal.aspectScale(options.width, options.height, self.image.rows, self.image.cols);
+                    if (@abs(scale_factor - 1.0) > 0.001) {
+                        scaled_image = self.image.scale(allocator, scale_factor, .nearest_neighbor) catch null;
+                        if (scaled_image) |*img| {
+                            image_to_display = img;
+                        }
+                    }
+                },
+                .braille => |config| {
+                    const scale_factor = terminal.aspectScale(config.width, config.height, self.image.rows, self.image.cols);
                     if (@abs(scale_factor - 1.0) > 0.001) {
                         scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
                         if (scaled_image) |*img| {
                             image_to_display = img;
                         }
                     }
+                },
+                else => {}, // sixel, kitty, and auto handle their own scaling
+            }
 
+            // Determine if we can fallback to SGR
+            const can_fallback = self.display_format == .auto;
+
+            // Now render with the appropriate format
+            fmt: switch (self.display_format) {
+                .sgr => {
                     // Process image in 2-row chunks for half-block characters
                     const row_pairs = (image_to_display.rows + 1) / 2;
 
@@ -107,23 +123,6 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .braille => |config| {
-                    // Handle scaling if needed
-                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-                    defer arena.deinit();
-                    const allocator = arena.allocator();
-
-                    var image_to_display = self.image;
-                    var scaled_image: ?Image(T) = null;
-                    defer if (scaled_image) |*img| img.deinit(allocator);
-
-                    const scale_factor = terminal.aspectScale(config.width, config.height, self.image.rows, self.image.cols);
-                    if (@abs(scale_factor - 1.0) > 0.001) {
-                        scaled_image = self.image.scale(allocator, scale_factor, .nearest_neighbor) catch null;
-                        if (scaled_image) |*img| {
-                            image_to_display = img;
-                        }
-                    }
-
                     // Braille pattern bit mapping
                     // Dots are numbered 1-8, bits are 0-7
                     const braille_bits = [4][2]u3{
@@ -204,7 +203,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .dither = .auto,
                             .width = options.width,
                             .height = options.height,
-                            .interpolation = .bilinear,
+                            .interpolation = .nearest_neighbor,
                         } };
                     } else {
                         continue :fmt .{ .sgr = .{
@@ -214,11 +213,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .sixel => |options| {
-                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-                    defer arena.deinit();
-                    const allocator = arena.allocator();
-
-                    // Try to convert to sixel
+                    // Try to convert to sixel (uses original image, handles scaling internally)
                     const sixel_data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
                         // On OutOfMemory, try without dithering
                         if (err == error.OutOfMemory) {
@@ -239,11 +234,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .kitty => |options| {
-                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
-                    defer arena.deinit();
-                    const allocator = arena.allocator();
-
-                    // Try to convert to Kitty format
+                    // Try to convert to Kitty format (uses original image, handles scaling internally)
                     const kitty_data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
                         // On error, try with default options
                         if (err == error.OutOfMemory) {
