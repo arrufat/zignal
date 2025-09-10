@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ORB Feature Matching</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+      #image-container {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+        margin: 20px 0;
+      }
+      .canvas-wrapper {
+        position: relative;
+      }
+      .canvas-wrapper canvas {
+        cursor: pointer;
+        border: 2px dashed #666;
+        background: #222;
+      }
+      .canvas-wrapper.has-image canvas {
+        border: 2px solid #444;
+      }
+      /* SVG positioning handled by JavaScript */
+      .controls {
+        text-align: center;
+        margin: 20px 0;
+      }
+      .controls button {
+        padding: 10px 20px;
+        font-size: 16px;
+        margin: 0 5px;
+      }
+      #stats {
+        text-align: center;
+        margin: 20px 0;
+        font-family: monospace;
+      }
+      .stat-row {
+        margin: 5px 0;
+      }
+      .legend {
+        text-align: center;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      .legend span {
+        margin: 0 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>ORB Feature Matching</h1>
+      <p>Detect and match ORB features between two images using WebAssembly</p>
+    </div>
+    <div class="instructions">
+      Click or drag images to load them. Then click "Detect & Match" to find matching features.
+    </div>
+    <div id="image-container">
+      <div class="canvas-wrapper" id="wrapper1">
+        <h3>Image 1</h3>
+        <canvas id="canvas1" width="400" height="300"></canvas>
+      </div>
+      <div class="canvas-wrapper" id="wrapper2">
+        <h3>Image 2</h3>
+        <canvas id="canvas2" width="400" height="300"></canvas>
+      </div>
+    </div>
+    <svg id="match-lines" style="position: absolute; width: 100%; height: 100%; display: none;">
+    </svg>
+    <div class="controls">
+      <button id="match-button" disabled>Detect & Match Features</button>
+      <button id="clear-button">Clear Visualization</button>
+      <label>
+        <input type="checkbox" id="show-keypoints" checked>
+        Show Keypoints
+      </label>
+      <label>
+        <input type="checkbox" id="show-matches" checked>
+        Show Matches
+      </label>
+    </div>
+    <div class="legend">
+      Match Quality:
+      <span style="background: #00ff00; color: black;">Excellent</span>
+      <span style="background: #ffff00; color: black;">Good</span>
+      <span style="background: #ff8800; color: black;">Fair</span>
+      <span style="background: #ff0000; color: white;">Poor</span>
+    </div>
+    <div id="stats">
+      <div class="stat-row">Image 1:
+        <span id="features1">-</span>
+        features detected</div>
+      <div class="stat-row">Image 2:
+        <span id="features2">-</span>
+        features detected</div>
+      <div class="stat-row">Matches:
+        <span id="matches">-</span></div>
+      <div class="stat-row">Average distance:
+        <span id="avg-distance">-</span></div>
+      <div class="stat-row">Processing time:
+        <span id="time">-</span>
+        ms</div>
+    </div>
+    <input type="file" id="file1" style="display: none;" accept="image/*">
+    <input type="file" id="file2" style="display: none;" accept="image/*">
+    <script src="./feature_matching.js"></script>
+  </body>
+</html>
