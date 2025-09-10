@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
         "seam_carving",
         "whitebalance",
         "fdm",
+        "feature_matching",
     };
 
     // List of additional examples to build as executables
