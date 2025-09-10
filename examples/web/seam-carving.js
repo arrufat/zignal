@@ -141,7 +141,7 @@
       const rgbaPtr = wasmExports.alloc(rgbaSize);
       const seamSize = rows * 4;
       const seamPtr = wasmExports.alloc(seamSize);
-      const extraSize = rows * cols * 10;
+      const extraSize = rows * cols * 15;
       const extraPtr = wasmExports.alloc(extraSize);
       var rgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, rgbaSize);
       var seam = new Uint32Array(wasmExports.memory.buffer, seamPtr, cleanImageData.height);
@@ -150,6 +150,10 @@
       rgba.set(cleanImageData.data);
 
       wasmExports.seam_carve(rgbaPtr, rows, cols, extraPtr, extraSize, seamPtr, rows);
+
+      // Recreate views after potential memory growth
+      rgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, rgbaSize);
+      seam = new Uint32Array(wasmExports.memory.buffer, seamPtr, cleanImageData.height);
 
       // Create new clean image data after seam removal
       const newWidth = cols - 1;
