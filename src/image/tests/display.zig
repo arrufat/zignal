@@ -24,7 +24,7 @@ test "image format sgr" {
     var stream = std.Io.Writer.fixed(&buffer);
 
     // Force SGR format for testing
-    try stream.print("{f}", .{image.display(.sgr)});
+    try stream.print("{f}", .{image.display(.{ .sgr = .default })});
     const result = buffer[0..stream.end];
 
     // The expected output should combine two rows into one using half-block character
@@ -54,7 +54,7 @@ test "image format sgr odd rows" {
     var buffer: [512]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(.sgr)});
+    try stream.print("{f}", .{image.display(.{ .sgr = .default })});
     const result = buffer[0..stream.end];
 
     // Expected: 2 lines (3 rows compressed to 2 using half-blocks)

@@ -6,6 +6,8 @@ const color = @import("../color.zig");
 const Rgb = @import("../color.zig").Rgb;
 const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");
+const terminal = @import("../terminal.zig");
+const Interpolation = @import("interpolation.zig").Interpolation;
 
 // Import Image type directly - Zig's lazy compilation handles circular imports
 const Image = @import("../image.zig").Image;
@@ -13,16 +15,32 @@ const Image = @import("../image.zig").Image;
 /// Display format options
 pub const DisplayFormat = union(enum) {
     /// Automatically detect the best format (kitty -> sixel -> sgr)
-    auto,
+    auto: struct {
+        /// Optional target width in pixels
+        width: ?u32 = null,
+        /// Optional target height in pixels
+        height: ?u32 = null,
+        pub const default: @This() = .{};
+    },
     /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
     /// Requires a monospace font with Unicode block element support (U+2580)
-    sgr,
+    sgr: struct {
+        /// Optional target width in pixels
+        width: ?u32 = null,
+        /// Optional target height in pixels
+        height: ?u32 = null,
+        pub const default: @This() = .{};
+    },
     /// Braille patterns for 2x4 monochrome resolution
     /// Requires Unicode Braille pattern support (U+2800-U+28FF)
     /// Color images are binarized with threshold
     braille: struct {
         /// Brightness threshold for on/off (0.0-1.0)
-        threshold: f32,
+        threshold: f32 = 0.5,
+        /// Optional target width in pixels
+        width: ?u32 = null,
+        /// Optional target height in pixels
+        height: ?u32 = null,
         pub const default: @This() = .{ .threshold = 0.5 };
     },
     /// Force sixel output with specific options
@@ -42,20 +60,37 @@ pub fn DisplayFormatter(comptime T: type) type {
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 
             // Determine if we can fallback to SGR
-            const can_fallback = self.display_format == .auto;
+            const can_fallback = @as(std.meta.Tag(@TypeOf(self.display_format)), self.display_format) == .auto;
 
             fmt: switch (self.display_format) {
-                .sgr => {
+                .sgr => |options| {
+                    // Handle scaling if needed
+                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+                    defer arena.deinit();
+                    const allocator = arena.allocator();
+
+                    var image_to_display = self.image;
+                    var scaled_image: ?Image(T) = null;
+                    defer if (scaled_image) |*img| img.deinit(allocator);
+
+                    const scale_factor = terminal.aspectScale(options.width, options.height, self.image.rows, self.image.cols);
+                    if (@abs(scale_factor - 1.0) > 0.001) {
+                        scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
+                        if (scaled_image) |*img| {
+                            image_to_display = img;
+                        }
+                    }
+
                     // Process image in 2-row chunks for half-block characters
-                    const row_pairs = (self.image.rows + 1) / 2;
+                    const row_pairs = (image_to_display.rows + 1) / 2;
 
                     for (0..row_pairs) |pair_idx| {
-                        for (0..self.image.cols) |col| {
+                        for (0..image_to_display.cols) |col| {
                             const row1 = pair_idx * 2;
-                            const row2 = if (row1 + 1 < self.image.rows) row1 + 1 else row1;
+                            const row2 = if (row1 + 1 < image_to_display.rows) row1 + 1 else row1;
 
-                            const upper_pixel = self.image.at(row1, col).*;
-                            const lower_pixel = self.image.at(row2, col).*;
+                            const upper_pixel = image_to_display.at(row1, col).*;
+                            const lower_pixel = image_to_display.at(row2, col).*;
 
                             const rgb_upper = color.convertColor(Rgb, upper_pixel);
                             const rgb_lower = color.convertColor(Rgb, lower_pixel);
@@ -72,6 +107,23 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .braille => |config| {
+                    // Handle scaling if needed
+                    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+                    defer arena.deinit();
+                    const allocator = arena.allocator();
+
+                    var image_to_display = self.image;
+                    var scaled_image: ?Image(T) = null;
+                    defer if (scaled_image) |*img| img.deinit(allocator);
+
+                    const scale_factor = terminal.aspectScale(config.width, config.height, self.image.rows, self.image.cols);
+                    if (@abs(scale_factor - 1.0) > 0.001) {
+                        scaled_image = self.image.scale(allocator, scale_factor, .nearest_neighbor) catch null;
+                        if (scaled_image) |*img| {
+                            image_to_display = img;
+                        }
+                    }
+
                     // Braille pattern bit mapping
                     // Dots are numbered 1-8, bits are 0-7
                     const braille_bits = [4][2]u3{
@@ -81,8 +133,8 @@ pub fn DisplayFormatter(comptime T: type) type {
                         .{ 6, 7 }, // dots 7, 8
                     };
                     // Process image in 2x4 blocks for Braille patterns
-                    const block_rows = (self.image.rows + 3) / 4;
-                    const block_cols = (self.image.cols + 1) / 2;
+                    const block_rows = (image_to_display.rows + 3) / 4;
+                    const block_cols = (image_to_display.cols + 1) / 2;
 
                     for (0..block_rows) |block_row| {
                         for (0..block_cols) |block_col| {
@@ -94,8 +146,8 @@ pub fn DisplayFormatter(comptime T: type) type {
                                     const y = block_row * 4 + dy;
                                     const x = block_col * 2 + dx;
 
-                                    if (y < self.image.rows and x < self.image.cols) {
-                                        const pixel = self.image.at(y, x).*;
+                                    if (y < image_to_display.rows and x < image_to_display.cols) {
+                                        const pixel = image_to_display.at(y, x).*;
 
                                         // Convert to grayscale brightness
                                         const brightness: f32 = switch (@typeInfo(@TypeOf(pixel))) {
@@ -134,13 +186,31 @@ pub fn DisplayFormatter(comptime T: type) type {
                         }
                     }
                 },
-                .auto => {
+                .auto => |options| {
                     if (kitty.isSupported()) {
-                        continue :fmt .{ .kitty = .default };
+                        continue :fmt .{ .kitty = .{
+                            .quiet = 1,
+                            .image_id = null,
+                            .placement_id = null,
+                            .delete_after = false,
+                            .enable_chunking = false,
+                            .width = options.width,
+                            .height = options.height,
+                            .interpolation = .bilinear,
+                        } };
                     } else if (sixel.isSupported()) {
-                        continue :fmt .{ .sixel = .default };
+                        continue :fmt .{ .sixel = .{
+                            .palette = .{ .adaptive = .{ .max_colors = 256 } },
+                            .dither = .auto,
+                            .width = options.width,
+                            .height = options.height,
+                            .interpolation = .bilinear,
+                        } };
                     } else {
-                        continue :fmt .sgr;
+                        continue :fmt .{ .sgr = .{
+                            .width = options.width,
+                            .height = options.height,
+                        } };
                     }
                 },
                 .sixel => |options| {
@@ -161,7 +231,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (sixel_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .sgr;
+                        continue :fmt .{ .sgr = .default };
                     } else {
                         // Output minimal sixel sequence to indicate failure
                         // This ensures we always output valid sixel when explicitly requested
@@ -186,7 +256,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (kitty_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .sgr;
+                        continue :fmt .{ .sgr = .default };
                     } else {
                         // Output minimal Kitty sequence to indicate failure
                         // Empty image with delete command
