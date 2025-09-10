@@ -221,6 +221,12 @@ input {
   width: 150px;
 }
 
+/* Do not force width on checkboxes/radios */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+}
+
 #validation-message {
   color: #bf616a;
 }
