@@ -146,13 +146,16 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 // ============================================================================
 
 pub const image_save_doc =
-    \\Save the image to a PNG file.
+    \\Save the image to a file (PNG or JPEG format).
+    \\
+    \\The format is determined by the file extension (.png, .jpg, or .jpeg).
     \\
     \\## Parameters
-    \\- `path` (str): Path where the PNG file will be saved. Must have .png extension.
+    \\- `path` (str): Path where the image file will be saved.
+    \\  Must have .png, .jpg, or .jpeg extension.
     \\
     \\## Raises
-    \\- `ValueError`: If the file does not have .png extension
+    \\- `ValueError`: If the file has an unsupported extension
     \\- `MemoryError`: If allocation fails during save
     \\- `PermissionError`: If write permission is denied
     \\- `FileNotFoundError`: If the directory does not exist
@@ -160,7 +163,8 @@ pub const image_save_doc =
     \\## Examples
     \\```python
     \\img = Image.load("input.png")
-    \\img.save("output.png")
+    \\img.save("output.png")   # Save as PNG
+    \\img.save("output.jpg")   # Save as JPEG
     \\```
 ;
 
@@ -178,32 +182,24 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     // Convert C string to Zig slice
     const path_slice = std.mem.span(file_path);
 
-    // Validate file extension
-    if (!std.mem.endsWith(u8, path_slice, ".png") and
-        !std.mem.endsWith(u8, path_slice, ".PNG"))
-    {
-        c.PyErr_SetString(c.PyExc_ValueError, "File must have .png extension. Currently only PNG format is supported.");
-        return null;
-    }
-
-    // Save PNG for current image format
+    // Save image using the core library's save method which handles format detection
     if (self.py_image) |pimg| {
-        const res = switch (pimg.data) {
-            inline else => |img| img.save(allocator, path_slice),
-        };
-        res catch |err| {
-            py_utils.setErrorWithPath(err, path_slice);
-            return null;
-        };
+        switch (pimg.data) {
+            inline else => |img| img.save(allocator, path_slice) catch |err| {
+                if (err == error.UnsupportedImageFormat) {
+                    c.PyErr_SetString(c.PyExc_ValueError, "Unsupported image format. File must have a valid PNG or JPEG extension.");
+                    return null;
+                }
+                py_utils.setErrorWithPath(err, path_slice);
+                return null;
+            },
+        }
     } else {
         c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
         return null;
     }
 
-    // Return None
-    const none = c.Py_None();
-    c.Py_INCREF(none);
-    return none;
+    return py_utils.getPyNone();
 }
 
 // ============================================================================
@@ -287,10 +283,7 @@ pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    // Return None
-    const none = c.Py_None();
-    c.Py_INCREF(none);
-    return none;
+    return py_utils.getPyNone();
 }
 
 // ============================================================================
