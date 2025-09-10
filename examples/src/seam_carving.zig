@@ -85,7 +85,7 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
         const right_start = seam_col + 1;
         if (right_start < image.cols) {
             const right_count = image.cols - right_start;
-            @memmove(image.data[pos..][0..right_count], image.data[row_start..][right_start..]);
+            @memmove(image.data[pos..][0..right_count], image.data[row_start..][right_start..][0..right_count]);
             pos += right_count;
         }
     }
@@ -102,7 +102,7 @@ pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr:
     const allocator: std.mem.Allocator = blk: {
         if (extra_ptr) |ptr| {
             @setRuntimeSafety(true);
-            assert(extra_len > size * 9);
+            assert(extra_len >= size * 13); // Need at least 13x for sobel buffers
             var fba: std.heap.FixedBufferAllocator = .init(ptr[0..extra_len]);
             break :blk fba.allocator();
         } else if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
