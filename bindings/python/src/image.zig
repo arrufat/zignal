@@ -1130,6 +1130,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "autocontrast",
+            .meth = @ptrCast(&filtering.image_autocontrast),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_autocontrast_doc,
+            .params = "self, cutoff: float = 0.0",
+            .returns = "Image",
+        },
+        .{
             .name = "motion_blur",
             .meth = @ptrCast(&filtering.image_motion_blur),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,

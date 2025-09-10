@@ -205,6 +205,65 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     return null;
 }
 
+pub const image_autocontrast_doc =
+    \\Automatically adjust image contrast by stretching the intensity range.
+    \\
+    \\Analyzes the histogram and remaps pixel values so the darkest pixels
+    \\become black (0) and brightest become white (255).
+    \\
+    \\## Parameters
+    \\- `cutoff` (float, optional): Percentage of pixels to ignore at extremes (0-50).
+    \\  Default: 0. For example, 2.0 ignores the darkest and brightest 2% of pixels,
+    \\  helping to remove outliers.
+    \\
+    \\## Returns
+    \\A new image with adjusted contrast.
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\
+    \\# Basic auto-contrast
+    \\enhanced = img.autocontrast()
+    \\
+    \\# Ignore 2% outliers on each end
+    \\enhanced = img.autocontrast(cutoff=2.0)
+    \\```
+;
+
+pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Parse arguments
+    var cutoff: f32 = 0.0;
+    const kw = comptime py_utils.kw(&.{"cutoff"});
+    const format = std.fmt.comptimePrint("|f", .{});
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &cutoff) == 0) {
+        return null;
+    }
+
+    // Validate cutoff range
+    if (cutoff < 0 or cutoff >= 50) {
+        c.PyErr_SetString(c.PyExc_ValueError, "cutoff must be between 0 and 50");
+        return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                const out = img.autocontrast(allocator, cutoff) catch {
+                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply autocontrast");
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 pub const image_motion_blur_doc =
     \\Apply motion blur effect to the image.
     \\

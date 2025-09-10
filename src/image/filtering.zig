@@ -199,6 +199,193 @@ pub fn Filter(comptime T: type) type {
         /// version of the original image (calculated efficiently using an integral image).
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
+        /// Automatically adjusts the contrast by stretching the intensity range.
+        pub fn autocontrast(self: Self, allocator: Allocator, cutoff: f32) !Self {
+            if (cutoff < 0 or cutoff >= 50) {
+                return error.InvalidCutoff; // Can't ignore 50% or more from each end
+            }
+
+            var result = try Self.init(allocator, self.rows, self.cols);
+            errdefer result.deinit(allocator);
+
+            const total_pixels = self.rows * self.cols;
+            const cutoff_pixels = @as(usize, @intFromFloat(@as(f32, @floatFromInt(total_pixels)) * cutoff / 100.0));
+
+            switch (@typeInfo(T)) {
+                .int => {
+                    // For grayscale images, single channel processing
+                    var histogram = [_]usize{0} ** 256;
+
+                    // Build histogram
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const val = self.at(r, c).*;
+                            histogram[val] += 1;
+                        }
+                    }
+
+                    // Find min and max values considering cutoff
+                    var min_val: u8 = 0;
+                    var max_val: u8 = 255;
+
+                    if (cutoff > 0) {
+                        var count: usize = 0;
+                        for (0..256) |i| {
+                            count += histogram[i];
+                            if (count > cutoff_pixels) {
+                                min_val = @intCast(i);
+                                break;
+                            }
+                        }
+
+                        count = 0;
+                        var i: usize = 255;
+                        while (i > 0) : (i -= 1) {
+                            count += histogram[i];
+                            if (count > cutoff_pixels) {
+                                max_val = @intCast(i);
+                                break;
+                            }
+                        }
+                    } else {
+                        // Find actual min/max without cutoff
+                        for (0..256) |i| {
+                            if (histogram[i] > 0) {
+                                min_val = @intCast(i);
+                                break;
+                            }
+                        }
+                        var i: usize = 255;
+                        while (i > 0) : (i -= 1) {
+                            if (histogram[i] > 0) {
+                                max_val = @intCast(i);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Avoid division by zero
+                    const range = if (max_val > min_val) max_val - min_val else 1;
+
+                    // Apply remapping
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const val = self.at(r, c).*;
+                            const clamped = @max(min_val, @min(max_val, val));
+                            const normalized = @as(f32, @floatFromInt(clamped - min_val)) / @as(f32, @floatFromInt(range));
+                            result.at(r, c).* = @intFromFloat(normalized * 255.0);
+                        }
+                    }
+                },
+                .@"struct" => {
+                    // For RGB/RGBA images, process each channel independently
+                    const Rgb = @import("../color.zig").Rgb;
+                    const Rgba = @import("../color.zig").Rgba;
+
+                    if (T == Rgb or T == Rgba) {
+                        // Build histograms for each channel
+                        var hist_r = [_]usize{0} ** 256;
+                        var hist_g = [_]usize{0} ** 256;
+                        var hist_b = [_]usize{0} ** 256;
+
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const pixel = self.at(r, c).*;
+                                hist_r[pixel.r] += 1;
+                                hist_g[pixel.g] += 1;
+                                hist_b[pixel.b] += 1;
+                            }
+                        }
+
+                        // Find min/max for each channel
+                        const findRange = struct {
+                            fn find(histogram: *const [256]usize, cutoff_px: usize) struct { min: u8, max: u8 } {
+                                var min_val: u8 = 0;
+                                var max_val: u8 = 255;
+
+                                if (cutoff_px > 0) {
+                                    var count: usize = 0;
+                                    for (0..256) |i| {
+                                        count += histogram[i];
+                                        if (count > cutoff_px) {
+                                            min_val = @intCast(i);
+                                            break;
+                                        }
+                                    }
+
+                                    count = 0;
+                                    var i: usize = 255;
+                                    while (i > 0) : (i -= 1) {
+                                        count += histogram[i];
+                                        if (count > cutoff_px) {
+                                            max_val = @intCast(i);
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    for (0..256) |i| {
+                                        if (histogram[i] > 0) {
+                                            min_val = @intCast(i);
+                                            break;
+                                        }
+                                    }
+                                    var i: usize = 255;
+                                    while (i > 0) : (i -= 1) {
+                                        if (histogram[i] > 0) {
+                                            max_val = @intCast(i);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                return .{ .min = min_val, .max = max_val };
+                            }
+                        }.find;
+
+                        const range_r = findRange(&hist_r, cutoff_pixels);
+                        const range_g = findRange(&hist_g, cutoff_pixels);
+                        const range_b = findRange(&hist_b, cutoff_pixels);
+
+                        // Apply remapping
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const pixel = self.at(r, c).*;
+                                var new_pixel = pixel;
+
+                                // Remap each channel
+                                const remap = struct {
+                                    fn apply(val: u8, min: u8, max: u8) u8 {
+                                        const clamped = @max(min, @min(max, val));
+                                        const range = if (max > min) max - min else 1;
+                                        const normalized = @as(f32, @floatFromInt(clamped - min)) / @as(f32, @floatFromInt(range));
+                                        return @intFromFloat(normalized * 255.0);
+                                    }
+                                }.apply;
+
+                                new_pixel.r = remap(pixel.r, range_r.min, range_r.max);
+                                new_pixel.g = remap(pixel.g, range_g.min, range_g.max);
+                                new_pixel.b = remap(pixel.b, range_b.min, range_b.max);
+
+                                result.at(r, c).* = new_pixel;
+                            }
+                        }
+                    } else {
+                        // For other color types, convert to RGB, process, and convert back
+                        const rgb_img = try self.convert(Rgb, allocator);
+                        defer rgb_img.deinit(allocator);
+
+                        const rgb_result = try Filter(Rgb).autocontrast(rgb_img, allocator, cutoff);
+                        defer rgb_result.deinit(allocator);
+
+                        return rgb_result.convert(T, allocator);
+                    }
+                },
+                else => return error.UnsupportedType,
+            }
+
+            return result;
+        }
+
         pub fn sharpen(self: Self, allocator: std.mem.Allocator, sharpened: *Self, radius: usize) !void {
             if (!self.hasSameShape(sharpened.*)) {
                 sharpened.* = try .init(allocator, self.rows, self.cols);
