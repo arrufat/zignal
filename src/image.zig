@@ -544,6 +544,23 @@ pub fn Image(comptime T: type) type {
             return Filter(T).sharpen(self, allocator, sharpened, radius);
         }
 
+        /// Automatically adjusts the contrast of an image by stretching the intensity range.
+        ///
+        /// This function analyzes the histogram of the image and remaps pixel values so that
+        /// the darkest pixels become black (0) and the brightest become white (255), with
+        /// intermediate values scaled proportionally.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the new image
+        /// - `cutoff`: Percentage of pixels to ignore at the extremes (0-100).
+        ///             For example, 2.0 ignores the darkest and brightest 2% of pixels,
+        ///             which helps remove outliers.
+        ///
+        /// Returns: A new image with adjusted contrast
+        pub fn autocontrast(self: Self, allocator: Allocator, cutoff: f32) !Self {
+            return Filter(T).autocontrast(self, allocator, cutoff);
+        }
+
         /// Applies a 2D convolution with the given kernel to the image.
         ///
         /// Parameters:
