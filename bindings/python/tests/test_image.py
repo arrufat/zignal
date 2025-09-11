@@ -303,3 +303,37 @@ class TestImageSmoke:
 
         with pytest.raises(ValueError):
             img.shen_castan(high_ratio=0.0)  # Must be in (0, 1)
+
+    def test_autocontrast_smoke(self):
+        """Smoke test for autocontrast method"""
+        # Grayscale
+        gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        enhanced = gray.autocontrast()
+        assert enhanced.rows == 5 and enhanced.cols == 5
+
+        # RGB
+        rgb = zignal.Image(5, 5, (100, 150, 200), dtype=zignal.Rgb)
+        enhanced_rgb = rgb.autocontrast(cutoff=2.0)
+        assert enhanced_rgb.rows == 5 and enhanced_rgb.cols == 5
+
+        # RGBA
+        rgba = zignal.Image(5, 5, (100, 150, 200, 255), dtype=zignal.Rgba)
+        enhanced_rgba = rgba.autocontrast()
+        assert enhanced_rgba.rows == 5 and enhanced_rgba.cols == 5
+
+    def test_equalize_smoke(self):
+        """Smoke test for equalize method"""
+        # Grayscale
+        gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        equalized = gray.equalize()
+        assert equalized.rows == 5 and equalized.cols == 5
+
+        # RGB
+        rgb = zignal.Image(5, 5, (100, 150, 200), dtype=zignal.Rgb)
+        equalized_rgb = rgb.equalize()
+        assert equalized_rgb.rows == 5 and equalized_rgb.cols == 5
+
+        # RGBA
+        rgba = zignal.Image(5, 5, (100, 150, 200, 255), dtype=zignal.Rgba)
+        equalized_rgba = rgba.equalize()
+        assert equalized_rgba.rows == 5 and equalized_rgba.cols == 5

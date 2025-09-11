@@ -264,6 +264,57 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
     return null;
 }
 
+pub const image_equalize_doc =
+    \\Equalize the histogram of the image to improve contrast.
+    \\
+    \\Redistributes pixel intensities to achieve a more uniform histogram,
+    \\which typically enhances contrast in images with poor contrast or
+    \\uneven lighting conditions. The technique maps the cumulative
+    \\distribution function (CDF) of pixel values to create a more even
+    \\spread of intensities across the full range.
+    \\
+    \\For color images (RGB/RGBA), each channel is equalized independently.
+    \\
+    \\## Returns
+    \\Image: New image with equalized histogram
+    \\
+    \\## Example
+    \\```python
+    \\import zignal
+    \\
+    \\# Load an image with poor contrast
+    \\img = zignal.Image.load("low_contrast.jpg")
+    \\
+    \\# Apply histogram equalization
+    \\equalized = img.equalize()
+    \\
+    \\# Save the result
+    \\equalized.save("equalized.jpg")
+    \\
+    \\# Compare with autocontrast
+    \\auto = img.autocontrast(cutoff=2.0)
+    \\```
+;
+
+pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+
+    // Apply equalization
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                const out = img.equalize(allocator) catch {
+                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply histogram equalization");
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+    }
+    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    return null;
+}
+
 pub const image_motion_blur_doc =
     \\Apply motion blur effect to the image.
     \\
