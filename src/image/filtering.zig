@@ -213,56 +213,10 @@ pub fn Filter(comptime T: type) type {
 
             switch (@typeInfo(T)) {
                 .int => {
-                    // For grayscale images, single channel processing
-                    var histogram = [_]usize{0} ** 256;
-
-                    // Build histogram
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            const val = self.at(r, c).*;
-                            histogram[val] += 1;
-                        }
-                    }
-
-                    // Find min and max values considering cutoff
-                    var min_val: u8 = 0;
-                    var max_val: u8 = 255;
-
-                    if (cutoff > 0) {
-                        var count: usize = 0;
-                        for (0..256) |i| {
-                            count += histogram[i];
-                            if (count > cutoff_pixels) {
-                                min_val = @intCast(i);
-                                break;
-                            }
-                        }
-
-                        count = 0;
-                        var i: usize = 255;
-                        while (i > 0) : (i -= 1) {
-                            count += histogram[i];
-                            if (count > cutoff_pixels) {
-                                max_val = @intCast(i);
-                                break;
-                            }
-                        }
-                    } else {
-                        // Find actual min/max without cutoff
-                        for (0..256) |i| {
-                            if (histogram[i] > 0) {
-                                min_val = @intCast(i);
-                                break;
-                            }
-                        }
-                        var i: usize = 255;
-                        while (i > 0) : (i -= 1) {
-                            if (histogram[i] > 0) {
-                                max_val = @intCast(i);
-                                break;
-                            }
-                        }
-                    }
+                    // For grayscale images, use histogram module
+                    const hist = self.histogram();
+                    const min_val = hist.findCutoffMin(@intCast(cutoff_pixels));
+                    const max_val = hist.findCutoffMax(@intCast(cutoff_pixels));
 
                     // Avoid division by zero
                     const range = if (max_val > min_val) max_val - min_val else 1;
@@ -283,68 +237,10 @@ pub fn Filter(comptime T: type) type {
                     const Rgba = @import("../color.zig").Rgba;
 
                     if (T == Rgb or T == Rgba) {
-                        // Build histograms for each channel
-                        var hist_r = [_]usize{0} ** 256;
-                        var hist_g = [_]usize{0} ** 256;
-                        var hist_b = [_]usize{0} ** 256;
-
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const pixel = self.at(r, c).*;
-                                hist_r[pixel.r] += 1;
-                                hist_g[pixel.g] += 1;
-                                hist_b[pixel.b] += 1;
-                            }
-                        }
-
-                        // Find min/max for each channel
-                        const findRange = struct {
-                            fn find(histogram: *const [256]usize, cutoff_px: usize) struct { min: u8, max: u8 } {
-                                var min_val: u8 = 0;
-                                var max_val: u8 = 255;
-
-                                if (cutoff_px > 0) {
-                                    var count: usize = 0;
-                                    for (0..256) |i| {
-                                        count += histogram[i];
-                                        if (count > cutoff_px) {
-                                            min_val = @intCast(i);
-                                            break;
-                                        }
-                                    }
-
-                                    count = 0;
-                                    var i: usize = 255;
-                                    while (i > 0) : (i -= 1) {
-                                        count += histogram[i];
-                                        if (count > cutoff_px) {
-                                            max_val = @intCast(i);
-                                            break;
-                                        }
-                                    }
-                                } else {
-                                    for (0..256) |i| {
-                                        if (histogram[i] > 0) {
-                                            min_val = @intCast(i);
-                                            break;
-                                        }
-                                    }
-                                    var i: usize = 255;
-                                    while (i > 0) : (i -= 1) {
-                                        if (histogram[i] > 0) {
-                                            max_val = @intCast(i);
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                return .{ .min = min_val, .max = max_val };
-                            }
-                        }.find;
-
-                        const range_r = findRange(&hist_r, cutoff_pixels);
-                        const range_g = findRange(&hist_g, cutoff_pixels);
-                        const range_b = findRange(&hist_b, cutoff_pixels);
+                        // Use histogram module
+                        const hist = self.histogram();
+                        const mins = hist.findCutoffMin(@intCast(cutoff_pixels));
+                        const maxs = hist.findCutoffMax(@intCast(cutoff_pixels));
 
                         // Apply remapping
                         for (0..self.rows) |r| {
@@ -362,9 +258,9 @@ pub fn Filter(comptime T: type) type {
                                     }
                                 }.apply;
 
-                                new_pixel.r = remap(pixel.r, range_r.min, range_r.max);
-                                new_pixel.g = remap(pixel.g, range_g.min, range_g.max);
-                                new_pixel.b = remap(pixel.b, range_b.min, range_b.max);
+                                new_pixel.r = remap(pixel.r, mins.r, maxs.r);
+                                new_pixel.g = remap(pixel.g, mins.g, maxs.g);
+                                new_pixel.b = remap(pixel.b, mins.b, maxs.b);
 
                                 result.at(r, c).* = new_pixel;
                             }

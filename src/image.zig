@@ -32,6 +32,7 @@ pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const channel_ops = @import("image/channel_ops.zig");
+pub const Histogram = @import("image/histogram.zig").Histogram;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -792,6 +793,39 @@ pub fn Image(comptime T: type) type {
                 .stride = self.stride,
                 .rows = self.rows,
             };
+        }
+
+        /// Computes a histogram of the image pixel values.
+        /// Supported types: u8, Rgb, Rgba
+        /// Returns a Histogram struct with channel-specific bins.
+        pub fn histogram(self: Self) Histogram(T) {
+            const Rgb = @import("color/Rgb.zig");
+            const Rgba = @import("color/Rgba.zig").Rgba;
+
+            var hist: Histogram(T) = .init();
+
+            var iter = self.pixels();
+            while (iter.next()) |pixel| {
+                switch (T) {
+                    u8 => {
+                        hist.values[pixel.*] += 1;
+                    },
+                    Rgb => {
+                        hist.r[pixel.r] += 1;
+                        hist.g[pixel.g] += 1;
+                        hist.b[pixel.b] += 1;
+                    },
+                    Rgba => {
+                        hist.r[pixel.r] += 1;
+                        hist.g[pixel.g] += 1;
+                        hist.b[pixel.b] += 1;
+                        hist.a[pixel.a] += 1;
+                    },
+                    else => @compileError("histogram() only supports u8, Rgb, and Rgba types"),
+                }
+            }
+
+            return hist;
         }
     };
 }
