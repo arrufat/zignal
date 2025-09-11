@@ -562,6 +562,30 @@ pub fn Image(comptime T: type) type {
             return Filter(T).autocontrast(self, allocator, cutoff);
         }
 
+        /// Equalizes the histogram of an image to improve contrast.
+        ///
+        /// This function redistributes pixel intensities to achieve a more uniform histogram,
+        /// which typically enhances contrast in images with poor contrast or uneven lighting.
+        /// The technique maps the cumulative distribution function (CDF) of pixel values to
+        /// create a more even spread of intensities across the full range.
+        ///
+        /// For color images (RGB/RGBA), each channel is equalized independently.
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for the new image
+        ///
+        /// Returns: A new image with equalized histogram
+        ///
+        /// Example usage:
+        /// ```zig
+        /// var img = try Image(u8).load(allocator, "low_contrast.png");
+        /// var equalized = try img.equalize(allocator);
+        /// defer equalized.deinit(allocator);
+        /// ```
+        pub fn equalize(self: Self, allocator: Allocator) !Self {
+            return Filter(T).equalize(self, allocator);
+        }
+
         /// Applies a 2D convolution with the given kernel to the image.
         ///
         /// Parameters:

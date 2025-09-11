@@ -1138,6 +1138,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "equalize",
+            .meth = @ptrCast(&filtering.image_equalize),
+            .flags = c.METH_NOARGS,
+            .doc = filtering.image_equalize_doc,
+            .params = "self",
+            .returns = "Image",
+        },
+        .{
             .name = "motion_blur",
             .meth = @ptrCast(&filtering.image_motion_blur),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
