@@ -5,7 +5,6 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
-const detectJpegComponents = zignal.jpeg.detectComponents;
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
@@ -81,32 +80,27 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         std.mem.endsWith(u8, path_slice, ".JPEG");
 
     if (is_jpeg) {
-        // Read file to detect JPEG color space
+        // Read file and decode JPEG
         const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(200 * 1024 * 1024)) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
         defer allocator.free(data);
 
-        const components = detectJpegComponents(data) orelse {
-            c.PyErr_SetString(c.PyExc_ValueError, "Invalid JPEG file (no SOF marker)");
+        var decoded = zignal.jpeg.decode(allocator, data) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
+        defer decoded.deinit();
 
-        if (components == 1) {
-            // Grayscale JPEG
-            const image = Image(u8).load(allocator, path_slice) catch |err| {
-                py_utils.setErrorWithPath(err, path_slice);
-                return null;
-            };
-            return @ptrCast(moveImageToPython(image) orelse return null);
-        } else {
-            // Color JPEG - load as RGB
-            const image = Image(Rgb).load(allocator, path_slice) catch |err| {
-                py_utils.setErrorWithPath(err, path_slice);
-                return null;
-            };
-            return @ptrCast(moveImageToPython(image) orelse return null);
+        const native = zignal.jpeg.toNativeImage(allocator, &decoded) catch |err| {
+            py_utils.setErrorWithPath(err, path_slice);
+            return null;
+        };
+        switch (native) {
+            inline else => |img| {
+                return @ptrCast(moveImageToPython(img) orelse return null);
+            },
         }
     }
 
