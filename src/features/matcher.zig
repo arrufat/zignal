@@ -51,7 +51,7 @@ pub const BruteForceMatcher = struct {
             return try allocator.alloc(Match, 0);
         }
 
-        var matches: ArrayList(Match) = .empty;
+        var matches: ArrayList(Match) = .{};
         defer matches.deinit(allocator);
 
         // For each query descriptor, find best matches in train set
