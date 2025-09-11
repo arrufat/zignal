@@ -87,9 +87,12 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
 
-        if (pixel > center +| threshold) {
+        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
+        const dark_threshold = if (center < threshold) 0 else center - threshold;
+
+        if (pixel > bright_threshold) {
             bright_count += 1;
-        } else if (pixel < center -| threshold) {
+        } else if (pixel < dark_threshold) {
             dark_count += 1;
         }
     }
@@ -113,11 +116,14 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
 
-        if (pixel > center +| threshold) {
+        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
+        const dark_threshold = if (center < threshold) 0 else center - threshold;
+
+        if (pixel > bright_threshold) {
             bright_arc += 1;
             dark_arc = 0;
             max_bright_arc = @max(max_bright_arc, bright_arc);
-        } else if (pixel < center -| threshold) {
+        } else if (pixel < dark_threshold) {
             dark_arc += 1;
             bright_arc = 0;
             max_dark_arc = @max(max_dark_arc, dark_arc);

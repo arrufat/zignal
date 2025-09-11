@@ -53,10 +53,8 @@ pub fn ImagePyramid(comptime T: type) type {
             // First level is the original image (no copy, just reference)
             levels[0] = source;
 
-            // Build subsequent levels
+            // Build subsequent levels from original for better quality
             for (1..n_levels) |i| {
-                const prev_level = levels[i - 1];
-
                 // Calculate dimensions for this level
                 const scale = std.math.pow(f32, scale_factor, @as(f32, @floatFromInt(i)));
                 const new_rows = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(source.rows)) / scale)));
@@ -75,25 +73,27 @@ pub fn ImagePyramid(comptime T: type) type {
                     };
                 }
 
-                // Apply Gaussian blur to previous level for anti-aliasing
+                // Apply Gaussian blur to original for anti-aliasing
+                // Use adaptive sigma based on scale factor
+                const sigma = blur_sigma * @sqrt(scale * scale - 1.0);
                 var blurred: Image(T) = .empty;
                 defer if (blurred.rows > 0) blurred.deinit(allocator);
 
-                // Only blur if we have gaussianBlur available
-                if (@hasDecl(Filter(T), "gaussianBlur")) {
-                    try Filter(T).gaussianBlur(prev_level, allocator, blur_sigma, &blurred);
-                } else {
+                // Only blur if we have gaussianBlur available and sigma > 0.5
+                if (sigma > 0.5 and @hasDecl(Filter(T), "gaussianBlur")) {
+                    try Filter(T).gaussianBlur(source, allocator, sigma, &blurred);
+                } else if (sigma > 0.5) {
                     // Fallback to box blur if Gaussian not available
-                    const radius = @as(usize, @intFromFloat(blur_sigma * 2));
-                    try Filter(T).boxBlur(prev_level, allocator, &blurred, radius);
+                    const radius = @as(usize, @intFromFloat(sigma * 2));
+                    try Filter(T).boxBlur(source, allocator, &blurred, radius);
                 }
 
                 // Allocate and resize to create the new level
                 levels[i] = try Image(T).init(allocator, new_rows, new_cols);
 
-                // Use bilinear interpolation for downsampling
-                const blur_to_use = if (blurred.rows > 0) blurred else prev_level;
-                try blur_to_use.resize(allocator, levels[i], .bilinear);
+                // Use bilinear interpolation for downsampling from original or blurred
+                const source_to_use = if (blurred.rows > 0) blurred else source;
+                try source_to_use.resize(allocator, levels[i], .bilinear);
             }
 
             return .{
