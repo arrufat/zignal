@@ -111,3 +111,7 @@ pub const MatchStats = features.MatchStats;
 
 // Optimization algorithms
 pub const optimization = @import("optimization.zig");
+
+// Statistics module
+const stats = @import("stats.zig");
+pub const RunningStats = stats.RunningStats;
