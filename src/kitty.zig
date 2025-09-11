@@ -71,7 +71,7 @@ pub fn fromImage(
     }
 
     // Encode the (possibly scaled) image as PNG
-    const png_data = try png.encodeImage(T, gpa, image_to_encode, .default);
+    const png_data = try png.encode(T, gpa, image_to_encode, .default);
     defer gpa.free(png_data);
 
     // Calculate base64 encoded size

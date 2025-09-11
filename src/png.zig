@@ -155,7 +155,7 @@ fn adam7TotalSize(header: Header) usize {
 }
 
 /// PNG decoder/encoder state
-pub const PngImage = struct {
+pub const PngState = struct {
     header: Header,
     palette: ?[][3]u8 = null,
     transparency: ?[]u8 = null, // For palette transparency or single transparent color
@@ -165,7 +165,7 @@ pub const PngImage = struct {
     gamma: ?f32 = null, // Gamma value from gAMA chunk
     srgb_intent: ?SrgbRenderingIntent = null, // sRGB rendering intent
 
-    pub fn deinit(self: *PngImage, gpa: Allocator) void {
+    pub fn deinit(self: *PngState, gpa: Allocator) void {
         self.idat_data.deinit(gpa);
         if (self.palette) |palette| {
             gpa.free(palette);
@@ -334,24 +334,24 @@ fn parseHeader(chunk: Chunk) !Header {
 }
 
 // PNG decoder entry point
-pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
+pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
     }
 
     var reader: ChunkReader = .init(png_data[8..]);
-    var png_image: PngImage = .{
+    var png_state: PngState = .{
         .header = undefined,
         .idat_data = .empty,
     };
-    errdefer png_image.deinit(gpa);
+    errdefer png_state.deinit(gpa);
 
     var header_found = false;
 
     while (try reader.nextChunk()) |chunk| {
         if (std.mem.eql(u8, &chunk.type, "IHDR")) {
             if (header_found) return error.MultipleHeaders;
-            png_image.header = try parseHeader(chunk);
+            png_state.header = try parseHeader(chunk);
             header_found = true;
         } else if (std.mem.eql(u8, &chunk.type, "PLTE")) {
             if (chunk.length % 3 != 0) return error.InvalidPaletteLength;
@@ -365,10 +365,10 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
                 if (offset + 3 > chunk.data.len) return error.InvalidPaletteLength;
                 palette[i] = [3]u8{ chunk.data[offset], chunk.data[offset + 1], chunk.data[offset + 2] };
             }
-            png_image.palette = palette;
+            png_state.palette = palette;
         } else if (std.mem.eql(u8, &chunk.type, "tRNS")) {
             // Validate tRNS chunk size based on color type
-            switch (png_image.header.color_type) {
+            switch (png_state.header.color_type) {
                 .grayscale => {
                     if (chunk.length != 2) return error.InvalidTransparencyLength;
                 },
@@ -387,18 +387,18 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
 
             const transparency = try gpa.alloc(u8, chunk.length);
             @memcpy(transparency, chunk.data);
-            png_image.transparency = transparency;
+            png_state.transparency = transparency;
         } else if (std.mem.eql(u8, &chunk.type, "gAMA")) {
             // gAMA chunk: 4 bytes containing gamma value * 100,000
             if (chunk.length != 4) return error.InvalidGammaLength;
             const gamma_int = std.mem.readInt(u32, chunk.data[0..4][0..4], .big);
-            png_image.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
+            png_state.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
         } else if (std.mem.eql(u8, &chunk.type, "sRGB")) {
             // sRGB chunk: 1 byte containing rendering intent
             // NOTE: sRGB and iCCP chunks are mutually exclusive according to PNG spec
             if (chunk.length != 1) return error.InvalidSrgbLength;
             const intent_raw = chunk.data[0];
-            png_image.srgb_intent = switch (intent_raw) {
+            png_state.srgb_intent = switch (intent_raw) {
                 0 => .perceptual,
                 1 => .relative_colorimetric,
                 2 => .saturation,
@@ -406,7 +406,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
                 else => return error.InvalidSrgbIntent,
             };
         } else if (std.mem.eql(u8, &chunk.type, "IDAT")) {
-            try png_image.idat_data.appendSlice(gpa, chunk.data);
+            try png_state.idat_data.appendSlice(gpa, chunk.data);
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             break;
         }
@@ -417,71 +417,71 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngImage {
         return error.MissingHeader;
     }
 
-    if (png_image.idat_data.items.len == 0) {
+    if (png_state.idat_data.items.len == 0) {
         return error.MissingImageData;
     }
 
-    return png_image;
+    return png_state;
 }
 
 /// Convert PNG image data to its most natural Zignal Image type
-pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
+pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
     rgba: Image(Rgba),
 } {
     // Decompress IDAT data
-    const decompressed = try deflate.zlibDecompress(allocator, png_image.idat_data.items);
+    const decompressed = try deflate.zlibDecompress(allocator, png_state.idat_data.items);
     defer allocator.free(decompressed);
 
     // Apply row defiltering
-    try defilterScanlines(decompressed, png_image.header);
+    try defilterScanlines(decompressed, png_state.header);
 
-    const width = png_image.header.width;
-    const height = png_image.header.height;
-    const scanline_bytes = png_image.header.scanlineBytes();
+    const width = png_state.header.width;
+    const height = png_state.header.height;
+    const scanline_bytes = png_state.header.scanlineBytes();
 
     // Handle interlaced images separately
-    if (png_image.header.interlace_method == 1) {
+    if (png_state.header.interlace_method == 1) {
         // Interlaced image - use Adam7 deinterlacing
-        const color_info = ColorInfo{ .gamma = png_image.gamma, .srgb_intent = png_image.srgb_intent };
-        switch (png_image.header.color_type) {
+        const color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent };
+        switch (png_state.header.color_type) {
             .grayscale, .grayscale_alpha => {
-                if (png_image.transparency != null) {
-                    const config = PixelExtractionConfig{ .transparency = png_image.transparency, .color_info = color_info };
-                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_image.header, config) };
+                if (png_state.transparency != null) {
+                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = color_info };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
                 } else {
                     const config = PixelExtractionConfig{ .color_info = color_info };
-                    return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_image.header, config) };
+                    return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_state.header, config) };
                 }
             },
             .rgb => {
-                if (png_image.transparency != null) {
-                    const config = PixelExtractionConfig{ .transparency = png_image.transparency, .color_info = color_info };
-                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_image.header, config) };
+                if (png_state.transparency != null) {
+                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = color_info };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
                 } else {
                     const config = PixelExtractionConfig{ .color_info = color_info };
-                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_image.header, config) };
+                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, config) };
                 }
             },
             .rgba => {
                 const config = PixelExtractionConfig{ .color_info = color_info };
-                return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_image.header, config) };
+                return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
             },
             .palette => {
-                if (png_image.transparency != null) {
-                    return .{ .rgba = try deinterlaceAdam7Palette(allocator, Rgba, decompressed, png_image.header, png_image.palette orelse return error.MissingPalette, png_image.transparency) };
+                if (png_state.transparency != null) {
+                    return .{ .rgba = try deinterlaceAdam7Palette(allocator, Rgba, decompressed, png_state.header, png_state.palette orelse return error.MissingPalette, png_state.transparency) };
                 } else {
-                    return .{ .rgb = try deinterlaceAdam7Palette(allocator, Rgb, decompressed, png_image.header, png_image.palette orelse return error.MissingPalette, null) };
+                    return .{ .rgb = try deinterlaceAdam7Palette(allocator, Rgb, decompressed, png_state.header, png_state.palette orelse return error.MissingPalette, null) };
                 }
             },
         }
     }
 
     // Determine native format and convert accordingly
-    switch (png_image.header.color_type) {
+    switch (png_state.header.color_type) {
         .grayscale, .grayscale_alpha => {
-            if (png_image.transparency != null) {
+            if (png_state.transparency != null) {
                 // Create RGBA image when transparency is present
                 const total_pixels = @as(u64, width) * @as(u64, height);
                 if (total_pixels > std.math.maxInt(usize)) {
@@ -495,9 +495,9 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .transparency = png_image.transparency, .color_info = ColorInfo{ .gamma = png_image.gamma, .srgb_intent = png_image.srgb_intent } };
+                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(Rgba, src_row, i, png_image.header, config);
+                        pixel.* = extractGrayscalePixel(Rgba, src_row, i, png_state.header, config);
                     }
                 }
 
@@ -516,9 +516,9 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_image.gamma, .srgb_intent = png_image.srgb_intent } };
+                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(u8, src_row, i, png_image.header, config);
+                        pixel.* = extractGrayscalePixel(u8, src_row, i, png_state.header, config);
                     }
                 }
 
@@ -526,7 +526,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
             }
         },
         .rgb => {
-            if (png_image.transparency != null) {
+            if (png_state.transparency != null) {
                 // Create RGBA image when transparency is present
                 const total_pixels = @as(u64, width) * @as(u64, height);
                 if (total_pixels > std.math.maxInt(usize)) {
@@ -540,9 +540,9 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .transparency = png_image.transparency, .color_info = ColorInfo{ .gamma = png_image.gamma, .srgb_intent = png_image.srgb_intent } };
+                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgba, src_row, i, png_image.header, config);
+                        pixel.* = extractRgbPixel(Rgba, src_row, i, png_state.header, config);
                     }
                 }
 
@@ -561,9 +561,9 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_image.gamma, .srgb_intent = png_image.srgb_intent } };
+                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgb, src_row, i, png_image.header, config);
+                        pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, config);
                     }
                 }
 
@@ -585,7 +585,7 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                 const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
                 for (dst_row, 0..) |*pixel, i| {
-                    if (png_image.header.bit_depth == 8) {
+                    if (png_state.header.bit_depth == 8) {
                         pixel.* = Rgba{ .r = src_row[i * 4], .g = src_row[i * 4 + 1], .b = src_row[i * 4 + 2], .a = src_row[i * 4 + 3] };
                     } else {
                         // 16-bit to 8-bit conversion
@@ -608,9 +608,9 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
         },
         .palette => {
             // Convert palette to RGB or RGBA (if transparency present)
-            if (png_image.palette == null) return error.MissingPalette;
-            const palette = png_image.palette.?;
-            const transparency = png_image.transparency;
+            if (png_state.palette == null) return error.MissingPalette;
+            const palette = png_state.palette.?;
+            const transparency = png_state.transparency;
 
             const total_pixels = @as(u64, width) * @as(u64, height);
             if (total_pixels > std.math.maxInt(usize)) {
@@ -629,13 +629,13 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
                     for (dst_row, 0..) |*pixel, i| {
-                        const index = switch (png_image.header.bit_depth) {
+                        const index = switch (png_state.header.bit_depth) {
                             8 => blk: {
                                 if (i >= src_row.len) return error.InvalidScanlineData;
                                 break :blk src_row[i];
                             },
                             1, 2, 4 => blk: {
-                                const bits_per_pixel = png_image.header.bit_depth;
+                                const bits_per_pixel = png_state.header.bit_depth;
                                 const pixels_per_byte = 8 / bits_per_pixel;
                                 const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
                                 const byte_idx = i / pixels_per_byte;
@@ -669,13 +669,13 @@ pub fn toNativeImage(allocator: Allocator, png_image: PngImage) !union(enum) {
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
                     for (dst_row, 0..) |*pixel, i| {
-                        const index = switch (png_image.header.bit_depth) {
+                        const index = switch (png_state.header.bit_depth) {
                             8 => blk: {
                                 if (i >= src_row.len) return error.InvalidScanlineData;
                                 break :blk src_row[i];
                             },
                             1, 2, 4 => blk: {
-                                const bits_per_pixel = png_image.header.bit_depth;
+                                const bits_per_pixel = png_state.header.bit_depth;
                                 const pixels_per_byte = 8 / bits_per_pixel;
                                 const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
                                 const byte_idx = i / pixels_per_byte;
@@ -717,11 +717,11 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
     const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, std.Io.Limit.limited(100 * 1024 * 1024));
     defer allocator.free(png_data);
 
-    var png_image = try decode(allocator, png_data);
-    defer png_image.deinit(allocator);
+    var png_state = try decode(allocator, png_data);
+    defer png_state.deinit(allocator);
 
     // Load the PNG in its native format first, then convert to requested type
-    var native_image = try toNativeImage(allocator, png_image);
+    var native_image = try toNativeImage(allocator, png_state);
     switch (native_image) {
         .grayscale => |*img| {
             if (T == u8) {
@@ -877,8 +877,8 @@ fn getColorType(comptime T: type) ColorType {
     };
 }
 
-// Encode Image data to PNG format
-pub fn encode(gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
+// Encode raw image data to PNG format (internal use)
+fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
     var writer = ChunkWriter.init(gpa);
     defer writer.deinit();
 
@@ -935,14 +935,14 @@ pub fn encode(gpa: Allocator, image_data: []const u8, width: u32, height: u32, c
 }
 
 /// Generic PNG encoding function that works with any supported pixel type
-pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     const color_type = getColorType(T);
 
     switch (T) {
         u8, Rgb, Rgba => {
             // Direct support - use image as-is
             const image_bytes = image.asBytes();
-            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
+            return encodeRaw(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
         },
         else => {
             // Convert unsupported type to RGB
@@ -955,7 +955,7 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), opti
             }
 
             const image_bytes = rgb_image.asBytes();
-            return encode(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
+            return encodeRaw(allocator, image_bytes, @intCast(image.cols), @intCast(image.rows), color_type, 8, options);
         },
     }
 }
@@ -972,7 +972,7 @@ pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), opti
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
 pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encodeImage(T, allocator, image, .default);
+    const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
 
     const file = try std.fs.cwd().createFile(file_path, .{});
@@ -1686,7 +1686,7 @@ test "PNG round-trip encoding/decoding" {
     const original_image: Image(Rgb) = .initFromSlice(height, width, owned_data);
 
     // Encode to PNG
-    const png_data = try encodeImage(Rgb, allocator, original_image, .default);
+    const png_data = try encode(Rgb, allocator, original_image, .default);
     defer allocator.free(png_data);
 
     // Verify PNG signature
@@ -1831,7 +1831,7 @@ test "PNG encode with color management chunks" {
 
     // Test encoding with sRGB chunk
     const srgb_options: EncodeOptions = .{ .srgb_intent = .perceptual };
-    const srgb_png = try encodeImage(Rgb, allocator, test_image, srgb_options);
+    const srgb_png = try encode(Rgb, allocator, test_image, srgb_options);
     defer allocator.free(srgb_png);
 
     // Verify sRGB chunk is present
@@ -1852,7 +1852,7 @@ test "PNG encode with color management chunks" {
 
     // Test encoding with gAMA chunk
     const gamma_options: EncodeOptions = .{ .gamma = 1.0 / 2.2 };
-    const gamma_png = try encodeImage(Rgb, allocator, test_image, gamma_options);
+    const gamma_png = try encode(Rgb, allocator, test_image, gamma_options);
     defer allocator.free(gamma_png);
 
     // Verify gAMA chunk is present
@@ -1997,7 +1997,7 @@ test "PNG bounds checking - malformed palette" {
         .crc = 0,
     };
 
-    var png_image = PngImage{
+    var png_state = PngState{
         .header = Header{
             .width = 4,
             .height = 4,
@@ -2009,7 +2009,7 @@ test "PNG bounds checking - malformed palette" {
         },
         .idat_data = .empty,
     };
-    defer png_image.deinit(gpa);
+    defer png_state.deinit(gpa);
 
     // Simulate the palette parsing that would happen in decode()
     if (chunk.length % 3 != 0) {
@@ -2098,7 +2098,7 @@ test "PNG palette transparency support" {
     const allocator = std.testing.allocator;
 
     // Create a palette PNG with transparency
-    var png_image = PngImage{
+    var png_state = PngState{
         .header = Header{
             .width = 2,
             .height = 2,
@@ -2110,7 +2110,7 @@ test "PNG palette transparency support" {
         },
         .idat_data = .empty,
     };
-    defer png_image.deinit(allocator);
+    defer png_state.deinit(allocator);
 
     // Create palette: red, green, blue, white
     const palette = try allocator.alloc([3]u8, 4);
@@ -2119,7 +2119,7 @@ test "PNG palette transparency support" {
     palette[1] = [3]u8{ 0, 255, 0 }; // green
     palette[2] = [3]u8{ 0, 0, 255 }; // blue
     palette[3] = [3]u8{ 255, 255, 255 }; // white
-    png_image.palette = palette;
+    png_state.palette = palette;
 
     // Create transparency: red=255, green=128, blue=64, white=0 (transparent)
     const transparency = try allocator.alloc(u8, 4);
@@ -2128,12 +2128,12 @@ test "PNG palette transparency support" {
     transparency[1] = 128; // green semi-transparent
     transparency[2] = 64; // blue more transparent
     transparency[3] = 0; // white fully transparent
-    png_image.transparency = transparency;
+    png_state.transparency = transparency;
 
     // Clear pointers before deinit to avoid double-free
     defer {
-        png_image.palette = null;
-        png_image.transparency = null;
+        png_state.palette = null;
+        png_state.transparency = null;
     }
 
     // Test palette transparency access
@@ -2209,7 +2209,7 @@ test "PNG transparency error cases" {
     const allocator = std.testing.allocator;
 
     // Test invalid tRNS chunk for grayscale_alpha (should error)
-    var png_image = PngImage{
+    var png_state = PngState{
         .header = Header{
             .width = 16,
             .height = 16,
@@ -2221,7 +2221,7 @@ test "PNG transparency error cases" {
         },
         .idat_data = .empty,
     };
-    defer png_image.deinit(allocator);
+    defer png_state.deinit(allocator);
 
     // Test chunk reader would reject tRNS for grayscale_alpha
     _ = Chunk{
@@ -2291,7 +2291,7 @@ test "PNG gAMA chunk parsing" {
         .crc = 0,
     };
 
-    var png_image = PngImage{
+    var png_state = PngState{
         .header = Header{
             .width = 4,
             .height = 4,
@@ -2303,7 +2303,7 @@ test "PNG gAMA chunk parsing" {
         },
         .idat_data = .empty,
     };
-    defer png_image.deinit(allocator);
+    defer png_state.deinit(allocator);
 
     // Manually parse the gAMA chunk (simulating the parsing logic)
     const gamma_int = std.mem.readInt(u32, gamma_chunk.data[0..4][0..4], .big);
@@ -2325,7 +2325,7 @@ test "PNG sRGB chunk parsing" {
         .crc = 0,
     };
 
-    var png_image = PngImage{
+    var png_state = PngState{
         .header = Header{
             .width = 4,
             .height = 4,
@@ -2337,7 +2337,7 @@ test "PNG sRGB chunk parsing" {
         },
         .idat_data = .empty,
     };
-    defer png_image.deinit(allocator);
+    defer png_state.deinit(allocator);
 
     // Manually parse the sRGB chunk (simulating the parsing logic)
     const intent_raw = srgb_chunk.data[0];

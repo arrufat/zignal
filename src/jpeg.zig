@@ -1,4 +1,4 @@
-//! Pure Zig JPEG decoder and baseline encoder implementation.
+//! Pure Zig JPEG state and baseline encoder implementation.
 //! Decoder supports baseline and progressive DCT JPEG images.
 //! Encoder implements baseline (SOF0) JPEG with 4:4:4 sampling and adjustable quality.
 
@@ -46,7 +46,7 @@ pub const EncodeOptions = struct {
 
 /// Save Image to JPEG file with baseline encoding.
 pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encodeImage(T, allocator, image, .{ .subsampling = .yuv420 });
+    const bytes = try encode(T, allocator, image, .{ .subsampling = .yuv420 });
     defer allocator.free(bytes);
 
     const file = try std.fs.cwd().createFile(file_path, .{});
@@ -56,7 +56,7 @@ pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: 
 
 /// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman).
 /// Supports grayscale (u8) and RGB (Rgb). Other types are converted to RGB.
-pub fn encodeImage(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     // Validate image dimensions
     if (image.rows == 0 or image.cols == 0) {
         return error.InvalidImageDimensions;
@@ -793,45 +793,6 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     return out.toOwnedSlice(allocator);
 }
 
-/// Lightweight scan to detect number of components declared by the JPEG SOF header.
-/// Returns 1 for grayscale, 3 for color, or null on error/unsupported.
-pub fn detectComponents(data: []const u8) ?u8 {
-    if (data.len < 4) return null;
-    if (!std.mem.eql(u8, data[0..2], &signature)) return null;
-
-    var pos: usize = 2;
-    while (pos + 3 < data.len) {
-        // Find marker prefix 0xFF (skip stuffing bytes)
-        if (data[pos] != 0xFF) {
-            pos += 1;
-            continue;
-        }
-        while (pos < data.len and data[pos] == 0xFF) pos += 1;
-        if (pos >= data.len) break;
-        const marker = data[pos];
-        pos += 1;
-
-        // Markers without a length field
-        if (marker == 0xD8 or marker == 0xD9 or (marker >= 0xD0 and marker <= 0xD7) or marker == 0x01) {
-            continue;
-        }
-
-        if (pos + 1 >= data.len) break;
-        const len: usize = (@as(usize, data[pos]) << 8) | data[pos + 1];
-        pos += 2;
-        if (len < 2 or pos + len - 2 > data.len) break;
-
-        // Baseline or progressive SOF: return component count
-        if (marker == 0xC0 or marker == 0xC2) {
-            if (len < 8) break; // need precision(1) + height(2) + width(2) + components(1)
-            return data[pos + 5];
-        }
-
-        pos += len - 2;
-    }
-    return null;
-}
-
 // JPEG markers
 pub const Marker = enum(u16) {
     // Start of Frame markers
@@ -923,8 +884,8 @@ const FrameType = enum {
     progressive, // SOF2
 };
 
-// JPEG decoder state
-pub const JpegDecoder = struct {
+// JPEG state state
+pub const JpegState = struct {
     allocator: Allocator,
 
     // Image properties
@@ -970,7 +931,7 @@ pub const JpegDecoder = struct {
     // Debug
     debug_block_count: u32 = 0,
 
-    pub fn init(allocator: Allocator) JpegDecoder {
+    pub fn init(allocator: Allocator) JpegState {
         return .{
             .allocator = allocator,
             .width = 0,
@@ -981,7 +942,7 @@ pub const JpegDecoder = struct {
         };
     }
 
-    pub fn deinit(self: *JpegDecoder) void {
+    pub fn deinit(self: *JpegState) void {
         for (&self.dc_tables) |*table| {
             if (table.*) |*t| t.deinit();
         }
@@ -1000,7 +961,7 @@ pub const JpegDecoder = struct {
     }
 
     // Decode a Huffman symbol using the fast lookup table
-    pub fn readCode(self: *JpegDecoder, table: *const HuffmanTable) !u8 {
+    pub fn readCode(self: *JpegState, table: *const HuffmanTable) !u8 {
         const fast_bits = 9;
         const fast_index = self.bit_reader.peekBits(fast_bits) catch 0;
 
@@ -1027,12 +988,12 @@ pub const JpegDecoder = struct {
     }
 
     // Legacy alias for compatibility
-    pub fn decodeHuffmanSymbol(self: *JpegDecoder, table: *const HuffmanTable) !u8 {
+    pub fn decodeHuffmanSymbol(self: *JpegState, table: *const HuffmanTable) !u8 {
         return self.readCode(table);
     }
 
     // Decode magnitude-coded coefficient (T.81 section F1.2.1)
-    pub fn readMagnitudeCoded(self: *JpegDecoder, magnitude: u5) !i32 {
+    pub fn readMagnitudeCoded(self: *JpegState, magnitude: u5) !i32 {
         if (magnitude == 0) return 0;
 
         var coeff: i32 = @intCast(try self.bit_reader.peekBits(magnitude));
@@ -1047,7 +1008,7 @@ pub const JpegDecoder = struct {
     }
 
     // Decode AC coefficients (simple baseline implementation)
-    pub fn decodeAC(self: *JpegDecoder, table: *const HuffmanTable, block: *[64]i32) !void {
+    pub fn decodeAC(self: *JpegState, table: *const HuffmanTable, block: *[64]i32) !void {
         var k: usize = 1; // Start after DC coefficient
 
         while (k < 64) {
@@ -1086,7 +1047,7 @@ pub const JpegDecoder = struct {
 
                 if (k >= 64) break;
 
-                // Decode AC coefficient using magnitude decoder
+                // Decode AC coefficient using magnitude state
                 const value = try self.readMagnitudeCoded(@intCast(size));
                 block[zigzag[k]] = value;
                 k += 1;
@@ -1095,7 +1056,7 @@ pub const JpegDecoder = struct {
     }
 
     // Parse Start of Frame (SOF0/SOF2) marker
-    pub fn parseSOF(self: *JpegDecoder, data: []const u8, frame_type: FrameType) !void {
+    pub fn parseSOF(self: *JpegState, data: []const u8, frame_type: FrameType) !void {
         self.frame_type = frame_type;
         if (data.len < 8) return error.InvalidSOF;
 
@@ -1211,7 +1172,7 @@ pub const JpegDecoder = struct {
     }
 
     // Parse Define Huffman Table (DHT) marker
-    pub fn parseDHT(self: *JpegDecoder, data: []const u8) !void {
+    pub fn parseDHT(self: *JpegState, data: []const u8) !void {
         if (data.len < 2) return error.InvalidDHT;
 
         const length = (@as(u16, data[0]) << 8) | data[1];
@@ -1316,7 +1277,7 @@ pub const JpegDecoder = struct {
     }
 
     // Parse Define Quantization Table (DQT) marker
-    pub fn parseDQT(self: *JpegDecoder, data: []const u8) !void {
+    pub fn parseDQT(self: *JpegState, data: []const u8) !void {
         if (data.len < 2) return error.InvalidDQT;
 
         const length = (@as(u16, data[0]) << 8) | data[1];
@@ -1360,7 +1321,7 @@ pub const JpegDecoder = struct {
     }
 
     // Parse Start of Scan (SOS) marker
-    pub fn parseSOS(self: *JpegDecoder, data: []const u8) !ScanInfo {
+    pub fn parseSOS(self: *JpegState, data: []const u8) !ScanInfo {
         if (data.len < 6) return error.InvalidSOS;
 
         const length = (@as(u16, data[0]) << 8) | data[1];
@@ -1420,7 +1381,7 @@ pub const JpegDecoder = struct {
     }
 
     // Parse Define Restart Interval (DRI) marker
-    pub fn parseDRI(self: *JpegDecoder, data: []const u8) !void {
+    pub fn parseDRI(self: *JpegState, data: []const u8) !void {
         if (data.len < 4) return error.InvalidDRI;
 
         const length = (@as(u16, data[0]) << 8) | data[1];
@@ -1526,20 +1487,20 @@ pub const BitReader = struct {
 };
 
 // Perform a scan (baseline or progressive)
-pub fn performScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
-    if (decoder.block_storage == null) return error.BlockStorageNotAllocated;
+fn performScan(state: *JpegState, scan_info: ScanInfo) !void {
+    if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
-    if (decoder.frame_type == .baseline) {
+    if (state.frame_type == .baseline) {
         // Baseline JPEG: single scan with all data
-        try performBaselineScan(decoder, scan_info);
+        try performBaselineScan(state, scan_info);
     } else {
         // Progressive JPEG: accumulate data across multiple scans
-        try performProgressiveScan(decoder, scan_info);
+        try performProgressiveScan(state, scan_info);
     }
 }
 
 // Upsample and convert a single YCbCr block to RGB
-pub fn yCbCrToRgbBlock(_: *JpegDecoder, y_block: *[64]i32, cb_block: *const [64]i32, cr_block: *const [64]i32, rgb_block: *[3][64]u8) void {
+fn yCbCrToRgbBlock(_: *JpegState, y_block: *[64]i32, cb_block: *const [64]i32, cr_block: *const [64]i32, rgb_block: *[3][64]u8) void {
     // YCbCr to RGB conversion coefficients (ITU-R BT.601 standard)
     const co_1: @Vector(8, f32) = @splat(1.402); // Cr to R
     const co_2: @Vector(8, f32) = @splat(1.772); // Cb to B
@@ -1587,11 +1548,11 @@ pub fn yCbCrToRgbBlock(_: *JpegDecoder, y_block: *[64]i32, cb_block: *const [64]
 }
 
 // Perform baseline scan
-fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
+fn performBaselineScan(state: *JpegState, scan_info: ScanInfo) !void {
     // Calculate maximum sampling factors
     var max_h_factor: u4 = 1;
     var max_v_factor: u4 = 1;
-    for (decoder.components[0..decoder.num_components]) |comp| {
+    for (state.components[0..state.num_components]) |comp| {
         max_h_factor = @max(max_h_factor, comp.h_sampling);
         max_v_factor = @max(max_v_factor, comp.v_sampling);
     }
@@ -1609,18 +1570,18 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
     var mcus_since_restart: u32 = 0;
 
     var y: usize = 0;
-    while (y < decoder.block_height) : (y += y_step) {
+    while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
-        while (x < decoder.block_width) : (x += x_step) {
+        while (x < state.block_width) : (x += x_step) {
             // Handle restart intervals for baseline scans
-            if (decoder.restart_interval != 0 and mcus_since_restart == decoder.restart_interval) {
+            if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
                 // Reset DC predictions
                 prediction_values = @splat(0);
                 mcus_since_restart = 0;
                 // Reset expected RST marker
-                decoder.expected_rst_marker = 0;
+                state.expected_rst_marker = 0;
                 // Flush bits to byte boundary
-                decoder.bit_reader.flushBits();
+                state.bit_reader.flushBits();
             }
             // Decode each component at this position
             for (scan_info.components) |scan_comp| {
@@ -1629,7 +1590,7 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
                 var v_max: usize = undefined;
                 var h_max: usize = undefined;
 
-                for (decoder.components[0..decoder.num_components], 0..) |frame_component, i| {
+                for (state.components[0..state.num_components], 0..) |frame_component, i| {
                     if (frame_component.id == scan_comp.component_id) {
                         component_index = i;
                         v_max = if (noninterleaved) 1 else frame_component.v_sampling;
@@ -1645,16 +1606,16 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
                         const actual_x = x + h;
                         const actual_y = y + v;
 
-                        if (actual_y >= decoder.block_height or actual_x >= decoder.block_width) continue;
+                        if (actual_y >= state.block_height or actual_x >= state.block_width) continue;
 
-                        const block_id = actual_y * decoder.block_width_actual + actual_x;
-                        const block = &decoder.block_storage.?[block_id][component_index];
+                        const block_id = actual_y * state.block_width_actual + actual_x;
+                        const block = &state.block_storage.?[block_id][component_index];
 
                         // Fill bit buffer before decoding
-                        try decoder.bit_reader.fillBits(24);
+                        try state.bit_reader.fillBits(24);
 
                         // Decode block directly into storage
-                        decodeBlockBaseline(decoder, scan_comp, block, &prediction_values[component_index]) catch |err| {
+                        decodeBlockBaseline(state, scan_comp, block, &prediction_values[component_index]) catch |err| {
                             if (err == error.UnexpectedEndOfData) return;
                             return err;
                         };
@@ -1669,7 +1630,7 @@ fn performBaselineScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
 }
 
 // Perform progressive scan
-fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
+fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
     var skips: u32 = 0;
 
     // Definition of noninterleaved
@@ -1678,7 +1639,7 @@ fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
     // Calculate sampling factors
     var max_h_factor: u4 = 1;
     var max_v_factor: u4 = 1;
-    for (decoder.components[0..decoder.num_components]) |comp| {
+    for (state.components[0..state.num_components]) |comp| {
         max_h_factor = @max(max_h_factor, comp.h_sampling);
         max_v_factor = @max(max_v_factor, comp.v_sampling);
     }
@@ -1688,15 +1649,15 @@ fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
 
     // Scan loop structure
     var y: usize = 0;
-    while (y < decoder.block_height) : (y += y_step) {
+    while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
-        while (x < decoder.block_width) : (x += x_step) {
-            const mcu_id = y * decoder.block_width_actual + x;
+        while (x < state.block_width) : (x += x_step) {
+            const mcu_id = y * state.block_width_actual + x;
 
             // Handle restart intervals
-            if (decoder.restart_interval != 0 and mcu_id % (decoder.restart_interval * y_step * x_step) == 0) {
-                decoder.bit_reader.flushBits();
-                decoder.dc_prediction_values = @splat(0);
+            if (state.restart_interval != 0 and mcu_id % (state.restart_interval * y_step * x_step) == 0) {
+                state.bit_reader.flushBits();
+                state.dc_prediction_values = @splat(0);
                 skips = 0;
             }
 
@@ -1708,7 +1669,7 @@ fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
                 var h_max: usize = undefined;
 
                 // Find the component
-                for (decoder.components[0..decoder.num_components], 0..) |frame_component, i| {
+                for (state.components[0..state.num_components], 0..) |frame_component, i| {
                     if (frame_component.id == scan_comp.component_id) {
                         component_index = i;
                         v_max = if (noninterleaved) 1 else frame_component.v_sampling;
@@ -1719,13 +1680,13 @@ fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
 
                 for (0..v_max) |v| {
                     for (0..h_max) |h| {
-                        const block_id = (y + v) * decoder.block_width_actual + (x + h);
-                        const block = &decoder.block_storage.?[block_id][component_index];
+                        const block_id = (y + v) * state.block_width_actual + (x + h);
+                        const block = &state.block_storage.?[block_id][component_index];
 
                         // Fill bits
-                        decoder.bit_reader.fillBits(24) catch {};
+                        state.bit_reader.fillBits(24) catch {};
 
-                        try decodeBlockProgressive(decoder, scan_info, scan_comp, block, &decoder.dc_prediction_values[component_index], &skips);
+                        try decodeBlockProgressive(state, scan_info, scan_comp, block, &state.dc_prediction_values[component_index], &skips);
                     }
                 }
             }
@@ -1734,47 +1695,47 @@ fn performProgressiveScan(decoder: *JpegDecoder, scan_info: ScanInfo) !void {
 
     // Save skip count for next progressive AC scan
     if (scan_info.start_of_spectral_selection != 0) {
-        decoder.skip_count = skips;
+        state.skip_count = skips;
     }
 }
 
 // Decode a single block in progressive mode
-fn decodeBlockProgressive(decoder: *JpegDecoder, scan_info: ScanInfo, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32, skips: *u32) !void {
+fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32, skips: *u32) !void {
     if (scan_info.start_of_spectral_selection == 0) {
-        const dc_table = decoder.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
+        const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
         if (scan_info.approximation_high == 0) {
-            const maybe_magnitude = try decoder.readCode(&dc_table);
+            const maybe_magnitude = try state.readCode(&dc_table);
             if (maybe_magnitude > 11) return error.InvalidDCCoefficient;
-            const diff = try decoder.readMagnitudeCoded(@intCast(maybe_magnitude));
+            const diff = try state.readMagnitudeCoded(@intCast(maybe_magnitude));
             const dc_coefficient = diff + dc_prediction.*;
             dc_prediction.* = dc_coefficient;
             block[0] = dc_coefficient << @intCast(scan_info.approximation_low);
         } else if (scan_info.approximation_high != 0) {
-            const bit: u32 = try decoder.bit_reader.getBits(1);
+            const bit: u32 = try state.bit_reader.getBits(1);
             block[0] += @as(i32, @intCast(bit)) << @intCast(scan_info.approximation_low);
         }
     } else if (scan_info.start_of_spectral_selection != 0) {
-        const ac_table = decoder.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
+        const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
         if (scan_info.approximation_high == 0) {
             var ac: usize = scan_info.start_of_spectral_selection;
             // Check skips == 0 first
             if (skips.* == 0) {
                 while (ac <= scan_info.end_of_spectral_selection) {
                     var coeff: i32 = 0;
-                    const zero_run_length_and_magnitude = try decoder.readCode(&ac_table);
+                    const zero_run_length_and_magnitude = try state.readCode(&ac_table);
                     const zero_run_length = zero_run_length_and_magnitude >> 4;
                     const maybe_magnitude = zero_run_length_and_magnitude & 0x0F;
 
                     if (maybe_magnitude == 0) {
                         if (zero_run_length < 15) {
-                            const extra_skips: u32 = try decoder.bit_reader.getBits(@intCast(zero_run_length));
+                            const extra_skips: u32 = try state.bit_reader.getBits(@intCast(zero_run_length));
                             skips.* = (@as(u32, 1) << @intCast(zero_run_length));
                             skips.* += extra_skips;
                             break; // process skips
                         } // no special case for zrl == 15
                     } else if (maybe_magnitude != 0) {
                         if (maybe_magnitude > 10) return error.InvalidACCoefficient;
-                        coeff = try decoder.readMagnitudeCoded(@intCast(maybe_magnitude));
+                        coeff = try state.readMagnitudeCoded(@intCast(maybe_magnitude));
                     }
 
                     for (0..zero_run_length) |_| {
@@ -1799,19 +1760,19 @@ fn decodeBlockProgressive(decoder: *JpegDecoder, scan_info: ScanInfo, scan_comp:
             if (skips.* == 0) {
                 while (ac <= scan_info.end_of_spectral_selection) {
                     var coeff: i32 = 0;
-                    const zero_run_length_and_magnitude = try decoder.readCode(&ac_table);
+                    const zero_run_length_and_magnitude = try state.readCode(&ac_table);
                     var zero_run_length = zero_run_length_and_magnitude >> 4;
                     const maybe_magnitude = zero_run_length_and_magnitude & 0x0F;
 
                     if (maybe_magnitude == 0) {
                         if (zero_run_length < 15) {
                             skips.* = (@as(u32, 1) << @intCast(zero_run_length));
-                            const extra_skips: u32 = try decoder.bit_reader.getBits(@intCast(zero_run_length));
+                            const extra_skips: u32 = try state.bit_reader.getBits(@intCast(zero_run_length));
                             skips.* += extra_skips;
                             break; // start processing skips
                         } // no special treatment for zero_run_length == 15
                     } else if (maybe_magnitude != 0) {
-                        const sign_bit: u32 = try decoder.bit_reader.getBits(1);
+                        const sign_bit: u32 = try state.bit_reader.getBits(1);
                         coeff = if (sign_bit == 1) bit else -bit;
                     }
 
@@ -1827,7 +1788,7 @@ fn decodeBlockProgressive(decoder: *JpegDecoder, scan_info: ScanInfo, scan_comp:
                                 break;
                             }
                         } else {
-                            const sign_bit: u32 = try decoder.bit_reader.getBits(1);
+                            const sign_bit: u32 = try state.bit_reader.getBits(1);
                             if (sign_bit != 0) {
                                 block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
                             }
@@ -1841,7 +1802,7 @@ fn decodeBlockProgressive(decoder: *JpegDecoder, scan_info: ScanInfo, scan_comp:
             if (skips.* > 0) {
                 while (ac <= scan_info.end_of_spectral_selection) : (ac += 1) {
                     if (block[zigzag[ac]] != 0) {
-                        const sign_bit: u32 = try decoder.bit_reader.getBits(1);
+                        const sign_bit: u32 = try state.bit_reader.getBits(1);
                         if (sign_bit != 0) {
                             block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
                         }
@@ -1854,24 +1815,24 @@ fn decodeBlockProgressive(decoder: *JpegDecoder, scan_info: ScanInfo, scan_comp:
 }
 
 // Decode a single block in baseline mode
-fn decodeBlockBaseline(decoder: *JpegDecoder, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
+fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
     // For baseline, clear the block
     @memset(block, 0);
 
     // Decode DC coefficient
-    const dc_table = decoder.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
-    const dc_symbol = try decoder.readCode(&dc_table);
+    const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
+    const dc_symbol = try state.readCode(&dc_table);
 
     if (dc_symbol > 11) return error.InvalidDCCoefficient;
 
-    const dc_diff = try decoder.readMagnitudeCoded(@intCast(dc_symbol));
+    const dc_diff = try state.readMagnitudeCoded(@intCast(dc_symbol));
 
     dc_prediction.* += dc_diff;
     block[0] = dc_prediction.*;
 
     // Decode AC coefficients using the existing function
-    const ac_table = decoder.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
-    try decoder.decodeAC(&ac_table, block);
+    const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
+    try state.decodeAC(&ac_table, block);
 }
 
 // Parse JPEG file and decode image
@@ -1908,36 +1869,36 @@ fn readMarkerLength(data: []const u8, pos: usize) !u16 {
 }
 
 // Helper function to process a Start of Scan marker
-fn processScanMarker(decoder: *JpegDecoder, data: []const u8, pos: usize) !usize {
-    const scan_info = try decoder.parseSOS(data[pos + 2 ..]);
+fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
+    const scan_info = try state.parseSOS(data[pos + 2 ..]);
     const header_len = try readMarkerLength(data, pos + 2);
     const scan_start = pos + 2 + header_len;
 
     const scan_end = findScanEnd(data, scan_start);
-    decoder.bit_reader = BitReader.init(data[scan_start..scan_end]);
+    state.bit_reader = BitReader.init(data[scan_start..scan_end]);
 
     // For baseline JPEG, don't perform scan here - loadJpeg will call performBlockScan
-    if (decoder.frame_type == .baseline) {
+    if (state.frame_type == .baseline) {
         // Track allocated components for baseline
-        decoder.scan_components = scan_info.components;
+        state.scan_components = scan_info.components;
         return scan_end; // Signal that baseline processing is complete
     }
 
     // For progressive JPEG, perform the scan
-    performScan(decoder, scan_info) catch |err| {
+    performScan(state, scan_info) catch |err| {
         // Free scan components before propagating error
-        decoder.allocator.free(scan_info.components);
+        state.allocator.free(scan_info.components);
         return err;
     };
 
-    // Free scan components for progressive (don't store in decoder)
-    decoder.allocator.free(scan_info.components);
+    // Free scan components for progressive (don't store in state)
+    state.allocator.free(scan_info.components);
     return scan_end;
 }
 
-pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
-    var decoder = JpegDecoder.init(allocator);
-    errdefer decoder.deinit();
+pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
+    var state = JpegState.init(allocator);
+    errdefer state.deinit();
 
     // Check for JPEG SOI marker
     if (data.len < 2 or !std.mem.eql(u8, data[0..2], &signature)) {
@@ -1972,7 +1933,7 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
 
             .SOF0, .SOF2 => {
                 const frame_type: FrameType = if (marker == .SOF0) .baseline else .progressive;
-                try decoder.parseSOF(data[pos + 2 ..], frame_type);
+                try state.parseSOF(data[pos + 2 ..], frame_type);
                 const length = try readMarkerLength(data, pos + 2);
                 pos += 2 + length;
             },
@@ -1982,29 +1943,29 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
             .SOF3 => return error.UnsupportedLosslessJpeg,
 
             .DHT => {
-                try decoder.parseDHT(data[pos + 2 ..]);
+                try state.parseDHT(data[pos + 2 ..]);
                 const length = try readMarkerLength(data, pos + 2);
                 pos += 2 + length;
             },
 
             .DQT => {
-                try decoder.parseDQT(data[pos + 2 ..]);
+                try state.parseDQT(data[pos + 2 ..]);
                 const length = try readMarkerLength(data, pos + 2);
                 pos += 2 + length;
             },
 
             .SOS => {
-                const scan_end = try processScanMarker(&decoder, data, pos);
+                const scan_end = try processScanMarker(&state, data, pos);
                 // For baseline JPEG, return immediately after first scan
-                if (decoder.frame_type == .baseline) {
-                    return decoder;
+                if (state.frame_type == .baseline) {
+                    return state;
                 }
                 // For progressive JPEG, continue parsing more scans
                 pos = scan_end;
             },
 
             .DRI => {
-                try decoder.parseDRI(data[pos + 2 ..]);
+                try state.parseDRI(data[pos + 2 ..]);
                 const length = try readMarkerLength(data, pos + 2);
                 pos += 2 + length;
             },
@@ -2041,8 +2002,8 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegDecoder {
     }
 
     // For progressive JPEG that finished all scans
-    if (decoder.frame_type == .progressive) {
-        return decoder;
+    if (state.frame_type == .progressive) {
+        return state;
     }
 
     return error.NoScanData;
@@ -2256,19 +2217,19 @@ fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_
 }
 
 // Block scan function that fills block storage (from master)
-fn performBlockScan(decoder: *JpegDecoder) !void {
-    if (decoder.block_storage == null) return error.BlockStorageNotAllocated;
+fn performBlockScan(state: *JpegState) !void {
+    if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
     // Calculate maximum sampling factors
     var max_h_factor: u4 = 1;
     var max_v_factor: u4 = 1;
-    for (decoder.components[0..decoder.num_components]) |comp| {
+    for (state.components[0..state.num_components]) |comp| {
         max_h_factor = @max(max_h_factor, comp.h_sampling);
         max_v_factor = @max(max_v_factor, comp.v_sampling);
     }
 
     // Scan structure
-    const noninterleaved = decoder.scan_components.len == 1 and decoder.scan_components[0].component_id == 1;
+    const noninterleaved = state.scan_components.len == 1 and state.scan_components[0].component_id == 1;
     const y_step = if (noninterleaved) 1 else max_v_factor;
     const x_step = if (noninterleaved) 1 else max_h_factor;
 
@@ -2276,17 +2237,17 @@ fn performBlockScan(decoder: *JpegDecoder) !void {
     var prediction_values: [4]i32 = @splat(0);
 
     var y: usize = 0;
-    while (y < decoder.block_height) : (y += y_step) {
+    while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
-        while (x < decoder.block_width) : (x += x_step) {
+        while (x < state.block_width) : (x += x_step) {
             // Decode each component at this position
-            for (decoder.scan_components) |scan_comp| {
+            for (state.scan_components) |scan_comp| {
                 // Find the component index for this scan component
                 var component_index: usize = 0;
                 var v_max: usize = undefined;
                 var h_max: usize = undefined;
 
-                for (decoder.components[0..decoder.num_components], 0..) |frame_component, i| {
+                for (state.components[0..state.num_components], 0..) |frame_component, i| {
                     if (frame_component.id == scan_comp.component_id) {
                         component_index = i;
                         v_max = if (noninterleaved) 1 else frame_component.v_sampling;
@@ -2298,13 +2259,13 @@ fn performBlockScan(decoder: *JpegDecoder) !void {
                 // Decode all blocks for this component in this MCU
                 for (0..v_max) |v| {
                     for (0..h_max) |h| {
-                        if (y + v >= decoder.block_height or x + h >= decoder.block_width) continue;
+                        if (y + v >= state.block_height or x + h >= state.block_width) continue;
 
-                        const block_id = (y + v) * decoder.block_width_actual + (x + h);
-                        const block = &decoder.block_storage.?[block_id][component_index];
+                        const block_id = (y + v) * state.block_width_actual + (x + h);
+                        const block = &state.block_storage.?[block_id][component_index];
 
                         // Decode block directly into storage
-                        try decodeBlockToStorage(decoder, scan_comp, block, &prediction_values[component_index]);
+                        try decodeBlockToStorage(state, scan_comp, block, &prediction_values[component_index]);
                     }
                 }
             }
@@ -2313,19 +2274,19 @@ fn performBlockScan(decoder: *JpegDecoder) !void {
 }
 
 // Decode a single block directly into block storage (from master)
-fn decodeBlockToStorage(decoder: *JpegDecoder, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
+fn decodeBlockToStorage(state: *JpegState, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
     // Clear the block
     @memset(block, 0);
 
     // Decode DC coefficient
-    const dc_table = decoder.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
-    const dc_symbol = try decoder.decodeHuffmanSymbol(&dc_table);
+    const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
+    const dc_symbol = try state.decodeHuffmanSymbol(&dc_table);
 
     if (dc_symbol > 11) return error.InvalidDCCoefficient;
 
     var dc_diff: i32 = 0;
     if (dc_symbol > 0) {
-        const dc_bits = try decoder.bit_reader.getBits(@intCast(dc_symbol));
+        const dc_bits = try state.bit_reader.getBits(@intCast(dc_symbol));
         dc_diff = @intCast(dc_bits);
 
         // Convert from unsigned to signed
@@ -2338,11 +2299,11 @@ fn decodeBlockToStorage(decoder: *JpegDecoder, scan_comp: ScanComponent, block: 
     block[0] = dc_prediction.*;
 
     // Decode AC coefficients
-    const ac_table = decoder.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
+    const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
     var k: usize = 1;
 
     while (k < 64) {
-        const ac_symbol = try decoder.decodeHuffmanSymbol(&ac_table);
+        const ac_symbol = try state.decodeHuffmanSymbol(&ac_table);
 
         if (ac_symbol == 0x00) {
             // End of block
@@ -2363,7 +2324,7 @@ fn decodeBlockToStorage(decoder: *JpegDecoder, scan_comp: ScanComponent, block: 
         k += zero_run;
         if (k >= 64) break;
 
-        const ac_bits = try decoder.bit_reader.getBits(@intCast(coeff_bits));
+        const ac_bits = try state.bit_reader.getBits(@intCast(coeff_bits));
         var ac_value: i32 = @intCast(ac_bits);
 
         // Convert from unsigned to signed
@@ -2377,13 +2338,13 @@ fn decodeBlockToStorage(decoder: *JpegDecoder, scan_comp: ScanComponent, block: 
 }
 
 // Dequantize all blocks in storage
-pub fn dequantizeAllBlocks(decoder: *JpegDecoder) !void {
-    if (decoder.block_storage == null) return error.BlockStorageNotAllocated;
+fn dequantizeAllBlocks(state: *JpegState) !void {
+    if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
     // Apply dequantization to all blocks
-    for (decoder.block_storage.?) |*block_set| {
-        for (decoder.components[0..decoder.num_components], 0..) |comp, comp_idx| {
-            const quant_table = decoder.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
+    for (state.block_storage.?) |*block_set| {
+        for (state.components[0..state.num_components], 0..) |comp, comp_idx| {
+            const quant_table = state.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
 
             for (0..64) |i| {
                 block_set[comp_idx][i] *= @as(i32, @intCast(quant_table[i]));
@@ -2393,12 +2354,12 @@ pub fn dequantizeAllBlocks(decoder: *JpegDecoder) !void {
 }
 
 // Apply IDCT to all blocks in storage
-pub fn idctAllBlocks(decoder: *JpegDecoder) void {
-    if (decoder.block_storage == null) return;
+fn idctAllBlocks(state: *JpegState) void {
+    if (state.block_storage == null) return;
 
     // Apply IDCT to all blocks
-    for (decoder.block_storage.?) |*block_set| {
-        for (0..decoder.num_components) |comp_idx| {
+    for (state.block_storage.?) |*block_set| {
+        for (0..state.num_components) |comp_idx| {
             idct8x8(&block_set[comp_idx]);
 
             // Apply level shift (+128) only to Y component (component 0) - master's approach
@@ -2413,7 +2374,7 @@ pub fn idctAllBlocks(decoder: *JpegDecoder) void {
 }
 
 // Upsample chroma for a specific Y block within an MCU
-fn upsampleChromaForBlock(decoder: *JpegDecoder, mcu_col: usize, mcu_row: usize, h_offset: usize, v_offset: usize, max_h: u4, max_v: u4, cb_out: *[64]i32, cr_out: *[64]i32) void {
+fn upsampleChromaForBlock(state: *JpegState, mcu_col: usize, mcu_row: usize, h_offset: usize, v_offset: usize, max_h: u4, max_v: u4, cb_out: *[64]i32, cr_out: *[64]i32) void {
 
     // For 4:2:0, we need to interpolate from the 2x2 pixel grid at the MCU level to 8x8 for each Y block
     // The h_offset and v_offset tell us which quadrant of the MCU we're in
@@ -2421,15 +2382,15 @@ fn upsampleChromaForBlock(decoder: *JpegDecoder, mcu_col: usize, mcu_row: usize,
     // Get the chroma block for this MCU
     const chroma_y = mcu_row * max_v;
     const chroma_x = mcu_col * max_h;
-    if (chroma_y >= decoder.block_height or chroma_x >= decoder.block_width) {
+    if (chroma_y >= state.block_height or chroma_x >= state.block_width) {
         @memset(cb_out, 0);
         @memset(cr_out, 0);
         return;
     }
 
-    const chroma_block_index = chroma_y * decoder.block_width_actual + chroma_x;
-    const cb_block = &decoder.block_storage.?[chroma_block_index][1];
-    const cr_block = &decoder.block_storage.?[chroma_block_index][2];
+    const chroma_block_index = chroma_y * state.block_width_actual + chroma_x;
+    const cb_block = &state.block_storage.?[chroma_block_index][1];
+    const cr_block = &state.block_storage.?[chroma_block_index][2];
 
     // For 4:2:0 with 2x2 Y blocks per MCU, we need to map the 8x8 chroma to each 8x8 Y block
     // Each Y block gets a quarter of the chroma samples, interpolated
@@ -2459,30 +2420,30 @@ fn upsampleChromaForBlock(decoder: *JpegDecoder, mcu_col: usize, mcu_row: usize,
 }
 
 // Convert YCbCr blocks to RGB with proper 4:2:0 chroma upsampling
-pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
-    if (decoder.block_storage == null) return error.BlockStorageNotAllocated;
+fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
+    if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
-    if (decoder.num_components == 1) {
+    if (state.num_components == 1) {
         // Grayscale - blocks already level-shifted in IDCT
-        for (decoder.block_storage.?, 0..) |*block_set, idx| {
+        for (state.block_storage.?, 0..) |*block_set, idx| {
             for (0..64) |i| {
                 const y_val = block_set[0][i];
                 const rgb_val: u8 = @intCast(std.math.clamp(y_val, 0, 255));
-                decoder.rgb_storage.?[idx][0][i] = rgb_val; // R
-                decoder.rgb_storage.?[idx][1][i] = rgb_val; // G
-                decoder.rgb_storage.?[idx][2][i] = rgb_val; // B
+                state.rgb_storage.?[idx][0][i] = rgb_val; // R
+                state.rgb_storage.?[idx][1][i] = rgb_val; // G
+                state.rgb_storage.?[idx][2][i] = rgb_val; // B
             }
         }
         return;
     }
 
     // Check chroma subsampling mode
-    const max_h = decoder.components[0].h_sampling;
-    const max_v = decoder.components[0].v_sampling;
+    const max_h = state.components[0].h_sampling;
+    const max_v = state.components[0].v_sampling;
 
     // 4:4:4 - no chroma subsampling, each component has same number of blocks
     if (max_h == 1 and max_v == 1) {
-        for (decoder.block_storage.?, 0..) |*block_set, idx| {
+        for (state.block_storage.?, 0..) |*block_set, idx| {
             // Direct YCbCr to RGB conversion without upsampling
             for (0..64) |i| {
                 const Y = block_set[0][i];
@@ -2496,9 +2457,9 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                 };
                 const rgb = ycbcr.toRgb();
 
-                decoder.rgb_storage.?[idx][0][i] = rgb.r;
-                decoder.rgb_storage.?[idx][1][i] = rgb.g;
-                decoder.rgb_storage.?[idx][2][i] = rgb.b;
+                state.rgb_storage.?[idx][0][i] = rgb.r;
+                state.rgb_storage.?[idx][1][i] = rgb.g;
+                state.rgb_storage.?[idx][2][i] = rgb.b;
             }
         }
         return;
@@ -2507,23 +2468,23 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
     // 4:2:2 - horizontal chroma subsampling only
     if (max_h == 2 and max_v == 1) {
         var mcu_y: usize = 0;
-        while (mcu_y < decoder.block_height) : (mcu_y += 1) {
+        while (mcu_y < state.block_height) : (mcu_y += 1) {
             var mcu_x: usize = 0;
-            while (mcu_x < decoder.block_width) : (mcu_x += 2) {
-                const chroma_block_index = mcu_y * decoder.block_width_actual + mcu_x;
+            while (mcu_x < state.block_width) : (mcu_x += 2) {
+                const chroma_block_index = mcu_y * state.block_width_actual + mcu_x;
 
                 // Process the 2 Y blocks in this MCU
                 for (0..2) |h| {
                     const y_block_x = mcu_x + h;
-                    if (y_block_x >= decoder.block_width) continue;
+                    if (y_block_x >= state.block_width) continue;
 
-                    const y_block_index = mcu_y * decoder.block_width_actual + y_block_x;
+                    const y_block_index = mcu_y * state.block_width_actual + y_block_x;
 
                     for (0..64) |pixel_idx| {
                         const py = pixel_idx / 8;
                         const px = pixel_idx % 8;
 
-                        const Y = decoder.block_storage.?[y_block_index][0][pixel_idx];
+                        const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Horizontal interpolation for chroma
                         const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
@@ -2534,12 +2495,12 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
                         const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
 
-                        const cb0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx]));
-                        const cb1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx_next]));
+                        const cb0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]));
+                        const cb1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]));
                         const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
 
-                        const cr0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx]));
-                        const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
+                        const cr0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]));
+                        const cr1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]));
                         const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
 
                         const ycbcr: Ycbcr = .{
@@ -2549,9 +2510,9 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         };
                         const rgb = ycbcr.toRgb();
 
-                        decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
-                        decoder.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
-                        decoder.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
+                        state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
+                        state.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
+                        state.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
                     }
                 }
             }
@@ -2562,23 +2523,23 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
     // 4:1:1 - 4:1 horizontal chroma subsampling
     if (max_h == 4 and max_v == 1) {
         var mcu_y: usize = 0;
-        while (mcu_y < decoder.block_height) : (mcu_y += 1) {
+        while (mcu_y < state.block_height) : (mcu_y += 1) {
             var mcu_x: usize = 0;
-            while (mcu_x < decoder.block_width) : (mcu_x += 4) {
-                const chroma_block_index = mcu_y * decoder.block_width_actual + mcu_x;
+            while (mcu_x < state.block_width) : (mcu_x += 4) {
+                const chroma_block_index = mcu_y * state.block_width_actual + mcu_x;
 
                 // Process the 4 Y blocks in this MCU
                 for (0..4) |h| {
                     const y_block_x = mcu_x + h;
-                    if (y_block_x >= decoder.block_width) continue;
+                    if (y_block_x >= state.block_width) continue;
 
-                    const y_block_index = mcu_y * decoder.block_width_actual + y_block_x;
+                    const y_block_index = mcu_y * state.block_width_actual + y_block_x;
 
                     for (0..64) |pixel_idx| {
                         const py = pixel_idx / 8;
                         const px = pixel_idx % 8;
 
-                        const Y = decoder.block_storage.?[y_block_index][0][pixel_idx];
+                        const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Horizontal interpolation for 4:1 chroma
                         const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.25 - 0.5;
@@ -2589,12 +2550,12 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
                         const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
 
-                        const cb0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx]));
-                        const cb1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][chroma_idx_next]));
+                        const cb0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]));
+                        const cb1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]));
                         const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
 
-                        const cr0 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx]));
-                        const cr1 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][chroma_idx_next]));
+                        const cr0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]));
+                        const cr1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]));
                         const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
 
                         const ycbcr: Ycbcr = .{
@@ -2604,9 +2565,9 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         };
                         const rgb = ycbcr.toRgb();
 
-                        decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
-                        decoder.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
-                        decoder.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
+                        state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
+                        state.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
+                        state.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
                     }
                 }
             }
@@ -2617,11 +2578,11 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
     // 4:2:0 chroma subsampling (both horizontal and vertical)
     // Process in MCU units
     var mcu_y: usize = 0;
-    while (mcu_y < decoder.block_height) : (mcu_y += max_v) {
+    while (mcu_y < state.block_height) : (mcu_y += max_v) {
         var mcu_x: usize = 0;
-        while (mcu_x < decoder.block_width) : (mcu_x += max_h) {
+        while (mcu_x < state.block_width) : (mcu_x += max_h) {
             // Get the chroma block (stored at MCU origin)
-            const chroma_block_index = mcu_y * decoder.block_width_actual + mcu_x;
+            const chroma_block_index = mcu_y * state.block_width_actual + mcu_x;
 
             // Process each Y block in this MCU
             for (0..max_v) |v| {
@@ -2629,16 +2590,16 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                     const y_block_y = mcu_y + v;
                     const y_block_x = mcu_x + h;
 
-                    if (y_block_y >= decoder.block_height or y_block_x >= decoder.block_width) continue;
+                    if (y_block_y >= state.block_height or y_block_x >= state.block_width) continue;
 
-                    const y_block_index = y_block_y * decoder.block_width_actual + y_block_x;
+                    const y_block_index = y_block_y * state.block_width_actual + y_block_x;
 
                     // Convert this Y block using upsampled chroma
                     for (0..64) |pixel_idx| {
                         const py = pixel_idx / 8;
                         const px = pixel_idx % 8;
 
-                        const Y = decoder.block_storage.?[y_block_index][0][pixel_idx];
+                        const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Bilinear interpolation for chroma upsampling
                         const chroma_y_f = (@as(f32, @floatFromInt(v * 8 + py)) + 0.5) * 0.5 - 0.5;
@@ -2653,16 +2614,16 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
                         // Get the four surrounding chroma values for Cb
-                        const cb00 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cb10 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
-                        const cb01 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cb11 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cb00 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
+                        const cb10 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cb01 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
+                        const cb11 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
 
                         // Get the four surrounding chroma values for Cr
-                        const cr00 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cr10 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
-                        const cr01 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cr11 = @as(f32, @floatFromInt(decoder.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cr00 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
+                        const cr10 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cr01 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
+                        const cr11 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
 
                         // Bilinear interpolation
                         const cb_interp_x0 = std.math.lerp(cb00, cb10, fx);
@@ -2681,9 +2642,9 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
                         const rgb = ycbcr.toRgb();
 
                         // Store RGB in separate storage to avoid overwriting chroma data
-                        decoder.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
-                        decoder.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
-                        decoder.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
+                        state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
+                        state.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
+                        state.rgb_storage.?[y_block_index][2][pixel_idx] = rgb.b;
                     }
                 }
             }
@@ -2692,29 +2653,29 @@ pub fn ycbcrToRgbAllBlocks(decoder: *JpegDecoder) !void {
 }
 
 // Render RGB blocks to pixels (simple after YCbCr conversion)
-pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Image(T)) !void {
-    if (decoder.rgb_storage == null) return error.RgbStorageNotAllocated;
+fn renderRgbBlocksToPixels(comptime T: type, state: *JpegState, img: *Image(T)) !void {
+    if (state.rgb_storage == null) return error.RgbStorageNotAllocated;
 
     // Simple rendering - read from RGB storage
     var block_y: usize = 0;
-    while (block_y < decoder.block_height) : (block_y += 1) {
+    while (block_y < state.block_height) : (block_y += 1) {
         const pixel_y = block_y * 8;
 
         var block_x: usize = 0;
-        while (block_x < decoder.block_width) : (block_x += 1) {
-            const block_index = block_y * decoder.block_width_actual + block_x;
+        while (block_x < state.block_width) : (block_x += 1) {
+            const block_index = block_y * state.block_width_actual + block_x;
             const pixel_x = block_x * 8;
 
             for (0..8) |y| {
                 for (0..8) |x| {
-                    if (pixel_y + y >= decoder.height or pixel_x + x >= decoder.width) {
+                    if (pixel_y + y >= state.height or pixel_x + x >= state.width) {
                         continue;
                     }
 
                     const pixel_idx = y * 8 + x;
-                    const r = decoder.rgb_storage.?[block_index][0][pixel_idx];
-                    const g = decoder.rgb_storage.?[block_index][1][pixel_idx];
-                    const b = decoder.rgb_storage.?[block_index][2][pixel_idx];
+                    const r = state.rgb_storage.?[block_index][0][pixel_idx];
+                    const g = state.rgb_storage.?[block_index][1][pixel_idx];
+                    const b = state.rgb_storage.?[block_index][2][pixel_idx];
 
                     const rgb = Rgb{ .r = r, .g = g, .b = b };
                     img.at(pixel_y + y, pixel_x + x).* = convertColor(T, rgb);
@@ -2732,6 +2693,44 @@ pub fn renderRgbBlocksToPixels(comptime T: type, decoder: *JpegDecoder, img: *Im
 /// - T: Desired output pixel type (u8, Rgb, etc.) - color conversion applied if needed
 /// - allocator: Memory allocator for image data
 /// - file_path: Path to JPEG file
+/// Convert JPEG state data to its most natural Zignal Image type.
+/// Returns grayscale for single-component JPEGs, RGB for color JPEGs.
+pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
+    grayscale: Image(u8),
+    rgb: Image(Rgb),
+} {
+    // Complete block-based pipeline:
+    // Step 1: Decode all blocks into storage (storage allocated during parseSOF)
+    // For baseline JPEG, decode blocks here. For progressive, decode() already did it.
+    if (state.frame_type == .baseline) {
+        try performBlockScan(state);
+    }
+
+    // Step 2: Apply dequantization to all blocks
+    try dequantizeAllBlocks(state);
+
+    // Step 3: Apply IDCT to all blocks
+    idctAllBlocks(state);
+
+    // Step 4: Convert YCbCr to RGB with proper chroma upsampling (RGB storage allocated during parseSOF)
+    try ycbcrToRgbAllBlocks(state);
+
+    // Step 5: Create appropriate image type based on component count
+    if (state.num_components == 1) {
+        // Grayscale
+        var img = try Image(u8).init(allocator, state.height, state.width);
+        errdefer img.deinit(allocator);
+        try renderRgbBlocksToPixels(u8, state, &img);
+        return .{ .grayscale = img };
+    } else {
+        // Color (RGB)
+        var img = try Image(Rgb).init(allocator, state.height, state.width);
+        errdefer img.deinit(allocator);
+        try renderRgbBlocksToPixels(Rgb, state, &img);
+        return .{ .rgb = img };
+    }
+}
+
 ///
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
@@ -2755,33 +2754,31 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
 
     _ = try file.read(data);
 
-    var decoder = try decode(allocator, data);
-    defer decoder.deinit();
+    var state = try decode(allocator, data);
+    defer state.deinit();
 
-    // Create output image
-    var img = try Image(T).init(allocator, decoder.height, decoder.width);
-    errdefer img.deinit(allocator);
-
-    // Complete block-based pipeline:
-    // Step 1: Decode all blocks into storage (storage allocated during parseSOF)
-    // For baseline JPEG, decode blocks here. For progressive, decode() already did it.
-    if (decoder.frame_type == .baseline) {
-        try performBlockScan(&decoder);
+    // Load the JPEG in its native format first, then convert to requested type
+    var native_image = try toNativeImage(allocator, &state);
+    switch (native_image) {
+        .grayscale => |*img| {
+            if (T == u8) {
+                // Direct return without conversion - no extra allocation needed
+                return img.*;
+            } else {
+                defer img.deinit(allocator);
+                return img.convert(T, allocator);
+            }
+        },
+        .rgb => |*img| {
+            if (T == Rgb) {
+                // Direct return without conversion - no extra allocation needed
+                return img.*;
+            } else {
+                defer img.deinit(allocator);
+                return img.convert(T, allocator);
+            }
+        },
     }
-
-    // Step 2: Apply dequantization to all blocks
-    try dequantizeAllBlocks(&decoder);
-
-    // Step 3: Apply IDCT to all blocks
-    idctAllBlocks(&decoder);
-
-    // Step 4: Convert YCbCr to RGB with proper chroma upsampling (RGB storage allocated during parseSOF)
-    try ycbcrToRgbAllBlocks(&decoder);
-
-    // Step 4: Render RGB blocks to pixels
-    try renderRgbBlocksToPixels(T, &decoder, &img);
-
-    return img;
 }
 
 test "JPEG encode -> decode RGB roundtrip" {
@@ -2798,18 +2795,18 @@ test "JPEG encode -> decode RGB roundtrip" {
         }
     }
 
-    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 85 });
+    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
-    var decoder = try decode(gpa, bytes);
-    defer decoder.deinit();
-    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
-    try dequantizeAllBlocks(&decoder);
-    idctAllBlocks(&decoder);
-    try ycbcrToRgbAllBlocks(&decoder);
-    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    var state = try decode(gpa, bytes);
+    defer state.deinit();
+    if (state.frame_type == .baseline) try performBlockScan(&state);
+    try dequantizeAllBlocks(&state);
+    idctAllBlocks(&state);
+    try ycbcrToRgbAllBlocks(&state);
+    var out = try Image(Rgb).init(gpa, state.height, state.width);
     defer out.deinit(gpa);
-    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+    try renderRgbBlocksToPixels(Rgb, &state, &out);
 
     const ps = try img.psnr(out);
     try std.testing.expect(ps > 40.0);
@@ -2824,18 +2821,18 @@ test "JPEG encode -> decode grayscale roundtrip" {
             img.at(y, x).* = @intCast(((x + y) * 255) / (img.cols + img.rows - 2));
         }
     }
-    const bytes = try encodeImage(u8, gpa, img, .{ .quality = 85 });
+    const bytes = try encode(u8, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
-    var decoder = try decode(gpa, bytes);
-    defer decoder.deinit();
-    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
-    try dequantizeAllBlocks(&decoder);
-    idctAllBlocks(&decoder);
-    try ycbcrToRgbAllBlocks(&decoder);
-    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    var state = try decode(gpa, bytes);
+    defer state.deinit();
+    if (state.frame_type == .baseline) try performBlockScan(&state);
+    try dequantizeAllBlocks(&state);
+    idctAllBlocks(&state);
+    try ycbcrToRgbAllBlocks(&state);
+    var out = try Image(Rgb).init(gpa, state.height, state.width);
     defer out.deinit(gpa);
-    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+    try renderRgbBlocksToPixels(Rgb, &state, &out);
 
     // Convert original gray to RGB for PSNR
     var gray_rgb = try img.convert(Rgb, gpa);
@@ -2862,18 +2859,18 @@ test "JPEG subsampling 4:2:2 roundtrip" {
         }
     }
 
-    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
+    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
     defer gpa.free(bytes);
 
-    var decoder = try decode(gpa, bytes);
-    defer decoder.deinit();
-    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
-    try dequantizeAllBlocks(&decoder);
-    idctAllBlocks(&decoder);
-    try ycbcrToRgbAllBlocks(&decoder);
-    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    var state = try decode(gpa, bytes);
+    defer state.deinit();
+    if (state.frame_type == .baseline) try performBlockScan(&state);
+    try dequantizeAllBlocks(&state);
+    idctAllBlocks(&state);
+    try ycbcrToRgbAllBlocks(&state);
+    var out = try Image(Rgb).init(gpa, state.height, state.width);
     defer out.deinit(gpa);
-    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+    try renderRgbBlocksToPixels(Rgb, &state, &out);
 
     const ps = try img.psnr(out);
     try std.testing.expect(ps > 40);
@@ -2897,18 +2894,18 @@ test "JPEG subsampling 4:2:0 roundtrip" {
         }
     }
 
-    const bytes = try encodeImage(Rgb, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
+    const bytes = try encode(Rgb, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
     defer gpa.free(bytes);
 
-    var decoder = try decode(gpa, bytes);
-    defer decoder.deinit();
-    if (decoder.frame_type == .baseline) try performBlockScan(&decoder);
-    try dequantizeAllBlocks(&decoder);
-    idctAllBlocks(&decoder);
-    try ycbcrToRgbAllBlocks(&decoder);
-    var out = try Image(Rgb).init(gpa, decoder.height, decoder.width);
+    var state = try decode(gpa, bytes);
+    defer state.deinit();
+    if (state.frame_type == .baseline) try performBlockScan(&state);
+    try dequantizeAllBlocks(&state);
+    idctAllBlocks(&state);
+    try ycbcrToRgbAllBlocks(&state);
+    var out = try Image(Rgb).init(gpa, state.height, state.width);
     defer out.deinit(gpa);
-    try renderRgbBlocksToPixels(Rgb, &decoder, &out);
+    try renderRgbBlocksToPixels(Rgb, &state, &out);
 
     const ps = try img.psnr(out);
     try std.testing.expect(ps > 45);
