@@ -94,7 +94,7 @@ scale_factor: f32 = 1.2,
 n_levels: u8 = 8,
 
 /// Border width where features are not detected
-edge_threshold: u8 = DEFAULT_PATCH_SIZE,
+edge_threshold: u8 = DEFAULT_PATCH_SIZE / 2,
 
 /// First pyramid level to use (0 = original resolution)
 first_level: u8 = 0,
@@ -146,9 +146,13 @@ pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 
         if (n_desired == 0) continue;
 
-        // Detect FAST corners
+        // Detect FAST corners with adaptive threshold
+        // Lower threshold for higher pyramid levels to maintain detection
+        const threshold_scale = 1.0 - (@as(f32, @floatFromInt(level)) * 0.1);
+        const adaptive_threshold = @max(5, @as(u8, @intFromFloat(@as(f32, @floatFromInt(self.fast_threshold)) * threshold_scale)));
+
         var fast_detector = Fast{
-            .threshold = self.fast_threshold,
+            .threshold = adaptive_threshold,
             .nonmax_suppression = true,
             .min_contiguous = 9,
         };
@@ -172,13 +176,25 @@ pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
         }
 
         // Compute orientation and scale coordinates
+        // Scale-aware edge margin: smaller at higher pyramid levels
+        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
+        const edge_margin = @as(f32, @floatFromInt(self.edge_threshold)) / scale;
+        const min_margin = 3.0; // Minimum margin for FAST detector
+        const actual_margin = @max(min_margin, edge_margin);
+
         for (level_keypoints) |*kp| {
+            // Filter out keypoints too close to image borders
+            if (kp.x < actual_margin or kp.x >= @as(f32, @floatFromInt(level_image.cols)) - actual_margin or
+                kp.y < actual_margin or kp.y >= @as(f32, @floatFromInt(level_image.rows)) - actual_margin)
+            {
+                continue;
+            }
+
             // Compute orientation using intensity centroid
             kp.angle = self.computeOrientation(level_image, kp.*);
             kp.octave = @intCast(level);
 
             // Scale coordinates to original image
-            const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
             kp.x *= scale;
             kp.y *= scale;
             kp.size *= scale;
@@ -244,9 +260,13 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
 
         if (n_desired == 0) continue;
 
-        // Detect FAST corners
+        // Detect FAST corners with adaptive threshold
+        // Lower threshold for higher pyramid levels to maintain detection
+        const threshold_scale = 1.0 - (@as(f32, @floatFromInt(level)) * 0.1);
+        const adaptive_threshold = @max(5, @as(u8, @intFromFloat(@as(f32, @floatFromInt(self.fast_threshold)) * threshold_scale)));
+
         var fast_detector = Fast{
-            .threshold = self.fast_threshold,
+            .threshold = adaptive_threshold,
             .nonmax_suppression = true,
             .min_contiguous = 9,
         };
@@ -270,13 +290,25 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
         }
 
         // Compute orientation and scale coordinates
+        // Scale-aware edge margin: smaller at higher pyramid levels
+        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
+        const edge_margin = @as(f32, @floatFromInt(self.edge_threshold)) / scale;
+        const min_margin = 3.0; // Minimum margin for FAST detector
+        const actual_margin = @max(min_margin, edge_margin);
+
         for (level_keypoints) |*kp| {
+            // Filter out keypoints too close to image borders
+            if (kp.x < actual_margin or kp.x >= @as(f32, @floatFromInt(level_image.cols)) - actual_margin or
+                kp.y < actual_margin or kp.y >= @as(f32, @floatFromInt(level_image.rows)) - actual_margin)
+            {
+                continue;
+            }
+
             // Compute orientation using intensity centroid
             kp.angle = self.computeOrientation(level_image, kp.*);
             kp.octave = @intCast(level);
 
             // Scale coordinates to original image
-            const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
             kp.x *= scale;
             kp.y *= scale;
             kp.size *= scale;
@@ -347,37 +379,49 @@ pub fn detectAndCompute(
 fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
     var n_features_per_level = try allocator.alloc(usize, self.n_levels);
 
-    // Simple distribution: more features at finer scales
-    // This follows ORB paper's approach
-    const inv_scale = 1.0 / self.scale_factor;
-    var sum_inv_scale: f32 = 0;
+    // Exponential scale distribution for better coverage
+    // Uses formula: n_features * (1 - factor) / (1 - factor^n_levels) * factor^level
+    const factor = 1.0 / self.scale_factor;
+    const factor_to_n = std.math.pow(f32, factor, @as(f32, @floatFromInt(self.n_levels)));
 
-    // Calculate sum of inverse scales
-    for (0..self.n_levels) |level| {
-        sum_inv_scale += std.math.pow(f32, inv_scale, @as(f32, @floatFromInt(level)));
+    // Special case for single level
+    if (self.n_levels == 1) {
+        n_features_per_level[0] = self.n_features;
+        return n_features_per_level;
     }
 
-    // Distribute features proportionally
+    // Distribute features with exponential decay
     var assigned: usize = 0;
+    const n_features_f = @as(f32, @floatFromInt(self.n_features));
+
     for (0..self.n_levels) |level| {
-        const scale_factor_level = std.math.pow(f32, inv_scale, @as(f32, @floatFromInt(level)));
-        const n_desired = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.n_features)) * scale_factor_level / sum_inv_scale)));
+        const scale_factor_level = std.math.pow(f32, factor, @as(f32, @floatFromInt(level)));
+
+        // Calculate desired features for this level
+        const desired_float = n_features_f * (1.0 - factor) / (1.0 - factor_to_n) * scale_factor_level;
+        const n_desired = @as(usize, @intFromFloat(@round(desired_float)));
+
+        // Ensure at least some features per level (except possibly last level)
+        // Reduced minimum to allow more flexible distribution
+        const min_features = if (level < self.n_levels - 1) @max(10, self.n_features / (self.n_levels * 3)) else 0;
 
         if (level == self.n_levels - 1) {
             // Last level gets remaining features
-            n_features_per_level[level] = self.n_features - assigned;
+            n_features_per_level[level] = if (assigned < self.n_features) self.n_features - assigned else 0;
         } else {
-            n_features_per_level[level] = n_desired;
-            assigned += n_desired;
+            n_features_per_level[level] = @max(min_features, @min(n_desired, self.n_features - assigned));
+            assigned += n_features_per_level[level];
         }
     }
 
     return n_features_per_level;
 }
 
-/// Compute keypoint orientation using intensity centroid
+/// Compute keypoint orientation using intensity centroid with circular mask
 fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
     const half_patch = self.patch_size / 2;
+    const radius = @as(f32, @floatFromInt(half_patch));
+    const radius_sq = radius * radius;
     const x = @as(isize, @intFromFloat(kp.x));
     const y = @as(isize, @intFromFloat(kp.y));
 
@@ -385,7 +429,7 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
     var m10: f32 = 0; // First moment in x
     var m01: f32 = 0; // First moment in y
 
-    // Compute moments
+    // Compute moments with circular mask
     for (0..self.patch_size) |v| {
         const dy = @as(isize, @intCast(v)) - half_patch;
         const py = y + dy;
@@ -398,7 +442,14 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
 
             if (px < 0 or px >= image.cols) continue;
 
-            const intensity = @as(f32, @floatFromInt(image.at(@intCast(py), @intCast(px)).*));
+            // Apply circular mask
+            const dist_sq = @as(f32, @floatFromInt(dx * dx + dy * dy));
+            if (dist_sq > radius_sq) continue;
+
+            // Gaussian weight for better stability (optional, can use 1.0 for uniform)
+            const weight = @exp(-dist_sq / (2.0 * radius_sq / 4.0));
+
+            const intensity = @as(f32, @floatFromInt(image.at(@intCast(py), @intCast(px)).*)) * weight;
             m00 += intensity;
             m10 += intensity * @as(f32, @floatFromInt(dx));
             m01 += intensity * @as(f32, @floatFromInt(dy));
@@ -406,10 +457,12 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
     }
 
     // Avoid division by zero
-    if (m00 == 0) return 0;
+    if (m00 < 0.001) return 0;
 
     // Compute angle from centroid
-    const angle_rad = std.math.atan2(m01 / m00, m10 / m00);
+    const centroid_x = m10 / m00;
+    const centroid_y = m01 / m00;
+    const angle_rad = std.math.atan2(centroid_y, centroid_x);
     return std.math.radiansToDegrees(angle_rad);
 }
 
