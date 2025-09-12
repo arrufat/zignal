@@ -23,8 +23,10 @@ pub const CompressionLevel = enum(u4) {
 pub const CompressionStrategy = enum {
     default, // Normal compression (LZ77 + Huffman)
     filtered, // For filtered data like PNG rows
+    // TODO: Could bias toward smaller distances for filtered data
     huffman_only, // Skip LZ77, only Huffman coding
     rle, // Run-length encoding focus for images with runs
+    // TODO: Could prefer longer matches over closer ones for RLE data
 };
 
 // Fixed Huffman code lengths for literal/length alphabet (RFC 1951)
@@ -53,6 +55,7 @@ const FIXED_LITERAL_LENGTHS = [_]u8{
 const FIXED_DISTANCE_LENGTHS: [32]u8 = @splat(5);
 
 // Length codes 257-285 (extra bits and base lengths)
+// Used for DECODING: maps from length code index to actual length values
 const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
     .{ .base = 3, .extra_bits = 0 }, // 257
     .{ .base = 4, .extra_bits = 0 }, // 258
@@ -86,6 +89,7 @@ const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
 };
 
 // Distance codes 0-29 (extra bits and base distances)
+// Used for DECODING: maps from distance code index to actual distance values
 const DISTANCE_CODES = [_]struct { base: u16, extra_bits: u8 }{
     .{ .base = 1, .extra_bits = 0 }, // 0
     .{ .base = 2, .extra_bits = 0 }, // 1
@@ -649,6 +653,7 @@ const StaticHuffmanTables = struct {
 };
 
 // Length and distance encoding tables for LZ77
+// Used for ENCODING: maps from actual length/distance values to codes
 const LengthCode = struct {
     code: u16,
     extra_bits: u8,
@@ -845,6 +850,95 @@ const HuffmanTree = struct {
                 length = @min(length, max_bits);
                 self.lengths[i] = length;
                 self.max_length = @max(self.max_length, length);
+            }
+        }
+
+        // Verify and fix Kraft inequality
+        self.enforceKraftInequality(max_bits);
+    }
+
+    // Verify and enforce Kraft inequality: Σ(2^(-lᵢ)) ≤ 1
+    fn enforceKraftInequality(self: *Self, max_bits: u8) void {
+        // Count symbols at each length
+        var bl_count: [16]u32 = std.mem.zeroes([16]u32);
+        var num_symbols: u32 = 0;
+
+        for (self.lengths[0..288]) |len| {
+            if (len > 0) {
+                bl_count[len] += 1;
+                num_symbols += 1;
+            }
+        }
+
+        if (num_symbols == 0) return;
+
+        // Calculate Kraft sum: Σ(count[i] * 2^(max_bits - i))
+        var kraft_sum: u32 = 0;
+        const kraft_limit: u32 = @as(u32, 1) << @intCast(max_bits);
+
+        for (1..@min(16, max_bits + 1)) |bits| {
+            if (bl_count[bits] > 0) {
+                kraft_sum += bl_count[bits] * (kraft_limit >> @intCast(bits));
+            }
+        }
+
+        // If oversubscribed (sum > limit), increase lengths of least frequent symbols
+        while (kraft_sum > kraft_limit) {
+            // Find a symbol with non-maximum length to increase
+            var increased = false;
+            for (self.lengths[0..288]) |*len| {
+                if (len.* > 0 and len.* < max_bits) {
+                    const old_bits = len.*;
+                    const new_bits = old_bits + 1;
+
+                    // Update Kraft sum
+                    kraft_sum -= kraft_limit >> @intCast(old_bits);
+                    kraft_sum += kraft_limit >> @intCast(new_bits);
+
+                    // Update counts
+                    bl_count[old_bits] -= 1;
+                    bl_count[new_bits] += 1;
+                    len.* = new_bits;
+
+                    increased = true;
+                    if (kraft_sum <= kraft_limit) break;
+                }
+            }
+
+            // Safety check: if we can't increase any lengths, break
+            if (!increased) break;
+        }
+
+        // If undersubscribed (sum < limit), decrease some lengths to improve compression
+        while (kraft_sum < kraft_limit and kraft_sum > 0) {
+            // Find a symbol with length > 1 to decrease
+            var decreased = false;
+            for (self.lengths[0..288]) |*len| {
+                if (len.* > 1) {
+                    const old_bits = len.*;
+                    const new_bits = old_bits - 1;
+
+                    // Check if decreasing would exceed limit
+                    const new_sum = kraft_sum - (kraft_limit >> @intCast(old_bits)) + (kraft_limit >> @intCast(new_bits));
+                    if (new_sum <= kraft_limit) {
+                        kraft_sum = new_sum;
+                        bl_count[old_bits] -= 1;
+                        bl_count[new_bits] += 1;
+                        len.* = new_bits;
+                        decreased = true;
+                    }
+                }
+            }
+
+            // If we can't decrease any more, we're done
+            if (!decreased) break;
+        }
+
+        // Update max_length
+        self.max_length = 0;
+        for (self.lengths[0..288]) |len| {
+            if (len > 0) {
+                self.max_length = @max(self.max_length, len);
             }
         }
     }
@@ -1166,11 +1260,55 @@ pub const DeflateEncoder = struct {
 
     pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         // Choose compression method based on level
-        return switch (self.level) {
-            .none => self.encodeUncompressed(data),
-            .best => self.encodeDynamicHuffman(data),
-            else => self.encodeStaticHuffman(data),
-        };
+        if (self.level == .none) {
+            return self.encodeUncompressed(data);
+        }
+
+        // For best compression, estimate if dynamic is worth it
+        if (self.level == .best and data.len >= 512) { // Skip dynamic for very small data
+            // Try to estimate if dynamic would be beneficial
+            if (try self.shouldUseDynamicHuffman(data)) {
+                return self.encodeDynamicHuffman(data);
+            }
+        }
+
+        // Default to static Huffman
+        return self.encodeStaticHuffman(data);
+    }
+
+    // Estimate if dynamic Huffman would provide better compression
+    fn shouldUseDynamicHuffman(self: *DeflateEncoder, data: []const u8) !bool {
+        _ = self; // Currently unused, but kept for future enhancements
+        // For small data, dynamic overhead is usually not worth it
+        if (data.len < 512) return false;
+
+        // Quick frequency analysis to estimate benefit
+        var freq: [256]u32 = std.mem.zeroes([256]u32);
+        for (data) |byte| {
+            freq[byte] += 1;
+        }
+
+        // Count unique symbols
+        var unique_symbols: u32 = 0;
+        var max_freq: u32 = 0;
+        var min_freq: u32 = std.math.maxInt(u32);
+
+        for (freq) |f| {
+            if (f > 0) {
+                unique_symbols += 1;
+                max_freq = @max(max_freq, f);
+                min_freq = @min(min_freq, f);
+            }
+        }
+
+        // Heuristic: use dynamic if there's significant frequency skew
+        // and not too many unique symbols (which would increase tree size)
+        if (unique_symbols > 200) return false; // Too many symbols, tree overhead too high
+        if (unique_symbols < 20) return true; // Few symbols, likely good for dynamic
+
+        // Check frequency skew
+        const ratio = if (min_freq > 0) @as(f32, @floatFromInt(max_freq)) / @as(f32, @floatFromInt(min_freq)) else 1.0;
+        return ratio > 10.0; // Significant skew suggests dynamic would help
     }
 
     fn encodeUncompressed(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
@@ -1253,8 +1391,8 @@ pub const DeflateEncoder = struct {
             }
         }
 
-        // Add end of block symbol
-        self.literal_freq[256] = 1;
+        // Add end of block symbol (ensure it's always present)
+        self.literal_freq[256] = @max(self.literal_freq[256], 1);
 
         // Build Huffman trees from frequencies
         var literal_tree = HuffmanTree{
@@ -1546,10 +1684,18 @@ pub fn zlibCompress(gpa: Allocator, data: []const u8, level: CompressionLevel, s
     // zlib header (2 bytes)
     // CMF: compression method (8) + compression info (7 for 32K window)
     const cmf: u8 = 0x78; // 8 + (7 << 4) = 120 = 0x78
-    // FLG: fcheck will be calculated to make (cmf*256 + flg) % 31 == 0
-    var flg: u8 = 0x00; // No preset dictionary, default compression level
 
-    // Calculate FCHECK to make header valid
+    // FLG: includes FLEVEL bits and will include FCHECK
+    // FLEVEL (bits 6-7): compression level hint
+    const flevel: u2 = switch (level) {
+        .none, .fastest => 0, // Fastest algorithm
+        .fast => 1, // Fast algorithm
+        .default => 2, // Default algorithm
+        .best => 3, // Maximum compression
+    };
+    var flg: u8 = @as(u8, flevel) << 6; // No preset dictionary
+
+    // Calculate FCHECK to make header valid (cmf*256 + flg) % 31 == 0
     const header_base = (@as(u16, cmf) << 8) | flg;
     const fcheck = 31 - (header_base % 31);
     if (fcheck < 31) {
