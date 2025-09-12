@@ -56,6 +56,8 @@ const FIXED_DISTANCE_LENGTHS: [32]u8 = @splat(5);
 
 // Length codes 257-285 (extra bits and base lengths)
 // Used for DECODING: maps from length code index to actual length values
+// Note: Separate from encoder tables as decoder needs code→value lookup
+// while encoder needs efficient value→code lookup
 const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
     .{ .base = 3, .extra_bits = 0 }, // 257
     .{ .base = 4, .extra_bits = 0 }, // 258
@@ -90,6 +92,8 @@ const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
 
 // Distance codes 0-29 (extra bits and base distances)
 // Used for DECODING: maps from distance code index to actual distance values
+// Note: Separate from encoder tables as decoder needs code→value lookup
+// while encoder needs efficient value→code lookup
 const DISTANCE_CODES = [_]struct { base: u16, extra_bits: u8 }{
     .{ .base = 1, .extra_bits = 0 }, // 0
     .{ .base = 2, .extra_bits = 0 }, // 1
@@ -650,7 +654,8 @@ const DistanceCode = struct {
     base: u16,
 };
 
-// Length codes (257-285 map to lengths 3-258)
+// Length codes for ENCODING (257-285 map to lengths 3-258)
+// Maps from length values to codes - optimized for encoder's value→code lookup
 const length_codes = [_]LengthCode{
     .{ .code = 257, .extra_bits = 0, .base = 3 },   .{ .code = 258, .extra_bits = 0, .base = 4 },
     .{ .code = 259, .extra_bits = 0, .base = 5 },   .{ .code = 260, .extra_bits = 0, .base = 6 },
@@ -669,7 +674,8 @@ const length_codes = [_]LengthCode{
     .{ .code = 285, .extra_bits = 0, .base = 258 },
 };
 
-// Distance codes (0-29 map to distances 1-32768)
+// Distance codes for ENCODING (0-29 map to distances 1-32768)
+// Maps from distance values to codes - optimized for encoder's value→code lookup
 const distance_codes = [_]DistanceCode{
     .{ .code = 0, .extra_bits = 0, .base = 1 },       .{ .code = 1, .extra_bits = 0, .base = 2 },
     .{ .code = 2, .extra_bits = 0, .base = 3 },       .{ .code = 3, .extra_bits = 0, .base = 4 },
@@ -750,13 +756,6 @@ const LZ77Match = struct {
         }
         return 29;
     }
-};
-
-// Symbol for building Huffman trees
-const Symbol = union(enum) {
-    literal: u8, // 0-255
-    end_of_block, // 256
-    length: u16, // 257-285 (match length code)
 };
 
 // Code length symbols for RLE encoding
@@ -1213,18 +1212,18 @@ pub const DeflateEncoder = struct {
             .default => LevelParams{ .max_chain = 32, .nice_length = 128 },
             .best => LevelParams{ .max_chain = 4096, .nice_length = 258 },
         };
-        
+
         // Adjust based on strategy
         return switch (strategy) {
             .default => base_params,
-            .filtered => LevelParams{ 
+            .filtered => LevelParams{
                 // Reduced search for filtered data (e.g., images)
                 .max_chain = @min(base_params.max_chain, 16),
                 .nice_length = @min(base_params.nice_length, 32),
             },
             .rle => LevelParams{
                 // Optimized for run-length encoded data
-                .max_chain = @min(base_params.max_chain, 8), 
+                .max_chain = @min(base_params.max_chain, 8),
                 .nice_length = base_params.nice_length, // Keep full length for long runs
             },
             .huffman_only => LevelParams{
