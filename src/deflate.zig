@@ -221,3 +221,140 @@ test "hash table improves compression" {
     try std.testing.expectEqualSlices(u8, repetitive_data, d1);
     try std.testing.expectEqualSlices(u8, repetitive_data, d2);
 }
+
+test "deflate handles corrupted compressed data" {
+    const allocator = std.testing.allocator;
+    const original = "Hello, this is test data for corruption testing!";
+    const compressed = try deflate(allocator, original, .default, .default);
+    defer allocator.free(compressed);
+
+    // Create corrupted version
+    var corrupted = try allocator.dupe(u8, compressed);
+    defer allocator.free(corrupted);
+
+    // Corrupt multiple bytes to ensure we break the stream
+    // Corrupting just one byte might not always cause an error
+    if (corrupted.len > 20) {
+        corrupted[10] ^= 0xFF;
+        corrupted[11] ^= 0xFF;
+        corrupted[12] ^= 0xFF;
+    }
+
+    // Attempt to decompress corrupted data
+    if (inflate(allocator, corrupted)) |decompressed| {
+        // If it somehow succeeds, it shouldn't match the original
+        defer allocator.free(decompressed);
+        try std.testing.expect(!std.mem.eql(u8, original, decompressed));
+    } else |_| {
+        // Any error is acceptable for corrupted data
+    }
+}
+
+test "deflate handles truncated compressed data" {
+    const allocator = std.testing.allocator;
+    const original = "This is a longer test string that will be compressed and then truncated";
+    const compressed = try deflate(allocator, original, .default, .default);
+    defer allocator.free(compressed);
+
+    // Truncate the compressed data
+    const truncated = compressed[0 .. compressed.len / 2];
+
+    // Attempt to decompress truncated data
+    if (inflate(allocator, truncated)) |decompressed| {
+        // If it somehow succeeds (unlikely), clean up
+        defer allocator.free(decompressed);
+        try std.testing.expect(false); // Should not succeed
+    } else |err| {
+        // Any of these errors are acceptable for truncated data
+        try std.testing.expect(err == error.UnexpectedEndOfData or
+            err == error.InvalidDeflateHuffmanCode or
+            err == error.InvalidDeflateSymbol);
+    }
+}
+
+test "deflate handles files larger than 64KB" {
+    const allocator = std.testing.allocator;
+
+    // Create data larger than max uncompressed block size (65535 bytes)
+    const large_size = 100_000;
+    const large_data = try allocator.alloc(u8, large_size);
+    defer allocator.free(large_data);
+
+    // Fill with a pattern
+    for (large_data, 0..) |*byte, i| {
+        byte.* = @truncate(i % 256);
+    }
+
+    // Compress and decompress
+    const compressed = try deflate(allocator, large_data, .default, .default);
+    defer allocator.free(compressed);
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, large_data, decompressed);
+}
+
+test "deflate handles maximum distance references" {
+    const allocator = std.testing.allocator;
+
+    // Create data with pattern at beginning and at maximum distance
+    const window_size = 32768;
+    var data: [window_size + 100]u8 = undefined;
+
+    // Place pattern at start
+    const pattern = "UNIQUE_PATTERN_123";
+    @memcpy(data[0..pattern.len], pattern);
+
+    // Fill middle with different data
+    for (data[pattern.len..window_size]) |*byte| {
+        byte.* = 0xAA;
+    }
+
+    // Place same pattern at maximum distance
+    @memcpy(data[window_size .. window_size + pattern.len], pattern);
+
+    // Compress with best level to ensure LZ77 matching
+    const compressed = try deflate(allocator, &data, .best, .default);
+    defer allocator.free(compressed);
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, &data, decompressed);
+}
+
+test "deflate explicit dynamic Huffman usage" {
+    const allocator = std.testing.allocator;
+
+    // Create data that should trigger dynamic Huffman:
+    // - Size >= 512 bytes
+    // - Limited unique symbols (between 20-200)
+    // - High frequency variance
+    var data: [1024]u8 = undefined;
+
+    // Use only 30 unique symbols with varying frequencies
+    const symbols = "abcdefghijklmnopqrstuvwxyz0123";
+    for (&data, 0..) |*byte, i| {
+        // Create frequency distribution that favors dynamic Huffman
+        const symbol_index = if (i % 100 < 50)
+            0 // 'a' appears 50% of the time
+        else if (i % 100 < 70)
+            1 // 'b' appears 20% of the time
+        else
+            2 + (i % 28); // Other symbols share remaining 30%
+        byte.* = symbols[symbol_index];
+    }
+
+    // Compress with .best to trigger dynamic Huffman
+    const compressed = try deflate(allocator, &data, .best, .default);
+    defer allocator.free(compressed);
+
+    // Verify it compresses and decompresses correctly
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, &data, decompressed);
+
+    // Dynamic Huffman should compress better than static for this data
+    const static_compressed = try deflate(allocator, &data, .fastest, .default);
+    defer allocator.free(static_compressed);
+    try std.testing.expect(compressed.len < static_compressed.len);
+}
