@@ -39,7 +39,7 @@ fn crc32(data: []const u8) u32 {
 }
 
 /// Compress data to gzip format
-pub fn gzipCompress(gpa: Allocator, data: []const u8, level: deflate.CompressionLevel, strategy: deflate.CompressionStrategy) ![]u8 {
+pub fn compress(gpa: Allocator, data: []const u8, level: deflate.CompressionLevel, strategy: deflate.CompressionStrategy) ![]u8 {
     // Compress data using deflate
     const compressed_data = try deflate.deflate(gpa, data, level, strategy);
     defer gpa.free(compressed_data);
@@ -87,7 +87,7 @@ pub fn gzipCompress(gpa: Allocator, data: []const u8, level: deflate.Compression
 }
 
 /// Decompress gzip data
-pub fn gzipDecompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
+pub fn decompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
     if (gzip_data.len < 18) { // Minimum gzip file size
         return error.InvalidGzipData;
     }
@@ -152,11 +152,6 @@ pub fn gzipDecompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
     return decompressed;
 }
 
-// Backwards compatibility wrapper with defaults
-pub fn compressGzip(gpa: Allocator, data: []const u8) ![]u8 {
-    return gzipCompress(gpa, data, .fastest, .default);
-}
-pub const decompressGzip = gzipDecompress;
 
 test "gzip compression and decompression round-trip" {
     const allocator = std.testing.allocator;
@@ -165,7 +160,7 @@ test "gzip compression and decompression round-trip" {
     const original_data = "Hello, World! This is a test for gzip compression.";
 
     // Compress
-    const compressed = try gzipCompress(allocator, original_data, .fastest, .default);
+    const compressed = try compress(allocator, original_data, .fastest, .default);
     defer allocator.free(compressed);
 
     // Verify gzip header
@@ -174,7 +169,7 @@ test "gzip compression and decompression round-trip" {
     try std.testing.expectEqual(@as(u8, 0x08), compressed[2]);
 
     // Decompress
-    const decompressed = try gzipDecompress(allocator, compressed);
+    const decompressed = try decompress(allocator, compressed);
     defer allocator.free(decompressed);
 
     // Verify round-trip
@@ -188,10 +183,10 @@ test "gzip with different compression levels" {
     const levels = [_]deflate.CompressionLevel{ .none, .fastest, .default, .best };
 
     for (levels) |level| {
-        const compressed = try gzipCompress(allocator, test_data, level, .default);
+        const compressed = try compress(allocator, test_data, level, .default);
         defer allocator.free(compressed);
 
-        const decompressed = try gzipDecompress(allocator, compressed);
+        const decompressed = try decompress(allocator, compressed);
         defer allocator.free(decompressed);
 
         try std.testing.expectEqualSlices(u8, test_data, decompressed);
@@ -203,9 +198,9 @@ test "gzip error handling" {
 
     // Test invalid magic number
     const bad_magic = [_]u8{ 0x00, 0x00 } ++ ([_]u8{0} ** 16);
-    try std.testing.expectError(error.InvalidGzipHeader, gzipDecompress(allocator, &bad_magic));
+    try std.testing.expectError(error.InvalidGzipHeader, decompress(allocator, &bad_magic));
 
     // Test too short data
     const too_short = [_]u8{ 0x1f, 0x8b };
-    try std.testing.expectError(error.InvalidGzipData, gzipDecompress(allocator, &too_short));
+    try std.testing.expectError(error.InvalidGzipData, decompress(allocator, &too_short));
 }

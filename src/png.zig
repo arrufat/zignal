@@ -432,7 +432,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     rgba: Image(Rgba),
 } {
     // Decompress IDAT data
-    const decompressed = try zlib.zlibDecompress(allocator, png_state.idat_data.items);
+    const decompressed = try zlib.decompress(allocator, png_state.idat_data.items);
     defer allocator.free(decompressed);
 
     // Apply row defiltering
@@ -930,7 +930,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     defer gpa.free(filtered_data);
 
     // Compress filtered data with zlib format (required for PNG IDAT)
-    const compressed_data = try zlib.zlibCompress(gpa, filtered_data, options.compression_level, options.compression_strategy);
+    const compressed_data = try zlib.compress(gpa, filtered_data, options.compression_level, options.compression_strategy);
     defer gpa.free(compressed_data);
 
     // Write IDAT chunk

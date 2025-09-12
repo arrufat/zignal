@@ -15,6 +15,7 @@ const testing = std.testing;
 const LoadFilter = @import("../font.zig").LoadFilter;
 const max_file_size = @import("../font.zig").max_file_size;
 const compression = @import("../font.zig").compression;
+const gzip = @import("../compression/gzip.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -193,7 +194,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        decompressed_data = compression.decompressGzip(allocator, raw_file_contents) catch |err| switch (err) {
+        decompressed_data = gzip.decompress(allocator, raw_file_contents) catch |err| switch (err) {
             error.InvalidGzipData, error.InvalidGzipHeader => return PcfError.InvalidCompression,
             else => return err,
         };
