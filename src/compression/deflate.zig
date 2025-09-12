@@ -40,15 +40,7 @@ const ArrayList = std.ArrayList;
 const bit = @import("bitstream.zig");
 const BitReader = bit.BitReader;
 const BitWriter = bit.BitWriter;
-const huf = @import("huffman.zig");
-const HuffmanDecoder = huf.HuffmanDecoder;
-const HuffmanTree = huf.HuffmanTree;
-const LENGTH_TABLE = huf.LENGTH_TABLE;
-const DISTANCE_TABLE = huf.DISTANCE_TABLE;
-const FIXED_LITERAL_LENGTHS = huf.FIXED_LITERAL_LENGTHS;
-const FIXED_DISTANCE_LENGTHS = huf.FIXED_DISTANCE_LENGTHS;
-const reverseBits = huf.reverseBits;
-const code_length_order = huf.code_length_order;
+const huffman = @import("huffman.zig");
 const lz = @import("lz77.zig");
 const LZ77HashTable = lz.LZ77HashTable;
 
@@ -76,16 +68,16 @@ pub const CompressionStrategy = enum { default, filtered, huffman_only, rle };
 pub const DeflateDecoder = struct {
     gpa: Allocator,
     output: ArrayList(u8),
-    literal_decoder: HuffmanDecoder,
-    distance_decoder: HuffmanDecoder,
+    literal_decoder: huffman.Decoder,
+    distance_decoder: huffman.Decoder,
     current_byte_offset: usize = 0,
 
     pub fn init(allocator: Allocator) DeflateDecoder {
         return .{
             .gpa = allocator,
             .output = .empty,
-            .literal_decoder = HuffmanDecoder.init(allocator),
-            .distance_decoder = HuffmanDecoder.init(allocator),
+            .literal_decoder = .init(allocator),
+            .distance_decoder = .init(allocator),
         };
     }
 
@@ -129,8 +121,8 @@ pub const DeflateDecoder = struct {
     }
 
     fn decodeFixedHuffmanBlock(self: *DeflateDecoder, reader: *BitReader) !void {
-        try self.literal_decoder.buildFromLengths(&FIXED_LITERAL_LENGTHS);
-        try self.distance_decoder.buildFromLengths(&FIXED_DISTANCE_LENGTHS);
+        try self.literal_decoder.buildFromLengths(&huffman.FIXED_LITERAL_LENGTHS);
+        try self.distance_decoder.buildFromLengths(&huffman.FIXED_DISTANCE_LENGTHS);
         try self.decodeHuffmanBlock(reader);
     }
 
@@ -141,9 +133,9 @@ pub const DeflateDecoder = struct {
 
         var code_length_lengths: [19]u8 = @splat(0);
         for (0..hclen) |i| {
-            code_length_lengths[code_length_order[i]] = @intCast(try reader.readBits(3));
+            code_length_lengths[huffman.code_length_order[i]] = @intCast(try reader.readBits(3));
         }
-        var code_length_decoder = HuffmanDecoder.init(self.gpa);
+        var code_length_decoder: huffman.Decoder = .init(self.gpa);
         defer code_length_decoder.deinit();
         try code_length_decoder.buildFromLengths(&code_length_lengths);
 
@@ -200,13 +192,13 @@ pub const DeflateDecoder = struct {
                 break;
             } else if (symbol <= 285) {
                 const length_code = symbol - 257;
-                if (length_code >= LENGTH_TABLE.len) return error.InvalidLengthCode;
-                const length_info = LENGTH_TABLE[length_code];
+                if (length_code >= huffman.LENGTH_TABLE.len) return error.InvalidLengthCode;
+                const length_info = huffman.LENGTH_TABLE[length_code];
                 const length_val: usize = @intCast(length_info.base + try reader.readBits(length_info.extra_bits));
 
                 const distance_symbol = try self.decodeSymbol(reader, &self.distance_decoder);
-                if (distance_symbol >= DISTANCE_TABLE.len) return error.InvalidDistanceCode;
-                const distance_info = DISTANCE_TABLE[distance_symbol];
+                if (distance_symbol >= huffman.DISTANCE_TABLE.len) return error.InvalidDistanceCode;
+                const distance_info = huffman.DISTANCE_TABLE[distance_symbol];
                 const distance_val: usize = @intCast(distance_info.base + try reader.readBits(distance_info.extra_bits));
 
                 if (distance_val > self.output.items.len) return error.InvalidDistance;
@@ -222,7 +214,7 @@ pub const DeflateDecoder = struct {
         }
     }
 
-    fn decodeSymbol(self: *DeflateDecoder, reader: *BitReader, decoder: *HuffmanDecoder) !u16 {
+    fn decodeSymbol(self: *DeflateDecoder, reader: *BitReader, decoder: *huffman.Decoder) !u16 {
         self.current_byte_offset = reader.byte_pos;
         const remaining_bits = (reader.data.len - reader.byte_pos) * 8 - reader.bit_pos;
         if (remaining_bits > 0) {
@@ -318,9 +310,9 @@ pub const DeflateEncoder = struct {
     }
 
     fn getLengthCode(length: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
-        for (LENGTH_TABLE) |lc| {
+        for (huffman.LENGTH_TABLE) |lc| {
             if (length >= lc.base) {
-                const next_base = if (lc.code == 285) 259 else LENGTH_TABLE[lc.code - 257 + 1].base;
+                const next_base = if (lc.code == 285) 259 else huffman.LENGTH_TABLE[lc.code - 257 + 1].base;
                 if (length < next_base) return .{ .code = lc.code, .extra_bits = lc.extra_bits, .extra_value = length - lc.base };
             }
         }
@@ -328,9 +320,9 @@ pub const DeflateEncoder = struct {
     }
 
     fn getDistanceCode(distance: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
-        for (DISTANCE_TABLE) |dc| {
+        for (huffman.DISTANCE_TABLE) |dc| {
             if (distance >= dc.base) {
-                const next_base = if (dc.code == 29) 32769 else DISTANCE_TABLE[dc.code + 1].base;
+                const next_base = if (dc.code == 29) 32769 else huffman.DISTANCE_TABLE[dc.code + 1].base;
                 if (distance < next_base) return .{ .code = dc.code, .extra_bits = dc.extra_bits, .extra_value = distance - dc.base };
             }
         }
@@ -462,9 +454,9 @@ pub const DeflateEncoder = struct {
         }
         self.literal_freq[256] = @max(self.literal_freq[256], 1);
 
-        var literal_tree = HuffmanTree.init(self.gpa);
+        var literal_tree: huffman.Tree = .init(self.gpa);
         try literal_tree.buildFromFrequencies(self.literal_freq[0..286], 15);
-        var distance_tree = HuffmanTree.init(self.gpa);
+        var distance_tree: huffman.Tree = .init(self.gpa);
         try distance_tree.buildFromFrequencies(self.distance_freq[0..30], 15);
 
         var has_dist = false;
@@ -476,7 +468,7 @@ pub const DeflateEncoder = struct {
         }
         if (!has_dist) {
             distance_tree.lengths[0] = 1;
-            huf.generateCanonicalCodes(distance_tree.lengths[0..], distance_tree.codes[0..]);
+            huffman.generateCanonicalCodes(distance_tree.lengths[0..], distance_tree.codes[0..]);
         }
 
         var num_lit_codes: usize = 257;
@@ -505,11 +497,11 @@ pub const DeflateEncoder = struct {
 
         var cl_freq: [MAX_CODE_LENGTH_CODES]u32 = std.mem.zeroes([MAX_CODE_LENGTH_CODES]u32);
         for (enc_lengths) |cl| cl_freq[cl.symbol] += 1;
-        var cl_tree = HuffmanTree.init(self.gpa);
+        var cl_tree: huffman.Tree = .init(self.gpa);
         try cl_tree.buildFromFrequencies(cl_freq[0..19], 7);
         var num_cl_codes: usize = 4;
         for (0..MAX_CODE_LENGTH_CODES) |i| {
-            const idx = code_length_order[MAX_CODE_LENGTH_CODES - 1 - i];
+            const idx = huffman.code_length_order[MAX_CODE_LENGTH_CODES - 1 - i];
             if (cl_tree.lengths[idx] != 0) {
                 num_cl_codes = MAX_CODE_LENGTH_CODES - i;
                 break;
@@ -526,12 +518,12 @@ pub const DeflateEncoder = struct {
         try writer.writeBits(self.gpa, @intCast(HDIST), 5);
         try writer.writeBits(self.gpa, @intCast(HCLEN), 4);
         for (0..num_cl_codes) |i| {
-            const sym = code_length_order[i];
+            const sym = huffman.code_length_order[i];
             try writer.writeBits(self.gpa, cl_tree.lengths[sym], 3);
         }
         for (enc_lengths) |cl| {
             const ci = cl_tree.getCode(cl.symbol);
-            const rc = reverseBits(ci.code, ci.bits);
+            const rc = huffman.reverseBits(ci.code, ci.bits);
             try writer.writeBits(self.gpa, rc, ci.bits);
             if (cl.extra_bits > 0) try writer.writeBits(self.gpa, cl.extra_value, cl.extra_bits);
         }
@@ -550,21 +542,21 @@ pub const DeflateEncoder = struct {
                 }
                 const li = getLengthCode(m.length);
                 const lc = literal_tree.getCode(li.code);
-                try writer.writeBits(self.gpa, reverseBits(lc.code, lc.bits), lc.bits);
+                try writer.writeBits(self.gpa, huffman.reverseBits(lc.code, lc.bits), lc.bits);
                 if (li.extra_bits > 0) try writer.writeBits(self.gpa, li.extra_value, li.extra_bits);
                 const di = getDistanceCode(m.distance);
                 const dc = distance_tree.getCode(di.code);
-                try writer.writeBits(self.gpa, reverseBits(dc.code, dc.bits), dc.bits);
+                try writer.writeBits(self.gpa, huffman.reverseBits(dc.code, dc.bits), dc.bits);
                 if (di.extra_bits > 0) try writer.writeBits(self.gpa, di.extra_value, di.extra_bits);
                 pos += m.length;
             } else {
                 const lc = literal_tree.getCode(data[pos]);
-                try writer.writeBits(self.gpa, reverseBits(lc.code, lc.bits), lc.bits);
+                try writer.writeBits(self.gpa, huffman.reverseBits(lc.code, lc.bits), lc.bits);
                 pos += 1;
             }
         }
         const eob = literal_tree.getCode(256);
-        try writer.writeBits(self.gpa, reverseBits(eob.code, eob.bits), eob.bits);
+        try writer.writeBits(self.gpa, huffman.reverseBits(eob.code, eob.bits), eob.bits);
         try writer.flush(self.gpa);
         return self.output.clone(self.gpa);
     }
@@ -579,21 +571,21 @@ pub const DeflateEncoder = struct {
         const lit_codes = blk: {
             @setEvalBranchQuota(10000);
             var codes: [288]Codes = undefined;
-            var lens = FIXED_LITERAL_LENGTHS;
+            var lens = huffman.FIXED_LITERAL_LENGTHS;
             var codes_raw: [288]u16 = undefined;
-            huf.generateCanonicalCodes(lens[0..], codes_raw[0..]);
+            huffman.generateCanonicalCodes(lens[0..], codes_raw[0..]);
             for (codes_raw, 0..) |c, i| {
-                codes[i] = .{ .code = reverseBits(c, lens[i]), .bits = lens[i] };
+                codes[i] = .{ .code = huffman.reverseBits(c, lens[i]), .bits = lens[i] };
             }
             break :blk codes;
         };
         const dist_codes = blk: {
             var codes: [32]Codes = undefined;
-            var lens = FIXED_DISTANCE_LENGTHS;
+            var lens = huffman.FIXED_DISTANCE_LENGTHS;
             var codes_raw: [32]u16 = undefined;
-            huf.generateCanonicalCodes(lens[0..], codes_raw[0..]);
+            huffman.generateCanonicalCodes(lens[0..], codes_raw[0..]);
             for (codes_raw, 0..) |c, i| {
-                codes[i] = .{ .code = reverseBits(c, lens[i]), .bits = lens[i] };
+                codes[i] = .{ .code = huffman.reverseBits(c, lens[i]), .bits = lens[i] };
             }
             break :blk codes;
         };

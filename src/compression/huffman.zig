@@ -49,10 +49,71 @@ pub const CodeInfo = struct {
 };
 
 /// Length codes table (257-285 map to lengths 3-258)
-pub const LENGTH_TABLE = [_]CodeInfo{ .{ .code = 257, .base = 3, .extra_bits = 0 }, .{ .code = 258, .base = 4, .extra_bits = 0 }, .{ .code = 259, .base = 5, .extra_bits = 0 }, .{ .code = 260, .base = 6, .extra_bits = 0 }, .{ .code = 261, .base = 7, .extra_bits = 0 }, .{ .code = 262, .base = 8, .extra_bits = 0 }, .{ .code = 263, .base = 9, .extra_bits = 0 }, .{ .code = 264, .base = 10, .extra_bits = 0 }, .{ .code = 265, .base = 11, .extra_bits = 1 }, .{ .code = 266, .base = 13, .extra_bits = 1 }, .{ .code = 267, .base = 15, .extra_bits = 1 }, .{ .code = 268, .base = 17, .extra_bits = 1 }, .{ .code = 269, .base = 19, .extra_bits = 2 }, .{ .code = 270, .base = 23, .extra_bits = 2 }, .{ .code = 271, .base = 27, .extra_bits = 2 }, .{ .code = 272, .base = 31, .extra_bits = 2 }, .{ .code = 273, .base = 35, .extra_bits = 3 }, .{ .code = 274, .base = 43, .extra_bits = 3 }, .{ .code = 275, .base = 51, .extra_bits = 3 }, .{ .code = 276, .base = 59, .extra_bits = 3 }, .{ .code = 277, .base = 67, .extra_bits = 4 }, .{ .code = 278, .base = 83, .extra_bits = 4 }, .{ .code = 279, .base = 99, .extra_bits = 4 }, .{ .code = 280, .base = 115, .extra_bits = 4 }, .{ .code = 281, .base = 131, .extra_bits = 5 }, .{ .code = 282, .base = 163, .extra_bits = 5 }, .{ .code = 283, .base = 195, .extra_bits = 5 }, .{ .code = 284, .base = 227, .extra_bits = 5 }, .{ .code = 285, .base = 258, .extra_bits = 0 } };
+pub const LENGTH_TABLE = [_]CodeInfo{
+    .{ .code = 257, .base = 3, .extra_bits = 0 },
+    .{ .code = 258, .base = 4, .extra_bits = 0 },
+    .{ .code = 259, .base = 5, .extra_bits = 0 },
+    .{ .code = 260, .base = 6, .extra_bits = 0 },
+    .{ .code = 261, .base = 7, .extra_bits = 0 },
+    .{ .code = 262, .base = 8, .extra_bits = 0 },
+    .{ .code = 263, .base = 9, .extra_bits = 0 },
+    .{ .code = 264, .base = 10, .extra_bits = 0 },
+    .{ .code = 265, .base = 11, .extra_bits = 1 },
+    .{ .code = 266, .base = 13, .extra_bits = 1 },
+    .{ .code = 267, .base = 15, .extra_bits = 1 },
+    .{ .code = 268, .base = 17, .extra_bits = 1 },
+    .{ .code = 269, .base = 19, .extra_bits = 2 },
+    .{ .code = 270, .base = 23, .extra_bits = 2 },
+    .{ .code = 271, .base = 27, .extra_bits = 2 },
+    .{ .code = 272, .base = 31, .extra_bits = 2 },
+    .{ .code = 273, .base = 35, .extra_bits = 3 },
+    .{ .code = 274, .base = 43, .extra_bits = 3 },
+    .{ .code = 275, .base = 51, .extra_bits = 3 },
+    .{ .code = 276, .base = 59, .extra_bits = 3 },
+    .{ .code = 277, .base = 67, .extra_bits = 4 },
+    .{ .code = 278, .base = 83, .extra_bits = 4 },
+    .{ .code = 279, .base = 99, .extra_bits = 4 },
+    .{ .code = 280, .base = 115, .extra_bits = 4 },
+    .{ .code = 281, .base = 131, .extra_bits = 5 },
+    .{ .code = 282, .base = 163, .extra_bits = 5 },
+    .{ .code = 283, .base = 195, .extra_bits = 5 },
+    .{ .code = 284, .base = 227, .extra_bits = 5 },
+    .{ .code = 285, .base = 258, .extra_bits = 0 },
+};
 
 /// Distance codes table (0-29 map to distances 1-32768)
-pub const DISTANCE_TABLE = [_]CodeInfo{ .{ .code = 0, .base = 1, .extra_bits = 0 }, .{ .code = 1, .base = 2, .extra_bits = 0 }, .{ .code = 2, .base = 3, .extra_bits = 0 }, .{ .code = 3, .base = 4, .extra_bits = 0 }, .{ .code = 4, .base = 5, .extra_bits = 1 }, .{ .code = 5, .base = 7, .extra_bits = 1 }, .{ .code = 6, .base = 9, .extra_bits = 2 }, .{ .code = 7, .base = 13, .extra_bits = 2 }, .{ .code = 8, .base = 17, .extra_bits = 3 }, .{ .code = 9, .base = 25, .extra_bits = 3 }, .{ .code = 10, .base = 33, .extra_bits = 4 }, .{ .code = 11, .base = 49, .extra_bits = 4 }, .{ .code = 12, .base = 65, .extra_bits = 5 }, .{ .code = 13, .base = 97, .extra_bits = 5 }, .{ .code = 14, .base = 129, .extra_bits = 6 }, .{ .code = 15, .base = 193, .extra_bits = 6 }, .{ .code = 16, .base = 257, .extra_bits = 7 }, .{ .code = 17, .base = 385, .extra_bits = 7 }, .{ .code = 18, .base = 513, .extra_bits = 8 }, .{ .code = 19, .base = 769, .extra_bits = 8 }, .{ .code = 20, .base = 1025, .extra_bits = 9 }, .{ .code = 21, .base = 1537, .extra_bits = 9 }, .{ .code = 22, .base = 2049, .extra_bits = 10 }, .{ .code = 23, .base = 3073, .extra_bits = 10 }, .{ .code = 24, .base = 4097, .extra_bits = 11 }, .{ .code = 25, .base = 6145, .extra_bits = 11 }, .{ .code = 26, .base = 8193, .extra_bits = 12 }, .{ .code = 27, .base = 12289, .extra_bits = 12 }, .{ .code = 28, .base = 16385, .extra_bits = 13 }, .{ .code = 29, .base = 24577, .extra_bits = 13 } };
+pub const DISTANCE_TABLE = [_]CodeInfo{
+    .{ .code = 0, .base = 1, .extra_bits = 0 },
+    .{ .code = 1, .base = 2, .extra_bits = 0 },
+    .{ .code = 2, .base = 3, .extra_bits = 0 },
+    .{ .code = 3, .base = 4, .extra_bits = 0 },
+    .{ .code = 4, .base = 5, .extra_bits = 1 },
+    .{ .code = 5, .base = 7, .extra_bits = 1 },
+    .{ .code = 6, .base = 9, .extra_bits = 2 },
+    .{ .code = 7, .base = 13, .extra_bits = 2 },
+    .{ .code = 8, .base = 17, .extra_bits = 3 },
+    .{ .code = 9, .base = 25, .extra_bits = 3 },
+    .{ .code = 10, .base = 33, .extra_bits = 4 },
+    .{ .code = 11, .base = 49, .extra_bits = 4 },
+    .{ .code = 12, .base = 65, .extra_bits = 5 },
+    .{ .code = 13, .base = 97, .extra_bits = 5 },
+    .{ .code = 14, .base = 129, .extra_bits = 6 },
+    .{ .code = 15, .base = 193, .extra_bits = 6 },
+    .{ .code = 16, .base = 257, .extra_bits = 7 },
+    .{ .code = 17, .base = 385, .extra_bits = 7 },
+    .{ .code = 18, .base = 513, .extra_bits = 8 },
+    .{ .code = 19, .base = 769, .extra_bits = 8 },
+    .{ .code = 20, .base = 1025, .extra_bits = 9 },
+    .{ .code = 21, .base = 1537, .extra_bits = 9 },
+    .{ .code = 22, .base = 2049, .extra_bits = 10 },
+    .{ .code = 23, .base = 3073, .extra_bits = 10 },
+    .{ .code = 24, .base = 4097, .extra_bits = 11 },
+    .{ .code = 25, .base = 6145, .extra_bits = 11 },
+    .{ .code = 26, .base = 8193, .extra_bits = 12 },
+    .{ .code = 27, .base = 12289, .extra_bits = 12 },
+    .{ .code = 28, .base = 16385, .extra_bits = 13 },
+    .{ .code = 29, .base = 24577, .extra_bits = 13 },
+};
 
 /// Generate canonical codes for given bit lengths
 pub fn generateCanonicalCodes(lengths: []const u8, out_codes: []u16) void {
@@ -81,29 +142,29 @@ pub fn generateCanonicalCodes(lengths: []const u8, out_codes: []u16) void {
 }
 
 /// Decoder node for long codes
-const HuffmanNode = struct {
+const DecoderNode = struct {
     symbol: ?u16 = null,
-    left: ?*HuffmanNode = null,
-    right: ?*HuffmanNode = null,
+    left: ?*DecoderNode = null,
+    right: ?*DecoderNode = null,
 };
 
 /// Huffman decoder table for faster decoding
-pub const HuffmanDecoder = struct {
+pub const Decoder = struct {
     fast_table: [512]u16 = @splat(0),
     fast_mask: u16 = 511,
-    root: ?*HuffmanNode = null,
+    root: ?*DecoderNode = null,
     allocator: Allocator,
-    nodes: ArrayList(HuffmanNode),
+    nodes: ArrayList(DecoderNode),
 
-    pub fn init(gpa: Allocator) HuffmanDecoder {
+    pub fn init(gpa: Allocator) Decoder {
         return .{ .allocator = gpa, .nodes = .empty };
     }
 
-    pub fn deinit(self: *HuffmanDecoder) void {
+    pub fn deinit(self: *Decoder) void {
         self.nodes.deinit(self.allocator);
     }
 
-    pub fn buildFromLengths(self: *HuffmanDecoder, code_lengths: []const u8) !void {
+    pub fn buildFromLengths(self: *Decoder, code_lengths: []const u8) !void {
         self.fast_table = @splat(0);
         self.nodes.clearRetainingCapacity();
         self.root = null;
@@ -168,7 +229,7 @@ pub const HuffmanDecoder = struct {
 pub const code_length_order = [_]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
 /// Encoding-side Huffman tree (builds lengths and canonical codes)
-pub const HuffmanTree = struct {
+pub const Tree = struct {
     lengths: [288]u8 = std.mem.zeroes([288]u8),
     codes: [288]u16 = std.mem.zeroes([288]u16),
     max_length: u8 = 0,
@@ -466,7 +527,7 @@ pub const HuffmanTree = struct {
 
 test "huffman decoder build with varied lengths" {
     const allocator = std.testing.allocator;
-    var decoder = HuffmanDecoder.init(allocator);
+    var decoder = Decoder.init(allocator);
     defer decoder.deinit();
     const code_lengths = [_]u8{ 3, 4, 5, 6, 6, 6, 7, 7, 7, 8, 10, 10, 10, 11, 11, 12, 12, 12, 12, 13 };
     try decoder.buildFromLengths(&code_lengths);
@@ -475,9 +536,22 @@ test "huffman decoder build with varied lengths" {
 
 test "png regression lengths build" {
     const allocator = std.testing.allocator;
-    var decoder = HuffmanDecoder.init(allocator);
+    var decoder = Decoder.init(allocator);
     defer decoder.deinit();
-    const code_lengths = [_]u8{ 0, 0, 0, 0, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 0 };
+    const code_lengths = [_]u8{
+        0,  0,  0,  0,  3,  3,  4,  4,  4,  4,  5,  5,  5,  5,  6,  6,  6,  7,  7,  7,  7,  7,
+        8,  8,  8,  8,  8,  8,  9,  9,  9,  9,  9,  9,  9,  9,  10, 10, 10, 10, 10, 10, 10, 10,
+        10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12,
+        12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 0,
+    };
     try decoder.buildFromLengths(&code_lengths);
     try std.testing.expect(decoder.root != null);
 }
