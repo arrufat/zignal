@@ -6,6 +6,27 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+// Compression levels for deflate/zlib
+pub const CompressionLevel = enum(u4) {
+    none = 0, // Store uncompressed
+    fastest = 1, // Minimal LZ77 effort, may use static Huffman
+    fast = 3, // Basic LZ77, dynamic Huffman
+    default = 6, // Good balance of speed and compression
+    best = 9, // Maximum compression effort
+
+    pub fn toInt(self: CompressionLevel) u4 {
+        return @intFromEnum(self);
+    }
+};
+
+// Compression strategies for different data types
+pub const CompressionStrategy = enum {
+    default, // Normal compression (LZ77 + Huffman)
+    filtered, // For filtered data like PNG rows
+    huffman_only, // Skip LZ77, only Huffman coding
+    rle, // Run-length encoding focus for images with runs
+};
+
 // Fixed Huffman code lengths for literal/length alphabet (RFC 1951)
 const FIXED_LITERAL_LENGTHS = [_]u8{
     8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 0-15
@@ -709,11 +730,248 @@ const BitWriter = struct {
     }
 };
 
-// Compression methods for deflate
+// Compression methods for deflate block types
 pub const CompressionMethod = enum {
     uncompressed, // BTYPE = 00 - no compression
     static_huffman, // BTYPE = 01 - static Huffman codes
-    // dynamic_huffman could be added later
+    dynamic_huffman, // BTYPE = 10 - dynamic Huffman codes
+};
+
+// LZ77 match structure
+const LZ77Match = struct {
+    length: u16,
+    distance: u16,
+
+    pub fn getLengthCode(self: LZ77Match) u16 {
+        // Convert match length to length code (257-285)
+        if (self.length <= 10) return 254 + self.length;
+        for (LENGTH_CODES, 0..) |code, i| {
+            if (self.length <= code.base + (@as(u16, 1) << @as(u4, @intCast(code.extra_bits))) - 1) {
+                return 257 + @as(u16, @intCast(i));
+            }
+        }
+        return 285;
+    }
+
+    pub fn getDistanceCode(self: LZ77Match) u16 {
+        // Convert distance to distance code (0-29)
+        for (DISTANCE_CODES, 0..) |code, i| {
+            if (self.distance <= code.base + (@as(u16, 1) << @as(u4, @intCast(code.extra_bits))) - 1) {
+                return @intCast(i);
+            }
+        }
+        return 29;
+    }
+};
+
+// Symbol for building Huffman trees
+const Symbol = union(enum) {
+    literal: u8, // 0-255
+    end_of_block, // 256
+    length: u16, // 257-285 (match length code)
+};
+
+// Huffman tree for encoding
+const HuffmanTree = struct {
+    lengths: [288]u8, // Bit lengths for each symbol (max 288 for literals/lengths)
+    codes: [288]u16, // Canonical codes for each symbol
+    max_length: u8, // Maximum code length used
+
+    const Self = @This();
+
+    // Build optimal Huffman tree from frequencies with length limit
+    pub fn buildFromFrequencies(self: *Self, frequencies: []const u32, max_bits: u8) !void {
+        const n = frequencies.len;
+        assert(n <= 288);
+
+        // Reset lengths
+        self.lengths = std.mem.zeroes([288]u8);
+        self.max_length = 0;
+
+        // Count non-zero frequencies
+        var num_symbols: usize = 0;
+        for (frequencies[0..n]) |freq| {
+            if (freq > 0) num_symbols += 1;
+        }
+
+        if (num_symbols == 0) return;
+        if (num_symbols == 1) {
+            // Special case: only one symbol
+            for (frequencies[0..n], 0..) |freq, i| {
+                if (freq > 0) {
+                    self.lengths[i] = 1;
+                    self.max_length = 1;
+                    break;
+                }
+            }
+            self.generateCanonicalCodes();
+            return;
+        }
+
+        // Use simplified algorithm: assign lengths based on frequency
+        // This is a heuristic, not optimal, but works reasonably well
+        self.assignLengthsByFrequency(frequencies[0..n], max_bits);
+        self.generateCanonicalCodes();
+    }
+
+    // Heuristic: assign shorter codes to more frequent symbols
+    fn assignLengthsByFrequency(self: *Self, frequencies: []const u32, max_bits: u8) void {
+        // Find total frequency
+        var total: u64 = 0;
+        for (frequencies) |freq| {
+            total += freq;
+        }
+
+        if (total == 0) return;
+
+        // Assign lengths based on frequency proportion
+        for (frequencies, 0..) |freq, i| {
+            if (freq == 0) {
+                self.lengths[i] = 0;
+            } else {
+                // Higher frequency = shorter code
+                const ratio = @as(f32, @floatFromInt(freq)) / @as(f32, @floatFromInt(total));
+                var length: u8 = if (ratio > 0.1) 7 else if (ratio > 0.01) 9 else if (ratio > 0.001) 11 else 13;
+
+                length = @min(length, max_bits);
+                self.lengths[i] = length;
+                self.max_length = @max(self.max_length, length);
+            }
+        }
+    }
+
+    // Generate canonical Huffman codes from bit lengths
+    pub fn generateCanonicalCodes(self: *Self) void {
+        // Count codes of each length
+        var bl_count: [16]u16 = std.mem.zeroes([16]u16);
+        for (self.lengths) |len| {
+            if (len > 0) bl_count[len] += 1;
+        }
+
+        // Calculate first code for each length
+        var code: u16 = 0;
+        var next_code: [16]u16 = std.mem.zeroes([16]u16);
+        bl_count[0] = 0;
+
+        for (1..16) |bits| {
+            code = (code + bl_count[bits - 1]) << 1;
+            next_code[bits] = code;
+        }
+
+        // Assign codes to symbols
+        self.codes = std.mem.zeroes([288]u16);
+        for (self.lengths, 0..) |len, i| {
+            if (len != 0) {
+                self.codes[i] = next_code[len];
+                next_code[len] += 1;
+            }
+        }
+    }
+
+    // Get the Huffman code for a symbol
+    pub fn getCode(self: *const Self, symbol: usize) struct { code: u16, bits: u8 } {
+        return .{
+            .code = self.codes[symbol],
+            .bits = self.lengths[symbol],
+        };
+    }
+};
+
+// LZ77 hash table for fast string matching
+const LZ77HashTable = struct {
+    const HASH_BITS = 15;
+    const HASH_SIZE = 1 << HASH_BITS;
+    const HASH_MASK = HASH_SIZE - 1;
+    const WINDOW_SIZE = 32768;
+    const MIN_MATCH = 3;
+    const MAX_MATCH = 258;
+
+    head: [HASH_SIZE]u16, // Head of hash chains
+    prev: [WINDOW_SIZE]u16, // Previous positions in chain
+    window: [WINDOW_SIZE]u8, // Sliding window buffer
+    window_pos: usize, // Current position in window
+
+    const Self = @This();
+
+    pub fn init() Self {
+        return .{
+            .head = std.mem.zeroes([HASH_SIZE]u16),
+            .prev = std.mem.zeroes([WINDOW_SIZE]u16),
+            .window = std.mem.zeroes([WINDOW_SIZE]u8),
+            .window_pos = 0,
+        };
+    }
+
+    // Hash function for 3-byte sequences
+    fn hash(data: []const u8) u16 {
+        if (data.len < 3) return 0;
+        // Simple rolling hash
+        const h = (@as(u32, data[0]) << 10) ^ (@as(u32, data[1]) << 5) ^ data[2];
+        return @intCast(h & HASH_MASK);
+    }
+
+    // Update hash table with new position
+    pub fn update(self: *Self, data: []const u8, pos: usize) void {
+        if (pos + MIN_MATCH > data.len) return;
+
+        const h = hash(data[pos..]);
+        const window_pos = @as(u16, @intCast(pos & (WINDOW_SIZE - 1)));
+
+        // Update chain
+        self.prev[window_pos] = self.head[h];
+        self.head[h] = window_pos;
+
+        // Update window
+        if (pos < data.len) {
+            self.window[window_pos] = data[pos];
+        }
+    }
+
+    // Find best match at current position
+    pub fn findMatch(self: *Self, data: []const u8, pos: usize, max_chain: usize, nice_length: usize) ?LZ77Match {
+        if (pos + MIN_MATCH > data.len) return null;
+
+        const h = hash(data[pos..]);
+        var chain_pos = self.head[h];
+        var chain_length: usize = 0;
+
+        var best_match: ?LZ77Match = null;
+        const max_length = @min(MAX_MATCH, data.len - pos);
+        const nice_len = @min(nice_length, max_length);
+
+        while (chain_length < max_chain) {
+            const match_pos = chain_pos;
+            if (match_pos == 0 or pos <= match_pos) break;
+
+            const distance = pos - match_pos;
+            if (distance > WINDOW_SIZE) break;
+
+            // Compare strings
+            var length: u16 = 0;
+            while (length < max_length and
+                pos + length < data.len and
+                data[pos + length] == data[match_pos + length])
+            {
+                length += 1;
+            }
+
+            if (length >= MIN_MATCH) {
+                if (best_match == null or length > best_match.?.length) {
+                    best_match = LZ77Match{
+                        .length = length,
+                        .distance = @intCast(distance),
+                    };
+
+                    if (length >= nice_len) break; // Good enough
+                }
+            }
+
+            chain_pos = self.prev[chain_pos];
+            chain_length += 1;
+        }
+
+        return best_match;
+    }
 };
 
 // DEFLATE encoder for PNG compression
@@ -721,10 +979,56 @@ pub const DeflateEncoder = struct {
     gpa: Allocator,
     output: ArrayList(u8),
 
-    pub fn init(gpa: Allocator) DeflateEncoder {
+    // LZ77 parameters based on compression level
+    level: CompressionLevel,
+    strategy: CompressionStrategy,
+    window_size: usize, // Max lookback distance (32KB max)
+    max_chain: usize, // Max hash chain length to search
+    good_length: usize, // Don't search further if we have this
+    max_lazy: usize, // Max lazy match length
+    nice_length: usize, // Stop searching if we find this length
+
+    // LZ77 hash table
+    hash_table: LZ77HashTable,
+
+    // Frequency tables for dynamic Huffman
+    literal_freq: [288]u32, // Frequencies for literals/lengths 0-287
+    distance_freq: [32]u32, // Frequencies for distances 0-31
+
+    pub fn init(gpa: Allocator, level: CompressionLevel, strategy: CompressionStrategy) DeflateEncoder {
+        // Set parameters based on compression level
+        const params = getLevelParams(level);
         return .{
             .gpa = gpa,
             .output = .empty,
+            .level = level,
+            .strategy = strategy,
+            .window_size = params.window_size,
+            .max_chain = params.max_chain,
+            .good_length = params.good_length,
+            .max_lazy = params.max_lazy,
+            .nice_length = params.nice_length,
+            .hash_table = LZ77HashTable.init(),
+            .literal_freq = std.mem.zeroes([288]u32),
+            .distance_freq = std.mem.zeroes([32]u32),
+        };
+    }
+
+    const LevelParams = struct {
+        window_size: usize,
+        max_chain: usize,
+        good_length: usize,
+        max_lazy: usize,
+        nice_length: usize,
+    };
+
+    fn getLevelParams(level: CompressionLevel) LevelParams {
+        return switch (level) {
+            .none => .{ .window_size = 0, .max_chain = 0, .good_length = 0, .max_lazy = 0, .nice_length = 0 },
+            .fastest => .{ .window_size = 4096, .max_chain = 4, .good_length = 4, .max_lazy = 4, .nice_length = 8 },
+            .fast => .{ .window_size = 8192, .max_chain = 8, .good_length = 8, .max_lazy = 16, .nice_length = 16 },
+            .default => .{ .window_size = 16384, .max_chain = 32, .good_length = 16, .max_lazy = 32, .nice_length = 128 },
+            .best => .{ .window_size = 32768, .max_chain = 4096, .good_length = 32, .max_lazy = 258, .nice_length = 258 },
         };
     }
 
@@ -819,11 +1123,23 @@ pub const DeflateEncoder = struct {
         return .{ .code = 29, .extra_bits = 0, .extra_value = 0 };
     }
 
-    pub fn encode(self: *DeflateEncoder, data: []const u8, method: CompressionMethod) !ArrayList(u8) {
+    pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        // Choose compression method based on level
+        const method = self.getCompressionMethod();
+
         switch (method) {
             .uncompressed => return self.encodeUncompressed(data),
             .static_huffman => return self.encodeStaticHuffman(data),
+            .dynamic_huffman => return self.encodeDynamicHuffman(data),
         }
+    }
+
+    fn getCompressionMethod(self: *DeflateEncoder) CompressionMethod {
+        return switch (self.level) {
+            .none => .uncompressed,
+            // For now, use static Huffman for all compressed levels until dynamic is fully implemented
+            else => .static_huffman,
+        };
     }
 
     fn encodeUncompressed(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
@@ -859,30 +1175,146 @@ pub const DeflateEncoder = struct {
         return self.output.clone(self.gpa);
     }
 
+    fn encodeDynamicHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        // Reset frequency counters and hash table
+        self.literal_freq = std.mem.zeroes([288]u32);
+        self.distance_freq = std.mem.zeroes([32]u32);
+        self.hash_table = LZ77HashTable.init();
+
+        // First pass: collect frequencies and populate hash table
+        var pos: usize = 0;
+        while (pos < data.len) {
+            // Update hash table for current position
+            self.hash_table.update(data, pos);
+
+            // Try to find a match using hash table
+            const match = if (self.level == .none or self.strategy == .huffman_only)
+                null
+            else
+                self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length);
+
+            if (match) |m| {
+                // Count length code frequency
+                const length_code = m.getLengthCode();
+                self.literal_freq[length_code] += 1;
+
+                // Count distance code frequency
+                const dist_code = m.getDistanceCode();
+                self.distance_freq[dist_code] += 1;
+
+                // Update hash table for all bytes in the match
+                var i: usize = 1;
+                while (i < m.length) : (i += 1) {
+                    if (pos + i < data.len) {
+                        self.hash_table.update(data, pos + i);
+                    }
+                }
+
+                pos += m.length;
+            } else {
+                // Count literal frequency
+                self.literal_freq[data[pos]] += 1;
+                pos += 1;
+            }
+        }
+
+        // Add end of block symbol
+        self.literal_freq[256] = 1;
+
+        // Build Huffman trees from frequencies
+        var literal_tree = HuffmanTree{
+            .lengths = std.mem.zeroes([288]u8),
+            .codes = std.mem.zeroes([288]u16),
+            .max_length = 0,
+        };
+        try literal_tree.buildFromFrequencies(self.literal_freq[0..286], 15);
+
+        var distance_tree = HuffmanTree{
+            .lengths = std.mem.zeroes([288]u8),
+            .codes = std.mem.zeroes([288]u16),
+            .max_length = 0,
+        };
+        try distance_tree.buildFromFrequencies(self.distance_freq[0..30], 15);
+
+        // Write dynamic Huffman block
+        var writer = BitWriter.init(&self.output);
+
+        // Block header: BFINAL=1, BTYPE=10 (dynamic Huffman)
+        try writer.writeBits(self.gpa, 0x5, 3); // 101 in binary (BFINAL=1, BTYPE=10)
+
+        // Encode the Huffman trees (simplified - would need run-length encoding)
+        // For now, write minimal header
+        const HLIT = 286 - 257; // Number of literal/length codes - 257
+        const HDIST = 30 - 1; // Number of distance codes - 1
+        const HCLEN = 4 - 4; // Number of code length codes - 4 (minimum)
+
+        try writer.writeBits(self.gpa, HLIT, 5);
+        try writer.writeBits(self.gpa, HDIST, 5);
+        try writer.writeBits(self.gpa, HCLEN, 4);
+
+        // TODO: Properly encode code lengths and compressed data
+        // For now, fall back to static Huffman for the actual data
+        return self.encodeStaticHuffman(data);
+    }
+
+    fn findEnhancedMatch(self: *DeflateEncoder, data: []const u8, pos: usize) ?LZ77Match {
+        // Enhanced match finding with lazy evaluation using hash table
+        if (pos + 3 > data.len) return null;
+
+        const current_match = self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length);
+
+        // Lazy matching: check if delaying gives better match
+        if (self.max_lazy > 0 and current_match != null and pos + 1 < data.len) {
+            self.hash_table.update(data, pos + 1);
+            const next_match = self.hash_table.findMatch(data, pos + 1, self.max_chain, self.nice_length);
+            if (next_match) |nm| {
+                if (nm.length > current_match.?.length + 1) {
+                    // Better to emit literal and use next match
+                    return null;
+                }
+            }
+        }
+
+        return current_match;
+    }
+
     fn encodeStaticHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         // Use static Huffman compression (BTYPE = 01)
         var writer = BitWriter.init(&self.output);
 
-        // Debug: check for problematic data patterns
-        var has_high_bytes = false;
-        for (data) |byte| {
-            if (byte > 250) {
-                has_high_bytes = true;
-                break;
-            }
-        }
-        if (has_high_bytes) {}
+        // Initialize hash table for better matching
+        self.hash_table = LZ77HashTable.init();
 
         // Write block header: BFINAL=1, BTYPE=01 (static Huffman)
         try writer.writeBits(self.gpa, 0x3, 3); // 011 in binary (LSB first: BFINAL=1, BTYPE=01)
 
         var pos: usize = 0;
         while (pos < data.len) {
-            // Try to find a match
-            if (findMatch(data, pos)) |match| {
+            // Update hash table only if we're using LZ77
+            if (self.strategy != .huffman_only) {
+                self.hash_table.update(data, pos);
+            }
+
+            // Try to find a match using hash table if enabled
+            const match = if (self.level != .none and self.strategy != .huffman_only)
+                self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length)
+            else
+                null;
+
+            if (match) |m| {
+                // Convert to old Match type for compatibility
+                const old_match = Match{ .length = m.length, .distance = m.distance };
+
+                // Update hash table for matched bytes
+                var i: usize = 1;
+                while (i < m.length) : (i += 1) {
+                    if (pos + i < data.len) {
+                        self.hash_table.update(data, pos + i);
+                    }
+                }
                 // Output length/distance pair
-                const length_info = getLengthCode(match.length);
-                const distance_info = getDistanceCode(match.distance);
+                const length_info = getLengthCode(old_match.length);
+                const distance_info = getDistanceCode(old_match.distance);
 
                 // LZ77 match found
 
@@ -904,7 +1336,7 @@ pub const DeflateEncoder = struct {
                     try writer.writeBits(self.gpa, distance_info.extra_value, distance_info.extra_bits);
                 }
 
-                pos += match.length;
+                pos += m.length;
             } else {
                 // Output literal
                 const literal = data[pos];
@@ -925,15 +1357,25 @@ pub const DeflateEncoder = struct {
     }
 };
 
-// Public compression function with selectable compression method
-pub fn deflate(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
-    var encoder = DeflateEncoder.init(gpa);
+// Public compression function with compression level and strategy
+pub fn deflate(gpa: Allocator, data: []const u8, level: CompressionLevel, strategy: CompressionStrategy) ![]u8 {
+    var encoder = DeflateEncoder.init(gpa, level, strategy);
     defer encoder.deinit();
 
-    var result = try encoder.encode(data, method);
+    var result = try encoder.encode(data);
     defer result.deinit(gpa);
 
     return result.toOwnedSlice(gpa);
+}
+
+// Legacy function for backward compatibility
+pub fn deflateSimple(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
+    const level: CompressionLevel = switch (method) {
+        .uncompressed => .none,
+        .static_huffman => .fastest,
+        .dynamic_huffman => .default,
+    };
+    return deflate(gpa, data, level, .default);
 }
 
 // Adler-32 checksum implementation (required for zlib format)
@@ -950,10 +1392,10 @@ fn adler32(data: []const u8) u32 {
     return (b << 16) | a;
 }
 
-// Compress data using zlib format (RFC 1950) - required for PNG IDAT chunks
-pub fn zlibCompress(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
+// Compress data using zlib format (RFC 1950) with compression settings
+pub fn zlibCompress(gpa: Allocator, data: []const u8, level: CompressionLevel, strategy: CompressionStrategy) ![]u8 {
     // Generate raw DEFLATE data first
-    const deflate_data = try deflate(gpa, data, method);
+    const deflate_data = try deflate(gpa, data, level, strategy);
     defer gpa.free(deflate_data);
 
     // Calculate Adler-32 checksum of original data
@@ -989,6 +1431,16 @@ pub fn zlibCompress(gpa: Allocator, data: []const u8, method: CompressionMethod)
     try result.append(gpa, @intCast(checksum & 0xFF));
 
     return result.toOwnedSlice(gpa);
+}
+
+// Legacy zlib compression for backward compatibility
+pub fn zlibCompressSimple(gpa: Allocator, data: []const u8, method: CompressionMethod) ![]u8 {
+    const level: CompressionLevel = switch (method) {
+        .uncompressed => .none,
+        .static_huffman => .fastest,
+        .dynamic_huffman => .default,
+    };
+    return zlibCompress(gpa, data, level, .default);
 }
 
 // Decompress zlib format data (RFC 1950)
@@ -1050,7 +1502,7 @@ test "deflate round-trip compression" {
     const original_data = "Hello, World! This is a test string for deflate compression.";
 
     // Compress
-    const compressed = try deflate(allocator, original_data, .uncompressed);
+    const compressed = try deflate(allocator, original_data, .none, .default);
     defer allocator.free(compressed);
 
     // Decompress
@@ -1066,7 +1518,7 @@ test "deflate endianness" {
 
     // Test that block headers are written in correct endianness
     const test_data = "Test";
-    const compressed = try deflate(allocator, test_data, .uncompressed);
+    const compressed = try deflate(allocator, test_data, .none, .default);
     defer allocator.free(compressed);
 
     // Check first block header
@@ -1126,11 +1578,11 @@ test "compression methods comparison" {
     const test_data = "Hello World! Hello World! Hello World! This is a test string for compression.";
 
     // Test uncompressed method
-    const uncompressed = try deflate(allocator, test_data, .uncompressed);
+    const uncompressed = try deflate(allocator, test_data, .none, .default);
     defer allocator.free(uncompressed);
 
     // Test static Huffman method
-    const static_huffman = try deflate(allocator, test_data, .static_huffman);
+    const static_huffman = try deflate(allocator, test_data, .fastest, .default);
     defer allocator.free(static_huffman);
 
     // Both should decompress back to the original
@@ -1155,7 +1607,7 @@ test "static huffman zlib round trip" {
     const test_data = "Test data for static Huffman compression";
 
     // Test zlib with static Huffman
-    const compressed = try zlibCompress(allocator, test_data, .static_huffman);
+    const compressed = try zlibCompress(allocator, test_data, .fastest, .default);
     defer allocator.free(compressed);
 
     const decompressed = try zlibDecompress(allocator, compressed);
@@ -1174,7 +1626,7 @@ test "static huffman with pattern data" {
     }
 
     // Test zlib with static Huffman
-    const compressed = try zlibCompress(allocator, &test_data, .static_huffman);
+    const compressed = try zlibCompress(allocator, &test_data, .fastest, .default);
     defer allocator.free(compressed);
 
     const decompressed = try zlibDecompress(allocator, compressed);
@@ -1193,7 +1645,7 @@ test "static huffman end-of-stream edge case" {
 
     // Compress with static Huffman - this should create a compressed stream
     // where the final EOB symbol (256) has only 7-8 bits available for reading
-    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    const compressed = try deflate(allocator, &test_data, .fastest, .default);
     defer allocator.free(compressed);
 
     // This decompression should succeed even though the final symbol
@@ -1211,7 +1663,7 @@ test "static huffman with high bytes" {
     const test_data = [_]u8{ 250, 251, 252, 253, 254, 255, 255, 254, 253, 252, 251, 250 };
 
     // Test raw deflate with static Huffman
-    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    const compressed = try deflate(allocator, &test_data, .fastest, .default);
     defer allocator.free(compressed);
 
     const decompressed = try inflate(allocator, compressed);
@@ -1238,7 +1690,7 @@ test "debug specific grayscale pattern" {
     }
 
     // Test with static Huffman
-    const compressed = try deflate(allocator, &test_data, .static_huffman);
+    const compressed = try deflate(allocator, &test_data, .fastest, .default);
     defer allocator.free(compressed);
 
     const decompressed = try inflate(allocator, compressed);
@@ -1254,7 +1706,7 @@ test "zlib round-trip compression" {
     const original_data = "Hello, zlib compression test for PNG!";
 
     // Compress with zlib format
-    const compressed = try zlibCompress(allocator, original_data, .uncompressed);
+    const compressed = try zlibCompress(allocator, original_data, .none, .default);
     defer allocator.free(compressed);
 
     // Decompress
@@ -1270,7 +1722,7 @@ test "zlib header validation" {
 
     // Test with valid header
     const test_data = "Test";
-    const compressed = try zlibCompress(allocator, test_data, .uncompressed);
+    const compressed = try zlibCompress(allocator, test_data, .none, .default);
     defer allocator.free(compressed);
 
     // Check zlib header format
@@ -1283,6 +1735,79 @@ test "zlib header validation" {
     // Header should be valid (divisible by 31)
     const header_check = (@as(u16, compressed[0]) << 8) | compressed[1];
     try std.testing.expectEqual(@as(u16, 0), header_check % 31);
+}
+
+test "compression levels" {
+    const allocator = std.testing.allocator;
+
+    const test_data = "The quick brown fox jumps over the lazy dog. " ** 10;
+
+    // Test all compression levels
+    const levels = [_]CompressionLevel{ .none, .fastest, .fast, .default, .best };
+    var sizes: [levels.len]usize = undefined;
+
+    for (levels, 0..) |level, i| {
+        const compressed = try zlibCompress(allocator, test_data, level, .default);
+        defer allocator.free(compressed);
+
+        sizes[i] = compressed.len;
+
+        // Verify round-trip
+        const decompressed = try zlibDecompress(allocator, compressed);
+        defer allocator.free(decompressed);
+
+        try std.testing.expectEqualSlices(u8, test_data, decompressed);
+    }
+
+    // Verify compression improves with level (except for .none which stores uncompressed)
+    try std.testing.expect(sizes[0] > sizes[1]); // none > fastest
+    try std.testing.expect(sizes[1] >= sizes[2]); // fastest >= fast
+    try std.testing.expect(sizes[2] >= sizes[3]); // fast >= default
+    try std.testing.expect(sizes[3] >= sizes[4]); // default >= best
+}
+
+test "compression strategies" {
+    const allocator = std.testing.allocator;
+
+    // Test different strategies
+    const strategies = [_]CompressionStrategy{ .default, .filtered, .huffman_only, .rle };
+    const test_data = "AAAAAABBBBBBCCCCCCDDDDDD" ** 5; // Repetitive data good for RLE
+
+    for (strategies) |strategy| {
+        const compressed = try zlibCompress(allocator, test_data, .default, strategy);
+        defer allocator.free(compressed);
+
+        const decompressed = try zlibDecompress(allocator, compressed);
+        defer allocator.free(decompressed);
+
+        try std.testing.expectEqualSlices(u8, test_data, decompressed);
+    }
+}
+
+test "hash table improves compression" {
+    const allocator = std.testing.allocator;
+
+    // Create data with lots of repetition that benefits from LZ77
+    const repetitive_data = "AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD" ** 50;
+
+    // Compress with different levels
+    const fast = try zlibCompress(allocator, repetitive_data, .fastest, .default);
+    defer allocator.free(fast);
+
+    const best = try zlibCompress(allocator, repetitive_data, .best, .default);
+    defer allocator.free(best);
+
+    // Better compression level should produce smaller or equal output
+    try std.testing.expect(best.len <= fast.len);
+
+    // Both should decompress correctly
+    const decompressed1 = try zlibDecompress(allocator, fast);
+    defer allocator.free(decompressed1);
+    const decompressed2 = try zlibDecompress(allocator, best);
+    defer allocator.free(decompressed2);
+
+    try std.testing.expectEqualSlices(u8, repetitive_data, decompressed1);
+    try std.testing.expectEqualSlices(u8, repetitive_data, decompressed2);
 }
 
 test "deflate invalid distance check" {
