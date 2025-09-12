@@ -1078,11 +1078,11 @@ const LZ77HashTable = struct {
     const MIN_MATCH = 3;
     const MAX_MATCH = 258;
 
-    head: [HASH_SIZE]i32, // Head of hash chains (absolute positions or NIL)
-    prev: [WINDOW_SIZE]i32, // Previous positions in chain (absolute positions or NIL)
+    head: [HASH_SIZE]i64, // Head of hash chains (absolute positions or NIL)
+    prev: [WINDOW_SIZE]i64, // Previous positions in chain (absolute positions or NIL)
 
     const Self = @This();
-    const NIL: i32 = -1; // Sentinel value for no match
+    const NIL: i64 = -1; // Sentinel value for no match
     const WINDOW_MASK = WINDOW_SIZE - 1;
 
     pub fn init() Self {
@@ -1184,8 +1184,8 @@ pub const DeflateEncoder = struct {
     distance_freq: [32]u32, // Frequencies for distances 0-31
 
     pub fn init(gpa: Allocator, level: CompressionLevel, strategy: CompressionStrategy) DeflateEncoder {
-        // Set parameters based on compression level
-        const params = getLevelParams(level);
+        // Set parameters based on compression level and strategy
+        const params = getStrategyParams(level, strategy);
         return .{
             .gpa = gpa,
             .output = .empty,
@@ -1204,13 +1204,34 @@ pub const DeflateEncoder = struct {
         nice_length: usize,
     };
 
-    fn getLevelParams(level: CompressionLevel) LevelParams {
-        return switch (level) {
-            .none => .{ .max_chain = 0, .nice_length = 0 },
-            .fastest => .{ .max_chain = 4, .nice_length = 8 },
-            .fast => .{ .max_chain = 8, .nice_length = 16 },
-            .default => .{ .max_chain = 32, .nice_length = 128 },
-            .best => .{ .max_chain = 4096, .nice_length = 258 },
+    fn getStrategyParams(level: CompressionLevel, strategy: CompressionStrategy) LevelParams {
+        // Base parameters from compression level
+        const base_params = switch (level) {
+            .none => LevelParams{ .max_chain = 0, .nice_length = 0 },
+            .fastest => LevelParams{ .max_chain = 4, .nice_length = 8 },
+            .fast => LevelParams{ .max_chain = 8, .nice_length = 16 },
+            .default => LevelParams{ .max_chain = 32, .nice_length = 128 },
+            .best => LevelParams{ .max_chain = 4096, .nice_length = 258 },
+        };
+        
+        // Adjust based on strategy
+        return switch (strategy) {
+            .default => base_params,
+            .filtered => LevelParams{ 
+                // Reduced search for filtered data (e.g., images)
+                .max_chain = @min(base_params.max_chain, 16),
+                .nice_length = @min(base_params.nice_length, 32),
+            },
+            .rle => LevelParams{
+                // Optimized for run-length encoded data
+                .max_chain = @min(base_params.max_chain, 8), 
+                .nice_length = base_params.nice_length, // Keep full length for long runs
+            },
+            .huffman_only => LevelParams{
+                // No LZ77 matching
+                .max_chain = 0,
+                .nice_length = 0,
+            },
         };
     }
 
