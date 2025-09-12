@@ -172,11 +172,21 @@ pub const HuffmanTree = struct {
     lengths: [288]u8 = std.mem.zeroes([288]u8),
     codes: [288]u16 = std.mem.zeroes([288]u16),
     max_length: u8 = 0,
+    allocator: Allocator,
 
     const Self = @This();
 
     const Leaf = struct { sym: u16, freq: u32 };
     const Node = struct { freq: u64, left: i32, right: i32, sym: i32 };
+
+    pub fn init(allocator: Allocator) Self {
+        return .{
+            .lengths = undefined,
+            .codes = undefined,
+            .max_length = 0,
+            .allocator = allocator,
+        };
+    }
 
     /// Build length-limited Huffman tree using standard merge + length limiting
     pub fn buildFromFrequencies(self: *Self, frequencies: []const u32, max_bits: u8) !void {
@@ -188,10 +198,10 @@ pub const HuffmanTree = struct {
 
         // Collect leaves
         var leaves_list: ArrayList(Leaf) = .empty;
-        defer leaves_list.deinit(std.heap.page_allocator);
+        defer leaves_list.deinit(self.allocator);
         for (frequencies, 0..) |f, i| {
             if (f > 0) {
-                try leaves_list.append(std.heap.page_allocator, .{ .sym = @intCast(i), .freq = f });
+                try leaves_list.append(self.allocator, .{ .sym = @intCast(i), .freq = f });
             }
         }
 
@@ -205,17 +215,17 @@ pub const HuffmanTree = struct {
 
         // Build initial Huffman tree by repeatedly merging two lowest frequencies
         var nodes: ArrayList(Node) = .empty;
-        defer nodes.deinit(std.heap.page_allocator);
+        defer nodes.deinit(self.allocator);
 
         // Add leaves as nodes
         for (leaves_list.items) |leaf| {
-            try nodes.append(std.heap.page_allocator, .{ .freq = leaf.freq, .left = -1, .right = -1, .sym = @intCast(leaf.sym) });
+            try nodes.append(self.allocator, .{ .freq = leaf.freq, .left = -1, .right = -1, .sym = @intCast(leaf.sym) });
         }
 
         var alive: ArrayList(i32) = .empty;
-        defer alive.deinit(std.heap.page_allocator);
+        defer alive.deinit(self.allocator);
         // Track indices of alive nodes (start with leaves)
-        for (0..nodes.items.len) |idx| try alive.append(std.heap.page_allocator, @intCast(idx));
+        for (0..nodes.items.len) |idx| try alive.append(self.allocator, @intCast(idx));
 
         // Iteratively merge two minimums
         while (alive.items.len > 1) {
@@ -245,7 +255,7 @@ pub const HuffmanTree = struct {
             const a: usize = @intCast(alive.items[min1_idx]);
             const b: usize = @intCast(alive.items[min2_idx]);
             const combined_freq = nodes.items[a].freq + nodes.items[b].freq;
-            try nodes.append(std.heap.page_allocator, .{ .freq = combined_freq, .left = @intCast(a), .right = @intCast(b), .sym = -1 });
+            try nodes.append(self.allocator, .{ .freq = combined_freq, .left = @intCast(a), .right = @intCast(b), .sym = -1 });
             const new_idx: i32 = @intCast(nodes.items.len - 1);
 
             // Remove higher index first to avoid shifting earlier index
@@ -256,15 +266,15 @@ pub const HuffmanTree = struct {
                 _ = alive.orderedRemove(min2_idx);
                 _ = alive.orderedRemove(min1_idx);
             }
-            try alive.append(std.heap.page_allocator, new_idx);
+            try alive.append(self.allocator, new_idx);
         }
 
         const root_index = alive.items[0];
 
         // Compute lengths by DFS
         var stack: ArrayList(struct { idx: i32, depth: u16 }) = .empty;
-        defer stack.deinit(std.heap.page_allocator);
-        try stack.append(std.heap.page_allocator, .{ .idx = root_index, .depth = 0 });
+        defer stack.deinit(self.allocator);
+        try stack.append(self.allocator, .{ .idx = root_index, .depth = 0 });
 
         while (stack.items.len > 0) {
             const elem = stack.pop() orelse unreachable;
@@ -278,8 +288,8 @@ pub const HuffmanTree = struct {
                 self.lengths[sym_u] = dl;
                 self.max_length = @max(self.max_length, dl);
             } else {
-                if (node.left >= 0) try stack.append(std.heap.page_allocator, .{ .idx = node.left, .depth = elem.depth + 1 });
-                if (node.right >= 0) try stack.append(std.heap.page_allocator, .{ .idx = node.right, .depth = elem.depth + 1 });
+                if (node.left >= 0) try stack.append(self.allocator, .{ .idx = node.left, .depth = elem.depth + 1 });
+                if (node.right >= 0) try stack.append(self.allocator, .{ .idx = node.right, .depth = elem.depth + 1 });
             }
         }
 

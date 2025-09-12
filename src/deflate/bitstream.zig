@@ -29,9 +29,10 @@ pub const BitReader = struct {
             const bits_needed = num_bits - bits_read;
             const bits_to_read = @min(bits_needed, bits_in_byte);
 
-            const mask = if (bits_to_read == 8) @as(u8, 0xFF) else (@as(u8, 1) << @as(u3, @intCast(bits_to_read))) - 1;
-            const bits = (current_byte >> @as(u3, @intCast(self.bit_pos))) & mask;
-            result |= @as(u32, bits) << @as(u5, @intCast(bits_read));
+            // bits_to_read <= 8 and bit_pos <= 7, so truncation is always valid
+            const mask = if (bits_to_read == 8) @as(u8, 0xFF) else (@as(u8, 1) << @truncate(bits_to_read)) - 1;
+            const bits = (current_byte >> @truncate(self.bit_pos)) & mask;
+            result |= @as(u32, bits) << @truncate(bits_read);
 
             bits_read += bits_to_read;
             self.bit_pos += bits_to_read;
@@ -73,7 +74,7 @@ pub const BitWriter = struct {
     }
 
     pub fn writeBits(self: *BitWriter, gpa: std.mem.Allocator, code: u32, bits: u8) !void {
-        self.bit_buffer |= code << @as(u5, @intCast(self.bit_count));
+        self.bit_buffer |= code << @truncate(self.bit_count);
         self.bit_count += bits;
 
         while (self.bit_count >= 8) {
