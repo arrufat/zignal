@@ -139,7 +139,7 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
 /// Compress data to gzip format
 pub fn compressGzip(gpa: std.mem.Allocator, data: []const u8) ![]u8 {
     // Compress data using deflate
-    const compressed_data = try deflate.deflate(gpa, data, .static_huffman);
+    const compressed_data = try deflate.deflate(gpa, data, .fastest, .default);
     defer gpa.free(compressed_data);
 
     // Calculate CRC32 checksum of original data

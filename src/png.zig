@@ -856,9 +856,15 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
 // PNG encoding options
 pub const EncodeOptions = struct {
     filter_mode: FilterMode = .adaptive,
+    compression_level: deflate.CompressionLevel = .default,
+    compression_strategy: deflate.CompressionStrategy = .filtered,
     gamma: ?f32 = null,
     srgb_intent: ?SrgbRenderingIntent = null,
-    pub const default: EncodeOptions = .{ .filter_mode = .adaptive };
+    pub const default: EncodeOptions = .{
+        .filter_mode = .adaptive,
+        .compression_level = .default,
+        .compression_strategy = .filtered,
+    };
 };
 
 pub const FilterMode = union(enum) {
@@ -921,8 +927,8 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     };
     defer gpa.free(filtered_data);
 
-    // Compress filtered data with zlib format (required for PNG IDAT) using static Huffman
-    const compressed_data = try deflate.zlibCompress(gpa, filtered_data, .static_huffman);
+    // Compress filtered data with zlib format (required for PNG IDAT) using compression settings
+    const compressed_data = try deflate.zlibCompress(gpa, filtered_data, options.compression_level, options.compression_strategy);
     defer gpa.free(compressed_data);
 
     // Write IDAT chunk
