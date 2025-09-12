@@ -734,10 +734,10 @@ fn convertToBitmapFont(
     bitmap_info: BitmapInfo,
     encoding: EncodingEntry,
     filter: LoadFilter,
-    font_ascent: i16,
+    ascent: i16,
     max_width: u16,
     max_height: u16,
-    font_name: []u8,
+    name: []u8,
 ) !BitmapFont {
     // Determine which glyphs to include
     var glyph_list: std.ArrayList(struct {
@@ -830,7 +830,7 @@ fn convertToBitmapFont(
         try glyph_map.put(glyph_info.codepoint, list_index);
 
         // Adjust y_offset to account for font baseline
-        const adjusted_y_offset = font_ascent - metric.ascent;
+        const adjusted_y_offset = ascent - metric.ascent;
 
         glyph_data_list[list_index] = GlyphData{
             .width = @intCast(dims.width),
@@ -847,7 +847,7 @@ fn convertToBitmapFont(
     @memcpy(bitmap_data, converted_bitmaps.items);
 
     return BitmapFont{
-        .name = font_name,
+        .name = name,
         .char_width = @as(u8, @intCast(@min(max_width, 255))),
         .char_height = @as(u8, @intCast(@min(max_height, 255))),
         .first_char = if (all_ascii) min_char else 0,
