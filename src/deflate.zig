@@ -222,6 +222,63 @@ test "hash table improves compression" {
     try std.testing.expectEqualSlices(u8, repetitive_data, d2);
 }
 
+test "dynamic huffman zlib round-trip with png-like scanlines" {
+    const allocator = std.testing.allocator;
+
+    // Construct PNG-like filtered scanlines: each row starts with a filter byte
+    const width: usize = 512;
+    const height: usize = 96;
+    const scanline_bytes: usize = width; // pretend 1 byte/pixel for stress
+    const total: usize = height * (scanline_bytes + 1);
+
+    var data = try allocator.alloc(u8, total);
+    defer allocator.free(data);
+
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        const row_start = y * (scanline_bytes + 1);
+        data[row_start] = 0; // filter type: none
+
+        const row = data[row_start + 1 .. row_start + 1 + scanline_bytes];
+        var x: usize = 0;
+        while (x < scanline_bytes) : (x += 1) {
+            // Alternating pattern with some repetition to exercise LZ and Huffman
+            const v: u8 = if ((y & 1) == 0)
+                @intCast((x * 3 + y) % 256)
+            else blk: {
+                // Compute (255 - x + y*7) mod 256 without overflow
+                const xv: u32 = @intCast(x % 256);
+                const yv: u32 = @intCast((y * 7) % 256);
+                break :blk @intCast(((255 + yv + 256 - xv) & 0xFF));
+            };
+            row[x] = v;
+            if ((x % 32) == 0) {
+                // Sprinkle small runs
+                const end = @min(scanline_bytes, x + 8);
+                for (x..end) |i| row[i] = v;
+                x = end;
+            }
+        }
+    }
+
+    // Compress with zlib using default (dynamic) settings
+    const compressed = try zlibCompress(allocator, data, .default, .filtered);
+    defer allocator.free(compressed);
+
+    // Verify first block is dynamic Huffman (BTYPE=10), LSB-first => first 3 bits are 101
+    try std.testing.expect(compressed.len >= 3);
+    const first_deflate_byte = compressed[2]; // after zlib header (2 bytes)
+    const bfinal: u1 = @intCast(first_deflate_byte & 0x01);
+    const btype: u2 = @intCast((first_deflate_byte >> 1) & 0x03);
+    try std.testing.expectEqual(@as(u1, 1), bfinal); // final block
+    try std.testing.expectEqual(@as(u2, 2), btype); // dynamic Huffman
+
+    // Decompress and verify round-trip
+    const decompressed = try zlibDecompress(allocator, compressed);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, data, decompressed);
+}
+
 test "deflate handles corrupted compressed data" {
     const allocator = std.testing.allocator;
     const original = "Hello, this is test data for corruption testing!";
