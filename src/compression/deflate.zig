@@ -630,7 +630,7 @@ pub const DeflateEncoder = struct {
             }
 
             const match = if (self.level == .level_1 and self.strategy != .huffman_only)
-                self.hash_table.findMatchTurbo(data, pos)
+                self.hash_table.findMatchFast(data, pos)
             else if (self.level != .level_0 and self.strategy != .huffman_only)
                 self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length)
             else

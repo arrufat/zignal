@@ -35,7 +35,7 @@ pub const HashTable = struct {
         return @intCast(h & HASH_MASK);
     }
 
-    // Faster hash for turbo mode - simpler computation
+    // Faster hash for fast mode - simpler computation
     fn hashFast(data: []const u8) u16 {
         if (data.len < 3) return 0;
         const h = (@as(u32, data[0]) << 5) ^ (@as(u32, data[1]) << 3) ^ data[2];
@@ -50,7 +50,7 @@ pub const HashTable = struct {
         self.head[h] = @intCast(pos);
     }
 
-    // Turbo mode: update with faster hash
+    // Fast mode: update with faster hash
     pub fn updateFast(self: *Self, data: []const u8, pos: usize) void {
         if (pos + MIN_MATCH > data.len) return;
         const h = hashFast(data[pos..]);
@@ -93,8 +93,8 @@ pub const HashTable = struct {
         return best;
     }
 
-    // Turbo mode: find match with faster hash and immediate return on first good match
-    pub fn findMatchTurbo(self: *Self, data: []const u8, pos: usize) ?Match {
+    // Fast mode: find match with faster hash and immediate return on first good match
+    pub fn findMatchFast(self: *Self, data: []const u8, pos: usize) ?Match {
         if (pos + MIN_MATCH > data.len) return null;
         const h = hashFast(data[pos..]);
         const chain_pos = self.head[h];
