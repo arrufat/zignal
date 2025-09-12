@@ -36,7 +36,7 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
     errdefer allocator.free(raw_file_contents);
 
     if (is_compressed) {
-        const decompressed_data = try gzip.decompressGzip(allocator, raw_file_contents);
+        const decompressed_data = try gzip.decompress(allocator, raw_file_contents);
         std.log.info("Decompressed {s} from {} bytes to {} bytes", .{ path, raw_file_contents.len, decompressed_data.len });
 
         return LoadedFile{
@@ -55,9 +55,3 @@ pub fn loadFile(allocator: std.mem.Allocator, path: []const u8, max_size: usize)
     }
 }
 
-// Re-export gzip functions for backwards compatibility
-pub const decompressGzip = gzip.decompressGzip;
-pub const compressGzip = gzip.compressGzip;
-pub const CompressionError = error{
-    InvalidCompression,
-};

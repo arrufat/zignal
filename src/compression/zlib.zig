@@ -48,7 +48,7 @@ fn adler32(data: []const u8) u32 {
     return (b << 16) | a;
 }
 
-pub fn zlibCompress(gpa: Allocator, data: []const u8, level: def.CompressionLevel, strategy: def.CompressionStrategy) ![]u8 {
+pub fn compress(gpa: Allocator, data: []const u8, level: def.CompressionLevel, strategy: def.CompressionStrategy) ![]u8 {
     const deflate_data = try def.deflate(gpa, data, level, strategy);
     defer gpa.free(deflate_data);
     const checksum = adler32(data);
@@ -75,7 +75,7 @@ pub fn zlibCompress(gpa: Allocator, data: []const u8, level: def.CompressionLeve
     return result.toOwnedSlice(gpa);
 }
 
-pub fn zlibDecompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
+pub fn decompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
     if (zlib_data.len < 6) return error.InvalidZlibData;
     const cmf = zlib_data[0];
     const flg = zlib_data[1];
@@ -97,9 +97,9 @@ pub fn zlibDecompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
 test "zlib round trip" {
     const allocator = std.testing.allocator;
     const original_data = "Hello, zlib compression test for PNG!";
-    const compressed = try zlibCompress(allocator, original_data, .none, .default);
+    const compressed = try compress(allocator, original_data, .none, .default);
     defer allocator.free(compressed);
-    const decompressed = try zlibDecompress(allocator, compressed);
+    const decompressed = try decompress(allocator, compressed);
     defer allocator.free(decompressed);
     try std.testing.expectEqualSlices(u8, original_data, decompressed);
 }
@@ -107,7 +107,7 @@ test "zlib round trip" {
 test "zlib header validation" {
     const allocator = std.testing.allocator;
     const test_data = "Test";
-    const compressed = try zlibCompress(allocator, test_data, .none, .default);
+    const compressed = try compress(allocator, test_data, .none, .default);
     defer allocator.free(compressed);
     try std.testing.expect(compressed.len >= 6);
     const cmf = compressed[0];
@@ -122,10 +122,10 @@ test "zlib compression levels" {
     const levels = [_]def.CompressionLevel{ .none, .fastest, .fast, .default, .best };
     var sizes: [levels.len]usize = undefined;
     for (levels, 0..) |level, i| {
-        const compressed = try zlibCompress(allocator, test_data, level, .default);
+        const compressed = try compress(allocator, test_data, level, .default);
         defer allocator.free(compressed);
         sizes[i] = compressed.len;
-        const decomp = try zlibDecompress(allocator, compressed);
+        const decomp = try decompress(allocator, compressed);
         defer allocator.free(decomp);
         try std.testing.expectEqualSlices(u8, test_data, decomp);
     }
