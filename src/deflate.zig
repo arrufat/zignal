@@ -6,83 +6,75 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-// Compression levels for deflate/zlib
+/// Compression levels for deflate/zlib
 pub const CompressionLevel = enum(u4) {
-    none = 0, // Store uncompressed
-    fastest = 1, // Minimal LZ77 effort, may use static Huffman
-    fast = 3, // Basic LZ77, dynamic Huffman
-    default = 6, // Good balance of speed and compression
-    best = 9, // Maximum compression effort
-
+    none = 0,
+    fastest = 1,
+    fast = 3,
+    default = 6,
+    best = 9,
     pub fn toInt(self: CompressionLevel) u4 {
         return @intFromEnum(self);
     }
 };
 
-// Compression strategies for different data types
+/// Compression strategies for different data types
 pub const CompressionStrategy = enum {
-    default, // Normal compression (LZ77 + Huffman)
-    filtered, // For filtered data like PNG rows
-    // TODO: Could bias toward smaller distances for filtered data
-    huffman_only, // Skip LZ77, only Huffman coding
-    rle, // Run-length encoding focus for images with runs
-    // TODO: Could prefer longer matches over closer ones for RLE data
+    default,
+    filtered,
+    huffman_only,
+    rle,
 };
 
-// Fixed Huffman code lengths for literal/length alphabet (RFC 1951)
+/// Fixed Huffman code lengths for literal/length alphabet (RFC 1951)
 const FIXED_LITERAL_LENGTHS = [_]u8{
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 0-15
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 16-31
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 32-47
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 48-63
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 64-79
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 80-95
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 96-111
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 112-127
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // 128-143
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 144-159
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 160-175
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 176-191
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 192-207
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 208-223
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 224-239
-    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, // 240-255
-    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, // 256-271
-    7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, // 272-287
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+    7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8,
 };
 
-// Fixed distance code lengths (all 5 bits)
+/// Fixed distance code lengths (all 5 bits)
 const FIXED_DISTANCE_LENGTHS: [32]u8 = @splat(5);
 
-// Unified length/distance code information structure
+/// Unified length/distance code information structure
 const CodeInfo = struct {
-    code: u16, // The code value (257-285 for lengths, 0-29 for distances)
-    base: u16, // Base value for this code
-    extra_bits: u8, // Number of extra bits to read/write
+    code: u16,
+    base: u16,
+    extra_bits: u8,
 };
 
-// Unified length codes table (257-285 map to lengths 3-258)
-// Used by both encoder (value→code lookup) and decoder (code→value lookup)
+/// Length codes table (257-285 map to lengths 3-258)
 const LENGTH_TABLE = [_]CodeInfo{ .{ .code = 257, .base = 3, .extra_bits = 0 }, .{ .code = 258, .base = 4, .extra_bits = 0 }, .{ .code = 259, .base = 5, .extra_bits = 0 }, .{ .code = 260, .base = 6, .extra_bits = 0 }, .{ .code = 261, .base = 7, .extra_bits = 0 }, .{ .code = 262, .base = 8, .extra_bits = 0 }, .{ .code = 263, .base = 9, .extra_bits = 0 }, .{ .code = 264, .base = 10, .extra_bits = 0 }, .{ .code = 265, .base = 11, .extra_bits = 1 }, .{ .code = 266, .base = 13, .extra_bits = 1 }, .{ .code = 267, .base = 15, .extra_bits = 1 }, .{ .code = 268, .base = 17, .extra_bits = 1 }, .{ .code = 269, .base = 19, .extra_bits = 2 }, .{ .code = 270, .base = 23, .extra_bits = 2 }, .{ .code = 271, .base = 27, .extra_bits = 2 }, .{ .code = 272, .base = 31, .extra_bits = 2 }, .{ .code = 273, .base = 35, .extra_bits = 3 }, .{ .code = 274, .base = 43, .extra_bits = 3 }, .{ .code = 275, .base = 51, .extra_bits = 3 }, .{ .code = 276, .base = 59, .extra_bits = 3 }, .{ .code = 277, .base = 67, .extra_bits = 4 }, .{ .code = 278, .base = 83, .extra_bits = 4 }, .{ .code = 279, .base = 99, .extra_bits = 4 }, .{ .code = 280, .base = 115, .extra_bits = 4 }, .{ .code = 281, .base = 131, .extra_bits = 5 }, .{ .code = 282, .base = 163, .extra_bits = 5 }, .{ .code = 283, .base = 195, .extra_bits = 5 }, .{ .code = 284, .base = 227, .extra_bits = 5 }, .{ .code = 285, .base = 258, .extra_bits = 0 } };
 
-// Unified distance codes table (0-29 map to distances 1-32768)
-// Used by both encoder (value→code lookup) and decoder (code→value lookup)
+/// Distance codes table (0-29 map to distances 1-32768)
 const DISTANCE_TABLE = [_]CodeInfo{ .{ .code = 0, .base = 1, .extra_bits = 0 }, .{ .code = 1, .base = 2, .extra_bits = 0 }, .{ .code = 2, .base = 3, .extra_bits = 0 }, .{ .code = 3, .base = 4, .extra_bits = 0 }, .{ .code = 4, .base = 5, .extra_bits = 1 }, .{ .code = 5, .base = 7, .extra_bits = 1 }, .{ .code = 6, .base = 9, .extra_bits = 2 }, .{ .code = 7, .base = 13, .extra_bits = 2 }, .{ .code = 8, .base = 17, .extra_bits = 3 }, .{ .code = 9, .base = 25, .extra_bits = 3 }, .{ .code = 10, .base = 33, .extra_bits = 4 }, .{ .code = 11, .base = 49, .extra_bits = 4 }, .{ .code = 12, .base = 65, .extra_bits = 5 }, .{ .code = 13, .base = 97, .extra_bits = 5 }, .{ .code = 14, .base = 129, .extra_bits = 6 }, .{ .code = 15, .base = 193, .extra_bits = 6 }, .{ .code = 16, .base = 257, .extra_bits = 7 }, .{ .code = 17, .base = 385, .extra_bits = 7 }, .{ .code = 18, .base = 513, .extra_bits = 8 }, .{ .code = 19, .base = 769, .extra_bits = 8 }, .{ .code = 20, .base = 1025, .extra_bits = 9 }, .{ .code = 21, .base = 1537, .extra_bits = 9 }, .{ .code = 22, .base = 2049, .extra_bits = 10 }, .{ .code = 23, .base = 3073, .extra_bits = 10 }, .{ .code = 24, .base = 4097, .extra_bits = 11 }, .{ .code = 25, .base = 6145, .extra_bits = 11 }, .{ .code = 26, .base = 8193, .extra_bits = 12 }, .{ .code = 27, .base = 12289, .extra_bits = 12 }, .{ .code = 28, .base = 16385, .extra_bits = 13 }, .{ .code = 29, .base = 24577, .extra_bits = 13 } };
 
-// Huffman tree node
+/// Huffman tree node
 const HuffmanNode = struct {
-    symbol: ?u16 = null, // null for internal nodes
+    symbol: ?u16 = null,
     left: ?*HuffmanNode = null,
     right: ?*HuffmanNode = null,
 };
 
-// Huffman decoder table for faster decoding
+/// Huffman decoder table for faster decoding
 const HuffmanDecoder = struct {
-    // Fast lookup table for common short codes
-    fast_table: [512]u16 = @splat(0), // 9-bit lookup
-    fast_mask: u16 = 511, // 2^9 - 1
-
-    // Tree for longer codes
+    fast_table: [512]u16 = @splat(0),
+    fast_mask: u16 = 511,
     root: ?*HuffmanNode = null,
     allocator: Allocator,
     nodes: ArrayList(HuffmanNode),
@@ -98,22 +90,16 @@ const HuffmanDecoder = struct {
         self.nodes.deinit(self.allocator);
     }
 
-    // Use top-level reverseBits function
-
     pub fn buildFromLengths(self: *HuffmanDecoder, code_lengths: []const u8) !void {
-
-        // Reset fast table and clear nodes
         self.fast_table = @splat(0);
         self.nodes.clearRetainingCapacity();
         self.root = null;
 
-        // Count codes of each length
         var length_count: [16]u16 = @splat(0);
         for (code_lengths) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
-        // Calculate first code for each length
         var code: u16 = 0;
         var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
@@ -121,25 +107,21 @@ const HuffmanDecoder = struct {
             first_code[bits] = code;
         }
 
-        // Pre-allocate enough nodes for the worst case (all long codes)
-        var max_nodes: usize = 1; // Root
+        var max_nodes: usize = 1;
         for (code_lengths) |len| {
             if (len > 9) max_nodes += len;
         }
         try self.nodes.ensureTotalCapacity(self.allocator, max_nodes);
 
-        // Build fast lookup table and tree
         for (code_lengths, 0..) |len, symbol| {
             if (len == 0) continue;
 
             const sym_code = first_code[len];
             first_code[len] += 1;
 
-            // Reverse the bits for proper deflate bit order
             const reversed_code = reverseBits(sym_code, @intCast(len));
 
             if (len <= 9) {
-                // Add to fast table with all possible suffixes
                 const num_entries = @as(u16, 1) << @intCast(9 - len);
                 var i: u16 = 0;
                 while (i < num_entries) : (i += 1) {
@@ -147,7 +129,6 @@ const HuffmanDecoder = struct {
                     self.fast_table[table_index] = @as(u16, @intCast(symbol)) | (@as(u16, @intCast(len)) << 12);
                 }
             } else {
-                // Add to tree for longer codes
                 if (self.root == null) {
                     self.nodes.appendAssumeCapacity(.{});
                     self.root = &self.nodes.items[0];
@@ -176,7 +157,7 @@ const HuffmanDecoder = struct {
     }
 };
 
-// Bit stream reader for deflate data
+/// Bit stream reader for deflate data
 const BitReader = struct {
     data: []const u8,
     byte_pos: usize = 0,
@@ -235,7 +216,7 @@ const BitReader = struct {
     }
 };
 
-// DEFLATE decompressor
+/// DEFLATE decompressor
 pub const DeflateDecoder = struct {
     gpa: Allocator,
     output: ArrayList(u8),
@@ -488,7 +469,7 @@ pub const DeflateDecoder = struct {
     }
 };
 
-// Public decompression function
+/// Decompresses DEFLATE compressed data
 pub fn inflate(gpa: Allocator, compressed_data: []const u8) ![]u8 {
     var decoder = DeflateDecoder.init(gpa);
     defer decoder.deinit();
@@ -499,7 +480,7 @@ pub fn inflate(gpa: Allocator, compressed_data: []const u8) ![]u8 {
     return result.toOwnedSlice(gpa);
 }
 
-// Build static Huffman encoder tables by computing codes from lengths
+/// Static Huffman encoder tables
 const StaticHuffmanTables = struct {
     const LiteralCode = struct {
         code: u16,
@@ -511,13 +492,11 @@ const StaticHuffmanTables = struct {
         @setEvalBranchQuota(10000); // Increase quota for comptime evaluation
         var codes: [288]LiteralCode = undefined;
 
-        // Count codes of each length
         var length_count: [16]u16 = @splat(0);
         for (FIXED_LITERAL_LENGTHS) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
-        // Calculate first code for each length
         var code: u16 = 0;
         var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
@@ -535,7 +514,6 @@ const StaticHuffmanTables = struct {
             const sym_code = first_code[len];
             first_code[len] += 1;
 
-            // Reverse the bits for proper deflate bit order
             const reversed_code = reverseBits(sym_code, @intCast(len));
             codes[symbol] = LiteralCode{ .code = reversed_code, .bits = @intCast(len) };
         }
@@ -547,13 +525,11 @@ const StaticHuffmanTables = struct {
     const distance_codes = blk: {
         var codes: [32]LiteralCode = undefined;
 
-        // Count codes of each length
         var length_count: [16]u16 = @splat(0);
         for (FIXED_DISTANCE_LENGTHS) |len| {
             if (len > 0) length_count[len] += 1;
         }
 
-        // Calculate first code for each length
         var code: u16 = 0;
         var first_code: [16]u16 = @splat(0);
         for (1..16) |bits| {
@@ -571,18 +547,15 @@ const StaticHuffmanTables = struct {
             const sym_code = first_code[len];
             first_code[len] += 1;
 
-            // Reverse the bits for proper deflate bit order
             const reversed_code = reverseBits(sym_code, @intCast(len));
             codes[symbol] = LiteralCode{ .code = reversed_code, .bits = @intCast(len) };
         }
 
         break :blk codes;
     };
-
-    // Use top-level reverseBits function
 };
 
-// Bit writer for variable-length codes
+/// Bit writer for variable-length codes
 const BitWriter = struct {
     output: *ArrayList(u8),
     bit_buffer: u32 = 0,
@@ -612,14 +585,14 @@ const BitWriter = struct {
     }
 };
 
-// Compression methods for deflate block types
+/// Compression methods for deflate block types
 pub const CompressionMethod = enum {
-    uncompressed, // BTYPE = 00 - no compression
+    uncompressed,
     static_huffman, // BTYPE = 01 - static Huffman codes
     dynamic_huffman, // BTYPE = 10 - dynamic Huffman codes
 };
 
-// LZ77 match structure
+/// LZ77 match structure
 const LZ77Match = struct {
     length: u16,
     distance: u16,
@@ -646,17 +619,17 @@ const LZ77Match = struct {
     }
 };
 
-// Code length symbols for RLE encoding
+/// Code length symbols for RLE encoding
 const CodeLengthSymbol = struct {
     symbol: u8, // 0-18
     extra_bits: u8, // Number of extra bits
     extra_value: u16, // Value of extra bits
 };
 
-// Order in which code length codes are written
+/// Order in which code length codes are written
 const code_length_order = [_]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
-// Shared function to reverse bits for DEFLATE bit ordering
+/// Reverses bits for DEFLATE bit ordering
 fn reverseBits(code: u16, length: u8) u16 {
     var result: u16 = 0;
     var temp = code;
@@ -667,10 +640,10 @@ fn reverseBits(code: u16, length: u8) u16 {
     return result;
 }
 
-// Huffman tree for encoding
+/// Huffman tree for encoding
 const HuffmanTree = struct {
-    lengths: [288]u8, // Bit lengths for each symbol (max 288 for literals/lengths)
-    codes: [288]u16, // Canonical codes for each symbol
+    lengths: [288]u8,
+    codes: [288]u16,
     max_length: u8, // Maximum code length used
 
     const Self = @This();
@@ -833,7 +806,6 @@ const HuffmanTree = struct {
             if (len > 0) bl_count[len] += 1;
         }
 
-        // Calculate first code for each length
         var code: u16 = 0;
         var next_code: [16]u16 = std.mem.zeroes([16]u16);
         bl_count[0] = 0;
@@ -1572,7 +1544,7 @@ pub fn deflate(gpa: Allocator, data: []const u8, level: CompressionLevel, strate
     return result.toOwnedSlice(gpa);
 }
 
-// Adler-32 checksum implementation (required for zlib format)
+/// Adler-32 checksum calculator
 fn adler32(data: []const u8) u32 {
     const MOD_ADLER: u32 = 65521;
     var a: u32 = 1;
