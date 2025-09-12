@@ -76,7 +76,6 @@ pub const jpeg = @import("jpeg.zig");
 pub const deflate = @import("compression/deflate.zig");
 pub const zlib = @import("compression/zlib.zig");
 pub const gzip = @import("compression/gzip.zig");
-pub const lz4 = @import("compression/lz4.zig");
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
