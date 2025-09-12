@@ -41,16 +41,32 @@ pub fn build(b: *Build) void {
 
     // Run tests
     const test_step = b.step("test", "Run library tests");
-    for ([_][]const u8{
-        "color",  "image",  "geometry", "matrix",
-        "perlin", "canvas", "png",      "deflate",
-        "fdm",    "jpeg",   "pca",      "sixel",
-        "kitty",  "font",   "features", "optimization",
-    }) |module| {
+    const modules = [_]struct { name: []const u8, path: []const u8 }{
+        .{ .name = "color", .path = "src/color.zig" },
+        .{ .name = "image", .path = "src/image.zig" },
+        .{ .name = "geometry", .path = "src/geometry.zig" },
+        .{ .name = "matrix", .path = "src/matrix.zig" },
+        .{ .name = "perlin", .path = "src/perlin.zig" },
+        .{ .name = "canvas", .path = "src/canvas.zig" },
+        .{ .name = "png", .path = "src/png.zig" },
+        .{ .name = "deflate", .path = "src/compression/deflate.zig" },
+        .{ .name = "zlib", .path = "src/compression/zlib.zig" },
+        .{ .name = "gzip", .path = "src/compression/gzip.zig" },
+        .{ .name = "fdm", .path = "src/fdm.zig" },
+        .{ .name = "jpeg", .path = "src/jpeg.zig" },
+        .{ .name = "pca", .path = "src/pca.zig" },
+        .{ .name = "sixel", .path = "src/sixel.zig" },
+        .{ .name = "kitty", .path = "src/kitty.zig" },
+        .{ .name = "font", .path = "src/font.zig" },
+        .{ .name = "features", .path = "src/features.zig" },
+        .{ .name = "optimization", .path = "src/optimization.zig" },
+    };
+    
+    for (modules) |module| {
         const module_test = b.addTest(.{
-            .name = module,
+            .name = module.name,
             .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("src/{s}.zig", .{module})),
+                .root_source_file = b.path(module.path),
                 .target = target,
                 .optimize = optimize,
             }),

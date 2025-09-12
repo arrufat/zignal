@@ -1,4 +1,37 @@
-//! DEFLATE encoder/decoder implementation glue
+//! DEFLATE compression algorithm (RFC 1951).
+//!
+//! This module provides compression and decompression using the DEFLATE algorithm,
+//! which combines LZ77 compression with Huffman coding. It supports multiple
+//! compression levels and strategies for different data types.
+//!
+//! ## Basic Usage
+//!
+//! ```zig
+//! const allocator = std.heap.page_allocator;
+//!
+//! // Compress data
+//! const compressed = try deflate(allocator, "Hello, World!", .default, .default);
+//! defer allocator.free(compressed);
+//!
+//! // Decompress data
+//! const decompressed = try inflate(allocator, compressed);
+//! defer allocator.free(decompressed);
+//! ```
+//!
+//! ## Compression Levels
+//!
+//! - `.none` - Store only, no compression
+//! - `.fastest` - Minimal compression, maximum speed
+//! - `.fast` - Fast compression
+//! - `.default` - Balanced compression/speed (recommended)
+//! - `.best` - Maximum compression, slower
+//!
+//! ## Compression Strategies
+//!
+//! - `.default` - Standard compression for general data
+//! - `.filtered` - For filtered data (e.g., small values with limited range)
+//! - `.huffman_only` - Huffman coding only, no LZ77 matching
+//! - `.rle` - Run-length encoding, good for data with many runs
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -620,4 +653,50 @@ pub fn deflate(gpa: Allocator, data: []const u8, level: CompressionLevel, strate
     var result = try encoder.encode(data);
     defer result.deinit(gpa);
     return result.toOwnedSlice(gpa);
+}
+
+// Tests
+test "deflate decompression empty" {
+    const allocator = std.testing.allocator;
+    const empty_data = [_]u8{};
+    const result = inflate(allocator, &empty_data);
+    try std.testing.expectError(error.UnexpectedEndOfData, result);
+}
+
+test "deflate round-trip uncompressed" {
+    const allocator = std.testing.allocator;
+    const original_data = "Hello, World! This is a test string for deflate compression.";
+    const compressed = try deflate(allocator, original_data, .none, .default);
+    defer allocator.free(compressed);
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, original_data, decompressed);
+}
+
+test "deflate uncompressed header endianness" {
+    const allocator = std.testing.allocator;
+    const test_data = "Test";
+    const compressed = try deflate(allocator, test_data, .none, .default);
+    defer allocator.free(compressed);
+    try std.testing.expect(compressed.len >= 5);
+    try std.testing.expectEqual(@as(u8, 0x01), compressed[0]);
+    const len = compressed[1] | (@as(u16, compressed[2]) << 8);
+    const nlen = compressed[3] | (@as(u16, compressed[4]) << 8);
+    try std.testing.expectEqual(@as(u16, 4), len);
+    try std.testing.expectEqual(@as(u16, 0xFFFB), nlen);
+}
+
+test "methods comparison static vs none" {
+    const allocator = std.testing.allocator;
+    const test_data = "Hello World! Hello World! Hello World! This is a test string for compression.";
+    const uncompressed = try deflate(allocator, test_data, .none, .default);
+    defer allocator.free(uncompressed);
+    const static_huffman = try deflate(allocator, test_data, .fastest, .default);
+    defer allocator.free(static_huffman);
+    const d1 = try inflate(allocator, uncompressed);
+    defer allocator.free(d1);
+    try std.testing.expectEqualSlices(u8, test_data, d1);
+    const d2 = try inflate(allocator, static_huffman);
+    defer allocator.free(d2);
+    try std.testing.expectEqualSlices(u8, test_data, d2);
 }
