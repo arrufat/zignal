@@ -26,9 +26,10 @@ pub const BdfError = error{
 
 /// BDF font metadata
 const BdfFont = struct {
+    name: []u8,
     bbox_width: i16,
     bbox_height: i16,
-    font_ascent: i16,
+    ascent: i16,
     glyph_count: u32,
 };
 
@@ -53,6 +54,7 @@ const BdfParseState = struct {
     bitmap_data: std.ArrayList(u8),
     all_ascii: bool = true,
     fn deinit(self: *BdfParseState, gpa: Allocator) void {
+        gpa.free(self.font.name);
         self.glyphs.deinit(gpa);
         self.bitmap_data.deinit(gpa);
     }
@@ -96,7 +98,7 @@ pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !Bitma
     defer state.deinit(gpa);
 
     // Parse header
-    state.font = try parseHeader(&lines);
+    state.font = try parseHeader(gpa, &lines);
 
     // Parse glyphs
     var parsed_glyphs: usize = 0;
@@ -129,11 +131,12 @@ pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !Bitma
 }
 
 /// Parse BDF header
-fn parseHeader(lines: *std.mem.TokenIterator(u8, .any)) !BdfFont {
+fn parseHeader(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any)) !BdfFont {
     var font = BdfFont{
+        .name = try gpa.dupe(u8, "Unknown"),
         .bbox_width = 0,
         .bbox_height = 0,
-        .font_ascent = 0,
+        .ascent = 0,
         .glyph_count = 0,
     };
 
@@ -151,7 +154,28 @@ fn parseHeader(lines: *std.mem.TokenIterator(u8, .any)) !BdfFont {
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
 
-        if (std.mem.startsWith(u8, trimmed, "FONTBOUNDINGBOX ")) {
+        if (std.mem.startsWith(u8, trimmed, "FONT ")) {
+            // Extract font name
+            const font_name_str = std.mem.trim(u8, trimmed[5..], " \t");
+            gpa.free(font.name);
+
+            // If it's an XLFD name (starts with -), extract just the family name
+            if (font_name_str.len > 0 and font_name_str[0] == '-') {
+                // XLFD format: -foundry-family-weight-slant-...
+                // We want the second field (family)
+                var iter = std.mem.tokenizeScalar(u8, font_name_str[1..], '-');
+                _ = iter.next(); // Skip foundry
+                if (iter.next()) |family| {
+                    font.name = try gpa.dupe(u8, family);
+                } else {
+                    // Fallback to full name if parsing fails
+                    font.name = try gpa.dupe(u8, font_name_str);
+                }
+            } else {
+                // Not XLFD, use as-is
+                font.name = try gpa.dupe(u8, font_name_str);
+            }
+        } else if (std.mem.startsWith(u8, trimmed, "FONTBOUNDINGBOX ")) {
             var parts = std.mem.tokenizeAny(u8, trimmed[16..], " \t");
             font.bbox_width = try std.fmt.parseInt(i16, parts.next() orelse return BdfError.MissingRequired, 10);
             font.bbox_height = try std.fmt.parseInt(i16, parts.next() orelse return BdfError.MissingRequired, 10);
@@ -166,7 +190,7 @@ fn parseHeader(lines: *std.mem.TokenIterator(u8, .any)) !BdfFont {
                     break;
                 }
                 if (std.mem.startsWith(u8, prop_trimmed, "FONT_ASCENT ")) {
-                    font.font_ascent = try std.fmt.parseInt(i16, std.mem.trim(u8, prop_trimmed[12..], " \t\""), 10);
+                    font.ascent = try std.fmt.parseInt(i16, std.mem.trim(u8, prop_trimmed[12..], " \t\""), 10);
                 }
             }
         }
@@ -366,7 +390,7 @@ fn convertToBitmapFont(
             for (glyphs, 0..) |glyph, idx| {
                 try map.put(glyph.encoding, idx);
 
-                const adjusted_y_offset = font.font_ascent - (glyph.bbox.y_offset + @as(i16, @intCast(glyph.bbox.height)));
+                const adjusted_y_offset = font.ascent - (glyph.bbox.y_offset + @as(i16, @intCast(glyph.bbox.height)));
 
                 glyph_data_list[idx] = GlyphData{
                     .width = @intCast(glyph.bbox.width),
@@ -379,6 +403,7 @@ fn convertToBitmapFont(
             }
 
             return BitmapFont{
+                .name = try allocator.dupe(u8, font.name),
                 .char_width = @intCast(char_width),
                 .char_height = @intCast(char_height),
                 .first_char = min_char,
@@ -386,7 +411,7 @@ fn convertToBitmapFont(
                 .data = bitmap_data,
                 .glyph_map = map,
                 .glyph_data = glyph_data_list,
-                .font_ascent = font.font_ascent,
+                .font_ascent = font.ascent,
             };
         } else {
             // Fixed-width ASCII font - use simple layout
@@ -420,6 +445,7 @@ fn convertToBitmapFont(
             allocator.free(bitmap_data);
 
             return BitmapFont{
+                .name = try allocator.dupe(u8, font.name),
                 .char_width = @intCast(char_width),
                 .char_height = @intCast(char_height),
                 .first_char = min_char,
@@ -427,7 +453,7 @@ fn convertToBitmapFont(
                 .data = contiguous_data,
                 .glyph_map = null,
                 .glyph_data = null,
-                .font_ascent = font.font_ascent,
+                .font_ascent = font.ascent,
             };
         }
     } else {
@@ -441,7 +467,7 @@ fn convertToBitmapFont(
         for (glyphs, 0..) |glyph, idx| {
             try map.put(glyph.encoding, idx);
 
-            const adjusted_y_offset = font.font_ascent - (glyph.bbox.y_offset + @as(i16, @intCast(glyph.bbox.height)));
+            const adjusted_y_offset = font.ascent - (glyph.bbox.y_offset + @as(i16, @intCast(glyph.bbox.height)));
 
             glyph_data_list[idx] = GlyphData{
                 .width = @intCast(glyph.bbox.width),
@@ -454,6 +480,7 @@ fn convertToBitmapFont(
         }
 
         return BitmapFont{
+            .name = try allocator.dupe(u8, font.name),
             .char_width = @intCast(char_width),
             .char_height = @intCast(char_height),
             .first_char = 0,
@@ -461,7 +488,7 @@ fn convertToBitmapFont(
             .data = bitmap_data,
             .glyph_map = map,
             .glyph_data = glyph_data_list,
-            .font_ascent = font.font_ascent,
+            .font_ascent = font.ascent,
         };
     }
 }
@@ -500,7 +527,7 @@ test "BDF to BitmapFont conversion" {
     };
     defer state.deinit(std.testing.allocator);
 
-    state.font = try parseHeader(&lines);
+    state.font = try parseHeader(testing.allocator, &lines);
 
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
@@ -559,7 +586,9 @@ test "BDF save and load compressed roundtrip" {
 
     // Duplicate the data since BitmapFont takes ownership
     const font_data = try testing.allocator.dupe(u8, bitmap_data);
+    const font_name = try testing.allocator.dupe(u8, "TestFont");
     var font = BitmapFont{
+        .name = font_name,
         .char_width = char_width,
         .char_height = char_height,
         .first_char = first_char,
@@ -659,7 +688,9 @@ test "BDF save and load roundtrip" {
 
     // Duplicate the data since BitmapFont takes ownership
     const font_data = try testing.allocator.dupe(u8, bitmap_data);
+    const font_name = try testing.allocator.dupe(u8, "TestFont");
     var font = BitmapFont{
+        .name = font_name,
         .char_width = char_width,
         .char_height = char_height,
         .first_char = first_char,
@@ -774,10 +805,20 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
     const height = if (font.char_height == 0) 16 else font.char_height;
     const width = if (font.char_width == 0) 8 else font.char_width;
 
-    try list.appendSlice(allocator, "FONT -zignal-Unknown-Medium-R-Normal--");
-    const font_line = try std.fmt.allocPrint(allocator, "{d}-{d}-75-75-P-{d}-ISO10646-1\n", .{ height, @as(u32, height) * 10, @as(u32, width) * 6 });
-    defer allocator.free(font_line);
-    try list.appendSlice(allocator, font_line);
+    // Use font name or default
+    const font_name = if (font.name.len > 0) font.name else "Unknown";
+
+    // If the font name looks like an XLFD name (contains dashes), use it directly
+    if (std.mem.indexOf(u8, font_name, "-") != null) {
+        try list.appendSlice(allocator, "FONT ");
+        try list.appendSlice(allocator, font_name);
+        try list.appendSlice(allocator, "\n");
+    } else {
+        // Otherwise build a simple XLFD name
+        const font_line = try std.fmt.allocPrint(allocator, "FONT -{s}-{s}-Medium-R-Normal--{d}-{d}-75-75-P-{d}-ISO10646-1\n", .{ "zignal", font_name, height, @as(u32, height) * 10, @as(u32, width) * 6 });
+        defer allocator.free(font_line);
+        try list.appendSlice(allocator, font_line);
+    }
     const size_line = try std.fmt.allocPrint(allocator, "SIZE {d} 75 75\n", .{height});
     defer allocator.free(size_line);
     try list.appendSlice(allocator, size_line);

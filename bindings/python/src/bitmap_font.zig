@@ -40,7 +40,22 @@ fn bitmap_font_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn bitmap_font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = self_obj;
+    const self = @as(*BitmapFontObject, @ptrCast(self_obj.?));
+
+    if (self.font) |font| {
+        // Create a formatted string with the font name
+        var buffer: [256]u8 = undefined;
+        const repr_str = std.fmt.bufPrintZ(&buffer, "BitmapFont(name=\"{s}\", width={d}, height={d})", .{
+            font.name,
+            font.char_width,
+            font.char_height,
+        }) catch {
+            // Fall back to simple representation if formatting fails
+            return c.PyUnicode_FromString("BitmapFont()");
+        };
+        return c.PyUnicode_FromString(repr_str.ptr);
+    }
+
     return c.PyUnicode_FromString("BitmapFont()");
 }
 
@@ -142,6 +157,43 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     return cached_font8x8;
 }
 
+// Property getter for font name
+fn bitmap_font_get_name(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+    _ = closure;
+    const self = @as(*BitmapFontObject, @ptrCast(self_obj.?));
+
+    if (self.font) |font| {
+        // Use PyUnicode_FromStringAndSize for Zig slices (not null-terminated)
+        return c.PyUnicode_FromStringAndSize(font.name.ptr, @intCast(font.name.len));
+    }
+
+    return py_utils.getPyNone();
+}
+
+// Property getter for char_width
+fn bitmap_font_get_width(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+    _ = closure;
+    const self = @as(*BitmapFontObject, @ptrCast(self_obj.?));
+
+    if (self.font) |font| {
+        return c.PyLong_FromLong(font.char_width);
+    }
+
+    return py_utils.getPyNone();
+}
+
+// Property getter for char_height
+fn bitmap_font_get_height(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+    _ = closure;
+    const self = @as(*BitmapFontObject, @ptrCast(self_obj.?));
+
+    if (self.font) |font| {
+        return c.PyLong_FromLong(font.char_height);
+    }
+
+    return py_utils.getPyNone();
+}
+
 // Methods metadata (used for both C API and stub generation)
 pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
@@ -164,6 +216,32 @@ pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
 
 var bitmap_font_methods = stub_metadata.toPyMethodDefArray(&bitmap_font_methods_metadata);
 
+// Properties for BitmapFont
+var bitmap_font_getsetters = [_]c.PyGetSetDef{
+    .{
+        .name = "name",
+        .get = bitmap_font_get_name,
+        .set = null,
+        .doc = "Font name",
+        .closure = null,
+    },
+    .{
+        .name = "width",
+        .get = bitmap_font_get_width,
+        .set = null,
+        .doc = "Character width in pixels",
+        .closure = null,
+    },
+    .{
+        .name = "height",
+        .get = bitmap_font_get_height,
+        .set = null,
+        .doc = "Character height in pixels",
+        .closure = null,
+    },
+    .{ .name = null }, // Sentinel
+};
+
 const bitmap_font_class_doc =
     "Bitmap font for text rendering. Supports BDF/PCF formats, including optional " ++
     "gzip-compressed files (.bdf.gz, .pcf.gz).";
@@ -180,5 +258,6 @@ pub var BitmapFontType = c.PyTypeObject{
     .tp_flags = c.Py_TPFLAGS_DEFAULT,
     .tp_doc = bitmap_font_class_doc,
     .tp_methods = @ptrCast(&bitmap_font_methods),
+    .tp_getset = @ptrCast(&bitmap_font_getsetters),
     .tp_new = bitmap_font_new,
 };

@@ -12,6 +12,8 @@ const LoadFilter = @import("../font.zig").LoadFilter;
 
 const BitmapFont = @This();
 
+/// Name of the font (e.g., "Unifont", "Fixed", etc.)
+name: []const u8,
 /// Width of each character in pixels (default/maximum width)
 char_width: u8,
 /// Height of each character in pixels
@@ -52,8 +54,8 @@ font_ascent: ?i16 = null,
 /// const font = try BitmapFont.load(allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
 /// ```
 pub fn load(allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
-    const format = try FontFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedFontFormat;
-    return switch (format) {
+    const font_format = try FontFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedFontFormat;
+    return switch (font_format) {
         .bdf => @import("bdf.zig").load(allocator, file_path, filter),
         .pcf => @import("pcf.zig").load(allocator, file_path, filter),
     };
@@ -304,8 +306,32 @@ pub fn save(self: BitmapFont, allocator: Allocator, file_path: []const u8) !void
     try @import("bdf.zig").save(allocator, self, file_path);
 }
 
+/// Displays the font information: name, dimensions, and character range.
+pub fn format(self: BitmapFont, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    // Count total glyphs if using glyph map
+    const glyph_count = if (self.glyph_map) |map| map.count() else blk: {
+        if (self.first_char <= self.last_char) {
+            break :blk self.last_char - self.first_char + 1;
+        } else {
+            break :blk 0;
+        }
+    };
+
+    // Determine font type
+    const font_type = if (self.glyph_map != null) "variable" else "fixed";
+
+    try writer.print("BitmapFont{{ .name = \"{s}\", .char_width = {d}, .char_height = {d}, .glyphs = {d}, .type = {s} }}", .{
+        self.name,
+        self.char_width,
+        self.char_height,
+        glyph_count,
+        font_type,
+    });
+}
+
 /// Free resources (if owned)
 pub fn deinit(self: *BitmapFont, allocator: std.mem.Allocator) void {
+    allocator.free(self.name);
     if (self.glyph_map) |*map| {
         map.deinit();
     }
