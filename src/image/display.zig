@@ -4,14 +4,12 @@ const std = @import("std");
 
 const color = @import("../color.zig");
 const Rgb = @import("../color.zig").Rgb;
+const Image = @import("../image.zig").Image;
 const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");
 const terminal = @import("../terminal.zig");
-const Interpolation = @import("interpolation.zig").Interpolation;
 
 // Import Image type directly - Zig's lazy compilation handles circular imports
-const Image = @import("../image.zig").Image;
-
 /// Display format options
 pub const DisplayFormat = union(enum) {
     /// Automatically detect the best format (kitty -> sixel -> sgr)

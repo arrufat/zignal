@@ -5,11 +5,9 @@
 
 const std = @import("std");
 const expectEqualStrings = std.testing.expectEqualStrings;
-const expect = std.testing.expect;
 
 const convertColor = @import("conversions.zig").convertColor;
 const Hsl = @import("Hsl.zig");
-const Oklab = @import("Oklab.zig");
 const Rgb = @import("Rgb.zig");
 
 pub fn formatColor(
