@@ -293,8 +293,8 @@ pub const HuffmanTree = struct {
             }
         }
 
-        // Enforce maximum bit length using zlib-style overflow adjustment
-        self.limitCodeLengths(max_bits);
+        // Enforce maximum bit length using a greedy, frequency-aware adjustment
+        self.enforceMaxBitsGreedy(max_bits, frequencies);
 
         // Generate canonical codes
         generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
@@ -373,6 +373,89 @@ pub const HuffmanTree = struct {
         self.max_length = 0;
         for (self.lengths) |len| {
             if (len > 0) self.max_length = @max(self.max_length, len);
+        }
+    }
+
+    // Greedy enforcement of max_bits that preserves Kraft inequality and favors
+    // increasing lengths of least-frequent symbols first.
+    fn enforceMaxBitsGreedy(self: *Self, max_bits: u8, frequencies: []const u32) void {
+        // Clamp all lengths to max_bits and compute Kraft sum in units of 2^(max_bits)
+        const LIMIT: u32 = @as(u32, 1) << @intCast(max_bits);
+
+        // Collect symbol set and track max_length
+        var n_syms: usize = 0;
+        for (self.lengths, 0..) |l, i| {
+            if (l > 0 and i < frequencies.len) n_syms += 1;
+        }
+        if (n_syms == 0) return;
+
+        // Clamp and compute initial sum S = Σ 2^(max_bits - l)
+        var S: u32 = 0;
+        for (&self.lengths, 0..) |*l_ptr, i| {
+            if (i >= frequencies.len) continue;
+            if (l_ptr.* == 0) continue;
+            if (l_ptr.* > max_bits) l_ptr.* = max_bits;
+            const exp: u5 = @intCast(max_bits - l_ptr.*);
+            S += (@as(u32, 1) << exp);
+        }
+
+        if (S <= LIMIT) {
+            // Already valid
+            self.max_length = 0;
+            for (self.lengths) |l| {
+                if (l > 0) self.max_length = @max(self.max_length, l);
+            }
+            return;
+        }
+
+        // Build a list of candidates: symbols with 0 < length < max_bits
+        const Entry = struct { idx: u16, freq: u32 };
+        var entries: [288]Entry = undefined;
+        var m: usize = 0;
+        for (self.lengths, 0..) |l, i| {
+            if (i >= frequencies.len) continue;
+            if (l > 0 and l < max_bits) {
+                entries[m] = .{ .idx = @intCast(i), .freq = frequencies[i] };
+                m += 1;
+            }
+        }
+
+        // If none are eligible (all at max_bits), nothing we can do; but with DEFLATE's limits this shouldn't happen.
+        if (m == 0) return;
+
+        // Greedily increase lengths of the least-frequent symbols until S <= LIMIT.
+        // We re-sort on each pass; cost is negligible for small alphabets.
+        while (S > LIMIT) {
+            // Sort by frequency ascending; tie-break by current length ascending (increase shorter ones first reduces S more)
+            std.sort.block(Entry, entries[0..m], self, struct {
+                fn lessThan(ctx: *Self, a: Entry, b: Entry) bool {
+                    if (a.freq == b.freq) {
+                        return ctx.lengths[a.idx] < ctx.lengths[b.idx];
+                    }
+                    return a.freq < b.freq;
+                }
+            }.lessThan);
+
+            var progressed = false;
+            var i: usize = 0;
+            while (i < m and S > LIMIT) : (i += 1) {
+                const si = entries[i].idx;
+                const l_old = self.lengths[si];
+                if (l_old == 0 or l_old >= max_bits) continue;
+                const reduction: u32 = (@as(u32, 1) << @intCast(max_bits - (l_old + 1)));
+                // Apply change
+                self.lengths[si] = l_old + 1;
+                S -= reduction;
+                progressed = true;
+            }
+
+            if (!progressed) break; // Should not happen; safety guard
+        }
+
+        // Update max_length
+        self.max_length = 0;
+        for (self.lengths) |l| {
+            if (l > 0) self.max_length = @max(self.max_length, l);
         }
     }
 

@@ -315,11 +315,15 @@ pub const DeflateEncoder = struct {
     }
 
     pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        // Store-only
         if (self.level == .none) return self.encodeUncompressed(data);
-        if (self.level == .best and data.len >= 512) {
-            if (try self.shouldUseDynamicHuffman(data)) return self.encodeDynamicHuffman(data);
+
+        // Static for fastest/fast (speed), dynamic for default/best (size)
+        switch (self.level) {
+            .fastest, .fast => return self.encodeStaticHuffman(data),
+            .default, .best => return self.encodeDynamicHuffman(data),
+            .none => unreachable, // handled above
         }
-        return self.encodeStaticHuffman(data);
     }
 
     fn shouldUseDynamicHuffman(self: *DeflateEncoder, data: []const u8) !bool {

@@ -862,7 +862,8 @@ pub const EncodeOptions = struct {
     srgb_intent: ?SrgbRenderingIntent = null,
     pub const default: EncodeOptions = .{
         .filter_mode = .adaptive,
-        .compression_level = .default,
+        // Prefer best compression for PNG by default to match typical encoders
+        .compression_level = .best,
         .compression_strategy = .filtered,
     };
 };
@@ -927,7 +928,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     };
     defer gpa.free(filtered_data);
 
-    // Compress filtered data with zlib format (required for PNG IDAT) using compression settings
+    // Compress filtered data with zlib format (required for PNG IDAT)
     const compressed_data = try deflate.zlibCompress(gpa, filtered_data, options.compression_level, options.compression_strategy);
     defer gpa.free(compressed_data);
 
