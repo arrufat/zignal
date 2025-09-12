@@ -159,7 +159,7 @@ test "gzip compression and decompression round-trip" {
     const original_data = "Hello, World! This is a test for gzip compression.";
 
     // Compress
-    const compressed = try compress(allocator, original_data, .fastest, .default);
+    const compressed = try compress(allocator, original_data, .level_1, .default);
     defer allocator.free(compressed);
 
     // Verify gzip header
@@ -177,9 +177,18 @@ test "gzip compression and decompression round-trip" {
 
 test "gzip with different compression levels" {
     const allocator = std.testing.allocator;
-    const test_data = "The quick brown fox jumps over the lazy dog. " ** 10;
+    const base = "The quick brown fox jumps over the lazy dog. ";
+    const test_data = blk: {
+        var data: std.ArrayList(u8) = .empty;
+        defer data.deinit(allocator);
+        for (0..10) |_| {
+            try data.appendSlice(allocator, base);
+        }
+        break :blk try data.toOwnedSlice(allocator);
+    };
+    defer allocator.free(test_data);
 
-    const levels = [_]deflate.CompressionLevel{ .none, .fastest, .default, .best };
+    const levels = [_]deflate.CompressionLevel{ .level_0, .level_1, .level_6, .level_9 };
 
     for (levels) |level| {
         const compressed = try compress(allocator, test_data, level, .default);
@@ -196,7 +205,7 @@ test "gzip error handling" {
     const allocator = std.testing.allocator;
 
     // Test invalid magic number
-    const bad_magic = [_]u8{ 0x00, 0x00 } ++ ([_]u8{0} ** 16);
+    const bad_magic = [_]u8{ 0x00, 0x00 } ++ @as([16]u8, @splat(0));
     try std.testing.expectError(error.InvalidGzipHeader, decompress(allocator, &bad_magic));
 
     // Test too short data

@@ -857,14 +857,14 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
 // PNG encoding options
 pub const EncodeOptions = struct {
     filter_mode: FilterMode = .adaptive,
-    compression_level: deflate.CompressionLevel = .default,
+    compression_level: deflate.CompressionLevel = .level_6,
     compression_strategy: deflate.CompressionStrategy = .filtered,
     gamma: ?f32 = null,
     srgb_intent: ?SrgbRenderingIntent = null,
     pub const default: EncodeOptions = .{
         .filter_mode = .adaptive,
         // Prefer best compression for PNG by default to match typical encoders
-        .compression_level = .best,
+        .compression_level = .level_9,
         .compression_strategy = .filtered,
     };
 };
