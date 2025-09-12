@@ -152,15 +152,7 @@ const HuffmanDecoder = struct {
         self.nodes.deinit(self.allocator);
     }
 
-    fn reverseBits(code: u16, length: u8) u16 {
-        var result: u16 = 0;
-        var temp = code;
-        for (0..length) |_| {
-            result = (result << 1) | (temp & 1);
-            temp >>= 1;
-        }
-        return result;
-    }
+    // Use top-level reverseBits function
 
     pub fn buildFromLengths(self: *HuffmanDecoder, code_lengths: []const u8) !void {
 
@@ -641,15 +633,7 @@ const StaticHuffmanTables = struct {
         break :blk codes;
     };
 
-    fn reverseBits(code: u16, length: u8) u16 {
-        var result: u16 = 0;
-        var temp = code;
-        for (0..length) |_| {
-            result = (result << 1) | (temp & 1);
-            temp >>= 1;
-        }
-        return result;
-    }
+    // Use top-level reverseBits function
 };
 
 // Length and distance encoding tables for LZ77
@@ -784,6 +768,17 @@ const CodeLengthSymbol = struct {
 
 // Order in which code length codes are written
 const code_length_order = [_]u8{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+
+// Shared function to reverse bits for DEFLATE bit ordering
+fn reverseBits(code: u16, length: u8) u16 {
+    var result: u16 = 0;
+    var temp = code;
+    for (0..length) |_| {
+        result = (result << 1) | (temp & 1);
+        temp >>= 1;
+    }
+    return result;
+}
 
 // Huffman tree for encoding
 const HuffmanTree = struct {
@@ -1419,6 +1414,21 @@ pub const DeflateEncoder = struct {
         };
         try distance_tree.buildFromFrequencies(self.distance_freq[0..30], 15);
 
+        // Edge case: if no matches occurred, ensure at least one distance code
+        // Some decoders expect at least one defined distance code
+        var has_distance_codes = false;
+        for (distance_tree.lengths[0..30]) |len| {
+            if (len > 0) {
+                has_distance_codes = true;
+                break;
+            }
+        }
+        if (!has_distance_codes) {
+            // Force distance code 0 to have length 1
+            distance_tree.lengths[0] = 1;
+            distance_tree.generateCanonicalCodes();
+        }
+
         // Find actual number of distance codes used
         var num_dist_codes: usize = 1; // Minimum is 1
         for (0..30) |i| {
@@ -1488,7 +1498,7 @@ pub const DeflateEncoder = struct {
         for (encoded_lengths) |cl| {
             const code_info = cl_tree.getCode(cl.symbol);
             // Reverse bits for proper deflate order
-            const reversed_code = StaticHuffmanTables.reverseBits(code_info.code, code_info.bits);
+            const reversed_code = reverseBits(code_info.code, code_info.bits);
             try writer.writeBits(self.gpa, reversed_code, code_info.bits);
 
             // Write extra bits if needed
@@ -1527,7 +1537,7 @@ pub const DeflateEncoder = struct {
                 // Output length/distance pair
                 const length_info = getLengthCode(m.length);
                 const lit_code = literal_tree.getCode(length_info.code);
-                const reversed_lit = StaticHuffmanTables.reverseBits(lit_code.code, lit_code.bits);
+                const reversed_lit = reverseBits(lit_code.code, lit_code.bits);
                 try writer.writeBits(self.gpa, reversed_lit, lit_code.bits);
 
                 // Write extra length bits
@@ -1538,7 +1548,7 @@ pub const DeflateEncoder = struct {
                 // Output distance
                 const dist_info = getDistanceCode(m.distance);
                 const dist_code = distance_tree.getCode(dist_info.code);
-                const reversed_dist = StaticHuffmanTables.reverseBits(dist_code.code, dist_code.bits);
+                const reversed_dist = reverseBits(dist_code.code, dist_code.bits);
                 try writer.writeBits(self.gpa, reversed_dist, dist_code.bits);
 
                 // Write extra distance bits
@@ -1550,7 +1560,7 @@ pub const DeflateEncoder = struct {
             } else {
                 // Output literal
                 const lit_code = literal_tree.getCode(data[pos]);
-                const reversed_lit = StaticHuffmanTables.reverseBits(lit_code.code, lit_code.bits);
+                const reversed_lit = reverseBits(lit_code.code, lit_code.bits);
                 try writer.writeBits(self.gpa, reversed_lit, lit_code.bits);
                 pos += 1;
             }
@@ -1558,7 +1568,7 @@ pub const DeflateEncoder = struct {
 
         // Write end-of-block symbol
         const eob_code = literal_tree.getCode(256);
-        const reversed_eob = StaticHuffmanTables.reverseBits(eob_code.code, eob_code.bits);
+        const reversed_eob = reverseBits(eob_code.code, eob_code.bits);
         try writer.writeBits(self.gpa, reversed_eob, eob_code.bits);
 
         // Flush remaining bits
