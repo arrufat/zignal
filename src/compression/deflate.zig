@@ -41,8 +41,7 @@ const bit = @import("bitstream.zig");
 const BitReader = bit.BitReader;
 const BitWriter = bit.BitWriter;
 const huffman = @import("huffman.zig");
-const lz = @import("lz77.zig");
-const LZ77HashTable = lz.LZ77HashTable;
+const lz77 = @import("lz77.zig");
 
 /// Maximum block size for uncompressed blocks
 const MAX_UNCOMPRESSED_BLOCK_SIZE = 65535;
@@ -269,7 +268,7 @@ pub const DeflateEncoder = struct {
     strategy: CompressionStrategy,
     max_chain: usize,
     nice_length: usize,
-    hash_table: LZ77HashTable,
+    hash_table: lz77.HashTable,
     literal_freq: [MAX_LITERAL_CODES + 2]u32, // 288 total (286 used + 2 reserved)
     distance_freq: [MAX_DISTANCE_CODES + 2]u32, // 32 total (30 used + 2 reserved),
 
@@ -282,7 +281,7 @@ pub const DeflateEncoder = struct {
             .strategy = strategy,
             .max_chain = params.max_chain,
             .nice_length = params.nice_length,
-            .hash_table = LZ77HashTable.init(),
+            .hash_table = lz77.HashTable.init(),
             .literal_freq = std.mem.zeroes([MAX_LITERAL_CODES + 2]u32),
             .distance_freq = std.mem.zeroes([MAX_DISTANCE_CODES + 2]u32),
         };
@@ -429,7 +428,7 @@ pub const DeflateEncoder = struct {
     fn encodeDynamicHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         self.literal_freq = std.mem.zeroes([288]u32);
         self.distance_freq = std.mem.zeroes([32]u32);
-        self.hash_table = LZ77HashTable.init();
+        self.hash_table = lz77.HashTable.init();
 
         var pos: usize = 0;
         while (pos < data.len) {
@@ -528,7 +527,7 @@ pub const DeflateEncoder = struct {
             if (cl.extra_bits > 0) try writer.writeBits(self.gpa, cl.extra_value, cl.extra_bits);
         }
 
-        self.hash_table = LZ77HashTable.init();
+        self.hash_table = lz77.HashTable.init();
         pos = 0;
         while (pos < data.len) {
             if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
@@ -563,7 +562,7 @@ pub const DeflateEncoder = struct {
 
     fn encodeStaticHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         var writer = BitWriter.init(&self.output);
-        self.hash_table = LZ77HashTable.init();
+        self.hash_table = lz77.HashTable.init();
         try writer.writeBits(self.gpa, 0x3, 3); // final block + static (BFINAL=1, BTYPE=01)
 
         // Build static literal and distance codes at comptime via canonical generator
