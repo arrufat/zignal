@@ -1,3 +1,38 @@
+//! DEFLATE compression algorithm (RFC 1951) and zlib wrapper (RFC 1950).
+//!
+//! This module provides compression and decompression using the DEFLATE algorithm,
+//! which combines LZ77 compression with Huffman coding. It supports multiple
+//! compression levels and strategies for different data types.
+//!
+//! ## Basic Usage
+//!
+//! ```zig
+//! const allocator = std.heap.page_allocator;
+//!
+//! // Compress data
+//! const compressed = try deflate(allocator, "Hello, World!", .default, .default);
+//! defer allocator.free(compressed);
+//!
+//! // Decompress data
+//! const decompressed = try inflate(allocator, compressed);
+//! defer allocator.free(decompressed);
+//! ```
+//!
+//! ## Compression Levels
+//!
+//! - `.none` - Store only, no compression
+//! - `.fastest` - Minimal compression, maximum speed
+//! - `.fast` - Fast compression
+//! - `.default` - Balanced compression/speed (recommended)
+//! - `.best` - Maximum compression, slower
+//!
+//! ## Compression Strategies
+//!
+//! - `.default` - Standard compression for general data
+//! - `.filtered` - For filtered data (e.g., small values with limited range)
+//! - `.huffman_only` - Huffman coding only, no LZ77 matching
+//! - `.rle` - Run-length encoding, good for data with many runs
+//!
 //! Public façade for DEFLATE and zlib
 
 const std = @import("std");

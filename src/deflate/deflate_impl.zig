@@ -22,6 +22,21 @@ const lz = @import("lz77.zig");
 const LZ77HashTable = lz.LZ77HashTable;
 const LZ77Match = lz.LZ77Match;
 
+/// Maximum block size for uncompressed blocks
+const MAX_UNCOMPRESSED_BLOCK_SIZE = 65535;
+
+/// Huffman code limits
+const MAX_LITERAL_CODES = 286;
+const MAX_DISTANCE_CODES = 30;
+const MAX_CODE_LENGTH_CODES = 19;
+
+/// End of block symbol
+const END_OF_BLOCK_SYMBOL = 256;
+
+/// Maximum bits for Huffman codes
+const MAX_HUFFMAN_BITS = 15;
+const MAX_CODELEN_BITS = 7;
+
 pub const CompressionLevel = enum(u4) {
     none = 0,
     fastest = 1,
@@ -68,7 +83,7 @@ pub const DeflateDecoder = struct {
                 0 => try self.decodeUncompressedBlock(&reader),
                 1 => try self.decodeFixedHuffmanBlock(&reader),
                 2 => try self.decodeDynamicHuffmanBlock(&reader),
-                3 => return error.InvalidBlockType,
+                3 => return error.InvalidDeflateBlockType,
                 else => unreachable,
             }
             if (is_final) break;
@@ -144,7 +159,7 @@ pub const DeflateDecoder = struct {
                     i += 1;
                 }
             } else {
-                return error.InvalidCodeLengthSymbol;
+                return error.InvalidDynamicCodeLength;
             }
         }
 
@@ -179,7 +194,7 @@ pub const DeflateDecoder = struct {
                     try self.output.append(self.gpa, byte);
                 }
             } else {
-                return error.InvalidLiteralLengthSymbol;
+                return error.InvalidDeflateSymbol;
             }
         }
     }
@@ -219,16 +234,16 @@ pub const DeflateDecoder = struct {
                 if (bitv == 0) {
                     if (current.left) |left| {
                         current = left;
-                    } else return error.InvalidHuffmanCode;
+                    } else return error.InvalidDeflateHuffmanCode;
                 } else {
                     if (current.right) |right| {
                         current = right;
-                    } else return error.InvalidHuffmanCode;
+                    } else return error.InvalidDeflateHuffmanCode;
                 }
             }
             return current.symbol.?;
         }
-        return error.InvalidHuffmanCode;
+        return error.InvalidDeflateHuffmanCode;
     }
 };
 
@@ -240,8 +255,8 @@ pub const DeflateEncoder = struct {
     max_chain: usize,
     nice_length: usize,
     hash_table: LZ77HashTable,
-    literal_freq: [288]u32,
-    distance_freq: [32]u32,
+    literal_freq: [MAX_LITERAL_CODES + 2]u32, // 288 total (286 used + 2 reserved)
+    distance_freq: [MAX_DISTANCE_CODES + 2]u32, // 32 total (30 used + 2 reserved),
 
     pub fn init(gpa: Allocator, level: CompressionLevel, strategy: CompressionStrategy) DeflateEncoder {
         const params = getStrategyParams(level, strategy);
@@ -253,8 +268,8 @@ pub const DeflateEncoder = struct {
             .max_chain = params.max_chain,
             .nice_length = params.nice_length,
             .hash_table = LZ77HashTable.init(),
-            .literal_freq = std.mem.zeroes([288]u32),
-            .distance_freq = std.mem.zeroes([32]u32),
+            .literal_freq = std.mem.zeroes([MAX_LITERAL_CODES + 2]u32),
+            .distance_freq = std.mem.zeroes([MAX_DISTANCE_CODES + 2]u32),
         };
     }
 
@@ -329,7 +344,7 @@ pub const DeflateEncoder = struct {
     }
 
     fn encodeUncompressed(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
-        const block_size = @min(data.len, 65535);
+        const block_size = @min(data.len, MAX_UNCOMPRESSED_BLOCK_SIZE);
         var pos: usize = 0;
         while (pos < data.len) {
             const remaining = data.len - pos;
@@ -420,9 +435,9 @@ pub const DeflateEncoder = struct {
         }
         self.literal_freq[256] = @max(self.literal_freq[256], 1);
 
-        var literal_tree = HuffmanTree{};
+        var literal_tree = HuffmanTree.init(self.gpa);
         try literal_tree.buildFromFrequencies(self.literal_freq[0..286], 15);
-        var distance_tree = HuffmanTree{};
+        var distance_tree = HuffmanTree.init(self.gpa);
         try distance_tree.buildFromFrequencies(self.distance_freq[0..30], 15);
 
         var has_dist = false;
@@ -461,15 +476,15 @@ pub const DeflateEncoder = struct {
         const enc_lengths = try encodeCodeLengths(self.gpa, all_lengths.items);
         defer self.gpa.free(enc_lengths);
 
-        var cl_freq: [19]u32 = std.mem.zeroes([19]u32);
+        var cl_freq: [MAX_CODE_LENGTH_CODES]u32 = std.mem.zeroes([MAX_CODE_LENGTH_CODES]u32);
         for (enc_lengths) |cl| cl_freq[cl.symbol] += 1;
-        var cl_tree = HuffmanTree{};
+        var cl_tree = HuffmanTree.init(self.gpa);
         try cl_tree.buildFromFrequencies(cl_freq[0..19], 7);
         var num_cl_codes: usize = 4;
-        for (0..19) |i| {
-            const idx = code_length_order[18 - i];
+        for (0..MAX_CODE_LENGTH_CODES) |i| {
+            const idx = code_length_order[MAX_CODE_LENGTH_CODES - 1 - i];
             if (cl_tree.lengths[idx] != 0) {
-                num_cl_codes = 19 - i;
+                num_cl_codes = MAX_CODE_LENGTH_CODES - i;
                 break;
             }
         }
