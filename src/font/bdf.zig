@@ -77,7 +77,7 @@ pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !Bitma
 
     if (is_compressed) {
         decompressed_data = compression.decompressGzip(gpa, raw_file_contents) catch |err| switch (err) {
-            compression.CompressionError.InvalidCompression => return BdfError.InvalidCompression,
+            error.InvalidGzipData, error.InvalidGzipHeader => return BdfError.InvalidCompression,
             else => return err,
         };
         file_contents = decompressed_data.?;

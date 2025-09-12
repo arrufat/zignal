@@ -194,7 +194,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
 
     if (is_compressed) {
         decompressed_data = compression.decompressGzip(allocator, raw_file_contents) catch |err| switch (err) {
-            compression.CompressionError.InvalidCompression => return PcfError.InvalidCompression,
+            error.InvalidGzipData, error.InvalidGzipHeader => return PcfError.InvalidCompression,
             else => return err,
         };
         file_contents = decompressed_data.?;
