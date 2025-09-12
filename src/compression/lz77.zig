@@ -2,12 +2,12 @@
 
 const std = @import("std");
 
-pub const LZ77Match = struct {
+pub const Match = struct {
     length: u16,
     distance: u16,
 };
 
-pub const LZ77HashTable = struct {
+pub const HashTable = struct {
     pub const HASH_BITS = 15;
     pub const HASH_SIZE = 1 << HASH_BITS;
     pub const HASH_MASK = HASH_SIZE - 1;
@@ -43,12 +43,12 @@ pub const LZ77HashTable = struct {
         self.head[h] = @intCast(pos);
     }
 
-    pub fn findMatch(self: *Self, data: []const u8, pos: usize, max_chain: usize, nice_length: usize) ?LZ77Match {
+    pub fn findMatch(self: *Self, data: []const u8, pos: usize, max_chain: usize, nice_length: usize) ?Match {
         if (pos + MIN_MATCH > data.len) return null;
         const h = hash(data[pos..]);
         var chain_pos = self.head[h];
         var chain_length: usize = 0;
-        var best: ?LZ77Match = null;
+        var best: ?Match = null;
 
         const max_len = @min(MAX_MATCH, data.len - pos);
         const target = @min(nice_length, max_len);
@@ -66,7 +66,7 @@ pub const LZ77HashTable = struct {
 
             if (length >= MIN_MATCH) {
                 if (best == null or length > best.?.length) {
-                    best = LZ77Match{ .length = length, .distance = @intCast(distance) };
+                    best = Match{ .length = length, .distance = @intCast(distance) };
                     if (length >= target) break;
                 }
             }
@@ -79,7 +79,7 @@ pub const LZ77HashTable = struct {
 };
 
 test "LZ77 hash table absolute positions" {
-    var hash_table = LZ77HashTable.init();
+    var hash_table = HashTable.init();
     const data = "ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP" ** 100; // 3200 bytes
     const positions = [_]usize{ 0, 100, 32760, 32768, 32769, 65536 };
     for (positions) |pos| {
