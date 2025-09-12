@@ -54,78 +54,20 @@ const FIXED_LITERAL_LENGTHS = [_]u8{
 // Fixed distance code lengths (all 5 bits)
 const FIXED_DISTANCE_LENGTHS: [32]u8 = @splat(5);
 
-// Length codes 257-285 (extra bits and base lengths)
-// Used for DECODING: maps from length code index to actual length values
-// Note: Separate from encoder tables as decoder needs code→value lookup
-// while encoder needs efficient value→code lookup
-const LENGTH_CODES = [_]struct { base: u16, extra_bits: u8 }{
-    .{ .base = 3, .extra_bits = 0 }, // 257
-    .{ .base = 4, .extra_bits = 0 }, // 258
-    .{ .base = 5, .extra_bits = 0 }, // 259
-    .{ .base = 6, .extra_bits = 0 }, // 260
-    .{ .base = 7, .extra_bits = 0 }, // 261
-    .{ .base = 8, .extra_bits = 0 }, // 262
-    .{ .base = 9, .extra_bits = 0 }, // 263
-    .{ .base = 10, .extra_bits = 0 }, // 264
-    .{ .base = 11, .extra_bits = 1 }, // 265
-    .{ .base = 13, .extra_bits = 1 }, // 266
-    .{ .base = 15, .extra_bits = 1 }, // 267
-    .{ .base = 17, .extra_bits = 1 }, // 268
-    .{ .base = 19, .extra_bits = 2 }, // 269
-    .{ .base = 23, .extra_bits = 2 }, // 270
-    .{ .base = 27, .extra_bits = 2 }, // 271
-    .{ .base = 31, .extra_bits = 2 }, // 272
-    .{ .base = 35, .extra_bits = 3 }, // 273
-    .{ .base = 43, .extra_bits = 3 }, // 274
-    .{ .base = 51, .extra_bits = 3 }, // 275
-    .{ .base = 59, .extra_bits = 3 }, // 276
-    .{ .base = 67, .extra_bits = 4 }, // 277
-    .{ .base = 83, .extra_bits = 4 }, // 278
-    .{ .base = 99, .extra_bits = 4 }, // 279
-    .{ .base = 115, .extra_bits = 4 }, // 280
-    .{ .base = 131, .extra_bits = 5 }, // 281
-    .{ .base = 163, .extra_bits = 5 }, // 282
-    .{ .base = 195, .extra_bits = 5 }, // 283
-    .{ .base = 227, .extra_bits = 5 }, // 284
-    .{ .base = 258, .extra_bits = 0 }, // 285
+// Unified length/distance code information structure
+const CodeInfo = struct {
+    code: u16, // The code value (257-285 for lengths, 0-29 for distances)
+    base: u16, // Base value for this code
+    extra_bits: u8, // Number of extra bits to read/write
 };
 
-// Distance codes 0-29 (extra bits and base distances)
-// Used for DECODING: maps from distance code index to actual distance values
-// Note: Separate from encoder tables as decoder needs code→value lookup
-// while encoder needs efficient value→code lookup
-const DISTANCE_CODES = [_]struct { base: u16, extra_bits: u8 }{
-    .{ .base = 1, .extra_bits = 0 }, // 0
-    .{ .base = 2, .extra_bits = 0 }, // 1
-    .{ .base = 3, .extra_bits = 0 }, // 2
-    .{ .base = 4, .extra_bits = 0 }, // 3
-    .{ .base = 5, .extra_bits = 1 }, // 4
-    .{ .base = 7, .extra_bits = 1 }, // 5
-    .{ .base = 9, .extra_bits = 2 }, // 6
-    .{ .base = 13, .extra_bits = 2 }, // 7
-    .{ .base = 17, .extra_bits = 3 }, // 8
-    .{ .base = 25, .extra_bits = 3 }, // 9
-    .{ .base = 33, .extra_bits = 4 }, // 10
-    .{ .base = 49, .extra_bits = 4 }, // 11
-    .{ .base = 65, .extra_bits = 5 }, // 12
-    .{ .base = 97, .extra_bits = 5 }, // 13
-    .{ .base = 129, .extra_bits = 6 }, // 14
-    .{ .base = 193, .extra_bits = 6 }, // 15
-    .{ .base = 257, .extra_bits = 7 }, // 16
-    .{ .base = 385, .extra_bits = 7 }, // 17
-    .{ .base = 513, .extra_bits = 8 }, // 18
-    .{ .base = 769, .extra_bits = 8 }, // 19
-    .{ .base = 1025, .extra_bits = 9 }, // 20
-    .{ .base = 1537, .extra_bits = 9 }, // 21
-    .{ .base = 2049, .extra_bits = 10 }, // 22
-    .{ .base = 3073, .extra_bits = 10 }, // 23
-    .{ .base = 4097, .extra_bits = 11 }, // 24
-    .{ .base = 6145, .extra_bits = 11 }, // 25
-    .{ .base = 8193, .extra_bits = 12 }, // 26
-    .{ .base = 12289, .extra_bits = 12 }, // 27
-    .{ .base = 16385, .extra_bits = 13 }, // 28
-    .{ .base = 24577, .extra_bits = 13 }, // 29
-};
+// Unified length codes table (257-285 map to lengths 3-258)
+// Used by both encoder (value→code lookup) and decoder (code→value lookup)
+const LENGTH_TABLE = [_]CodeInfo{ .{ .code = 257, .base = 3, .extra_bits = 0 }, .{ .code = 258, .base = 4, .extra_bits = 0 }, .{ .code = 259, .base = 5, .extra_bits = 0 }, .{ .code = 260, .base = 6, .extra_bits = 0 }, .{ .code = 261, .base = 7, .extra_bits = 0 }, .{ .code = 262, .base = 8, .extra_bits = 0 }, .{ .code = 263, .base = 9, .extra_bits = 0 }, .{ .code = 264, .base = 10, .extra_bits = 0 }, .{ .code = 265, .base = 11, .extra_bits = 1 }, .{ .code = 266, .base = 13, .extra_bits = 1 }, .{ .code = 267, .base = 15, .extra_bits = 1 }, .{ .code = 268, .base = 17, .extra_bits = 1 }, .{ .code = 269, .base = 19, .extra_bits = 2 }, .{ .code = 270, .base = 23, .extra_bits = 2 }, .{ .code = 271, .base = 27, .extra_bits = 2 }, .{ .code = 272, .base = 31, .extra_bits = 2 }, .{ .code = 273, .base = 35, .extra_bits = 3 }, .{ .code = 274, .base = 43, .extra_bits = 3 }, .{ .code = 275, .base = 51, .extra_bits = 3 }, .{ .code = 276, .base = 59, .extra_bits = 3 }, .{ .code = 277, .base = 67, .extra_bits = 4 }, .{ .code = 278, .base = 83, .extra_bits = 4 }, .{ .code = 279, .base = 99, .extra_bits = 4 }, .{ .code = 280, .base = 115, .extra_bits = 4 }, .{ .code = 281, .base = 131, .extra_bits = 5 }, .{ .code = 282, .base = 163, .extra_bits = 5 }, .{ .code = 283, .base = 195, .extra_bits = 5 }, .{ .code = 284, .base = 227, .extra_bits = 5 }, .{ .code = 285, .base = 258, .extra_bits = 0 } };
+
+// Unified distance codes table (0-29 map to distances 1-32768)
+// Used by both encoder (value→code lookup) and decoder (code→value lookup)
+const DISTANCE_TABLE = [_]CodeInfo{ .{ .code = 0, .base = 1, .extra_bits = 0 }, .{ .code = 1, .base = 2, .extra_bits = 0 }, .{ .code = 2, .base = 3, .extra_bits = 0 }, .{ .code = 3, .base = 4, .extra_bits = 0 }, .{ .code = 4, .base = 5, .extra_bits = 1 }, .{ .code = 5, .base = 7, .extra_bits = 1 }, .{ .code = 6, .base = 9, .extra_bits = 2 }, .{ .code = 7, .base = 13, .extra_bits = 2 }, .{ .code = 8, .base = 17, .extra_bits = 3 }, .{ .code = 9, .base = 25, .extra_bits = 3 }, .{ .code = 10, .base = 33, .extra_bits = 4 }, .{ .code = 11, .base = 49, .extra_bits = 4 }, .{ .code = 12, .base = 65, .extra_bits = 5 }, .{ .code = 13, .base = 97, .extra_bits = 5 }, .{ .code = 14, .base = 129, .extra_bits = 6 }, .{ .code = 15, .base = 193, .extra_bits = 6 }, .{ .code = 16, .base = 257, .extra_bits = 7 }, .{ .code = 17, .base = 385, .extra_bits = 7 }, .{ .code = 18, .base = 513, .extra_bits = 8 }, .{ .code = 19, .base = 769, .extra_bits = 8 }, .{ .code = 20, .base = 1025, .extra_bits = 9 }, .{ .code = 21, .base = 1537, .extra_bits = 9 }, .{ .code = 22, .base = 2049, .extra_bits = 10 }, .{ .code = 23, .base = 3073, .extra_bits = 10 }, .{ .code = 24, .base = 4097, .extra_bits = 11 }, .{ .code = 25, .base = 6145, .extra_bits = 11 }, .{ .code = 26, .base = 8193, .extra_bits = 12 }, .{ .code = 27, .base = 12289, .extra_bits = 12 }, .{ .code = 28, .base = 16385, .extra_bits = 13 }, .{ .code = 29, .base = 24577, .extra_bits = 13 } };
 
 // Huffman tree node
 const HuffmanNode = struct {
@@ -444,19 +386,19 @@ pub const DeflateDecoder = struct {
             } else if (symbol <= 285) {
                 // Length/distance pair
                 const length_code = symbol - 257;
-                if (length_code >= LENGTH_CODES.len) {
+                if (length_code >= LENGTH_TABLE.len) {
                     return error.InvalidLengthCode;
                 }
 
-                const length_info = LENGTH_CODES[length_code];
+                const length_info = LENGTH_TABLE[length_code];
                 const length = length_info.base + try reader.readBits(length_info.extra_bits);
 
                 const distance_symbol = try self.decodeSymbol(reader, &self.distance_decoder);
-                if (distance_symbol >= DISTANCE_CODES.len) {
+                if (distance_symbol >= DISTANCE_TABLE.len) {
                     return error.InvalidDistanceCode;
                 }
 
-                const distance_info = DISTANCE_CODES[distance_symbol];
+                const distance_info = DISTANCE_TABLE[distance_symbol];
                 const distance = distance_info.base + try reader.readBits(distance_info.extra_bits);
 
                 // Copy from sliding window
@@ -640,60 +582,6 @@ const StaticHuffmanTables = struct {
     // Use top-level reverseBits function
 };
 
-// Length and distance encoding tables for LZ77
-// Used for ENCODING: maps from actual length/distance values to codes
-const LengthCode = struct {
-    code: u16,
-    extra_bits: u8,
-    base: u16,
-};
-
-const DistanceCode = struct {
-    code: u16,
-    extra_bits: u8,
-    base: u16,
-};
-
-// Length codes for ENCODING (257-285 map to lengths 3-258)
-// Maps from length values to codes - optimized for encoder's value→code lookup
-const length_codes = [_]LengthCode{
-    .{ .code = 257, .extra_bits = 0, .base = 3 },   .{ .code = 258, .extra_bits = 0, .base = 4 },
-    .{ .code = 259, .extra_bits = 0, .base = 5 },   .{ .code = 260, .extra_bits = 0, .base = 6 },
-    .{ .code = 261, .extra_bits = 0, .base = 7 },   .{ .code = 262, .extra_bits = 0, .base = 8 },
-    .{ .code = 263, .extra_bits = 0, .base = 9 },   .{ .code = 264, .extra_bits = 0, .base = 10 },
-    .{ .code = 265, .extra_bits = 1, .base = 11 },  .{ .code = 266, .extra_bits = 1, .base = 13 },
-    .{ .code = 267, .extra_bits = 1, .base = 15 },  .{ .code = 268, .extra_bits = 1, .base = 17 },
-    .{ .code = 269, .extra_bits = 2, .base = 19 },  .{ .code = 270, .extra_bits = 2, .base = 23 },
-    .{ .code = 271, .extra_bits = 2, .base = 27 },  .{ .code = 272, .extra_bits = 2, .base = 31 },
-    .{ .code = 273, .extra_bits = 3, .base = 35 },  .{ .code = 274, .extra_bits = 3, .base = 43 },
-    .{ .code = 275, .extra_bits = 3, .base = 51 },  .{ .code = 276, .extra_bits = 3, .base = 59 },
-    .{ .code = 277, .extra_bits = 4, .base = 67 },  .{ .code = 278, .extra_bits = 4, .base = 83 },
-    .{ .code = 279, .extra_bits = 4, .base = 99 },  .{ .code = 280, .extra_bits = 4, .base = 115 },
-    .{ .code = 281, .extra_bits = 5, .base = 131 }, .{ .code = 282, .extra_bits = 5, .base = 163 },
-    .{ .code = 283, .extra_bits = 5, .base = 195 }, .{ .code = 284, .extra_bits = 5, .base = 227 },
-    .{ .code = 285, .extra_bits = 0, .base = 258 },
-};
-
-// Distance codes for ENCODING (0-29 map to distances 1-32768)
-// Maps from distance values to codes - optimized for encoder's value→code lookup
-const distance_codes = [_]DistanceCode{
-    .{ .code = 0, .extra_bits = 0, .base = 1 },       .{ .code = 1, .extra_bits = 0, .base = 2 },
-    .{ .code = 2, .extra_bits = 0, .base = 3 },       .{ .code = 3, .extra_bits = 0, .base = 4 },
-    .{ .code = 4, .extra_bits = 1, .base = 5 },       .{ .code = 5, .extra_bits = 1, .base = 7 },
-    .{ .code = 6, .extra_bits = 2, .base = 9 },       .{ .code = 7, .extra_bits = 2, .base = 13 },
-    .{ .code = 8, .extra_bits = 3, .base = 17 },      .{ .code = 9, .extra_bits = 3, .base = 25 },
-    .{ .code = 10, .extra_bits = 4, .base = 33 },     .{ .code = 11, .extra_bits = 4, .base = 49 },
-    .{ .code = 12, .extra_bits = 5, .base = 65 },     .{ .code = 13, .extra_bits = 5, .base = 97 },
-    .{ .code = 14, .extra_bits = 6, .base = 129 },    .{ .code = 15, .extra_bits = 6, .base = 193 },
-    .{ .code = 16, .extra_bits = 7, .base = 257 },    .{ .code = 17, .extra_bits = 7, .base = 385 },
-    .{ .code = 18, .extra_bits = 8, .base = 513 },    .{ .code = 19, .extra_bits = 8, .base = 769 },
-    .{ .code = 20, .extra_bits = 9, .base = 1025 },   .{ .code = 21, .extra_bits = 9, .base = 1537 },
-    .{ .code = 22, .extra_bits = 10, .base = 2049 },  .{ .code = 23, .extra_bits = 10, .base = 3073 },
-    .{ .code = 24, .extra_bits = 11, .base = 4097 },  .{ .code = 25, .extra_bits = 11, .base = 6145 },
-    .{ .code = 26, .extra_bits = 12, .base = 8193 },  .{ .code = 27, .extra_bits = 12, .base = 12289 },
-    .{ .code = 28, .extra_bits = 13, .base = 16385 }, .{ .code = 29, .extra_bits = 13, .base = 24577 },
-};
-
 // Bit writer for variable-length codes
 const BitWriter = struct {
     output: *ArrayList(u8),
@@ -739,7 +627,7 @@ const LZ77Match = struct {
     pub fn getLengthCode(self: LZ77Match) u16 {
         // Convert match length to length code (257-285)
         if (self.length <= 10) return 254 + self.length;
-        for (LENGTH_CODES, 0..) |code, i| {
+        for (LENGTH_TABLE, 0..) |code, i| {
             if (self.length <= code.base + (@as(u16, 1) << @as(u4, @intCast(code.extra_bits))) - 1) {
                 return 257 + @as(u16, @intCast(i));
             }
@@ -749,7 +637,7 @@ const LZ77Match = struct {
 
     pub fn getDistanceCode(self: LZ77Match) u16 {
         // Convert distance to distance code (0-29)
-        for (DISTANCE_CODES, 0..) |code, i| {
+        for (DISTANCE_TABLE, 0..) |code, i| {
             if (self.distance <= code.base + (@as(u16, 1) << @as(u4, @intCast(code.extra_bits))) - 1) {
                 return @intCast(i);
             }
@@ -1239,9 +1127,9 @@ pub const DeflateEncoder = struct {
     }
 
     fn getLengthCode(length: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
-        for (length_codes) |lc| {
+        for (LENGTH_TABLE) |lc| {
             if (length >= lc.base) {
-                const next_base = if (lc.code == 285) 259 else length_codes[lc.code - 257 + 1].base;
+                const next_base = if (lc.code == 285) 259 else LENGTH_TABLE[lc.code - 257 + 1].base;
                 if (length < next_base) {
                     return .{
                         .code = lc.code,
@@ -1256,9 +1144,9 @@ pub const DeflateEncoder = struct {
     }
 
     fn getDistanceCode(distance: u16) struct { code: u16, extra_bits: u8, extra_value: u16 } {
-        for (distance_codes) |dc| {
+        for (DISTANCE_TABLE) |dc| {
             if (distance >= dc.base) {
-                const next_base = if (dc.code == 29) 32769 else distance_codes[dc.code + 1].base;
+                const next_base = if (dc.code == 29) 32769 else DISTANCE_TABLE[dc.code + 1].base;
                 if (distance < next_base) {
                     // Distance code found
                     return .{
