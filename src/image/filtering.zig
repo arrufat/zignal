@@ -2593,7 +2593,7 @@ pub fn Filter(comptime T: type) type {
             var t_high: f32 = 0;
 
             // Build histogram of gradient magnitudes at candidate edges
-            var hist: [256]usize = .{0} ** 256;
+            var hist: [256]usize = @splat(0);
             var total: usize = 0;
             for (0..self.rows) |rr| {
                 for (0..self.cols) |cc| {

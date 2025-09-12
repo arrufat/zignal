@@ -35,9 +35,25 @@ pub const HashTable = struct {
         return @intCast(h & HASH_MASK);
     }
 
+    // Faster hash for turbo mode - simpler computation
+    fn hashFast(data: []const u8) u16 {
+        if (data.len < 3) return 0;
+        const h = (@as(u32, data[0]) << 5) ^ (@as(u32, data[1]) << 3) ^ data[2];
+        return @intCast(h & HASH_MASK);
+    }
+
     pub fn update(self: *Self, data: []const u8, pos: usize) void {
         if (pos + MIN_MATCH > data.len) return;
         const h = hash(data[pos..]);
+        const window_index = pos & WINDOW_MASK;
+        self.prev[window_index] = self.head[h];
+        self.head[h] = @intCast(pos);
+    }
+
+    // Turbo mode: update with faster hash
+    pub fn updateFast(self: *Self, data: []const u8, pos: usize) void {
+        if (pos + MIN_MATCH > data.len) return;
+        const h = hashFast(data[pos..]);
         const window_index = pos & WINDOW_MASK;
         self.prev[window_index] = self.head[h];
         self.head[h] = @intCast(pos);
@@ -76,11 +92,55 @@ pub const HashTable = struct {
 
         return best;
     }
+
+    // Turbo mode: find match with faster hash and immediate return on first good match
+    pub fn findMatchTurbo(self: *Self, data: []const u8, pos: usize) ?Match {
+        if (pos + MIN_MATCH > data.len) return null;
+        const h = hashFast(data[pos..]);
+        const chain_pos = self.head[h];
+
+        if (chain_pos < 0) return null;
+
+        const match_pos: usize = @intCast(chain_pos);
+        if (match_pos >= pos) return null;
+        const distance = pos - match_pos;
+        if (distance > WINDOW_SIZE) return null;
+
+        // Quick check: if first 4 bytes don't match, skip
+        if (pos + 4 <= data.len and match_pos + 4 <= data.len) {
+            const a = std.mem.readInt(u32, data[pos..][0..4], .little);
+            const b = std.mem.readInt(u32, data[match_pos..][0..4], .little);
+            if (a != b) return null;
+        }
+
+        // Count match length
+        var length: u16 = 0;
+        const max_len = @min(MAX_MATCH, data.len - pos);
+        while (length < max_len and pos + length < data.len and match_pos + length < data.len and data[pos + length] == data[match_pos + length]) {
+            length += 1;
+        }
+
+        if (length >= MIN_MATCH) {
+            return Match{ .length = length, .distance = @intCast(distance) };
+        }
+
+        return null;
+    }
 };
 
 test "LZ77 hash table absolute positions" {
     var hash_table = HashTable.init();
-    const data = "ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP" ** 100; // 3200 bytes
+    const base = "ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP";
+    const allocator = std.testing.allocator;
+    const data = blk: {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
+        for (0..100) |_| {
+            try buf.appendSlice(allocator, base);
+        }
+        break :blk try buf.toOwnedSlice(allocator);
+    };
+    defer allocator.free(data);
     const positions = [_]usize{ 0, 100, 32760, 32768, 32769, 65536 };
     for (positions) |pos| {
         if (pos + 3 <= data.len) {

@@ -140,8 +140,8 @@ const StdTables = struct {
 };
 
 const HuffmanEncoder = struct {
-    codes: [256]u16 = [1]u16{0} ** 256,
-    sizes: [256]u8 = [1]u8{0} ** 256,
+    codes: [256]u16 = @splat(0),
+    sizes: [256]u8 = @splat(0),
 };
 
 fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {

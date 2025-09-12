@@ -51,13 +51,30 @@ const MAX_LITERAL_CODES = 286;
 const MAX_DISTANCE_CODES = 30;
 const MAX_CODE_LENGTH_CODES = 19;
 
-pub const CompressionLevel = enum(u4) {
-    none = 0,
-    fastest = 1,
-    fast = 3,
-    default = 6,
-    best = 9,
-    pub fn toInt(self: CompressionLevel) u4 {
+/// DEFLATE compression levels following zlib standard (0-9)
+pub const CompressionLevel = enum(u8) {
+    /// No compression - store blocks uncompressed
+    level_0 = 0,
+    /// Fastest compression, lowest compression ratio
+    level_1 = 1,
+    /// Fast compression, low compression ratio
+    level_2 = 2,
+    /// Fast compression, slightly better ratio
+    level_3 = 3,
+    /// Moderate speed, moderate compression
+    level_4 = 4,
+    /// Moderate speed, good compression
+    level_5 = 5,
+    /// Default level - good balance of speed and compression
+    level_6 = 6,
+    /// Slower compression, better ratio
+    level_7 = 7,
+    /// Slow compression, very good ratio
+    level_8 = 8,
+    /// Slowest compression, best compression ratio
+    level_9 = 9,
+
+    pub fn toInt(self: CompressionLevel) u8 {
         return @intFromEnum(self);
     }
 };
@@ -290,11 +307,16 @@ pub const DeflateEncoder = struct {
     const LevelParams = struct { max_chain: usize, nice_length: usize };
     fn getStrategyParams(level: CompressionLevel, strategy: CompressionStrategy) LevelParams {
         const base = switch (level) {
-            .none => LevelParams{ .max_chain = 0, .nice_length = 0 },
-            .fastest => LevelParams{ .max_chain = 4, .nice_length = 8 },
-            .fast => LevelParams{ .max_chain = 8, .nice_length = 16 },
-            .default => LevelParams{ .max_chain = 32, .nice_length = 128 },
-            .best => LevelParams{ .max_chain = 4096, .nice_length = 258 },
+            .level_0 => LevelParams{ .max_chain = 0, .nice_length = 0 },
+            .level_1 => LevelParams{ .max_chain = 1, .nice_length = 8 },
+            .level_2 => LevelParams{ .max_chain = 4, .nice_length = 8 },
+            .level_3 => LevelParams{ .max_chain = 8, .nice_length = 16 },
+            .level_4 => LevelParams{ .max_chain = 16, .nice_length = 32 },
+            .level_5 => LevelParams{ .max_chain = 32, .nice_length = 64 },
+            .level_6 => LevelParams{ .max_chain = 32, .nice_length = 128 },
+            .level_7 => LevelParams{ .max_chain = 64, .nice_length = 128 },
+            .level_8 => LevelParams{ .max_chain = 256, .nice_length = 258 },
+            .level_9 => LevelParams{ .max_chain = 4096, .nice_length = 258 },
         };
         return switch (strategy) {
             .default => base,
@@ -329,14 +351,14 @@ pub const DeflateEncoder = struct {
     }
 
     pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
-        // Store-only
-        if (self.level == .none) return self.encodeUncompressed(data);
+        // Store-only for no compression
+        if (self.level == .level_0) return self.encodeUncompressed(data);
 
-        // Static for fastest/fast (speed), dynamic for default/best (size)
+        // Use static Huffman for speed (levels 1-3), dynamic for better compression (4-9)
         switch (self.level) {
-            .fastest, .fast => return self.encodeStaticHuffman(data),
-            .default, .best => return self.encodeDynamicHuffman(data),
-            .none => unreachable, // handled above
+            .level_0 => return self.encodeUncompressed(data),
+            .level_1, .level_2, .level_3 => return self.encodeStaticHuffman(data),
+            .level_4, .level_5, .level_6, .level_7, .level_8, .level_9 => return self.encodeDynamicHuffman(data),
         }
     }
 
@@ -433,7 +455,10 @@ pub const DeflateEncoder = struct {
         var pos: usize = 0;
         while (pos < data.len) {
             if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
-            const match = if (self.level == .none or self.strategy == .huffman_only) null else self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length);
+            const match = if (self.level == .level_0 or self.strategy == .huffman_only)
+                null
+            else
+                self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length);
             if (match) |m| {
                 const length_code = getLengthCode(m.length).code;
                 self.literal_freq[length_code] += 1;
@@ -531,7 +556,10 @@ pub const DeflateEncoder = struct {
         pos = 0;
         while (pos < data.len) {
             if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
-            const match = if (self.level != .none and self.strategy != .huffman_only) self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length) else null;
+            const match = if (self.level != .level_0 and self.strategy != .huffman_only)
+                self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length)
+            else
+                null;
             if (match) |m| {
                 if (self.strategy != .huffman_only) {
                     var step_idx2: usize = 1;
@@ -591,12 +619,29 @@ pub const DeflateEncoder = struct {
 
         var pos: usize = 0;
         while (pos < data.len) {
-            if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
-            const match = if (self.level != .none and self.strategy != .huffman_only) self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length) else null;
+            // Level 1 optimizations for fastest compression
+            if (self.level == .level_1) {
+                // Update hash only every 2nd position for speed
+                if (self.strategy != .huffman_only and pos % 2 == 0) {
+                    self.hash_table.updateFast(data, pos);
+                }
+            } else {
+                if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
+            }
+
+            const match = if (self.level == .level_1 and self.strategy != .huffman_only)
+                self.hash_table.findMatchTurbo(data, pos)
+            else if (self.level != .level_0 and self.strategy != .huffman_only)
+                self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length)
+            else
+                null;
             if (match) |m| {
-                var step_idx3: usize = 1;
-                while (step_idx3 < m.length and pos + step_idx3 < data.len) : (step_idx3 += 1) {
-                    if (self.strategy != .huffman_only) self.hash_table.update(data, pos + step_idx3);
+                // Skip hash updates for most positions in level_1 mode
+                if (self.level != .level_1) {
+                    var step_idx3: usize = 1;
+                    while (step_idx3 < m.length and pos + step_idx3 < data.len) : (step_idx3 += 1) {
+                        if (self.strategy != .huffman_only) self.hash_table.update(data, pos + step_idx3);
+                    }
                 }
                 const li = getLengthCode(m.length);
                 const lc = lit_codes[li.code];
@@ -647,17 +692,50 @@ test "deflate decompression empty" {
 test "deflate round-trip uncompressed" {
     const allocator = std.testing.allocator;
     const original_data = "Hello, World! This is a test string for deflate compression.";
-    const compressed = try deflate(allocator, original_data, .none, .default);
+    const compressed = try deflate(allocator, original_data, .level_0, .default);
     defer allocator.free(compressed);
     const decompressed = try inflate(allocator, compressed);
     defer allocator.free(decompressed);
     try std.testing.expectEqualSlices(u8, original_data, decompressed);
 }
 
+test "deflate level_1 fast mode" {
+    const allocator = std.testing.allocator;
+    const base = "The quick brown fox jumps over the lazy dog. ";
+    const test_data = blk: {
+        var data: std.ArrayList(u8) = .empty;
+        defer data.deinit(allocator);
+        for (0..100) |_| {
+            try data.appendSlice(allocator, base);
+        }
+        break :blk try data.toOwnedSlice(allocator);
+    };
+    defer allocator.free(test_data);
+
+    // Test that level_1 (fast) mode works and produces valid output
+    const compressed_fast = try deflate(allocator, test_data, .level_1, .default);
+    defer allocator.free(compressed_fast);
+
+    const decompressed = try inflate(allocator, compressed_fast);
+    defer allocator.free(decompressed);
+
+    try std.testing.expectEqualSlices(u8, test_data, decompressed);
+
+    // Compare with level_6 compression (level_1 should be larger but still compressed)
+    const compressed_default = try deflate(allocator, test_data, .level_6, .default);
+    defer allocator.free(compressed_default);
+
+    // level_1 should still compress (be smaller than original)
+    try std.testing.expect(compressed_fast.len < test_data.len);
+
+    // But typically larger than default compression (trading size for speed)
+    // This is not guaranteed for all inputs, so we just verify it works
+}
+
 test "deflate uncompressed header endianness" {
     const allocator = std.testing.allocator;
     const test_data = "Test";
-    const compressed = try deflate(allocator, test_data, .none, .default);
+    const compressed = try deflate(allocator, test_data, .level_0, .default);
     defer allocator.free(compressed);
     try std.testing.expect(compressed.len >= 5);
     try std.testing.expectEqual(@as(u8, 0x01), compressed[0]);
@@ -670,9 +748,9 @@ test "deflate uncompressed header endianness" {
 test "methods comparison static vs none" {
     const allocator = std.testing.allocator;
     const test_data = "Hello World! Hello World! Hello World! This is a test string for compression.";
-    const uncompressed = try deflate(allocator, test_data, .none, .default);
+    const uncompressed = try deflate(allocator, test_data, .level_0, .default);
     defer allocator.free(uncompressed);
-    const static_huffman = try deflate(allocator, test_data, .fastest, .default);
+    const static_huffman = try deflate(allocator, test_data, .level_1, .default);
     defer allocator.free(static_huffman);
     const d1 = try inflate(allocator, uncompressed);
     defer allocator.free(d1);

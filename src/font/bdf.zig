@@ -788,7 +788,7 @@ pub fn save(gpa: Allocator, font: BitmapFont, path: []const u8) !void {
 
     if (is_compressed) {
         // Compress the BDF content
-        const compressed_data = try gzip.compress(gpa, bdf_content.items, deflate.CompressionLevel.fastest, deflate.CompressionStrategy.default);
+        const compressed_data = try gzip.compress(gpa, bdf_content.items, .level_1, .default);
         defer gpa.free(compressed_data);
         try file.writeAll(compressed_data);
     } else {

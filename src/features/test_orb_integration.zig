@@ -155,7 +155,7 @@ test "ORB scale invariance" {
     try expectEqual(true, scaled_result.keypoints.len > 0);
 
     // Check scale distribution in pyramid
-    var scale_counts = [_]usize{0} ** 5;
+    var scale_counts: [5]usize = @splat(0);
     for (orig_result.keypoints) |kp| {
         if (kp.octave >= 0 and kp.octave < 5) {
             scale_counts[@intCast(kp.octave)] += 1;
