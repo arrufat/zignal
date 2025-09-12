@@ -21,6 +21,7 @@ const unicode = @import("unicode.zig");
 /// This font is always available and requires no allocation
 /// Uses a slice of basic_latin starting at character 0x20
 pub const basic = BitmapFont{
+    .name = "8x8 Basic",
     .char_width = 8,
     .char_height = 8,
     .first_char = 0x20, // Space
@@ -128,7 +129,11 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
         }
     }
 
+    const font_name = try gpa.dupe(u8, "8x8 Unicode");
+    errdefer gpa.free(font_name);
+
     return BitmapFont{
+        .name = font_name,
         .char_width = 8,
         .char_height = 8,
         .first_char = 0, // Not used with glyph_map

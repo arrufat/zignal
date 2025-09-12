@@ -279,8 +279,24 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     // Parse bitmap data
     const bitmap_info = try parseBitmaps(arena_allocator, file_contents, bitmaps_table);
 
+    // Extract font name while in arena scope and duplicate with main allocator
+    var font_name: []u8 = undefined;
+    if (properties_info) |props| {
+        // Try to get FAMILY_NAME first, fall back to other properties
+        if (getStringProperty(props.properties, "FAMILY_NAME")) |family| {
+            font_name = try allocator.dupe(u8, family);
+        } else if (getStringProperty(props.properties, "FONT")) |font| {
+            font_name = try allocator.dupe(u8, font);
+        } else {
+            font_name = try allocator.dupe(u8, "PCF Font");
+        }
+    } else {
+        font_name = try allocator.dupe(u8, "PCF Font");
+    }
+    errdefer allocator.free(font_name);
+
     // Convert to BitmapFont format
-    return convertToBitmapFont(allocator, metrics, bitmap_info, encoding, filter, font_ascent, max_width, max_height);
+    return convertToBitmapFont(allocator, metrics, bitmap_info, encoding, filter, font_ascent, max_width, max_height, font_name);
 }
 
 /// Find a table in the table of contents
@@ -721,6 +737,7 @@ fn convertToBitmapFont(
     font_ascent: i16,
     max_width: u16,
     max_height: u16,
+    font_name: []u8,
 ) !BitmapFont {
     // Determine which glyphs to include
     var glyph_list: std.ArrayList(struct {
@@ -830,6 +847,7 @@ fn convertToBitmapFont(
     @memcpy(bitmap_data, converted_bitmaps.items);
 
     return BitmapFont{
+        .name = font_name,
         .char_width = @as(u8, @intCast(@min(max_width, 255))),
         .char_height = @as(u8, @intCast(@min(max_height, 255))),
         .first_char = if (all_ascii) min_char else 0,
