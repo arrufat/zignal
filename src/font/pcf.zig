@@ -14,7 +14,6 @@ const testing = std.testing;
 
 const LoadFilter = @import("../font.zig").LoadFilter;
 const max_file_size = @import("../font.zig").max_file_size;
-const compression = @import("../font.zig").compression;
 const gzip = @import("../compression/gzip.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
@@ -199,7 +198,6 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
             else => return err,
         };
         file_contents = decompressed_data.?;
-        std.log.info("PCF: Decompressed {s} from {} bytes to {} bytes", .{ path, raw_file_contents.len, file_contents.len });
     } else {
         file_contents = raw_file_contents;
     }
@@ -249,16 +247,6 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
             std.log.debug("Failed to parse properties table: {}", .{err});
             break :blk null;
         };
-
-        // Log some useful properties if found
-        if (properties_info) |info| {
-            if (getStringProperty(info.properties, "FAMILY_NAME")) |family| {
-                std.log.info("PCF: Font family: {s}", .{family});
-            }
-            if (getStringProperty(info.properties, "WEIGHT_NAME")) |weight| {
-                std.log.info("PCF: Font weight: {s}", .{weight});
-            }
-        }
     }
 
     // Parse accelerator table for font metrics

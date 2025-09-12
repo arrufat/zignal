@@ -40,7 +40,6 @@ const ArrayList = std.ArrayList;
 const bit = @import("bitstream.zig");
 const BitReader = bit.BitReader;
 const BitWriter = bit.BitWriter;
-
 const huf = @import("huffman.zig");
 const HuffmanDecoder = huf.HuffmanDecoder;
 const HuffmanTree = huf.HuffmanTree;
@@ -50,10 +49,8 @@ const FIXED_LITERAL_LENGTHS = huf.FIXED_LITERAL_LENGTHS;
 const FIXED_DISTANCE_LENGTHS = huf.FIXED_DISTANCE_LENGTHS;
 const reverseBits = huf.reverseBits;
 const code_length_order = huf.code_length_order;
-
 const lz = @import("lz77.zig");
 const LZ77HashTable = lz.LZ77HashTable;
-const LZ77Match = lz.LZ77Match;
 
 /// Maximum block size for uncompressed blocks
 const MAX_UNCOMPRESSED_BLOCK_SIZE = 65535;
@@ -62,13 +59,6 @@ const MAX_UNCOMPRESSED_BLOCK_SIZE = 65535;
 const MAX_LITERAL_CODES = 286;
 const MAX_DISTANCE_CODES = 30;
 const MAX_CODE_LENGTH_CODES = 19;
-
-/// End of block symbol
-const END_OF_BLOCK_SYMBOL = 256;
-
-/// Maximum bits for Huffman codes
-const MAX_HUFFMAN_BITS = 15;
-const MAX_CODELEN_BITS = 7;
 
 pub const CompressionLevel = enum(u4) {
     none = 0,

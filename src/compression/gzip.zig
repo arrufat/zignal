@@ -152,7 +152,6 @@ pub fn decompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
     return decompressed;
 }
 
-
 test "gzip compression and decompression round-trip" {
     const allocator = std.testing.allocator;
 

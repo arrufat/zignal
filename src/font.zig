@@ -38,12 +38,8 @@ pub const bdf = @import("font/bdf.zig");
 // PCF font support
 pub const pcf = @import("font/pcf.zig");
 
-// Compression utilities
-pub const compression = @import("font/compression.zig");
-
 test {
     _ = font8x8;
     _ = bdf;
     _ = pcf;
-    _ = compression;
 }

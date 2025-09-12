@@ -9,7 +9,6 @@ const Allocator = std.mem.Allocator;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
-const compression = @import("../font.zig").compression;
 const gzip = @import("../compression/gzip.zig");
 const deflate = @import("../compression/deflate.zig");
 const BitmapFont = @import("BitmapFont.zig");
@@ -83,7 +82,6 @@ pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !Bitma
             else => return err,
         };
         file_contents = decompressed_data.?;
-        std.log.info("BDF: Decompressed {s} from {} bytes to {} bytes", .{ path, raw_file_contents.len, file_contents.len });
     } else {
         file_contents = raw_file_contents;
     }
@@ -762,7 +760,6 @@ pub fn save(gpa: Allocator, font: BitmapFont, path: []const u8) !void {
         const compressed_data = try gzip.compress(gpa, bdf_content.items, deflate.CompressionLevel.fastest, deflate.CompressionStrategy.default);
         defer gpa.free(compressed_data);
         try file.writeAll(compressed_data);
-        std.log.info("BDF: Saved compressed font to {s} ({} bytes compressed from {} bytes)", .{ path, compressed_data.len, bdf_content.items.len });
     } else {
         try file.writeAll(bdf_content.items);
     }

@@ -7,7 +7,6 @@
 
 const std = @import("std");
 const testing = std.testing;
-const assert = std.debug.assert;
 
 /// Running statistics for streaming data.
 /// Computes mean, variance, skewness, and kurtosis in a single pass.
