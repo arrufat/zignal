@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+- **Matrix API Refactoring**: Removed `OpsBuilder` and merged all functionality directly into `Matrix`
+  - Operations are now chainable directly on Matrix: `matrix.transpose().inverse().eval()`
+  - Errors are deferred and checked at terminal operation (`.eval()`)
+  - For operation chains, use `ArenaAllocator` to manage intermediate allocations
+  - All SIMD optimizations preserved, including optimized GEMM operations
+
 ### Python Bindings
 - Consolidated CPython type registration in `bindings/python/src/main.zig` via a compile‑time table + loop.
 - Added `py_utils.kw(...)` helper to build CPython kwlists; adopted across transforms, canvas (including macro‑generated methods), filtering, matrix, PCA, motion blur, pixel proxy, rectangle.
@@ -254,7 +261,7 @@ Comprehensive matrix operations:
 - **Generic Matrix**: `Matrix(T)` for any numeric type
 - **SVD Decomposition**: High-precision Singular Value Decomposition (ported from dlib)
 - **GEMM Operations**: Optimized matrix multiplication
-- **OpsBuilder**: Fluent API for complex matrix operations
+- **Chainable Matrix Operations**: Fluent API directly on Matrix type for complex operations
 - **Static Matrices**: `SMatrix` for compile-time sized matrices
 
 ### Principal Component Analysis

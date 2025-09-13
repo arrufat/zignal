@@ -1,4 +1,45 @@
 //! Dynamic matrix with runtime dimensions
+//!
+//! ## Chainable Operations
+//!
+//! Matrix operations can be chained together for expressive linear algebra:
+//! ```zig
+//! const result = try matrix.transpose().inverse().scale(2.0).eval();
+//! ```
+//!
+//! Each operation executes immediately and returns a new Matrix. Errors are
+//! stored internally and checked when you call `.eval()` at the end of the chain.
+//!
+//! ## Memory Management
+//!
+//! **Important**: When chaining multiple operations, each operation creates a new
+//! matrix. For optimal memory usage, use an ArenaAllocator:
+//!
+//! ```zig
+//! var arena = std.heap.ArenaAllocator.init(allocator);
+//! defer arena.deinit();
+//!
+//! var matrix = try Matrix(f64).init(arena.allocator(), 10, 10);
+//! // ... initialize matrix ...
+//!
+//! // Chain operations - intermediate matrices are managed by arena
+//! const result = try matrix
+//!     .transpose()
+//!     .dot(other_matrix)
+//!     .inverse()
+//!     .eval();
+//! ```
+//!
+//! With an arena allocator, all intermediate matrices created during the chain
+//! are automatically freed when the arena is destroyed, preventing memory leaks.
+//!
+//! ## Available Operations
+//!
+//! - Element-wise: `add()`, `sub()`, `times()`, `scale()`, `offset()`, `pow()`
+//! - Matrix operations: `dot()`, `transpose()`, `inverse()`
+//! - Special products: `gram()`, `covariance()`
+//! - Advanced: `gemm()` (general matrix multiply), `apply()` (custom functions)
+//! - Extraction: `row()`, `col()`, `subMatrix()`
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -706,13 +747,6 @@ pub fn Matrix(comptime T: type) type {
         pub fn eval(self: Self) !Self {
             if (self.err) |e| return e;
             return self;
-        }
-
-        /// Panic variant for when you know the operation won't fail
-        pub fn evalOrPanic(self: Self) Self {
-            return self.eval() catch |err| {
-                std.debug.panic("Matrix evaluation failed: {}", .{err});
-            };
         }
 
         /// Helper to create an error matrix
