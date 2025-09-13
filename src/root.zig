@@ -80,7 +80,6 @@ pub const gzip = @import("compression/gzip.zig");
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
-pub const OpsBuilder = matrix.OpsBuilder;
 pub const meta = @import("meta.zig");
 
 const perlin_mod = @import("perlin.zig");

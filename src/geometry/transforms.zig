@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 
 const SMatrix = @import("../matrix.zig").SMatrix;
 const Matrix = @import("../matrix.zig").Matrix;
-const OpsBuilder = @import("../matrix.zig").OpsBuilder;
 const Point = @import("Point.zig").Point;
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
@@ -130,31 +129,22 @@ pub fn AffineTransform(comptime T: type) type {
                 q.at(0, i).* = to_points[i].x();
                 q.at(1, i).* = to_points[i].y();
             }
-            // Use OpsBuilder to perform matrix operations
-            var p_ops = try OpsBuilder(T).init(self.allocator, p);
-            defer p_ops.deinit();
-
+            // Use Matrix operations to perform matrix operations
             // Invert p
-            var p_inv = try p_ops.inverse().build();
+            var p_inv = try p.inverse().eval();
             defer p_inv.deinit();
 
             // Calculate m = q * p^-1
-            var q_ops = try OpsBuilder(T).init(self.allocator, q);
-            defer q_ops.deinit();
-            var m = try q_ops.dot(p_inv).build();
+            var m = try q.dot(p_inv).eval();
             defer m.deinit();
 
             // Extract the 2x2 matrix
-            var m_ops1 = try OpsBuilder(T).init(self.allocator, m);
-            defer m_ops1.deinit();
-            var sub_matrix = try m_ops1.subMatrix(0, 0, 2, 2).build();
+            var sub_matrix = try m.subMatrix(0, 0, 2, 2).eval();
             defer sub_matrix.deinit();
             self.matrix = sub_matrix.toSMatrix(2, 2);
 
             // Extract the bias column
-            var m_ops2 = try OpsBuilder(T).init(self.allocator, m);
-            defer m_ops2.deinit();
-            var bias_col = try m_ops2.col(2).build();
+            var bias_col = try m.col(2).eval();
             defer bias_col.deinit();
             self.bias = bias_col.toSMatrix(2, 1);
         }

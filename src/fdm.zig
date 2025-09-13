@@ -7,7 +7,6 @@ const expectApproxEqAbs = testing.expectApproxEqAbs;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const OpsBuilder = @import("matrix.zig").OpsBuilder;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 
@@ -130,16 +129,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     };
                 } else {
                     // Full color - compute and store SVD
-                    var cov_ops = try OpsBuilder(f64).init(self.allocator, feature_mat);
-                    defer cov_ops.deinit();
-                    var cov_matrix = try cov_ops.gemm(
+                    var cov_matrix = try feature_mat.gemm(
                         true,
                         feature_mat,
                         false,
                         1.0 / @as(f64, @floatFromInt(self.target_size)),
                         0.0,
                         null,
-                    ).build();
+                    ).eval();
                     defer cov_matrix.deinit();
 
                     const cov_static = cov_matrix.toSMatrix(3, 3);
@@ -240,16 +237,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     _ = centerImage(&feature_mat_source, 3);
 
                     // Compute source covariance
-                    var source_cov_ops = try OpsBuilder(f64).init(self.allocator, feature_mat_source);
-                    defer source_cov_ops.deinit();
-                    var source_cov_matrix = try source_cov_ops.gemm(
+                    var source_cov_matrix = try feature_mat_source.gemm(
                         true,
                         feature_mat_source,
                         false,
                         1.0 / @as(f64, @floatFromInt(source_size)),
                         0.0,
                         null,
-                    ).build();
+                    ).eval();
                     defer source_cov_matrix.deinit();
 
                     const source_cov = source_cov_matrix.toSMatrix(3, 3);
@@ -291,23 +286,23 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                         }
                     }
 
-                    var w_ops = try OpsBuilder(f64).init(self.allocator, u_source);
-                    defer w_ops.deinit();
+                    // Create a copy of u_source and apply diagonal matrix
+                    var u_source_scaled = try Matrix(f64).init(self.allocator, u_source.rows, u_source.cols);
+                    defer u_source_scaled.deinit();
+                    @memcpy(u_source_scaled.items, u_source.items);
 
                     // Apply diagonal matrix
                     for (0..3) |r| {
                         for (0..3) |c| {
-                            w_ops.result.at(r, c).* *= sigma_combined.at(c, c).*;
+                            u_source_scaled.at(r, c).* *= sigma_combined.at(c, c).*;
                         }
                     }
 
-                    var w_matrix = try w_ops.dot(u_target_t).build();
+                    var w_matrix = try u_source_scaled.dot(u_target_t).eval();
                     defer w_matrix.deinit();
 
                     // Apply transformation
-                    var result_ops = try OpsBuilder(f64).init(self.allocator, feature_mat_source);
-                    defer result_ops.deinit();
-                    var result_matrix = try result_ops.dot(w_matrix).build();
+                    var result_matrix = try feature_mat_source.dot(w_matrix).eval();
                     defer result_matrix.deinit();
 
                     reshapeToImage(T, result_matrix, source_img, self.target_mean, false);

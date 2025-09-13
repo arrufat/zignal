@@ -1,9 +1,8 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
-const OpsBuilder = @import("OpsBuilder.zig").OpsBuilder;
 
-test "OpsBuilder apply method" {
+test "Matrix apply method" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -17,8 +16,7 @@ test "OpsBuilder apply method" {
     mat.at(1, 2).* = 36.0;
 
     // Test apply with no arguments (sqrt)
-    var ops1: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    var result1 = try ops1.apply(std.math.sqrt, .{}).build();
+    var result1 = try mat.apply(std.math.sqrt, .{}).eval();
     defer result1.deinit();
 
     try expectEqual(@as(f64, 1.0), result1.at(0, 0).*);
@@ -34,8 +32,7 @@ test "OpsBuilder apply method" {
             return std.math.pow(f64, x, n);
         }
     }.f;
-    var ops2: OpsBuilder(f64) = try .init(arena.allocator(), result1);
-    var result2 = try ops2.apply(pow2, .{@as(f64, 2.0)}).build();
+    var result2 = try result1.apply(pow2, .{@as(f64, 2.0)}).eval();
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);
@@ -52,8 +49,7 @@ test "OpsBuilder apply method" {
         }
     }.f;
 
-    var ops3: OpsBuilder(f64) = try .init(arena.allocator(), result1);
-    var result3 = try ops3.apply(reciprocal, .{}).build();
+    var result3 = try result1.apply(reciprocal, .{}).eval();
     defer result3.deinit();
 
     try expectEqual(@as(f64, 1.0), result3.at(0, 0).*);
@@ -121,7 +117,7 @@ test "Matrix norms" {
     try expectEqual(@as(f64, 5.0), mat.trace());
 }
 
-test "OpsBuilder offset and pow" {
+test "Matrix offset and pow" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -133,8 +129,7 @@ test "OpsBuilder offset and pow" {
     mat.at(1, 1).* = 4.0;
 
     // Test offset
-    var ops1: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    var result1 = try ops1.offset(5.0).build();
+    var result1 = try mat.offset(5.0).eval();
     defer result1.deinit();
 
     try expectEqual(@as(f64, 6.0), result1.at(0, 0).*);
@@ -143,8 +138,7 @@ test "OpsBuilder offset and pow" {
     try expectEqual(@as(f64, 9.0), result1.at(1, 1).*);
 
     // Test pow
-    var ops2: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    var result2 = try ops2.pow(2.0).build();
+    var result2 = try mat.pow(2.0).eval();
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);

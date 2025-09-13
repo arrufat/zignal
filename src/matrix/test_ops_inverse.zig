@@ -1,8 +1,7 @@
 const std = @import("std");
 const Matrix = @import("Matrix.zig").Matrix;
-const OpsBuilder = @import("OpsBuilder.zig").OpsBuilder;
 
-test "OpsBuilder matrix inverse - small matrices" {
+test "Matrix inverse - small matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -13,12 +12,10 @@ test "OpsBuilder matrix inverse - small matrices" {
     mat2.at(1, 0).* = 2.0;
     mat2.at(1, 1).* = 6.0;
 
-    var ops2: OpsBuilder(f64) = try .init(arena.allocator(), mat2);
-    const inv2 = try ops2.inverse().build();
+    const inv2 = try mat2.inverse().eval();
 
     // Verify A * A^(-1) = I
-    var check2: OpsBuilder(f64) = try .init(arena.allocator(), mat2);
-    const identity2 = try check2.dot(inv2).build();
+    const identity2 = try mat2.dot(inv2).eval();
 
     const eps = 1e-10;
     try std.testing.expect(@abs(identity2.at(0, 0).* - 1.0) < eps);
@@ -38,12 +35,10 @@ test "OpsBuilder matrix inverse - small matrices" {
     mat3.at(2, 1).* = 6.0;
     mat3.at(2, 2).* = 0.0;
 
-    var ops3: OpsBuilder(f64) = try .init(arena.allocator(), mat3);
-    const inv3 = try ops3.inverse().build();
+    const inv3 = try mat3.inverse().eval();
 
     // Verify A * A^(-1) = I
-    var check3: OpsBuilder(f64) = try .init(arena.allocator(), mat3);
-    const identity3 = try check3.dot(inv3).build();
+    const identity3 = try mat3.dot(inv3).eval();
 
     for (0..3) |i| {
         for (0..3) |j| {
@@ -53,7 +48,7 @@ test "OpsBuilder matrix inverse - small matrices" {
     }
 }
 
-test "OpsBuilder matrix inverse - large matrices using Gauss-Jordan" {
+test "Matrix inverse - large matrices using Gauss-Jordan" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -77,12 +72,10 @@ test "OpsBuilder matrix inverse - large matrices using Gauss-Jordan" {
     mat4.at(3, 2).* = 0.0;
     mat4.at(3, 3).* = 4.0;
 
-    var ops4: OpsBuilder(f64) = try .init(arena.allocator(), mat4);
-    const inv4 = try ops4.inverse().build();
+    const inv4 = try mat4.inverse().eval();
 
     // Verify A * A^(-1) = I
-    var check4: OpsBuilder(f64) = try .init(arena.allocator(), mat4);
-    const identity4 = try check4.dot(inv4).build();
+    const identity4 = try mat4.dot(inv4).eval();
 
     const eps = 1e-10;
     for (0..4) |i| {
@@ -105,12 +98,10 @@ test "OpsBuilder matrix inverse - large matrices using Gauss-Jordan" {
         }
     }
 
-    var ops5: OpsBuilder(f64) = try .init(arena.allocator(), mat5);
-    const inv5 = try ops5.inverse().build();
+    const inv5 = try mat5.inverse().eval();
 
     // Verify A * A^(-1) = I
-    var check5: OpsBuilder(f64) = try .init(arena.allocator(), mat5);
-    const identity5 = try check5.dot(inv5).build();
+    const identity5 = try mat5.dot(inv5).eval();
 
     for (0..5) |i| {
         for (0..5) |j| {
@@ -120,7 +111,7 @@ test "OpsBuilder matrix inverse - large matrices using Gauss-Jordan" {
     }
 }
 
-test "OpsBuilder matrix inverse - singular matrix error" {
+test "Matrix inverse - singular matrix error" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -131,8 +122,7 @@ test "OpsBuilder matrix inverse - singular matrix error" {
     sing2.at(1, 0).* = 2.0;
     sing2.at(1, 1).* = 4.0; // Second row is multiple of first
 
-    var ops_sing2: OpsBuilder(f64) = try .init(arena.allocator(), sing2);
-    try std.testing.expectError(error.SingularMatrix, ops_sing2.inverse().build());
+    try std.testing.expectError(error.SingularMatrix, sing2.inverse().eval());
 
     // Test singular 4x4 matrix (uses Gauss-Jordan)
     var sing4: Matrix(f64) = try .init(arena.allocator(), 4, 4);
@@ -154,7 +144,5 @@ test "OpsBuilder matrix inverse - singular matrix error" {
     sing4.at(3, 2).* = 11.0;
     sing4.at(3, 3).* = 12.0;
 
-    var ops_sing4: OpsBuilder(f64) = try .init(arena.allocator(), sing4);
-    defer ops_sing4.deinit();
-    try std.testing.expectError(error.SingularMatrix, ops_sing4.inverse().build());
+    try std.testing.expectError(error.SingularMatrix, sing4.inverse().eval());
 }

@@ -5,7 +5,6 @@
 // Re-export all matrix functionality
 pub const SMatrix = @import("matrix/SMatrix.zig").SMatrix;
 pub const Matrix = @import("matrix/Matrix.zig").Matrix;
-pub const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
 
 test {
     _ = @import("matrix/SMatrix.zig");
