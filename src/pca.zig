@@ -43,7 +43,6 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const OpsBuilder = @import("matrix/OpsBuilder.zig").OpsBuilder;
 const Rgb = @import("color.zig").Rgb;
 
 /// Principal Component Analysis
@@ -243,9 +242,7 @@ pub fn Pca(comptime T: type) type {
             }
 
             // Compute centered * components
-            var ops = try OpsBuilder(T).init(self.allocator, centered_matrix);
-            defer ops.deinit();
-            return try ops.gemm(false, self.components, false, 1.0, 0.0, null).build();
+            return try centered_matrix.gemm(false, self.components, false, 1.0, 0.0, null).eval();
         }
 
         /// Get the mean vector
@@ -270,11 +267,9 @@ pub fn Pca(comptime T: type) type {
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
 
-            var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
-            defer ops.deinit();
             // Use GEMM directly: scale * (X^T * X) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var cov_matrix = try ops.gemm(true, data_matrix.*, false, scale, 0.0, null).build();
+            var cov_matrix = try data_matrix.gemm(true, data_matrix.*, false, scale, 0.0, null).eval();
             defer cov_matrix.deinit();
 
             const n = cov_matrix.rows;
@@ -328,11 +323,9 @@ pub fn Pca(comptime T: type) type {
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
 
-            var ops = try OpsBuilder(T).init(self.allocator, data_matrix.*);
-            defer ops.deinit();
             // Use GEMM directly: scale * (X * X^T) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var gram_matrix = try ops.gemm(false, data_matrix.*, true, scale, 0.0, null).build();
+            var gram_matrix = try data_matrix.gemm(false, data_matrix.*, true, scale, 0.0, null).eval();
             defer gram_matrix.deinit();
 
             const n = gram_matrix.rows;
