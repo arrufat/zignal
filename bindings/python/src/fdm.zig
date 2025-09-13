@@ -123,6 +123,7 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     fdm_ptr.setTarget(target_rgb) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting target"),
+            else => c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to set target image"),
         }
         return null;
     };
@@ -270,6 +271,7 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during match"),
             error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set"),
             error.NoSourceSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No source image set"),
+            else => c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to match images"),
         }
         return null;
     };
@@ -321,6 +323,7 @@ fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during update"),
             error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set. Call set_target() or match() first"),
             error.NoSourceSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No source image set. Call set_source() or match() first"),
+            else => c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to update FDM transformation"),
         }
         return null;
     };

@@ -6,8 +6,9 @@
 //!
 //! OpsBuilder: Chainable operations that modify the matrix
 //! - add, sub, scale, transpose, times, dot, inverse, etc.
-//! - All methods return void and can be chained
-//! - Access final result with toOwned()
+//! - All methods return *Self for chaining
+//! - Errors are stored internally and checked at build()
+//! - Single try at the end with build()
 //!
 //! Matrix: Query/analysis operations that return values
 //! - determinant, mean, variance, min, max, rank, etc.
@@ -30,7 +31,7 @@ pub fn OpsBuilder(comptime T: type) type {
 
         result: Matrix(T),
         allocator: std.mem.Allocator,
-        consumed: bool = false,
+        err: ?anyerror = null,
 
         /// Initialize builder with a copy of the input matrix
         pub fn init(allocator: std.mem.Allocator, matrix: Matrix(T)) !Self {
@@ -42,76 +43,122 @@ pub fn OpsBuilder(comptime T: type) type {
             };
         }
 
-        /// Clean up the builder (only if exec() was not called)
+        /// Clean up the builder's matrix (if ownership hasn't been transferred)
         pub fn deinit(self: *Self) void {
-            if (!self.consumed) {
+            // Only deinit if we still own the matrix (items.len > 0)
+            if (self.result.items.len > 0) {
                 self.result.deinit();
             }
         }
 
         /// Add another matrix element-wise
-        pub fn add(self: *Self, other: Matrix(T)) !void {
-            assert(self.result.rows == other.rows and self.result.cols == other.cols);
+        pub fn add(self: *Self, other: Matrix(T)) *Self {
+            if (self.err != null) return self;
+
+            if (self.result.rows != other.rows or self.result.cols != other.cols) {
+                self.err = error.DimensionMismatch;
+                return self;
+            }
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] += other.items[i];
             }
+            return self;
         }
 
         /// Subtract another matrix element-wise
-        pub fn sub(self: *Self, other: Matrix(T)) !void {
-            assert(self.result.rows == other.rows and self.result.cols == other.cols);
+        pub fn sub(self: *Self, other: Matrix(T)) *Self {
+            if (self.err != null) return self;
+
+            if (self.result.rows != other.rows or self.result.cols != other.cols) {
+                self.err = error.DimensionMismatch;
+                return self;
+            }
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] -= other.items[i];
             }
+            return self;
         }
 
         /// Scale all elements by a value
-        pub fn scale(self: *Self, value: T) !void {
+        pub fn scale(self: *Self, value: T) *Self {
+            if (self.err != null) return self;
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] *= value;
             }
+            return self;
         }
 
         /// Transpose the matrix
-        pub fn transpose(self: *Self) !void {
-            var transposed: Matrix(T) = try .init(self.allocator, self.result.cols, self.result.rows);
+        pub fn transpose(self: *Self) *Self {
+            if (self.err != null) return self;
+
+            var transposed = Matrix(T).init(self.allocator, self.result.cols, self.result.rows) catch |e| {
+                self.err = e;
+                return self;
+            };
+
             for (0..self.result.rows) |r| {
                 for (0..self.result.cols) |c| {
                     transposed.at(c, r).* = self.result.at(r, c).*;
                 }
             }
+
             self.result.deinit();
             self.result = transposed;
+            return self;
         }
 
         /// Perform element-wise multiplication
-        pub fn times(self: *Self, other: Matrix(T)) !void {
-            assert(self.result.rows == other.rows and self.result.cols == other.cols);
+        pub fn times(self: *Self, other: Matrix(T)) *Self {
+            if (self.err != null) return self;
+
+            if (self.result.rows != other.rows or self.result.cols != other.cols) {
+                self.err = error.DimensionMismatch;
+                return self;
+            }
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] *= other.items[i];
             }
+            return self;
         }
 
         /// Matrix multiplication (dot product) - changes dimensions
-        pub fn dot(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(false, other, false, 1.0, 0.0, null);
+        pub fn dot(self: *Self, other: Matrix(T)) *Self {
+            return self.gemm(false, other, false, 1.0, 0.0, null);
         }
 
         /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
         /// and Gauss-Jordan elimination for larger matrices
-        pub fn inverse(self: *Self) !void {
-            assert(self.result.rows == self.result.cols);
+        pub fn inverse(self: *Self) *Self {
+            if (self.err != null) return self;
+
+            if (self.result.rows != self.result.cols) {
+                self.err = error.NotSquareMatrix;
+                return self;
+            }
 
             const n = self.result.rows;
 
             // Use analytical formulas for small matrices (more efficient)
             if (n <= 3) {
-                const det = try self.result.determinant();
+                const det = self.result.determinant() catch |e| {
+                    self.err = e;
+                    return self;
+                };
+
                 if (@abs(det) < std.math.floatEps(T)) {
-                    return error.SingularMatrix;
+                    self.err = error.SingularMatrix;
+                    return self;
                 }
 
-                var inv = try Matrix(T).init(self.allocator, n, n);
+                var inv = Matrix(T).init(self.allocator, n, n) catch |e| {
+                    self.err = e;
+                    return self;
+                };
 
                 switch (n) {
                     1 => inv.at(0, 0).* = 1 / det,
@@ -139,17 +186,23 @@ pub fn OpsBuilder(comptime T: type) type {
                 self.result = inv;
             } else {
                 // Use Gauss-Jordan elimination for larger matrices
-                try self.inverseGaussJordan();
+                self.inverseGaussJordan();
             }
+            return self;
         }
 
         /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
         /// This is a general method that works for any size square matrix
-        fn inverseGaussJordan(self: *Self) !void {
+        fn inverseGaussJordan(self: *Self) void {
+            if (self.err != null) return;
+
             const n = self.result.rows;
 
             // Create augmented matrix [A | I]
-            var augmented: Matrix(T) = try .init(self.allocator, n, 2 * n);
+            var augmented = Matrix(T).init(self.allocator, n, 2 * n) catch |e| {
+                self.err = e;
+                return;
+            };
             defer augmented.deinit();
 
             // Copy original matrix to left half and identity to right half
@@ -176,7 +229,8 @@ pub fn OpsBuilder(comptime T: type) type {
 
                 // Check for singular matrix
                 if (max_val < std.math.floatEps(T) * 10) {
-                    return error.SingularMatrix;
+                    self.err = error.SingularMatrix;
+                    return;
                 }
 
                 // Swap rows if needed
@@ -206,7 +260,11 @@ pub fn OpsBuilder(comptime T: type) type {
             }
 
             // Extract inverse from right half of augmented matrix
-            var inv: Matrix(T) = try .init(self.allocator, n, n);
+            var inv = Matrix(T).init(self.allocator, n, n) catch |e| {
+                self.err = e;
+                return;
+            };
+
             for (0..n) |i| {
                 for (0..n) |j| {
                     inv.at(i, j).* = augmented.at(i, n + j).*;
@@ -218,11 +276,18 @@ pub fn OpsBuilder(comptime T: type) type {
         }
 
         /// Extract a submatrix - changes dimensions
-        pub fn subMatrix(self: *Self, row_begin: usize, col_begin: usize, row_count: usize, col_count: usize) !void {
-            assert(row_begin + row_count <= self.result.rows);
-            assert(col_begin + col_count <= self.result.cols);
+        pub fn subMatrix(self: *Self, row_begin: usize, col_begin: usize, row_count: usize, col_count: usize) *Self {
+            if (self.err != null) return self;
 
-            var new_result: Matrix(T) = try .init(self.allocator, row_count, col_count);
+            if (row_begin + row_count > self.result.rows or col_begin + col_count > self.result.cols) {
+                self.err = error.OutOfBounds;
+                return self;
+            }
+
+            var new_result = Matrix(T).init(self.allocator, row_count, col_count) catch |e| {
+                self.err = e;
+                return self;
+            };
 
             for (0..row_count) |r| {
                 for (0..col_count) |c| {
@@ -232,13 +297,22 @@ pub fn OpsBuilder(comptime T: type) type {
 
             self.result.deinit();
             self.result = new_result;
+            return self;
         }
 
         /// Extract a column - changes dimensions
-        pub fn col(self: *Self, col_idx: usize) !void {
-            assert(col_idx < self.result.cols);
+        pub fn col(self: *Self, col_idx: usize) *Self {
+            if (self.err != null) return self;
 
-            var new_result: Matrix(T) = try .init(self.allocator, self.result.rows, 1);
+            if (col_idx >= self.result.cols) {
+                self.err = error.OutOfBounds;
+                return self;
+            }
+
+            var new_result = Matrix(T).init(self.allocator, self.result.rows, 1) catch |e| {
+                self.err = e;
+                return self;
+            };
 
             for (0..self.result.rows) |r| {
                 new_result.at(r, 0).* = self.result.at(r, col_idx).*;
@@ -246,13 +320,22 @@ pub fn OpsBuilder(comptime T: type) type {
 
             self.result.deinit();
             self.result = new_result;
+            return self;
         }
 
         /// Extract a row - changes dimensions
-        pub fn row(self: *Self, row_idx: usize) !void {
-            assert(row_idx < self.result.rows);
+        pub fn row(self: *Self, row_idx: usize) *Self {
+            if (self.err != null) return self;
 
-            var new_result: Matrix(T) = try .init(self.allocator, 1, self.result.cols);
+            if (row_idx >= self.result.rows) {
+                self.err = error.OutOfBounds;
+                return self;
+            }
+
+            var new_result = Matrix(T).init(self.allocator, 1, self.result.cols) catch |e| {
+                self.err = e;
+                return self;
+            };
 
             for (0..self.result.cols) |c| {
                 new_result.at(0, c).* = self.result.at(row_idx, c).*;
@@ -260,20 +343,21 @@ pub fn OpsBuilder(comptime T: type) type {
 
             self.result.deinit();
             self.result = new_result;
+            return self;
         }
 
         /// Compute Gram matrix: X * X^T
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
-        pub fn gram(self: *Self) !void {
-            try self.gemm(false, self.result, true, 1.0, 0.0, null);
+        pub fn gram(self: *Self) *Self {
+            return self.gemm(false, self.result, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
-        pub fn covariance(self: *Self) !void {
-            try self.gemm(true, self.result, false, 1.0, 0.0, null);
+        pub fn covariance(self: *Self) *Self {
+            return self.gemm(true, self.result, false, 1.0, 0.0, null);
         }
 
         /// Helper function for optimized SIMD GEMM kernel
@@ -339,7 +423,9 @@ pub fn OpsBuilder(comptime T: type) type {
             alpha: T,
             beta: T,
             c: ?Matrix(T),
-        ) !void {
+        ) *Self {
+            if (self.err != null) return self;
+
             // Determine dimensions after potential transposition
             const a_rows = if (trans_a) self.result.cols else self.result.rows;
             const a_cols = if (trans_a) self.result.rows else self.result.cols;
@@ -347,13 +433,23 @@ pub fn OpsBuilder(comptime T: type) type {
             const b_cols = if (trans_b) other.rows else other.cols;
 
             // Verify matrix multiplication compatibility
-            assert(a_cols == b_rows);
+            if (a_cols != b_rows) {
+                self.err = error.DimensionMismatch;
+                return self;
+            }
 
-            var result: Matrix(T) = try .init(self.allocator, a_rows, b_cols);
+            var result = Matrix(T).init(self.allocator, a_rows, b_cols) catch |e| {
+                self.err = e;
+                return self;
+            };
 
             // Initialize with scaled C matrix if provided
             if (c) |c_mat| {
-                assert(c_mat.rows == a_rows and c_mat.cols == b_cols);
+                if (c_mat.rows != a_rows or c_mat.cols != b_cols) {
+                    result.deinit();
+                    self.err = error.DimensionMismatch;
+                    return self;
+                }
                 if (beta != 0) {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {
@@ -388,7 +484,11 @@ pub fn OpsBuilder(comptime T: type) type {
                             std.mem.eql(T, self.result.items, other.items))
                         {
                             // For A * A, we need to transpose A for the second operand
-                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
+                            var a_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
+                                result.deinit();
+                                self.err = e;
+                                return self;
+                            };
                             defer a_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -398,7 +498,11 @@ pub fn OpsBuilder(comptime T: type) type {
                             simdGemmKernel(VecType, vec_len, &result, self.result, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for cache-friendly row-major access
-                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
+                            var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
+                                result.deinit();
+                                self.err = e;
+                                return self;
+                            };
                             defer b_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -409,7 +513,11 @@ pub fn OpsBuilder(comptime T: type) type {
                         }
                     } else if (trans_a and !trans_b) {
                         // Case 2: A^T * B - transpose A for cache-friendly row-major access
-                        var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
+                        var a_transposed = Matrix(T).init(self.allocator, a_rows, a_cols) catch |e| {
+                            result.deinit();
+                            self.err = e;
+                            return self;
+                        };
                         defer a_transposed.deinit();
                         // Transpose A: a_transposed[i,j] = A[j,i]
                         for (0..a_cols) |k| {
@@ -426,7 +534,11 @@ pub fn OpsBuilder(comptime T: type) type {
                             simdGemmKernel(VecType, vec_len, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for row-wise access
-                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
+                            var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
+                                result.deinit();
+                                self.err = e;
+                                return self;
+                            };
                             defer b_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -444,7 +556,11 @@ pub fn OpsBuilder(comptime T: type) type {
                             std.mem.eql(T, self.result.items, other.items))
                         {
                             // For A * A^T, we need to transpose A for the second operand
-                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
+                            var a_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
+                                result.deinit();
+                                self.err = e;
+                                return self;
+                            };
                             defer a_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -465,7 +581,11 @@ pub fn OpsBuilder(comptime T: type) type {
                             std.mem.eql(T, self.result.items, other.items))
                         {
                             // For A^T * A^T, we transpose A to get the transposed version
-                            var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
+                            var a_transposed = Matrix(T).init(self.allocator, a_rows, a_cols) catch |e| {
+                                result.deinit();
+                                self.err = e;
+                                return self;
+                            };
                             defer a_transposed.deinit();
                             for (0..self.result.rows) |i| {
                                 for (0..self.result.cols) |j| {
@@ -496,56 +616,72 @@ pub fn OpsBuilder(comptime T: type) type {
 
             self.result.deinit();
             self.result = result;
+            return self;
         }
 
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
-        pub fn scaledDot(self: *Self, other: Matrix(T), alpha: T) !void {
-            try self.gemm(false, other, false, alpha, 0.0, null);
+        pub fn scaledDot(self: *Self, other: Matrix(T), alpha: T) *Self {
+            return self.gemm(false, other, false, alpha, 0.0, null);
         }
 
         /// Matrix multiplication with transpose: A * B^T
         /// Convenience method for common GEMM use case
-        pub fn dotTranspose(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(false, other, true, 1.0, 0.0, null);
+        pub fn dotTranspose(self: *Self, other: Matrix(T)) *Self {
+            return self.gemm(false, other, true, 1.0, 0.0, null);
         }
 
         /// Transpose matrix multiplication: A^T * B
         /// Convenience method for common GEMM use case
-        pub fn transposeDot(self: *Self, other: Matrix(T)) !void {
-            try self.gemm(true, other, false, 1.0, 0.0, null);
+        pub fn transposeDot(self: *Self, other: Matrix(T)) *Self {
+            return self.gemm(true, other, false, 1.0, 0.0, null);
         }
 
         /// Apply a function to all matrix elements with optional arguments
-        pub fn apply(self: *Self, comptime func: anytype, args: anytype) !void {
+        pub fn apply(self: *Self, comptime func: anytype, args: anytype) *Self {
+            if (self.err != null) return self;
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] = @call(.auto, func, .{self.result.items[i]} ++ args);
             }
+            return self;
         }
 
         /// Add scalar to all elements
-        pub fn offset(self: *Self, value: T) !void {
+        pub fn offset(self: *Self, value: T) *Self {
+            if (self.err != null) return self;
+
             for (0..self.result.items.len) |i| {
                 self.result.items[i] += value;
             }
+            return self;
         }
 
         /// Raise all elements to power n (convenience method)
-        pub fn pow(self: *Self, n: T) !void {
+        pub fn pow(self: *Self, n: T) *Self {
             const powN = struct {
                 fn f(x: T, exponent: T) T {
                     return std.math.pow(T, x, exponent);
                 }
             }.f;
-            try self.apply(powN, .{n});
+            return self.apply(powN, .{n});
         }
 
         /// Transfer ownership of the result to the caller
-        pub fn toOwned(self: *Self) Matrix(T) {
-            const final_result = self.result;
-            // Mark as consumed to prevent deinit from freeing it
-            self.consumed = true;
-            return final_result;
+        /// This is the final step in the chain - returns the built matrix
+        /// Returns an error if any operation in the chain failed
+        pub fn build(self: *Self) !Matrix(T) {
+            if (self.err) |e| return e;
+            // Transfer ownership - the caller is now responsible for calling deinit()
+            const owned_result = self.result;
+            // Reset self.result to prevent double-free when OpsBuilder is deinitialized
+            self.result = Matrix(T){
+                .allocator = self.result.allocator,
+                .rows = 0,
+                .cols = 0,
+                .items = &.{},
+            };
+            return owned_result;
         }
     };
 }

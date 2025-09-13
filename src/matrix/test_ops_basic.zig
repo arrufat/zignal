@@ -20,10 +20,11 @@ test "complex operation chaining" {
     const dynamic_b = try static_b.toMatrix(arena.allocator());
 
     var ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_a);
-    try ops.dot(dynamic_b);
-    try ops.transpose();
-    try ops.scale(0.5);
-    const dynamic_result = ops.toOwned();
+    const dynamic_result = try ops
+        .dot(dynamic_b)
+        .transpose()
+        .scale(0.5)
+        .build();
 
     // Verify both approaches give identical results
     for (0..2) |r| {
@@ -48,16 +49,14 @@ test "row and column extraction with OpsBuilder" {
     const dynamic_matrix = try test_matrix.toMatrix(arena.allocator());
 
     var row_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try row_ops.row(1);
-    const dynamic_row = row_ops.toOwned();
+    const dynamic_row = try row_ops.row(1).build();
     try expectEqual(@as(usize, 1), dynamic_row.rows);
     try expectEqual(@as(usize, 2), dynamic_row.cols);
     try expectEqual(@as(f32, 3.0), dynamic_row.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), dynamic_row.at(0, 1).*);
 
     var col_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try col_ops.col(1);
-    const dynamic_col = col_ops.toOwned();
+    const dynamic_col = try col_ops.col(1).build();
     try expectEqual(@as(usize, 3), dynamic_col.rows);
     try expectEqual(@as(usize, 1), dynamic_col.cols);
     try expectEqual(@as(f32, 2.0), dynamic_col.at(0, 0).*);
@@ -91,25 +90,21 @@ test "OpsBuilder matrix operations: add, sub, scale, transpose" {
 
     // Test scale
     var scale_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try scale_ops.scale(2.0);
-    const dynamic_scaled = scale_ops.toOwned();
+    const dynamic_scaled = try scale_ops.scale(2.0).build();
 
     // Test transpose
     var transpose_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try transpose_ops.transpose();
-    const dynamic_transposed = transpose_ops.toOwned();
+    const dynamic_transposed = try transpose_ops.transpose().build();
 
     // Test add
     const add_matrix: Matrix(f32) = try .initAll(arena.allocator(), 2, 3, 1.0);
     var add_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try add_ops.add(add_matrix);
-    const dynamic_added = add_ops.toOwned();
+    const dynamic_added = try add_ops.add(add_matrix).build();
 
     // Test subtract
     const dynamic_operand = try static_operand.toMatrix(arena.allocator());
     var sub_ops: OpsBuilder(f32) = try .init(arena.allocator(), dynamic_matrix);
-    try sub_ops.sub(dynamic_operand);
-    const dynamic_subtracted = sub_ops.toOwned();
+    const dynamic_subtracted = try sub_ops.sub(dynamic_operand).build();
 
     // Verify results match
     for (0..2) |r| {
