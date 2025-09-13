@@ -135,30 +135,26 @@ pub fn AffineTransform(comptime T: type) type {
             defer p_ops.deinit();
 
             // Invert p
-            try p_ops.inverse();
-            var p_inv = p_ops.toOwned();
+            var p_inv = try p_ops.inverse().build();
             defer p_inv.deinit();
 
             // Calculate m = q * p^-1
             var q_ops = try OpsBuilder(T).init(self.allocator, q);
             defer q_ops.deinit();
-            try q_ops.dot(p_inv);
-            var m = q_ops.toOwned();
+            var m = try q_ops.dot(p_inv).build();
             defer m.deinit();
 
             // Extract the 2x2 matrix
             var m_ops1 = try OpsBuilder(T).init(self.allocator, m);
             defer m_ops1.deinit();
-            try m_ops1.subMatrix(0, 0, 2, 2);
-            var sub_matrix = m_ops1.toOwned();
+            var sub_matrix = try m_ops1.subMatrix(0, 0, 2, 2).build();
             defer sub_matrix.deinit();
             self.matrix = sub_matrix.toSMatrix(2, 2);
 
             // Extract the bias column
             var m_ops2 = try OpsBuilder(T).init(self.allocator, m);
             defer m_ops2.deinit();
-            try m_ops2.col(2);
-            var bias_col = m_ops2.toOwned();
+            var bias_col = try m_ops2.col(2).build();
             defer bias_col.deinit();
             self.bias = bias_col.toSMatrix(2, 1);
         }

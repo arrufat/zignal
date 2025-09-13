@@ -18,8 +18,7 @@ test "OpsBuilder apply method" {
 
     // Test apply with no arguments (sqrt)
     var ops1: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    try ops1.apply(std.math.sqrt, .{});
-    var result1 = ops1.toOwned();
+    var result1 = try ops1.apply(std.math.sqrt, .{}).build();
     defer result1.deinit();
 
     try expectEqual(@as(f64, 1.0), result1.at(0, 0).*);
@@ -36,8 +35,7 @@ test "OpsBuilder apply method" {
         }
     }.f;
     var ops2: OpsBuilder(f64) = try .init(arena.allocator(), result1);
-    try ops2.apply(pow2, .{@as(f64, 2.0)});
-    var result2 = ops2.toOwned();
+    var result2 = try ops2.apply(pow2, .{@as(f64, 2.0)}).build();
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);
@@ -55,8 +53,7 @@ test "OpsBuilder apply method" {
     }.f;
 
     var ops3: OpsBuilder(f64) = try .init(arena.allocator(), result1);
-    try ops3.apply(reciprocal, .{});
-    var result3 = ops3.toOwned();
+    var result3 = try ops3.apply(reciprocal, .{}).build();
     defer result3.deinit();
 
     try expectEqual(@as(f64, 1.0), result3.at(0, 0).*);
@@ -137,8 +134,7 @@ test "OpsBuilder offset and pow" {
 
     // Test offset
     var ops1: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    try ops1.offset(5.0);
-    var result1 = ops1.toOwned();
+    var result1 = try ops1.offset(5.0).build();
     defer result1.deinit();
 
     try expectEqual(@as(f64, 6.0), result1.at(0, 0).*);
@@ -148,8 +144,7 @@ test "OpsBuilder offset and pow" {
 
     // Test pow
     var ops2: OpsBuilder(f64) = try .init(arena.allocator(), mat);
-    try ops2.pow(2.0);
-    var result2 = ops2.toOwned();
+    var result2 = try ops2.pow(2.0).build();
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);

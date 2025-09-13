@@ -132,15 +132,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     // Full color - compute and store SVD
                     var cov_ops = try OpsBuilder(f64).init(self.allocator, feature_mat);
                     defer cov_ops.deinit();
-                    try cov_ops.gemm(
+                    var cov_matrix = try cov_ops.gemm(
                         true,
                         feature_mat,
                         false,
                         1.0 / @as(f64, @floatFromInt(self.target_size)),
                         0.0,
                         null,
-                    );
-                    var cov_matrix = cov_ops.toOwned();
+                    ).build();
                     defer cov_matrix.deinit();
 
                     const cov_static = cov_matrix.toSMatrix(3, 3);
@@ -243,15 +242,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     // Compute source covariance
                     var source_cov_ops = try OpsBuilder(f64).init(self.allocator, feature_mat_source);
                     defer source_cov_ops.deinit();
-                    try source_cov_ops.gemm(
+                    var source_cov_matrix = try source_cov_ops.gemm(
                         true,
                         feature_mat_source,
                         false,
                         1.0 / @as(f64, @floatFromInt(source_size)),
                         0.0,
                         null,
-                    );
-                    var source_cov_matrix = source_cov_ops.toOwned();
+                    ).build();
                     defer source_cov_matrix.deinit();
 
                     const source_cov = source_cov_matrix.toSMatrix(3, 3);
@@ -303,15 +301,13 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                         }
                     }
 
-                    try w_ops.dot(u_target_t);
-                    var w_matrix = w_ops.toOwned();
+                    var w_matrix = try w_ops.dot(u_target_t).build();
                     defer w_matrix.deinit();
 
                     // Apply transformation
                     var result_ops = try OpsBuilder(f64).init(self.allocator, feature_mat_source);
                     defer result_ops.deinit();
-                    try result_ops.dot(w_matrix);
-                    var result_matrix = result_ops.toOwned();
+                    var result_matrix = try result_ops.dot(w_matrix).build();
                     defer result_matrix.deinit();
 
                     reshapeToImage(T, result_matrix, source_img, self.target_mean, false);
