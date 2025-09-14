@@ -601,68 +601,77 @@ fn encodeBlocksRgb(
 
     var block: [64]i32 = undefined;
 
+    // MCU buffer - sized for the largest case (16x16 for 4:2:0)
+    var mcu_buffer: [16][16]Ycbcr = undefined;
+    const mcu_width = 8 * h_max;
+    const mcu_height = 8 * v_max;
+
     for (0..mcu_rows) |mcu_y| {
         for (0..mcu_cols) |mcu_x| {
-            // Encode Y blocks (h_max * v_max blocks per MCU)
+            const mcu_px0 = mcu_x * mcu_width;
+            const mcu_py0 = mcu_y * mcu_height;
+
+            // Convert entire MCU to YCbCr once
+            for (0..mcu_height) |y| {
+                const iy = @min(rows - 1, mcu_py0 + y);
+                for (0..mcu_width) |x| {
+                    const ix = @min(cols - 1, mcu_px0 + x);
+                    mcu_buffer[y][x] = convertColor(Ycbcr, image.at(iy, ix).*);
+                }
+            }
+
+            // Encode Y blocks directly from buffer
             for (0..v_max) |vy| {
                 for (0..h_max) |hx| {
-                    const px0 = mcu_x * 8 * h_max + hx * 8;
-                    const py0 = mcu_y * 8 * v_max + vy * 8;
+                    const by0 = vy * 8;
+                    const bx0 = hx * 8;
                     for (0..8) |y| {
-                        const iy = @min(rows - 1, py0 + y);
                         for (0..8) |x| {
-                            const ix = @min(cols - 1, px0 + x);
-                            const rgb = image.at(iy, ix).*;
-                            const ycbcr = convertColor(Ycbcr, rgb);
-                            block[y * 8 + x] = @as(i32, ycbcr.y) - 128;
+                            block[y * 8 + x] = @as(i32, mcu_buffer[by0 + y][bx0 + x].y) - 128;
                         }
                     }
                     try encodeBlock(&block, ql_recip, writer, dc_luma, ac_luma, &prev_dc_y);
                 }
             }
 
-            // Encode Cb block for this MCU (downsampled if needed)
-            const mcu_px0 = mcu_x * 8 * h_max;
-            const mcu_py0 = mcu_y * 8 * v_max;
+            // Encode Cb block with downsampling from buffer
             for (0..8) |y| {
                 for (0..8) |x| {
-                    const sx0 = mcu_px0 + x * h_max;
-                    const sy0 = mcu_py0 + y * v_max;
-                    var sum_cb: i32 = 0;
-                    var count: usize = 0;
-                    for (0..v_max) |dy| {
-                        const sy = @min(rows - 1, sy0 + dy);
-                        for (0..h_max) |dx| {
-                            const sx = @min(cols - 1, sx0 + dx);
-                            const ycbcr = convertColor(Ycbcr, image.at(sy, sx).*);
-                            sum_cb += ycbcr.cb;
-                            count += 1;
+                    if (h_max == 1 and v_max == 1) {
+                        // 4:4:4 - no downsampling
+                        block[y * 8 + x] = @as(i32, mcu_buffer[y][x].cb) - 128;
+                    } else {
+                        // Average the corresponding pixels for downsampling
+                        var sum_cb: u32 = 0;
+                        for (0..v_max) |dy| {
+                            for (0..h_max) |dx| {
+                                sum_cb += mcu_buffer[y * v_max + dy][x * h_max + dx].cb;
+                            }
                         }
+                        const avg_cb = sum_cb / (h_max * v_max);
+                        block[y * 8 + x] = @as(i32, @intCast(avg_cb)) - 128;
                     }
-                    const avg_cb = @divTrunc(sum_cb, @as(i32, @intCast(count)));
-                    block[y * 8 + x] = avg_cb - 128;
                 }
             }
             try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cb);
 
-            // Encode Cr block for this MCU (downsampled if needed)
+            // Encode Cr block with downsampling from buffer
             for (0..8) |y| {
                 for (0..8) |x| {
-                    const sx0 = mcu_px0 + x * h_max;
-                    const sy0 = mcu_py0 + y * v_max;
-                    var sum_cr: i32 = 0;
-                    var count: usize = 0;
-                    for (0..v_max) |dy| {
-                        const sy = @min(rows - 1, sy0 + dy);
-                        for (0..h_max) |dx| {
-                            const sx = @min(cols - 1, sx0 + dx);
-                            const ycbcr = convertColor(Ycbcr, image.at(sy, sx).*);
-                            sum_cr += ycbcr.cr;
-                            count += 1;
+                    if (h_max == 1 and v_max == 1) {
+                        // 4:4:4 - no downsampling
+                        block[y * 8 + x] = @as(i32, mcu_buffer[y][x].cr) - 128;
+                    } else {
+                        // Average the corresponding pixels for downsampling
+                        var sum_cr: u32 = 0;
+                        for (0..v_max) |dy| {
+                            for (0..h_max) |dx| {
+                                sum_cr += mcu_buffer[y * v_max + dy][x * h_max + dx].cr;
+                            }
                         }
+                        const avg_cr = sum_cr / (h_max * v_max);
+                        block[y * 8 + x] = @as(i32, @intCast(avg_cr)) - 128;
                     }
-                    const avg_cr = @divTrunc(sum_cr, @as(i32, @intCast(count)));
-                    block[y * 8 + x] = avg_cr - 128;
                 }
             }
             try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cr);
