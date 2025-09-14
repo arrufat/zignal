@@ -83,12 +83,15 @@ pub fn Matrix(comptime T: type) type {
         /// Create a duplicate of this matrix with the specified allocator.
         /// The caller owns the returned matrix and must call deinit() on it.
         ///
+        /// Error propagation: if this matrix carries a deferred error (`self.err != null`),
+        /// the duplicate will also carry the same error and no allocation is performed.
+        /// This preserves failure state across chains.
+        ///
         /// Example:
-        /// ```zig
         /// var copy = try matrix.dupe(allocator);
         /// defer copy.deinit();
-        /// ```
         pub fn dupe(self: Self, allocator: std.mem.Allocator) !Self {
+            if (self.err) |e| return errorMatrix(allocator, e);
             const result = try Self.init(allocator, self.rows, self.cols);
             @memcpy(result.items, self.items);
             return result;

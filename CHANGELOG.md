@@ -8,6 +8,7 @@
   - Errors are deferred and checked at terminal operation (`.eval()`)
   - For operation chains, use `ArenaAllocator` to manage intermediate allocations
   - All SIMD optimizations preserved, including optimized GEMM operations
+  - Added `Matrix.dupe(allocator)` to explicitly copy before in-place chains and avoid aliasing/double-free issues.
 
 ### Python Bindings
 - Consolidated CPython type registration in `bindings/python/src/main.zig` via a compile‑time table + loop.
