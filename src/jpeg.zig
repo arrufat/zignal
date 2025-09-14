@@ -290,7 +290,7 @@ fn writeCOM(dst: *std.ArrayList(u8), gpa: Allocator, comment: []const u8) !void 
     try writeSegment(dst, gpa, 0xFFFE, comment);
 }
 
-fn writeDHT(dst: *std.ArrayList(u8), gpa: Allocator) !void {
+fn writeDHT(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
     var tmp = std.ArrayList(u8).empty;
     defer tmp.deinit(gpa);
 
@@ -302,14 +302,17 @@ fn writeDHT(dst: *std.ArrayList(u8), gpa: Allocator) !void {
     try tmp.append(gpa, 0x10);
     try tmp.appendSlice(gpa, &StdTables.bits_ac_luma);
     try tmp.appendSlice(gpa, &StdTables.val_ac_luma);
-    // DC Chroma (class 0, id 1)
-    try tmp.append(gpa, 0x01);
-    try tmp.appendSlice(gpa, &StdTables.bits_dc_chroma);
-    try tmp.appendSlice(gpa, &StdTables.val_dc_chroma);
-    // AC Chroma (class 1, id 1)
-    try tmp.append(gpa, 0x11);
-    try tmp.appendSlice(gpa, &StdTables.bits_ac_chroma);
-    try tmp.appendSlice(gpa, &StdTables.val_ac_chroma);
+
+    if (!grayscale) {
+        // DC Chroma (class 0, id 1)
+        try tmp.append(gpa, 0x01);
+        try tmp.appendSlice(gpa, &StdTables.bits_dc_chroma);
+        try tmp.appendSlice(gpa, &StdTables.val_dc_chroma);
+        // AC Chroma (class 1, id 1)
+        try tmp.append(gpa, 0x11);
+        try tmp.appendSlice(gpa, &StdTables.bits_ac_chroma);
+        try tmp.appendSlice(gpa, &StdTables.val_ac_chroma);
+    }
 
     try writeSegment(dst, gpa, 0xFFC4, tmp.items);
 }
@@ -683,7 +686,7 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     scaleQuantTables(options.quality, &ql, &qc);
     try writeDQT(&out, allocator, &ql, &qc);
     try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
-    try writeDHT(&out, allocator);
+    try writeDHT(&out, allocator, false);
     try writeSOS(&out, allocator, false);
 
     // Entropy-coded data
@@ -739,18 +742,7 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     try writeSegment(&out, allocator, 0xFFDB, tmp_dqt.items);
 
     try writeSOF0(&out, allocator, @intCast(width), @intCast(height), true, .yuv444);
-
-    // DHT: only DC/AC luma
-    var tmp_dht = std.ArrayList(u8).empty;
-    defer tmp_dht.deinit(allocator);
-    try tmp_dht.appendSlice(allocator, &[_]u8{0x00});
-    try tmp_dht.appendSlice(allocator, &StdTables.bits_dc_luma);
-    try tmp_dht.appendSlice(allocator, &StdTables.val_dc_luma);
-    try tmp_dht.appendSlice(allocator, &[_]u8{0x10});
-    try tmp_dht.appendSlice(allocator, &StdTables.bits_ac_luma);
-    try tmp_dht.appendSlice(allocator, &StdTables.val_ac_luma);
-    try writeSegment(&out, allocator, 0xFFC4, tmp_dht.items);
-
+    try writeDHT(&out, allocator, true);
     try writeSOS(&out, allocator, true);
 
     var ew = EntropyWriter.init(allocator);
