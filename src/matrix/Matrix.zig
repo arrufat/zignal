@@ -53,6 +53,15 @@ pub const SvdMode = svd_module.SvdMode;
 pub const SvdOptions = svd_module.SvdOptions;
 pub const SvdResult = svd_module.SvdResult;
 
+/// Matrix-specific errors
+pub const MatrixError = error{
+    DimensionMismatch,
+    NotSquare,
+    Singular,
+    OutOfBounds,
+    OutOfMemory,
+};
+
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
     return struct {
@@ -62,7 +71,7 @@ pub fn Matrix(comptime T: type) type {
         rows: usize,
         cols: usize,
         allocator: std.mem.Allocator,
-        err: ?anyerror = null,
+        err: ?MatrixError = null,
 
         pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
             const data = try allocator.alloc(T, rows * cols);
@@ -255,7 +264,7 @@ pub fn Matrix(comptime T: type) type {
             if (self.err != null) return self;
 
             if (self.rows != self.cols) {
-                return errorMatrix(self.allocator, error.NotSquareMatrix);
+                return errorMatrix(self.allocator, error.NotSquare);
             }
 
             const n = self.rows;
@@ -267,7 +276,7 @@ pub fn Matrix(comptime T: type) type {
                 };
 
                 if (@abs(det) < std.math.floatEps(T)) {
-                    return errorMatrix(self.allocator, error.SingularMatrix);
+                    return errorMatrix(self.allocator, error.Singular);
                 }
 
                 var inv = Matrix(T).init(self.allocator, n, n) catch |e| {
@@ -340,7 +349,7 @@ pub fn Matrix(comptime T: type) type {
 
                 // Check for singular matrix
                 if (max_val < std.math.floatEps(T) * 10) {
-                    return errorMatrix(self.allocator, error.SingularMatrix);
+                    return errorMatrix(self.allocator, error.Singular);
                 }
 
                 // Swap rows if needed
@@ -761,13 +770,13 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Terminal operation - evaluates the chain and returns result or error
-        pub fn eval(self: Self) !Self {
+        pub fn eval(self: Self) MatrixError!Self {
             if (self.err) |e| return e;
             return self;
         }
 
         /// Helper to create an error matrix
-        fn errorMatrix(allocator: std.mem.Allocator, err: anyerror) Self {
+        fn errorMatrix(allocator: std.mem.Allocator, err: MatrixError) Self {
             return Self{
                 .items = &.{},
                 .rows = 0,
