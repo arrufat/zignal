@@ -122,7 +122,7 @@ test "Matrix inverse - singular matrix error" {
     sing2.at(1, 0).* = 2.0;
     sing2.at(1, 1).* = 4.0; // Second row is multiple of first
 
-    try std.testing.expectError(error.SingularMatrix, sing2.inverse().eval());
+    try std.testing.expectError(error.Singular, sing2.inverse().eval());
 
     // Test singular 4x4 matrix (uses Gauss-Jordan)
     var sing4: Matrix(f64) = try .init(arena.allocator(), 4, 4);
@@ -144,5 +144,5 @@ test "Matrix inverse - singular matrix error" {
     sing4.at(3, 2).* = 11.0;
     sing4.at(3, 3).* = 12.0;
 
-    try std.testing.expectError(error.SingularMatrix, sing4.inverse().eval());
+    try std.testing.expectError(error.Singular, sing4.inverse().eval());
 }
