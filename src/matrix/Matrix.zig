@@ -80,6 +80,20 @@ pub fn Matrix(comptime T: type) type {
             }
         }
 
+        /// Create a duplicate of this matrix with the specified allocator.
+        /// The caller owns the returned matrix and must call deinit() on it.
+        ///
+        /// Example:
+        /// ```zig
+        /// var copy = try matrix.dupe(allocator);
+        /// defer copy.deinit();
+        /// ```
+        pub fn dupe(self: Self, allocator: std.mem.Allocator) !Self {
+            const result = try Self.init(allocator, self.rows, self.cols);
+            @memcpy(result.items, self.items);
+            return result;
+        }
+
         /// Returns the rows and columns as a struct.
         pub fn shape(self: Self) struct { usize, usize } {
             return .{ self.rows, self.cols };
