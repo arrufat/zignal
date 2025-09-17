@@ -5,10 +5,10 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-const Image = @import("../image.zig").Image;
 const channel_ops = @import("channel_ops.zig");
 const ShenCastan = @import("ShenCastan.zig");
 
@@ -1157,8 +1157,19 @@ pub fn Filter(comptime T: type) type {
                         rounded = @select(i32, below, zero_vec, rounded);
                         const above = rounded > max_vec;
                         rounded = @select(i32, above, max_vec, rounded);
-                        const out_vec: @Vector(vec_len_y, u8) = @intCast(rounded);
-                        dst_img.data[r * dst_img.stride + c ..][0..vec_len_y].* = out_vec;
+                        // TODO(zig-upgrade): Once verified fixed, enable vector store branch below.
+                        if (comptime false) {
+                            const out_vec: @Vector(vec_len_y, u8) = @intCast(rounded);
+                            dst_img.data[r * dst_img.stride + c ..][0..vec_len_y].* = out_vec;
+                        } else {
+                            // Work around vector cast/codegen bug:
+                            // casting @Vector(N,i32) -> @Vector(N,u8) and storing caused upper lanes
+                            // to mirror lower lanes in tests (gaussianBlur). Store lane-by-lane instead.
+                            inline for (0..vec_len_y) |lane| {
+                                const v: i32 = rounded[lane];
+                                dst_img.data[r * dst_img.stride + c + lane] = @intCast(@max(0, @min(255, v)));
+                            }
+                        }
                     }
 
                     // Remaining columns (scalar)
@@ -1246,8 +1257,17 @@ pub fn Filter(comptime T: type) type {
                         const max_vec: @Vector(vec_len, i32) = @splat(255);
                         rounded = @select(i32, rounded < zero_vec, zero_vec, rounded);
                         rounded = @select(i32, rounded > max_vec, max_vec, rounded);
-                        const out_vec: @Vector(vec_len, u8) = @intCast(rounded);
-                        temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
+                        // TODO(zig-upgrade): Once verified fixed, enable vector store branch below.
+                        if (comptime false) {
+                            const out_vec: @Vector(vec_len, u8) = @intCast(rounded);
+                            temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
+                        } else {
+                            // Same workaround as above: avoid vector @intCast store due to Zig dev bug.
+                            inline for (0..vec_len) |lane| {
+                                const v: i32 = rounded[lane];
+                                temp_img.data[temp_offset + c + lane] = @intCast(@max(0, @min(255, v)));
+                            }
+                        }
                     }
 
                     while (c < safe_end) : (c += 1) {
@@ -2120,10 +2140,11 @@ pub fn Filter(comptime T: type) type {
                 .int => unreachable, // handled above for u8
                 .float => {
                     const vec_len = std.simd.suggestVectorLength(T) orelse 8;
+                    const Vec = @Vector(vec_len, T);
                     var i: usize = 0;
                     while (i + vec_len <= total_pixels) : (i += vec_len) {
-                        const blur1_vec = out.data[i..][0..vec_len].*;
-                        const blur2_vec = temp.data[i..][0..vec_len].*;
+                        const blur1_vec: Vec = out.data[i..][0..vec_len].*;
+                        const blur2_vec: Vec = temp.data[i..][0..vec_len].*;
                         out.data[i..][0..vec_len].* = blur1_vec - blur2_vec;
                     }
                     while (i < total_pixels) : (i += 1) {
