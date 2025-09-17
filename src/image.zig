@@ -631,9 +631,10 @@ pub fn Image(comptime T: type) type {
         /// - `out`: Output image containing the difference.
         ///
         /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
-        /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
-        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, out: *Self) !void {
-            return Filter(T).differenceOfGaussians(self, allocator, sigma1, sigma2, out);
+        /// For edge detection, typically sigma2 ≈ 1.6 * sigma1. `offset` controls how u8-family
+        /// outputs encode negatives (128 recommended). For non-u8 types, `offset` is ignored.
+        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, offset: u8, out: *Self) !void {
+            return Filter(T).differenceOfGaussians(self, allocator, sigma1, sigma2, offset, out);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
