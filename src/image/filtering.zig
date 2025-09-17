@@ -1302,6 +1302,7 @@ pub fn Filter(comptime T: type) type {
             border_mode: BorderMode,
         ) void {
             const SCALE = 256;
+            const OFFSET = 128; // Offset to preserve negative values in u8 range
             const half_y1 = kernel_y1_int.len / 2;
             const half_y2 = kernel_y2_int.len / 2;
             const rows = dst_img.rows;
@@ -1364,7 +1365,7 @@ pub fn Filter(comptime T: type) type {
 
                         const r1: @Vector(vec_len, i32) = (acc1 + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
                         const r2: @Vector(vec_len, i32) = (acc2 + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
-                        var diff: @Vector(vec_len, i32) = r1 - r2;
+                        var diff: @Vector(vec_len, i32) = r1 - r2 + @as(@Vector(vec_len, i32), @splat(OFFSET));
                         const zero_vec: @Vector(vec_len, i32) = @splat(0);
                         const max_vec: @Vector(vec_len, i32) = @splat(255);
                         diff = @select(i32, diff < zero_vec, zero_vec, diff);
@@ -1391,7 +1392,7 @@ pub fn Filter(comptime T: type) type {
                         }
                         const rounded1 = @divTrunc(s1 + SCALE / 2, SCALE);
                         const rounded2 = @divTrunc(s2 + SCALE / 2, SCALE);
-                        const d = rounded1 - rounded2;
+                        const d = rounded1 - rounded2 + OFFSET;
                         dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
                     }
                 }
@@ -1411,7 +1412,7 @@ pub fn Filter(comptime T: type) type {
                         const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
                         s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
                     }
-                    const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE);
+                    const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE) + OFFSET;
                     dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
                 }
             }
@@ -2015,6 +2016,10 @@ pub fn Filter(comptime T: type) type {
         /// - `sigma1`: Standard deviation of the first (typically smaller) Gaussian kernel.
         /// - `sigma2`: Standard deviation of the second (typically larger) Gaussian kernel.
         /// - `out`: Output image containing the difference.
+        ///
+        /// Note for u8 images: To preserve negative values, the output uses an offset of 128.
+        /// Values < 128 represent negative differences, values > 128 represent positive differences,
+        /// and 128 represents zero difference. Users should subtract 128 to get actual difference values.
         ///
         /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
         /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
