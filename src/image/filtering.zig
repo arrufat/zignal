@@ -1034,27 +1034,34 @@ pub fn Filter(comptime T: type) type {
                     var c: usize = half_x;
                     const safe_end = cols - half_x;
 
-                    // SIMD processing for interior pixels
+                    // SIMD processing for interior pixels (symmetric kernel pairs)
                     while (c + vec_len <= safe_end) : (c += vec_len) {
-                        // Process vec_len pixels in parallel
-                        var results: @Vector(vec_len, i32) = @splat(0);
+                        var acc: @Vector(vec_len, i32) = @splat(0);
 
-                        // Accumulate convolution for each kernel element
-                        for (kernel_x_int, 0..) |k, ki| {
-                            if (k == 0) continue; // Skip zero weights
+                        // Center tap
+                        const k_center = kernel_x_int[half_x];
+                        if (k_center != 0) {
+                            const center_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c ..][0..vec_len].*;
+                            const center_i32: @Vector(vec_len, i32) = @intCast(center_u8);
+                            acc += center_i32 * @as(@Vector(vec_len, i32), @splat(k_center));
+                        }
 
-                            const k_vec: @Vector(vec_len, i32) = @splat(k);
-                            const src_idx = row_offset + c - half_x + ki;
-
-                            // Load a vector of u8 and widen to i32
-                            const pix_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
-                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
-
-                            results += pix_i32 * k_vec;
+                        // Paired taps
+                        var di: usize = 1;
+                        while (di <= half_x) : (di += 1) {
+                            const k = kernel_x_int[half_x + di];
+                            if (k != 0) {
+                                const left_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c - di ..][0..vec_len].*;
+                                const right_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c + di ..][0..vec_len].*;
+                                const left_i32: @Vector(vec_len, i32) = @intCast(left_u8);
+                                const right_i32: @Vector(vec_len, i32) = @intCast(right_u8);
+                                const pair_sum: @Vector(vec_len, i32) = left_i32 + right_i32;
+                                acc += pair_sum * @as(@Vector(vec_len, i32), @splat(k));
+                            }
                         }
 
                         // Vectorized rounding, clamp, and store
-                        var rounded_vec: @Vector(vec_len, i32) = (results + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
+                        var rounded_vec: @Vector(vec_len, i32) = (acc + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
                         const zero_vec: @Vector(vec_len, i32) = @splat(0);
                         const max_vec: @Vector(vec_len, i32) = @splat(255);
                         rounded_vec = @select(i32, rounded_vec < zero_vec, zero_vec, rounded_vec);
@@ -1114,19 +1121,33 @@ pub fn Filter(comptime T: type) type {
                 for (half_y..safe_end_r) |r| {
                     var c: usize = 0;
 
-                    // SIMD processing across columns
+                    // SIMD processing across columns (symmetric kernel pairs)
                     while (c + vec_len_y <= cols) : (c += vec_len_y) {
                         var acc: @Vector(vec_len_y, i32) = @splat(0);
-                        const r0 = r - half_y;
 
-                        for (kernel_y_int, 0..) |k, i| {
-                            if (k == 0) continue;
-                            const rr = r0 + i;
-                            const row_off = rr * temp_img.stride;
-                            const pix_u8: @Vector(vec_len_y, u8) = temp_img.data[row_off + c ..][0..vec_len_y].*;
-                            const pix_i32: @Vector(vec_len_y, i32) = @intCast(pix_u8);
-                            const k_vec: @Vector(vec_len_y, i32) = @splat(k);
-                            acc += pix_i32 * k_vec;
+                        // Center tap
+                        const k_center = kernel_y_int[half_y];
+                        if (k_center != 0) {
+                            const center_off = r * temp_img.stride;
+                            const center_u8: @Vector(vec_len_y, u8) = temp_img.data[center_off + c ..][0..vec_len_y].*;
+                            const center_i32: @Vector(vec_len_y, i32) = @intCast(center_u8);
+                            acc += center_i32 * @as(@Vector(vec_len_y, i32), @splat(k_center));
+                        }
+
+                        // Row pairs
+                        var di: usize = 1;
+                        while (di <= half_y) : (di += 1) {
+                            const k = kernel_y_int[half_y + di];
+                            if (k != 0) {
+                                const top_off = (r - di) * temp_img.stride;
+                                const bot_off = (r + di) * temp_img.stride;
+                                const top_u8: @Vector(vec_len_y, u8) = temp_img.data[top_off + c ..][0..vec_len_y].*;
+                                const bot_u8: @Vector(vec_len_y, u8) = temp_img.data[bot_off + c ..][0..vec_len_y].*;
+                                const top_i32: @Vector(vec_len_y, i32) = @intCast(top_u8);
+                                const bot_i32: @Vector(vec_len_y, i32) = @intCast(bot_u8);
+                                const pair_sum: @Vector(vec_len_y, i32) = top_i32 + bot_i32;
+                                acc += pair_sum * @as(@Vector(vec_len_y, i32), @splat(k));
+                            }
                         }
 
                         var rounded: @Vector(vec_len_y, i32) = (acc + @as(@Vector(vec_len_y, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len_y, i32), @splat(SCALE));
@@ -1295,26 +1316,50 @@ pub fn Filter(comptime T: type) type {
                     while (c + vec_len <= cols) : (c += vec_len) {
                         var acc1: @Vector(vec_len, i32) = @splat(0);
                         var acc2: @Vector(vec_len, i32) = @splat(0);
-                        const r01 = r - half_y1;
-                        const r02 = r - half_y2;
 
-                        for (kernel_y1_int, 0..) |k, i| {
-                            if (k == 0) continue;
-                            const rr = r01 + i;
-                            const row_off = rr * temp1.stride;
-                            const pix_u8: @Vector(vec_len, u8) = temp1.data[row_off + c ..][0..vec_len].*;
-                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
-                            const k_vec: @Vector(vec_len, i32) = @splat(k);
-                            acc1 += pix_i32 * k_vec;
+                        // Centers
+                        const k1_center = kernel_y1_int[half_y1];
+                        if (k1_center != 0) {
+                            const center1_off = r * temp1.stride;
+                            const v1_u8: @Vector(vec_len, u8) = temp1.data[center1_off + c ..][0..vec_len].*;
+                            const v1_i32: @Vector(vec_len, i32) = @intCast(v1_u8);
+                            acc1 += v1_i32 * @as(@Vector(vec_len, i32), @splat(k1_center));
                         }
-                        for (kernel_y2_int, 0..) |k, i| {
-                            if (k == 0) continue;
-                            const rr = r02 + i;
-                            const row_off = rr * temp2.stride;
-                            const pix_u8: @Vector(vec_len, u8) = temp2.data[row_off + c ..][0..vec_len].*;
-                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
-                            const k_vec: @Vector(vec_len, i32) = @splat(k);
-                            acc2 += pix_i32 * k_vec;
+                        const k2_center = kernel_y2_int[half_y2];
+                        if (k2_center != 0) {
+                            const center2_off = r * temp2.stride;
+                            const v2_u8: @Vector(vec_len, u8) = temp2.data[center2_off + c ..][0..vec_len].*;
+                            const v2_i32: @Vector(vec_len, i32) = @intCast(v2_u8);
+                            acc2 += v2_i32 * @as(@Vector(vec_len, i32), @splat(k2_center));
+                        }
+
+                        // Pairs for kernel1
+                        var di1: usize = 1;
+                        while (di1 <= half_y1) : (di1 += 1) {
+                            const k = kernel_y1_int[half_y1 + di1];
+                            if (k != 0) {
+                                const top_off = (r - di1) * temp1.stride;
+                                const bot_off = (r + di1) * temp1.stride;
+                                const top_u8: @Vector(vec_len, u8) = temp1.data[top_off + c ..][0..vec_len].*;
+                                const bot_u8: @Vector(vec_len, u8) = temp1.data[bot_off + c ..][0..vec_len].*;
+                                const top_i32: @Vector(vec_len, i32) = @intCast(top_u8);
+                                const bot_i32: @Vector(vec_len, i32) = @intCast(bot_u8);
+                                acc1 += (top_i32 + bot_i32) * @as(@Vector(vec_len, i32), @splat(k));
+                            }
+                        }
+                        // Pairs for kernel2
+                        var di2: usize = 1;
+                        while (di2 <= half_y2) : (di2 += 1) {
+                            const k = kernel_y2_int[half_y2 + di2];
+                            if (k != 0) {
+                                const top_off = (r - di2) * temp2.stride;
+                                const bot_off = (r + di2) * temp2.stride;
+                                const top_u8: @Vector(vec_len, u8) = temp2.data[top_off + c ..][0..vec_len].*;
+                                const bot_u8: @Vector(vec_len, u8) = temp2.data[bot_off + c ..][0..vec_len].*;
+                                const top_i32: @Vector(vec_len, i32) = @intCast(top_u8);
+                                const bot_i32: @Vector(vec_len, i32) = @intCast(bot_u8);
+                                acc2 += (top_i32 + bot_i32) * @as(@Vector(vec_len, i32), @splat(k));
+                            }
                         }
 
                         const r1: @Vector(vec_len, i32) = (acc1 + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
@@ -1705,6 +1750,9 @@ pub fn Filter(comptime T: type) type {
                         for (kernel_y, 0..) |k, i| {
                             kernel_y_int[i] = @intFromFloat(@round(k * SCALE));
                         }
+                        // Enforce symmetry and exact sum preservation
+                        symmetrizeKernelI32(kernel_x_int, SCALE);
+                        symmetrizeKernelI32(kernel_y_int, SCALE);
 
                         convolveSeparableU8Plane(self, out.*, temp, kernel_x_int, kernel_y_int, border_mode);
                         return; // Skip the rest of the function
@@ -2036,6 +2084,8 @@ pub fn Filter(comptime T: type) type {
                 defer allocator.free(kernel2_int);
                 for (kernel1, 0..) |k, i| kernel1_int[i] = @intFromFloat(@round(k * SCALE));
                 for (kernel2, 0..) |k, i| kernel2_int[i] = @intFromFloat(@round(k * SCALE));
+                symmetrizeKernelI32(kernel1_int, SCALE);
+                symmetrizeKernelI32(kernel2_int, SCALE);
 
                 // Two horizontal passes into two temps
                 var temp1 = try Self.init(allocator, self.rows, self.cols);
@@ -2179,6 +2229,10 @@ pub fn Filter(comptime T: type) type {
                 const val = @exp(-(x * x) / (2.0 * sigma2 * sigma2)) / sum2;
                 kernel2_int[i] = @intFromFloat(@round(val * 256.0));
             }
+
+            // Enforce symmetry and sum preservation
+            symmetrizeKernelI32(kernel1_int, 256);
+            symmetrizeKernelI32(kernel2_int, 256);
 
             // Dual-sigma path: two horizontal passes, one combined vertical pass
             var temp1 = try Self.init(allocator, self.rows, self.cols);
@@ -3585,6 +3639,29 @@ pub fn Filter(comptime T: type) type {
                 }
             }
             return result;
+        }
+
+        /// Make a 1D integer kernel symmetric and adjust the center tap so the sum equals `scale`.
+        inline fn symmetrizeKernelI32(k: []i32, scale: i32) void {
+            const n = k.len;
+            if (n == 0 or (n & 1) == 0) return; // only handle odd-length kernels
+            const half = n / 2;
+
+            var new_sum: i32 = 0;
+            // Symmetrize pairs
+            var i: usize = 0;
+            while (i < half) : (i += 1) {
+                const j = n - 1 - i;
+                const avg = @divTrunc(k[i] + k[j], 2);
+                k[i] = avg;
+                k[j] = avg;
+                new_sum += 2 * avg;
+            }
+            // Add center
+            new_sum += k[half];
+            // Adjust center to match target scale exactly
+            const delta = scale - new_sum;
+            k[half] += delta;
         }
     };
 }
