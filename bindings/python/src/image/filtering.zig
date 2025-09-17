@@ -131,6 +131,8 @@ pub const image_difference_of_gaussians_doc =
     \\## Parameters
     \\- `sigma1` (float): Standard deviation of the first (typically smaller) Gaussian kernel. Must be > 0.
     \\- `sigma2` (float): Standard deviation of the second (typically larger) Gaussian kernel. Must be > 0 and != sigma1.
+    \\- `offset` (int, optional): For u8/RGB/RGBA images, shift the output by a constant to preserve negative values.
+    \\    - Default: 128 for u8-based images, 0 otherwise. Set to 0 to match libraries that clamp to [0,255].
     \\
     \\## Returns
     \\A new image containing the difference of the two Gaussian-blurred versions.
@@ -160,10 +162,11 @@ pub fn image_difference_of_gaussians(self_obj: ?*c.PyObject, args: ?*c.PyObject,
     // Parse arguments
     var sigma1: f64 = 0;
     var sigma2: f64 = 0;
-    const kw = comptime py_utils.kw(&.{ "sigma1", "sigma2" });
-    const format = std.fmt.comptimePrint("dd", .{});
+    var offset_long: c_long = -1; // sentinel: not provided
+    const kw = comptime py_utils.kw(&.{ "sigma1", "sigma2", "offset" });
+    const format = std.fmt.comptimePrint("dd|l", .{});
     // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &sigma1, &sigma2) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &sigma1, &sigma2, &offset_long) == 0) {
         return null;
     }
 
@@ -194,8 +197,12 @@ pub fn image_difference_of_gaussians(self_obj: ?*c.PyObject, args: ?*c.PyObject,
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.differenceOfGaussians(allocator, @floatCast(sigma1_pos), @floatCast(sigma2_pos), &out) catch |err| {
+                var out: @TypeOf(img) = .empty;
+                const eff_offset: u8 = if (offset_long != -1)
+                    (py_utils.validateRange(u8, offset_long, 0, 255, "offset") catch return null)
+                else
+                    128;
+                img.differenceOfGaussians(allocator, @floatCast(sigma1_pos), @floatCast(sigma2_pos), eff_offset, &out) catch |err| {
                     if (err == error.InvalidSigma) {
                         c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
                     } else if (err == error.SigmasMustDiffer) {

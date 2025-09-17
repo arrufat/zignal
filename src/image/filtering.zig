@@ -1320,9 +1320,10 @@ pub fn Filter(comptime T: type) type {
             kernel_y1_int: []const i32,
             kernel_y2_int: []const i32,
             border_mode: BorderMode,
+            offset_u8: u8,
         ) void {
             const SCALE = 256;
-            const OFFSET = 128; // Offset to preserve negative values in u8 range
+            const OFFSET: i32 = @intCast(offset_u8); // configurable offset
             const half_y1 = kernel_y1_int.len / 2;
             const half_y2 = kernel_y2_int.len / 2;
             const rows = dst_img.rows;
@@ -2023,28 +2024,14 @@ pub fn Filter(comptime T: type) type {
             try convolveSeparable(self, allocator, kernel, kernel, out, .mirror);
         }
 
-        /// Applies Difference of Gaussians (DoG) band-pass filter to the image.
-        /// This efficiently computes the difference between two Gaussian blurs with different sigmas,
-        /// which acts as a band-pass filter and is commonly used for edge detection and feature enhancement.
+        /// Applies Difference of Gaussians (DoG) band-pass filter to the image with a configurable offset.
+        /// This efficiently computes gaussian_blur(sigma1) - gaussian_blur(sigma2).
         ///
-        /// The implementation uses several optimizations:
-        /// - SIMD-accelerated integer arithmetic for u8 images
-        /// - Fused DoG kernels when both sigmas have same radius
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `sigma1`: Standard deviation of the first (typically smaller) Gaussian kernel.
-        /// - `sigma2`: Standard deviation of the second (typically larger) Gaussian kernel.
-        /// - `out`: Output image containing the difference.
-        ///
-        /// Note for u8 and RGB/RGBA images: To preserve negative values, the output uses an offset of 128.
-        /// Values < 128 represent negative differences, values > 128 represent positive differences,
-        /// and 128 represents zero difference. Users should subtract 128 to get actual difference values.
-        /// This applies to both grayscale u8 images and each channel of RGB/RGBA images.
-        ///
-        /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
-        /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
-        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, out: *Self) !void {
+        /// For u8 and RGB/RGBA images, negative values cannot be represented directly. Use `offset`:
+        /// - offset = 128 → preserves negatives (128 = zero), default suggested for u8-family
+        /// - offset = 0 → clamp behavior to match many libraries
+        /// For non-u8 pixel types, `offset` is ignored.
+        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, offset: u8, out: *Self) !void {
             if (sigma1 <= 0 or sigma2 <= 0) return error.InvalidSigma;
             if (sigma1 == sigma2) return error.SigmasMustDiffer;
 
@@ -2056,7 +2043,7 @@ pub fn Filter(comptime T: type) type {
             // Special optimization for u8 images with common sigmas
             if (T == u8 and isCommonSigma(sigma1) and isCommonSigma(sigma2)) {
                 // Use fast integer path for common sigmas
-                return try differenceOfGaussiansIntegerFast(self, allocator, sigma1, sigma2, out);
+                return try differenceOfGaussiansIntegerFast(self, allocator, sigma1, sigma2, offset, out);
             }
 
             // For same-sized kernels, use fused approach
@@ -2064,8 +2051,16 @@ pub fn Filter(comptime T: type) type {
             const radius2 = @as(usize, @intFromFloat(@ceil(3.0 * sigma2)));
 
             if (radius1 == radius2) {
-                // Fused kernel approach - compute DoG kernel directly
-                return try differenceOfGaussiansFused(self, allocator, sigma1, sigma2, out);
+                const is_u8_family = switch (@typeInfo(T)) {
+                    .int => T == u8,
+                    .@"struct" => comptime meta.allFieldsAreU8(T),
+                    else => false,
+                };
+                // Use fused kernel unless we are u8-based and need an offset preserving negatives
+                if (!is_u8_family or offset == 0) {
+                    return try differenceOfGaussiansFused(self, allocator, sigma1, sigma2, offset, out);
+                }
+                // else fall through to the dual-kernel path which preserves signed values
             }
 
             // Fall back to optimized two-pass approach
@@ -2123,7 +2118,7 @@ pub fn Filter(comptime T: type) type {
                 convolveHorizontalU8Plane(self, temp2, kernel2_int, .mirror);
 
                 // One dual vertical pass producing DoG into out
-                convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror);
+                convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror, offset);
                 return;
             }
 
@@ -2154,7 +2149,7 @@ pub fn Filter(comptime T: type) type {
                 .@"struct" => {
                     // Check if all fields are u8 for offset approach
                     if (comptime meta.allFieldsAreU8(T)) {
-                        const OFFSET: i16 = 128; // Offset to preserve negative values
+                        const OFFSET: i16 = @intCast(offset); // Configurable offset for u8 structs
                         for (0..self.rows) |r| {
                             const row_offset = r * out.stride;
                             for (0..self.cols) |c| {
@@ -2201,7 +2196,7 @@ pub fn Filter(comptime T: type) type {
 
         /// Fused Difference of Gaussians - computes DoG with a single convolution pass
         /// when both kernels have the same size.
-        fn differenceOfGaussiansFused(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, out: *Self) !void {
+        fn differenceOfGaussiansFused(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, offset: u8, out: *Self) !void {
             const radius = @as(usize, @intFromFloat(@ceil(3.0 * @max(sigma1, sigma2))));
             const kernel_size = 2 * radius + 1;
 
@@ -2229,6 +2224,41 @@ pub fn Filter(comptime T: type) type {
 
             // Apply single separable convolution with DoG kernel
             try convolveSeparable(self, allocator, dog_kernel, dog_kernel, out, .mirror);
+
+            // For u8-based images, apply offset post-convolution to preserve negatives
+            switch (@typeInfo(T)) {
+                .int => {
+                    if (T == u8 and offset != 0) {
+                        for (out.data, 0..) |*p, i| {
+                            _ = i; // silence unused
+                            const v: i32 = @intCast(p.*);
+                            const vv = @max(0, @min(255, v + @as(i32, @intCast(offset))));
+                            p.* = @intCast(vv);
+                        }
+                    }
+                },
+                .@"struct" => {
+                    if (comptime meta.allFieldsAreU8(T)) {
+                        if (offset != 0) {
+                            const add: i16 = @intCast(offset);
+                            for (0..out.rows) |r| {
+                                const row_off = r * out.stride;
+                                for (0..out.cols) |c| {
+                                    const idx = row_off + c;
+                                    var px = out.data[idx];
+                                    inline for (std.meta.fields(T)) |field| {
+                                        const base: i16 = @intCast(@field(px, field.name));
+                                        const vv = @max(0, @min(255, base + add));
+                                        @field(px, field.name) = @intCast(vv);
+                                    }
+                                    out.data[idx] = px;
+                                }
+                            }
+                        }
+                    }
+                },
+                else => {},
+            }
         }
 
         /// Fast DoG using integer arithmetic for u8 images
@@ -2237,6 +2267,7 @@ pub fn Filter(comptime T: type) type {
             allocator: Allocator,
             sigma1: f32,
             sigma2: f32,
+            offset: u8,
             out: *Self,
         ) !void {
             // Only for u8 images
@@ -2291,7 +2322,7 @@ pub fn Filter(comptime T: type) type {
 
             convolveHorizontalU8Plane(self, temp1, kernel1_int, .mirror);
             convolveHorizontalU8Plane(self, temp2, kernel2_int, .mirror);
-            convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror);
+            convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror, offset);
         }
 
         /// Applies linear motion blur to simulate camera or object movement in a straight line.

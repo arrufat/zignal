@@ -729,7 +729,7 @@ test "differenceOfGaussians basic functionality" {
     }
 
     var dog_result: Image(f32) = .empty;
-    try image.differenceOfGaussians(std.testing.allocator, 1.0, 1.6, &dog_result);
+    try image.differenceOfGaussians(std.testing.allocator, 1.0, 1.6, 0, &dog_result);
     defer dog_result.deinit(std.testing.allocator);
 
     // Check that DoG produces reasonable results
@@ -768,7 +768,7 @@ test "differenceOfGaussians edge detection" {
     }
 
     var dog_result: Image(u8) = .empty;
-    try image.differenceOfGaussians(std.testing.allocator, 0.5, 1.0, &dog_result);
+    try image.differenceOfGaussians(std.testing.allocator, 0.5, 1.0, 128, &dog_result);
     defer dog_result.deinit(std.testing.allocator);
 
     // The edge region (around column 3) should have different values than uniform regions
@@ -788,9 +788,9 @@ test "differenceOfGaussians invalid parameters" {
     // Don't defer deinit for an empty image that may never be allocated
 
     // Test with invalid sigmas
-    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, -1.0, 2.0, &result));
-    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, 1.0, -2.0, &result));
-    try std.testing.expectError(error.SigmasMustDiffer, image.differenceOfGaussians(std.testing.allocator, 1.0, 1.0, &result));
+    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, -1.0, 2.0, 0, &result));
+    try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, 1.0, -2.0, 0, &result));
+    try std.testing.expectError(error.SigmasMustDiffer, image.differenceOfGaussians(std.testing.allocator, 1.0, 1.0, 0, &result));
 }
 
 test "differenceOfGaussians with RGB" {
@@ -807,7 +807,7 @@ test "differenceOfGaussians with RGB" {
     }
 
     var dog_result: Image(Rgb) = .empty;
-    try image.differenceOfGaussians(std.testing.allocator, 0.8, 1.3, &dog_result);
+    try image.differenceOfGaussians(std.testing.allocator, 0.8, 1.3, 128, &dog_result);
     defer dog_result.deinit(std.testing.allocator);
 
     // Just verify it runs without error and produces reasonable output
@@ -840,7 +840,7 @@ test "differenceOfGaussians approximates manual subtraction" {
 
     // Compute DoG
     var dog_result: Image(f32) = .empty;
-    try image.differenceOfGaussians(std.testing.allocator, sigma1, sigma2, &dog_result);
+    try image.differenceOfGaussians(std.testing.allocator, sigma1, sigma2, 0, &dog_result);
     defer dog_result.deinit(std.testing.allocator);
 
     // Compute manual subtraction
