@@ -929,9 +929,6 @@ pub const JpegState = struct {
     // Restart marker tracking
     expected_rst_marker: u3 = 0, // Cycles 0-7 for RST0-RST7
 
-    // Debug
-    debug_block_count: u32 = 0,
-
     pub fn init(allocator: Allocator) JpegState {
         return .{
             .allocator = allocator,
@@ -975,12 +972,14 @@ pub const JpegState = struct {
             }
         }
 
-        var code: u32 = 0;
-        var length: u5 = if (self.bit_reader.bit_count < fast_bits) 1 else fast_bits + 1;
-        while (length <= 16) : (length += 1) {
-            code = self.bit_reader.peekBits(length) catch return error.InvalidHuffmanCode;
-            if (table.code_map.get(.{ .length_minus_one = @intCast(length - 1), .code = @intCast(code) })) |value| {
-                self.bit_reader.consumeBits(length);
+        // Slow path: read one bit at a time and probe the table
+        var code: u16 = 0;
+        var length: u5 = 0;
+        while (length < 16) {
+            const bit: u32 = self.bit_reader.getBits(1) catch return error.InvalidHuffmanCode;
+            code = (code << 1) | @as(u16, @intCast(bit & 1));
+            length += 1;
+            if (table.code_map.get(.{ .length_minus_one = @intCast(length - 1), .code = code })) |value| {
                 return value;
             }
         }
@@ -1036,7 +1035,7 @@ pub const JpegState = struct {
                         k += 1;
                     }
                 } else {
-                    break; // Invalid symbol, exit gracefully
+                    return error.InvalidACCoefficient; // invalid stream
                 }
             } else {
                 // Skip 'run' zeros
@@ -1474,16 +1473,10 @@ pub const BitReader = struct {
     }
 
     pub fn flushBits(self: *BitReader) void {
-        if (self.bit_count > 8 and self.bit_count % 8 != 0) {
-            const bits_to_flush: u5 = self.bit_count % 8;
-            self.bit_buffer <<= bits_to_flush;
-            self.bit_count = self.bit_count - bits_to_flush;
-        } else if (self.bit_count % 8 == 0) {
-            return;
-        } else if (self.bit_count < 8) {
-            self.bit_buffer = 0;
-            self.bit_count = 0;
-        }
+        // On restart boundaries or explicit flush requests
+        // discard any buffered bits and realign to the next byte.
+        self.bit_buffer = 0;
+        self.bit_count = 0;
     }
 };
 
@@ -1607,16 +1600,19 @@ fn performBaselineScan(state: *JpegState, scan_info: ScanInfo) !void {
                         const actual_x = x + h;
                         const actual_y = y + v;
 
-                        if (actual_y >= state.block_height or actual_x >= state.block_width) continue;
-
-                        const block_id = actual_y * state.block_width_actual + actual_x;
-                        const block = &state.block_storage.?[block_id][component_index];
+                        // Compute storage pointer, but always decode the block to keep bitstream in sync
+                        var tmp_block: [64]i32 = undefined;
+                        const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
+                        const block_ptr: *[64]i32 = if (in_bounds)
+                            &state.block_storage.?[actual_y * state.block_width_actual + actual_x][component_index]
+                        else
+                            &tmp_block;
 
                         // Fill bit buffer before decoding
                         try state.bit_reader.fillBits(24);
 
-                        // Decode block directly into storage
-                        decodeBlockBaseline(state, scan_comp, block, &prediction_values[component_index]) catch |err| {
+                        // Decode block
+                        decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| {
                             if (err == error.UnexpectedEndOfData) return;
                             return err;
                         };
@@ -2237,10 +2233,23 @@ fn performBlockScan(state: *JpegState) !void {
     // DC prediction values for each component
     var prediction_values: [4]i32 = @splat(0);
 
+    // Track MCUs to honor restart intervals
+    var mcus_since_restart: u32 = 0;
+
     var y: usize = 0;
     while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
         while (x < state.block_width) : (x += x_step) {
+            // Handle restart intervals for baseline scans
+            if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
+                // Reset DC predictions at restart boundary
+                prediction_values = @splat(0);
+                mcus_since_restart = 0;
+                // Reset expected RST marker sequence number
+                state.expected_rst_marker = 0;
+                // Align to next byte boundary before continuing entropy decoding
+                state.bit_reader.flushBits();
+            }
             // Decode each component at this position
             for (state.scan_components) |scan_comp| {
                 // Find the component index for this scan component
@@ -2260,16 +2269,27 @@ fn performBlockScan(state: *JpegState) !void {
                 // Decode all blocks for this component in this MCU
                 for (0..v_max) |v| {
                     for (0..h_max) |h| {
-                        if (y + v >= state.block_height or x + h >= state.block_width) continue;
+                        const actual_x = x + h;
+                        const actual_y = y + v;
 
-                        const block_id = (y + v) * state.block_width_actual + (x + h);
-                        const block = &state.block_storage.?[block_id][component_index];
+                        var tmp_block: [64]i32 = undefined;
+                        const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
+                        const block_ptr: *[64]i32 = if (in_bounds)
+                            &state.block_storage.?[actual_y * state.block_width_actual + actual_x][component_index]
+                        else
+                            &tmp_block;
 
-                        // Decode block directly into storage
-                        try decodeBlockToStorage(state, scan_comp, block, &prediction_values[component_index]);
+                        // Ensure we have enough bits buffered; helps when resuming after markers
+                        _ = state.bit_reader.fillBits(24) catch {};
+
+                        // Decode block directly into storage using the baseline path
+                        try decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]);
                     }
                 }
             }
+
+            // Count one MCU completed (one position in interleaved grid)
+            mcus_since_restart += 1;
         }
     }
 }
@@ -2910,6 +2930,44 @@ test "JPEG subsampling 4:2:0 roundtrip" {
 
     const ps = try img.psnr(out);
     try std.testing.expect(ps > 45);
+}
+
+test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
+    const gpa = std.testing.allocator;
+
+    // Choose dimensions that are not multiples of 16 to force partial MCUs on both axes
+    const rows: usize = 37; // not multiple of 16
+    const cols: usize = 53; // not multiple of 16
+
+    var img = try Image(Rgb).init(gpa, rows, cols);
+    defer img.deinit(gpa);
+
+    // Fill with a smooth gradient so PSNR is meaningful
+    for (0..rows) |y| {
+        for (0..cols) |x| {
+            const r: u8 = @intCast((x * 255) / (cols - 1));
+            const g: u8 = @intCast((y * 255) / (rows - 1));
+            const b: u8 = @intCast(((2 * x + 3 * y) * 255) / (2 * (cols - 1) + 3 * (rows - 1)));
+            img.at(y, x).* = .{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv420 });
+    defer gpa.free(bytes);
+
+    var state = try decode(gpa, bytes);
+    defer state.deinit();
+    if (state.frame_type == .baseline) try performBlockScan(&state);
+    try dequantizeAllBlocks(&state);
+    idctAllBlocks(&state);
+    try ycbcrToRgbAllBlocks(&state);
+    var out = try Image(Rgb).init(gpa, state.height, state.width);
+    defer out.deinit(gpa);
+    try renderRgbBlocksToPixels(Rgb, &state, &out);
+
+    // We expect a decent reconstruction quality even with 4:2:0 on odd dimensions.
+    const ps = try img.psnr(out);
+    try std.testing.expect(ps > 35.0);
 }
 
 // Basic tests
