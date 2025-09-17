@@ -2017,9 +2017,10 @@ pub fn Filter(comptime T: type) type {
         /// - `sigma2`: Standard deviation of the second (typically larger) Gaussian kernel.
         /// - `out`: Output image containing the difference.
         ///
-        /// Note for u8 images: To preserve negative values, the output uses an offset of 128.
+        /// Note for u8 and RGB/RGBA images: To preserve negative values, the output uses an offset of 128.
         /// Values < 128 represent negative differences, values > 128 represent positive differences,
         /// and 128 represents zero difference. Users should subtract 128 to get actual difference values.
+        /// This applies to both grayscale u8 images and each channel of RGB/RGBA images.
         ///
         /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
         /// For edge detection, typically sigma2 ≈ 1.6 * sigma1
@@ -2130,24 +2131,46 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    for (0..self.rows) |r| {
-                        const row_offset = r * out.stride;
-                        for (0..self.cols) |c| {
-                            const idx = row_offset + c;
-                            var result_pixel: T = undefined;
-                            const pixel1 = out.data[idx];
-                            const pixel2 = temp.data[idx];
-                            inline for (std.meta.fields(T)) |field| {
-                                const val1 = as(f32, @field(pixel1, field.name));
-                                const val2 = as(f32, @field(pixel2, field.name));
-                                const diff = val1 - val2;
-                                @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(diff)))),
-                                    .float => as(field.type, diff),
-                                    else => @compileError("Unsupported field type in struct"),
-                                };
+                    // Check if all fields are u8 for offset approach
+                    if (comptime meta.allFieldsAreU8(T)) {
+                        const OFFSET: i16 = 128; // Offset to preserve negative values
+                        for (0..self.rows) |r| {
+                            const row_offset = r * out.stride;
+                            for (0..self.cols) |c| {
+                                const idx = row_offset + c;
+                                var result_pixel: T = undefined;
+                                const pixel1 = out.data[idx];
+                                const pixel2 = temp.data[idx];
+                                inline for (std.meta.fields(T)) |field| {
+                                    const val1 = @as(i16, @field(pixel1, field.name));
+                                    const val2 = @as(i16, @field(pixel2, field.name));
+                                    const diff = val1 - val2 + OFFSET;
+                                    @field(result_pixel, field.name) = @intCast(@max(0, @min(255, diff)));
+                                }
+                                out.data[idx] = result_pixel;
                             }
-                            out.data[idx] = result_pixel;
+                        }
+                    } else {
+                        // Float path for non-u8 structs
+                        for (0..self.rows) |r| {
+                            const row_offset = r * out.stride;
+                            for (0..self.cols) |c| {
+                                const idx = row_offset + c;
+                                var result_pixel: T = undefined;
+                                const pixel1 = out.data[idx];
+                                const pixel2 = temp.data[idx];
+                                inline for (std.meta.fields(T)) |field| {
+                                    const val1 = as(f32, @field(pixel1, field.name));
+                                    const val2 = as(f32, @field(pixel2, field.name));
+                                    const diff = val1 - val2;
+                                    @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(diff)))),
+                                        .float => as(field.type, diff),
+                                        else => @compileError("Unsupported field type in struct"),
+                                    };
+                                }
+                                out.data[idx] = result_pixel;
+                            }
                         }
                     }
                 },
