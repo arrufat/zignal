@@ -649,7 +649,9 @@ pub fn validateNonNull(comptime T: type, ptr: ?T, name: []const u8) !T {
 pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
     const info = @typeInfo(T);
     const max = if (info == .float) std.math.inf(T) else std.math.maxInt(T);
-    return validateRange(T, value, 1, max, name);
+    // For floats, allow any positive value > 0. For integers, minimum is 1.
+    const min = if (info == .float) std.math.floatEps(T) else 1;
+    return validateRange(T, value, min, max, name);
 }
 
 /// Build a Python kwlist for PyArg_ParseTupleAndKeywords from a comptime list of names.
