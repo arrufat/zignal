@@ -1114,6 +1114,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "difference_of_gaussians",
+            .meth = @ptrCast(&filtering.image_difference_of_gaussians),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_difference_of_gaussians_doc,
+            .params = "self, sigma1: float, sigma2: float",
+            .returns = "Image",
+        },
+        .{
             .name = "sharpen",
             .meth = @ptrCast(&filtering.image_sharpen),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
