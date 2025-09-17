@@ -61,7 +61,7 @@ pub fn build(b: *Build) void {
         .{ .name = "features", .path = "src/features.zig" },
         .{ .name = "optimization", .path = "src/optimization.zig" },
     };
-    
+
     for (modules) |module| {
         const module_test = b.addTest(.{
             .name = module.name,
