@@ -1104,15 +1104,43 @@ pub fn Filter(comptime T: type) type {
                 }
             }
 
-            // Vertical pass (temp -> dst) with SIMD
-            for (0..cols) |c| {
-                // Process interior pixels with SIMD
-                if (rows > 2 * half_y) {
-                    var r: usize = half_y;
-                    const safe_end = rows - half_y;
+            // Vertical pass (temp -> dst) with SIMD across columns
+            const vec_len_y = vec_len;
 
-                    // Process one column at a time (vertical access pattern)
-                    while (r < safe_end) : (r += 1) {
+            // Interior rows: process r in [half_y, rows - half_y)
+            if (rows > 2 * half_y) {
+                const safe_end_r = rows - half_y;
+                for (half_y..safe_end_r) |r| {
+                    var c: usize = 0;
+
+                    // SIMD processing across columns
+                    while (c + vec_len_y <= cols) : (c += vec_len_y) {
+                        var acc: @Vector(vec_len_y, i32) = @splat(0);
+                        const r0 = r - half_y;
+
+                        for (kernel_y_int, 0..) |k, i| {
+                            if (k == 0) continue;
+                            const rr = r0 + i;
+                            const row_off = rr * temp_img.stride;
+                            const pix_u8: @Vector(vec_len_y, u8) = temp_img.data[row_off + c ..][0..vec_len_y].*;
+                            const pix_i32: @Vector(vec_len_y, i32) = @intCast(pix_u8);
+                            const k_vec: @Vector(vec_len_y, i32) = @splat(k);
+                            acc += pix_i32 * k_vec;
+                        }
+
+                        var rounded: @Vector(vec_len_y, i32) = (acc + @as(@Vector(vec_len_y, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len_y, i32), @splat(SCALE));
+                        const zero_vec: @Vector(vec_len_y, i32) = @splat(0);
+                        const max_vec: @Vector(vec_len_y, i32) = @splat(255);
+                        const below = rounded < zero_vec;
+                        rounded = @select(i32, below, zero_vec, rounded);
+                        const above = rounded > max_vec;
+                        rounded = @select(i32, above, max_vec, rounded);
+                        const out_vec: @Vector(vec_len_y, u8) = @intCast(rounded);
+                        dst_img.data[r * dst_img.stride + c ..][0..vec_len_y].* = out_vec;
+                    }
+
+                    // Remaining columns (scalar)
+                    while (c < cols) : (c += 1) {
                         var result: i32 = 0;
                         const r0 = r - half_y;
                         for (kernel_y_int, 0..) |k, i| {
@@ -1125,9 +1153,11 @@ pub fn Filter(comptime T: type) type {
                         dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                     }
                 }
+            }
 
-                // Handle top border
-                for (0..@min(half_y, rows)) |r| {
+            // Handle top border rows (scalar across columns)
+            for (0..@min(half_y, rows)) |r| {
+                for (0..cols) |c| {
                     var result: i32 = 0;
                     const ir = @as(isize, @intCast(r));
                     for (kernel_y_int, 0..) |k, i| {
@@ -1138,10 +1168,12 @@ pub fn Filter(comptime T: type) type {
                     const rounded = @divTrunc(result + SCALE / 2, SCALE);
                     dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
                 }
+            }
 
-                // Handle bottom border
-                if (rows > half_y) {
-                    for (rows - half_y..rows) |r| {
+            // Handle bottom border rows (scalar across columns)
+            if (rows > half_y) {
+                for (rows - half_y..rows) |r| {
+                    for (0..cols) |c| {
                         var result: i32 = 0;
                         const ir = @as(isize, @intCast(r));
                         for (kernel_y_int, 0..) |k, i| {
