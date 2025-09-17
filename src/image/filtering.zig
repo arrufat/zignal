@@ -1046,20 +1046,21 @@ pub fn Filter(comptime T: type) type {
                             const k_vec: @Vector(vec_len, i32) = @splat(k);
                             const src_idx = row_offset + c - half_x + ki;
 
-                            // Load and convert pixels to i32
-                            var pixels: @Vector(vec_len, i32) = undefined;
-                            for (0..vec_len) |vi| {
-                                pixels[vi] = @as(i32, src_img.data[src_idx + vi]);
-                            }
+                            // Load a vector of u8 and widen to i32
+                            const pix_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
+                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
 
-                            results += pixels * k_vec;
+                            results += pix_i32 * k_vec;
                         }
 
-                        // Round and store results
-                        for (0..vec_len) |vi| {
-                            const rounded = @divTrunc(results[vi] + SCALE / 2, SCALE);
-                            temp_img.data[temp_offset + c + vi] = @intCast(@max(0, @min(255, rounded)));
-                        }
+                        // Vectorized rounding, clamp, and store
+                        var rounded_vec: @Vector(vec_len, i32) = (results + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
+                        const zero_vec: @Vector(vec_len, i32) = @splat(0);
+                        const max_vec: @Vector(vec_len, i32) = @splat(255);
+                        rounded_vec = @select(i32, rounded_vec < zero_vec, zero_vec, rounded_vec);
+                        rounded_vec = @select(i32, rounded_vec > max_vec, max_vec, rounded_vec);
+                        const out_vec: @Vector(vec_len, u8) = @intCast(rounded_vec);
+                        temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
                     }
 
                     // Handle remaining pixels with scalar code
@@ -1183,6 +1184,210 @@ pub fn Filter(comptime T: type) type {
                         }
                         const rounded = @divTrunc(result + SCALE / 2, SCALE);
                         dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
+                    }
+                }
+            }
+        }
+
+        /// Horizontal-only separable convolution for u8 plane (integer SIMD).
+        fn convolveHorizontalU8Plane(
+            src_img: Image(u8),
+            temp_img: Image(u8),
+            kernel_x_int: []const i32,
+            border_mode: BorderMode,
+        ) void {
+            const SCALE = 256;
+            const half_x = kernel_x_int.len / 2;
+            const rows = src_img.rows;
+            const cols = src_img.cols;
+            const vec_len = std.simd.suggestVectorLength(i32) orelse 8;
+
+            for (0..rows) |r| {
+                const row_offset = r * src_img.stride;
+                const temp_offset = r * temp_img.stride;
+
+                if (cols > 2 * half_x) {
+                    var c: usize = half_x;
+                    const safe_end = cols - half_x;
+
+                    while (c + vec_len <= safe_end) : (c += vec_len) {
+                        var results: @Vector(vec_len, i32) = @splat(0);
+                        for (kernel_x_int, 0..) |k, ki| {
+                            if (k == 0) continue;
+                            const k_vec: @Vector(vec_len, i32) = @splat(k);
+                            const src_idx = row_offset + c - half_x + ki;
+                            const pix_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
+                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
+                            results += pix_i32 * k_vec;
+                        }
+                        var rounded: @Vector(vec_len, i32) = (results + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
+                        const zero_vec: @Vector(vec_len, i32) = @splat(0);
+                        const max_vec: @Vector(vec_len, i32) = @splat(255);
+                        rounded = @select(i32, rounded < zero_vec, zero_vec, rounded);
+                        rounded = @select(i32, rounded > max_vec, max_vec, rounded);
+                        const out_vec: @Vector(vec_len, u8) = @intCast(rounded);
+                        temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
+                    }
+
+                    while (c < safe_end) : (c += 1) {
+                        var result: i32 = 0;
+                        const c0 = c - half_x;
+                        for (kernel_x_int, 0..) |k, i| {
+                            const cc = c0 + i;
+                            result += @as(i32, src_img.data[row_offset + cc]) * k;
+                        }
+                        const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                        temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                    }
+                }
+
+                // Left border
+                for (0..@min(half_x, cols)) |c| {
+                    var result: i32 = 0;
+                    const ic = @as(isize, @intCast(c));
+                    for (kernel_x_int, 0..) |k, i| {
+                        const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
+                        const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                        result += pixel_val * k;
+                    }
+                    const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                    temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                }
+
+                // Right border
+                if (cols > half_x) {
+                    for (cols - half_x..cols) |c| {
+                        var result: i32 = 0;
+                        const ic = @as(isize, @intCast(c));
+                        for (kernel_x_int, 0..) |k, i| {
+                            const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
+                            const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                            result += pixel_val * k;
+                        }
+                        const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                        temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                    }
+                }
+            }
+        }
+
+        /// Vertical dual-kernel pass: consumes two horizontal temps and writes DoG (blur1 - blur2).
+        fn convolveVerticalU8PlaneDual(
+            temp1: Image(u8),
+            temp2: Image(u8),
+            dst_img: Image(u8),
+            kernel_y1_int: []const i32,
+            kernel_y2_int: []const i32,
+            border_mode: BorderMode,
+        ) void {
+            const SCALE = 256;
+            const half_y1 = kernel_y1_int.len / 2;
+            const half_y2 = kernel_y2_int.len / 2;
+            const rows = dst_img.rows;
+            const cols = dst_img.cols;
+            const vec_len = std.simd.suggestVectorLength(i32) orelse 8;
+
+            const half_y = @max(half_y1, half_y2);
+            if (rows > 2 * half_y) {
+                const safe_end_r = rows - half_y;
+                for (half_y..safe_end_r) |r| {
+                    var c: usize = 0;
+                    while (c + vec_len <= cols) : (c += vec_len) {
+                        var acc1: @Vector(vec_len, i32) = @splat(0);
+                        var acc2: @Vector(vec_len, i32) = @splat(0);
+                        const r01 = r - half_y1;
+                        const r02 = r - half_y2;
+
+                        for (kernel_y1_int, 0..) |k, i| {
+                            if (k == 0) continue;
+                            const rr = r01 + i;
+                            const row_off = rr * temp1.stride;
+                            const pix_u8: @Vector(vec_len, u8) = temp1.data[row_off + c ..][0..vec_len].*;
+                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
+                            const k_vec: @Vector(vec_len, i32) = @splat(k);
+                            acc1 += pix_i32 * k_vec;
+                        }
+                        for (kernel_y2_int, 0..) |k, i| {
+                            if (k == 0) continue;
+                            const rr = r02 + i;
+                            const row_off = rr * temp2.stride;
+                            const pix_u8: @Vector(vec_len, u8) = temp2.data[row_off + c ..][0..vec_len].*;
+                            const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
+                            const k_vec: @Vector(vec_len, i32) = @splat(k);
+                            acc2 += pix_i32 * k_vec;
+                        }
+
+                        const r1: @Vector(vec_len, i32) = (acc1 + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
+                        const r2: @Vector(vec_len, i32) = (acc2 + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
+                        var diff: @Vector(vec_len, i32) = r1 - r2;
+                        const zero_vec: @Vector(vec_len, i32) = @splat(0);
+                        const max_vec: @Vector(vec_len, i32) = @splat(255);
+                        diff = @select(i32, diff < zero_vec, zero_vec, diff);
+                        diff = @select(i32, diff > max_vec, max_vec, diff);
+                        const out_vec: @Vector(vec_len, u8) = @intCast(diff);
+                        dst_img.data[r * dst_img.stride + c ..][0..vec_len].* = out_vec;
+                    }
+
+                    // Scalar tail
+                    while (c < cols) : (c += 1) {
+                        var s1: i32 = 0;
+                        var s2: i32 = 0;
+                        const r01 = r - half_y1;
+                        const r02 = r - half_y2;
+                        for (kernel_y1_int, 0..) |k, i| {
+                            if (k == 0) continue;
+                            const rr = r01 + i;
+                            s1 += @as(i32, temp1.data[rr * temp1.stride + c]) * k;
+                        }
+                        for (kernel_y2_int, 0..) |k, i| {
+                            if (k == 0) continue;
+                            const rr = r02 + i;
+                            s2 += @as(i32, temp2.data[rr * temp2.stride + c]) * k;
+                        }
+                        const rounded1 = @divTrunc(s1 + SCALE / 2, SCALE);
+                        const rounded2 = @divTrunc(s2 + SCALE / 2, SCALE);
+                        const d = rounded1 - rounded2;
+                        dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
+                    }
+                }
+            }
+
+            // Top border rows
+            for (0..@min(half_y, rows)) |r| {
+                for (0..cols) |c| {
+                    var s1: i32 = 0;
+                    var s2: i32 = 0;
+                    const ir = @as(isize, @intCast(r));
+                    for (kernel_y1_int, 0..) |k, i| {
+                        const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y1));
+                        s1 += getPixel(u8, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
+                    }
+                    for (kernel_y2_int, 0..) |k, i| {
+                        const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
+                        s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
+                    }
+                    const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE);
+                    dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
+                }
+            }
+
+            // Bottom border rows
+            if (rows > half_y) {
+                for (rows - half_y..rows) |r| {
+                    for (0..cols) |c| {
+                        var s1: i32 = 0;
+                        var s2: i32 = 0;
+                        const ir = @as(isize, @intCast(r));
+                        for (kernel_y1_int, 0..) |k, i| {
+                            const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y1));
+                            s1 += getPixel(u8, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
+                        }
+                        for (kernel_y2_int, 0..) |k, i| {
+                            const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
+                            s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
+                        }
+                        const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE);
+                        dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
                     }
                 }
             }
@@ -1821,80 +2026,55 @@ pub fn Filter(comptime T: type) type {
                 k.* /= sum2;
             }
 
-            // Optimized approach: use output buffer for first blur, only one temp buffer
+            // For u8, use dual-sigma separable path: two horizontal passes, one combined vertical pass
+            if (T == u8) {
+                const SCALE = 256;
+                // Convert kernels to integer scaled by 256
+                var kernel1_int = try allocator.alloc(i32, kernel_size1);
+                defer allocator.free(kernel1_int);
+                var kernel2_int = try allocator.alloc(i32, kernel_size2);
+                defer allocator.free(kernel2_int);
+                for (kernel1, 0..) |k, i| kernel1_int[i] = @intFromFloat(@round(k * SCALE));
+                for (kernel2, 0..) |k, i| kernel2_int[i] = @intFromFloat(@round(k * SCALE));
+
+                // Two horizontal passes into two temps
+                var temp1 = try Self.init(allocator, self.rows, self.cols);
+                defer temp1.deinit(allocator);
+                var temp2 = try Self.init(allocator, self.rows, self.cols);
+                defer temp2.deinit(allocator);
+
+                convolveHorizontalU8Plane(self, temp1, kernel1_int, .mirror);
+                convolveHorizontalU8Plane(self, temp2, kernel2_int, .mirror);
+
+                // One dual vertical pass producing DoG into out
+                convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror);
+                return;
+            }
+
+            // Optimized approach (float/struct): two blurs then subtract
             var temp = try Self.init(allocator, self.rows, self.cols);
             defer temp.deinit(allocator);
 
-            // Apply first Gaussian blur directly to output
             try convolveSeparable(self, allocator, kernel1, kernel1, out, .mirror);
-
-            // Apply second Gaussian blur to temporary buffer
             try convolveSeparable(self, allocator, kernel2, kernel2, &temp, .mirror);
 
-            // SIMD-optimized subtraction: out = out - temp
             const total_pixels = self.rows * self.cols;
 
             switch (@typeInfo(T)) {
-                .int => {
-                    // For integer types with SIMD
-                    if (T == u8) {
-                        const vec_len = std.simd.suggestVectorLength(i16) orelse 8;
-                        var i: usize = 0;
-
-                        // Process SIMD chunks using i16 to avoid overflow
-                        while (i + vec_len <= total_pixels) : (i += vec_len) {
-                            // Load as i16 to handle subtraction without overflow
-                            var blur1_vec: @Vector(vec_len, i16) = undefined;
-                            var blur2_vec: @Vector(vec_len, i16) = undefined;
-                            for (0..vec_len) |j| {
-                                blur1_vec[j] = @as(i16, out.data[i + j]);
-                                blur2_vec[j] = @as(i16, temp.data[i + j]);
-                            }
-
-                            const diff_vec = blur1_vec - blur2_vec;
-
-                            // Clamp and store
-                            for (0..vec_len) |j| {
-                                const clamped = @max(@as(i16, 0), @min(@as(i16, 255), diff_vec[j]));
-                                out.data[i + j] = @intCast(clamped);
-                            }
-                        }
-
-                        // Handle remaining pixels
-                        while (i < total_pixels) : (i += 1) {
-                            const diff = @as(i16, out.data[i]) - @as(i16, temp.data[i]);
-                            out.data[i] = @intCast(@max(@as(i16, 0), @min(@as(i16, 255), diff)));
-                        }
-                    } else {
-                        // Generic integer path
-                        for (0..total_pixels) |i| {
-                            const val1 = as(i32, out.data[i]);
-                            const val2 = as(i32, temp.data[i]);
-                            const diff = val1 - val2;
-                            out.data[i] = @intCast(@max(std.math.minInt(T), @min(std.math.maxInt(T), diff)));
-                        }
-                    }
-                },
+                .int => unreachable, // handled above for u8
                 .float => {
-                    // SIMD path for float types
                     const vec_len = std.simd.suggestVectorLength(T) orelse 8;
                     var i: usize = 0;
-
-                    // Process in SIMD chunks
                     while (i + vec_len <= total_pixels) : (i += vec_len) {
                         const blur1_vec = out.data[i..][0..vec_len].*;
                         const blur2_vec = temp.data[i..][0..vec_len].*;
                         out.data[i..][0..vec_len].* = blur1_vec - blur2_vec;
                     }
-
-                    // Handle remaining pixels
                     while (i < total_pixels) : (i += 1) {
                         out.data[i] = out.data[i] - temp.data[i];
                     }
                 },
                 .@"struct" => {
-                    // For struct types (RGB, RGBA), use the existing approach
-                    // but with better memory access pattern
                     for (0..self.rows) |r| {
                         const row_offset = r * out.stride;
                         for (0..self.cols) |c| {
@@ -1902,12 +2082,10 @@ pub fn Filter(comptime T: type) type {
                             var result_pixel: T = undefined;
                             const pixel1 = out.data[idx];
                             const pixel2 = temp.data[idx];
-
                             inline for (std.meta.fields(T)) |field| {
                                 const val1 = as(f32, @field(pixel1, field.name));
                                 const val2 = as(f32, @field(pixel2, field.name));
                                 const diff = val1 - val2;
-
                                 @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
                                     .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(diff)))),
                                     .float => as(field.type, diff),
@@ -2002,45 +2180,15 @@ pub fn Filter(comptime T: type) type {
                 kernel2_int[i] = @intFromFloat(@round(val * 256.0));
             }
 
-            // Allocate temporary buffer
-            var temp = try Self.init(allocator, self.rows, self.cols);
-            defer temp.deinit(allocator);
-
-            // Apply first blur using integer kernel
-            convolveSeparableU8Plane(self, out.*, temp, kernel1_int, kernel1_int, .mirror);
-
-            // Apply second blur to temp
+            // Dual-sigma path: two horizontal passes, one combined vertical pass
+            var temp1 = try Self.init(allocator, self.rows, self.cols);
+            defer temp1.deinit(allocator);
             var temp2 = try Self.init(allocator, self.rows, self.cols);
             defer temp2.deinit(allocator);
-            convolveSeparableU8Plane(self, temp2, temp, kernel2_int, kernel2_int, .mirror);
 
-            // SIMD-optimized subtraction with saturation
-            const total_pixels = self.rows * self.cols;
-            const vec_len = std.simd.suggestVectorLength(i16) orelse 8;
-            var i: usize = 0;
-
-            while (i + vec_len <= total_pixels) : (i += vec_len) {
-                var blur1_vec: @Vector(vec_len, i16) = undefined;
-                var blur2_vec: @Vector(vec_len, i16) = undefined;
-
-                for (0..vec_len) |j| {
-                    blur1_vec[j] = @as(i16, out.data[i + j]);
-                    blur2_vec[j] = @as(i16, temp2.data[i + j]);
-                }
-
-                const diff_vec = blur1_vec - blur2_vec;
-
-                for (0..vec_len) |j| {
-                    const clamped = @max(@as(i16, 0), @min(@as(i16, 255), diff_vec[j]));
-                    out.data[i + j] = @intCast(clamped);
-                }
-            }
-
-            // Handle remaining pixels
-            while (i < total_pixels) : (i += 1) {
-                const diff = @as(i16, out.data[i]) - @as(i16, temp2.data[i]);
-                out.data[i] = @intCast(@max(@as(i16, 0), @min(@as(i16, 255), diff)));
-            }
+            convolveHorizontalU8Plane(self, temp1, kernel1_int, .mirror);
+            convolveHorizontalU8Plane(self, temp2, kernel2_int, .mirror);
+            convolveVerticalU8PlaneDual(temp1, temp2, out.*, kernel1_int, kernel2_int, .mirror);
         }
 
         /// Applies linear motion blur to simulate camera or object movement in a straight line.
