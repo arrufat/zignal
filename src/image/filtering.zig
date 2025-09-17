@@ -1452,7 +1452,7 @@ pub fn Filter(comptime T: type) type {
                             const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
                             s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
                         }
-                        const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE);
+                        const d = @divTrunc(s1 + SCALE / 2, SCALE) - @divTrunc(s2 + SCALE / 2, SCALE) + OFFSET;
                         dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
                     }
                 }
