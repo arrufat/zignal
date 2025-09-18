@@ -980,7 +980,8 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
 pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encode(T, allocator, image, .default);
+    const options = EncodeOptions{ .compression_level = .level_1, .filter_mode = .adaptive, .compression_strategy = .filtered };
+    const png_data = try encode(T, allocator, image, options);
     defer allocator.free(png_data);
 
     const file = try std.fs.cwd().createFile(file_path, .{});
