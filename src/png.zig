@@ -863,9 +863,8 @@ pub const EncodeOptions = struct {
     srgb_intent: ?SrgbRenderingIntent = null,
     pub const default: EncodeOptions = .{
         .filter_mode = .adaptive,
-        // Prefer best compression for PNG by default to match typical encoders
-        .compression_level = .level_9,
-        .compression_strategy = .filtered,
+        .compression_level = .level_6,
+        .compression_strategy = .default,
     };
 };
 
@@ -980,8 +979,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
 pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const options = EncodeOptions{ .compression_level = .level_1, .filter_mode = .adaptive, .compression_strategy = .filtered };
-    const png_data = try encode(T, allocator, image, options);
+    const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
 
     const file = try std.fs.cwd().createFile(file_path, .{});
@@ -1108,51 +1106,18 @@ fn filterRow(
     }
 }
 
-/// Calculate entropy-based cost for filtered data
-/// Lower entropy means better compression
-fn calculateFilterCost(filtered_data: []const u8) f32 {
-    // Count byte frequencies
-    var freq: [256]u32 = @splat(0);
-    for (filtered_data) |byte| {
-        freq[byte] += 1;
+/// Calculate cost for filtered data using the standard PNG heuristic:
+/// sum of absolute values of the signed filter bytes. Lower is better.
+fn calculateFilterCost(filtered_data: []const u8) u32 {
+    var cost: u32 = 0;
+    // Interpret bytes as signed 8-bit deltas; accumulate absolute value safely
+    // Cast to wider type before abs to handle -128 correctly.
+    for (filtered_data) |b| {
+        const sb: i8 = @bitCast(b);
+        const wide: i16 = sb;
+        cost += @as(u32, @intCast(@abs(wide)));
     }
-
-    // Calculate entropy
-    var entropy: f32 = 0.0;
-    const len_f32 = @as(f32, @floatFromInt(filtered_data.len));
-
-    for (freq) |count| {
-        if (count > 0) {
-            const p = @as(f32, @floatFromInt(count)) / len_f32;
-            entropy -= p * @log2(p);
-        }
-    }
-
-    // Also consider run lengths for better cost estimation
-    var run_bonus: f32 = 0.0;
-    var last_byte = filtered_data[0];
-    var run_length: u32 = 1;
-
-    for (filtered_data[1..]) |byte| {
-        if (byte == last_byte) {
-            run_length += 1;
-        } else {
-            if (run_length > 3) {
-                // Bonus for long runs (they compress well)
-                run_bonus += @log2(@as(f32, @floatFromInt(run_length)));
-            }
-            last_byte = byte;
-            run_length = 1;
-        }
-    }
-
-    // Final run
-    if (run_length > 3) {
-        run_bonus += @log2(@as(f32, @floatFromInt(run_length)));
-    }
-
-    // Lower score is better (subtract run bonus)
-    return entropy - (run_bonus / len_f32);
+    return cost;
 }
 
 /// Select the best filter type for a scanline
@@ -1163,43 +1128,19 @@ fn selectBestFilter(
     temp_buffer: []u8,
 ) FilterType {
     var best_filter = FilterType.none;
-    var best_cost: f32 = std.math.floatMax(f32);
+    var best_cost: u32 = std.math.maxInt(u32);
 
-    // Quick heuristic: check if row has many repeated values
-    var same_count: u32 = 0;
-    for (src_row[bytes_per_pixel..], 0..) |byte, i| {
-        if (byte == src_row[i]) same_count += 1;
-    }
-    const horizontal_similarity = @as(f32, @floatFromInt(same_count)) / @as(f32, @floatFromInt(src_row.len - bytes_per_pixel));
-
-    // Try filters in smart order based on heuristics
-    // First try the most likely filter based on content
-    if (horizontal_similarity > 0.7) {
-        // High horizontal similarity - sub filter likely best
-        filterRow(.sub, temp_buffer, src_row, previous_row, bytes_per_pixel);
-        const sub_cost = calculateFilterCost(temp_buffer);
-        if (sub_cost < best_cost) {
-            best_cost = sub_cost;
-            best_filter = .sub;
-            if (sub_cost < 1.0) return .sub; // Early exit for excellent result
-        }
-    }
-
-    inline for (std.meta.fields(FilterType)) |field| {
-        const filter_type = @field(FilterType, field.name);
-
-        // Check if we should process this filter
-        const already_tested = (horizontal_similarity > 0.7 and filter_type == .sub);
+    const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
+    for (filters) |filter_type| {
+        // Skip filters that reference a previous row if none exists
         const invalid_for_first_row = (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth));
+        if (invalid_for_first_row) continue;
 
-        if (!already_tested and !invalid_for_first_row) {
-            filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
-            const cost = calculateFilterCost(temp_buffer);
-            if (cost < best_cost) {
-                best_cost = cost;
-                best_filter = filter_type;
-                if (cost < 1.0) return best_filter;
-            }
+        filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
+        const cost = calculateFilterCost(temp_buffer);
+        if (cost < best_cost) {
+            best_cost = cost;
+            best_filter = filter_type;
         }
     }
 
@@ -1730,6 +1671,49 @@ test "PNG round-trip encoding/decoding" {
         try std.testing.expectEqual(orig.g, decoded.g);
         try std.testing.expectEqual(orig.b, decoded.b);
     }
+}
+
+test "PNG adaptive filter selection" {
+    const allocator = std.testing.allocator;
+
+    // Create a tiny 2-row RGB image where the first row is constant
+    // so .sub is best, and the second row equals the first so .up is best.
+    const width: u32 = 8;
+    const height: u32 = 2;
+    const header = Header{
+        .width = width,
+        .height = height,
+        .bit_depth = 8,
+        .color_type = .rgb,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 0,
+    };
+
+    const scanline_bytes = header.scanlineBytes();
+    var raw = try allocator.alloc(u8, scanline_bytes * height);
+    defer allocator.free(raw);
+
+    // Row 0: all bytes are 128; Row 1: identical to Row 0
+    @memset(raw[0..scanline_bytes], 128);
+    @memset(raw[scanline_bytes .. scanline_bytes * 2], 128);
+
+    // Apply adaptive filtering and check filter bytes
+    const filtered = try filterScanlinesAdaptive(allocator, raw, header);
+    defer allocator.free(filtered);
+
+    const stride = scanline_bytes + 1; // filter byte + scanline data
+    try std.testing.expectEqual(@as(u8, @intFromEnum(FilterType.sub)), filtered[0]);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(FilterType.up)), filtered[stride]);
+
+    // Defilter back and verify we recover the original bytes
+    var roundtrip = try allocator.alloc(u8, filtered.len);
+    defer allocator.free(roundtrip);
+    @memcpy(roundtrip, filtered);
+    try defilterStandardScanlines(roundtrip, header);
+
+    try std.testing.expectEqualSlices(u8, raw[0..scanline_bytes], roundtrip[1 .. 1 + scanline_bytes]);
+    try std.testing.expectEqualSlices(u8, raw[scanline_bytes .. scanline_bytes * 2], roundtrip[stride + 1 .. stride + 1 + scanline_bytes]);
 }
 
 test "PNG bit unpacking - 1-bit grayscale" {
