@@ -1744,6 +1744,7 @@ pub fn Filter(comptime T: type) type {
         pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
             // Ensure output is properly allocated
             if (out.rows == 0 or out.cols == 0 or !self.hasSameShape(out.*)) {
+                out.deinit(allocator);
                 out.* = try .init(allocator, self.rows, self.cols);
             }
 
