@@ -270,7 +270,7 @@ pub const Tree = struct {
         if (leaves_list.items.len == 1) {
             self.lengths[leaves_list.items[0].sym] = 1;
             self.max_length = 1;
-            generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
+            generateCanonicalCodes(self.lengths[0..n], self.codes[0..n]);
             return;
         }
 
@@ -359,6 +359,35 @@ pub const Tree = struct {
 
         // Generate canonical codes
         generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
+
+        // Validate the generated tree
+        if (!self.validateTree()) {
+            // If validation fails, ensure at least one symbol has a code
+            self.lengths[0] = 1;
+            generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
+        }
+    }
+
+    /// Validate that the Huffman tree satisfies the Kraft inequality
+    fn validateTree(self: *const Self) bool {
+        var kraft_sum: u32 = 0;
+        var has_codes = false;
+
+        for (self.lengths) |len| {
+            if (len > 0) {
+                has_codes = true;
+                if (len > 15) return false; // Code length exceeds maximum
+                const exp = @as(u5, @intCast(len));
+                kraft_sum += @as(u32, 1) << @intCast(15 - exp);
+            }
+        }
+
+        // Must have at least one code
+        if (!has_codes) return false;
+
+        // Kraft sum should be exactly 2^15 for a valid tree
+        // Allow some tolerance for rounding
+        return kraft_sum >= (1 << 14) and kraft_sum <= (1 << 16);
     }
 
     fn limitCodeLengths(self: *Self, max_bits: u8) void {

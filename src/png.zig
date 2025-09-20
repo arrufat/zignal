@@ -1716,6 +1716,47 @@ test "PNG adaptive filter selection" {
     try std.testing.expectEqualSlices(u8, raw[scanline_bytes .. scanline_bytes * 2], roundtrip[stride + 1 .. stride + 1 + scanline_bytes]);
 }
 
+test "PNG fixed filters round-trip" {
+    const allocator = std.testing.allocator;
+
+    // Build a small RGB gradient that exercises left/above predictors
+    const width: usize = 16;
+    const height: usize = 8;
+    var img = try Image(Rgb).init(allocator, height, width);
+    defer img.deinit(allocator);
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const r: u8 = @intCast((x * 255) / (width - 1));
+            const g: u8 = @intCast((y * 255) / (height - 1));
+            const b: u8 = @intCast(((x + y) * 255) / (width + height - 2));
+            img.data[y * width + x] = Rgb{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
+    for (filters) |ft| {
+        const png_data = try encode(Rgb, allocator, img, .{ .filter_mode = .{ .fixed = ft }, .compression_level = .level_1, .compression_strategy = .filtered });
+        defer allocator.free(png_data);
+
+        var state = try decode(allocator, png_data);
+        defer state.deinit(allocator);
+        const native = try toNativeImage(allocator, state);
+        var round = switch (native) {
+            .rgb => |*i| i.*,
+            else => @panic("expected RGB"),
+        };
+        defer round.deinit(allocator);
+
+        try std.testing.expectEqual(height, round.rows);
+        try std.testing.expectEqual(width, round.cols);
+        for (img.data, round.data) |a, b| {
+            try std.testing.expectEqual(a.r, b.r);
+            try std.testing.expectEqual(a.g, b.g);
+            try std.testing.expectEqual(a.b, b.b);
+        }
+    }
+}
+
 test "PNG bit unpacking - 1-bit grayscale" {
 
     // Test data with bits: 10110010 = 0xB2

@@ -407,44 +407,66 @@ pub const DeflateEncoder = struct {
     const CodeLenSym = struct { symbol: u8, extra_bits: u8, extra_value: u16 };
 
     fn encodeCodeLengths(allocator: Allocator, lengths: []const u8) ![]CodeLenSym {
-        var result: ArrayList(CodeLenSym) = .empty;
-        errdefer result.deinit(allocator);
+        // Conservative, spec-compliant encoder for the HLIT+HDIST code-length sequence.
+        // - Always uses 17/18 for zero runs.
+        // - Uses 16 only when repeating the immediately previous non-zero length.
+        // - Otherwise emits literal code lengths directly.
+        var out: ArrayList(CodeLenSym) = .empty;
+        errdefer out.deinit(allocator);
+
+        if (lengths.len == 0) return out.toOwnedSlice(allocator);
+
         var i: usize = 0;
+        var prevlen: i32 = -1;
         while (i < lengths.len) {
-            const current = lengths[i];
-            if (current == 0) {
-                var run: usize = 1;
-                while (i + run < lengths.len and lengths[i + run] == 0) run += 1;
-                const total = run;
-                while (run > 0) {
-                    if (run >= 11) {
-                        const count = @min(run, 138);
-                        try result.append(allocator, .{ .symbol = 18, .extra_bits = 7, .extra_value = @intCast(count - 11) });
-                        run -= count;
-                    } else if (run >= 3) {
-                        try result.append(allocator, .{ .symbol = 17, .extra_bits = 3, .extra_value = @intCast(run - 3) });
-                        run = 0;
-                    } else {
-                        while (run > 0) : (run -= 1) try result.append(allocator, .{ .symbol = 0, .extra_bits = 0, .extra_value = 0 });
-                    }
+            const curlen = lengths[i];
+            if (curlen == 0) {
+                // Zero run
+                var run: usize = 0;
+                while (i + run < lengths.len and lengths[i + run] == 0) : (run += 1) {}
+
+                var r = run;
+                while (r >= 11) {
+                    const c = @min(r, 138);
+                    try out.append(allocator, .{ .symbol = 18, .extra_bits = 7, .extra_value = @intCast(c - 11) });
+                    r -= c;
                 }
-                i += total;
+                if (r >= 3) {
+                    try out.append(allocator, .{ .symbol = 17, .extra_bits = 3, .extra_value = @intCast(r - 3) });
+                    r = 0;
+                }
+                while (r > 0) : (r -= 1) {
+                    try out.append(allocator, .{ .symbol = 0, .extra_bits = 0, .extra_value = 0 });
+                }
+                prevlen = 0;
+                i += run;
             } else {
-                var run: usize = 1;
-                while (i + run < lengths.len and lengths[i + run] == current) run += 1;
-                try result.append(allocator, .{ .symbol = current, .extra_bits = 0, .extra_value = 0 });
-                const total = run;
-                run -= 1;
-                while (run >= 3) {
-                    const count = @min(run, 6);
-                    try result.append(allocator, .{ .symbol = 16, .extra_bits = 2, .extra_value = @intCast(count - 3) });
-                    run -= count;
+                // Non-zero run of a single code length value
+                const val = curlen;
+                var run: usize = 0;
+                while (i + run < lengths.len and lengths[i + run] == val) : (run += 1) {}
+
+                // Always emit the first instance literally
+                try out.append(allocator, .{ .symbol = val, .extra_bits = 0, .extra_value = 0 });
+                prevlen = @intCast(val);
+                var r = run - 1; // remaining
+
+                // Use 16 only to repeat the same non-zero previous value in 3..6 chunks
+                while (r >= 3 and prevlen == val) {
+                    const c = @min(r, 6);
+                    try out.append(allocator, .{ .symbol = 16, .extra_bits = 2, .extra_value = @intCast(c - 3) });
+                    r -= c;
                 }
-                while (run > 0) : (run -= 1) try result.append(allocator, .{ .symbol = current, .extra_bits = 0, .extra_value = 0 });
-                i += total;
+                // Emit any remaining 1-2 as literals
+                while (r > 0) : (r -= 1) {
+                    try out.append(allocator, .{ .symbol = val, .extra_bits = 0, .extra_value = 0 });
+                }
+
+                i += run;
             }
         }
-        return result.toOwnedSlice(allocator);
+
+        return out.toOwnedSlice(allocator);
     }
 
     fn encodeDynamicHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
@@ -454,12 +476,14 @@ pub const DeflateEncoder = struct {
 
         var pos: usize = 0;
         while (pos < data.len) {
-            if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
+            // Find match before inserting current position, so the chain starts from previous head
             const match = if (self.level == .level_0 or self.strategy == .huffman_only)
                 null
             else
                 self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length);
             if (match) |m| {
+                // Insert current position and the covered region into the hash table
+                if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
                 const length_code = getLengthCode(m.length).code;
                 self.literal_freq[length_code] += 1;
                 const dist_code = getDistanceCode(m.distance).code;
@@ -472,6 +496,7 @@ pub const DeflateEncoder = struct {
                 }
                 pos += m.length;
             } else {
+                if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
                 self.literal_freq[data[pos]] += 1;
                 pos += 1;
             }
@@ -502,7 +527,10 @@ pub const DeflateEncoder = struct {
                 break;
             }
         }
+        // Ensure within spec limits (257-286)
         num_lit_codes = @max(num_lit_codes, 257);
+        num_lit_codes = @min(num_lit_codes, 286);
+
         var num_dist_codes: usize = 1;
         for (0..30) |i| {
             if (distance_tree.lengths[29 - i] != 0) {
@@ -510,7 +538,9 @@ pub const DeflateEncoder = struct {
                 break;
             }
         }
+        // Ensure within spec limits (1-30)
         num_dist_codes = @max(num_dist_codes, 1);
+        num_dist_codes = @min(num_dist_codes, 30);
 
         var all_lengths: ArrayList(u8) = .empty;
         defer all_lengths.deinit(self.gpa);
@@ -531,13 +561,21 @@ pub const DeflateEncoder = struct {
                 break;
             }
         }
+        // Ensure within spec limits (4-19)
         num_cl_codes = @max(num_cl_codes, 4);
+        num_cl_codes = @min(num_cl_codes, MAX_CODE_LENGTH_CODES);
 
         var writer = BitWriter.init(&self.output);
         try writer.writeBits(self.gpa, 0x5, 3); // final block + dynamic (BFINAL=1, BTYPE=10)
         const HLIT = num_lit_codes - 257;
         const HDIST = num_dist_codes - 1;
         const HCLEN = num_cl_codes - 4;
+
+        // Validate HLIT (0-29), HDIST (0-29), HCLEN (0-15) are within spec
+        std.debug.assert(HLIT <= 29); // 257 + 29 = 286 max lit codes
+        std.debug.assert(HDIST <= 29); // 1 + 29 = 30 max dist codes
+        std.debug.assert(HCLEN <= 15); // 4 + 15 = 19 max code length codes
+
         try writer.writeBits(self.gpa, @intCast(HLIT), 5);
         try writer.writeBits(self.gpa, @intCast(HDIST), 5);
         try writer.writeBits(self.gpa, @intCast(HCLEN), 4);
@@ -552,16 +590,39 @@ pub const DeflateEncoder = struct {
             if (cl.extra_bits > 0) try writer.writeBits(self.gpa, cl.extra_value, cl.extra_bits);
         }
 
+        // Optional header dump for debugging: set env var ZIGNAL_DUMP_DEFLATE_HEADER
+        var dump = false;
+        if (std.process.getEnvVarOwned(self.gpa, "ZIGNAL_DUMP_DEFLATE_HEADER")) |val| {
+            dump = val.len > 0;
+            self.gpa.free(val);
+        } else |_| {}
+        if (dump) {
+            std.debug.print("[deflate] HLIT={} HDIST={} HCLEN={}\n", .{ HLIT, HDIST, HCLEN });
+            std.debug.print("[deflate] CL lens (order):", .{});
+            for (0..num_cl_codes) |i| {
+                const sym = huffman.code_length_order[i];
+                std.debug.print(" {}", .{cl_tree.lengths[sym]});
+            }
+            std.debug.print("\n", .{});
+            std.debug.print("[deflate] L+D lengths ({}):", .{all_lengths.items.len});
+            const max_show = @min(all_lengths.items.len, 64);
+            for (all_lengths.items[0..max_show]) |v| std.debug.print(" {}", .{v});
+            if (all_lengths.items.len > max_show) std.debug.print(" ...", .{});
+            std.debug.print("\n", .{});
+        }
+
         self.hash_table = lz77.HashTable.init();
         pos = 0;
         while (pos < data.len) {
-            if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
+            // Query match before inserting current pos to avoid self-hit in the chain
             const match = if (self.level != .level_0 and self.strategy != .huffman_only)
                 self.hash_table.findMatch(data, pos, self.max_chain, self.nice_length)
             else
                 null;
             if (match) |m| {
                 if (self.strategy != .huffman_only) {
+                    // Insert current position and the covered region into the hash table
+                    self.hash_table.update(data, pos);
                     var step_idx2: usize = 1;
                     while (step_idx2 < m.length and pos + step_idx2 < data.len) : (step_idx2 += 1) {
                         self.hash_table.update(data, pos + step_idx2);
@@ -577,6 +638,7 @@ pub const DeflateEncoder = struct {
                 if (di.extra_bits > 0) try writer.writeBits(self.gpa, di.extra_value, di.extra_bits);
                 pos += m.length;
             } else {
+                if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
                 const lc = literal_tree.getCode(data[pos]);
                 try writer.writeBits(self.gpa, huffman.reverseBits(lc.code, lc.bits), lc.bits);
                 pos += 1;
@@ -619,16 +681,7 @@ pub const DeflateEncoder = struct {
 
         var pos: usize = 0;
         while (pos < data.len) {
-            // Level 1 optimizations for fastest compression
-            if (self.level == .level_1) {
-                // Update hash only every 2nd position for speed
-                if (self.strategy != .huffman_only and pos % 2 == 0) {
-                    self.hash_table.updateFast(data, pos);
-                }
-            } else {
-                if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
-            }
-
+            // Query match BEFORE inserting current position into the hash chains
             const match = if (self.level == .level_1 and self.strategy != .huffman_only)
                 self.hash_table.findMatchFast(data, pos)
             else if (self.level != .level_0 and self.strategy != .huffman_only)
@@ -638,6 +691,7 @@ pub const DeflateEncoder = struct {
             if (match) |m| {
                 // Skip hash updates for most positions in level_1 mode
                 if (self.level != .level_1) {
+                    if (self.strategy != .huffman_only) self.hash_table.update(data, pos);
                     var step_idx3: usize = 1;
                     while (step_idx3 < m.length and pos + step_idx3 < data.len) : (step_idx3 += 1) {
                         if (self.strategy != .huffman_only) self.hash_table.update(data, pos + step_idx3);
@@ -653,6 +707,14 @@ pub const DeflateEncoder = struct {
                 if (di.extra_bits > 0) try writer.writeBits(self.gpa, di.extra_value, di.extra_bits);
                 pos += m.length;
             } else {
+                // No match: insert current pos (fast mode updates every other pos)
+                if (self.strategy != .huffman_only) {
+                    if (self.level == .level_1) {
+                        if (pos % 2 == 0) self.hash_table.updateFast(data, pos);
+                    } else {
+                        self.hash_table.update(data, pos);
+                    }
+                }
                 const lc = lit_codes[data[pos]];
                 try writer.writeBits(self.gpa, lc.code, lc.bits);
                 pos += 1;
@@ -743,6 +805,131 @@ test "deflate uncompressed header endianness" {
     const nlen = compressed[3] | (@as(u16, compressed[4]) << 8);
     try std.testing.expectEqual(@as(u16, 4), len);
     try std.testing.expectEqual(@as(u16, 0xFFFB), nlen);
+}
+
+test "encodeCodeLengths emits spec-compliant stream" {
+    const allocator = std.testing.allocator;
+
+    // Construct a pattern of lengths with zero and non-zero runs
+    var lengths = [_]u8{
+        3, 3, 3, 3, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1,
+    };
+
+    const enc = try DeflateEncoder.encodeCodeLengths(allocator, &lengths);
+    defer allocator.free(enc);
+
+    // Build code-length Huffman over symbols 0..18 from frequencies
+    var cl_freq: [19]u32 = std.mem.zeroes([19]u32);
+    for (enc) |e| cl_freq[e.symbol] += 1;
+    var cl_tree: huffman.Tree = .init(allocator);
+    defer cl_tree = cl_tree; // silence unused set warning
+    try cl_tree.buildFromFrequencies(cl_freq[0..19], 7);
+
+    // Serialize enc to a bitstream using cl_tree and decode it back
+    var bits = std.ArrayList(u8).empty;
+    defer bits.deinit(allocator);
+    var bw = bit.BitWriter.init(&bits);
+    for (enc) |e| {
+        const ci = cl_tree.getCode(e.symbol);
+        const rc = huffman.reverseBits(ci.code, ci.bits);
+        try bw.writeBits(allocator, rc, ci.bits);
+        if (e.extra_bits > 0) try bw.writeBits(allocator, e.extra_value, e.extra_bits);
+    }
+    try bw.flush(allocator);
+
+    var br = bit.BitReader.init(bits.items);
+    var dec = huffman.Decoder.init(allocator);
+    defer dec.deinit();
+    try dec.buildFromLengths(&cl_tree.lengths);
+
+    // Local decoder for a single Huffman symbol from `dec`.
+    const decodeSym = struct {
+        fn go(brp: *bit.BitReader, d: *huffman.Decoder) !u16 {
+            // Fast table lookup on up to 9 bits
+            const remaining_bits = (brp.data.len - brp.byte_pos) * 8 - brp.bit_pos;
+            if (remaining_bits > 0) {
+                var peek_value: u16 = 0;
+                var t_byte = brp.byte_pos;
+                var t_bit: u8 = brp.bit_pos;
+                var i: u8 = 0;
+                while (i < 9 and t_byte < brp.data.len) : (i += 1) {
+                    const bitv = (brp.data[t_byte] >> @as(u3, @intCast(t_bit))) & 1;
+                    peek_value |= @as(u16, bitv) << @intCast(i);
+                    t_bit += 1;
+                    if (t_bit >= 8) {
+                        t_bit = 0;
+                        t_byte += 1;
+                    }
+                }
+                const entry = d.fast_table[peek_value & d.fast_mask];
+                if (entry != 0) {
+                    const symbol = entry & 0x0FFF;
+                    const code_length: u8 = @intCast((entry >> 12) & 0xF);
+                    if (remaining_bits >= code_length) {
+                        _ = try brp.readBits(code_length);
+                        return symbol;
+                    }
+                }
+            }
+            // Fallback to tree walk
+            if (d.root) |root| {
+                var current = root;
+                while (current.symbol == null) {
+                    const bitv = try brp.readBits(1);
+                    if (bitv == 0) {
+                        if (current.left) |left| {
+                            current = left;
+                        } else return error.InvalidDeflateHuffmanCode;
+                    } else {
+                        if (current.right) |right| {
+                            current = right;
+                        } else return error.InvalidDeflateHuffmanCode;
+                    }
+                }
+                return current.symbol.?;
+            }
+            return error.InvalidDeflateHuffmanCode;
+        }
+    }.go;
+
+    var out_lens: [lengths.len]u8 = undefined;
+    var i: usize = 0;
+    while (i < lengths.len) {
+        const sym = try decodeSym(&br, &dec);
+        if (sym < 16) {
+            out_lens[i] = @intCast(sym);
+            i += 1;
+        } else if (sym == 16) {
+            // Repeat previous non-zero 3..6
+            try std.testing.expect(i > 0);
+            const rep = (try br.readBits(2)) + 3;
+            const v = out_lens[i - 1];
+            try std.testing.expect(v != 0);
+            var r: u32 = rep;
+            while (r > 0) : (r -= 1) {
+                out_lens[i] = v;
+                i += 1;
+            }
+        } else if (sym == 17) {
+            const rep = (try br.readBits(3)) + 3;
+            var r: u32 = rep;
+            while (r > 0) : (r -= 1) {
+                out_lens[i] = 0;
+                i += 1;
+            }
+        } else if (sym == 18) {
+            const rep = (try br.readBits(7)) + 11;
+            var r: u32 = rep;
+            while (r > 0) : (r -= 1) {
+                out_lens[i] = 0;
+                i += 1;
+            }
+        } else {
+            try std.testing.expect(false); // invalid symbol
+        }
+    }
+
+    try std.testing.expectEqualSlices(u8, &lengths, &out_lens);
 }
 
 test "methods comparison static vs none" {
