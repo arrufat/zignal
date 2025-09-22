@@ -787,7 +787,7 @@ test "differenceOfGaussians invalid parameters" {
     var result: Image(f32) = .empty;
     // Don't defer deinit for an empty image that may never be allocated
 
-    // Test with invalid sigmas
+    // Test with invalid sigmas (negative values only)
     try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, -1.0, 2.0, 0, &result));
     try std.testing.expectError(error.InvalidSigma, image.differenceOfGaussians(std.testing.allocator, 1.0, -2.0, 0, &result));
     try std.testing.expectError(error.SigmasMustDiffer, image.differenceOfGaussians(std.testing.allocator, 1.0, 1.0, 0, &result));
@@ -1089,6 +1089,83 @@ test "radialMotionBlur zero strength" {
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             try expectEqual(image.at(r, c).*, blurred.at(r, c).*);
+        }
+    }
+}
+
+test "gaussianBlur with sigma=0" {
+    var image: Image(f32) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with test pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @floatFromInt(r * 5 + c);
+        }
+    }
+
+    var result: Image(f32) = .empty;
+    try image.gaussianBlur(std.testing.allocator, 0, &result);
+    defer result.deinit(std.testing.allocator);
+
+    // With sigma=0, result should be identical to input
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try std.testing.expectEqual(image.at(r, c).*, result.at(r, c).*);
+        }
+    }
+}
+
+test "differenceOfGaussians with sigma=0" {
+    var image: Image(f32) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    // Fill with test pattern
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @floatFromInt(r * 5 + c);
+        }
+    }
+
+    // Test case 1: Both sigmas are 0 -> result should be 0
+    var result1: Image(f32) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 0, 0, 0, &result1);
+    defer result1.deinit(std.testing.allocator);
+
+    for (result1.data) |pixel| {
+        try std.testing.expectEqual(@as(f32, 0), pixel);
+    }
+
+    // Test case 2: sigma1=0, sigma2>0 -> edge detection (input - blurred)
+    var result2: Image(f32) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 0, 1.0, 0, &result2);
+    defer result2.deinit(std.testing.allocator);
+
+    // Result should not be all zeros (it's input - blur)
+    var has_nonzero = false;
+    for (result2.data) |pixel| {
+        if (pixel != 0) has_nonzero = true;
+    }
+    try std.testing.expect(has_nonzero);
+
+    // Test case 3: sigma1>0, sigma2=0 -> inverted edge detection (blurred - input)
+    var result3: Image(f32) = .empty;
+    try image.differenceOfGaussians(std.testing.allocator, 1.0, 0, 0, &result3);
+    defer result3.deinit(std.testing.allocator);
+
+    // Result should not be all zeros
+    has_nonzero = false;
+    for (result3.data) |pixel| {
+        if (pixel != 0) has_nonzero = true;
+    }
+    try std.testing.expect(has_nonzero);
+
+    // Results 2 and 3 should be negatives of each other
+    for (0..result2.rows) |r| {
+        for (0..result2.cols) |c| {
+            const val2 = result2.at(r, c).*;
+            const val3 = result3.at(r, c).*;
+            try std.testing.expectApproxEqAbs(val2, -val3, 0.0001);
         }
     }
 }

@@ -2214,12 +2214,122 @@ pub fn Filter(comptime T: type) type {
         /// - offset = 0 → clamp behavior to match many libraries
         /// For non-u8 pixel types, `offset` is ignored.
         pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, offset: u8, out: *Self) !void {
-            if (sigma1 <= 0 or sigma2 <= 0) return error.InvalidSigma;
-            if (sigma1 == sigma2) return error.SigmasMustDiffer;
+            if (sigma1 < 0 or sigma2 < 0) return error.InvalidSigma;
+
+            // Check for equal non-zero sigmas early (before allocating)
+            if (sigma1 == sigma2 and sigma1 != 0) return error.SigmasMustDiffer;
 
             // Ensure output is allocated
             if (!self.hasSameShape(out.*)) {
                 out.* = try .init(allocator, self.rows, self.cols);
+            }
+
+            // Handle special cases where one or both sigmas are 0
+            if (sigma1 == 0 and sigma2 == 0) {
+                // Both are 0: result is input - input = 0
+                for (out.data) |*pixel| {
+                    pixel.* = switch (@typeInfo(T)) {
+                        .int => if (T == u8) offset else 0,
+                        .float => 0,
+                        .@"struct" => blk: {
+                            var p: T = undefined;
+                            inline for (@typeInfo(T).@"struct".fields) |field| {
+                                @field(p, field.name) = if (field.type == u8) offset else 0;
+                            }
+                            break :blk p;
+                        },
+                        else => @compileError("Unsupported pixel type for DoG"),
+                    };
+                }
+                return;
+            }
+
+            if (sigma1 == 0) {
+                // Result is input - blur(sigma2)
+                var blur2: Self = .empty;
+                try self.gaussianBlur(allocator, sigma2, &blur2);
+                defer blur2.deinit(allocator);
+
+                switch (@typeInfo(T)) {
+                    .int, .float => {
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                if (T == u8) {
+                                    const val1 = @as(i16, self.at(r, c).*);
+                                    const val2 = @as(i16, blur2.at(r, c).*);
+                                    const diff = val1 - val2 + @as(i16, offset);
+                                    out.at(r, c).* = @intCast(@max(0, @min(255, diff)));
+                                } else {
+                                    out.at(r, c).* = self.at(r, c).* - blur2.at(r, c).*;
+                                }
+                            }
+                        }
+                    },
+                    .@"struct" => {
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                var result: T = undefined;
+                                inline for (@typeInfo(T).@"struct".fields) |field| {
+                                    if (field.type == u8) {
+                                        const val1 = @as(i16, @field(self.at(r, c).*, field.name));
+                                        const val2 = @as(i16, @field(blur2.at(r, c).*, field.name));
+                                        const diff = val1 - val2 + @as(i16, offset);
+                                        @field(result, field.name) = @intCast(@max(0, @min(255, diff)));
+                                    } else {
+                                        @field(result, field.name) = @field(self.at(r, c).*, field.name) - @field(blur2.at(r, c).*, field.name);
+                                    }
+                                }
+                                out.at(r, c).* = result;
+                            }
+                        }
+                    },
+                    else => @compileError("Unsupported pixel type for DoG"),
+                }
+                return;
+            }
+
+            if (sigma2 == 0) {
+                // Result is blur(sigma1) - input
+                var blur1: Self = .empty;
+                try self.gaussianBlur(allocator, sigma1, &blur1);
+                defer blur1.deinit(allocator);
+
+                switch (@typeInfo(T)) {
+                    .int, .float => {
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                if (T == u8) {
+                                    const val1 = @as(i16, blur1.at(r, c).*);
+                                    const val2 = @as(i16, self.at(r, c).*);
+                                    const diff = val1 - val2 + @as(i16, offset);
+                                    out.at(r, c).* = @intCast(@max(0, @min(255, diff)));
+                                } else {
+                                    out.at(r, c).* = blur1.at(r, c).* - self.at(r, c).*;
+                                }
+                            }
+                        }
+                    },
+                    .@"struct" => {
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                var result: T = undefined;
+                                inline for (@typeInfo(T).@"struct".fields) |field| {
+                                    if (field.type == u8) {
+                                        const val1 = @as(i16, @field(blur1.at(r, c).*, field.name));
+                                        const val2 = @as(i16, @field(self.at(r, c).*, field.name));
+                                        const diff = val1 - val2 + @as(i16, offset);
+                                        @field(result, field.name) = @intCast(@max(0, @min(255, diff)));
+                                    } else {
+                                        @field(result, field.name) = @field(blur1.at(r, c).*, field.name) - @field(self.at(r, c).*, field.name);
+                                    }
+                                }
+                                out.at(r, c).* = result;
+                            }
+                        }
+                    },
+                    else => @compileError("Unsupported pixel type for DoG"),
+                }
+                return;
             }
 
             // Special optimization for u8 images with common sigmas
