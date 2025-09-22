@@ -1221,6 +1221,109 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
+        /// Optimized separable convolution for f32 planes with SIMD.
+        fn convolveSeparableF32Plane(
+            src_img: Image(f32),
+            dst_img: Image(f32),
+            temp_img: Image(f32),
+            kernel_x: []const f32,
+            kernel_y: []const f32,
+            border_mode: BorderMode,
+        ) void {
+            const rows = src_img.rows;
+            const cols = src_img.cols;
+            const half_x = kernel_x.len / 2;
+            const half_y = kernel_y.len / 2;
+            const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
+
+            // Horizontal pass (src -> temp)
+            for (0..rows) |r| {
+                var c: usize = 0;
+
+                // Left border (scalar, needs border handling)
+                while (c < half_x and c < cols) : (c += 1) {
+                    var sum_left: f32 = 0;
+                    const ir: isize = @intCast(r);
+                    const ic: isize = @intCast(c);
+                    for (kernel_x, 0..) |k, i| {
+                        const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
+                        sum_left += getPixel(f32, src_img, ir, src_c, border_mode) * k;
+                    }
+                    temp_img.data[r * temp_img.stride + c] = sum_left;
+                }
+
+                // SIMD interior
+                if (cols > vec_len + 2 * half_x) {
+                    const safe_end = cols - half_x - vec_len;
+                    while (c <= safe_end) : (c += vec_len) {
+                        var acc: @Vector(vec_len, f32) = @splat(0);
+                        var kx: usize = 0;
+                        while (kx < kernel_x.len) : (kx += 1) {
+                            const kv: @Vector(vec_len, f32) = @splat(kernel_x[kx]);
+                            var pix: @Vector(vec_len, f32) = undefined;
+                            for (0..vec_len) |i| {
+                                const cc = c + i + kx - half_x;
+                                pix[i] = src_img.data[r * src_img.stride + cc];
+                            }
+                            acc += pix * kv;
+                        }
+                        for (0..vec_len) |i| temp_img.data[r * temp_img.stride + c + i] = acc[i];
+                    }
+                }
+                // Right tail (scalar)
+                while (c < cols) : (c += 1) {
+                    var sum: f32 = 0;
+                    if (c >= half_x and c + half_x < cols) {
+                        const c0 = c - half_x;
+                        for (kernel_x, 0..) |k, i| sum += src_img.data[r * src_img.stride + (c0 + i)] * k;
+                    } else {
+                        const ir: isize = @intCast(r);
+                        const ic: isize = @intCast(c);
+                        for (kernel_x, 0..) |k, i| {
+                            const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
+                            sum += getPixel(f32, src_img, ir, src_c, border_mode) * k;
+                        }
+                    }
+                    temp_img.data[r * temp_img.stride + c] = sum;
+                }
+            }
+
+            // Vertical pass (temp -> dst)
+            for (0..rows) |r| {
+                var c: usize = 0;
+                if (r >= half_y and r + half_y < rows and cols >= vec_len) {
+                    const safe_end = cols - (cols % vec_len);
+                    while (c + vec_len <= safe_end) : (c += vec_len) {
+                        var acc: @Vector(vec_len, f32) = @splat(0);
+                        var ky: usize = 0;
+                        while (ky < kernel_y.len) : (ky += 1) {
+                            const kv: @Vector(vec_len, f32) = @splat(kernel_y[ky]);
+                            var pix: @Vector(vec_len, f32) = undefined;
+                            const rr = r + ky - half_y;
+                            for (0..vec_len) |i| pix[i] = temp_img.data[rr * temp_img.stride + c + i];
+                            acc += pix * kv;
+                        }
+                        for (0..vec_len) |i| dst_img.data[r * dst_img.stride + c + i] = acc[i];
+                    }
+                }
+                while (c < cols) : (c += 1) {
+                    var sum: f32 = 0;
+                    if (r >= half_y and r + half_y < rows) {
+                        const r0 = r - half_y;
+                        for (kernel_y, 0..) |k, i| sum += temp_img.data[(r0 + i) * temp_img.stride + c] * k;
+                    } else {
+                        const ir: isize = @intCast(r);
+                        const ic: isize = @intCast(c);
+                        for (kernel_y, 0..) |k, i| {
+                            const src_r = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
+                            sum += getPixel(f32, temp_img, src_r, ic, border_mode) * k;
+                        }
+                    }
+                    dst_img.data[r * dst_img.stride + c] = sum;
+                }
+            }
+        }
+
         /// Horizontal-only separable convolution for u8 plane (integer SIMD).
         fn convolveHorizontalU8Plane(
             src_img: Image(u8),
@@ -1779,6 +1882,15 @@ pub fn Filter(comptime T: type) type {
 
                         convolveSeparableU8Plane(self, out.*, temp, kernel_x_int, kernel_y_int, border_mode);
                         return; // Skip the rest of the function
+                    }
+
+                    // Optimized path for f32 with SIMD
+                    if (T == f32) {
+                        const src_plane: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = self.data };
+                        const dst_plane: Image(f32) = .{ .rows = out.rows, .cols = out.cols, .stride = out.stride, .data = out.data };
+                        const tmp_plane: Image(f32) = .{ .rows = temp.rows, .cols = temp.cols, .stride = temp.stride, .data = temp.data };
+                        convolveSeparableF32Plane(src_plane, dst_plane, tmp_plane, kernel_x, kernel_y, border_mode);
+                        return;
                     }
 
                     // Generic path for other scalar types
