@@ -1221,6 +1221,43 @@ pub fn Filter(comptime T: type) type {
             }
         }
 
+        /// Helper for scalar convolution at a single pixel
+        inline fn convolveScalarHorizontal(
+            src_img: Image(f32),
+            row: usize,
+            col: usize,
+            kernel: []const f32,
+            half_k: usize,
+            border_mode: BorderMode,
+        ) f32 {
+            var sum: f32 = 0;
+            const ir: isize = @intCast(row);
+            const ic: isize = @intCast(col);
+            for (kernel, 0..) |k, i| {
+                const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_k));
+                sum += getPixel(f32, src_img, ir, src_c, border_mode) * k;
+            }
+            return sum;
+        }
+
+        inline fn convolveScalarVertical(
+            temp_img: Image(f32),
+            row: usize,
+            col: usize,
+            kernel: []const f32,
+            half_k: usize,
+            border_mode: BorderMode,
+        ) f32 {
+            var sum: f32 = 0;
+            const ir: isize = @intCast(row);
+            const ic: isize = @intCast(col);
+            for (kernel, 0..) |k, i| {
+                const src_r = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_k));
+                sum += getPixel(f32, temp_img, src_r, ic, border_mode) * k;
+            }
+            return sum;
+        }
+
         /// Optimized separable convolution for f32 planes with SIMD.
         fn convolveSeparableF32Plane(
             src_img: Image(f32),
@@ -1239,87 +1276,111 @@ pub fn Filter(comptime T: type) type {
             // Horizontal pass (src -> temp)
             for (0..rows) |r| {
                 var c: usize = 0;
+                const row_offset = r * src_img.stride;
+                const temp_offset = r * temp_img.stride;
 
                 // Left border (scalar, needs border handling)
-                while (c < half_x and c < cols) : (c += 1) {
-                    var sum_left: f32 = 0;
-                    const ir: isize = @intCast(r);
-                    const ic: isize = @intCast(c);
-                    for (kernel_x, 0..) |k, i| {
-                        const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                        sum_left += getPixel(f32, src_img, ir, src_c, border_mode) * k;
-                    }
-                    temp_img.data[r * temp_img.stride + c] = sum_left;
+                const left_border_end = @min(half_x, cols);
+                while (c < left_border_end) : (c += 1) {
+                    temp_img.data[temp_offset + c] = convolveScalarHorizontal(src_img, r, c, kernel_x, half_x, border_mode);
                 }
 
-                // SIMD interior
-                if (cols > vec_len + 2 * half_x) {
-                    const safe_end = cols - half_x - vec_len;
-                    while (c <= safe_end) : (c += vec_len) {
+                // SIMD interior - only if there's enough space
+                if (cols > 2 * half_x + vec_len) {
+                    // Safe bounds: ensure we don't underflow and have room for vectors
+                    const safe_start = half_x;
+                    const safe_end = cols - half_x;
+                    c = safe_start;
+
+                    // Process full vectors
+                    while (c + vec_len <= safe_end) : (c += vec_len) {
                         var acc: @Vector(vec_len, f32) = @splat(0);
-                        var kx: usize = 0;
-                        while (kx < kernel_x.len) : (kx += 1) {
-                            const kv: @Vector(vec_len, f32) = @splat(kernel_x[kx]);
-                            var pix: @Vector(vec_len, f32) = undefined;
-                            for (0..vec_len) |i| {
-                                const cc = c + i + kx - half_x;
-                                pix[i] = src_img.data[r * src_img.stride + cc];
-                            }
+
+                        // Optimized memory access pattern - load contiguous data
+                        for (kernel_x, 0..) |k, kx| {
+                            if (k == 0) continue; // Skip zero coefficients
+                            const kv: @Vector(vec_len, f32) = @splat(k);
+                            const src_idx = row_offset + c + kx - half_x;
+                            // Load contiguous memory as vector
+                            const pix: @Vector(vec_len, f32) = src_img.data[src_idx..][0..vec_len].*;
                             acc += pix * kv;
                         }
-                        for (0..vec_len) |i| temp_img.data[r * temp_img.stride + c + i] = acc[i];
+
+                        // Store results as vector
+                        temp_img.data[temp_offset + c ..][0..vec_len].* = acc;
+                    }
+
+                    // Process remaining elements in safe region with scalar
+                    while (c < safe_end) : (c += 1) {
+                        var sum: f32 = 0;
+                        const c0 = c - half_x;
+                        for (kernel_x, 0..) |k, i| {
+                            sum += src_img.data[row_offset + c0 + i] * k;
+                        }
+                        temp_img.data[temp_offset + c] = sum;
                     }
                 }
-                // Right tail (scalar)
+
+                // Right border (scalar with border handling)
                 while (c < cols) : (c += 1) {
-                    var sum: f32 = 0;
-                    if (c >= half_x and c + half_x < cols) {
-                        const c0 = c - half_x;
-                        for (kernel_x, 0..) |k, i| sum += src_img.data[r * src_img.stride + (c0 + i)] * k;
-                    } else {
-                        const ir: isize = @intCast(r);
-                        const ic: isize = @intCast(c);
-                        for (kernel_x, 0..) |k, i| {
-                            const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                            sum += getPixel(f32, src_img, ir, src_c, border_mode) * k;
-                        }
-                    }
-                    temp_img.data[r * temp_img.stride + c] = sum;
+                    temp_img.data[temp_offset + c] = convolveScalarHorizontal(src_img, r, c, kernel_x, half_x, border_mode);
                 }
             }
 
             // Vertical pass (temp -> dst)
-            for (0..rows) |r| {
-                var c: usize = 0;
-                if (r >= half_y and r + half_y < rows and cols >= vec_len) {
-                    const safe_end = cols - (cols % vec_len);
-                    while (c + vec_len <= safe_end) : (c += vec_len) {
-                        var acc: @Vector(vec_len, f32) = @splat(0);
-                        var ky: usize = 0;
-                        while (ky < kernel_y.len) : (ky += 1) {
-                            const kv: @Vector(vec_len, f32) = @splat(kernel_y[ky]);
-                            var pix: @Vector(vec_len, f32) = undefined;
-                            const rr = r + ky - half_y;
-                            for (0..vec_len) |i| pix[i] = temp_img.data[rr * temp_img.stride + c + i];
-                            acc += pix * kv;
-                        }
-                        for (0..vec_len) |i| dst_img.data[r * dst_img.stride + c + i] = acc[i];
-                    }
-                }
-                while (c < cols) : (c += 1) {
-                    var sum: f32 = 0;
+            // Process in column blocks for better cache usage
+            const block_size = 64; // Process columns in blocks for cache efficiency
+            var col_block: usize = 0;
+
+            while (col_block < cols) : (col_block += block_size) {
+                const block_end = @min(col_block + block_size, cols);
+
+                for (0..rows) |r| {
+                    const dst_offset = r * dst_img.stride;
+
+                    // Check if we can use SIMD for this row
                     if (r >= half_y and r + half_y < rows) {
-                        const r0 = r - half_y;
-                        for (kernel_y, 0..) |k, i| sum += temp_img.data[(r0 + i) * temp_img.stride + c] * k;
+                        // Safe region - can use direct memory access
+                        var c = col_block;
+                        const block_width = block_end - col_block;
+
+                        // Process vectors if block is wide enough
+                        if (block_width >= vec_len) {
+                            const vec_end = col_block + (block_width / vec_len) * vec_len;
+
+                            while (c < vec_end) : (c += vec_len) {
+                                var acc: @Vector(vec_len, f32) = @splat(0);
+
+                                // More efficient vertical access pattern
+                                for (kernel_y, 0..) |k, ky| {
+                                    if (k == 0) continue; // Skip zero coefficients
+                                    const kv: @Vector(vec_len, f32) = @splat(k);
+                                    const src_row = r + ky - half_y;
+                                    const src_idx = src_row * temp_img.stride + c;
+                                    const pix: @Vector(vec_len, f32) = temp_img.data[src_idx..][0..vec_len].*;
+                                    acc += pix * kv;
+                                }
+
+                                dst_img.data[dst_offset + c ..][0..vec_len].* = acc;
+                            }
+                        }
+
+                        // Process remaining scalar elements in safe region
+                        while (c < block_end) : (c += 1) {
+                            var sum: f32 = 0;
+                            const r0 = r - half_y;
+                            for (kernel_y, 0..) |k, i| {
+                                sum += temp_img.data[(r0 + i) * temp_img.stride + c] * k;
+                            }
+                            dst_img.data[dst_offset + c] = sum;
+                        }
                     } else {
-                        const ir: isize = @intCast(r);
-                        const ic: isize = @intCast(c);
-                        for (kernel_y, 0..) |k, i| {
-                            const src_r = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                            sum += getPixel(f32, temp_img, src_r, ic, border_mode) * k;
+                        // Border region - need boundary checks
+                        var c = col_block;
+                        while (c < block_end) : (c += 1) {
+                            dst_img.data[dst_offset + c] = convolveScalarVertical(temp_img, r, c, kernel_y, half_y, border_mode);
                         }
                     }
-                    dst_img.data[r * dst_img.stride + c] = sum;
                 }
             }
         }
