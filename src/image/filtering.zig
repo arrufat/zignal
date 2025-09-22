@@ -2172,7 +2172,15 @@ pub fn Filter(comptime T: type) type {
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
         pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
-            if (sigma <= 0) return error.InvalidSigma;
+            // sigma == 0 means no blur; just copy input to output
+            if (sigma == 0) {
+                if (!self.hasSameShape(out.*)) {
+                    out.* = try .init(allocator, self.rows, self.cols);
+                }
+                self.copy(out.*);
+                return;
+            }
+            if (sigma < 0) return error.InvalidSigma;
 
             // Calculate kernel size (3 sigma on each side)
             const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
