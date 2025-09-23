@@ -171,27 +171,20 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
     const kernel_width = @typeInfo(outer_array.child).array.len;
 
     if (!self.hasSameShape(out.*)) {
+        out.deinit(allocator);
         out.* = try .init(allocator, self.rows, self.cols);
     }
 
-    // Generate specialized implementation for this kernel size
-
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            // Optimized path for u8 with integer arithmetic
-            if (T == u8) {
-                const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
-                // Convert floating-point kernel to integer
-                const SCALE = 256;
-                const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
-
-                Kernel.convolve(self, out.*, kernel_int, border_mode);
-            } else if (T == f32) {
-                const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
-                // Optimized path for f32 with SIMD
-                const kernel_flat = flattenKernel(f32, Kernel.size, kernel, null);
-                Kernel.convolve(self, out.*, kernel_flat, border_mode);
-            } else {
+    switch (T) {
+        u8, f32 => {
+            const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
+            const scale = if (T == u8) 256 else null;
+            const Scalar = if (T == u8) i32 else f32;
+            const flat_kernel = flattenKernel(Scalar, Kernel.size, kernel, scale);
+            Kernel.convolve(self, out.*, flat_kernel, border_mode);
+        },
+        else => switch (@typeInfo(T)) {
+            .int, .float => {
                 // Generic scalar path for other types
                 const half_h = kernel_height / 2;
                 const half_w = kernel_width / 2;
@@ -233,124 +226,124 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                         };
                     }
                 }
-            }
-        },
-        .@"struct" => {
-            // Optimized path for u8 structs (RGB, RGBA, etc.)
-            if (comptime meta.allFieldsAreU8(T)) {
-                const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
-                // Channel separation approach for optimal performance
-                const SCALE = 256;
-                const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
-                const plane_size = self.rows * self.cols;
+            },
+            .@"struct" => {
+                // Optimized path for u8 structs (RGB, RGBA, etc.)
+                if (comptime meta.allFieldsAreU8(T)) {
+                    const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
+                    // Channel separation approach for optimal performance
+                    const SCALE = 256;
+                    const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
+                    const plane_size = self.rows * self.cols;
 
-                // Separate channels using helper
-                const channels = try channel_ops.splitChannels(T, self, allocator);
-                defer for (channels) |channel| allocator.free(channel);
+                    // Separate channels using helper
+                    const channels = try channel_ops.splitChannels(T, self, allocator);
+                    defer for (channels) |channel| allocator.free(channel);
 
-                // Check which channels are uniform to avoid unnecessary processing
-                var is_uniform: [channels.len]bool = undefined;
-                var uniform_values: [channels.len]u8 = undefined;
-                var non_uniform_count: usize = 0;
+                    // Check which channels are uniform to avoid unnecessary processing
+                    var is_uniform: [channels.len]bool = undefined;
+                    var uniform_values: [channels.len]u8 = undefined;
+                    var non_uniform_count: usize = 0;
 
-                inline for (channels, 0..) |src_data, i| {
-                    if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
-                        is_uniform[i] = true;
-                        uniform_values[i] = uniform_val;
-                    } else {
-                        is_uniform[i] = false;
-                        non_uniform_count += 1;
+                    inline for (channels, 0..) |src_data, i| {
+                        if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                            is_uniform[i] = true;
+                            uniform_values[i] = uniform_val;
+                        } else {
+                            is_uniform[i] = false;
+                            non_uniform_count += 1;
+                        }
                     }
-                }
 
-                // Allocate output planes only for non-uniform channels
-                var out_channels: [channels.len][]u8 = undefined;
-                inline for (&out_channels, is_uniform) |*ch, uniform| {
-                    if (uniform) {
-                        // For uniform channels with normalized kernels, output is same as input
-                        ch.* = &[_]u8{}; // Empty slice as placeholder
-                    } else {
-                        ch.* = try allocator.alloc(u8, plane_size);
+                    // Allocate output planes only for non-uniform channels
+                    var out_channels: [channels.len][]u8 = undefined;
+                    inline for (&out_channels, is_uniform) |*ch, uniform| {
+                        if (uniform) {
+                            // For uniform channels with normalized kernels, output is same as input
+                            ch.* = &[_]u8{}; // Empty slice as placeholder
+                        } else {
+                            ch.* = try allocator.alloc(u8, plane_size);
+                        }
                     }
-                }
-                defer {
-                    inline for (out_channels, is_uniform) |ch, uniform| {
-                        if (!uniform and ch.len > 0) allocator.free(ch);
+                    defer {
+                        inline for (out_channels, is_uniform) |ch, uniform| {
+                            if (!uniform and ch.len > 0) allocator.free(ch);
+                        }
                     }
-                }
 
-                // Convolve only non-uniform channels
-                inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
-                    if (!uniform) {
-                        const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                        const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                        Kernel.convolve(src_plane, dst_plane, kernel_int, border_mode);
+                    // Convolve only non-uniform channels
+                    inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
+                        if (!uniform) {
+                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                            Kernel.convolve(src_plane, dst_plane, kernel_int, border_mode);
+                        }
                     }
-                }
 
-                // Recombine channels, using original values for uniform channels
-                var final_channels: [channels.len][]const u8 = undefined;
-                inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
-                    if (uniform) {
-                        // For uniform channels, convolution with normalized kernel preserves the value
-                        final_channels[i] = src_ch;
-                    } else {
-                        final_channels[i] = out_ch;
+                    // Recombine channels, using original values for uniform channels
+                    var final_channels: [channels.len][]const u8 = undefined;
+                    inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                        if (uniform) {
+                            // For uniform channels, convolution with normalized kernel preserves the value
+                            final_channels[i] = src_ch;
+                        } else {
+                            final_channels[i] = out_ch;
+                        }
                     }
-                }
-                channel_ops.mergeChannels(T, final_channels, out.*);
-            } else {
-                // Generic struct path for other color types
-                const fields = std.meta.fields(T);
-                const half_h = kernel_height / 2;
-                const half_w = kernel_width / 2;
+                    channel_ops.mergeChannels(T, final_channels, out.*);
+                } else {
+                    // Generic struct path for other color types
+                    const fields = std.meta.fields(T);
+                    const half_h = kernel_height / 2;
+                    const half_w = kernel_width / 2;
 
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        var result_pixel: T = undefined;
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            var result_pixel: T = undefined;
 
-                        inline for (fields) |field| {
-                            var accumulator: f32 = 0;
-                            const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
-                            if (in_interior) {
-                                const r0: usize = r - half_h;
-                                const c0: usize = c - half_w;
-                                for (0..kernel_height) |kr| {
-                                    const rr = r0 + kr;
-                                    for (0..kernel_width) |kc| {
-                                        const cc = c0 + kc;
-                                        const pixel_val = self.at(rr, cc).*;
-                                        const channel_val = @field(pixel_val, field.name);
-                                        const kernel_val = kernel[kr][kc];
-                                        accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                            inline for (fields) |field| {
+                                var accumulator: f32 = 0;
+                                const in_interior = (r >= half_h and r + half_h < self.rows and c >= half_w and c + half_w < self.cols);
+                                if (in_interior) {
+                                    const r0: usize = r - half_h;
+                                    const c0: usize = c - half_w;
+                                    for (0..kernel_height) |kr| {
+                                        const rr = r0 + kr;
+                                        for (0..kernel_width) |kc| {
+                                            const cc = c0 + kc;
+                                            const pixel_val = self.at(rr, cc).*;
+                                            const channel_val = @field(pixel_val, field.name);
+                                            const kernel_val = kernel[kr][kc];
+                                            accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                        }
+                                    }
+                                } else {
+                                    for (0..kernel_height) |kr| {
+                                        for (0..kernel_width) |kc| {
+                                            const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
+                                            const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
+                                            const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
+                                            const channel_val = @field(pixel_val, field.name);
+                                            const kernel_val = kernel[kr][kc];
+                                            accumulator += as(f32, channel_val) * as(f32, kernel_val);
+                                        }
                                     }
                                 }
-                            } else {
-                                for (0..kernel_height) |kr| {
-                                    for (0..kernel_width) |kc| {
-                                        const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
-                                        const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                        const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
-                                        const channel_val = @field(pixel_val, field.name);
-                                        const kernel_val = kernel[kr][kc];
-                                        accumulator += as(f32, channel_val) * as(f32, kernel_val);
-                                    }
-                                }
+
+                                @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
+                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(accumulator)))),
+                                    .float => as(field.type, accumulator),
+                                    else => @compileError("Unsupported field type in struct"),
+                                };
                             }
 
-                            @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(accumulator)))),
-                                .float => as(field.type, accumulator),
-                                else => @compileError("Unsupported field type in struct"),
-                            };
+                            out.at(r, c).* = result_pixel;
                         }
-
-                        out.at(r, c).* = result_pixel;
                     }
                 }
-            }
+            },
+            else => @compileError("Convolution not supported for type " ++ @typeName(T)),
         },
-        else => @compileError("Convolution not supported for type " ++ @typeName(T)),
     }
 }
 
