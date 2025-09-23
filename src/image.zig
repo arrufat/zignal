@@ -26,13 +26,14 @@ const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
-pub const BorderMode = @import("image/filtering.zig").BorderMode;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const channel_ops = @import("image/channel_ops.zig");
 pub const Histogram = @import("image/histogram.zig").Histogram;
+const convolution = @import("image/convolution.zig");
+pub const BorderMode = convolution.BorderMode;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -593,8 +594,8 @@ pub fn Image(comptime T: type) type {
         /// - `kernel`: A 2D array representing the convolution kernel.
         /// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
         /// - `border_mode`: How to handle pixels at the image borders.
-        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border_mode: @import("image/filtering.zig").BorderMode) !void {
-            return Filter(T).convolve(self, allocator, kernel, out, border_mode);
+        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border_mode: BorderMode) !void {
+            return convolution.convolve(T, self, allocator, kernel, out, border_mode);
         }
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
@@ -606,8 +607,8 @@ pub fn Image(comptime T: type) type {
         /// - `kernel_y`: Vertical (row) kernel.
         /// - `out`: Output image.
         /// - `border_mode`: How to handle image borders.
-        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: @import("image/filtering.zig").BorderMode) !void {
-            return Filter(T).convolveSeparable(self, allocator, kernel_x, kernel_y, out, border_mode);
+        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
+            return convolution.convolveSeparable(T, self, allocator, kernel_x, kernel_y, out, border_mode);
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
