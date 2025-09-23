@@ -20,162 +20,137 @@ pub const BorderMode = enum {
 
 /// Comptime function generator for specialized convolution implementations.
 /// Generates optimized code for specific kernel dimensions at compile time.
-pub fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
-    return switch (T) {
-        u8 => struct {
-            const size = rows * cols;
-            const half_h = rows / 2;
-            const half_w = cols / 2;
-            fn convolve(src: Image(u8), dst: Image(u8), kernel: [size]i32, border: BorderMode) void {
-                const SCALE = 256;
-                const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
+fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
+    if (T != u8 and T != f32) {
+        @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported");
+    }
 
-                for (0..src.rows) |r| {
-                    var c: usize = 0;
+    return struct {
+        const size = rows * cols;
+        const half_h = rows / 2;
+        const half_w = cols / 2;
 
-                    // SIMD path for interior pixels
-                    if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
-                        c = half_w;
-                        const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
+        // Type-specific definitions
+        const Scalar = if (T == u8) i32 else f32;
+        const scale = if (T == u8) 256 else 1;
+        const vec_len = std.simd.suggestVectorLength(Scalar) orelse 1;
 
-                        while (c + vec_len <= safe_end) : (c += vec_len) {
-                            var result_vec: @Vector(vec_len, i32) = @splat(0);
+        // Helper functions for type-specific operations
+        inline fn loadPixel(value: T) Scalar {
+            return if (T == u8) @as(Scalar, value) else value;
+        }
 
-                            // Unroll kernel application for known sizes
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const kernel_val = kernel[ky * cols + kx];
-                                    const kernel_vec: @Vector(vec_len, i32) = @splat(kernel_val);
+        inline fn loadPixelVec(src: []const T, offset: usize) @Vector(vec_len, Scalar) {
+            if (T == u8) {
+                const u8_vec: @Vector(vec_len, u8) = src[offset..][0..vec_len].*;
+                return @intCast(u8_vec);
+            } else {
+                return src[offset..][0..vec_len].*;
+            }
+        }
 
-                                    var pixel_vec: @Vector(vec_len, i32) = undefined;
-                                    inline for (0..vec_len) |i| {
-                                        const src_r = r + ky - half_h;
-                                        const src_c = c + i + kx - half_w;
-                                        pixel_vec[i] = src.data[src_r * src.stride + src_c];
-                                    }
+        inline fn storePixel(accum: Scalar) T {
+            if (T == u8) {
+                const rounded = @divTrunc(accum + scale / 2, scale);
+                return @intCast(@max(0, @min(255, rounded)));
+            } else {
+                return accum;
+            }
+        }
 
-                                    result_vec += pixel_vec * kernel_vec;
-                                }
-                            }
+        inline fn storePixelVec(accum_vec: @Vector(vec_len, Scalar), dst: []T, offset: usize) void {
+            if (T == u8) {
+                const half_scale_vec: @Vector(vec_len, Scalar) = @splat(scale / 2);
+                const scale_vec: @Vector(vec_len, Scalar) = @splat(scale);
+                const rounded_vec = @divTrunc(accum_vec + half_scale_vec, scale_vec);
 
-                            const half_scale_vec: @Vector(vec_len, i32) = @splat(SCALE / 2);
-                            const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
-                            const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
-
-                            inline for (0..vec_len) |i| {
-                                dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
-                            }
-                        }
-                    }
-
-                    while (c < src.cols) : (c += 1) {
-                        if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
-                            var result: i32 = 0;
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const src_r = r + ky - half_h;
-                                    const src_c = c + kx - half_w;
-                                    const pixel_val = @as(i32, src.data[src_r * src.stride + src_c]);
-                                    result += pixel_val * kernel[ky * cols + kx];
-                                }
-                            }
-                            const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                            dst.data[r * dst.stride + c] = @intCast(@max(0, @min(255, rounded)));
-                        } else {
-                            const ir = @as(isize, @intCast(r));
-                            const ic = @as(isize, @intCast(c));
-                            var result: i32 = 0;
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                    const pixel_val: i32 = getPixel(u8, src, iry, icx, border);
-                                    result += pixel_val * kernel[ky * cols + kx];
-                                }
-                            }
-                            const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                            dst.data[r * dst.stride + c] = @intCast(@max(0, @min(255, rounded)));
-                        }
-                    }
+                inline for (0..vec_len) |i| {
+                    dst[offset + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                }
+            } else {
+                inline for (0..vec_len) |i| {
+                    dst[offset + i] = accum_vec[i];
                 }
             }
-        },
-        f32 => struct {
-            const size = rows * cols;
-            const half_h = rows / 2;
-            const half_w = cols / 2;
-            fn convolve(src: Image(f32), dst: Image(f32), kernel: [size]f32, border: BorderMode) void {
-                const vec_len = comptime std.simd.suggestVectorLength(f32) orelse 8;
+        }
 
-                // Pre-create kernel vectors for SIMD
-                var kernel_vecs: [size]@Vector(vec_len, f32) = undefined;
+        fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border: BorderMode) void {
+            // Pre-create kernel vectors for SIMD (for f32)
+            var kernel_vecs: [size]@Vector(vec_len, Scalar) = undefined;
+            if (T == f32) {
                 inline for (0..size) |i| {
                     kernel_vecs[i] = @splat(kernel[i]);
                 }
+            }
 
-                for (0..src.rows) |r| {
-                    var c: usize = 0;
+            for (0..src.rows) |r| {
+                var c: usize = 0;
 
-                    // SIMD path for interior pixels
-                    if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
-                        c = half_w;
-                        const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
+                // SIMD path for interior pixels
+                if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
+                    c = half_w;
+                    const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
 
-                        while (c + vec_len <= safe_end) : (c += vec_len) {
-                            var result_vec: @Vector(vec_len, f32) = @splat(0);
+                    while (c + vec_len <= safe_end) : (c += vec_len) {
+                        var result_vec: @Vector(vec_len, Scalar) = @splat(0);
 
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const kid = ky * cols + kx;
-                                    const kernel_vec = kernel_vecs[kid];
+                        // Unroll kernel application for known sizes
+                        inline for (0..rows) |ky| {
+                            inline for (0..cols) |kx| {
+                                const kid = ky * cols + kx;
 
-                                    var pixel_vec: @Vector(vec_len, f32) = undefined;
-                                    inline for (0..vec_len) |i| {
-                                        const src_r = r + ky - half_h;
-                                        const src_c = c + i + kx - half_w;
-                                        pixel_vec[i] = src.data[src_r * src.stride + src_c];
-                                    }
+                                const kernel_vec = if (T == f32)
+                                    kernel_vecs[kid]
+                                else
+                                    @as(@Vector(vec_len, Scalar), @splat(kernel[kid]));
 
-                                    result_vec += pixel_vec * kernel_vec;
-                                }
-                            }
-
-                            inline for (0..vec_len) |i| {
-                                dst.data[r * dst.stride + c + i] = result_vec[i];
+                                const src_r = r + ky - half_h;
+                                const src_c = c + kx - half_w;
+                                const src_idx = src_r * src.stride + src_c;
+                                const pixel_vec = loadPixelVec(src.data, src_idx);
+                                result_vec += pixel_vec * kernel_vec;
                             }
                         }
+
+                        storePixelVec(result_vec, dst.data, r * dst.stride + c);
                     }
+                }
 
-                    while (c < src.cols) : (c += 1) {
-                        if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
-                            var result: f32 = 0;
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const src_r = r + ky - half_h;
-                                    const src_c = c + kx - half_w;
-                                    result += src.data[src_r * src.stride + src_c] * kernel[ky * cols + kx];
-                                }
+                // Scalar path for remaining pixels
+                while (c < src.cols) : (c += 1) {
+                    if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
+                        // Interior pixel - no border handling needed
+                        var result: Scalar = 0;
+                        inline for (0..rows) |ky| {
+                            inline for (0..cols) |kx| {
+                                const src_r = r + ky - half_h;
+                                const src_c = c + kx - half_w;
+                                const pixel_val = loadPixel(src.data[src_r * src.stride + src_c]);
+                                result += pixel_val * kernel[ky * cols + kx];
                             }
-                            dst.data[r * dst.stride + c] = result;
-                        } else {
-                            const ir = @as(isize, @intCast(r));
-                            const ic = @as(isize, @intCast(c));
-                            var result: f32 = 0;
-                            inline for (0..rows) |ky| {
-                                inline for (0..cols) |kx| {
-                                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                    const pixel_val = getPixel(f32, src, iry, icx, border);
-                                    result += pixel_val * kernel[ky * cols + kx];
-                                }
-                            }
-                            dst.data[r * dst.stride + c] = result;
                         }
+                        dst.data[r * dst.stride + c] = storePixel(result);
+                    } else {
+                        // Border pixel - needs border handling
+                        const ir = @as(isize, @intCast(r));
+                        const ic = @as(isize, @intCast(c));
+                        var result: Scalar = 0;
+                        inline for (0..rows) |ky| {
+                            inline for (0..cols) |kx| {
+                                const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                                const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                                const pixel_val = if (T == u8)
+                                    @as(Scalar, getPixel(T, src, iry, icx, border))
+                                else
+                                    getPixel(T, src, iry, icx, border);
+                                result += pixel_val * kernel[ky * cols + kx];
+                            }
+                        }
+                        dst.data[r * dst.stride + c] = storePixel(result);
                     }
                 }
             }
-        },
-        else => @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported"),
+        }
     };
 }
 
