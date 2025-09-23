@@ -25,7 +25,7 @@ pub fn hammingDistance(self: BinaryDescriptor, other: BinaryDescriptor) u32 {
 
     // Need to sum as u32 to avoid overflow (max sum is 256)
     var sum: u32 = 0;
-    for (0..32) |i| sum += popcount[i];
+    inline for (0..32) |i| sum += popcount[i];
     return sum;
 }
 
@@ -65,7 +65,7 @@ pub fn popCount(self: BinaryDescriptor) u32 {
 
     // Sum as u32 to avoid overflow (max sum is 256)
     var sum: u32 = 0;
-    for (0..32) |i| sum += popcount[i];
+    inline for (0..32) |i| sum += popcount[i];
     return sum;
 }
 
