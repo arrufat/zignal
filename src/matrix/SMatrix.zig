@@ -359,7 +359,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
                             var b_vec: VecType = undefined;
 
                             // Load vectors with appropriate indexing based on transpose flags
-                            for (0..vec_len) |v| {
+                            inline for (0..vec_len) |v| {
                                 const a_val = if (trans_a) self.items[k + v][i] else self.items[i][k + v];
                                 const b_val = if (trans_b) other.items[j][k + v] else other.items[k + v][j];
                                 a_vec[v] = a_val;

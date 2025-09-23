@@ -671,7 +671,7 @@ pub fn Filter(comptime T: type) type {
                                         const kernel_vec: @Vector(vec_len, i32) = @splat(kernel_val);
 
                                         var pixel_vec: @Vector(vec_len, i32) = undefined;
-                                        for (0..vec_len) |i| {
+                                        inline for (0..vec_len) |i| {
                                             const src_r = r + ky - half_h;
                                             const src_c = c + i + kx - half_w;
                                             pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
@@ -685,7 +685,7 @@ pub fn Filter(comptime T: type) type {
                                 const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
                                 const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
 
-                                for (0..vec_len) |i| {
+                                inline for (0..vec_len) |i| {
                                     dst_img.data[r * dst_img.stride + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
                                 }
                             }
@@ -757,7 +757,7 @@ pub fn Filter(comptime T: type) type {
                                         const kernel_vec = kernel_vecs[kid];
 
                                         var pixel_vec: @Vector(vec_len, f32) = undefined;
-                                        for (0..vec_len) |i| {
+                                        inline for (0..vec_len) |i| {
                                             const src_r = r + ky - half_h;
                                             const src_c = c + i + kx - half_w;
                                             pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
@@ -767,7 +767,7 @@ pub fn Filter(comptime T: type) type {
                                     }
                                 }
 
-                                for (0..vec_len) |i| {
+                                inline for (0..vec_len) |i| {
                                     dst_img.data[r * dst_img.stride + c + i] = result_vec[i];
                                 }
                             }
@@ -1717,7 +1717,7 @@ pub fn Filter(comptime T: type) type {
                             const vals = sums / area_vec;
 
                             if (PlaneType == u8) {
-                                for (0..simd_len) |i| {
+                                inline for (0..simd_len) |i| {
                                     dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
                                 }
                             } else {
@@ -1804,7 +1804,7 @@ pub fn Filter(comptime T: type) type {
                             const blurred_vals = sums / area_vec;
 
                             if (PlaneType == u8) {
-                                for (0..simd_len) |i| {
+                                inline for (0..simd_len) |i| {
                                     const original = meta.as(f32, src.data[r * src.stride + c + i]);
                                     dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(2 * original - blurred_vals[i]))))));
                                 }
@@ -2776,7 +2776,7 @@ pub fn Filter(comptime T: type) type {
 
                                         // Build coordinate vector for current pixels
                                         var col_indices: @Vector(vec_len, f32) = undefined;
-                                        for (0..vec_len) |j| {
+                                        inline for (0..vec_len) |j| {
                                             col_indices[j] = @as(f32, @floatFromInt(c + j));
                                         }
                                         const row_f32 = @as(f32, @floatFromInt(r));
@@ -2832,18 +2832,18 @@ pub fn Filter(comptime T: type) type {
                                             var p10_vec: @Vector(vec_len, i32) = @splat(0);
                                             var p11_vec: @Vector(vec_len, i32) = @splat(0);
 
-                                            for (0..vec_len) |j| {
-                                                if (!in_bounds[j]) continue;
+                                            inline for (0..vec_len) |j| {
+                                                if (in_bounds[j]) {
+                                                    const x0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.cols - 1)), x0_ivec[j]))));
+                                                    const y0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.rows - 1)), y0_ivec[j]))));
+                                                    const x1 = @min(x0 + 1, self.cols - 1);
+                                                    const y1 = @min(y0 + 1, self.rows - 1);
 
-                                                const x0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.cols - 1)), x0_ivec[j]))));
-                                                const y0 = @as(usize, @intCast(@max(0, @min(@as(i32, @intCast(self.rows - 1)), y0_ivec[j]))));
-                                                const x1 = @min(x0 + 1, self.cols - 1);
-                                                const y1 = @min(y0 + 1, self.rows - 1);
-
-                                                p00_vec[j] = @as(i32, src_channel[y0 * self.cols + x0]);
-                                                p01_vec[j] = @as(i32, src_channel[y0 * self.cols + x1]);
-                                                p10_vec[j] = @as(i32, src_channel[y1 * self.cols + x0]);
-                                                p11_vec[j] = @as(i32, src_channel[y1 * self.cols + x1]);
+                                                    p00_vec[j] = @as(i32, src_channel[y0 * self.cols + x0]);
+                                                    p01_vec[j] = @as(i32, src_channel[y0 * self.cols + x1]);
+                                                    p10_vec[j] = @as(i32, src_channel[y1 * self.cols + x0]);
+                                                    p11_vec[j] = @as(i32, src_channel[y1 * self.cols + x1]);
+                                                }
                                             }
 
                                             // Fully vectorized bilinear interpolation
@@ -2870,7 +2870,7 @@ pub fn Filter(comptime T: type) type {
                                         const clamped = @min(@as(@Vector(vec_len, i32), @splat(255)), @max(@as(@Vector(vec_len, i32), @splat(0)), averaged));
 
                                         // Store results with fallback for zero weights
-                                        for (0..vec_len) |j| {
+                                        inline for (0..vec_len) |j| {
                                             dst_channel[r * self.cols + c + j] = if (zero_weight_mask[j])
                                                 src_channel[r * self.cols + c + j]
                                             else
