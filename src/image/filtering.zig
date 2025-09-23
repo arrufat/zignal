@@ -1811,7 +1811,7 @@ pub fn Filter(comptime T: type) type {
                             } else {
                                 const two_vec: @Vector(simd_len, f32) = @splat(2.0);
                                 var original_vals: @Vector(simd_len, f32) = undefined;
-                                for (0..simd_len) |i| {
+                                inline for (0..simd_len) |i| {
                                     original_vals[i] = meta.as(f32, src.data[r * src.stride + c + i]);
                                 }
                                 dst.data[r * dst.stride + c ..][0..simd_len].* = two_vec * original_vals - blurred_vals;
