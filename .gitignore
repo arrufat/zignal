@@ -25,6 +25,7 @@ bindings/python/**/*.pyi
 bindings/python/venv/
 bindings/python/.venv/
 bindings/python/env/
+bindings/python/uv.lock
 
 # Testing artifacts
 bindings/python/.coverage
