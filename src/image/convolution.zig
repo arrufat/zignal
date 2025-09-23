@@ -20,172 +20,162 @@ pub const BorderMode = enum {
 
 /// Comptime function generator for specialized convolution implementations.
 /// Generates optimized code for specific kernel dimensions at compile time.
-fn ConvolveKernel(comptime height: usize, comptime width: usize) type {
-    return struct {
-        const kernel_size = height * width;
-        const half_h = height / 2;
-        const half_w = width / 2;
+pub fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
+    return switch (T) {
+        u8 => struct {
+            const size = rows * cols;
+            const half_h = rows / 2;
+            const half_w = cols / 2;
+            fn convolve(src: Image(u8), dst: Image(u8), kernel: [size]i32, border: BorderMode) void {
+                const SCALE = 256;
+                const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
 
-        /// Optimized convolution for u8 planes with integer arithmetic.
-        fn convolveU8Plane(
-            src_img: Image(u8),
-            dst_img: Image(u8),
-            kernel: [kernel_size]i32,
-            border_mode: BorderMode,
-        ) void {
-            const SCALE = 256;
-            const vec_len = comptime std.simd.suggestVectorLength(i32) orelse 8;
-            const rows = src_img.rows;
-            const cols = src_img.cols;
+                for (0..src.rows) |r| {
+                    var c: usize = 0;
 
-            for (0..rows) |r| {
-                var c: usize = 0;
+                    // SIMD path for interior pixels
+                    if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
+                        c = half_w;
+                        const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
 
-                // SIMD path for interior pixels
-                if (r >= half_h and r + half_h < rows and cols > vec_len + width) {
-                    c = half_w;
-                    const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
+                        while (c + vec_len <= safe_end) : (c += vec_len) {
+                            var result_vec: @Vector(vec_len, i32) = @splat(0);
 
-                    while (c + vec_len <= safe_end) : (c += vec_len) {
-                        var result_vec: @Vector(vec_len, i32) = @splat(0);
+                            // Unroll kernel application for known sizes
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
+                                    const kernel_val = kernel[ky * cols + kx];
+                                    const kernel_vec: @Vector(vec_len, i32) = @splat(kernel_val);
 
-                        // Unroll kernel application for known sizes
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const kernel_val = kernel[ky * width + kx];
-                                const kernel_vec: @Vector(vec_len, i32) = @splat(kernel_val);
+                                    var pixel_vec: @Vector(vec_len, i32) = undefined;
+                                    inline for (0..vec_len) |i| {
+                                        const src_r = r + ky - half_h;
+                                        const src_c = c + i + kx - half_w;
+                                        pixel_vec[i] = src.data[src_r * src.stride + src_c];
+                                    }
 
-                                var pixel_vec: @Vector(vec_len, i32) = undefined;
-                                inline for (0..vec_len) |i| {
-                                    const src_r = r + ky - half_h;
-                                    const src_c = c + i + kx - half_w;
-                                    pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
+                                    result_vec += pixel_vec * kernel_vec;
                                 }
-
-                                result_vec += pixel_vec * kernel_vec;
                             }
-                        }
 
-                        const half_scale_vec: @Vector(vec_len, i32) = @splat(SCALE / 2);
-                        const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
-                        const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
+                            const half_scale_vec: @Vector(vec_len, i32) = @splat(SCALE / 2);
+                            const scale_vec: @Vector(vec_len, i32) = @splat(SCALE);
+                            const rounded_vec = @divTrunc(result_vec + half_scale_vec, scale_vec);
 
-                        inline for (0..vec_len) |i| {
-                            dst_img.data[r * dst_img.stride + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                            inline for (0..vec_len) |i| {
+                                dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                            }
                         }
                     }
-                }
 
-                while (c < cols) : (c += 1) {
-                    if (r >= half_h and r + half_h < rows and c >= half_w and c + half_w < cols) {
-                        var result: i32 = 0;
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const src_r = r + ky - half_h;
-                                const src_c = c + kx - half_w;
-                                const pixel_val = @as(i32, src_img.data[src_r * src_img.stride + src_c]);
-                                result += pixel_val * kernel[ky * width + kx];
-                            }
-                        }
-                        const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                        dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
-                    } else {
-                        const ir = @as(isize, @intCast(r));
-                        const ic = @as(isize, @intCast(c));
-                        var result: i32 = 0;
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                                const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                const pixel_val: i32 = getPixel(u8, src_img, iry, icx, border_mode);
-                                result += pixel_val * kernel[ky * width + kx];
-                            }
-                        }
-                        const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                        dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
-                    }
-                }
-            }
-        }
-
-        /// Optimized convolution for f32 planes with SIMD.
-        fn convolveF32Plane(
-            src_img: Image(f32),
-            dst_img: Image(f32),
-            kernel: [kernel_size]f32,
-            border_mode: BorderMode,
-        ) void {
-            const vec_len = comptime std.simd.suggestVectorLength(f32) orelse 8;
-            const rows = src_img.rows;
-            const cols = src_img.cols;
-
-            // Pre-create kernel vectors for SIMD
-            var kernel_vecs: [kernel_size]@Vector(vec_len, f32) = undefined;
-            inline for (0..kernel_size) |i| {
-                kernel_vecs[i] = @splat(kernel[i]);
-            }
-
-            for (0..rows) |r| {
-                var c: usize = 0;
-
-                // SIMD path for interior pixels
-                if (r >= half_h and r + half_h < rows and cols > vec_len + width) {
-                    c = half_w;
-                    const safe_end = if (cols > vec_len + half_w) cols - vec_len - half_w else half_w;
-
-                    while (c + vec_len <= safe_end) : (c += vec_len) {
-                        var result_vec: @Vector(vec_len, f32) = @splat(0);
-
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const kid = ky * width + kx;
-                                const kernel_vec = kernel_vecs[kid];
-
-                                var pixel_vec: @Vector(vec_len, f32) = undefined;
-                                inline for (0..vec_len) |i| {
+                    while (c < src.cols) : (c += 1) {
+                        if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
+                            var result: i32 = 0;
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
                                     const src_r = r + ky - half_h;
-                                    const src_c = c + i + kx - half_w;
-                                    pixel_vec[i] = src_img.data[src_r * src_img.stride + src_c];
+                                    const src_c = c + kx - half_w;
+                                    const pixel_val = @as(i32, src.data[src_r * src.stride + src_c]);
+                                    result += pixel_val * kernel[ky * cols + kx];
                                 }
-
-                                result_vec += pixel_vec * kernel_vec;
                             }
-                        }
-
-                        inline for (0..vec_len) |i| {
-                            dst_img.data[r * dst_img.stride + c + i] = result_vec[i];
-                        }
-                    }
-                }
-
-                while (c < cols) : (c += 1) {
-                    if (r >= half_h and r + half_h < rows and c >= half_w and c + half_w < cols) {
-                        var result: f32 = 0;
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const src_r = r + ky - half_h;
-                                const src_c = c + kx - half_w;
-                                result += src_img.data[src_r * src_img.stride + src_c] * kernel[ky * width + kx];
+                            const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                            dst.data[r * dst.stride + c] = @intCast(@max(0, @min(255, rounded)));
+                        } else {
+                            const ir = @as(isize, @intCast(r));
+                            const ic = @as(isize, @intCast(c));
+                            var result: i32 = 0;
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
+                                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                                    const pixel_val: i32 = getPixel(u8, src, iry, icx, border);
+                                    result += pixel_val * kernel[ky * cols + kx];
+                                }
                             }
+                            const rounded = @divTrunc(result + SCALE / 2, SCALE);
+                            dst.data[r * dst.stride + c] = @intCast(@max(0, @min(255, rounded)));
                         }
-                        dst_img.data[r * dst_img.stride + c] = result;
-                    } else {
-                        const ir = @as(isize, @intCast(r));
-                        const ic = @as(isize, @intCast(c));
-                        var result: f32 = 0;
-                        inline for (0..height) |ky| {
-                            inline for (0..width) |kx| {
-                                const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                                const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                const pixel_val = getPixel(f32, src_img, iry, icx, border_mode);
-                                result += pixel_val * kernel[ky * width + kx];
-                            }
-                        }
-                        dst_img.data[r * dst_img.stride + c] = result;
                     }
                 }
             }
-        }
+        },
+        f32 => struct {
+            const size = rows * cols;
+            const half_h = rows / 2;
+            const half_w = cols / 2;
+            fn convolve(src: Image(f32), dst: Image(f32), kernel: [size]f32, border: BorderMode) void {
+                const vec_len = comptime std.simd.suggestVectorLength(f32) orelse 8;
+
+                // Pre-create kernel vectors for SIMD
+                var kernel_vecs: [size]@Vector(vec_len, f32) = undefined;
+                inline for (0..size) |i| {
+                    kernel_vecs[i] = @splat(kernel[i]);
+                }
+
+                for (0..src.rows) |r| {
+                    var c: usize = 0;
+
+                    // SIMD path for interior pixels
+                    if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
+                        c = half_w;
+                        const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
+
+                        while (c + vec_len <= safe_end) : (c += vec_len) {
+                            var result_vec: @Vector(vec_len, f32) = @splat(0);
+
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
+                                    const kid = ky * cols + kx;
+                                    const kernel_vec = kernel_vecs[kid];
+
+                                    var pixel_vec: @Vector(vec_len, f32) = undefined;
+                                    inline for (0..vec_len) |i| {
+                                        const src_r = r + ky - half_h;
+                                        const src_c = c + i + kx - half_w;
+                                        pixel_vec[i] = src.data[src_r * src.stride + src_c];
+                                    }
+
+                                    result_vec += pixel_vec * kernel_vec;
+                                }
+                            }
+
+                            inline for (0..vec_len) |i| {
+                                dst.data[r * dst.stride + c + i] = result_vec[i];
+                            }
+                        }
+                    }
+
+                    while (c < src.cols) : (c += 1) {
+                        if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
+                            var result: f32 = 0;
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
+                                    const src_r = r + ky - half_h;
+                                    const src_c = c + kx - half_w;
+                                    result += src.data[src_r * src.stride + src_c] * kernel[ky * cols + kx];
+                                }
+                            }
+                            dst.data[r * dst.stride + c] = result;
+                        } else {
+                            const ir = @as(isize, @intCast(r));
+                            const ic = @as(isize, @intCast(c));
+                            var result: f32 = 0;
+                            inline for (0..rows) |ky| {
+                                inline for (0..cols) |kx| {
+                                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                                    const pixel_val = getPixel(f32, src, iry, icx, border);
+                                    result += pixel_val * kernel[ky * cols + kx];
+                                }
+                            }
+                            dst.data[r * dst.stride + c] = result;
+                        }
+                    }
+                }
+            }
+        },
+        else => @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported"),
     };
 }
 
@@ -210,25 +200,26 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
     }
 
     // Generate specialized implementation for this kernel size
-    const Kernel = ConvolveKernel(kernel_height, kernel_width);
 
     switch (@typeInfo(T)) {
         .int, .float => {
             // Optimized path for u8 with integer arithmetic
             if (T == u8) {
+                const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
                 // Convert floating-point kernel to integer
                 const SCALE = 256;
-                const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
+                const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
 
-                Kernel.convolveU8Plane(self, out.*, kernel_int, border_mode);
+                Kernel.convolve(self, out.*, kernel_int, border_mode);
             } else if (T == f32) {
+                const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
                 // Optimized path for f32 with SIMD
-                const kernel_flat = flattenKernel(f32, Kernel.kernel_size, kernel, null);
-                Kernel.convolveF32Plane(self, out.*, kernel_flat, border_mode);
+                const kernel_flat = flattenKernel(f32, Kernel.size, kernel, null);
+                Kernel.convolve(self, out.*, kernel_flat, border_mode);
             } else {
                 // Generic scalar path for other types
-                const half_h = Kernel.half_h;
-                const half_w = Kernel.half_w;
+                const half_h = kernel_height / 2;
+                const half_w = kernel_width / 2;
                 for (0..self.rows) |r| {
                     for (0..self.cols) |c| {
                         var accumulator: f32 = 0;
@@ -271,11 +262,11 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
         },
         .@"struct" => {
             // Optimized path for u8 structs (RGB, RGBA, etc.)
-
             if (comptime meta.allFieldsAreU8(T)) {
+                const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
                 // Channel separation approach for optimal performance
                 const SCALE = 256;
-                const kernel_int = flattenKernel(i32, Kernel.kernel_size, kernel, SCALE);
+                const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
                 const plane_size = self.rows * self.cols;
 
                 // Separate channels using helper
@@ -318,7 +309,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                     if (!uniform) {
                         const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
                         const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                        Kernel.convolveU8Plane(src_plane, dst_plane, kernel_int, border_mode);
+                        Kernel.convolve(src_plane, dst_plane, kernel_int, border_mode);
                     }
                 }
 
@@ -336,8 +327,8 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
             } else {
                 // Generic struct path for other color types
                 const fields = std.meta.fields(T);
-                const half_h = Kernel.half_h;
-                const half_w = Kernel.half_w;
+                const half_h = kernel_height / 2;
+                const half_w = kernel_width / 2;
 
                 for (0..self.rows) |r| {
                     for (0..self.cols) |c| {
