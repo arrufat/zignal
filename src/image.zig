@@ -621,23 +621,6 @@ pub fn Image(comptime T: type) type {
             return Filter(T).gaussianBlur(self, allocator, sigma, out);
         }
 
-        /// Applies Difference of Gaussians (DoG) band-pass filter to the image.
-        /// This efficiently computes the difference between two Gaussian blurs with different sigmas,
-        /// which acts as a band-pass filter and is commonly used for edge detection and feature enhancement.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `sigma1`: Standard deviation of the first (typically smaller) Gaussian kernel.
-        /// - `sigma2`: Standard deviation of the second (typically larger) Gaussian kernel.
-        /// - `out`: Output image containing the difference.
-        ///
-        /// The result is computed as: gaussian_blur(sigma1) - gaussian_blur(sigma2)
-        /// For edge detection, typically sigma2 ≈ 1.6 * sigma1. `offset` controls how u8-family
-        /// outputs encode negatives (128 recommended). For non-u8 types, `offset` is ignored.
-        pub fn differenceOfGaussians(self: Self, allocator: Allocator, sigma1: f32, sigma2: f32, offset: u8, out: *Self) !void {
-            return Filter(T).differenceOfGaussians(self, allocator, sigma1, sigma2, offset, out);
-        }
-
         /// Applies the Sobel filter to `self` to perform edge detection.
         /// The output is a grayscale image representing the magnitude of gradients at each pixel.
         ///

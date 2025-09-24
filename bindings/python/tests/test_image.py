@@ -112,50 +112,6 @@ class TestImageSmoke:
         with pytest.raises(ValueError):
             img.gaussian_blur(0.0)
 
-    def test_difference_of_gaussians(self):
-        """Test Difference of Gaussians filter"""
-        # Create a test image with some features
-        img = zignal.Image(11, 11, (128, 128, 128))
-        # Add a bright square in the center for edge detection
-        for r in range(3, 8):
-            for c in range(3, 8):
-                img[r, c] = (255, 255, 255)
-
-        # Test basic functionality
-        dog_result = img.difference_of_gaussians(1.0, 1.6)
-        assert dog_result.rows == 11
-        assert dog_result.cols == 11
-        assert dog_result is not img  # Should return a new image
-
-        # Test with different sigma ratios
-        fine_details = img.difference_of_gaussians(0.5, 1.0)
-        assert fine_details.rows == 11
-
-        # Test with grayscale image
-        gray_img = zignal.Image(7, 7, 128, dtype=zignal.Grayscale)
-        for r in range(2, 5):
-            for c in range(2, 5):
-                gray_img[r, c] = 255
-
-        gray_dog = gray_img.difference_of_gaussians(0.8, 1.3)
-        assert gray_dog.rows == 7
-        assert gray_dog.cols == 7
-
-        # Test error cases
-        with pytest.raises(ValueError, match="sigma"):
-            img.difference_of_gaussians(0.0, 1.0)  # sigma1 = 0
-
-        with pytest.raises(ValueError, match="sigma"):
-            img.difference_of_gaussians(1.0, 0.0)  # sigma2 = 0
-
-        with pytest.raises(ValueError, match="sigma"):
-            img.difference_of_gaussians(-1.0, 1.0)  # negative sigma1
-
-        with pytest.raises(ValueError, match="sigma"):
-            img.difference_of_gaussians(1.0, -1.0)  # negative sigma2
-
-        with pytest.raises(ValueError, match="different"):
-            img.difference_of_gaussians(1.0, 1.0)  # equal sigmas
 
     def test_blend_api(self):
         # Test RGBA base blending
