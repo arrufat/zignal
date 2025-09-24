@@ -1,9 +1,14 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const Rgb = @import("../color.zig").Rgb;
 const Rgba = @import("../color.zig").Rgba;
+const meta = @import("../meta.zig");
+const as = meta.as;
+const channel_ops = @import("channel_ops.zig");
+const Integral = @import("integral.zig").Integral;
 
 /// Histogram-based image enhancement operations.
 /// Provides functions for adjusting contrast and equalizing histograms.
@@ -261,6 +266,263 @@ pub fn Enhancement(comptime T: type) type {
                     }
                 },
                 else => return error.UnsupportedType,
+            }
+        }
+
+        /// Computes a sharpened version of `self` by enhancing edges.
+        /// It uses the formula `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred
+        /// version of the original image (calculated efficiently using an integral image).
+        /// The `radius` parameter controls the size of the blur. This operation effectively
+        /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
+        pub fn sharpen(self: Image(T), allocator: std.mem.Allocator, sharpened: *Image(T), radius: usize) !void {
+            if (!self.hasSameShape(sharpened.*)) {
+                sharpened.* = try .init(allocator, self.rows, self.cols);
+            }
+            if (radius == 0) {
+                self.copy(sharpened.*);
+                return;
+            }
+
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    const plane_size = self.rows * self.cols;
+                    const integral_buf = try allocator.alloc(f32, plane_size);
+                    defer allocator.free(integral_buf);
+                    const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
+
+                    // Use optimized paths for u8 and f32, generic path for others
+                    if (T == u8 or T == f32) {
+                        Integral(T).plane(self, integral_img);
+                        sharpenPlane(T, self, integral_img, sharpened.*, radius);
+                    } else {
+                        // Generic path: convert to f32 for processing
+                        const src_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(src_f32);
+                        // Gather respecting stride into packed plane
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                src_f32[r * self.cols + c] = meta.as(f32, self.at(r, c).*);
+                            }
+                        }
+                        const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
+                        Integral(f32).plane(src_img, integral_img);
+
+                        const dst_f32 = try allocator.alloc(f32, plane_size);
+                        defer allocator.free(dst_f32);
+                        const src_packed: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
+                        const dst_packed: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_f32 };
+                        sharpenPlane(f32, src_packed, integral_img, dst_packed, radius);
+
+                        // Convert back to target type
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const v = dst_f32[r * self.cols + c];
+                                sharpened.at(r, c).* = if (@typeInfo(T) == .int)
+                                    @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(v))))
+                                else
+                                    meta.as(T, v);
+                            }
+                        }
+                    }
+                },
+                .@"struct" => {
+                    if (comptime meta.allFieldsAreU8(T)) {
+                        // Optimized path for u8 types
+                        const plane_size = self.rows * self.cols;
+
+                        // Separate channels
+                        const channels = try channel_ops.splitChannels(T, self, allocator);
+                        defer for (channels) |channel| allocator.free(channel);
+
+                        // Check which channels are uniform to avoid unnecessary allocations
+                        var is_uniform: [channels.len]bool = undefined;
+                        var uniform_values: [channels.len]u8 = undefined;
+                        var non_uniform_count: usize = 0;
+
+                        inline for (channels, 0..) |src_data, i| {
+                            if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                                is_uniform[i] = true;
+                                uniform_values[i] = uniform_val;
+                            } else {
+                                is_uniform[i] = false;
+                                non_uniform_count += 1;
+                            }
+                        }
+
+                        // Allocate output channels only for non-uniform channels
+                        var out_channels: [channels.len][]u8 = undefined;
+                        inline for (&out_channels, is_uniform) |*ch, uniform| {
+                            if (uniform) {
+                                // For uniform channels, sharpening doesn't change the value
+                                ch.* = &[_]u8{}; // Empty slice as placeholder
+                            } else {
+                                ch.* = try allocator.alloc(u8, plane_size);
+                            }
+                        }
+                        defer {
+                            inline for (out_channels, is_uniform) |ch, uniform| {
+                                if (!uniform and ch.len > 0) allocator.free(ch);
+                            }
+                        }
+
+                        // Only allocate integral buffer if we have non-uniform channels
+                        if (non_uniform_count > 0) {
+                            const integral_buf = try allocator.alloc(f32, plane_size);
+                            defer allocator.free(integral_buf);
+                            const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
+
+                            // Process only non-uniform channels
+                            inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
+                                if (!uniform) {
+                                    const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
+                                    const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
+                                    Integral(u8).plane(src_plane, integral_img);
+                                    sharpenPlane(u8, src_plane, integral_img, dst_plane, radius);
+                                }
+                            }
+                        }
+
+                        // Recombine channels, using uniform values where applicable
+                        var final_channels: [channels.len][]const u8 = undefined;
+                        inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
+                            if (uniform) {
+                                // For uniform channels, sharpen result is same as input (2*v - v = v)
+                                final_channels[i] = src_ch;
+                            } else {
+                                final_channels[i] = out_ch;
+                            }
+                        }
+                        channel_ops.mergeChannels(T, final_channels, sharpened.*);
+                    } else {
+                        // Generic struct path for other color types
+                        const fields = std.meta.fields(T);
+                        var sat: Image([Image(T).channels()]f32) = undefined;
+                        try self.integral(allocator, &sat);
+                        defer sat.deinit(allocator);
+
+                        for (0..self.rows) |r| {
+                            for (0..self.cols) |c| {
+                                const r1 = r -| radius;
+                                const c1 = c -| radius;
+                                const r2 = @min(r + radius, self.rows - 1);
+                                const c2 = @min(c + radius, self.cols - 1);
+                                const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                                inline for (fields, 0..) |f, i| {
+                                    const sum = Integral(f32).sumChannel(sat, r1, c1, r2, c2, i);
+
+                                    const blurred = sum / area;
+                                    const original = @field(self.at(r, c).*, f.name);
+                                    @field(sharpened.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                        .int => blk: {
+                                            const sharpened_val = 2 * as(f32, original) - blurred;
+                                            break :blk @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
+                                        },
+                                        .float => as(f.type, 2 * as(f32, original) - blurred),
+                                        else => @compileError("Can't compute the sharpen image with struct fields of type " ++ @typeName(f.type) ++ "."),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                },
+                else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Sharpen plane using integral image (sharpened = 2*original - blurred).
+        fn sharpenPlane(
+            comptime PlaneType: type,
+            src: Image(PlaneType),
+            sat: Image(f32),
+            dst: Image(PlaneType),
+            radius: usize,
+        ) void {
+            assert(src.rows == dst.rows and src.cols == dst.cols);
+            assert(sat.rows == src.rows and sat.cols == src.cols);
+            const rows = src.rows;
+            const cols = src.cols;
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+            for (0..rows) |r| {
+                const r1 = r -| radius;
+                const r2 = @min(r + radius, rows - 1);
+                const r2_offset = r2 * sat.stride;
+
+                var c: usize = 0;
+
+                // SIMD processing for safe regions
+                const row_safe = r >= radius and r + radius < rows;
+                if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
+                    // Handle left border (including the column where c1 would be 0)
+                    while (c <= radius) : (c += 1) {
+                        const c1 = c -| radius;
+                        const c2 = @min(c + radius, cols - 1);
+                        const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                        const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
+
+                        const blurred = sum / area;
+                        const original = meta.as(f32, src.data[r * src.stride + c]);
+                        const sharpened = 2 * original - blurred;
+                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                        else
+                            sharpened;
+                    }
+
+                    // SIMD middle section - only in completely safe region
+                    const safe_end = cols - radius;
+                    if (c < safe_end) {
+                        const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                        const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                        while (c + simd_len <= safe_end) : (c += simd_len) {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+
+                            const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + (c1 - 1) ..][0..simd_len].*;
+                            const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
+
+                            const sums = int22 - int21 - int12 + int11;
+                            const blurred_vals = sums / area_vec;
+
+                            if (PlaneType == u8) {
+                                inline for (0..simd_len) |i| {
+                                    const original = meta.as(f32, src.data[r * src.stride + c + i]);
+                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(2 * original - blurred_vals[i]))))));
+                                }
+                            } else {
+                                const two_vec: @Vector(simd_len, f32) = @splat(2.0);
+                                var original_vals: @Vector(simd_len, f32) = undefined;
+                                inline for (0..simd_len) |i| {
+                                    original_vals[i] = meta.as(f32, src.data[r * src.stride + c + i]);
+                                }
+                                dst.data[r * dst.stride + c ..][0..simd_len].* = two_vec * original_vals - blurred_vals;
+                            }
+                        }
+                    }
+                }
+
+                while (c < cols) : (c += 1) {
+                    const c1 = c -| radius;
+                    const c2 = @min(c + radius, cols - 1);
+                    const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                    // Correct integral image access with boundary checks
+                    const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
+
+                    const blurred = sum / area;
+                    const original = meta.as(f32, src.data[r * src.stride + c]);
+                    const sharpened = 2 * original - blurred;
+                    dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                    else
+                        sharpened;
+                }
             }
         }
     };

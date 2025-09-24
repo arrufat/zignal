@@ -23,7 +23,7 @@ const png = @import("png.zig");
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
-const Filter = @import("image/filtering.zig").Filter;
+const Blur = @import("image/blur.zig").Blur;
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 const Integral = @import("image/integral.zig").Integral;
@@ -539,7 +539,7 @@ pub fn Image(comptime T: type) type {
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
-            return Filter(T).boxBlur(self, allocator, blurred, radius);
+            return Blur(T).box(self, allocator, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -548,7 +548,7 @@ pub fn Image(comptime T: type) type {
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: Allocator, sharpened: *Self, radius: usize) !void {
-            return Filter(T).sharpen(self, allocator, sharpened, radius);
+            return Enhancement(T).sharpen(self, allocator, sharpened, radius);
         }
 
         /// Automatically adjusts the contrast of an image by stretching the intensity range.
@@ -626,7 +626,7 @@ pub fn Image(comptime T: type) type {
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
         pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
-            return Filter(T).gaussianBlur(self, allocator, sigma, out);
+            return Blur(T).gaussian(self, allocator, sigma, out);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
