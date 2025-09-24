@@ -1035,18 +1035,10 @@ pub fn convolveVerticalU8PlaneDual(
 /// Get pixel value with border handling, automatically converting to appropriate scalar type.
 /// Returns i32 for u8 pixels (for integer arithmetic), f32 for f32 pixels.
 fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border: BorderMode) if (T == u8) i32 else f32 {
+    if (T != u8 and T != f32) @compileError("getPixel only works with u8 and f32 types");
     const coords = computeBorderCoords(row, col, @intCast(img.rows), @intCast(img.cols), border);
-    const pixel = if (coords.is_zero)
-        std.mem.zeroes(T)
-    else
-        img.at(@intCast(coords.row), @intCast(coords.col)).*;
-
-    // Auto-convert based on type
-    if (T == u8) {
-        return @as(i32, pixel);
-    } else {
-        return pixel;
-    }
+    const pixel = if (coords.is_zero) 0 else img.at(coords.row, coords.col).*;
+    return if (T == u8) @as(i32, pixel) else pixel;
 }
 
 /// Common border mode logic that returns adjusted coordinates.
@@ -1056,18 +1048,18 @@ fn computeBorderCoords(
     rows: isize,
     cols: isize,
     border: BorderMode,
-) struct { row: isize, col: isize, is_zero: bool } {
+) struct { row: usize, col: usize, is_zero: bool } {
     switch (border) {
         .zero => {
             if (row < 0 or col < 0 or row >= rows or col >= cols) {
                 return .{ .row = 0, .col = 0, .is_zero = true };
             }
-            return .{ .row = row, .col = col, .is_zero = false };
+            return .{ .row = @intCast(row), .col = @intCast(col), .is_zero = false };
         },
         .replicate => {
             const r = @max(0, @min(row, rows - 1));
             const c = @max(0, @min(col, cols - 1));
-            return .{ .row = r, .col = c, .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
         },
         .mirror => {
             if (rows == 0 or cols == 0) return .{ .row = 0, .col = 0, .is_zero = true };
@@ -1093,12 +1085,12 @@ fn computeBorderCoords(
                 c = 2 * cols - c - 1;
                 if (c < 0) c = -c - 1;
             }
-            return .{ .row = r, .col = c, .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
         },
         .wrap => {
             const r = @mod(row, rows);
             const c = @mod(col, cols);
-            return .{ .row = r, .col = c, .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
         },
     }
 }
