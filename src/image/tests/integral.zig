@@ -4,6 +4,9 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
+const integral_mod = @import("../integral.zig");
+const integralPlane = integral_mod.integralPlane;
+const computeIntegralSum = integral_mod.computeIntegralSum;
 
 test "integral image scalar" {
     var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
@@ -108,4 +111,40 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
             try expectEqual(rgb[2], rgba[2]);
         }
     }
+}
+
+test "computeIntegralSum function" {
+    const allocator = std.testing.allocator;
+
+    // Create a simple 3x3 test image with values 1-9
+    var src = try Image(u8).init(allocator, 3, 3);
+    defer src.deinit(allocator);
+
+    for (0..3) |r| {
+        for (0..3) |c| {
+            src.at(r, c).* = @intCast(r * 3 + c + 1);
+        }
+    }
+
+    // Build integral image using the integralPlane function directly
+    var integral_img = try Image(f32).init(allocator, 3, 3);
+    defer integral_img.deinit(allocator);
+
+    integralPlane(u8, src, integral_img);
+
+    // Test box sum computation using computeIntegralSum
+    const sum_all = computeIntegralSum(integral_img, 0, 0, 2, 2);
+    try expectEqual(@as(f32, 45), sum_all); // 1+2+3+4+5+6+7+8+9 = 45
+
+    // Test a smaller box (top-left 2x2)
+    const sum_2x2 = computeIntegralSum(integral_img, 0, 0, 1, 1);
+    try expectEqual(@as(f32, 12), sum_2x2); // 1+2+4+5 = 12
+
+    // Test bottom-right 2x2
+    const sum_br = computeIntegralSum(integral_img, 1, 1, 2, 2);
+    try expectEqual(@as(f32, 28), sum_br); // 5+6+8+9 = 28
+
+    // Test single pixel
+    const sum_single = computeIntegralSum(integral_img, 1, 1, 1, 1);
+    try expectEqual(@as(f32, 5), sum_single); // Just the center pixel
 }
