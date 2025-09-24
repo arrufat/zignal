@@ -6,6 +6,7 @@
 const std = @import("std");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
+const lerp = std.math.lerp;
 
 const Rgb = @import("Rgb.zig");
 const Rgba = @import("Rgba.zig").Rgba;
@@ -70,108 +71,83 @@ pub fn blendColors(base: Rgba, overlay: Rgba, mode: Blending) Rgba {
     // Early return for fully opaque overlay with normal mode over transparent base
     if (overlay.a == 255 and base.a == 0 and mode == .normal) return overlay;
 
-    // Calculate alpha values
-    const base_alpha = @as(f32, @floatFromInt(base.a)) / 255.0;
-    const overlay_alpha = @as(f32, @floatFromInt(overlay.a)) / 255.0;
-    const result_alpha = base_alpha + overlay_alpha * (1.0 - base_alpha);
-
-    // Handle case where both colors are fully transparent
-    if (result_alpha == 0) {
-        return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
-    }
-
     // Blend RGB components based on mode
     const blended_rgb = switch (mode) {
-        .normal => blendNormal(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .multiply => blendMultiply(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .screen => blendScreen(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .overlay => blendOverlay(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .soft_light => blendSoftLight(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .hard_light => blendHardLight(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .color_dodge => blendColorDodge(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .color_burn => blendColorBurn(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .darken => blendDarken(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .lighten => blendLighten(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .difference => blendDifference(base, overlay, base_alpha, overlay_alpha, result_alpha),
-        .exclusion => blendExclusion(base, overlay, base_alpha, overlay_alpha, result_alpha),
+        .normal => blendNormal(base, overlay),
+        .multiply => blendMultiply(base, overlay),
+        .screen => blendScreen(base, overlay),
+        .overlay => blendOverlay(base, overlay),
+        .soft_light => blendSoftLight(base, overlay),
+        .hard_light => blendHardLight(base, overlay),
+        .color_dodge => blendColorDodge(base, overlay),
+        .color_burn => blendColorBurn(base, overlay),
+        .darken => blendDarken(base, overlay),
+        .lighten => blendLighten(base, overlay),
+        .difference => blendDifference(base, overlay),
+        .exclusion => blendExclusion(base, overlay),
     };
 
     return .{
         .r = blended_rgb.r,
         .g = blended_rgb.g,
         .b = blended_rgb.b,
-        .a = @intFromFloat(result_alpha * 255.0),
+        .a = base.a,
     };
 }
 
-// Helper function for proper alpha compositing of a single channel
-// This composites the already-blended overlay value with the base value
-fn compositeChannel(base_value: f32, blended_value: f32, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) f32 {
-    // When both are fully opaque, just return the blended value
-    if (base_alpha == 1.0 and overlay_alpha == 1.0) {
-        return blended_value;
-    }
-    // Simplified case when base is opaque - common for RGB blending onto opaque surface
-    if (base_alpha == 1.0) {
-        return std.math.lerp(base_value, blended_value, overlay_alpha);
-    }
-    // General alpha compositing using lerp
-    // (base_value * base_alpha + blended_value * overlay_alpha * (1.0 - base_alpha)) / result_alpha;
-    // The interpolation weight is the portion of the final alpha that comes from the overlay
-    const lerp_weight = overlay_alpha * (1.0 - base_alpha) / result_alpha;
-    return std.math.lerp(base_value, blended_value, lerp_weight);
-}
-
-fn blendNormal(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendNormal(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, overlay_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, overlay_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, overlay_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, overlay_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, overlay_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, overlay_b, overlay_a)),
     };
 }
 
-fn blendMultiply(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendMultiply(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = (base_r * overlay_r) / 255.0;
     const blended_g = (base_g * overlay_g) / 255.0;
     const blended_b = (base_b * overlay_b) / 255.0;
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
-fn blendScreen(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendScreen(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = 255.0 - ((255.0 - base_r) * (255.0 - overlay_r) / 255.0);
     const blended_g = 255.0 - ((255.0 - base_g) * (255.0 - overlay_g) / 255.0);
     const blended_b = 255.0 - ((255.0 - base_b) * (255.0 - overlay_b) / 255.0);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
@@ -183,22 +159,23 @@ fn overlayChannel(base: f32, blend: f32) f32 {
     }
 }
 
-fn blendOverlay(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendOverlay(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = overlayChannel(base_r, overlay_r);
     const blended_g = overlayChannel(base_g, overlay_g);
     const blended_b = overlayChannel(base_b, overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
@@ -214,7 +191,7 @@ fn softLightChannel(base: f32, blend: f32) f32 {
     }
 }
 
-fn blendSoftLight(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendSoftLight(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
@@ -225,21 +202,23 @@ fn blendSoftLight(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32
     const blended_r = softLightChannel(base_r, overlay_r);
     const blended_g = softLightChannel(base_g, overlay_g);
     const blended_b = softLightChannel(base_b, overlay_b);
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
-fn blendHardLight(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendHardLight(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     // Hard light is overlay with base and overlay swapped
     const blended_r = overlayChannel(overlay_r, base_r);
@@ -247,9 +226,9 @@ fn blendHardLight(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32
     const blended_b = overlayChannel(overlay_b, base_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
@@ -259,22 +238,23 @@ fn colorDodgeChannel(base: f32, blend: f32) f32 {
     return @min(255.0, result);
 }
 
-fn blendColorDodge(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendColorDodge(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = colorDodgeChannel(base_r, overlay_r);
     const blended_g = colorDodgeChannel(base_g, overlay_g);
     const blended_b = colorDodgeChannel(base_b, overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
@@ -284,7 +264,7 @@ fn colorBurnChannel(base: f32, blend: f32) f32 {
     return @max(0.0, result);
 }
 
-fn blendColorBurn(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendColorBurn(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
@@ -295,68 +275,72 @@ fn blendColorBurn(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32
     const blended_r = colorBurnChannel(base_r, overlay_r);
     const blended_g = colorBurnChannel(base_g, overlay_g);
     const blended_b = colorBurnChannel(base_b, overlay_b);
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
-fn blendDarken(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendDarken(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = @min(base_r, overlay_r);
     const blended_g = @min(base_g, overlay_g);
     const blended_b = @min(base_b, overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
-fn blendLighten(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendLighten(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = @max(base_r, overlay_r);
     const blended_g = @max(base_g, overlay_g);
     const blended_b = @max(base_b, overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
-fn blendDifference(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendDifference(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = @abs(base_r - overlay_r);
     const blended_g = @abs(base_g - overlay_g);
     const blended_b = @abs(base_b - overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
@@ -364,22 +348,23 @@ fn exclusionChannel(base: f32, blend: f32) f32 {
     return base + blend - 2.0 * base * blend / 255.0;
 }
 
-fn blendExclusion(base: Rgba, overlay: Rgba, base_alpha: f32, overlay_alpha: f32, result_alpha: f32) Rgb {
+fn blendExclusion(base: Rgba, overlay: Rgba) Rgb {
     const base_r = @as(f32, @floatFromInt(base.r));
     const base_g = @as(f32, @floatFromInt(base.g));
     const base_b = @as(f32, @floatFromInt(base.b));
     const overlay_r = @as(f32, @floatFromInt(overlay.r));
     const overlay_g = @as(f32, @floatFromInt(overlay.g));
     const overlay_b = @as(f32, @floatFromInt(overlay.b));
+    const overlay_a = @as(f32, @floatFromInt(overlay.a)) / 255.0;
 
     const blended_r = exclusionChannel(base_r, overlay_r);
     const blended_g = exclusionChannel(base_g, overlay_g);
     const blended_b = exclusionChannel(base_b, overlay_b);
 
     return .{
-        .r = @intFromFloat(compositeChannel(base_r, blended_r, base_alpha, overlay_alpha, result_alpha)),
-        .g = @intFromFloat(compositeChannel(base_g, blended_g, base_alpha, overlay_alpha, result_alpha)),
-        .b = @intFromFloat(compositeChannel(base_b, blended_b, base_alpha, overlay_alpha, result_alpha)),
+        .r = @intFromFloat(lerp(base_r, blended_r, overlay_a)),
+        .g = @intFromFloat(lerp(base_g, blended_g, overlay_a)),
+        .b = @intFromFloat(lerp(base_b, blended_b, overlay_a)),
     };
 }
 
