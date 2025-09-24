@@ -21,17 +21,19 @@ const png = @import("png.zig");
 
 // Import image sub-modules (private for internal use)
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
+const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
 const Filter = @import("image/filtering.zig").Filter;
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
+const Integral = @import("image/integral.zig").Integral;
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
-pub const channel_ops = @import("image/channel_ops.zig");
+const channel_ops = @import("image/channel_ops.zig");
 pub const Histogram = @import("image/histogram.zig").Histogram;
 const convolution = @import("image/convolution.zig");
 pub const BorderMode = convolution.BorderMode;
@@ -528,7 +530,7 @@ pub fn Image(comptime T: type) type {
             allocator: Allocator,
             sat: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
-            return Filter(T).integral(self, allocator, sat);
+            return Integral(T).compute(self, allocator, sat);
         }
 
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
@@ -632,7 +634,7 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
         /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
         pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
-            return Filter(T).sobel(self, allocator, out);
+            return Edges(T).sobel(self, allocator, out);
         }
 
         /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
@@ -649,7 +651,7 @@ pub fn Image(comptime T: type) type {
             opts: ShenCastan,
             out: *Image(u8),
         ) !void {
-            return Filter(T).shenCastan(self, allocator, opts, out);
+            return Edges(T).shenCastan(self, allocator, opts, out);
         }
 
         /// Applies motion blur effect to the image.
