@@ -489,8 +489,7 @@ pub const Tree = struct {
             S += (@as(u32, 1) << exp);
         }
 
-        if (S <= LIMIT) {
-            // Already valid
+        if (S == LIMIT) {
             self.max_length = 0;
             for (self.lengths) |l| {
                 if (l > 0) self.max_length = @max(self.max_length, l);
@@ -498,54 +497,141 @@ pub const Tree = struct {
             return;
         }
 
-        // Build a list of candidates: symbols with 0 < length < max_bits
+        var total = S;
+
+        if (S > LIMIT) {
+            // Build a list of candidates: symbols with 0 < length < max_bits
+            const Entry = struct { idx: u16, freq: u32 };
+            var entries: [288]Entry = undefined;
+            var m: usize = 0;
+            for (self.lengths, 0..) |l, i| {
+                if (i >= frequencies.len) continue;
+                if (l > 0 and l < max_bits) {
+                    entries[m] = .{ .idx = @intCast(i), .freq = frequencies[i] };
+                    m += 1;
+                }
+            }
+
+            if (m == 0) return;
+
+            while (total > LIMIT) {
+                std.sort.block(Entry, entries[0..m], self, struct {
+                    fn lessThan(ctx: *Self, a: Entry, b: Entry) bool {
+                        if (a.freq == b.freq) {
+                            return ctx.lengths[a.idx] < ctx.lengths[b.idx];
+                        }
+                        return a.freq < b.freq;
+                    }
+                }.lessThan);
+
+                var progressed = false;
+                var i: usize = 0;
+                while (i < m and total > LIMIT) : (i += 1) {
+                    const si = entries[i].idx;
+                    const l_old = self.lengths[si];
+                    if (l_old == 0 or l_old >= max_bits) continue;
+                    const reduction: u32 = (@as(u32, 1) << @intCast(max_bits - (l_old + 1)));
+                    self.lengths[si] = l_old + 1;
+                    total -= reduction;
+                    progressed = true;
+                }
+
+                if (!progressed) break;
+            }
+        }
+
+        if (total < LIMIT) {
+            self.fillKraftDeficit(max_bits, frequencies, &total, LIMIT);
+        }
+
+        std.debug.assert(total == LIMIT);
+
+        self.max_length = 0;
+        for (self.lengths) |l| {
+            if (l > 0) self.max_length = @max(self.max_length, l);
+        }
+    }
+
+    fn fillKraftDeficit(
+        self: *Self,
+        max_bits: u8,
+        frequencies: []const u32,
+        total: *u32,
+        limit: u32,
+    ) void {
+        var remaining = limit - total.*;
+        if (remaining == 0) return;
+
         const Entry = struct { idx: u16, freq: u32 };
+
+        var zero_entries: [288]Entry = undefined;
+        var zero_count: usize = 0;
+        for (self.lengths, 0..) |l, i| {
+            if (i >= frequencies.len) continue;
+            if (l == 0) {
+                zero_entries[zero_count] = .{ .idx = @intCast(i), .freq = frequencies[i] };
+                zero_count += 1;
+            }
+        }
+
+        std.sort.block(Entry, zero_entries[0..zero_count], {}, struct {
+            fn lessThan(_: void, a: Entry, b: Entry) bool {
+                if (a.freq == b.freq) return a.idx < b.idx;
+                return a.freq < b.freq;
+            }
+        }.lessThan);
+
+        var zi: usize = 0;
+        while (remaining > 0 and zi < zero_count) {
+            const idx = zero_entries[zi].idx;
+            zi += 1;
+
+            const highest_bit: u8 = @intCast(@bitSizeOf(u32) - 1 - @clz(remaining));
+            var assign_len: u8 = if (highest_bit >= max_bits) 1 else max_bits - highest_bit;
+            if (assign_len == 0) assign_len = 1;
+
+            const delta: u32 = (@as(u32, 1) << @intCast(max_bits - assign_len));
+            self.lengths[idx] = assign_len;
+            remaining -= delta;
+            total.* += delta;
+        }
+
+        if (remaining == 0) return;
+
         var entries: [288]Entry = undefined;
         var m: usize = 0;
         for (self.lengths, 0..) |l, i| {
             if (i >= frequencies.len) continue;
-            if (l > 0 and l < max_bits) {
+            if (l > 1) {
                 entries[m] = .{ .idx = @intCast(i), .freq = frequencies[i] };
                 m += 1;
             }
         }
 
-        // If none are eligible (all at max_bits), nothing we can do; but with DEFLATE's limits this shouldn't happen.
-        if (m == 0) return;
+        std.sort.block(Entry, entries[0..m], self, struct {
+            fn lessThan(ctx: *Self, a: Entry, b: Entry) bool {
+                if (a.freq == b.freq) return ctx.lengths[a.idx] > ctx.lengths[b.idx];
+                return a.freq > b.freq;
+            }
+        }.lessThan);
 
-        // Greedily increase lengths of the least-frequent symbols until S <= LIMIT.
-        // We re-sort on each pass; cost is negligible for small alphabets.
-        while (S > LIMIT) {
-            // Sort by frequency ascending; tie-break by current length ascending (increase shorter ones first reduces S more)
-            std.sort.block(Entry, entries[0..m], self, struct {
-                fn lessThan(ctx: *Self, a: Entry, b: Entry) bool {
-                    if (a.freq == b.freq) {
-                        return ctx.lengths[a.idx] < ctx.lengths[b.idx];
-                    }
-                    return a.freq < b.freq;
-                }
-            }.lessThan);
-
-            var progressed = false;
+        while (remaining > 0) {
+            var adjusted = false;
             var i: usize = 0;
-            while (i < m and S > LIMIT) : (i += 1) {
-                const si = entries[i].idx;
-                const l_old = self.lengths[si];
-                if (l_old == 0 or l_old >= max_bits) continue;
-                const reduction: u32 = (@as(u32, 1) << @intCast(max_bits - (l_old + 1)));
-                // Apply change
-                self.lengths[si] = l_old + 1;
-                S -= reduction;
-                progressed = true;
+            while (i < m) : (i += 1) {
+                const idx = entries[i].idx;
+                const len = self.lengths[idx];
+                if (len <= 1) continue;
+                const delta: u32 = (@as(u32, 1) << @intCast(max_bits - len));
+                if (delta > remaining) continue;
+                self.lengths[idx] = len - 1;
+                remaining -= delta;
+                total.* += delta;
+                adjusted = true;
+                break;
             }
 
-            if (!progressed) break; // Should not happen; safety guard
-        }
-
-        // Update max_length
-        self.max_length = 0;
-        for (self.lengths) |l| {
-            if (l > 0) self.max_length = @max(self.max_length, l);
+            if (!adjusted) break;
         }
     }
 
