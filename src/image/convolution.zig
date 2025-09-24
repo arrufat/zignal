@@ -153,7 +153,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                             inline for (0..cols) |kx| {
                                 const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                 const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                const pixel_val = getPixel(T, Scalar, src, iry, icx, border);
+                                const pixel_val = getPixel(T, src, iry, icx, border);
                                 result += pixel_val * kernel[ky * cols + kx];
                             }
                         }
@@ -223,7 +223,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                                 for (0..kernel_width) |kc| {
                                     const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
                                     const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                    const pixel_val = getPixel(T, T, self, src_r, src_c, border_mode);
+                                    const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
                                     const kernel_val = kernel[kr][kc];
                                     accumulator += as(f32, pixel_val) * as(f32, kernel_val);
                                 }
@@ -333,7 +333,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                                         for (0..kernel_width) |kc| {
                                             const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(kr)) - @as(isize, @intCast(half_h));
                                             const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(kc)) - @as(isize, @intCast(half_w));
-                                            const pixel_val = getPixel(T, T, self, src_r, src_c, border_mode);
+                                            const pixel_val = getPixel(T, self, src_r, src_c, border_mode);
                                             const channel_val = @field(pixel_val, field.name);
                                             const kernel_val = kernel[kr][kc];
                                             accumulator += as(f32, channel_val) * as(f32, kernel_val);
@@ -435,7 +435,7 @@ pub fn convolveSeparable(
                     } else {
                         for (kernel_x, 0..) |k, i| {
                             const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                            const pixel = getPixel(T, T, image, @as(isize, @intCast(r)), src_c, border);
+                            const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border);
                             sum += as(f32, pixel) * k;
                         }
                     }
@@ -550,7 +550,7 @@ pub fn convolveSeparable(
                         } else {
                             for (kernel_x, 0..) |k, i| {
                                 const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                                const pixel = getPixel(T, T, image, @as(isize, @intCast(r)), src_c, border);
+                                const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border);
                                 sum += as(f32, @field(pixel, field.name)) * k;
                             }
                         }
@@ -584,7 +584,7 @@ pub fn convolveSeparable(
                     } else {
                         for (kernel_y, 0..) |k, i| {
                             const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                            const pixel = getPixel(T, T, temp, src_r, @as(isize, @intCast(c)), border);
+                            const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border);
                             sum += as(f32, pixel) * k;
                         }
                     }
@@ -613,7 +613,7 @@ pub fn convolveSeparable(
                         } else {
                             for (kernel_y, 0..) |k, i| {
                                 const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                                const pixel = getPixel(T, T, temp, src_r, @as(isize, @intCast(c)), border);
+                                const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border);
                                 sum += as(f32, @field(pixel, field.name)) * k;
                             }
                         }
@@ -703,7 +703,7 @@ fn convolveSeparablePlane(
             const ic = @as(isize, @intCast(c));
             for (kernel_x, 0..) |k, i| {
                 const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val = getPixel(T, Scalar, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                const pixel_val = getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                 result += pixel_val * k;
             }
             temp_img.data[temp_offset + c] = Pixels.store(result);
@@ -715,7 +715,7 @@ fn convolveSeparablePlane(
                 const ic = @as(isize, @intCast(c));
                 for (kernel_x, 0..) |k, i| {
                     const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                    const pixel_val = getPixel(T, Scalar, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                    const pixel_val = getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                     result += pixel_val * k;
                 }
                 temp_img.data[temp_offset + c] = Pixels.store(result);
@@ -770,7 +770,7 @@ fn convolveSeparablePlane(
             const ir = @as(isize, @intCast(r));
             for (kernel_y, 0..) |k, i| {
                 const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                const pixel_val = getPixel(T, Scalar, temp_img, iry, @as(isize, @intCast(c)), border_mode);
+                const pixel_val = getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode);
                 result += pixel_val * k;
             }
             dst_img.data[r * dst_img.stride + c] = Pixels.store(result);
@@ -785,7 +785,7 @@ fn convolveSeparablePlane(
                 const ir = @as(isize, @intCast(r));
                 for (kernel_y, 0..) |k, i| {
                     const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                    const pixel_val = getPixel(T, Scalar, temp_img, iry, @as(isize, @intCast(c)), border_mode);
+                    const pixel_val = getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode);
                     result += pixel_val * k;
                 }
                 dst_img.data[r * dst_img.stride + c] = Pixels.store(result);
@@ -876,7 +876,7 @@ fn convolveHorizontalPlane(
             const ic = @as(isize, @intCast(c));
             for (kernel_x, 0..) |k, i| {
                 const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val = getPixel(T, Scalar, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                const pixel_val = getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                 result += pixel_val * k;
             }
             temp_img.data[temp_offset + c] = Pixels.store(result);
@@ -889,7 +889,7 @@ fn convolveHorizontalPlane(
                 const ic = @as(isize, @intCast(c));
                 for (kernel_x, 0..) |k, i| {
                     const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                    const pixel_val = getPixel(T, Scalar, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                    const pixel_val = getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                     result += pixel_val * k;
                 }
                 temp_img.data[temp_offset + c] = Pixels.store(result);
@@ -999,11 +999,11 @@ pub fn convolveVerticalU8PlaneDual(
             const ir = @as(isize, @intCast(r));
             for (kernel_y1_int, 0..) |k, i| {
                 const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y1));
-                s1 += getPixel(u8, i32, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
+                s1 += getPixel(u8, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
             }
             for (kernel_y2_int, 0..) |k, i| {
                 const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
-                s2 += getPixel(u8, i32, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
+                s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
             }
             const d = @divTrunc(s1 + scale / 2, scale) - @divTrunc(s2 + scale / 2, scale) + ioffset;
             dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
@@ -1019,11 +1019,11 @@ pub fn convolveVerticalU8PlaneDual(
                 const ir = @as(isize, @intCast(r));
                 for (kernel_y1_int, 0..) |k, i| {
                     const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y1));
-                    s1 += getPixel(u8, i32, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
+                    s1 += getPixel(u8, temp1, iry, @as(isize, @intCast(c)), border_mode) * k;
                 }
                 for (kernel_y2_int, 0..) |k, i| {
                     const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y2));
-                    s2 += getPixel(u8, i32, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
+                    s2 += getPixel(u8, temp2, iry, @as(isize, @intCast(c)), border_mode) * k;
                 }
                 const d = @divTrunc(s1 + scale / 2, scale) - @divTrunc(s2 + scale / 2, scale) + ioffset;
                 dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, d)));
@@ -1032,26 +1032,18 @@ pub fn convolveVerticalU8PlaneDual(
     }
 }
 
-/// Get pixel value with border handling, optionally converting to a different type.
-fn getPixel(
-    comptime PixelType: type,
-    comptime ReturnType: type,
-    img: Image(PixelType),
-    row: isize,
-    col: isize,
-    border: BorderMode,
-) ReturnType {
+/// Get pixel value with border handling, automatically converting to appropriate scalar type.
+/// Returns i32 for u8 pixels (for integer arithmetic), f32 for f32 pixels.
+fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border: BorderMode) if (T == u8) i32 else f32 {
     const coords = computeBorderCoords(row, col, @intCast(img.rows), @intCast(img.cols), border);
     const pixel = if (coords.is_zero)
-        std.mem.zeroes(PixelType)
+        std.mem.zeroes(T)
     else
         img.at(@intCast(coords.row), @intCast(coords.col)).*;
 
-    // Convert to return type if needed
-    if (ReturnType == PixelType) {
-        return pixel;
-    } else if (PixelType == u8) {
-        return @as(ReturnType, pixel);
+    // Auto-convert based on type
+    if (T == u8) {
+        return @as(i32, pixel);
     } else {
         return pixel;
     }
