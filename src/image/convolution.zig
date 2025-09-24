@@ -363,7 +363,7 @@ pub fn convolveSeparable(
     kernel_x: []const f32,
     kernel_y: []const f32,
     out: *Image(T),
-    border_mode: BorderMode,
+    border: BorderMode,
 ) !void {
     // Ensure output is properly allocated
     if (out.rows == 0 or out.cols == 0 or !image.hasSameShape(out.*)) {
@@ -384,24 +384,21 @@ pub fn convolveSeparable(
             // Optimized path for u8 with integer arithmetic
             if (T == u8) {
                 // Convert kernels to integer
-                const SCALE = 256;
+                const scale = 256;
                 const kernel_x_int = try allocator.alloc(i32, kernel_x.len);
                 defer allocator.free(kernel_x_int);
                 const kernel_y_int = try allocator.alloc(i32, kernel_y.len);
                 defer allocator.free(kernel_y_int);
 
                 for (kernel_x, 0..) |k, i| {
-                    kernel_x_int[i] = @intFromFloat(@round(k * SCALE));
+                    kernel_x_int[i] = @intFromFloat(@round(k * scale));
                 }
                 for (kernel_y, 0..) |k, i| {
-                    kernel_y_int[i] = @intFromFloat(@round(k * SCALE));
+                    kernel_y_int[i] = @intFromFloat(@round(k * scale));
                 }
-                // Enforce symmetry and exact sum preservation
-                symmetrizeKernelI32(kernel_x_int, SCALE);
-                symmetrizeKernelI32(kernel_y_int, SCALE);
 
-                convolveSeparableU8Plane(image, out.*, temp, kernel_x_int, kernel_y_int, border_mode);
-                return; // Skip the rest of the function
+                convolveSeparableU8Plane(image, out.*, temp, kernel_x_int, kernel_y_int, border);
+                return;
             }
 
             // Optimized path for f32 with SIMD
@@ -409,7 +406,7 @@ pub fn convolveSeparable(
                 const src_plane: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = image.data };
                 const dst_plane: Image(f32) = .{ .rows = out.rows, .cols = out.cols, .stride = out.stride, .data = out.data };
                 const tmp_plane: Image(f32) = .{ .rows = temp.rows, .cols = temp.cols, .stride = temp.stride, .data = temp.data };
-                convolveSeparableF32Plane(src_plane, dst_plane, tmp_plane, kernel_x, kernel_y, border_mode);
+                convolveSeparableF32Plane(src_plane, dst_plane, tmp_plane, kernel_x, kernel_y, border);
                 return;
             }
 
@@ -427,7 +424,7 @@ pub fn convolveSeparable(
                     } else {
                         for (kernel_x, 0..) |k, i| {
                             const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                            const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border_mode);
+                            const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border);
                             sum += as(f32, pixel) * k;
                         }
                     }
@@ -508,7 +505,7 @@ pub fn convolveSeparable(
                         const src_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_data };
                         const dst_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_data };
                         const tmp_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = temp_data };
-                        convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
+                        convolveSeparableU8Plane(src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border);
                     }
                 }
 
@@ -542,7 +539,7 @@ pub fn convolveSeparable(
                         } else {
                             for (kernel_x, 0..) |k, i| {
                                 const src_c = @as(isize, @intCast(c)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                                const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border_mode);
+                                const pixel = getPixel(T, image, @as(isize, @intCast(r)), src_c, border);
                                 sum += as(f32, @field(pixel, field.name)) * k;
                             }
                         }
@@ -576,7 +573,7 @@ pub fn convolveSeparable(
                     } else {
                         for (kernel_y, 0..) |k, i| {
                             const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                            const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border_mode);
+                            const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border);
                             sum += as(f32, pixel) * k;
                         }
                     }
@@ -605,7 +602,7 @@ pub fn convolveSeparable(
                         } else {
                             for (kernel_y, 0..) |k, i| {
                                 const src_r = @as(isize, @intCast(r)) + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                                const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border_mode);
+                                const pixel = getPixel(T, temp, src_r, @as(isize, @intCast(c)), border);
                                 sum += as(f32, @field(pixel, field.name)) * k;
                             }
                         }
@@ -655,29 +652,17 @@ pub fn convolveSeparableU8Plane(
             var c: usize = half_x;
             const safe_end = cols - half_x;
 
-            // SIMD processing for interior pixels (symmetric kernel pairs)
+            // SIMD processing for interior pixels
             while (c + vec_len <= safe_end) : (c += vec_len) {
                 var acc: @Vector(vec_len, i32) = @splat(0);
 
-                // Center tap
-                const k_center = kernel_x_int[half_x];
-                if (k_center != 0) {
-                    const center_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c ..][0..vec_len].*;
-                    const center_i32: @Vector(vec_len, i32) = @intCast(center_u8);
-                    acc += center_i32 * @as(@Vector(vec_len, i32), @splat(k_center));
-                }
-
-                // Paired taps
-                var di: usize = 1;
-                while (di <= half_x) : (di += 1) {
-                    const k = kernel_x_int[half_x + di];
+                // Apply kernel
+                for (kernel_x_int, 0..) |k, ki| {
                     if (k != 0) {
-                        const left_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c - di ..][0..vec_len].*;
-                        const right_u8: @Vector(vec_len, u8) = src_img.data[row_offset + c + di ..][0..vec_len].*;
-                        const left_i32: @Vector(vec_len, i32) = @intCast(left_u8);
-                        const right_i32: @Vector(vec_len, i32) = @intCast(right_u8);
-                        const pair_sum: @Vector(vec_len, i32) = left_i32 + right_i32;
-                        acc += pair_sum * @as(@Vector(vec_len, i32), @splat(k));
+                        const src_idx = row_offset + c + ki - half_x;
+                        const pixels_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
+                        const pixels_i32: @Vector(vec_len, i32) = @intCast(pixels_u8);
+                        acc += pixels_i32 * @as(@Vector(vec_len, i32), @splat(k));
                     }
                 }
 
@@ -742,32 +727,18 @@ pub fn convolveSeparableU8Plane(
         for (half_y..safe_end_r) |r| {
             var c: usize = 0;
 
-            // SIMD processing across columns (symmetric kernel pairs)
+            // SIMD processing across columns
             while (c + vec_len_y <= cols) : (c += vec_len_y) {
                 var acc: @Vector(vec_len_y, i32) = @splat(0);
 
-                // Center tap
-                const k_center = kernel_y_int[half_y];
-                if (k_center != 0) {
-                    const center_off = r * temp_img.stride;
-                    const center_u8: @Vector(vec_len_y, u8) = temp_img.data[center_off + c ..][0..vec_len_y].*;
-                    const center_i32: @Vector(vec_len_y, i32) = @intCast(center_u8);
-                    acc += center_i32 * @as(@Vector(vec_len_y, i32), @splat(k_center));
-                }
-
-                // Row pairs
-                var di: usize = 1;
-                while (di <= half_y) : (di += 1) {
-                    const k = kernel_y_int[half_y + di];
+                // Apply kernel
+                for (kernel_y_int, 0..) |k, ki| {
                     if (k != 0) {
-                        const top_off = (r - di) * temp_img.stride;
-                        const bot_off = (r + di) * temp_img.stride;
-                        const top_u8: @Vector(vec_len_y, u8) = temp_img.data[top_off + c ..][0..vec_len_y].*;
-                        const bot_u8: @Vector(vec_len_y, u8) = temp_img.data[bot_off + c ..][0..vec_len_y].*;
-                        const top_i32: @Vector(vec_len_y, i32) = @intCast(top_u8);
-                        const bot_i32: @Vector(vec_len_y, i32) = @intCast(bot_u8);
-                        const pair_sum: @Vector(vec_len_y, i32) = top_i32 + bot_i32;
-                        acc += pair_sum * @as(@Vector(vec_len_y, i32), @splat(k));
+                        const src_row = r + ki - half_y;
+                        const src_off = src_row * temp_img.stride;
+                        const pixels_u8: @Vector(vec_len_y, u8) = temp_img.data[src_off + c ..][0..vec_len_y].*;
+                        const pixels_i32: @Vector(vec_len_y, i32) = @intCast(pixels_u8);
+                        acc += pixels_i32 * @as(@Vector(vec_len_y, i32), @splat(k));
                     }
                 }
 
@@ -1124,48 +1095,24 @@ pub fn convolveVerticalU8PlaneDual(
                 var acc1: @Vector(vec_len, i32) = @splat(0);
                 var acc2: @Vector(vec_len, i32) = @splat(0);
 
-                // Centers
-                const k1_center = kernel_y1_int[half_y1];
-                if (k1_center != 0) {
-                    const center1_off = r * temp1.stride;
-                    const v1_u8: @Vector(vec_len, u8) = temp1.data[center1_off + c ..][0..vec_len].*;
-                    const v1_i32: @Vector(vec_len, i32) = @intCast(v1_u8);
-                    acc1 += v1_i32 * @as(@Vector(vec_len, i32), @splat(k1_center));
-                }
-                const k2_center = kernel_y2_int[half_y2];
-                if (k2_center != 0) {
-                    const center2_off = r * temp2.stride;
-                    const v2_u8: @Vector(vec_len, u8) = temp2.data[center2_off + c ..][0..vec_len].*;
-                    const v2_i32: @Vector(vec_len, i32) = @intCast(v2_u8);
-                    acc2 += v2_i32 * @as(@Vector(vec_len, i32), @splat(k2_center));
-                }
-
-                // Pairs for kernel1
-                var di1: usize = 1;
-                while (di1 <= half_y1) : (di1 += 1) {
-                    const k = kernel_y1_int[half_y1 + di1];
+                // Apply kernel1
+                for (kernel_y1_int, 0..) |k, ki| {
                     if (k != 0) {
-                        const top_off = (r - di1) * temp1.stride;
-                        const bot_off = (r + di1) * temp1.stride;
-                        const top_u8: @Vector(vec_len, u8) = temp1.data[top_off + c ..][0..vec_len].*;
-                        const bot_u8: @Vector(vec_len, u8) = temp1.data[bot_off + c ..][0..vec_len].*;
-                        const top_i32: @Vector(vec_len, i32) = @intCast(top_u8);
-                        const bot_i32: @Vector(vec_len, i32) = @intCast(bot_u8);
-                        acc1 += (top_i32 + bot_i32) * @as(@Vector(vec_len, i32), @splat(k));
+                        const src_row = r + ki - half_y1;
+                        const src_off = src_row * temp1.stride;
+                        const pixels_u8: @Vector(vec_len, u8) = temp1.data[src_off + c ..][0..vec_len].*;
+                        const pixels_i32: @Vector(vec_len, i32) = @intCast(pixels_u8);
+                        acc1 += pixels_i32 * @as(@Vector(vec_len, i32), @splat(k));
                     }
                 }
-                // Pairs for kernel2
-                var di2: usize = 1;
-                while (di2 <= half_y2) : (di2 += 1) {
-                    const k = kernel_y2_int[half_y2 + di2];
+                // Apply kernel2
+                for (kernel_y2_int, 0..) |k, ki| {
                     if (k != 0) {
-                        const top_off = (r - di2) * temp2.stride;
-                        const bot_off = (r + di2) * temp2.stride;
-                        const top_u8: @Vector(vec_len, u8) = temp2.data[top_off + c ..][0..vec_len].*;
-                        const bot_u8: @Vector(vec_len, u8) = temp2.data[bot_off + c ..][0..vec_len].*;
-                        const top_i32: @Vector(vec_len, i32) = @intCast(top_u8);
-                        const bot_i32: @Vector(vec_len, i32) = @intCast(bot_u8);
-                        acc2 += (top_i32 + bot_i32) * @as(@Vector(vec_len, i32), @splat(k));
+                        const src_row = r + ki - half_y2;
+                        const src_off = src_row * temp2.stride;
+                        const pixels_u8: @Vector(vec_len, u8) = temp2.data[src_off + c ..][0..vec_len].*;
+                        const pixels_i32: @Vector(vec_len, i32) = @intCast(pixels_u8);
+                        acc2 += pixels_i32 * @as(@Vector(vec_len, i32), @splat(k));
                     }
                 }
 
@@ -1322,27 +1269,4 @@ inline fn flattenKernel(comptime OutType: type, comptime size: usize, kernel: an
         }
     }
     return result;
-}
-
-/// Make a 1D integer kernel symmetric and adjust the center tap so the sum equals `scale`.
-pub inline fn symmetrizeKernelI32(k: []i32, scale: i32) void {
-    const n = k.len;
-    if (n == 0 or (n & 1) == 0) return; // only handle odd-length kernels
-    const half = n / 2;
-
-    var new_sum: i32 = 0;
-    // Symmetrize pairs
-    var i: usize = 0;
-    while (i < half) : (i += 1) {
-        const j = n - 1 - i;
-        const avg = @divTrunc(k[i] + k[j], 2);
-        k[i] = avg;
-        k[j] = avg;
-        new_sum += 2 * avg;
-    }
-    // Add center
-    new_sum += k[half];
-    // Adjust center to match target scale exactly
-    const delta = scale - new_sum;
-    k[half] += delta;
 }
