@@ -13,6 +13,10 @@ pub const BorderMode = @import("convolution.zig").BorderMode;
 const channel_ops = @import("channel_ops.zig");
 const convolve = @import("convolution.zig").convolve;
 const convolveSeparable = @import("convolution.zig").convolveSeparable;
+const integral = @import("integral.zig");
+const integralPlane = integral.integralPlane;
+const computeIntegralSum = integral.computeIntegralSum;
+const computeIntegralSumMultiChannel = integral.computeIntegralSumMultiChannel;
 const convolveSeparableF32Plane = @import("convolution.zig").convolveSeparableF32Plane;
 const convolveSeparableU8Plane = @import("convolution.zig").convolveSeparableU8Plane;
 const ShenCastan = @import("ShenCastan.zig");
@@ -348,51 +352,6 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 else => @compileError("Can't compute the sharpen image of " ++ @typeName(T) ++ "."),
-            }
-        }
-
-        // ============================================================================
-        // Convolution Kernel Specialization
-        // ============================================================================
-
-        /// Optimized convolution for scalar types (int/float) with SIMD.
-        /// Build integral image from any scalar type plane into f32 plane with SIMD optimization.
-        /// The output integral image allows O(1) computation of rectangular region sums.
-        fn integralPlane(comptime SrcT: type, src_img: Image(SrcT), dst_img: Image(f32)) void {
-            assert(src_img.rows == dst_img.rows and src_img.cols == dst_img.cols);
-
-            const rows = src_img.rows;
-            const cols = src_img.cols;
-            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
-
-            // First pass: compute row-wise cumulative sums
-            for (0..rows) |r| {
-                var tmp: f32 = 0;
-                const src_row_offset = r * src_img.stride;
-                const dst_row_offset = r * dst_img.stride; // equals cols
-                for (0..cols) |c| {
-                    tmp += meta.as(f32, src_img.data[src_row_offset + c]);
-                    dst_img.data[dst_row_offset + c] = tmp;
-                }
-            }
-
-            // Second pass: add column-wise cumulative sums using SIMD over packed dst
-            for (1..rows) |r| {
-                const prev_row_offset = (r - 1) * dst_img.stride;
-                const curr_row_offset = r * dst_img.stride;
-                var c: usize = 0;
-
-                // Process SIMD-width chunks
-                while (c + simd_len <= cols) : (c += simd_len) {
-                    const prev_vals: @Vector(simd_len, f32) = dst_img.data[prev_row_offset + c ..][0..simd_len].*;
-                    const curr_vals: @Vector(simd_len, f32) = dst_img.data[curr_row_offset + c ..][0..simd_len].*;
-                    dst_img.data[curr_row_offset + c ..][0..simd_len].* = prev_vals + curr_vals;
-                }
-
-                // Handle remaining columns
-                while (c < cols) : (c += 1) {
-                    dst_img.data[curr_row_offset + c] += dst_img.data[prev_row_offset + c];
-                }
             }
         }
 
@@ -1962,26 +1921,6 @@ pub fn Filter(comptime T: type) type {
                     }
                 }
             }
-        }
-
-        // ============================================================================
-        // Helper Functions - Border handling, kernel processing, utilities
-        // ============================================================================
-
-        /// Compute integral image sum with boundary checks.
-        fn computeIntegralSum(sat: Image(f32), r1: usize, c1: usize, r2: usize, c2: usize) f32 {
-            return sat.data[r2 * sat.stride + c2] -
-                (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -
-                (if (r1 > 0) sat.data[(r1 - 1) * sat.stride + c2] else 0) +
-                (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
-        }
-
-        /// Compute integral image sum for multi-channel images.
-        fn computeIntegralSumMultiChannel(sat: anytype, r1: usize, c1: usize, r2: usize, c2: usize, channel: usize) f32 {
-            return (if (r2 < sat.rows and c2 < sat.cols) sat.at(r2, c2)[channel] else 0) -
-                (if (r2 < sat.rows and c1 > 0) sat.at(r2, c1 - 1)[channel] else 0) -
-                (if (r1 > 0 and c2 < sat.cols) sat.at(r1 - 1, c2)[channel] else 0) +
-                (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[channel] else 0);
         }
     };
 }
