@@ -474,7 +474,7 @@ pub fn Image(comptime T: type) type {
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: @import("image/interpolation.zig").Interpolation) void {
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation) void {
             return Transform(T).extract(self, rect, angle, out, method);
         }
 
@@ -565,8 +565,8 @@ pub fn Image(comptime T: type) type {
         /// Adjusts contrast by stretching the intensity range. Modifies in-place.
         /// Parameters:
         /// - `cutoff`: Fraction of pixels to ignore from each end (0.0 to 0.5)
-        pub fn autocontrast(self: Self, allocator: Allocator, cutoff: f32) !void {
-            return Enhancement(T).autocontrast(self, allocator, cutoff);
+        pub fn autocontrast(self: Self, cutoff: f32) !void {
+            return Enhancement(T).autocontrast(self, cutoff);
         }
 
         /// Equalizes the histogram of an image to improve contrast.
@@ -590,8 +590,8 @@ pub fn Image(comptime T: type) type {
         /// defer equalized.deinit(allocator);
         /// ```
         /// Equalizes the histogram to improve contrast. Modifies in-place.
-        pub fn equalize(self: Self, allocator: Allocator) !void {
-            return Enhancement(T).equalize(self, allocator);
+        pub fn equalize(self: Self) void {
+            return Enhancement(T).equalize(self);
         }
 
         /// Applies a 2D convolution with the given kernel to the image.

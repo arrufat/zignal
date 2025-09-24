@@ -257,11 +257,8 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
-                out.autocontrast(allocator, cutoff) catch {
-                    out.deinit(allocator);
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply autocontrast");
-                    return null;
-                };
+                // we already checked for the cutoff value
+                out.autocontrast(cutoff) catch unreachable;
                 return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
@@ -314,11 +311,7 @@ pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.
                     c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
-                out.equalize(allocator) catch {
-                    out.deinit(allocator);
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply histogram equalization");
-                    return null;
-                };
+                out.equalize();
                 return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
