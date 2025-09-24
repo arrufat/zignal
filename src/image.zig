@@ -601,8 +601,8 @@ pub fn Image(comptime T: type) type {
         /// - `kernel`: A 2D array representing the convolution kernel.
         /// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
         /// - `border_mode`: How to handle pixels at the image borders.
-        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border_mode: BorderMode) !void {
-            return convolution.convolve(T, self, allocator, kernel, out, border_mode);
+        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, out: *Self, border: BorderMode) !void {
+            return convolution.convolve(T, self, allocator, kernel, out, border);
         }
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
@@ -614,8 +614,8 @@ pub fn Image(comptime T: type) type {
         /// - `kernel_y`: Vertical (row) kernel.
         /// - `out`: Output image.
         /// - `border_mode`: How to handle image borders.
-        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border_mode: BorderMode) !void {
-            return convolution.convolveSeparable(T, self, allocator, kernel_x, kernel_y, out, border_mode);
+        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, out: *Self, border: BorderMode) !void {
+            return convolution.convolveSeparable(T, self, allocator, kernel_x, kernel_y, out, border);
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
@@ -770,7 +770,7 @@ pub fn Image(comptime T: type) type {
             }
 
             // Calculate average MSE
-            mse = mse / @as(f64, @floatFromInt(component_count));
+            mse /= @as(f64, @floatFromInt(component_count));
 
             // If MSE is 0, images are identical
             if (mse == 0.0) {
@@ -801,7 +801,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns an iterator over all pixels in the image
-        pub fn pixels(self: Self) @import("image/PixelIterator.zig").PixelIterator(T) {
+        pub fn pixels(self: Self) PixelIterator(T) {
             return .{
                 .data = self.data,
                 .cols = self.cols,
