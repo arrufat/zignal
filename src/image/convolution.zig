@@ -227,16 +227,12 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
 
                     // Check which channels are uniform to avoid unnecessary processing
                     var is_uniform: [channels.len]bool = undefined;
-                    var uniform_values: [channels.len]u8 = undefined;
-                    var non_uniform_count: usize = 0;
 
                     inline for (channels, 0..) |src_data, i| {
-                        if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                        if (channel_ops.findUniformValue(u8, src_data)) |_| {
                             is_uniform[i] = true;
-                            uniform_values[i] = uniform_val;
                         } else {
                             is_uniform[i] = false;
-                            non_uniform_count += 1;
                         }
                     }
 
@@ -365,16 +361,12 @@ pub fn convolveSeparable(
 
                     // Check which channels are uniform to avoid unnecessary processing
                     var is_uniform: [channels.len]bool = undefined;
-                    var uniform_values: [channels.len]u8 = undefined;
-                    var non_uniform_count: usize = 0;
 
                     inline for (channels, 0..) |src_data, i| {
-                        if (channel_ops.findUniformValue(u8, src_data)) |uniform_val| {
+                        if (channel_ops.findUniformValue(u8, src_data)) |_| {
                             is_uniform[i] = true;
-                            uniform_values[i] = uniform_val;
                         } else {
                             is_uniform[i] = false;
-                            non_uniform_count += 1;
                         }
                     }
 
@@ -429,10 +421,6 @@ pub fn convolveSeparable(
         },
     }
 }
-
-// ============================================================================
-// Optimized Plane Processing Functions
-// ============================================================================
 
 /// Unified separable convolution for both u8 and f32 planes with SIMD.
 /// For u8, kernels must be pre-scaled by 256 for integer arithmetic.
