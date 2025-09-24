@@ -212,8 +212,8 @@ pub const image_autocontrast_doc =
     \\become black (0) and brightest become white (255).
     \\
     \\## Parameters
-    \\- `cutoff` (float, optional): Percentage of pixels to ignore at extremes (0-50).
-    \\  Default: 0. For example, 2.0 ignores the darkest and brightest 2% of pixels,
+    \\- `cutoff` (float, optional): Rate of pixels to ignore at extremes (0-0.5).
+    \\  Default: 0. For example, 0.02 ignores the darkest and brightest 2% of pixels,
     \\  helping to remove outliers.
     \\
     \\## Returns
@@ -227,7 +227,7 @@ pub const image_autocontrast_doc =
     \\enhanced = img.autocontrast()
     \\
     \\# Ignore 2% outliers on each end
-    \\enhanced = img.autocontrast(cutoff=2.0)
+    \\enhanced = img.autocontrast(cutoff=0.02)
     \\```
 ;
 
