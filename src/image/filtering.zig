@@ -4,24 +4,15 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
-const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-pub const BorderMode = @import("convolution.zig").BorderMode;
 const channel_ops = @import("channel_ops.zig");
 const convolve = @import("convolution.zig").convolve;
 const convolveSeparable = @import("convolution.zig").convolveSeparable;
-const integral = @import("integral.zig");
-const integralPlane = integral.integralPlane;
-const computeIntegralSum = integral.computeIntegralSum;
-const computeIntegralSumMultiChannel = integral.computeIntegralSumMultiChannel;
-const convolveSeparableF32Plane = @import("convolution.zig").convolveSeparableF32Plane;
-const convolveSeparableU8Plane = @import("convolution.zig").convolveSeparableU8Plane;
-const ShenCastan = @import("ShenCastan.zig");
-
-// ShenCastan type moved to its own file (ShenCastan.zig)
+pub const BorderMode = @import("convolution.zig").BorderMode;
+const Integral = @import("integral.zig").Integral;
 
 /// Filter operations for Image(T)
 pub fn Filter(comptime T: type) type {
@@ -54,10 +45,10 @@ pub fn Filter(comptime T: type) type {
 
                     // Use optimized paths for u8 and f32, generic path for others
                     if (T == u8) {
-                        integralPlane(u8, self, integral_img);
+                        Integral(u8).plane(self, integral_img);
                         boxBlurPlane(u8, integral_img, blurred.*, radius);
                     } else if (T == f32) {
-                        integralPlane(f32, self, integral_img);
+                        Integral(f32).plane(self, integral_img);
                         boxBlurPlane(f32, integral_img, blurred.*, radius);
                     } else {
                         // Generic path: convert to f32 for processing
@@ -70,7 +61,7 @@ pub fn Filter(comptime T: type) type {
                             }
                         }
                         const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
-                        integralPlane(f32, src_img, integral_img);
+                        Integral(f32).plane(src_img, integral_img);
 
                         const dst_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(dst_f32);
@@ -142,7 +133,7 @@ pub fn Filter(comptime T: type) type {
                                 if (!uniform) {
                                     const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
                                     const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                                    integralPlane(u8, src_plane, integral_img);
+                                    Integral(u8).plane(src_plane, integral_img);
                                     boxBlurPlane(u8, integral_img, dst_plane, radius);
                                 }
                             }
@@ -175,7 +166,7 @@ pub fn Filter(comptime T: type) type {
 
                                 inline for (fields, 0..) |f, i| {
                                     // Use correct integral image indices
-                                    const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
+                                    const sum = Integral(f32).sumChannel(sat, r1, c1, r2, c2, i);
 
                                     @field(blurred.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                         .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sum / area)))),
@@ -213,12 +204,9 @@ pub fn Filter(comptime T: type) type {
                     const integral_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = integral_buf };
 
                     // Use optimized paths for u8 and f32, generic path for others
-                    if (T == u8) {
-                        integralPlane(u8, self, integral_img);
-                        sharpenPlane(u8, self, integral_img, sharpened.*, radius);
-                    } else if (T == f32) {
-                        integralPlane(f32, self, integral_img);
-                        sharpenPlane(f32, self, integral_img, sharpened.*, radius);
+                    if (T == u8 or T == f32) {
+                        Integral(T).plane(self, integral_img);
+                        sharpenPlane(T, self, integral_img, sharpened.*, radius);
                     } else {
                         // Generic path: convert to f32 for processing
                         const src_f32 = try allocator.alloc(f32, plane_size);
@@ -230,7 +218,7 @@ pub fn Filter(comptime T: type) type {
                             }
                         }
                         const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_f32 };
-                        integralPlane(f32, src_img, integral_img);
+                        Integral(f32).plane(src_img, integral_img);
 
                         const dst_f32 = try allocator.alloc(f32, plane_size);
                         defer allocator.free(dst_f32);
@@ -301,7 +289,7 @@ pub fn Filter(comptime T: type) type {
                                 if (!uniform) {
                                     const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
                                     const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                                    integralPlane(u8, src_plane, integral_img);
+                                    Integral(u8).plane(src_plane, integral_img);
                                     sharpenPlane(u8, src_plane, integral_img, dst_plane, radius);
                                 }
                             }
@@ -334,7 +322,7 @@ pub fn Filter(comptime T: type) type {
                                 const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                                 inline for (fields, 0..) |f, i| {
-                                    const sum = computeIntegralSumMultiChannel(sat, r1, c1, r2, c2, i);
+                                    const sum = Integral(f32).sumChannel(sat, r1, c1, r2, c2, i);
 
                                     const blurred = sum / area;
                                     const original = @field(self.at(r, c).*, f.name);
@@ -378,7 +366,7 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        const sum = computeIntegralSum(sat, r1, c1, r2, c2);
+                        const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
 
                         const val = sum / area;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
@@ -423,7 +411,7 @@ pub fn Filter(comptime T: type) type {
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                     // Correct integral image access with boundary checks
-                    const sum = computeIntegralSum(sat, r1, c1, r2, c2);
+                    const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
 
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
                         @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sum / area))))))
@@ -463,7 +451,7 @@ pub fn Filter(comptime T: type) type {
                         const c2 = @min(c + radius, cols - 1);
                         const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
-                        const sum = computeIntegralSum(sat, r1, c1, r2, c2);
+                        const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
 
                         const blurred = sum / area;
                         const original = meta.as(f32, src.data[r * src.stride + c]);
@@ -516,7 +504,7 @@ pub fn Filter(comptime T: type) type {
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                     // Correct integral image access with boundary checks
-                    const sum = computeIntegralSum(sat, r1, c1, r2, c2);
+                    const sum = Integral(u8).sum(sat, r1, c1, r2, c2);
 
                     const blurred = sum / area;
                     const original = meta.as(f32, src.data[r * src.stride + c]);
@@ -526,63 +514,6 @@ pub fn Filter(comptime T: type) type {
                     else
                         sharpened;
                 }
-            }
-        }
-
-        /// Build integral image (summed area table) from the source image.
-        /// Uses channel separation and SIMD optimization for performance.
-        pub fn integral(
-            self: Self,
-            allocator: Allocator,
-            sat: *Image(if (meta.isScalar(T)) f32 else [Self.channels()]f32),
-        ) !void {
-            if (!self.hasSameShape(sat.*)) {
-                sat.* = try .init(allocator, self.rows, self.cols);
-            }
-
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    // Use generic integral plane function for all scalar types
-                    integralPlane(T, self, sat.*);
-                },
-                .@"struct" => {
-                    // Channel separation for struct types
-                    const fields = std.meta.fields(T);
-
-                    // Create temporary buffers for each channel
-                    const src_plane = try allocator.alloc(f32, self.rows * self.cols);
-                    defer allocator.free(src_plane);
-                    const dst_plane = try allocator.alloc(f32, self.rows * self.cols);
-                    defer allocator.free(dst_plane);
-
-                    // Process each channel separately
-                    inline for (fields, 0..) |field, ch| {
-                        // Extract channel to packed src_plane respecting stride
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const pix = self.at(r, c).*;
-                                const val = @field(pix, field.name);
-                                src_plane[r * self.cols + c] = switch (@typeInfo(field.type)) {
-                                    .int => @floatFromInt(val),
-                                    .float => @floatCast(val),
-                                    else => 0,
-                                };
-                            }
-                        }
-
-                        const src_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_plane };
-                        const dst_img: Image(f32) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_plane };
-
-                        // Compute integral for this channel from packed src_plane into packed dst_plane
-                        integralPlane(f32, src_img, dst_img);
-
-                        // Store result in output channel (packed to packed)
-                        for (0..self.rows * self.cols) |i| {
-                            sat.data[i][ch] = dst_plane[i];
-                        }
-                    }
-                },
-                else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
             }
         }
 
@@ -1335,591 +1266,6 @@ pub fn Filter(comptime T: type) type {
                     }
                 },
                 else => @compileError("Radial motion blur not supported for type " ++ @typeName(T)),
-            }
-        }
-
-        /// Applies the Sobel filter to `self` to perform edge detection.
-        /// The output is a grayscale image representing the magnitude of gradients at each pixel.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
-        /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
-        pub fn sobel(self: Self, allocator: Allocator, out: *Image(u8)) !void {
-            if (!self.hasSameShape(out.*)) {
-                out.* = try .init(allocator, self.rows, self.cols);
-            }
-
-            // For now, use float path for all types to ensure correctness
-            {
-                // Original float path for other types
-                const sobel_x = [3][3]f32{
-                    .{ -1, 0, 1 },
-                    .{ -2, 0, 2 },
-                    .{ -1, 0, 1 },
-                };
-                const sobel_y = [3][3]f32{
-                    .{ -1, -2, -1 },
-                    .{ 0, 0, 0 },
-                    .{ 1, 2, 1 },
-                };
-
-                // Convert input to grayscale float if needed
-                var gray_float: Image(f32) = undefined;
-                const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
-                if (needs_conversion) {
-                    gray_float = try .init(allocator, self.rows, self.cols);
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            gray_float.at(r, c).* = as(f32, convertColor(u8, self.at(r, c).*));
-                        }
-                    }
-                } else {
-                    gray_float = self;
-                }
-                defer if (needs_conversion) gray_float.deinit(allocator);
-
-                // Apply Sobel X and Y filters
-                var grad_x = Image(f32).empty;
-                var grad_y = Image(f32).empty;
-                defer grad_x.deinit(allocator);
-                defer grad_y.deinit(allocator);
-
-                try convolve(f32, gray_float, allocator, sobel_x, &grad_x, .replicate);
-                try convolve(f32, gray_float, allocator, sobel_y, &grad_y, .replicate);
-
-                // Compute gradient magnitude
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        const gx = grad_x.at(r, c).*;
-                        const gy = grad_y.at(r, c).*;
-                        const magnitude = @sqrt(gx * gx + gy * gy);
-                        // Scale by 1/4 to match typical Sobel output range
-                        // Max theoretical magnitude is ~1442, so /4 maps to ~360 max
-                        const scaled = magnitude / 4.0;
-                        out.at(r, c).* = @intFromFloat(@max(0, @min(255, scaled)));
-                    }
-                }
-            }
-        }
-
-        // (ShenCastan moved to module scope for public export)
-
-        /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
-        /// Exponential Filter (ISEF). This algorithm provides superior edge localization
-        /// and noise handling compared to traditional methods.
-        ///
-        /// Notes:
-        /// - The Laplacian is approximated as (smoothed - original) for sign.
-        /// - Border pixels (outermost row/column) are not processed for edge detection.
-        /// - Thresholds apply to raw luminance differences (0..255 scale).
-        pub fn shenCastan(
-            self: Self,
-            allocator: Allocator,
-            opts: ShenCastan,
-            out: *Image(u8),
-        ) !void {
-            try opts.validate();
-
-            // Ensure output is allocated (deinit old buffer if shape differs to prevent leak)
-            if (!self.hasSameShape(out.*)) {
-                if (out.data.len > 0) out.deinit(allocator);
-                out.* = try .init(allocator, self.rows, self.cols);
-            }
-
-            // Convert to grayscale float for processing
-            var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
-            defer gray_float.deinit(allocator);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const gray_val = convertColor(u8, self.at(r, c).*);
-                    gray_float.at(r, c).* = as(f32, gray_val);
-                }
-            }
-
-            // Apply ISEF filter for smoothing
-            var smoothed = try Image(f32).init(allocator, self.rows, self.cols);
-            defer smoothed.deinit(allocator);
-            try isefFilter2D(gray_float, opts.smooth, &smoothed, allocator);
-
-            // Compute Laplacian approximation (smoothed - original)
-            var laplacian = try Image(f32).init(allocator, self.rows, self.cols);
-            defer laplacian.deinit(allocator);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    laplacian.at(r, c).* = smoothed.at(r, c).* - gray_float.at(r, c).*;
-                }
-            }
-
-            // Generate Binary Laplacian Image (BLI)
-            var bli = try Image(u8).init(allocator, self.rows, self.cols);
-            defer bli.deinit(allocator);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    bli.at(r, c).* = if (laplacian.at(r, c).* >= 0) 1 else 0;
-                }
-            }
-
-            // Find zero crossings according to thinning mode (for NMS, start from non-thinned mask)
-            var edges = try Image(u8).init(allocator, self.rows, self.cols);
-            defer edges.deinit(allocator);
-            // For NMS, we start with non-thinned edges, otherwise use forward thinning
-            try findZeroCrossings(bli, &edges, !opts.use_nms);
-
-            // Compute gradient magnitudes at edge locations
-            var gradients = try Image(f32).init(allocator, self.rows, self.cols);
-            defer gradients.deinit(allocator);
-            try computeAdaptiveGradients(gray_float, bli, edges, opts.window_size, &gradients, allocator);
-
-            // Determine thresholds using ratio-based approach
-            var t_low: f32 = 0;
-            var t_high: f32 = 0;
-
-            // Build histogram of gradient magnitudes at candidate edges
-            var hist: [256]usize = @splat(0);
-            var total: usize = 0;
-            for (0..self.rows) |rr| {
-                for (0..self.cols) |cc| {
-                    if (edges.at(rr, cc).* == 0) continue;
-                    var g = gradients.at(rr, cc).*;
-                    if (g < 0) g = 0;
-                    if (g > 255) g = 255;
-                    const bin: usize = @intFromFloat(@round(g));
-                    hist[bin] += 1;
-                    total += 1;
-                }
-            }
-            if (total == 0) {
-                // No candidates -> output all zeros
-                for (0..self.rows) |rr| {
-                    for (0..self.cols) |cc| {
-                        out.at(rr, cc).* = 0;
-                    }
-                }
-                return;
-            }
-            const target: usize = @intFromFloat(@floor(@as(f32, @floatFromInt(total)) * opts.high_ratio));
-            var cum: usize = 0;
-            var idx: usize = 0;
-            while (idx < 256 and cum < target) : (idx += 1) {
-                cum += hist[idx];
-            }
-            // idx is the first bin where cum >= target
-            t_high = @floatFromInt(@min(idx, 255));
-            t_low = opts.low_rel * t_high;
-
-            // Optional non-maximum suppression along gradient direction
-            var edges_nms = Image(u8).empty;
-            defer if (edges_nms.data.len > 0) edges_nms.deinit(allocator);
-            const edges_for_thresh: Image(u8) = blk: {
-                if (opts.use_nms) {
-                    edges_nms = try Image(u8).init(allocator, self.rows, self.cols);
-                    try nonMaxSuppressEdges(smoothed, gradients, edges, &edges_nms);
-                    break :blk edges_nms;
-                } else {
-                    break :blk edges;
-                }
-            };
-
-            if (!opts.hysteresis) {
-                // Emit strong edges only
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        const is_edge = edges_for_thresh.at(r, c).* > 0 and gradients.at(r, c).* >= t_high;
-                        out.at(r, c).* = if (is_edge) 255 else 0;
-                    }
-                }
-                return;
-            }
-
-            // Apply hysteresis thresholding with computed thresholds
-            try applyHysteresis(edges_for_thresh, gradients, t_low, t_high, out, allocator);
-        }
-
-        // ============================================================================
-        // ISEF Filter Functions
-        // ============================================================================
-
-        /// Applies 1D ISEF recursive filter (forward + backward pass for symmetry)
-        fn isefFilter1D(data: []f32, b: f32, temp: []f32) void {
-            const n = data.len;
-            if (n == 0) return;
-
-            const a = 1.0 - b;
-
-            // Forward pass
-            temp[0] = b * data[0];
-            for (1..n) |i| {
-                temp[i] = b * data[i] + a * temp[i - 1];
-            }
-
-            // Backward pass (for symmetric response)
-            data[n - 1] = temp[n - 1];
-            if (n > 1) {
-                var i = n - 2;
-                while (true) {
-                    data[i] = b * temp[i] + a * data[i + 1];
-                    if (i == 0) break;
-                    i -= 1;
-                }
-            }
-        }
-
-        /// Applies 2D ISEF filter by separable application in X and Y directions
-        fn isefFilter2D(src: Image(f32), b: f32, dst: *Image(f32), allocator: Allocator) !void {
-            const rows = src.rows;
-            const cols = src.cols;
-
-            // Allocate temporary buffers
-            var row_buffer = try allocator.alloc(f32, cols);
-            defer allocator.free(row_buffer);
-            const temp_buffer = try allocator.alloc(f32, cols);
-            defer allocator.free(temp_buffer);
-
-            // Apply ISEF horizontally (along rows)
-            for (0..rows) |r| {
-                // Copy row to buffer
-                for (0..cols) |c| {
-                    row_buffer[c] = src.at(r, c).*;
-                }
-                // Apply 1D ISEF
-                isefFilter1D(row_buffer, b, temp_buffer);
-                // Copy back
-                for (0..cols) |c| {
-                    dst.at(r, c).* = row_buffer[c];
-                }
-            }
-
-            // Apply ISEF vertically (along columns)
-            var col_buffer = try allocator.alloc(f32, rows);
-            defer allocator.free(col_buffer);
-            const temp_col_buffer = try allocator.alloc(f32, rows);
-            defer allocator.free(temp_col_buffer);
-
-            for (0..cols) |c| {
-                // Copy column to buffer
-                for (0..rows) |r| {
-                    col_buffer[r] = dst.at(r, c).*;
-                }
-                // Apply 1D ISEF
-                isefFilter1D(col_buffer, b, temp_col_buffer);
-                // Copy back
-                for (0..rows) |r| {
-                    dst.at(r, c).* = col_buffer[r];
-                }
-            }
-        }
-
-        /// Finds zero crossings in the Binary Laplacian Image and produces an edge map.
-        /// If `thin` is `.forward`, marks a pixel when it differs from any forward neighbor (E, S, SE, SW)
-        /// which avoids double-marking and yields thinner edges. If `.none`, marks any 4-neighbor transition
-        /// around the center (thicker edges, useful for debugging/visualization).
-        fn findZeroCrossings(bli: Image(u8), edges: *Image(u8), use_forward: bool) !void {
-            const rows = bli.rows;
-            const cols = bli.cols;
-
-            // Initialize all to 0
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    edges.at(r, c).* = 0;
-                }
-            }
-
-            if (use_forward) {
-                // Check transitions with forward neighbors to reduce double-marking
-                for (0..rows) |r| {
-                    for (0..cols) |c| {
-                        const center = bli.at(r, c).*;
-                        var mark: bool = false;
-                        // East
-                        if (!mark and c + 1 < cols) mark = (center != bli.at(r, c + 1).*);
-                        // South
-                        if (!mark and r + 1 < rows) mark = (center != bli.at(r + 1, c).*);
-                        // South-East
-                        if (!mark and r + 1 < rows and c + 1 < cols) mark = (center != bli.at(r + 1, c + 1).*);
-                        // South-West
-                        if (!mark and r + 1 < rows and c > 0) mark = (center != bli.at(r + 1, c - 1).*);
-                        if (mark) edges.at(r, c).* = 255;
-                    }
-                }
-            } else {
-                // Mark any 4-neighbor transition (used for NMS)
-                if (rows >= 3 and cols >= 3) {
-                    for (1..rows - 1) |r| {
-                        for (1..cols - 1) |c| {
-                            const center = bli.at(r, c).*;
-                            const left = bli.at(r, c - 1).*;
-                            const right = bli.at(r, c + 1).*;
-                            const top = bli.at(r - 1, c).*;
-                            const bottom = bli.at(r + 1, c).*;
-                            if (center != left or center != right or center != top or center != bottom) {
-                                edges.at(r, c).* = 255;
-                            }
-                        }
-                    }
-                } else {
-                    // Fallback for very small images: safe bounds
-                    for (0..rows) |r| {
-                        for (0..cols) |c| {
-                            const center = bli.at(r, c).*;
-                            var mark = false;
-                            if (!mark and c > 0) mark = (center != bli.at(r, c - 1).*);
-                            if (!mark and c + 1 < cols) mark = (center != bli.at(r, c + 1).*);
-                            if (!mark and r > 0) mark = (center != bli.at(r - 1, c).*);
-                            if (!mark and r + 1 < rows) mark = (center != bli.at(r + 1, c).*);
-                            if (mark) edges.at(r, c).* = 255;
-                        }
-                    }
-                }
-            }
-        }
-
-        /// Computes adaptive gradient magnitudes using local window statistics with integral image acceleration
-        fn computeAdaptiveGradients(
-            gray: Image(f32),
-            bli: Image(u8),
-            edges: Image(u8),
-            window_size: usize,
-            gradients: *Image(f32),
-            allocator: Allocator,
-        ) !void {
-            const rows = gray.rows;
-            const cols = gray.cols;
-            const half_window = window_size / 2;
-
-            // Initialize gradients to 0
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    gradients.at(r, c).* = 0;
-                }
-            }
-
-            // Build integral images for fast box sum computation
-            const plane_size = rows * cols;
-
-            // Integral image for grayscale values
-            const integral_gray_buf = try allocator.alloc(f32, plane_size);
-            defer allocator.free(integral_gray_buf);
-            const integral_gray: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_gray_buf };
-            integralPlane(f32, gray, integral_gray);
-
-            // Integral image for BLI mask (where BLI == 1)
-            const integral_mask_buf = try allocator.alloc(f32, plane_size);
-            defer allocator.free(integral_mask_buf);
-            const integral_mask: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_mask_buf };
-            integralPlane(u8, bli, integral_mask);
-
-            // Integral image for gray * mask (values where BLI == 1)
-            const gray_masked_buf = try allocator.alloc(f32, plane_size);
-            defer allocator.free(gray_masked_buf);
-            for (0..plane_size) |i| {
-                gray_masked_buf[i] = gray.data[i] * @as(f32, @floatFromInt(bli.data[i]));
-            }
-            const gray_masked: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = gray_masked_buf };
-            const integral_gray_masked_buf = try allocator.alloc(f32, plane_size);
-            defer allocator.free(integral_gray_masked_buf);
-            const integral_gray_masked: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_gray_masked_buf };
-            integralPlane(f32, gray_masked, integral_gray_masked);
-
-            // Helper function to compute box sum from integral image
-            const boxSum = struct {
-                fn compute(img: Image(f32), r1: usize, r2: usize, c1: usize, c2: usize) f32 {
-                    // Box sum using integral image: sum = D - B - C + A
-                    // where A=(r1-1,c1-1), B=(r1-1,c2), C=(r2,c1-1), D=(r2,c2)
-                    var sum: f32 = img.at(r2, c2).*;
-                    if (r1 > 0) sum -= img.at(r1 - 1, c2).*;
-                    if (c1 > 0) sum -= img.at(r2, c1 - 1).*;
-                    if (r1 > 0 and c1 > 0) sum += img.at(r1 - 1, c1 - 1).*;
-                    return sum;
-                }
-            }.compute;
-
-            // For each edge pixel, compute gradient using integral images (O(1) per pixel)
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    if (edges.at(r, c).* == 0) continue;
-
-                    // Compute window bounds
-                    const r_start = if (r > half_window) r - half_window else 0;
-                    const r_end = @min(r + half_window, rows - 1);
-                    const c_start = if (c > half_window) c - half_window else 0;
-                    const c_end = @min(c + half_window, cols - 1);
-
-                    // Compute sums in O(1) using integral images
-                    const area = @as(f32, @floatFromInt((r_end - r_start + 1) * (c_end - c_start + 1)));
-                    const count1 = boxSum(integral_mask, r_start, r_end, c_start, c_end);
-                    const count0 = area - count1;
-
-                    if (count0 > 0 and count1 > 0) {
-                        const sum1 = boxSum(integral_gray_masked, r_start, r_end, c_start, c_end);
-                        const sum_total = boxSum(integral_gray, r_start, r_end, c_start, c_end);
-                        const sum0 = sum_total - sum1;
-
-                        const mean0 = sum0 / count0;
-                        const mean1 = sum1 / count1;
-                        gradients.at(r, c).* = @abs(mean1 - mean0);
-                    }
-                }
-            }
-        }
-
-        /// Applies hysteresis thresholding for final edge linking using BFS for O(N) performance.
-        /// Invariant: pixels are marked in `out` before being enqueued so each pixel is processed at most once.
-        fn applyHysteresis(
-            edges: Image(u8),
-            gradients: Image(f32),
-            threshold_low: f32,
-            threshold_high: f32,
-            out: *Image(u8),
-            allocator: Allocator,
-        ) !void {
-            const rows = edges.rows;
-            const cols = edges.cols;
-
-            // Initialize output and visited tracking
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    out.at(r, c).* = 0;
-                }
-            }
-
-            // BFS queue for edge propagation (monotonic indices to avoid head/tail ambiguity)
-            const max_queue_size = rows * cols;
-            const QueueItem = struct { r: usize, c: usize };
-            const queue_storage = try allocator.alloc(QueueItem, max_queue_size);
-            defer allocator.free(queue_storage);
-
-            var push_i: usize = 0;
-            var pop_i: usize = 0;
-
-            // Helper to enqueue (each pixel is enqueued at most once since we mark before enqueue)
-            const enqueue = struct {
-                fn push(q: []QueueItem, push_idx: *usize, r: usize, c: usize) void {
-                    assert(push_idx.* < q.len);
-                    q[push_idx.*] = .{ .r = r, .c = c };
-                    push_idx.* += 1;
-                }
-            }.push;
-
-            // First pass: find and enqueue all strong edges
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    if (edges.at(r, c).* > 0 and gradients.at(r, c).* >= threshold_high) {
-                        out.at(r, c).* = 255;
-                        enqueue(queue_storage, &push_i, r, c);
-                    }
-                }
-            }
-
-            // BFS propagation: grow from strong edges to weak edges
-            while (pop_i < push_i) {
-                const current = queue_storage[pop_i];
-                pop_i += 1;
-                const r = current.r;
-                const c = current.c;
-
-                // Check 8-connected neighbors
-                const r_start = if (r > 0) r - 1 else 0;
-                const r_end = @min(r + 2, rows);
-                const c_start = if (c > 0) c - 1 else 0;
-                const c_end = @min(c + 2, cols);
-
-                for (r_start..r_end) |nr| {
-                    for (c_start..c_end) |nc| {
-                        // Skip if same as current pixel
-                        if (nr == r and nc == c) continue;
-
-                        // Skip if already marked as edge
-                        if (out.at(nr, nc).* > 0) continue;
-
-                        // Check if it's a weak edge candidate
-                        if (edges.at(nr, nc).* > 0 and gradients.at(nr, nc).* >= threshold_low) {
-                            // Mark as edge and add to queue for further propagation
-                            out.at(nr, nc).* = 255;
-                            enqueue(queue_storage, &push_i, nr, nc);
-                        }
-                    }
-                }
-            }
-        }
-
-        /// Non-maximum suppression along gradient direction to thin edges to single-pixel width.
-        /// - Uses central differences on the smoothed image to estimate local gradient direction.
-        /// - Quantizes orientation into 0°, 45°, 90°, 135° without atan2 using slope thresholds.
-        /// - Keeps a candidate pixel only if its adaptive magnitude is not less than its two
-        ///   neighbors along the chosen direction.
-        fn nonMaxSuppressEdges(
-            smoothed: Image(f32),
-            gradients: Image(f32),
-            edges_in: Image(u8),
-            edges_out: *Image(u8),
-        ) !void {
-            const rows = edges_in.rows;
-            const cols = edges_in.cols;
-
-            // Initialize output to zero
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    edges_out.at(r, c).* = 0;
-                }
-            }
-
-            // Constants for direction quantization without atan2
-            const K: f32 = 0.414213562; // tan(22.5°)
-
-            if (rows < 3 or cols < 3) return; // Too small to compute central differences
-
-            // Skip image border to avoid bounds checks; border remains zero
-            for (1..rows - 1) |r| {
-                for (1..cols - 1) |c| {
-                    if (edges_in.at(r, c).* == 0) continue;
-
-                    // Gradient via central differences on smoothed image
-                    const gx = 0.5 * (smoothed.at(r, c + 1).* - smoothed.at(r, c - 1).*);
-                    const gy = 0.5 * (smoothed.at(r + 1, c).* - smoothed.at(r - 1, c).*);
-
-                    const ax = @abs(gx);
-                    const ay = @abs(gy);
-
-                    // Choose neighbor offsets along quantized direction
-                    var dr1: isize = 0;
-                    var dc1: isize = 0;
-                    var dr2: isize = 0;
-                    var dc2: isize = 0;
-
-                    if (ay <= K * ax) {
-                        // 0°: compare left/right
-                        dr1 = 0;
-                        dc1 = -1;
-                        dr2 = 0;
-                        dc2 = 1;
-                    } else if (ax <= K * ay) {
-                        // 90°: compare up/down
-                        dr1 = -1;
-                        dc1 = 0;
-                        dr2 = 1;
-                        dc2 = 0;
-                    } else if (gx * gy > 0) {
-                        // 45°: up-right and down-left
-                        dr1 = -1;
-                        dc1 = 1;
-                        dr2 = 1;
-                        dc2 = -1;
-                    } else {
-                        // 135°: up-left and down-right
-                        dr1 = -1;
-                        dc1 = -1;
-                        dr2 = 1;
-                        dc2 = 1;
-                    }
-
-                    const m = gradients.at(r, c).*;
-                    const n1 = gradients.at(@intCast(@as(isize, @intCast(r)) + dr1), @intCast(@as(isize, @intCast(c)) + dc1)).*;
-                    const n2 = gradients.at(@intCast(@as(isize, @intCast(r)) + dr2), @intCast(@as(isize, @intCast(c)) + dc2)).*;
-
-                    if (m >= n1 and m >= n2) {
-                        edges_out.at(r, c).* = 255;
-                    }
-                }
             }
         }
     };

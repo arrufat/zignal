@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Image = @import("../../image.zig").Image;
-const Filter = @import("../filtering.zig").Filter;
+const Edges = @import("../edges.zig").Edges;
 const color = @import("../../color.zig");
 const Rgb = color.Rgb;
 
@@ -30,7 +30,7 @@ test "Shen-Castan edge detection basic functionality" {
     var edges = Image(u8).empty;
     defer edges.deinit(allocator);
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
     var opts = @import("../../root.zig").ShenCastan{};
     opts.smooth = 0.8;
     opts.window_size = 7;
@@ -64,7 +64,7 @@ test "Shen-Castan parameter validation" {
     var edges = Image(u8).empty;
     defer edges.deinit(allocator);
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
 
     // Test invalid b_param (out of range)
     try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, allocator, .{ .smooth = 0.0 }, &edges));
@@ -107,7 +107,7 @@ test "Shen-Castan on gradient image" {
     var edges = Image(u8).empty;
     defer edges.deinit(allocator);
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
     var opts = @import("../../root.zig").ShenCastan{};
     opts.smooth = 0.85;
     opts.window_size = 7;
@@ -154,7 +154,7 @@ test "Shen-Castan with different b parameters" {
         }
     }
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
 
     // Test with low b (more smoothing)
     var edges_low_b = Image(u8).empty;
@@ -207,7 +207,7 @@ test "Shen-Castan on RGB image" {
     var edges = Image(u8).empty;
     defer edges.deinit(allocator);
 
-    const filter = Filter(Rgb);
+    const filter = Edges(Rgb);
     // Use lower thresholds for RGB edge detection
     try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 }, &edges);
 
@@ -250,7 +250,7 @@ test "Shen-Castan threshold monotonicity" {
         }
     }
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
 
     // Test with low thresholds
     var edges_low = Image(u8).empty;
@@ -303,7 +303,7 @@ test "Shen-Castan diagonal edge detection" {
     var edges = Image(u8).empty;
     defer edges.deinit(allocator);
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
     try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 }, &edges);
 
     // Check that diagonal edge is detected
@@ -339,7 +339,7 @@ test "Shen-Castan window size effect" {
         }
     }
 
-    const filter = Filter(u8);
+    const filter = Edges(u8);
 
     // Test with small window (should be more sensitive to noise)
     var edges_small = Image(u8).empty;
