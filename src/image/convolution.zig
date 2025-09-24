@@ -18,29 +18,22 @@ pub const BorderMode = enum {
     wrap,
 };
 
-/// Comptime function generator for specialized convolution implementations.
-/// Generates optimized code for specific kernel dimensions at compile time.
-fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
+/// Pixel I/O operations for type-specific convolution.
+/// Provides unified load/store operations for both u8 (with integer scaling) and f32.
+fn PixelIO(comptime T: type, comptime vec_len: usize) type {
     if (T != u8 and T != f32) {
-        @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported");
+        @compileError("PixelIO only supports u8 and f32 types");
     }
 
     return struct {
-        const size = rows * cols;
-        const half_h = rows / 2;
-        const half_w = cols / 2;
-
-        // Type-specific definitions
         const Scalar = if (T == u8) i32 else f32;
         const scale = if (T == u8) 256 else 1;
-        const vec_len = std.simd.suggestVectorLength(Scalar) orelse 1;
 
-        // Helper functions for type-specific operations
-        inline fn loadPixel(value: T) Scalar {
+        inline fn load(value: T) Scalar {
             return if (T == u8) @as(Scalar, value) else value;
         }
 
-        inline fn loadPixelVec(src: []const T, offset: usize) @Vector(vec_len, Scalar) {
+        inline fn loadVec(src: []const T, offset: usize) @Vector(vec_len, Scalar) {
             if (T == u8) {
                 const u8_vec: @Vector(vec_len, u8) = src[offset..][0..vec_len].*;
                 return @intCast(u8_vec);
@@ -49,7 +42,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             }
         }
 
-        inline fn storePixel(accum: Scalar) T {
+        inline fn store(accum: Scalar) T {
             if (T == u8) {
                 const rounded = @divTrunc(accum + scale / 2, scale);
                 return @intCast(@max(0, @min(255, rounded)));
@@ -58,7 +51,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             }
         }
 
-        inline fn storePixelVec(accum_vec: @Vector(vec_len, Scalar), dst: []T, offset: usize) void {
+        inline fn storeVec(accum_vec: @Vector(vec_len, Scalar), dst: []T, offset: usize) void {
             if (T == u8) {
                 const half_scale_vec: @Vector(vec_len, Scalar) = @splat(scale / 2);
                 const scale_vec: @Vector(vec_len, Scalar) = @splat(scale);
@@ -73,6 +66,27 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 }
             }
         }
+    };
+}
+
+/// Comptime function generator for specialized convolution implementations.
+/// Generates optimized code for specific kernel dimensions at compile time.
+fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
+    if (T != u8 and T != f32) {
+        @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported");
+    }
+
+    return struct {
+        const size = rows * cols;
+        const half_h = rows / 2;
+        const half_w = cols / 2;
+
+        // Type-specific definitions
+        const Scalar = if (T == u8) i32 else f32;
+        const vec_len = std.simd.suggestVectorLength(Scalar) orelse 1;
+
+        // Use the shared pixel I/O operations
+        const Pixels = PixelIO(T, vec_len);
 
         fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border: BorderMode) void {
             // Pre-create kernel vectors for SIMD (for f32)
@@ -107,12 +121,12 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                                 const src_r = r + ky - half_h;
                                 const src_c = c + kx - half_w;
                                 const src_idx = src_r * src.stride + src_c;
-                                const pixel_vec = loadPixelVec(src.data, src_idx);
+                                const pixel_vec = Pixels.loadVec(src.data, src_idx);
                                 result_vec += pixel_vec * kernel_vec;
                             }
                         }
 
-                        storePixelVec(result_vec, dst.data, r * dst.stride + c);
+                        Pixels.storeVec(result_vec, dst.data, r * dst.stride + c);
                     }
                 }
 
@@ -125,11 +139,11 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                             inline for (0..cols) |kx| {
                                 const src_r = r + ky - half_h;
                                 const src_c = c + kx - half_w;
-                                const pixel_val = loadPixel(src.data[src_r * src.stride + src_c]);
+                                const pixel_val = Pixels.load(src.data[src_r * src.stride + src_c]);
                                 result += pixel_val * kernel[ky * cols + kx];
                             }
                         }
-                        dst.data[r * dst.stride + c] = storePixel(result);
+                        dst.data[r * dst.stride + c] = Pixels.store(result);
                     } else {
                         // Border pixel - needs border handling
                         const ir = @as(isize, @intCast(r));
@@ -146,7 +160,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                                 result += pixel_val * kernel[ky * cols + kx];
                             }
                         }
-                        dst.data[r * dst.stride + c] = storePixel(result);
+                        dst.data[r * dst.stride + c] = Pixels.store(result);
                     }
                 }
             }
@@ -625,22 +639,26 @@ pub fn convolveSeparable(
 // Optimized Plane Processing Functions
 // ============================================================================
 
-/// Optimized separable convolution for u8 planes with SIMD integer arithmetic.
-/// The kernel must be pre-scaled by 256 for integer arithmetic.
-pub fn convolveSeparableU8Plane(
-    src_img: Image(u8),
-    dst_img: Image(u8),
-    temp_img: Image(u8),
-    kernel_x_int: []const i32,
-    kernel_y_int: []const i32,
+/// Unified separable convolution for both u8 and f32 planes with SIMD.
+/// For u8, kernels must be pre-scaled by 256 for integer arithmetic.
+fn convolveSeparablePlane(
+    comptime T: type,
+    src_img: Image(T),
+    dst_img: Image(T),
+    temp_img: Image(T),
+    kernel_x: anytype,
+    kernel_y: anytype,
     border_mode: BorderMode,
 ) void {
-    const SCALE = 256;
-    const half_x = kernel_x_int.len / 2;
-    const half_y = kernel_y_int.len / 2;
+    const Scalar = if (T == u8) i32 else f32;
+    const half_x = kernel_x.len / 2;
+    const half_y = kernel_y.len / 2;
     const rows = src_img.rows;
     const cols = src_img.cols;
-    const vec_len = std.simd.suggestVectorLength(i32) orelse 8;
+    const vec_len = std.simd.suggestVectorLength(Scalar) orelse 8;
+
+    // Use the shared pixel I/O operations
+    const Pixels = PixelIO(T, vec_len);
 
     // Horizontal pass (src -> temp) with SIMD
     for (0..rows) |r| {
@@ -654,73 +672,67 @@ pub fn convolveSeparableU8Plane(
 
             // SIMD processing for interior pixels
             while (c + vec_len <= safe_end) : (c += vec_len) {
-                var acc: @Vector(vec_len, i32) = @splat(0);
+                var acc: @Vector(vec_len, Scalar) = @splat(0);
 
                 // Apply kernel
-                for (kernel_x_int, 0..) |k, ki| {
+                for (kernel_x, 0..) |k, ki| {
                     if (k != 0) {
                         const src_idx = row_offset + c + ki - half_x;
-                        const pixels_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
-                        const pixels_i32: @Vector(vec_len, i32) = @intCast(pixels_u8);
-                        acc += pixels_i32 * @as(@Vector(vec_len, i32), @splat(k));
+                        const pixels_vec = Pixels.loadVec(src_img.data, src_idx);
+                        const k_vec: @Vector(vec_len, Scalar) = @splat(k);
+                        acc += pixels_vec * k_vec;
                     }
                 }
 
-                // Vectorized rounding, clamp, and store
-                var rounded_vec: @Vector(vec_len, i32) = (acc + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
-                const zero_vec: @Vector(vec_len, i32) = @splat(0);
-                const max_vec: @Vector(vec_len, i32) = @splat(255);
-                rounded_vec = @select(i32, rounded_vec < zero_vec, zero_vec, rounded_vec);
-                rounded_vec = @select(i32, rounded_vec > max_vec, max_vec, rounded_vec);
-                const out_vec: @Vector(vec_len, u8) = @intCast(rounded_vec);
-                temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
+                Pixels.storeVec(acc, temp_img.data, temp_offset + c);
             }
 
             // Handle remaining pixels with scalar code
             while (c < safe_end) : (c += 1) {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const c0 = c - half_x;
-                for (kernel_x_int, 0..) |k, i| {
+                for (kernel_x, 0..) |k, i| {
                     const cc = c0 + i;
-                    const pixel_val = @as(i32, src_img.data[row_offset + cc]);
+                    const pixel_val = Pixels.load(src_img.data[row_offset + cc]);
                     result += pixel_val * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                temp_img.data[temp_offset + c] = Pixels.store(result);
             }
         }
 
         // Handle borders with scalar code
         for (0..@min(half_x, cols)) |c| {
-            var result: i32 = 0;
+            var result: Scalar = 0;
             const ic = @as(isize, @intCast(c));
-            for (kernel_x_int, 0..) |k, i| {
+            for (kernel_x, 0..) |k, i| {
                 const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                const pixel_val = if (T == u8)
+                    @as(Scalar, getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode))
+                else
+                    getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                 result += pixel_val * k;
             }
-            const rounded = @divTrunc(result + SCALE / 2, SCALE);
-            temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+            temp_img.data[temp_offset + c] = Pixels.store(result);
         }
 
         if (cols > half_x) {
             for (cols - half_x..cols) |c| {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const ic = @as(isize, @intCast(c));
-                for (kernel_x_int, 0..) |k, i| {
+                for (kernel_x, 0..) |k, i| {
                     const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                    const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                    const pixel_val = if (T == u8)
+                        @as(Scalar, getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode))
+                    else
+                        getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                     result += pixel_val * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                temp_img.data[temp_offset + c] = Pixels.store(result);
             }
         }
     }
 
     // Vertical pass (temp -> dst) with SIMD across columns
-    const vec_len_y = vec_len;
-
     // Interior rows: process r in [half_y, rows - half_y)
     if (rows > 2 * half_y) {
         const safe_end_r = rows - half_y;
@@ -728,54 +740,34 @@ pub fn convolveSeparableU8Plane(
             var c: usize = 0;
 
             // SIMD processing across columns
-            while (c + vec_len_y <= cols) : (c += vec_len_y) {
-                var acc: @Vector(vec_len_y, i32) = @splat(0);
+            while (c + vec_len <= cols) : (c += vec_len) {
+                var acc: @Vector(vec_len, Scalar) = @splat(0);
 
                 // Apply kernel
-                for (kernel_y_int, 0..) |k, ki| {
+                for (kernel_y, 0..) |k, ki| {
                     if (k != 0) {
                         const src_row = r + ki - half_y;
                         const src_off = src_row * temp_img.stride;
-                        const pixels_u8: @Vector(vec_len_y, u8) = temp_img.data[src_off + c ..][0..vec_len_y].*;
-                        const pixels_i32: @Vector(vec_len_y, i32) = @intCast(pixels_u8);
-                        acc += pixels_i32 * @as(@Vector(vec_len_y, i32), @splat(k));
+                        const pixels_vec = Pixels.loadVec(temp_img.data, src_off + c);
+                        const k_vec: @Vector(vec_len, Scalar) = @splat(k);
+                        acc += pixels_vec * k_vec;
                     }
                 }
 
-                var rounded: @Vector(vec_len_y, i32) = (acc + @as(@Vector(vec_len_y, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len_y, i32), @splat(SCALE));
-                const zero_vec: @Vector(vec_len_y, i32) = @splat(0);
-                const max_vec: @Vector(vec_len_y, i32) = @splat(255);
-                const below = rounded < zero_vec;
-                rounded = @select(i32, below, zero_vec, rounded);
-                const above = rounded > max_vec;
-                rounded = @select(i32, above, max_vec, rounded);
-                // TODO(zig-upgrade): Once verified fixed, enable vector store branch below.
-                if (comptime false) {
-                    const out_vec: @Vector(vec_len_y, u8) = @intCast(rounded);
-                    dst_img.data[r * dst_img.stride + c ..][0..vec_len_y].* = out_vec;
-                } else {
-                    // Work around vector cast/codegen bug:
-                    // casting @Vector(N,i32) -> @Vector(N,u8) and storing caused upper lanes
-                    // to mirror lower lanes in tests (gaussianBlur). Store lane-by-lane instead.
-                    inline for (0..vec_len_y) |lane| {
-                        const v: i32 = rounded[lane];
-                        dst_img.data[r * dst_img.stride + c + lane] = @intCast(@max(0, @min(255, v)));
-                    }
-                }
+                Pixels.storeVec(acc, dst_img.data, r * dst_img.stride + c);
             }
 
             // Remaining columns (scalar)
             while (c < cols) : (c += 1) {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const r0 = r - half_y;
-                for (kernel_y_int, 0..) |k, i| {
+                for (kernel_y, 0..) |k, i| {
                     if (k == 0) continue;
                     const rr = r0 + i;
-                    const pixel_val = @as(i32, temp_img.data[rr * temp_img.stride + c]);
+                    const pixel_val = Pixels.load(temp_img.data[rr * temp_img.stride + c]);
                     result += pixel_val * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
+                dst_img.data[r * dst_img.stride + c] = Pixels.store(result);
             }
         }
     }
@@ -783,15 +775,17 @@ pub fn convolveSeparableU8Plane(
     // Handle top border rows (scalar across columns)
     for (0..@min(half_y, rows)) |r| {
         for (0..cols) |c| {
-            var result: i32 = 0;
+            var result: Scalar = 0;
             const ir = @as(isize, @intCast(r));
-            for (kernel_y_int, 0..) |k, i| {
+            for (kernel_y, 0..) |k, i| {
                 const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                const pixel_val: i32 = getPixel(u8, temp_img, iry, @as(isize, @intCast(c)), border_mode);
+                const pixel_val = if (T == u8)
+                    @as(Scalar, getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode))
+                else
+                    getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode);
                 result += pixel_val * k;
             }
-            const rounded = @divTrunc(result + SCALE / 2, SCALE);
-            dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
+            dst_img.data[r * dst_img.stride + c] = Pixels.store(result);
         }
     }
 
@@ -799,55 +793,33 @@ pub fn convolveSeparableU8Plane(
     if (rows > half_y) {
         for (rows - half_y..rows) |r| {
             for (0..cols) |c| {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const ir = @as(isize, @intCast(r));
-                for (kernel_y_int, 0..) |k, i| {
+                for (kernel_y, 0..) |k, i| {
                     const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                    const pixel_val: i32 = getPixel(u8, temp_img, iry, @as(isize, @intCast(c)), border_mode);
+                    const pixel_val = if (T == u8)
+                        @as(Scalar, getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode))
+                    else
+                        getPixel(T, temp_img, iry, @as(isize, @intCast(c)), border_mode);
                     result += pixel_val * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                dst_img.data[r * dst_img.stride + c] = @intCast(@max(0, @min(255, rounded)));
+                dst_img.data[r * dst_img.stride + c] = Pixels.store(result);
             }
         }
     }
 }
 
-/// Helper for scalar convolution at a single pixel
-inline fn convolveScalarHorizontal(
-    src_img: Image(f32),
-    row: usize,
-    col: usize,
-    kernel: []const f32,
-    half_k: usize,
+/// Optimized separable convolution for u8 planes with SIMD integer arithmetic.
+/// The kernel must be pre-scaled by 256 for integer arithmetic.
+pub fn convolveSeparableU8Plane(
+    src_img: Image(u8),
+    dst_img: Image(u8),
+    temp_img: Image(u8),
+    kernel_x_int: []const i32,
+    kernel_y_int: []const i32,
     border_mode: BorderMode,
-) f32 {
-    var sum: f32 = 0;
-    const ir: isize = @intCast(row);
-    const ic: isize = @intCast(col);
-    for (kernel, 0..) |k, i| {
-        const src_c = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_k));
-        sum += getPixel(f32, src_img, ir, src_c, border_mode) * k;
-    }
-    return sum;
-}
-
-inline fn convolveScalarVertical(
-    temp_img: Image(f32),
-    row: usize,
-    col: usize,
-    kernel: []const f32,
-    half_k: usize,
-    border_mode: BorderMode,
-) f32 {
-    var sum: f32 = 0;
-    const ir: isize = @intCast(row);
-    const ic: isize = @intCast(col);
-    for (kernel, 0..) |k, i| {
-        const src_r = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_k));
-        sum += getPixel(f32, temp_img, src_r, ic, border_mode) * k;
-    }
-    return sum;
+) void {
+    convolveSeparablePlane(u8, src_img, dst_img, temp_img, kernel_x_int, kernel_y_int, border_mode);
 }
 
 /// Optimized separable convolution for f32 planes with SIMD.
@@ -859,136 +831,25 @@ pub fn convolveSeparableF32Plane(
     kernel_y: []const f32,
     border_mode: BorderMode,
 ) void {
-    const rows = src_img.rows;
-    const cols = src_img.cols;
-    const half_x = kernel_x.len / 2;
-    const half_y = kernel_y.len / 2;
-    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
-
-    // Horizontal pass (src -> temp)
-    for (0..rows) |r| {
-        var c: usize = 0;
-        const row_offset = r * src_img.stride;
-        const temp_offset = r * temp_img.stride;
-
-        // Left border (scalar, needs border handling)
-        const left_border_end = @min(half_x, cols);
-        while (c < left_border_end) : (c += 1) {
-            temp_img.data[temp_offset + c] = convolveScalarHorizontal(src_img, r, c, kernel_x, half_x, border_mode);
-        }
-
-        // SIMD interior - only if there's enough space
-        if (cols > 2 * half_x + vec_len) {
-            // Safe bounds: ensure we don't underflow and have room for vectors
-            const safe_start = half_x;
-            const safe_end = cols - half_x;
-            c = safe_start;
-
-            // Process full vectors
-            while (c + vec_len <= safe_end) : (c += vec_len) {
-                var acc: @Vector(vec_len, f32) = @splat(0);
-
-                // Optimized memory access pattern - load contiguous data
-                for (kernel_x, 0..) |k, kx| {
-                    if (k == 0) continue; // Skip zero coefficients
-                    const kv: @Vector(vec_len, f32) = @splat(k);
-                    const src_idx = row_offset + c + kx - half_x;
-                    // Load contiguous memory as vector
-                    const pix: @Vector(vec_len, f32) = src_img.data[src_idx..][0..vec_len].*;
-                    acc += pix * kv;
-                }
-
-                // Store results as vector
-                temp_img.data[temp_offset + c ..][0..vec_len].* = acc;
-            }
-
-            // Process remaining elements in safe region with scalar
-            while (c < safe_end) : (c += 1) {
-                var sum: f32 = 0;
-                const c0 = c - half_x;
-                for (kernel_x, 0..) |k, i| {
-                    sum += src_img.data[row_offset + c0 + i] * k;
-                }
-                temp_img.data[temp_offset + c] = sum;
-            }
-        }
-
-        // Right border (scalar with border handling)
-        while (c < cols) : (c += 1) {
-            temp_img.data[temp_offset + c] = convolveScalarHorizontal(src_img, r, c, kernel_x, half_x, border_mode);
-        }
-    }
-
-    // Vertical pass (temp -> dst)
-    // Process in column blocks for better cache usage
-    const block_size = 64; // Process columns in blocks for cache efficiency
-    var col_block: usize = 0;
-
-    while (col_block < cols) : (col_block += block_size) {
-        const block_end = @min(col_block + block_size, cols);
-
-        for (0..rows) |r| {
-            const dst_offset = r * dst_img.stride;
-
-            // Check if we can use SIMD for this row
-            if (r >= half_y and r + half_y < rows) {
-                // Safe region - can use direct memory access
-                var c = col_block;
-                const block_width = block_end - col_block;
-
-                // Process vectors if block is wide enough
-                if (block_width >= vec_len) {
-                    const vec_end = col_block + (block_width / vec_len) * vec_len;
-
-                    while (c < vec_end) : (c += vec_len) {
-                        var acc: @Vector(vec_len, f32) = @splat(0);
-
-                        // More efficient vertical access pattern
-                        for (kernel_y, 0..) |k, ky| {
-                            if (k == 0) continue; // Skip zero coefficients
-                            const kv: @Vector(vec_len, f32) = @splat(k);
-                            const src_row = r + ky - half_y;
-                            const src_idx = src_row * temp_img.stride + c;
-                            const pix: @Vector(vec_len, f32) = temp_img.data[src_idx..][0..vec_len].*;
-                            acc += pix * kv;
-                        }
-
-                        dst_img.data[dst_offset + c ..][0..vec_len].* = acc;
-                    }
-                }
-
-                // Process remaining scalar elements in safe region
-                while (c < block_end) : (c += 1) {
-                    var sum: f32 = 0;
-                    const r0 = r - half_y;
-                    for (kernel_y, 0..) |k, i| {
-                        sum += temp_img.data[(r0 + i) * temp_img.stride + c] * k;
-                    }
-                    dst_img.data[dst_offset + c] = sum;
-                }
-            } else {
-                // Border region - need boundary checks
-                var c = col_block;
-                while (c < block_end) : (c += 1) {
-                    dst_img.data[dst_offset + c] = convolveScalarVertical(temp_img, r, c, kernel_y, half_y, border_mode);
-                }
-            }
-        }
-    }
+    convolveSeparablePlane(f32, src_img, dst_img, temp_img, kernel_x, kernel_y, border_mode);
 }
 
-/// Horizontal-only separable convolution for u8 plane (integer SIMD).
-pub fn convolveHorizontalU8Plane(
-    src_img: Image(u8),
-    temp_img: Image(u8),
-    kernel_x_int: []const i32,
+/// Unified horizontal-only separable convolution for both u8 and f32 planes.
+fn convolveHorizontalPlane(
+    comptime T: type,
+    src_img: Image(T),
+    temp_img: Image(T),
+    kernel_x: anytype,
     border_mode: BorderMode,
 ) void {
-    const SCALE = 256;
-    const half_x = kernel_x_int.len / 2;
+    const Scalar = if (T == u8) i32 else f32;
+    const half_x = kernel_x.len / 2;
     const rows = src_img.rows;
     const cols = src_img.cols;
-    const vec_len = std.simd.suggestVectorLength(i32) orelse 8;
+    const vec_len = std.simd.suggestVectorLength(Scalar) orelse 8;
+
+    // Use the shared pixel I/O operations
+    const Pixels = PixelIO(T, vec_len);
 
     for (0..rows) |r| {
         const row_offset = r * src_img.stride;
@@ -998,74 +859,77 @@ pub fn convolveHorizontalU8Plane(
             var c: usize = half_x;
             const safe_end = cols - half_x;
 
+            // SIMD processing for interior pixels
             while (c + vec_len <= safe_end) : (c += vec_len) {
-                var results: @Vector(vec_len, i32) = @splat(0);
-                for (kernel_x_int, 0..) |k, ki| {
+                var results: @Vector(vec_len, Scalar) = @splat(0);
+                for (kernel_x, 0..) |k, ki| {
                     if (k == 0) continue;
-                    const k_vec: @Vector(vec_len, i32) = @splat(k);
+                    const k_vec: @Vector(vec_len, Scalar) = @splat(k);
                     const src_idx = row_offset + c - half_x + ki;
-                    const pix_u8: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
-                    const pix_i32: @Vector(vec_len, i32) = @intCast(pix_u8);
-                    results += pix_i32 * k_vec;
+                    const pixels_vec = if (T == u8) blk: {
+                        const u8_vec: @Vector(vec_len, u8) = src_img.data[src_idx..][0..vec_len].*;
+                        break :blk @as(@Vector(vec_len, Scalar), @intCast(u8_vec));
+                    } else src_img.data[src_idx..][0..vec_len].*;
+                    results += pixels_vec * k_vec;
                 }
-                var rounded: @Vector(vec_len, i32) = (results + @as(@Vector(vec_len, i32), @splat(SCALE / 2))) / @as(@Vector(vec_len, i32), @splat(SCALE));
-                const zero_vec: @Vector(vec_len, i32) = @splat(0);
-                const max_vec: @Vector(vec_len, i32) = @splat(255);
-                rounded = @select(i32, rounded < zero_vec, zero_vec, rounded);
-                rounded = @select(i32, rounded > max_vec, max_vec, rounded);
-                // TODO(zig-upgrade): Once verified fixed, enable vector store branch below.
-                if (comptime false) {
-                    const out_vec: @Vector(vec_len, u8) = @intCast(rounded);
-                    temp_img.data[temp_offset + c ..][0..vec_len].* = out_vec;
-                } else {
-                    // Same workaround as above: avoid vector @intCast store due to Zig dev bug.
-                    inline for (0..vec_len) |lane| {
-                        const v: i32 = rounded[lane];
-                        temp_img.data[temp_offset + c + lane] = @intCast(@max(0, @min(255, v)));
-                    }
-                }
+
+                Pixels.storeVec(results, temp_img.data, temp_offset + c);
             }
 
+            // Scalar processing for remaining interior pixels
             while (c < safe_end) : (c += 1) {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const c0 = c - half_x;
-                for (kernel_x_int, 0..) |k, i| {
+                for (kernel_x, 0..) |k, i| {
                     const cc = c0 + i;
-                    result += @as(i32, src_img.data[row_offset + cc]) * k;
+                    result += (if (T == u8) @as(Scalar, src_img.data[row_offset + cc]) else src_img.data[row_offset + cc]) * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                temp_img.data[temp_offset + c] = Pixels.store(result);
             }
         }
 
         // Left border
         for (0..@min(half_x, cols)) |c| {
-            var result: i32 = 0;
+            var result: Scalar = 0;
             const ic = @as(isize, @intCast(c));
-            for (kernel_x_int, 0..) |k, i| {
+            for (kernel_x, 0..) |k, i| {
                 const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                const pixel_val = if (T == u8)
+                    @as(Scalar, getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode))
+                else
+                    getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                 result += pixel_val * k;
             }
-            const rounded = @divTrunc(result + SCALE / 2, SCALE);
-            temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+            temp_img.data[temp_offset + c] = Pixels.store(result);
         }
 
         // Right border
         if (cols > half_x) {
             for (cols - half_x..cols) |c| {
-                var result: i32 = 0;
+                var result: Scalar = 0;
                 const ic = @as(isize, @intCast(c));
-                for (kernel_x_int, 0..) |k, i| {
+                for (kernel_x, 0..) |k, i| {
                     const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                    const pixel_val: i32 = getPixel(u8, src_img, @as(isize, @intCast(r)), icx, border_mode);
+                    const pixel_val = if (T == u8)
+                        @as(Scalar, getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode))
+                    else
+                        getPixel(T, src_img, @as(isize, @intCast(r)), icx, border_mode);
                     result += pixel_val * k;
                 }
-                const rounded = @divTrunc(result + SCALE / 2, SCALE);
-                temp_img.data[temp_offset + c] = @intCast(@max(0, @min(255, rounded)));
+                temp_img.data[temp_offset + c] = Pixels.store(result);
             }
         }
     }
+}
+
+/// Wrapper for u8 horizontal convolution using the unified function.
+pub fn convolveHorizontalU8Plane(
+    src_img: Image(u8),
+    temp_img: Image(u8),
+    kernel_x_int: []const i32,
+    border_mode: BorderMode,
+) void {
+    convolveHorizontalPlane(u8, src_img, temp_img, kernel_x_int, border_mode);
 }
 
 /// Vertical dual-kernel pass: consumes two horizontal temps and writes DoG (blur1 - blur2).
