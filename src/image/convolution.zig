@@ -1037,32 +1037,33 @@ pub fn convolveVerticalU8PlaneDual(
 fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border: BorderMode) if (T == u8) i32 else f32 {
     if (T != u8 and T != f32) @compileError("getPixel only works with u8 and f32 types");
     const coords = computeBorderCoords(row, col, @intCast(img.rows), @intCast(img.cols), border);
-    const pixel = if (coords.is_zero) 0 else img.at(coords.row, coords.col).*;
+    const pixel = if (coords) |c| img.at(c.row, c.col).* else 0;
     return if (T == u8) @as(i32, pixel) else pixel;
 }
 
 /// Common border mode logic that returns adjusted coordinates.
+/// Returns null when the result should be zero (out of bounds with .zero mode, or empty image).
 fn computeBorderCoords(
     row: isize,
     col: isize,
     rows: isize,
     cols: isize,
     border: BorderMode,
-) struct { row: usize, col: usize, is_zero: bool } {
+) ?struct { row: usize, col: usize } {
     switch (border) {
         .zero => {
             if (row < 0 or col < 0 or row >= rows or col >= cols) {
-                return .{ .row = 0, .col = 0, .is_zero = true };
+                return null;
             }
-            return .{ .row = @intCast(row), .col = @intCast(col), .is_zero = false };
+            return .{ .row = @intCast(row), .col = @intCast(col) };
         },
         .replicate => {
             const r = @max(0, @min(row, rows - 1));
             const c = @max(0, @min(col, cols - 1));
-            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c) };
         },
         .mirror => {
-            if (rows == 0 or cols == 0) return .{ .row = 0, .col = 0, .is_zero = true };
+            if (rows == 0 or cols == 0) return null;
             var r = row;
             var c = col;
             // Handle negative row indices
@@ -1085,12 +1086,12 @@ fn computeBorderCoords(
                 c = 2 * cols - c - 1;
                 if (c < 0) c = -c - 1;
             }
-            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c) };
         },
         .wrap => {
             const r = @mod(row, rows);
             const c = @mod(col, cols);
-            return .{ .row = @intCast(r), .col = @intCast(c), .is_zero = false };
+            return .{ .row = @intCast(r), .col = @intCast(c) };
         },
     }
 }
