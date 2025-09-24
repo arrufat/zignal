@@ -21,6 +21,7 @@ const png = @import("png.zig");
 
 // Import image sub-modules (private for internal use)
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
+const Enhancement = @import("image/enhancement.zig").Enhancement;
 const Filter = @import("image/filtering.zig").Filter;
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
@@ -558,9 +559,11 @@ pub fn Image(comptime T: type) type {
         ///             For example, 2.0 ignores the darkest and brightest 2% of pixels,
         ///             which helps remove outliers.
         ///
-        /// Returns: A new image with adjusted contrast
-        pub fn autocontrast(self: Self, allocator: Allocator, cutoff: f32) !Self {
-            return Filter(T).autocontrast(self, allocator, cutoff);
+        /// Adjusts contrast by stretching the intensity range. Modifies in-place.
+        /// Parameters:
+        /// - `cutoff`: Fraction of pixels to ignore from each end (0.0 to 0.5)
+        pub fn autocontrast(self: Self, allocator: Allocator, cutoff: f32) !void {
+            return Enhancement(T).autocontrast(self, allocator, cutoff);
         }
 
         /// Equalizes the histogram of an image to improve contrast.
@@ -583,8 +586,9 @@ pub fn Image(comptime T: type) type {
         /// var equalized = try img.equalize(allocator);
         /// defer equalized.deinit(allocator);
         /// ```
-        pub fn equalize(self: Self, allocator: Allocator) !Self {
-            return Filter(T).equalize(self, allocator);
+        /// Equalizes the histogram to improve contrast. Modifies in-place.
+        pub fn equalize(self: Self, allocator: Allocator) !void {
+            return Enhancement(T).equalize(self, allocator);
         }
 
         /// Applies a 2D convolution with the given kernel to the image.
