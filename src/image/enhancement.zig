@@ -19,18 +19,18 @@ pub fn Enhancement(comptime T: type) type {
         ///
         /// Parameters:
         /// - `cutoff`: Fraction of pixels to ignore from each end (0.0 to 0.5)
-        pub fn autocontrast(self: Image(T), allocator: Allocator, cutoff: f32) !void {
+        pub fn autocontrast(image: Image(T), cutoff: f32) !void {
             if (cutoff < 0 or cutoff >= 0.5) {
                 return error.InvalidCutoff; // Can't ignore 50% or more from each end
             }
 
-            const total_pixels = self.rows * self.cols;
+            const total_pixels = image.rows * image.cols;
             const cutoff_pixels = @as(usize, @intFromFloat(@as(f32, @floatFromInt(total_pixels)) * cutoff));
 
             switch (@typeInfo(T)) {
                 .int => {
                     // For grayscale images, use histogram module
-                    const hist = self.histogram();
+                    const hist = image.histogram();
                     const min_val = hist.findCutoffMin(@intCast(cutoff_pixels));
                     const max_val = hist.findCutoffMax(@intCast(cutoff_pixels));
 
@@ -38,12 +38,12 @@ pub fn Enhancement(comptime T: type) type {
                     const range = if (max_val > min_val) max_val - min_val else 1;
 
                     // Apply remapping in-place
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            const val = self.at(r, c).*;
+                    for (0..image.rows) |r| {
+                        for (0..image.cols) |c| {
+                            const val = image.at(r, c).*;
                             const clamped = @max(min_val, @min(max_val, val));
                             const normalized = @as(f32, @floatFromInt(clamped - min_val)) / @as(f32, @floatFromInt(range));
-                            self.at(r, c).* = @intFromFloat(normalized * 255.0);
+                            image.at(r, c).* = @intFromFloat(normalized * 255.0);
                         }
                     }
                 },
@@ -51,14 +51,14 @@ pub fn Enhancement(comptime T: type) type {
                     // For RGB/RGBA images, process each channel independently
                     if (T == Rgb or T == Rgba) {
                         // Use histogram module
-                        const hist = self.histogram();
+                        const hist = image.histogram();
                         const mins = hist.findCutoffMin(@intCast(cutoff_pixels));
                         const maxs = hist.findCutoffMax(@intCast(cutoff_pixels));
 
                         // Apply remapping in-place
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const pixel = self.at(r, c).*;
+                        for (0..image.rows) |r| {
+                            for (0..image.cols) |c| {
+                                const pixel = image.at(r, c).*;
                                 var new_pixel = pixel;
 
                                 // Remap each channel
@@ -75,37 +75,26 @@ pub fn Enhancement(comptime T: type) type {
                                 new_pixel.g = remap(pixel.g, mins.g, maxs.g);
                                 new_pixel.b = remap(pixel.b, mins.b, maxs.b);
 
-                                self.at(r, c).* = new_pixel;
+                                image.at(r, c).* = new_pixel;
                             }
                         }
                     } else {
-                        // For other color types, convert to RGB, process, and convert back
-                        var rgb_img = try self.convert(Rgb, allocator);
-                        defer rgb_img.deinit(allocator);
-
-                        try Enhancement(Rgb).autocontrast(&rgb_img, allocator, cutoff);
-
-                        const converted_back = try rgb_img.convert(T, allocator);
-                        defer converted_back.deinit(allocator);
-
-                        // Copy the result back to self
-                        @memcpy(self.data[0..self.data.len], converted_back.data[0..converted_back.data.len]);
+                        @compileError("Unsuppoted type " ++ @typeName(T) ++ ", autocontrast only supports u8, Rgb, and Rgba");
                     }
                 },
-                else => return error.UnsupportedType,
+                else => @compileError("Unsuppoted type " ++ @typeName(T) ++ ", autocontrast only supports u8, Rgb, and Rgba"),
             }
         }
 
         /// Equalizes the histogram to improve contrast.
         /// Modifies the image in-place.
-        pub fn equalize(self: Image(T), allocator: Allocator) !void {
-            _ = allocator; // Will be used for other color type conversions
-            const total_pixels: u32 = @intCast(self.rows * self.cols);
+        pub fn equalize(image: Image(T)) void {
+            const total_pixels: u32 = @intCast(image.rows * image.cols);
 
             switch (@typeInfo(T)) {
                 .int => {
                     // For grayscale images
-                    const hist = self.histogram();
+                    const hist = image.histogram();
 
                     // Calculate cumulative distribution function (CDF)
                     var cdf: [256]u32 = undefined;
@@ -143,17 +132,17 @@ pub fn Enhancement(comptime T: type) type {
                     }
 
                     // Apply the lookup table in-place
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            const val = self.at(r, c).*;
-                            self.at(r, c).* = lut[val];
+                    for (0..image.rows) |r| {
+                        for (0..image.cols) |c| {
+                            const val = image.at(r, c).*;
+                            image.at(r, c).* = lut[val];
                         }
                     }
                 },
                 .@"struct" => {
                     // For RGB/RGBA images, process each channel independently
                     if (T == Rgb or T == Rgba) {
-                        const hist = self.histogram();
+                        const hist = image.histogram();
 
                         // Calculate CDF for each channel
                         var cdf_r: [256]u32 = undefined;
@@ -246,9 +235,9 @@ pub fn Enhancement(comptime T: type) type {
                         }
 
                         // Apply the lookup tables in-place
-                        for (0..self.rows) |r| {
-                            for (0..self.cols) |c| {
-                                const pixel = self.at(r, c).*;
+                        for (0..image.rows) |r| {
+                            for (0..image.cols) |c| {
+                                const pixel = image.at(r, c).*;
                                 var new_pixel = pixel;
 
                                 new_pixel.r = lut_r[pixel.r];
@@ -258,7 +247,7 @@ pub fn Enhancement(comptime T: type) type {
                                     new_pixel.a = lut_a[pixel.a];
                                 }
 
-                                self.at(r, c).* = new_pixel;
+                                image.at(r, c).* = new_pixel;
                             }
                         }
                     } else {
