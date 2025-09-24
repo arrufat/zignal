@@ -18,7 +18,6 @@ const convolveSeparableU8Plane = @import("convolution.zig").convolveSeparableU8P
 const convolveHorizontalU8Plane = @import("convolution.zig").convolveHorizontalU8Plane;
 const convolveVerticalU8PlaneDual = @import("convolution.zig").convolveVerticalU8PlaneDual;
 const ShenCastan = @import("ShenCastan.zig");
-const symmetrizeKernelI32 = @import("convolution.zig").symmetrizeKernelI32;
 
 // ShenCastan type moved to its own file (ShenCastan.zig)
 
@@ -1133,8 +1132,6 @@ pub fn Filter(comptime T: type) type {
                 defer allocator.free(kernel2_int);
                 for (kernel1, 0..) |k, i| kernel1_int[i] = @intFromFloat(@round(k * SCALE));
                 for (kernel2, 0..) |k, i| kernel2_int[i] = @intFromFloat(@round(k * SCALE));
-                symmetrizeKernelI32(kernel1_int, SCALE);
-                symmetrizeKernelI32(kernel2_int, SCALE);
 
                 // Two horizontal passes into two temps
                 var temp1 = try Self.init(allocator, self.rows, self.cols);
@@ -1337,10 +1334,6 @@ pub fn Filter(comptime T: type) type {
                 const val = @exp(-(x * x) / (2.0 * sigma2 * sigma2)) / sum2;
                 kernel2_int[i] = @intFromFloat(@round(val * 256.0));
             }
-
-            // Enforce symmetry and sum preservation
-            symmetrizeKernelI32(kernel1_int, 256);
-            symmetrizeKernelI32(kernel2_int, 256);
 
             // Dual-sigma path: two horizontal passes, one combined vertical pass
             var temp1 = try Self.init(allocator, self.rows, self.cols);
