@@ -10,7 +10,6 @@ const Allocator = std.mem.Allocator;
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
 const gzip = @import("../compression/gzip.zig");
-const deflate = @import("../compression/deflate.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 

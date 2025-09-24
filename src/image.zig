@@ -33,7 +33,6 @@ pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
-const channel_ops = @import("image/channel_ops.zig");
 pub const Histogram = @import("image/histogram.zig").Histogram;
 const convolution = @import("image/convolution.zig");
 pub const BorderMode = convolution.BorderMode;

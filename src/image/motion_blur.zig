@@ -1,13 +1,11 @@
 //! Motion blur effects for images
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
-const isScalar = meta.isScalar;
 
 /// Motion blur type for unified API.
 /// Provides different types of motion blur effects to simulate camera or object movement.
