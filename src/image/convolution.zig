@@ -88,6 +88,26 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         // Use the shared pixel I/O operations
         const Pixels = PixelIO(T, vec_len);
 
+        /// Flatten a 2D kernel to 1D array and scale to integer for u8.
+        pub fn flatten(kernel: anytype) [size]Scalar {
+            const kernel_info = @typeInfo(@TypeOf(kernel));
+            const kernel_height = kernel_info.array.len;
+            const kernel_width = @typeInfo(kernel_info.array.child).array.len;
+            var result: [size]Scalar = undefined;
+            var idx: usize = 0;
+            inline for (0..kernel_height) |kr| {
+                inline for (0..kernel_width) |kx| {
+                    const val = as(f32, kernel[kr][kx]);
+                    result[idx] = if (T == u8)
+                        @intFromFloat(@round(val * 256.0))
+                    else
+                        val;
+                    idx += 1;
+                }
+            }
+            return result;
+        }
+
         fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border: BorderMode) void {
             // Pre-create kernel vectors for SIMD (for f32)
             var kernel_vecs: [size]@Vector(vec_len, Scalar) = undefined;
@@ -189,9 +209,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
     switch (T) {
         u8, f32 => {
             const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
-            const scale = if (T == u8) 256 else null;
-            const Scalar = if (T == u8) i32 else f32;
-            const flat_kernel = flattenKernel(Scalar, Kernel.size, kernel, scale);
+            const flat_kernel = Kernel.flatten(kernel);
             Kernel.convolve(self, out.*, flat_kernel, border_mode);
         },
         else => switch (@typeInfo(T)) {
@@ -243,8 +261,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                 if (comptime meta.allFieldsAreU8(T)) {
                     const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
                     // Channel separation approach for optimal performance
-                    const SCALE = 256;
-                    const kernel_int = flattenKernel(i32, Kernel.size, kernel, SCALE);
+                    const kernel_int = Kernel.flatten(kernel);
                     const plane_size = self.rows * self.cols;
 
                     // Separate channels using helper
@@ -881,26 +898,4 @@ fn computeBorderCoords(
             return .{ .row = @intCast(r), .col = @intCast(c) };
         },
     }
-}
-
-/// Flatten a 2D kernel to 1D array and optionally scale to integer.
-inline fn flattenKernel(comptime OutType: type, comptime size: usize, kernel: anytype, scale: ?i32) [size]OutType {
-    const kernel_info = @typeInfo(@TypeOf(kernel));
-    const kernel_height = kernel_info.array.len;
-    const kernel_width = @typeInfo(kernel_info.array.child).array.len;
-    var result: [size]OutType = undefined;
-    var idx: usize = 0;
-    inline for (0..kernel_height) |kr| {
-        inline for (0..kernel_width) |kc| {
-            const val = as(f32, kernel[kr][kc]);
-            result[idx] = if (OutType == i32 and scale != null)
-                @intFromFloat(@round(val * @as(f32, @floatFromInt(scale.?))))
-            else if (OutType == f32)
-                val
-            else
-                @compileError("Unsupported kernel output type");
-            idx += 1;
-        }
-    }
-    return result;
 }
