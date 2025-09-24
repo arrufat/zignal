@@ -243,16 +243,22 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
         return null;
     }
 
-    // Validate cutoff range
-    if (cutoff < 0 or cutoff >= 50) {
-        c.PyErr_SetString(c.PyExc_ValueError, "cutoff must be between 0 and 50");
+    // Validate cutoff range (now 0.0 to 0.5)
+    if (cutoff < 0 or cutoff >= 0.5) {
+        c.PyErr_SetString(c.PyExc_ValueError, "cutoff must be between 0 and 0.5");
         return null;
     }
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                const out = img.autocontrast(allocator, cutoff) catch {
+                // Make a copy since autocontrast now works in-place
+                var out = img.dupe(allocator) catch {
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                out.autocontrast(allocator, cutoff) catch {
+                    out.deinit(allocator);
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply autocontrast");
                     return null;
                 };
@@ -303,7 +309,13 @@ pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                const out = img.equalize(allocator) catch {
+                // Make a copy since equalize now works in-place
+                var out = img.dupe(allocator) catch {
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    return null;
+                };
+                out.equalize(allocator) catch {
+                    out.deinit(allocator);
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to apply histogram equalization");
                     return null;
                 };
