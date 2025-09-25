@@ -1,10 +1,6 @@
 //! Blending enum for color blending operations
 
-const zignal = @import("zignal");
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
-const enum_utils = @import("enum_utils.zig");
 
 // Documentation for the Blending enum (used at runtime and for stub generation)
 pub const blending_doc =

@@ -11,6 +11,7 @@ pub fn build(b: *Build) void {
 
     // Option to print MD5 checksums for updating golden values
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
+    const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
 
     // Export module for use as dependency
     _ = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig") });
@@ -75,6 +76,7 @@ pub fn build(b: *Build) void {
         // Pass build options to tests
         const options = b.addOptions();
         options.addOption(bool, "print_md5sums", print_md5sums);
+        options.addOption(bool, "debug_test_images", debug_test_images);
         module_test.root_module.addOptions("build_options", options);
         const module_test_run = b.addRunArtifact(module_test);
         test_step.dependOn(&module_test_run.step);
