@@ -1,14 +1,6 @@
-const std = @import("std");
-const assert = std.debug.assert;
-const Allocator = std.mem.Allocator;
-
-const Image = @import("../image.zig").Image;
 const Rgb = @import("../color.zig").Rgb;
 const Rgba = @import("../color.zig").Rgba;
-const meta = @import("../meta.zig");
-const as = meta.as;
-const channel_ops = @import("channel_ops.zig");
-const Integral = @import("integral.zig").Integral;
+const Image = @import("../image.zig").Image;
 
 /// Histogram-based image enhancement operations.
 /// Provides functions for adjusting contrast and equalizing histograms.
