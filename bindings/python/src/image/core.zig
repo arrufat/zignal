@@ -16,7 +16,6 @@ const parseColorTo = @import("../color_utils.zig").parseColor;
 const grayscale_format = @import("../grayscale_format.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
-const stub_metadata = @import("../stub_metadata.zig");
 const rectangle = @import("../rectangle.zig");
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 

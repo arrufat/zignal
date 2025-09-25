@@ -6,16 +6,12 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const Interpolation = zignal.Interpolation;
-const Rectangle = zignal.Rectangle;
-const Point = zignal.Point;
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
 const enum_utils = @import("../enum_utils.zig");
 
-const PyImageMod = @import("../PyImage.zig");
-const PyImage = PyImageMod.PyImage;
 const transforms = @import("../transforms.zig");
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 

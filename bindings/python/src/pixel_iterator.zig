@@ -1,9 +1,3 @@
-const std = @import("std");
-
-const zignal = @import("zignal");
-const Rgba = zignal.Rgba;
-const Rgb = zignal.Rgb;
-
 const ImageObject = @import("image.zig").ImageObject;
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;

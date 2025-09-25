@@ -1,9 +1,9 @@
 const std = @import("std");
+
 const zignal = @import("zignal");
 const SimilarityTransform = zignal.SimilarityTransform;
 const AffineTransform = zignal.AffineTransform;
 const ProjectiveTransform = zignal.ProjectiveTransform;
-const Point = zignal.Point;
 
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;

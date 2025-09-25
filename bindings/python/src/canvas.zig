@@ -8,7 +8,6 @@ const Rgb = zignal.Rgb;
 const BitmapFont = zignal.BitmapFont;
 
 const color_utils = @import("color_utils.zig");
-const enum_utils = @import("enum_utils.zig");
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 pub const registerType = py_utils.registerType;
@@ -16,7 +15,7 @@ const c = py_utils.c;
 const PyImage = @import("PyImage.zig").PyImage;
 const stub_metadata = @import("stub_metadata.zig");
 
-// PyCanvas - A variant canvas type that mirrors PyImage structure
+/// A variant canvas type that mirrors PyImage structure
 pub const PyCanvas = struct {
     pub const Variant = union(PyImage.DType) {
         grayscale: Canvas(u8),

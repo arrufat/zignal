@@ -1,4 +1,3 @@
-const std = @import("std");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 
@@ -23,5 +22,3 @@ pub var GrayscaleType = c.PyTypeObject{
     .tp_repr = grayscale_repr,
     .tp_str = grayscale_repr,
 };
-
-// No wrapper; main registers this type with py_utils.registerType
