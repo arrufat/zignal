@@ -81,37 +81,38 @@ pub fn Integral(comptime T: type) type {
         /// Build integral image (summed area table) from the source image.
         /// Uses channel separation and SIMD optimization for performance.
         pub fn compute(
-            img: Image(T),
+            image: Image(T),
             allocator: Allocator,
             sat: *Image(if (isScalar(T)) f32 else [Image(T).channels()]f32),
         ) !void {
-            if (!img.hasSameShape(sat.*)) {
-                sat.* = try Image(if (isScalar(T)) f32 else [Image(T).channels()]f32).init(allocator, img.rows, img.cols);
+            // Always reinitialize if not matching shape (handles undefined case safely)
+            if (!image.hasSameShape(sat.*)) {
+                sat.* = try Image(if (isScalar(T)) f32 else [Image(T).channels()]f32).init(allocator, image.rows, image.cols);
             }
 
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Use generic integral plane function for all scalar types
-                    plane(img, sat.*);
+                    plane(image, sat.*);
                 },
                 .@"struct" => {
                     // Channel separation for struct types
                     const fields = std.meta.fields(T);
 
                     // Create temporary buffers for each channel
-                    const src_plane = try allocator.alloc(f32, img.rows * img.cols);
+                    const src_plane = try allocator.alloc(f32, image.rows * image.cols);
                     defer allocator.free(src_plane);
-                    const dst_plane = try allocator.alloc(f32, img.rows * img.cols);
+                    const dst_plane = try allocator.alloc(f32, image.rows * image.cols);
                     defer allocator.free(dst_plane);
 
                     // Process each channel separately
                     inline for (fields, 0..) |field, ch| {
                         // Extract channel to packed src_plane respecting stride
-                        for (0..img.rows) |r| {
-                            for (0..img.cols) |c| {
-                                const pix = img.at(r, c).*;
+                        for (0..image.rows) |r| {
+                            for (0..image.cols) |c| {
+                                const pix = image.at(r, c).*;
                                 const val = @field(pix, field.name);
-                                src_plane[r * img.cols + c] = switch (@typeInfo(field.type)) {
+                                src_plane[r * image.cols + c] = switch (@typeInfo(field.type)) {
                                     .int => @floatFromInt(val),
                                     .float => @floatCast(val),
                                     else => 0,
@@ -119,19 +120,300 @@ pub fn Integral(comptime T: type) type {
                             }
                         }
 
-                        const src_img: Image(f32) = .{ .rows = img.rows, .cols = img.cols, .stride = img.cols, .data = src_plane };
-                        const dst_img: Image(f32) = .{ .rows = img.rows, .cols = img.cols, .stride = img.cols, .data = dst_plane };
+                        const src_img: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_plane };
+                        const dst_img: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_plane };
 
                         // Compute integral for this channel from packed src_plane into packed dst_plane
                         Integral(f32).plane(src_img, dst_img);
 
                         // Store result in output channel (packed to packed)
-                        for (0..img.rows * img.cols) |i| {
+                        for (0..image.rows * image.cols) |i| {
                             sat.data[i][ch] = dst_plane[i];
                         }
                     }
                 },
                 else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Applies box blur using a pre-computed integral image.
+        /// This allows efficient reuse of the integral image for multiple blur operations.
+        pub fn boxBlur(
+            sat: anytype,
+            src: Image(T),
+            dst: *Image(T),
+            radius: usize,
+        ) void {
+            if (radius == 0) {
+                src.copy(dst.*);
+                return;
+            }
+
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    // Single channel blur
+                    boxBlurPlane(T, sat, dst.*, radius);
+                },
+                .@"struct" => {
+                    // Multi-channel blur
+                    const fields = std.meta.fields(T);
+                    for (0..src.rows) |r| {
+                        for (0..src.cols) |c| {
+                            const r1 = r -| radius;
+                            const c1 = c -| radius;
+                            const r2 = @min(r + radius, src.rows - 1);
+                            const c2 = @min(c + radius, src.cols - 1);
+                            const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                            inline for (fields, 0..) |f, i| {
+                                const channel_sum = sumChannel(sat, r1, c1, r2, c2, i);
+                                @field(dst.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(channel_sum / area)))),
+                                    .float => as(f.type, channel_sum / area),
+                                    else => @compileError("Can't compute box blur with struct fields of type " ++ @typeName(f.type) ++ "."),
+                                };
+                            }
+                        }
+                    }
+                },
+                else => @compileError("Can't compute box blur of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Box blur for scalar plane types using integral image with SIMD optimization.
+        fn boxBlurPlane(comptime PlaneType: type, sat: Image(f32), dst: Image(PlaneType), radius: usize) void {
+            assert(sat.rows == dst.rows and sat.cols == dst.cols);
+            const rows = sat.rows;
+            const cols = sat.cols;
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+            for (0..rows) |r| {
+                const r1 = r -| radius;
+                const r2 = @min(r + radius, rows - 1);
+                const r2_offset = r2 * sat.stride;
+
+                var c: usize = 0;
+
+                // SIMD processing for safe regions
+                const row_safe = r >= radius and r + radius < rows;
+                if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
+                    // Handle left border
+                    while (c <= radius) : (c += 1) {
+                        const c1 = c -| radius;
+                        const c2 = @min(c + radius, cols - 1);
+                        const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                        const s = sum(sat, r1, c1, r2, c2);
+                        const val = s / area;
+                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(val))))))
+                        else if (@typeInfo(PlaneType) == .int)
+                            @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(val))))
+                        else
+                            @as(PlaneType, val);
+                    }
+
+                    // SIMD middle section
+                    const safe_end = cols - radius;
+                    if (c < safe_end) {
+                        const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                        const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                        while (c + simd_len <= safe_end) : (c += simd_len) {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+
+                            const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + (c1 - 1) ..][0..simd_len].*;
+                            const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
+
+                            const sums = int22 - int21 - int12 + int11;
+                            const vals = sums / area_vec;
+
+                            if (PlaneType == u8) {
+                                inline for (0..simd_len) |i| {
+                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
+                                }
+                            } else if (@typeInfo(PlaneType) == .int) {
+                                inline for (0..simd_len) |i| {
+                                    dst.data[r * dst.stride + c + i] = @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(vals[i]))));
+                                }
+                            } else {
+                                dst.data[r * dst.stride + c ..][0..simd_len].* = vals;
+                            }
+                        }
+                    }
+                }
+
+                // Handle remaining pixels
+                while (c < cols) : (c += 1) {
+                    const c1 = c -| radius;
+                    const c2 = @min(c + radius, cols - 1);
+                    const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                    const s = sum(sat, r1, c1, r2, c2);
+                    dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(s / area))))))
+                    else if (@typeInfo(PlaneType) == .int)
+                        @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(s / area))))
+                    else
+                        s / area;
+                }
+            }
+        }
+
+        /// Applies sharpening using a pre-computed integral image.
+        /// Uses the formula: sharpened = 2 * original - blurred
+        pub fn sharpen(
+            sat: anytype,
+            src: Image(T),
+            dst: *Image(T),
+            radius: usize,
+        ) void {
+            if (radius == 0) {
+                src.copy(dst.*);
+                return;
+            }
+
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    // Single channel sharpen
+                    sharpenPlane(T, src, sat, dst.*, radius);
+                },
+                .@"struct" => {
+                    // Multi-channel sharpen
+                    const fields = std.meta.fields(T);
+                    for (0..src.rows) |r| {
+                        for (0..src.cols) |c| {
+                            const r1 = r -| radius;
+                            const c1 = c -| radius;
+                            const r2 = @min(r + radius, src.rows - 1);
+                            const c2 = @min(c + radius, src.cols - 1);
+                            const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                            inline for (fields, 0..) |f, i| {
+                                const channel_sum = sumChannel(sat, r1, c1, r2, c2, i);
+                                const blurred = channel_sum / area;
+                                const original = @field(src.at(r, c).*, f.name);
+                                @field(dst.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
+                                    .int => blk: {
+                                        const sharpened_val = 2 * as(f32, original) - blurred;
+                                        break :blk @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
+                                    },
+                                    .float => as(f.type, 2 * as(f32, original) - blurred),
+                                    else => @compileError("Can't compute sharpen with struct fields of type " ++ @typeName(f.type) ++ "."),
+                                };
+                            }
+                        }
+                    }
+                },
+                else => @compileError("Can't compute sharpen of " ++ @typeName(T) ++ "."),
+            }
+        }
+
+        /// Sharpen plane using integral image (sharpened = 2*original - blurred).
+        fn sharpenPlane(
+            comptime PlaneType: type,
+            src: Image(PlaneType),
+            sat: Image(f32),
+            dst: Image(PlaneType),
+            radius: usize,
+        ) void {
+            assert(sat.rows == dst.rows and sat.cols == dst.cols);
+            assert(src.rows == dst.rows and src.cols == dst.cols);
+            const rows = sat.rows;
+            const cols = sat.cols;
+            const simd_len = std.simd.suggestVectorLength(f32) orelse 1;
+
+            for (0..rows) |r| {
+                const r1 = r -| radius;
+                const r2 = @min(r + radius, rows - 1);
+                const r2_offset = r2 * sat.stride;
+
+                var c: usize = 0;
+
+                // SIMD processing for safe regions
+                const row_safe = r >= radius and r + radius < rows;
+                if (simd_len > 1 and cols > 2 * radius + simd_len and row_safe) {
+                    // Handle left border
+                    while (c <= radius) : (c += 1) {
+                        const c1 = c -| radius;
+                        const c2 = @min(c + radius, cols - 1);
+                        const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                        const s = sum(sat, r1, c1, r2, c2);
+                        const blurred = s / area;
+                        const original = as(f32, src.data[r * src.stride + c]);
+                        const sharpened = 2 * original - blurred;
+                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                        else if (@typeInfo(PlaneType) == .int)
+                            @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened))))
+                        else
+                            sharpened;
+                    }
+
+                    // SIMD middle section
+                    const safe_end = cols - radius;
+                    if (c < safe_end) {
+                        const const_area: f32 = @floatFromInt((2 * radius + 1) * (2 * radius + 1));
+                        const area_vec: @Vector(simd_len, f32) = @splat(const_area);
+
+                        while (c + simd_len <= safe_end) : (c += simd_len) {
+                            const c1 = c - radius;
+                            const c2 = c + radius;
+
+                            const r1_offset = if (r1 > 0) (r1 - 1) * sat.stride else 0;
+                            const int11: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + (c1 - 1) ..][0..simd_len].* else @splat(0);
+                            const int12: @Vector(simd_len, f32) = if (r1 > 0) sat.data[r1_offset + c2 ..][0..simd_len].* else @splat(0);
+                            const int21: @Vector(simd_len, f32) = sat.data[r2_offset + (c1 - 1) ..][0..simd_len].*;
+                            const int22: @Vector(simd_len, f32) = sat.data[r2_offset + c2 ..][0..simd_len].*;
+
+                            const sums = int22 - int21 - int12 + int11;
+                            const blurred_vec = sums / area_vec;
+
+                            // Load original values as vector
+                            var orig_vec: @Vector(simd_len, f32) = undefined;
+                            inline for (0..simd_len) |i| {
+                                orig_vec[i] = as(f32, src.data[r * src.stride + c + i]);
+                            }
+
+                            const sharpened_vec = @as(@Vector(simd_len, f32), @splat(2)) * orig_vec - blurred_vec;
+
+                            if (PlaneType == u8) {
+                                inline for (0..simd_len) |i| {
+                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened_vec[i]))))));
+                                }
+                            } else if (@typeInfo(PlaneType) == .int) {
+                                inline for (0..simd_len) |i| {
+                                    dst.data[r * dst.stride + c + i] = @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened_vec[i]))));
+                                }
+                            } else {
+                                dst.data[r * dst.stride + c ..][0..simd_len].* = sharpened_vec;
+                            }
+                        }
+                    }
+                }
+
+                // Handle remaining pixels
+                while (c < cols) : (c += 1) {
+                    const c1 = c -| radius;
+                    const c2 = @min(c + radius, cols - 1);
+                    const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+
+                    const s = sum(sat, r1, c1, r2, c2);
+                    const blurred = s / area;
+                    const original = as(f32, src.data[r * src.stride + c]);
+                    const sharpened = 2 * original - blurred;
+                    dst.data[r * dst.stride + c] = if (PlaneType == u8)
+                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
+                    else if (@typeInfo(PlaneType) == .int)
+                        @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened))))
+                    else
+                        sharpened;
+                }
             }
         }
     };
