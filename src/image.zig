@@ -23,10 +23,8 @@ const png = @import("png.zig");
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
-const Blur = @import("image/blur.zig").Blur;
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
-const Integral = @import("image/integral.zig").Integral;
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
@@ -48,6 +46,9 @@ pub fn Image(comptime T: type) type {
         stride: usize,
 
         const Self = @This();
+
+        /// Integral image operations for fast box filtering and region sums.
+        pub const Integral = @import("image/integral.zig").Integral(T);
 
         /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
         /// When passed to functions like `rotateFrom()`, `blurBox()`, etc., the function will
@@ -531,14 +532,26 @@ pub fn Image(comptime T: type) type {
             allocator: Allocator,
             sat: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
         ) !void {
-            return Integral(T).compute(self, allocator, sat);
+            return Self.Integral.compute(self, allocator, sat);
         }
 
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         pub fn boxBlur(self: Self, allocator: Allocator, blurred: *Self, radius: usize) !void {
-            return Blur(T).box(self, allocator, blurred, radius);
+            if (!self.hasSameShape(blurred.*)) {
+                blurred.* = try .init(allocator, self.rows, self.cols);
+            }
+            if (radius == 0) {
+                self.copy(blurred.*);
+                return;
+            }
+
+            // Compute integral image and apply box blur
+            var sat: Image(if (isScalar(T)) f32 else [Self.channels()]f32) = .empty;
+            try Self.Integral.compute(self, allocator, &sat);
+            defer sat.deinit(allocator);
+            Self.Integral.boxBlur(sat, self, blurred, radius);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -547,7 +560,19 @@ pub fn Image(comptime T: type) type {
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         pub fn sharpen(self: Self, allocator: Allocator, sharpened: *Self, radius: usize) !void {
-            return Enhancement(T).sharpen(self, allocator, sharpened, radius);
+            if (!self.hasSameShape(sharpened.*)) {
+                sharpened.* = try .init(allocator, self.rows, self.cols);
+            }
+            if (radius == 0) {
+                self.copy(sharpened.*);
+                return;
+            }
+
+            // Compute integral image and apply sharpening
+            var sat: Image(if (isScalar(T)) f32 else [Self.channels()]f32) = .empty;
+            try Self.Integral.compute(self, allocator, &sat);
+            defer sat.deinit(allocator);
+            Self.Integral.sharpen(sat, self, sharpened, radius);
         }
 
         /// Automatically adjusts the contrast of an image by stretching the intensity range.
@@ -625,7 +650,38 @@ pub fn Image(comptime T: type) type {
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: Output blurred image.
         pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: *Self) !void {
-            return Blur(T).gaussian(self, allocator, sigma, out);
+            // sigma == 0 means no blur; just copy input to output
+            if (sigma == 0) {
+                if (!self.hasSameShape(out.*)) {
+                    out.* = try .init(allocator, self.rows, self.cols);
+                }
+                self.copy(out.*);
+                return;
+            }
+            if (sigma < 0) return error.InvalidSigma;
+
+            // Calculate kernel size (3 sigma on each side)
+            const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
+            const kernel_size = 2 * radius + 1;
+
+            // Generate 1D Gaussian kernel
+            var kernel = try allocator.alloc(f32, kernel_size);
+            defer allocator.free(kernel);
+
+            var sum: f32 = 0;
+            for (0..kernel_size) |i| {
+                const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius));
+                kernel[i] = @exp(-(x * x) / (2.0 * sigma * sigma));
+                sum += kernel[i];
+            }
+
+            // Normalize kernel
+            for (kernel) |*k| {
+                k.* /= sum;
+            }
+
+            // Apply separable convolution
+            try convolution.convolveSeparable(T, self, allocator, kernel, kernel, out, .mirror);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.

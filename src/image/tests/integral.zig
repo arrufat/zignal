@@ -10,7 +10,7 @@ test "integral image scalar" {
     var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
-    var integral: Image(f32) = undefined;
+    var integral: Image(f32) = .empty;
     try image.integral(std.testing.allocator, &integral);
     defer integral.deinit(std.testing.allocator);
     try expectEqual(image.rows, integral.rows);
@@ -29,7 +29,7 @@ test "integral image view scalar" {
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     const view = image.view(.{ .l = 2, .t = 3, .r = 8, .b = 10 });
-    var integral: Image(f32) = undefined;
+    var integral: Image(f32) = .empty;
     try view.integral(std.testing.allocator, &integral);
     defer integral.deinit(std.testing.allocator);
     try expectEqual(view.rows, integral.rows);
@@ -46,7 +46,7 @@ test "integral image struct" {
     var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
-    var integral: Image([4]f32) = undefined;
+    var integral: Image([4]f32) = .empty;
     try image.integral(std.testing.allocator, &integral);
 
     defer integral.deinit(std.testing.allocator);
@@ -90,11 +90,11 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     }
 
     // Apply integral to both
-    var rgb_integral: Image([3]f32) = undefined;
+    var rgb_integral: Image([3]f32) = .empty;
     try rgb_img.integral(std.testing.allocator, &rgb_integral);
     defer rgb_integral.deinit(std.testing.allocator);
 
-    var rgba_integral: Image([4]f32) = undefined;
+    var rgba_integral: Image([4]f32) = .empty;
     try rgba_img.integral(std.testing.allocator, &rgba_integral);
     defer rgba_integral.deinit(std.testing.allocator);
 

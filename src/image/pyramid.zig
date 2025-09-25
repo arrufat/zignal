@@ -5,7 +5,6 @@ const expectEqual = std.testing.expectEqual;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const Image = @import("../image.zig").Image;
-const Blur = @import("blur.zig").Blur;
 
 /// A multi-scale image pyramid for scale-invariant feature detection.
 /// Each level is downsampled from the previous by a scale factor.
@@ -79,13 +78,9 @@ pub fn ImagePyramid(comptime T: type) type {
                 var blurred: Image(T) = .empty;
                 defer if (blurred.rows > 0) blurred.deinit(allocator);
 
-                // Only blur if we have gaussianBlur available and sigma > 0.5
-                if (sigma > 0.5 and @hasDecl(Blur(T), "gaussian")) {
-                    try Blur(T).gaussian(source, allocator, sigma, &blurred);
-                } else if (sigma > 0.5) {
-                    // Fallback to box blur if Gaussian not available
-                    const radius = @as(usize, @intFromFloat(sigma * 2));
-                    try Blur(T).box(source, allocator, &blurred, radius);
+                // Apply Gaussian blur if sigma > 0.5
+                if (sigma > 0.5) {
+                    try source.gaussianBlur(allocator, sigma, &blurred);
                 }
 
                 // Allocate and resize to create the new level
