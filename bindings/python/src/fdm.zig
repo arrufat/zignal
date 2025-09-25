@@ -3,7 +3,6 @@ const std = @import("std");
 const zignal = @import("zignal");
 const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
 const Rgb = zignal.Rgb;
-const Image = zignal.Image;
 
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");

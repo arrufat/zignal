@@ -1,24 +1,18 @@
 //! Image filtering and effects
 
 const std = @import("std");
+
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const MotionBlur = zignal.MotionBlur;
 
+const moveImageToPython = @import("../image.zig").moveImageToPython;
+const ImageObject = @import("../image.zig").ImageObject;
+const getImageType = @import("../image.zig").getImageType;
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
-
-const blending = @import("../blending.zig");
-const PyImageMod = @import("../PyImage.zig");
-const PyImage = PyImageMod.PyImage;
-const moveImageToPython = @import("../image.zig").moveImageToPython;
-
-// Import the ImageObject type from parent
-const ImageObject = @import("../image.zig").ImageObject;
-const getImageType = @import("../image.zig").getImageType;
 
 // Filtering functions
 pub const image_box_blur_doc =

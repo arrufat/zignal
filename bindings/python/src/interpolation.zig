@@ -1,7 +1,5 @@
 const zignal = @import("zignal");
 
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 // Documentation for the Interpolation enum (used at runtime and for stub generation)

@@ -1,17 +1,15 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const Matrix = zignal.Matrix;
 const optimization = zignal.optimization;
 
+const enum_utils = @import("enum_utils.zig");
+const matrix_module = @import("matrix.zig");
+const MatrixObject = matrix_module.MatrixObject;
 const py_utils = @import("py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
-const enum_utils = @import("enum_utils.zig");
-
-const matrix_module = @import("matrix.zig");
-const MatrixObject = matrix_module.MatrixObject;
 
 // ============================================================================
 // OPTIMIZATION POLICY ENUM

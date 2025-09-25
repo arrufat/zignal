@@ -71,6 +71,15 @@ const pca_init_doc =
     \\```
 ;
 
+pub const pca_special_methods_metadata = [_]stub_metadata.MethodInfo{
+    .{
+        .name = "__init__",
+        .params = "self",
+        .returns = "None",
+        .doc = pca_init_doc,
+    },
+};
+
 fn pca_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = args;
     _ = kwds;
@@ -766,4 +775,5 @@ pub const pca_class_metadata = stub_metadata.ClassInfo{
             .doc = "Dimension of input vectors",
         },
     },
+    .special_methods = &pca_special_methods_metadata,
 };

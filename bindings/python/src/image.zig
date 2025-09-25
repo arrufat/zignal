@@ -4,26 +4,18 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const Interpolation = zignal.Interpolation;
-const MotionBlur = zignal.MotionBlur;
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const DisplayFormat = zignal.DisplayFormat;
 
-// Import sub-modules
-const core = @import("image/core.zig");
-const numpy_interop = @import("image/numpy_interop.zig");
-const transforms = @import("image/transforms.zig");
-const filtering = @import("image/filtering.zig");
-
-// Import other required modules
-const blending = @import("blending.zig");
-const canvas = @import("canvas.zig");
 const color_bindings = @import("color.zig");
-const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const grayscale_format = @import("grayscale_format.zig");
+const core = @import("image/core.zig");
+const filtering = @import("image/filtering.zig");
+const numpy_interop = @import("image/numpy_interop.zig");
+const transforms = @import("image/transforms.zig");
 const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
 const makeRgbProxy = @import("pixel_proxy.zig").makeRgbProxy;
 const pixel_iterator = @import("pixel_iterator.zig");
@@ -35,6 +27,7 @@ const PyImageMod = @import("PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const stub_metadata = @import("stub_metadata.zig");
 
+// Import sub-modules
 pub const ImageVariant = union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
@@ -1187,7 +1180,7 @@ pub const image_methods_metadata = blk: {
             .name = "__format__",
             .meth = @ptrCast(&image_format),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
-            .doc = "Format image for display",
+            .doc = image_format_doc,
             .params = "self, format_spec: str",
             .returns = "str",
         },
@@ -1258,7 +1251,7 @@ pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
         .name = "__format__",
         .params = "self, format_spec: str",
         .returns = "str",
-        .doc = "Format image for display. Pattern: format[:WIDTHxHEIGHT] where format is 'auto', 'sgr', 'braille', 'sixel', or 'kitty'.",
+        .doc = image_format_doc,
     },
     .{
         .name = "__eq__",

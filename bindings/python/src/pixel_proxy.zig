@@ -2,14 +2,11 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 
-const blending = @import("blending.zig");
 const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const ImageObject = @import("image.zig").ImageObject;
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
-const PyImageMod = @import("PyImage.zig");
-const PyImage = PyImageMod.PyImage;
 
 // Proxy object layouts
 const RgbPixelProxy = extern struct {

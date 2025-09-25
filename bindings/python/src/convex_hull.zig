@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const zignal = @import("zignal");
 const ConvexHull = zignal.ConvexHull;
 
