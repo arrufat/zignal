@@ -71,6 +71,7 @@ const ColorInfo = struct {
 const PixelExtractionConfig = struct {
     transparency: ?[]const u8 = null,
     color_info: ColorInfo = ColorInfo.empty,
+    palette: ?[]const [3]u8 = null,
 };
 
 /// PNG chunk structure
@@ -470,10 +471,20 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                 return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
             },
             .palette => {
+                const palette = png_state.palette orelse return error.MissingPalette;
                 if (png_state.transparency != null) {
-                    return .{ .rgba = try deinterlaceAdam7Palette(allocator, Rgba, decompressed, png_state.header, png_state.palette orelse return error.MissingPalette, png_state.transparency) };
+                    const config = PixelExtractionConfig{
+                        .transparency = png_state.transparency,
+                        .color_info = color_info,
+                        .palette = palette,
+                    };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
                 } else {
-                    return .{ .rgb = try deinterlaceAdam7Palette(allocator, Rgb, decompressed, png_state.header, png_state.palette orelse return error.MissingPalette, null) };
+                    const config = PixelExtractionConfig{
+                        .color_info = color_info,
+                        .palette = palette,
+                    };
+                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, config) };
                 }
             },
         }
@@ -1329,94 +1340,11 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
                     .grayscale, .grayscale_alpha => extractGrayscalePixel(T, src_row, pass_x, header, config),
                     .rgb => extractRgbPixel(T, src_row, pass_x, header, config),
                     .rgba => extractRgbaPixel(T, src_row, pass_x, header, config),
-                    .palette => @panic("Palette images not supported yet"), // TODO: implement palette support
-                };
-            }
-        }
-
-        data_offset += dims.height * (pass_scanline_bytes + 1);
-    }
-
-    return Image(T){
-        .rows = @intCast(header.height),
-        .cols = @intCast(header.width),
-        .data = output_data,
-        .stride = @intCast(header.width),
-    };
-}
-
-/// Deinterlace Adam7 palette data and convert to RGB or RGBA
-fn deinterlaceAdam7Palette(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, palette: [][3]u8, transparency: ?[]u8) !Image(T) {
-    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
-    if (total_pixels > std.math.maxInt(usize)) {
-        return error.ImageTooLarge;
-    }
-
-    var output_data = try allocator.alloc(T, @intCast(total_pixels));
-    const channels = header.channels();
-    var data_offset: usize = 0;
-
-    // Process each of the 7 Adam7 passes
-    for (0..7) |pass| {
-        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
-        if (dims.width == 0 or dims.height == 0) continue;
-
-        const pass_info = adam7_passes[pass];
-        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
-
-        for (0..dims.height) |pass_y| {
-            const src_row_start = data_offset + pass_y * (pass_scanline_bytes + 1) + 1; // +1 to skip filter byte
-            const src_row = decompressed[src_row_start .. src_row_start + pass_scanline_bytes];
-
-            const final_y = pass_info.y_start + pass_y * pass_info.y_step;
-            if (final_y >= header.height) continue;
-
-            for (0..dims.width) |pass_x| {
-                const final_x = pass_info.x_start + pass_x * pass_info.x_step;
-                if (final_x >= header.width) continue;
-
-                const final_pixel_idx = final_y * header.width + final_x;
-
-                // Extract palette index based on bit depth
-                const index = switch (header.bit_depth) {
-                    8 => blk: {
-                        if (pass_x >= src_row.len) break :blk 0;
-                        break :blk src_row[pass_x];
+                    .palette => blk: {
+                        const palette = config.palette orelse return error.MissingPalette;
+                        break :blk extractPalettePixel(T, src_row, pass_x, header, palette, config.transparency);
                     },
-                    1, 2, 4 => blk: {
-                        const bits_per_pixel = header.bit_depth;
-                        const pixels_per_byte = 8 / bits_per_pixel;
-                        const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
-                        const byte_idx = pass_x / pixels_per_byte;
-                        if (byte_idx >= src_row.len) break :blk 0;
-                        const pixel_idx = pass_x % pixels_per_byte;
-                        const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
-                        break :blk (src_row[byte_idx] >> bit_offset) & mask;
-                    },
-                    else => 0,
                 };
-
-                // Convert palette index to RGB
-                if (index >= palette.len) {
-                    // Invalid palette index - use black as fallback
-                    output_data[final_pixel_idx] = switch (T) {
-                        Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
-                        Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
-                        u8 => 0,
-                        else => @compileError("Unsupported pixel type for palette conversion"),
-                    };
-                } else {
-                    const rgb = palette[index];
-                    // Get alpha value from transparency chunk (default to opaque if not present)
-                    const alpha = if (transparency != null and index < transparency.?.len) transparency.?[index] else 255;
-
-                    output_data[final_pixel_idx] = switch (T) {
-                        Rgb => Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] },
-                        Rgba => Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha },
-                        u8 => @as(u8, @intCast((@as(u16, rgb[0]) + @as(u16, rgb[1]) + @as(u16, rgb[2])) / 3)),
-                        else => @compileError("Unsupported pixel type for palette conversion"),
-                    };
-                }
             }
         }
 
@@ -1590,6 +1518,57 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
         Rgb => Rgb{ .r = corrected_r, .g = corrected_g, .b = corrected_b },
         Rgba => Rgba{ .r = corrected_r, .g = corrected_g, .b = corrected_b, .a = a },
         else => @compileError("Unsupported pixel type"),
+    };
+}
+
+/// Extract palette-based pixel from Adam7 pass data.
+/// Falls back to black/transparent when palette data is missing or the index is invalid.
+fn extractPalettePixel(
+    comptime T: type,
+    src_row: []const u8,
+    pass_x: usize,
+    header: Header,
+    palette: []const [3]u8,
+    transparency: ?[]const u8,
+) T {
+    const index = switch (header.bit_depth) {
+        8 => blk: {
+            if (pass_x >= src_row.len) break :blk 0;
+            break :blk src_row[pass_x];
+        },
+        1, 2, 4 => blk: {
+            const bits_per_pixel = header.bit_depth;
+            const pixels_per_byte = 8 / bits_per_pixel;
+            const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+            const byte_idx = pass_x / pixels_per_byte;
+            if (byte_idx >= src_row.len) break :blk 0;
+            const pixel_idx = pass_x % pixels_per_byte;
+            const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
+            break :blk (src_row[byte_idx] >> bit_offset) & mask;
+        },
+        else => 0,
+    };
+
+    if (index >= palette.len) {
+        return switch (T) {
+            u8 => 0,
+            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
+            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            else => @compileError("Unsupported pixel type for palette conversion"),
+        };
+    }
+
+    const rgb = palette[index];
+    const alpha = if (transparency) |trans_data|
+        if (index < trans_data.len) trans_data[index] else 255
+    else
+        255;
+
+    return switch (T) {
+        u8 => @as(u8, @intCast((@as(u16, rgb[0]) + @as(u16, rgb[1]) + @as(u16, rgb[2])) / 3)),
+        Rgb => Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] },
+        Rgba => Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha },
+        else => @compileError("Unsupported pixel type for palette conversion"),
     };
 }
 
@@ -2126,6 +2105,63 @@ test "Adam7 interlaced PNG support" {
     const rgba_src = [_]u8{ 255, 0, 0, 255, 0, 255, 0, 128 }; // red (alpha=255), green (alpha=128)
     const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, interlaced_header, PixelExtractionConfig{});
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
+}
+
+test "Adam7 palette deinterlace with transparency" {
+    const allocator = std.testing.allocator;
+
+    const header = Header{
+        .width = 1,
+        .height = 1,
+        .bit_depth = 8,
+        .color_type = .palette,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 1,
+    };
+
+    var decompressed = [_]u8{ 0, 1 }; // filter byte + palette index
+    const palette = [_][3]u8{
+        .{ 255, 0, 0 },
+        .{ 0, 255, 0 },
+    };
+    const transparency = [_]u8{ 255, 64 };
+
+    const config = PixelExtractionConfig{
+        .palette = palette[0..],
+        .transparency = transparency[0..],
+    };
+
+    var image = try deinterlaceAdam7(allocator, Rgba, decompressed[0..], header, config);
+    defer image.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), image.rows);
+    try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 64 }, image.at(0, 0).*);
+}
+
+test "extractPalettePixel handles 4-bit indices" {
+    const header = Header{
+        .width = 2,
+        .height = 1,
+        .bit_depth = 4,
+        .color_type = .palette,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 1,
+    };
+
+    const src_row = [_]u8{0x12}; // first pixel index 1, second index 2
+    const palette = [_][3]u8{
+        .{ 0, 0, 0 },
+        .{ 10, 20, 30 },
+        .{ 40, 50, 60 },
+    };
+
+    const pixel0 = extractPalettePixel(Rgb, src_row[0..], 0, header, palette[0..], null);
+    const pixel1 = extractPalettePixel(Rgb, src_row[0..], 1, header, palette[0..], null);
+
+    try std.testing.expectEqual(Rgb{ .r = 10, .g = 20, .b = 30 }, pixel0);
+    try std.testing.expectEqual(Rgb{ .r = 40, .g = 50, .b = 60 }, pixel1);
 }
 
 test "PNG palette transparency support" {
