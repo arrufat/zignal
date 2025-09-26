@@ -6,6 +6,7 @@ const DrawMode = zignal.DrawMode;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const BitmapFont = zignal.BitmapFont;
+const Rectangle = zignal.Rectangle;
 
 const color_utils = @import("color_utils.zig");
 const py_utils = @import("py_utils.zig");
@@ -161,6 +162,15 @@ pub const PyCanvas = struct {
     pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: BitmapFont, scale: f32, mode: DrawMode) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawText(text, position, color, font, scale, mode),
+        }
+    }
+
+    /// Draw another image onto the canvas.
+    pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(usize)) void {
+        switch (self.data) {
+            inline else => |*canvas| switch (source.data) {
+                inline else => |img| canvas.drawImage(img, position, source_rect),
+            },
         }
     }
 };
@@ -401,7 +411,7 @@ const canvas_draw_rectangle_doc =
     \\Draw a rectangle outline.
     \\
     \\## Parameters
-    \\- `rect` (Rectangle): Rectangle object defining the bounds
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): Rectangle object defining the bounds
     \\- `color` (int, tuple or color object): Color of the rectangle.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
@@ -506,9 +516,61 @@ const canvas_fill_rectangle_doc =
     \\Fill a rectangle area.
     \\
     \\## Parameters
-    \\- `rect` (Rectangle): Rectangle object defining the bounds
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): Rectangle object defining the bounds
     \\- `color` (int, tuple or color object): Fill color.
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+;
+
+fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(CanvasObject, self_obj);
+
+    const Params = struct {
+        image: ?*c.PyObject,
+        position: ?*c.PyObject,
+        source_rect: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const pos = py_utils.parsePointTuple(f32, params.position) catch return null;
+
+    const image_module = @import("image.zig");
+    if (c.PyObject_IsInstance(params.image, @ptrCast(&image_module.ImageType)) <= 0) {
+        py_utils.setTypeError("Image instance", params.image);
+        return null;
+    }
+
+    const image_obj = py_utils.safeCast(image_module.ImageObject, params.image);
+    const py_image_ptr = image_obj.py_image orelse {
+        py_utils.setValueError("Source image not initialized", .{});
+        return null;
+    };
+
+    var rect_opt: ?Rectangle(usize) = null;
+    if (params.source_rect) |rect_obj| {
+        if (rect_obj != c.Py_None()) {
+            rect_opt = py_utils.parseRectangle(usize, rect_obj) catch return null;
+        }
+    }
+
+    const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
+    canvas.drawImage(py_image_ptr, pos, rect_opt);
+
+    return py_utils.getPyNone();
+}
+
+const canvas_draw_image_doc =
+    \\Composite another image onto this canvas.
+    \\
+    \\## Parameters
+    \\- `image` (Image): Source image to draw.
+    \\- `position` (tuple[float, float]): Top-left destination position `(x, y)`.
+    \\- `source_rect` (Rectangle | tuple[float, float, float, float] | None, optional): Optional source rectangle in
+    \\  source image coordinates. When omitted or `None`, the entire image is used.
+    \\
+    \\## Notes
+    \\- Alpha blending is handled automatically based on the source image dtype.
+    \\- Drawing is clipped to the canvas bounds.
 ;
 
 fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -963,7 +1025,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_rectangle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_rectangle_doc,
-        .params = "self, rect: Rectangle, color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -971,7 +1033,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_rectangle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_rectangle_doc,
-        .params = "self, rect: Rectangle, color: Color, mode: DrawMode = DrawMode.FAST",
+        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, mode: DrawMode = DrawMode.FAST",
         .returns = "None",
     },
     .{
@@ -988,6 +1050,14 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_polygon_doc,
         .params = "self, points: list[tuple[float, float]], color: Color, mode: DrawMode = DrawMode.FAST",
+        .returns = "None",
+    },
+    .{
+        .name = "draw_image",
+        .meth = @ptrCast(&canvas_draw_image),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_image_doc,
+        .params = "self, image: Image, position: tuple[float, float], source_rect: Rectangle | tuple[float, float, float, float] | None = None",
         .returns = "None",
     },
     .{

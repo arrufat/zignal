@@ -1048,7 +1048,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&transforms.image_crop),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_crop_doc,
-            .params = "self, rect: Rectangle",
+            .params = "self, rect: Rectangle | tuple[float, float, float, float]",
             .returns = "Image",
         },
         .{
@@ -1056,7 +1056,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&transforms.image_extract),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_extract_doc,
-            .params = "self, rect: Rectangle, angle: float = 0.0, size: int | tuple[int, int] | None = None, method: Interpolation = Interpolation.BILINEAR",
+            .params = "self, rect: Rectangle | tuple[float, float, float, float], angle: float = 0.0, size: int | tuple[int, int] | None = None, method: Interpolation = Interpolation.BILINEAR",
             .returns = "Image",
         },
         .{
@@ -1064,7 +1064,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&transforms.image_insert),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_insert_doc,
-            .params = "self, source: Image, rect: Rectangle, angle: float = 0.0, method: Interpolation = Interpolation.BILINEAR",
+            .params = "self, source: Image, rect: Rectangle | tuple[float, float, float, float], angle: float = 0.0, method: Interpolation = Interpolation.BILINEAR",
             .returns = "None",
         },
     };
