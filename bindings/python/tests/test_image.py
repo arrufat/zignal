@@ -314,7 +314,7 @@ class TestImageSmoke:
 
         # RGB
         rgb = zignal.Image(5, 5, (100, 150, 200), dtype=zignal.Rgb)
-        enhanced_rgb = rgb.autocontrast(cutoff=2.0)
+        enhanced_rgb = rgb.autocontrast(cutoff=0.02)
         assert enhanced_rgb.rows == 5 and enhanced_rgb.cols == 5
 
         # RGBA

@@ -216,7 +216,7 @@ fn canvas_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     // Parse arguments - expect an Image object
     const Params = struct {
@@ -230,7 +230,7 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Check if it's an Image instance
     if (c.PyObject_IsInstance(params.image, @ptrCast(&image_module.ImageType)) <= 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image instance");
+        py_utils.setTypeError("Image instance", params.image);
         return -1;
     }
 
@@ -244,14 +244,14 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     if (image.py_image) |pimg| {
         const py_canvas = allocator.create(PyCanvas) catch {
             c.Py_DECREF(params.image.?);
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate PyCanvas");
+            py_utils.setMemoryError("PyCanvas");
             return -1;
         };
         py_canvas.* = PyCanvas.initFromPyImage(allocator, pimg);
         self.py_canvas = py_canvas;
     } else {
         c.Py_DECREF(params.image.?);
-        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        py_utils.setValueError("Image not initialized", .{});
         return -1;
     }
 
@@ -259,7 +259,7 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 }
 
 fn canvas_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     // Free the PyCanvas
     if (self.py_canvas) |ptr| {
@@ -275,7 +275,7 @@ fn canvas_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     if (self.py_canvas) |canvas| {
         var buffer: [64]u8 = undefined;
@@ -313,7 +313,7 @@ const canvas_fill_doc =
 ;
 
 fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     // Parse color argument
     var color_obj: ?*c.PyObject = undefined;
@@ -328,7 +328,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     if (self.py_canvas) |canvas| {
         canvas.fill(rgba);
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Canvas not initialized");
+        py_utils.setValueError("Canvas not initialized", .{});
         return null;
     }
 
@@ -337,7 +337,7 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
 // Draw methods
 fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         p1: ?*c.PyObject,
@@ -374,7 +374,7 @@ const canvas_draw_line_doc =
 ;
 
 fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         rect: ?*c.PyObject,
@@ -408,7 +408,7 @@ const canvas_draw_rectangle_doc =
 ;
 
 fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
@@ -443,7 +443,7 @@ const canvas_draw_polygon_doc =
 ;
 
 fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         center: ?*c.PyObject,
@@ -481,7 +481,7 @@ const canvas_draw_circle_doc =
 
 // Fill methods
 fn canvas_fill_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         rect: ?*c.PyObject,
@@ -512,7 +512,7 @@ const canvas_fill_rectangle_doc =
 ;
 
 fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
@@ -530,7 +530,7 @@ fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
 
     const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
     canvas.fillPolygon(points, rgba, draw_mode) catch {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill polygon");
+        py_utils.setRuntimeError("Failed to fill polygon", .{});
         return null;
     };
 
@@ -547,7 +547,7 @@ const canvas_fill_polygon_doc =
 ;
 
 fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         center: ?*c.PyObject,
@@ -582,7 +582,7 @@ const canvas_fill_circle_doc =
 
 // Special methods that need custom handling
 fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         p0: ?*c.PyObject,
@@ -610,7 +610,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
 }
 
 fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         p0: ?*c.PyObject,
@@ -640,7 +640,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
 }
 
 fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
@@ -667,7 +667,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 }
 
 fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
@@ -687,7 +687,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
     canvas.fillSplinePolygon(points, rgba, tension_val, draw_mode) catch {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill spline polygon");
+        py_utils.setRuntimeError("Failed to fill spline polygon", .{});
         return null;
     };
 
@@ -695,7 +695,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 }
 
 fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         center: ?*c.PyObject,
@@ -720,7 +720,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
     canvas.drawArc(center, radius_val, start_angle_val, end_angle_val, rgba, width_val, draw_mode) catch {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to draw arc");
+        py_utils.setRuntimeError("Failed to draw arc", .{});
         return null;
     };
 
@@ -728,7 +728,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     const Params = struct {
         center: ?*c.PyObject,
@@ -752,7 +752,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
     canvas.fillArc(center, radius_val, start_angle_val, end_angle_val, rgba, draw_mode) catch {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fill arc");
+        py_utils.setRuntimeError("Failed to fill arc", .{});
         return null;
     };
 
@@ -760,7 +760,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     // Parse arguments using struct-based parseArgs
     const Params = struct {
@@ -775,7 +775,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     const text_cstr = c.PyUnicode_AsUTF8(params.text) orelse {
-        c.PyErr_SetString(c.PyExc_TypeError, "text must be a string");
+        py_utils.setTypeError("string", params.text);
         return null;
     };
     const text = std.mem.span(text_cstr);
@@ -792,7 +792,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         const bitmap_font_module = @import("bitmap_font.zig");
         if (c.PyObject_IsInstance(font, @ptrCast(&bitmap_font_module.BitmapFontType)) <= 0) {
             if (c.PyErr_Occurred() == null) {
-                c.PyErr_SetString(c.PyExc_TypeError, "font must be a BitmapFont instance or None");
+                py_utils.setTypeError("BitmapFont instance or None", font);
             }
             return null;
         }
@@ -802,7 +802,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         py_canvas.drawText(text, position, rgba, font_ptr.*, @floatCast(params.scale), draw_mode);
     } else {
         const font = getFont8x8() catch {
-            c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to initialize default font");
+            py_utils.setRuntimeError("Failed to initialize default font", .{});
             return null;
         };
         py_canvas.drawText(text, position, rgba, font, @floatCast(params.scale), draw_mode);
@@ -814,7 +814,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 // Property getters
 fn canvas_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     if (self.py_canvas) |canvas| {
         return c.PyLong_FromLong(@intCast(canvas.rows()));
@@ -825,7 +825,7 @@ fn canvas_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*
 
 fn canvas_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     if (self.py_canvas) |canvas| {
         return c.PyLong_FromLong(@intCast(canvas.cols()));
@@ -836,13 +836,13 @@ fn canvas_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*
 
 fn canvas_get_image(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*CanvasObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(CanvasObject, self_obj);
 
     if (self.image_ref) |img_ref| {
         c.Py_INCREF(img_ref);
         return img_ref;
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Canvas not initialized");
+        py_utils.setValueError("Canvas not initialized", .{});
         return null;
     }
 }

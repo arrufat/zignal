@@ -115,7 +115,7 @@ pub const image_resize_doc =
 ;
 
 pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var shape_or_scale: ?*c.PyObject = null;
@@ -129,12 +129,12 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     }
 
     if (shape_or_scale == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "resize() missing required argument: 'size' (pos 1)");
+        py_utils.setTypeError("size argument", null);
         return null;
     }
 
     const tag_resize = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_resize);
@@ -153,7 +153,7 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     } else if (c.PyTuple_Check(shape_or_scale) != 0) {
         // It's a tuple of dimensions
         if (c.PyTuple_Size(shape_or_scale) != 2) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Size must be a 2-tuple of (rows, cols)");
+            py_utils.setValueError("Size must be a 2-tuple of (rows, cols)", .{});
             return null;
         }
 
@@ -162,13 +162,13 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
         const rows = c.PyLong_AsLong(rows_obj);
         if (rows == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+            py_utils.setTypeError("integer", rows_obj);
             return null;
         }
 
         const cols = c.PyLong_AsLong(cols_obj);
         if (cols == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+            py_utils.setTypeError("integer", cols_obj);
             return null;
         }
 
@@ -178,7 +178,7 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         const result = image_reshape(self, rows_pos, cols_pos, method) catch return null;
         return @ptrCast(result);
     } else {
-        c.PyErr_SetString(c.PyExc_TypeError, "resize() argument must be a number (scale) or tuple (rows, cols)");
+        py_utils.setTypeError("number or tuple", shape_or_scale);
         return null;
     }
 }
@@ -197,7 +197,7 @@ pub const image_letterbox_doc =
 ;
 
 pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var size: ?*c.PyObject = null;
@@ -211,12 +211,12 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     }
 
     if (size == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "letterbox() missing required argument: 'size' (pos 1)");
+        py_utils.setTypeError("size argument", null);
         return null;
     }
 
     const tag_letterbox = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_letterbox);
@@ -234,7 +234,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     } else if (c.PyTuple_Check(size) != 0) {
         // It's a tuple for dimensions
         if (c.PyTuple_Size(size) != 2) {
-            c.PyErr_SetString(c.PyExc_ValueError, "size must be a 2-tuple of (rows, cols)");
+            py_utils.setValueError("size must be a 2-tuple of (rows, cols)", .{});
             return null;
         }
 
@@ -242,7 +242,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         const cols_obj = c.PyTuple_GetItem(size, 1);
 
         if (c.PyLong_Check(rows_obj) == 0 or c.PyLong_Check(cols_obj) == 0) {
-            c.PyErr_SetString(c.PyExc_TypeError, "size must be a 2-tuple of (rows, cols)");
+            py_utils.setTypeError("2-tuple", size);
             return null;
         }
 
@@ -290,7 +290,7 @@ pub const image_rotate_doc =
 ;
 
 pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var angle: f64 = 0;
@@ -304,7 +304,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     }
 
     const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_rotate);
@@ -314,7 +314,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.rotate(allocator, @floatCast(angle), method, &out) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image resize");
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -351,7 +351,7 @@ pub const image_warp_doc =
 ;
 
 pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var transform_obj: ?*c.PyObject = null;
@@ -373,7 +373,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     }
 
     const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_warp);
@@ -479,7 +479,7 @@ pub const image_flip_left_right_doc =
 
 pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -509,7 +509,7 @@ pub const image_flip_top_bottom_doc =
 
 pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -547,7 +547,7 @@ pub const image_crop_doc =
 ;
 
 pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse Rectangle argument
     const Params = struct {
@@ -568,7 +568,7 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 };
                 img.crop(allocator, rect, &out) catch {
                     out.deinit(allocator);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate cropped image");
+                    py_utils.setMemoryError("cropped image");
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -615,7 +615,7 @@ pub const image_extract_doc =
 ;
 
 pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var rect_obj: ?*c.PyObject = undefined;
@@ -634,7 +634,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     const tag_extract = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_extract);
@@ -655,7 +655,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             out_cols = sq;
         } else if (c.PyTuple_Check(size_obj) != 0) {
             if (c.PyTuple_Size(size_obj) != 2) {
-                c.PyErr_SetString(c.PyExc_ValueError, "size must be a 2-tuple of (rows, cols)");
+                py_utils.setValueError("size must be a 2-tuple of (rows, cols)", .{});
                 return null;
             }
 
@@ -664,20 +664,20 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
             const rows = c.PyLong_AsLong(rows_obj);
             if (rows == -1 and c.PyErr_Occurred() != null) {
-                c.PyErr_SetString(c.PyExc_TypeError, "Rows must be an integer");
+                py_utils.setTypeError("integer", rows_obj);
                 return null;
             }
 
             const cols = c.PyLong_AsLong(cols_obj);
             if (cols == -1 and c.PyErr_Occurred() != null) {
-                c.PyErr_SetString(c.PyExc_TypeError, "Cols must be an integer");
+                py_utils.setTypeError("integer", cols_obj);
                 return null;
             }
 
             out_rows = py_utils.validatePositive(usize, rows, "Rows") catch return null;
             out_cols = py_utils.validatePositive(usize, cols, "Cols") catch return null;
         } else {
-            c.PyErr_SetString(c.PyExc_TypeError, "size must be an int (square) or a tuple (rows, cols)");
+            py_utils.setTypeError("int or tuple", size_obj);
             return null;
         }
     }
@@ -726,7 +726,7 @@ pub const image_insert_doc =
 ;
 
 pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var source_obj: ?*c.PyObject = undefined;
@@ -743,17 +743,17 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     // Check if source is an Image object
     if (c.PyObject_IsInstance(source_obj, @ptrCast(getImageType())) <= 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "source must be an Image object");
+        py_utils.setTypeError("Image object", source_obj);
         return null;
     }
 
-    const source = @as(*ImageObject, @ptrCast(source_obj.?));
+    const source = py_utils.safeCast(ImageObject, source_obj);
 
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
 
     const tag_insert = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid interpolation method");
+        py_utils.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_insert);
@@ -764,18 +764,18 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             .grayscale => |*dst| {
                 var src_u8: Image(u8) = undefined;
                 if (source.py_image == null) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    py_utils.setTypeError("initialized Image", source_obj);
                     return null;
                 }
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .grayscale => |img| src_u8 = img,
                     .rgb => |img| src_u8 = img.convert(u8, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                     .rgba => |img| src_u8 = img.convert(u8, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                 }
@@ -785,18 +785,18 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             .rgb => |*dst| {
                 var src_rgb: Image(Rgb) = undefined;
                 if (source.py_image == null) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    py_utils.setTypeError("initialized Image", source_obj);
                     return null;
                 }
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgb => |img| src_rgb = img,
                     .grayscale => |img| src_rgb = img.convert(Rgb, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                     .rgba => |img| src_rgb = img.convert(Rgb, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                 }
@@ -806,18 +806,18 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             .rgba => |*dst| {
                 var src_rgba: Image(Rgba) = undefined;
                 if (source.py_image == null) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "Source image not initialized");
+                    py_utils.setTypeError("initialized Image", source_obj);
                     return null;
                 }
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgba => |img| src_rgba = img,
                     .grayscale => |img| src_rgba = img.convert(Rgba, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                     .rgb => |img| src_rgba = img.convert(Rgba, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert source image");
+                        py_utils.setMemoryError("source image conversion");
                         return null;
                     },
                 }

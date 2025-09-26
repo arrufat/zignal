@@ -36,15 +36,14 @@ pub const MotionBlurObject = extern struct {
 // MotionBlur Implementation
 // ============================================================================
 
-fn motion_blur_dealloc(self: [*c]c.PyObject) callconv(.c) void {
-    c.Py_TYPE(self).*.tp_free.?(self);
-}
+// Using genericDealloc since there's no heap allocation to clean up
+const motion_blur_dealloc = py_utils.genericDealloc(MotionBlurObject, null);
 
-fn motion_blur_new(type_obj: [*c]c.PyTypeObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+fn motion_blur_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     _ = kwds;
 
-    const self = @as(?*MotionBlurObject, @ptrCast(type_obj.*.tp_alloc.?(type_obj, 0)));
+    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
     if (self) |obj| {
         // Initialize with defaults
         obj.blur_type = .linear;
@@ -54,20 +53,20 @@ fn motion_blur_new(type_obj: [*c]c.PyTypeObject, args: [*c]c.PyObject, kwds: [*c
         obj.center_y = 0.5;
         obj.strength = 0.5;
     }
-    return @ptrCast(self);
+    return @as(?*c.PyObject, @ptrCast(self));
 }
 
-fn motion_blur_init(self_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) c_int {
+fn motion_blur_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = self_obj;
     _ = args;
     _ = kwds;
     // This should not be called directly - factory methods handle initialization
-    c.PyErr_SetString(c.PyExc_TypeError, "MotionBlur cannot be instantiated directly. Use MotionBlur.linear(), MotionBlur.radial_zoom(), or MotionBlur.radial_spin()");
+    py_utils.setTypeError("MotionBlur factory methods", null);
     return -1;
 }
 
-fn motion_blur_repr(self_obj: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj));
+fn motion_blur_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(MotionBlurObject, self_obj);
     var buf: [256]u8 = undefined;
 
     const str = switch (self.blur_type) {
@@ -88,14 +87,14 @@ fn motion_blur_repr(self_obj: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
         ) catch return null,
     };
 
-    return @ptrCast(c.PyUnicode_FromString(str));
+    return c.PyUnicode_FromString(str);
 }
 
 // ============================================================================
 // Static Factory Methods
 // ============================================================================
 
-fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+fn motion_blur_linear(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = type_obj;
 
     const Params = struct {
@@ -110,7 +109,7 @@ fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]
     const dist = py_utils.validateNonNegative(u32, distance, "distance") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
+    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
     if (self) |obj| {
         obj.blur_type = .linear;
         obj.angle = angle;
@@ -121,10 +120,10 @@ fn motion_blur_linear(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]
         obj.strength = 0.5;
     }
 
-    return @ptrCast(self);
+    return @as(?*c.PyObject, @ptrCast(self));
 }
 
-fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+fn motion_blur_radial_zoom(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = type_obj;
 
     const Params = struct {
@@ -142,7 +141,7 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     // Parse center tuple if provided
     if (center_tuple != null) {
         if (c.PyArg_ParseTuple(center_tuple, "dd", &center_x, &center_y) == 0) {
-            c.PyErr_SetString(c.PyExc_TypeError, "center must be a tuple of two floats");
+            py_utils.setTypeError("tuple of two floats", center_tuple);
             return null;
         }
 
@@ -153,7 +152,7 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
+    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
     if (self) |obj| {
         obj.blur_type = .radial_zoom;
         obj.center_x = center_x;
@@ -164,10 +163,10 @@ fn motion_blur_radial_zoom(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
         obj.distance = 0;
     }
 
-    return @ptrCast(self);
+    return @as(?*c.PyObject, @ptrCast(self));
 }
 
-fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+fn motion_blur_radial_spin(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = type_obj;
 
     const Params = struct {
@@ -185,7 +184,7 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     // Parse center tuple if provided
     if (center_tuple != null) {
         if (c.PyArg_ParseTuple(center_tuple, "dd", &center_x, &center_y) == 0) {
-            c.PyErr_SetString(c.PyExc_TypeError, "center must be a tuple of two floats");
+            py_utils.setTypeError("tuple of two floats", center_tuple);
             return null;
         }
 
@@ -196,7 +195,7 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
     const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(MotionBlurType.tp_alloc.?(&MotionBlurType, 0)));
+    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
     if (self) |obj| {
         obj.blur_type = .radial_spin;
         obj.center_x = center_x;
@@ -207,7 +206,7 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
         obj.distance = 0;
     }
 
-    return @ptrCast(self);
+    return @as(?*c.PyObject, @ptrCast(self));
 }
 
 // ============================================================================
@@ -215,7 +214,7 @@ fn motion_blur_radial_spin(type_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds:
 // ============================================================================
 fn get_type(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*MotionBlurObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MotionBlurObject, self_obj);
     const type_str = switch (self.blur_type) {
         .linear => "linear",
         .radial_zoom => "radial_zoom",
@@ -325,19 +324,18 @@ var motion_blur_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var MotionBlurType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.MotionBlur",
-    .tp_basicsize = @sizeOf(MotionBlurObject),
-    .tp_dealloc = motion_blur_dealloc,
-    .tp_repr = motion_blur_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = motion_blur_doc,
-    .tp_methods = &motion_blur_methods,
-    .tp_getset = &motion_blur_getset,
-    .tp_init = motion_blur_init,
-    .tp_new = motion_blur_new,
-};
+// Using buildTypeObject helper for cleaner initialization
+pub var MotionBlurType = py_utils.buildTypeObject(.{
+    .name = "zignal.MotionBlur",
+    .basicsize = @sizeOf(MotionBlurObject),
+    .doc = motion_blur_doc,
+    .methods = &motion_blur_methods,
+    .getset = &motion_blur_getset,
+    .new = motion_blur_new,
+    .init = motion_blur_init,
+    .dealloc = motion_blur_dealloc,
+    .repr = motion_blur_repr,
+});
 
 // ============================================================================
 // Metadata for stub generation

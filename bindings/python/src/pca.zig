@@ -49,16 +49,8 @@ pub const PCAObject = extern struct {
     pca_ptr: ?*Pca(f64),
 };
 
-fn pca_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    _ = kwds;
-
-    const self = @as(?*PCAObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
-    if (self) |obj| {
-        obj.pca_ptr = null;
-    }
-    return @as(?*c.PyObject, @ptrCast(self));
-}
+// Using genericNew helper for standard object creation
+const pca_new = py_utils.genericNew(PCAObject);
 
 const pca_init_doc =
     \\Initialize a new PCA instance.
@@ -83,18 +75,18 @@ pub const pca_special_methods_metadata = [_]stub_metadata.MethodInfo{
 fn pca_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = args;
     _ = kwds;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     // Create and store the PCA struct
     const pca_ptr = allocator.create(Pca(f64)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate PCA");
+        py_utils.setMemoryError("PCA");
         return -1;
     };
 
     // Initialize the PCA instance
     pca_ptr.* = Pca(f64).init(allocator) catch {
         allocator.destroy(pca_ptr);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to initialize PCA");
+        py_utils.setMemoryError("PCA initialization");
         return -1;
     };
     self.pca_ptr = pca_ptr;
@@ -102,17 +94,16 @@ fn pca_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     return 0;
 }
 
-fn pca_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
-
+// Helper function for custom cleanup
+fn pcaDeinit(self: *PCAObject) void {
     if (self.pca_ptr) |pca| {
         pca.deinit();
         allocator.destroy(pca);
     }
-
-    const tp = @as(*c.PyTypeObject, @ptrCast(c.Py_TYPE(self_obj)));
-    tp.*.tp_free.?(self_obj);
 }
+
+// Using genericDealloc helper
+const pca_dealloc = py_utils.genericDealloc(PCAObject, pcaDeinit);
 
 const pca_fit_doc =
     \\Fit the PCA model on training data.
@@ -134,10 +125,10 @@ const pca_fit_doc =
 ;
 
 fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -153,13 +144,13 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
 
     // Check if matrix_obj is a Matrix
     if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
-        c.PyErr_SetString(c.PyExc_TypeError, "data must be a Matrix object");
+        py_utils.setTypeError("Matrix object", matrix_obj);
         return null;
     }
 
-    const matrix_struct = @as(*matrix.MatrixObject, @ptrCast(matrix_obj.?));
+    const matrix_struct = py_utils.safeCast(matrix.MatrixObject, matrix_obj);
     if (matrix_struct.matrix_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix is not initialized");
+        py_utils.setValueError("Matrix is not initialized", .{});
         return null;
     }
 
@@ -170,26 +161,25 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     self.pca_ptr.?.fit(matrix_struct.matrix_ptr.?.*, components) catch |err| {
         switch (err) {
             error.NoVectors => {
-                c.PyErr_SetString(c.PyExc_ValueError, "No data provided");
+                py_utils.setValueError("No data provided", .{});
                 return null;
             },
             error.InsufficientData => {
-                c.PyErr_SetString(c.PyExc_ValueError, "Need at least 2 samples for PCA");
+                py_utils.setValueError("Need at least 2 samples for PCA", .{});
                 return null;
             },
             error.InvalidComponents => {
-                c.PyErr_SetString(c.PyExc_ValueError, "Number of components must be > 0");
+                py_utils.setValueError("Number of components must be > 0", .{});
                 return null;
             },
             else => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to fit PCA model");
+                py_utils.setRuntimeError("Failed to fit PCA model", .{});
                 return null;
             },
         }
     };
 
-    c.Py_INCREF(c.Py_None());
-    return c.Py_None();
+    return py_utils.getPyNone();
 }
 
 const pca_project_doc =
@@ -212,10 +202,10 @@ const pca_project_doc =
 ;
 
 fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -228,7 +218,7 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "project() takes a list of floats as argument");
+        py_utils.setTypeError("list of floats", list_obj);
         return null;
     }
 
@@ -237,7 +227,7 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Allocate temporary buffer for input vector
     const vector = allocator.alloc(f64, @intCast(list_size)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate vector");
+        py_utils.setMemoryError("vector");
         return null;
     };
     defer allocator.free(vector);
@@ -256,17 +246,17 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const coeffs = pca.project(vector) catch |err| {
         switch (err) {
             error.NotFitted => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "PCA has not been fitted yet");
+                py_utils.setRuntimeError("PCA has not been fitted yet", .{});
                 return null;
             },
             error.DimensionMismatch => {
                 var buf: [256]u8 = undefined;
                 const msg = std.fmt.bufPrintZ(&buf, "Vector dimension ({}) doesn't match fitted data dimension ({})", .{ list_size, pca.dim }) catch "Dimension mismatch";
-                c.PyErr_SetString(c.PyExc_ValueError, msg);
+                py_utils.setValueError("{s}", .{msg});
                 return null;
             },
             else => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to project vector");
+                py_utils.setRuntimeError("Failed to project vector", .{});
                 return null;
             },
         }
@@ -311,10 +301,10 @@ const pca_transform_doc =
 ;
 
 fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -327,13 +317,13 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 
     // Check if matrix_obj is a Matrix
     if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
-        c.PyErr_SetString(c.PyExc_TypeError, "transform() takes a Matrix object as argument");
+        py_utils.setTypeError("Matrix object", matrix_obj);
         return null;
     }
 
-    const matrix_struct = @as(*matrix.MatrixObject, @ptrCast(matrix_obj.?));
+    const matrix_struct = py_utils.safeCast(matrix.MatrixObject, matrix_obj);
     if (matrix_struct.matrix_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix is not initialized");
+        py_utils.setValueError("Matrix is not initialized", .{});
         return null;
     }
 
@@ -341,22 +331,22 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     var transformed = self.pca_ptr.?.transform(matrix_struct.matrix_ptr.?.*) catch |err| {
         switch (err) {
             error.NotFitted => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "PCA has not been fitted yet");
+                py_utils.setRuntimeError("PCA has not been fitted yet", .{});
                 return null;
             },
             error.DimensionMismatch => {
                 const pca = self.pca_ptr.?;
                 var buf: [256]u8 = undefined;
                 const msg = std.fmt.bufPrintZ(&buf, "Data dimension ({}) doesn't match fitted data dimension ({})", .{ matrix_struct.matrix_ptr.?.cols, pca.dim }) catch "Dimension mismatch";
-                c.PyErr_SetString(c.PyExc_ValueError, msg);
+                py_utils.setValueError("{s}", .{msg});
                 return null;
             },
             error.NoVectors => {
-                c.PyErr_SetString(c.PyExc_ValueError, "No data provided");
+                py_utils.setValueError("No data provided", .{});
                 return null;
             },
             else => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to transform data");
+                py_utils.setRuntimeError("Failed to transform data", .{});
                 return null;
             },
         }
@@ -374,7 +364,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         transformed.deinit();
         // TODO: Remove explicit cast after Python 3.10 is dropped
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(result)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        py_utils.setMemoryError("Matrix");
         return null;
     };
     result.?.matrix_ptr.?.* = transformed;
@@ -404,10 +394,10 @@ const pca_reconstruct_doc =
 ;
 
 fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -420,7 +410,7 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "reconstruct() takes a list of floats as argument");
+        py_utils.setTypeError("list of floats", list_obj);
         return null;
     }
 
@@ -429,7 +419,7 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Allocate temporary buffer for coefficients
     const coeffs = allocator.alloc(f64, @intCast(list_size)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate coefficients");
+        py_utils.setMemoryError("coefficients");
         return null;
     };
     defer allocator.free(coeffs);
@@ -448,17 +438,17 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const reconstructed = pca.reconstruct(coeffs) catch |err| {
         switch (err) {
             error.NotFitted => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "PCA has not been fitted yet");
+                py_utils.setRuntimeError("PCA has not been fitted yet", .{});
                 return null;
             },
             error.InvalidCoefficients => {
                 var buf: [256]u8 = undefined;
                 const msg = std.fmt.bufPrintZ(&buf, "Number of coefficients ({}) doesn't match number of components ({})", .{ list_size, pca.num_components }) catch "Invalid coefficients";
-                c.PyErr_SetString(c.PyExc_ValueError, msg);
+                py_utils.setValueError("{s}", .{msg});
                 return null;
             },
             else => {
-                c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to reconstruct vector");
+                py_utils.setRuntimeError("Failed to reconstruct vector", .{});
                 return null;
             },
         }
@@ -487,10 +477,10 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
 fn pca_get_mean(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -522,10 +512,10 @@ fn pca_get_mean(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.P
 
 fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -537,7 +527,7 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
 
     // Create a copy of the components matrix
     var components_copy = Matrix(f64).init(allocator, pca.components.rows, pca.components.cols) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate components matrix");
+        py_utils.setMemoryError("components matrix");
         return null;
     };
 
@@ -561,7 +551,7 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
         components_copy.deinit();
         // TODO: Remove explicit cast after Python 3.10 is dropped
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(result)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        py_utils.setMemoryError("Matrix");
         return null;
     };
     result.?.matrix_ptr.?.* = components_copy;
@@ -573,10 +563,10 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
 
 fn pca_get_eigenvalues(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -606,10 +596,10 @@ fn pca_get_eigenvalues(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
 
 fn pca_get_num_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -619,10 +609,10 @@ fn pca_get_num_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv
 
 fn pca_get_dim(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*PCAObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(PCAObject, self_obj);
 
     if (self.pca_ptr == null) {
-        c.PyErr_SetString(c.PyExc_RuntimeError, "PCA not initialized");
+        py_utils.setRuntimeError("PCA not initialized", .{});
         return null;
     }
 
@@ -704,19 +694,18 @@ var PCAGetSet = [_]c.PyGetSetDef{
     c.PyGetSetDef{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-// Type definition
-pub var PCAType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.PCA",
-    .tp_basicsize = @sizeOf(PCAObject),
-    .tp_dealloc = @ptrCast(&pca_dealloc),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT | c.Py_TPFLAGS_BASETYPE,
-    .tp_doc = pca_class_doc,
-    .tp_methods = @ptrCast(&PCAMethods),
-    .tp_getset = @ptrCast(&PCAGetSet),
-    .tp_init = @ptrCast(&pca_init),
-    .tp_new = pca_new,
-};
+// Using buildTypeObject helper for cleaner initialization
+pub var PCAType = py_utils.buildTypeObject(.{
+    .name = "zignal.PCA",
+    .basicsize = @sizeOf(PCAObject),
+    .doc = pca_class_doc,
+    .methods = @ptrCast(&PCAMethods),
+    .getset = @ptrCast(&PCAGetSet),
+    .init = @ptrCast(&pca_init),
+    .new = pca_new,
+    .dealloc = pca_dealloc,
+    .flags = c.Py_TPFLAGS_DEFAULT | c.Py_TPFLAGS_BASETYPE,
+});
 
 // Metadata for stub generation
 pub const pca_class_metadata = stub_metadata.ClassInfo{

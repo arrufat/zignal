@@ -16,22 +16,11 @@ pub const RectangleObject = extern struct {
     bottom: f64,
 };
 
-fn rectangle_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    _ = kwds;
-
-    const self = @as(?*RectangleObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
-    if (self) |obj| {
-        obj.left = 0;
-        obj.top = 0;
-        obj.right = 0;
-        obj.bottom = 0;
-    }
-    return @as(?*c.PyObject, @ptrCast(self));
-}
+// Using genericNew helper for standard object creation
+const rectangle_new = py_utils.genericNew(RectangleObject);
 
 fn rectangle_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     // Parse arguments - expect left, top, right, bottom
     const Params = struct {
@@ -45,11 +34,11 @@ fn rectangle_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // Validate rectangle
     if (params.right < params.left) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Right must be greater than or equal to left");
+        py_utils.setValueError("Right must be greater than or equal to left", .{});
         return -1;
     }
     if (params.bottom < params.top) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Bottom must be greater than or equal to top");
+        py_utils.setValueError("Bottom must be greater than or equal to top", .{});
         return -1;
     }
 
@@ -61,12 +50,11 @@ fn rectangle_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     return 0;
 }
 
-fn rectangle_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
-}
+// Using genericDealloc since there's no heap allocation to clean up
+const rectangle_dealloc = py_utils.genericDealloc(RectangleObject, null);
 
 fn rectangle_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     var buffer: [128]u8 = undefined;
     const formatted = std.fmt.bufPrintZ(&buffer, "Rectangle({d:.2}, {d:.2}, {d:.2}, {d:.2})", .{ self.left, self.top, self.right, self.bottom }) catch return null;
@@ -137,7 +125,7 @@ const rectangle_is_empty_doc =
 
 fn rectangle_is_empty(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     // For floats, use >= comparison (matches Rectangle.zig logic)
     const is_empty = self.top >= self.bottom or self.left >= self.right;
@@ -156,7 +144,7 @@ const rectangle_area_doc =
 
 fn rectangle_area(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const width = self.right - self.left;
     const height = self.bottom - self.top;
@@ -185,7 +173,7 @@ const rectangle_contains_doc =
 ;
 
 fn rectangle_contains(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         x: f64,
@@ -218,7 +206,7 @@ const rectangle_grow_doc =
 ;
 
 fn rectangle_grow(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         amount: f64,
@@ -251,7 +239,7 @@ const rectangle_shrink_doc =
 ;
 
 fn rectangle_shrink(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         amount: f64,
@@ -292,7 +280,7 @@ const rectangle_intersect_doc =
 ;
 
 fn rectangle_intersect(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         other: ?*c.PyObject,
@@ -350,7 +338,7 @@ const rectangle_iou_doc =
 ;
 
 fn rectangle_iou(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         other: ?*c.PyObject,
@@ -408,7 +396,7 @@ const rectangle_overlaps_doc =
 ;
 
 fn rectangle_overlaps(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwargs: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
 
     const Params = struct {
         other: ?*c.PyObject,
@@ -442,14 +430,14 @@ fn rectangle_overlaps(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwargs: ?*c.Py
 
 fn rectangle_get_width(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
     const width = self.right - self.left;
     return c.PyFloat_FromDouble(@as(f64, width));
 }
 
 fn rectangle_get_height(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*RectangleObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(RectangleObject, self_obj);
     const height = self.bottom - self.top;
     return c.PyFloat_FromDouble(@as(f64, height));
 }
@@ -657,36 +645,29 @@ pub const rectangle_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-pub var RectangleType = c.PyTypeObject{
-    .ob_base = .{
-        .ob_base = .{},
-        .ob_size = 0,
-    },
-    .tp_name = "zignal.Rectangle",
-    .tp_basicsize = @sizeOf(RectangleObject),
-    .tp_dealloc = rectangle_dealloc,
-    .tp_repr = rectangle_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = rectangle_class_doc,
-    .tp_methods = @ptrCast(&rectangle_methods),
-    .tp_getset = @ptrCast(&rectangle_getset),
-    .tp_init = rectangle_init,
-    .tp_new = rectangle_new,
-};
+// Using buildTypeObject helper for cleaner initialization
+pub var RectangleType = py_utils.buildTypeObject(.{
+    .name = "zignal.Rectangle",
+    .basicsize = @sizeOf(RectangleObject),
+    .doc = rectangle_class_doc,
+    .methods = @ptrCast(&rectangle_methods),
+    .getset = @ptrCast(&rectangle_getset),
+    .new = rectangle_new,
+    .init = rectangle_init,
+    .dealloc = rectangle_dealloc,
+    .repr = rectangle_repr,
+});
 
 /// Convert a Python Rectangle object to a Zignal Rectangle(f32)
 pub fn toZignalRectangle(rect_obj: ?*c.PyObject) !Rectangle(f32) {
     if (rect_obj == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Rectangle object is null");
+        c.PyErr_SetString(c.PyExc_TypeError, "Object is null");
         return error.InvalidRectangle;
     }
-
-    // Check if it's a Rectangle instance
     if (c.PyObject_IsInstance(rect_obj, @ptrCast(&RectangleType)) <= 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Object must be a Rectangle instance");
+        c.PyErr_SetString(c.PyExc_TypeError, "Type mismatch");
         return error.InvalidRectangle;
     }
-
-    const rect = @as(*RectangleObject, @ptrCast(rect_obj.?));
+    const rect = py_utils.safeCast(RectangleObject, rect_obj);
     return Rectangle(f32).init(rect.left, rect.top, rect.right, rect.bottom);
 }

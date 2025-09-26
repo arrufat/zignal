@@ -30,7 +30,7 @@ pub const image_box_blur_doc =
 ;
 
 pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var radius_long: c_long = 0;
@@ -48,7 +48,7 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.boxBlur(allocator, &out, @intCast(radius)) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -56,7 +56,7 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         }
         return null;
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -75,7 +75,7 @@ pub const image_gaussian_blur_doc =
 ;
 
 pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var sigma: f64 = 0;
@@ -88,7 +88,7 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
 
     // Validate sigma: must be finite and > 0
     if (!std.math.isFinite(sigma)) {
-        c.PyErr_SetString(c.PyExc_ValueError, "sigma must be finite");
+        py_utils.setValueError("sigma must be finite", .{});
         return null;
     }
     const sigma_pos = py_utils.validatePositive(f64, sigma, "sigma") catch return null;
@@ -99,9 +99,9 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
                 var out = @TypeOf(img).empty;
                 img.gaussianBlur(allocator, @floatCast(sigma_pos), &out) catch |err| {
                     if (err == error.InvalidSigma) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid sigma value");
+                        py_utils.setValueError("Invalid sigma value", .{});
                     } else {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                        py_utils.setMemoryError("image operation");
                     }
                     return null;
                 };
@@ -110,7 +110,7 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
         }
         return null;
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -135,13 +135,13 @@ pub const image_invert_doc =
 
 pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
                 var out = img.dupe(allocator) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    py_utils.setMemoryError("image data");
                     return null;
                 };
                 out.invert();
@@ -151,7 +151,7 @@ pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         return null;
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -170,7 +170,7 @@ pub const image_sharpen_doc =
 ;
 
 pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var radius_long: c_long = 0;
@@ -187,7 +187,7 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             inline else => |img| {
                 var out = @TypeOf(img).empty;
                 img.sharpen(allocator, &out, @intCast(radius)) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -195,7 +195,7 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
         return null;
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -226,7 +226,7 @@ pub const image_autocontrast_doc =
 ;
 
 pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     var cutoff: f32 = 0.0;
@@ -237,9 +237,9 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
         return null;
     }
 
-    // Validate cutoff range (now 0.0 to 0.5)
+    // Validate cutoff range (0.0 to 0.5 fraction)
     if (cutoff < 0 or cutoff >= 0.5) {
-        c.PyErr_SetString(c.PyExc_ValueError, "cutoff must be between 0 and 0.5");
+        py_utils.setValueError("cutoff must be between 0 and 0.5", .{});
         return null;
     }
 
@@ -248,7 +248,7 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
             inline else => |img| {
                 // Make a copy since autocontrast now works in-place
                 var out = img.dupe(allocator) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
                 // we already checked for the cutoff value
@@ -257,7 +257,7 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
             },
         }
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -289,12 +289,12 @@ pub const image_equalize_doc =
     \\equalized.save("equalized.jpg")
     \\
     \\# Compare with autocontrast
-    \\auto = img.autocontrast(cutoff=2.0)
+    \\auto = img.autocontrast(cutoff=0.02)
     \\```
 ;
 
 pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Apply equalization
     if (self.py_image) |pimg| {
@@ -302,7 +302,7 @@ pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.
             inline else => |img| {
                 // Make a copy since equalize now works in-place
                 var out = img.dupe(allocator) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
                 out.equalize();
@@ -310,7 +310,7 @@ pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.
             },
         }
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -353,7 +353,7 @@ pub const image_motion_blur_doc =
 ;
 
 pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
     const motion_blur = @import("../motion_blur.zig");
 
     // Parse the single argument (config object)
@@ -368,7 +368,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const type_name = type_obj.*.tp_name;
 
     if (!std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlur")) {
-        c.PyErr_SetString(c.PyExc_TypeError, "config must be a MotionBlur object created with MotionBlur.linear(), MotionBlur.radial_zoom(), or MotionBlur.radial_spin()");
+        py_utils.setTypeError("MotionBlur object", config_obj);
         return null;
     }
 
@@ -405,7 +405,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                 };
 
                 img.motionBlur(allocator, blur_config, &out) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
 
@@ -414,7 +414,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         }
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -433,14 +433,14 @@ pub const image_sobel_doc =
 
 pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         var out = Image(u8).empty;
         switch (pimg.data) {
             inline else => |img| {
                 img.sobel(allocator, &out) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+                    py_utils.setMemoryError("image operation");
                     return null;
                 };
             },
@@ -448,7 +448,7 @@ pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
         return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -491,7 +491,7 @@ pub const image_shen_castan_doc =
 ;
 
 pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments with defaults matching ShenCastan.zig
     var smooth: f64 = 0.9;
@@ -510,15 +510,15 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
 
     // Validate parameters
     if (smooth <= 0 or smooth >= 1) {
-        c.PyErr_SetString(c.PyExc_ValueError, "smooth must be between 0 and 1");
+        py_utils.setValueError("smooth must be between 0 and 1", .{});
         return null;
     }
     if (window_size < 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be >= 3");
+        py_utils.setValueError("window_size must be >= 3", .{});
         return null;
     }
     if (@mod(window_size, 2) == 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be odd");
+        py_utils.setValueError("window_size must be odd", .{});
         return null;
     }
     if (high_ratio <= 0 or high_ratio >= 1) {
@@ -564,9 +564,9 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                     if (err == error.InvalidBParameter) {
                         c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
                     } else if (err == error.WindowSizeMustBeOdd) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be odd");
+                        py_utils.setValueError("window_size must be odd", .{});
                     } else if (err == error.WindowSizeTooSmall) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "window_size must be >= 3");
+                        py_utils.setValueError("window_size must be >= 3", .{});
                     } else if (err == error.InvalidThreshold) {
                         c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold parameters (high_ratio or low_rel out of range)");
                     } else {
@@ -580,7 +580,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -613,7 +613,7 @@ pub const image_blend_doc =
 ;
 
 pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments: overlay image and optional blend mode
     var overlay_obj: ?*c.PyObject = null;
