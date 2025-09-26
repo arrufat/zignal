@@ -1,12 +1,9 @@
-"""Test optimization module functionality."""
-
 import pytest
 
 import zignal
 
 
 def test_optimization_policy_enum():
-    """Test that OptimizationPolicy enum is accessible and has expected values."""
     assert hasattr(zignal, "OptimizationPolicy")
     assert hasattr(zignal.OptimizationPolicy, "MIN")
     assert hasattr(zignal.OptimizationPolicy, "MAX")
@@ -15,12 +12,10 @@ def test_optimization_policy_enum():
 
 
 def test_assignment_type():
-    """Test that Assignment type is accessible."""
     assert hasattr(zignal, "Assignment")
 
 
 def test_solve_assignment_problem_basic():
-    """Test basic assignment problem solving."""
     # Create a simple 3x3 cost matrix
     costs = zignal.Matrix([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
 
@@ -43,7 +38,6 @@ def test_solve_assignment_problem_basic():
 
 
 def test_solve_assignment_problem_minimize():
-    """Test minimization policy."""
     # Create a cost matrix where diagonal is cheapest
     costs = zignal.Matrix([[1.0, 10.0, 10.0], [10.0, 2.0, 10.0], [10.0, 10.0, 3.0]])
 
@@ -56,7 +50,6 @@ def test_solve_assignment_problem_minimize():
 
 
 def test_solve_assignment_problem_maximize():
-    """Test maximization policy."""
     # Create a profit matrix where anti-diagonal is most profitable
     profits = zignal.Matrix([[1.0, 2.0, 10.0], [2.0, 5.0, 8.0], [10.0, 6.0, 3.0]])
 
@@ -72,7 +65,6 @@ def test_solve_assignment_problem_maximize():
 
 
 def test_solve_assignment_problem_rectangular():
-    """Test with rectangular matrices."""
     # Test 2x3 matrix (more columns than rows)
     costs = zignal.Matrix([[1.0, 2.0, 3.0], [4.0, 2.0, 1.0]])
     result = zignal.solve_assignment_problem(costs)
@@ -87,7 +79,6 @@ def test_solve_assignment_problem_rectangular():
 
 
 def test_solve_assignment_problem_rectangular_tall():
-    """Test with tall rectangular matrix (more rows than columns)."""
     # Test 3x2 matrix
     costs = zignal.Matrix([[1.0, 2.0], [3.0, 1.0], [2.0, 3.0]])
     result = zignal.solve_assignment_problem(costs)
@@ -101,7 +92,6 @@ def test_solve_assignment_problem_rectangular_tall():
 
 
 def test_solve_assignment_problem_single_element():
-    """Test with 1x1 matrix."""
     costs = zignal.Matrix([[5.0]])
     result = zignal.solve_assignment_problem(costs)
 
@@ -111,7 +101,6 @@ def test_solve_assignment_problem_single_element():
 
 
 def test_solve_assignment_problem_integer_costs():
-    """Test that integer costs work correctly."""
     # Create matrix with integer values
     costs = zignal.Matrix([[10, 20, 30], [15, 25, 35], [20, 30, 40]])
     result = zignal.solve_assignment_problem(costs)
@@ -123,7 +112,6 @@ def test_solve_assignment_problem_integer_costs():
 
 
 def test_solve_assignment_problem_zeros():
-    """Test with matrix containing zeros."""
     costs = zignal.Matrix([[0.0, 1.0, 2.0], [1.0, 0.0, 3.0], [2.0, 3.0, 0.0]])
     result = zignal.solve_assignment_problem(costs)
 
@@ -132,7 +120,6 @@ def test_solve_assignment_problem_zeros():
 
 
 def test_assignment_repr():
-    """Test Assignment object string representation."""
     costs = zignal.Matrix([[1.0, 2.0], [3.0, 4.0]])
     result = zignal.solve_assignment_problem(costs)
 
@@ -142,7 +129,6 @@ def test_assignment_repr():
 
 
 def test_invalid_policy():
-    """Test that invalid policy values are rejected."""
     costs = zignal.Matrix([[1.0, 2.0], [3.0, 4.0]])
 
     # String values should be rejected
@@ -162,7 +148,6 @@ def test_invalid_policy():
 
 
 def test_invalid_matrix_type():
-    """Test that non-Matrix inputs are rejected."""
     costs = [[1.0, 2.0], [3.0, 4.0]]
 
     # List directly should fail (need Matrix wrapper)

@@ -1,11 +1,8 @@
-"""Test PCA functionality."""
-
 import numpy as np
 import zignal
 
 
 def test_pca_basic():
-    """Basic smoke test for PCA."""
     # Create PCA instance
     pca = zignal.PCA()
 
@@ -43,7 +40,6 @@ def test_pca_basic():
 
 
 def test_pca_with_numpy():
-    """Test PCA with numpy integration."""
     # Create numpy data and convert to Matrix
     np_data = np.random.randn(10, 5)
     matrix = zignal.Matrix.from_numpy(np_data)
