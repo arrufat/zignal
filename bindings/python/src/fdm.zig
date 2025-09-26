@@ -17,49 +17,29 @@ pub const FeatureDistributionMatchingObject = extern struct {
     fdm_ptr: ?*FeatureDistributionMatching(Rgb),
 };
 
-fn fdm_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    _ = kwds;
-
-    const self = @as(?*FeatureDistributionMatchingObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
-    if (self) |obj| {
-        obj.fdm_ptr = null;
-    }
-    return @as(?*c.PyObject, @ptrCast(self));
-}
+// Using genericNew helper for standard object creation
+const fdm_new = py_utils.genericNew(FeatureDistributionMatchingObject);
 
 fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = args;
     _ = kwds;
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(FeatureDistributionMatchingObject, self_obj);
 
-    // Create and store the FDM struct
-    const fdm_ptr = allocator.create(FeatureDistributionMatching(Rgb)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate FeatureDistributionMatching");
-        return -1;
-    };
-
-    // Initialize the FDM instance
-    fdm_ptr.* = FeatureDistributionMatching(Rgb).init(allocator);
-    self.fdm_ptr = fdm_ptr;
-
+    // Create and initialize FDM using helper
+    self.fdm_ptr = py_utils.createHeapObject(FeatureDistributionMatching(Rgb), .{allocator}) catch return -1;
     return 0;
 }
 
-fn fdm_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
-
-    // Free the FDM struct
-    if (self.fdm_ptr) |ptr| {
-        ptr.deinit();
-        allocator.destroy(ptr);
-    }
-
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+// Helper function for custom cleanup
+fn fdmDeinit(self: *FeatureDistributionMatchingObject) void {
+    py_utils.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm_ptr);
 }
 
+// Using genericDealloc helper
+const fdm_dealloc = py_utils.genericDealloc(FeatureDistributionMatchingObject, fdmDeinit);
+
 fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(FeatureDistributionMatchingObject, self_obj);
 
     if (self.fdm_ptr == null) {
         return c.PyUnicode_FromString("FeatureDistributionMatching(uninitialized)");
@@ -88,7 +68,7 @@ const set_target_doc =
 ;
 
 fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(FeatureDistributionMatchingObject, self_obj);
 
     const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgb), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
@@ -99,30 +79,33 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    // Check if argument is an Image object
-    if (c.PyObject_IsInstance(target_obj, @ptrCast(&image.ImageType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image object");
+    // Check if argument is an Image object and cast
+    if (target_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Object is null");
         return null;
     }
-
-    const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
+    if (c.PyObject_IsInstance(target_obj, @ptrCast(&image.ImageType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Type mismatch");
+        return null;
+    }
+    const target_img_obj = py_utils.safeCast(image.ImageObject, target_obj);
 
     // Accept only RGB format
     if (target_img_obj.py_image == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Target image must be an Image");
+        py_utils.setTypeError("Image object", target_obj);
         return null;
     }
     const target_rgb: zignal.Image(zignal.Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            c.PyErr_SetString(c.PyExc_TypeError, "Target image must be RGB");
+            py_utils.setTypeError("RGB image", target_obj);
             return null;
         },
     };
     fdm_ptr.setTarget(target_rgb) catch |err| {
         switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting target"),
-            else => c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to set target image"),
+            error.OutOfMemory => py_utils.setMemoryError("target image"),
+            else => py_utils.setRuntimeError("Failed to set target image: {s}", .{@errorName(err)}),
         }
         return null;
     };
@@ -162,28 +145,31 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    // Check if argument is an Image object
-    if (c.PyObject_IsInstance(source_obj, @ptrCast(&image.ImageType)) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Argument must be an Image object");
+    // Check if argument is an Image object and cast
+    if (source_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Object is null");
         return null;
     }
-
-    const source_img_obj = @as(*image.ImageObject, @ptrCast(source_obj.?));
+    if (c.PyObject_IsInstance(source_obj, @ptrCast(&image.ImageType)) <= 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Type mismatch");
+        return null;
+    }
+    const source_img_obj = py_utils.safeCast(image.ImageObject, source_obj);
 
     if (source_img_obj.py_image == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Source image must be an Image");
+        py_utils.setTypeError("Image object", source_obj);
         return null;
     }
     const src_rgb: zignal.Image(zignal.Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            c.PyErr_SetString(c.PyExc_TypeError, "Source image must be RGB");
+            py_utils.setTypeError("RGB image", source_obj);
             return null;
         },
     };
     fdm_ptr.setSource(src_rgb) catch |err| {
         switch (err) {
-            error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory setting source"),
+            error.OutOfMemory => py_utils.setMemoryError("source image"),
         }
         return null;
     };
@@ -252,14 +238,14 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     const src_rgb2: zignal.Image(zignal.Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            c.PyErr_SetString(c.PyExc_TypeError, "Source image must be RGB");
+            py_utils.setTypeError("RGB image", source_obj);
             return null;
         },
     };
     const dst_rgb2: zignal.Image(zignal.Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            c.PyErr_SetString(c.PyExc_TypeError, "Target image must be RGB");
+            py_utils.setTypeError("RGB image", target_obj);
             return null;
         },
     };
@@ -419,16 +405,14 @@ pub const fdm_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// PyTypeObject definition
-pub var FeatureDistributionMatchingType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.FeatureDistributionMatching",
-    .tp_basicsize = @sizeOf(FeatureDistributionMatchingObject),
-    .tp_dealloc = fdm_dealloc,
-    .tp_repr = fdm_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = fdm_class_doc,
-    .tp_methods = @ptrCast(&fdm_methods),
-    .tp_init = fdm_init,
-    .tp_new = fdm_new,
-};
+// Using buildTypeObject helper for cleaner initialization
+pub var FeatureDistributionMatchingType = py_utils.buildTypeObject(.{
+    .name = "zignal.FeatureDistributionMatching",
+    .basicsize = @sizeOf(FeatureDistributionMatchingObject),
+    .doc = fdm_class_doc,
+    .methods = @ptrCast(&fdm_methods),
+    .new = fdm_new,
+    .init = fdm_init,
+    .dealloc = fdm_dealloc,
+    .repr = fdm_repr,
+});

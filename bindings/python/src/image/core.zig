@@ -162,7 +162,7 @@ pub const image_save_doc =
 ;
 
 pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse file path argument
     var file_path: [*c]const u8 = undefined;
@@ -180,7 +180,7 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         switch (pimg.data) {
             inline else => |img| img.save(allocator, path_slice) catch |err| {
                 if (err == error.UnsupportedImageFormat) {
-                    c.PyErr_SetString(c.PyExc_ValueError, "Unsupported image format. File must have a valid PNG or JPEG extension.");
+                    py_utils.setValueError("Unsupported image format. File must have a valid PNG or JPEG extension.", .{});
                     return null;
                 }
                 py_utils.setErrorWithPath(err, path_slice);
@@ -188,7 +188,7 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             },
         }
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        py_utils.setValueError("Image not initialized", .{});
         return null;
     }
 
@@ -216,13 +216,13 @@ pub const image_copy_doc =
 
 pub fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
                 const copy = Image(@TypeOf(img.data[0])).init(allocator, img.rows, img.cols) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                    py_utils.setMemoryError("image data");
                     return null;
                 };
                 img.copy(copy);
@@ -231,7 +231,7 @@ pub fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
         }
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -257,7 +257,7 @@ pub const image_fill_doc =
 ;
 
 pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse the color argument (already validated in init)
     var color_obj: ?*c.PyObject = undefined;
@@ -272,7 +272,7 @@ pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             inline else => |img| img.fill(parseColorTo(@TypeOf(img.data[0]), color_obj) catch return null),
         }
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+        py_utils.setValueError("Image not initialized", .{});
         return null;
     }
 
@@ -311,7 +311,7 @@ pub const image_view_doc =
 ;
 
 pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse optional rectangle argument
     var rect_obj: ?*c.PyObject = null;
@@ -336,7 +336,7 @@ pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         };
 
         const pimg_view = view_result orelse {
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image view");
+            py_utils.setMemoryError("image view");
             return null;
         };
 
@@ -345,7 +345,7 @@ pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             pimg_view.deinit(allocator);
             return null;
         };
-        const new_self = @as(*ImageObject, @ptrCast(new_obj));
+        const new_self = py_utils.safeCast(ImageObject, new_obj);
         new_self.py_image = pimg_view;
         new_self.numpy_ref = null;
         // Keep reference to parent to prevent deallocation
@@ -355,7 +355,7 @@ pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return new_obj;
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -380,7 +380,7 @@ pub const image_is_contiguous_doc =
 
 pub fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         const is_contig = switch (pimg.data) {
@@ -390,7 +390,7 @@ pub fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
         return @ptrCast(py_utils.getPyBool(is_contig));
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -404,7 +404,7 @@ pub const image_get_rectangle_doc =
 
 pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
     if (self.py_image) |pimg| {
         const rows = switch (pimg.data) {
             inline else => |img| img.rows,
@@ -421,7 +421,7 @@ pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
         const rect_obj = c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
         return rect_obj;
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -439,7 +439,7 @@ pub const image_convert_doc =
 ;
 
 pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse one argument: target dtype sentinel or instance of Rgb/Rgba
     var dtype_obj: ?*c.PyObject = null;
@@ -450,7 +450,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     if (dtype_obj == null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "convert() requires a target dtype (zignal.Grayscale, zignal.Rgb, or zignal.Rgba)");
+        py_utils.setTypeError("target dtype (zignal.Grayscale, zignal.Rgb, or zignal.Rgba)", null);
         return null;
     }
 
@@ -469,7 +469,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
             target_rgba = true;
         } else {
-            c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+            py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", dtype_obj);
             return null;
         }
     } else {
@@ -478,7 +478,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbaType)) == 1) {
             target_rgba = true;
         } else {
-            c.PyErr_SetString(c.PyExc_TypeError, "format must be zignal.Grayscale, zignal.Rgb, or zignal.Rgba");
+            py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", dtype_obj);
             return null;
         }
     }
@@ -490,20 +490,20 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                 if (target_gray) {
                     // Same dtype: copy
                     const out = Image(u8).init(allocator, img.rows, img.cols) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        py_utils.setMemoryError("image data");
                         return null;
                     };
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else if (target_rgb) {
                     const out = img.convert(Rgb, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else if (target_rgba) {
                     const out = img.convert(Rgba, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
@@ -512,20 +512,20 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             .rgb => |*img| {
                 if (target_gray) {
                     const out = img.convert(u8, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else if (target_rgb) {
                     const out = Image(Rgb).init(allocator, img.rows, img.cols) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        py_utils.setMemoryError("image data");
                         return null;
                     };
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else if (target_rgba) {
                     const out = img.convert(Rgba, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
@@ -534,20 +534,20 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             .rgba => |*img| {
                 if (target_gray) {
                     const out = img.convert(u8, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else if (target_rgb) {
                     const out = img.convert(Rgb, allocator) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to convert image");
+                        py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     const wrapped = moveImageToPython(out) orelse return null;
                     return @ptrCast(wrapped);
                 } else if (target_rgba) {
                     const out = Image(Rgba).init(allocator, img.rows, img.cols) catch {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                        py_utils.setMemoryError("image data");
                         return null;
                     };
                     img.copy(out);
@@ -558,7 +558,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -619,7 +619,7 @@ pub const image_psnr_doc =
 ;
 
 pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse other image argument
     var other_obj: ?*c.PyObject = undefined;
@@ -629,10 +629,10 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    const other = @as(*ImageObject, @ptrCast(other_obj.?));
+    const other = py_utils.safeCast(ImageObject, other_obj);
 
     if (self.py_image == null or other.py_image == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Both images must be initialized");
+        py_utils.setValueError("Both images must be initialized", .{});
         return null;
     }
 
@@ -649,7 +649,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     };
 
     if (!std.mem.eql(u8, self_type, other_type)) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dtype for PSNR calculation");
+        py_utils.setValueError("Images must have the same dtype for PSNR calculation", .{});
         return null;
     }
 
@@ -658,7 +658,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         .grayscale => |img1| blk: {
             const img2 = other.py_image.?.data.grayscale;
             if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
+                py_utils.setValueError("Images must have the same dimensions", .{});
                 return null;
             }
 
@@ -682,7 +682,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         .rgb => |img1| blk: {
             const img2 = other.py_image.?.data.rgb;
             if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
+                py_utils.setValueError("Images must have the same dimensions", .{});
                 return null;
             }
 
@@ -708,7 +708,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         .rgba => |img1| blk: {
             const img2 = other.py_image.?.data.rgba;
             if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
+                py_utils.setValueError("Images must have the same dimensions", .{});
                 return null;
             }
 
@@ -743,33 +743,33 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
 pub fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
     if (self.py_image) |pimg| {
         const rows = switch (pimg.data) {
             inline else => |img| img.rows,
         };
         return c.PyLong_FromSize_t(rows);
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
 pub fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
     if (self.py_image) |pimg| {
         const cols = switch (pimg.data) {
             inline else => |img| img.cols,
         };
         return c.PyLong_FromSize_t(cols);
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
 pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
     if (self.py_image) |pimg| {
         const dtype_obj = switch (pimg.data) {
             .grayscale => @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType)),
@@ -779,7 +779,7 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
         c.Py_INCREF(dtype_obj);
         return dtype_obj;
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 // ============================================================================
@@ -812,7 +812,7 @@ pub const image_set_border_doc =
 ;
 
 pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse required rect and optional color
     var rect_obj: ?*c.PyObject = null;
@@ -841,6 +841,6 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         return none;
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }

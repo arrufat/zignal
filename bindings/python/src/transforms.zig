@@ -36,7 +36,7 @@ fn similarity_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 }
 
 fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
 
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
@@ -60,13 +60,13 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Check we have same number of points
     if (from_points.len != to_points.len) {
-        c.PyErr_SetString(c.PyExc_ValueError, "from_points and to_points must have the same length");
+        py_utils.setValueError("from_points and to_points must have the same length", .{});
         return -1;
     }
 
     // Check we have at least 2 points
     if (from_points.len < 2) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Need at least 2 point correspondences for similarity transform");
+        py_utils.setValueError("Need at least 2 point correspondences for similarity transform", .{});
         return -1;
     }
 
@@ -89,7 +89,7 @@ fn similarity_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
 
     var point_obj: ?*c.PyObject = null;
     const kw = comptime py_utils.kw(&.{"points"});
@@ -128,13 +128,13 @@ fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
         return result_list;
     } else {
-        c.PyErr_SetString(c.PyExc_TypeError, "Expected (x, y) tuple or list of (x, y) tuples");
+        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
         return null;
     }
 }
 
 fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*SimilarityTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
 
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "SimilarityTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
@@ -198,7 +198,7 @@ fn affine_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AffineTransformObject, self_obj);
 
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
@@ -222,19 +222,19 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Check we have same number of points
     if (from_points.len != to_points.len) {
-        c.PyErr_SetString(c.PyExc_ValueError, "from_points and to_points must have the same length");
+        py_utils.setValueError("from_points and to_points must have the same length", .{});
         return -1;
     }
 
     // Check we have at least 3 points
     if (from_points.len < 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Need at least 3 point correspondences for affine transform");
+        py_utils.setValueError("Need at least 3 point correspondences for affine transform", .{});
         return -1;
     }
 
     // Create and fit the transform
     const transform = AffineTransform(f64).init(allocator, from_points, to_points) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to compute affine transform");
+        py_utils.setMemoryError("affine transform");
         return -1;
     };
 
@@ -254,7 +254,7 @@ fn affine_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AffineTransformObject, self_obj);
 
     var point_obj: ?*c.PyObject = null;
     const kw = comptime py_utils.kw(&.{"points"});
@@ -293,13 +293,13 @@ fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
         return result_list;
     } else {
-        c.PyErr_SetString(c.PyExc_TypeError, "Expected (x, y) tuple or list of (x, y) tuples");
+        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
         return null;
     }
 }
 
 fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*AffineTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AffineTransformObject, self_obj);
 
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "AffineTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
@@ -364,7 +364,7 @@ fn projective_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 }
 
 fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
     var from_points_obj: ?*c.PyObject = null;
     var to_points_obj: ?*c.PyObject = null;
@@ -388,13 +388,13 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Check we have same number of points
     if (from_points.len != to_points.len) {
-        c.PyErr_SetString(c.PyExc_ValueError, "from_points and to_points must have the same length");
+        py_utils.setValueError("from_points and to_points must have the same length", .{});
         return -1;
     }
 
     // Check we have at least 4 points
     if (from_points.len < 4) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Need at least 4 point correspondences for projective transform");
+        py_utils.setValueError("Need at least 4 point correspondences for projective transform", .{});
         return -1;
     }
 
@@ -416,7 +416,7 @@ fn projective_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 }
 
 fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
     var point_obj: ?*c.PyObject = null;
     const kw = comptime py_utils.kw(&.{"points"});
@@ -469,14 +469,14 @@ fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
         return result_list;
     } else {
-        c.PyErr_SetString(c.PyExc_TypeError, "Expected (x, y) tuple or list of (x, y) tuples");
+        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
         return null;
     }
 }
 
 fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
     // Reconstruct the matrix from components
     const matrix = zignal.SMatrix(f64, 3, 3).init(.{
@@ -495,7 +495,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 
     // Create new ProjectiveTransform object
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&ProjectiveTransformType), 0) orelse return null;
-    const result = @as(*ProjectiveTransformObject, @ptrCast(py_obj));
+    const result = py_utils.safeCast(ProjectiveTransformObject, py_obj);
 
     // Copy inverse matrix components
     for (0..3) |i| {
@@ -508,7 +508,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 }
 
 fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ProjectiveTransformObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
     var buffer: [1024]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "ProjectiveTransform(matrix=[[{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}]])", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[0][2], self.matrix[1][0], self.matrix[1][1], self.matrix[1][2], self.matrix[2][0], self.matrix[2][1], self.matrix[2][2] }) catch return null;

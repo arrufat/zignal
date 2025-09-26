@@ -40,26 +40,26 @@ pub const image_to_numpy_doc =
 
 pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             .grayscale => |img| {
                 // Import numpy
                 const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
                     return null;
                 };
                 defer c.Py_DECREF(np_module);
 
                 // Allocate shape and strides arrays that persist for the lifetime of the array
                 const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate shape array");
+                    py_utils.setMemoryError("shape array");
                     return null;
                 };
                 const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
                     allocator.free(shape_array);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate strides array");
+                    py_utils.setMemoryError("strides array");
                     return null;
                 };
 
@@ -128,19 +128,19 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
             .rgb => |img| {
                 // Import numpy
                 const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
                     return null;
                 };
                 defer c.Py_DECREF(np_module);
 
                 // Allocate shape and strides arrays that persist for the lifetime of the array
                 const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate shape array");
+                    py_utils.setMemoryError("shape array");
                     return null;
                 };
                 const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
                     allocator.free(shape_array);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate strides array");
+                    py_utils.setMemoryError("strides array");
                     return null;
                 };
 
@@ -209,19 +209,19 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
             .rgba => |img| {
                 // Import numpy
                 const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
                     return null;
                 };
                 defer c.Py_DECREF(np_module);
 
                 // Allocate shape and strides arrays that persist for the lifetime of the array
                 const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate shape array");
+                    py_utils.setMemoryError("shape array");
                     return null;
                 };
                 const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
                     allocator.free(shape_array);
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate strides array");
+                    py_utils.setMemoryError("strides array");
                     return null;
                 };
 
@@ -289,7 +289,7 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
             },
         }
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 
@@ -346,7 +346,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     }
 
     if (array_obj == null or array_obj == c.Py_None()) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Array cannot be None");
+        py_utils.setTypeError("non-None array", array_obj);
         return null;
     }
 
@@ -365,14 +365,14 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     // Validate buffer format if available (should be 'B' for uint8)
     // Note: format might be null if PyBUF_FORMAT wasn't requested
     if (buffer.format != null and (buffer.format[0] != 'B' or buffer.format[1] != 0)) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Array must have dtype uint8");
+        py_utils.setTypeError("uint8 array", array_obj);
         return null;
     }
 
     // Validate dimensions and shape: only 3D arrays with 1, 3 or 4 channels are supported
     const ndim: c_int = buffer.ndim;
     if (ndim != 3) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have shape (rows, cols, 1|3|4)");
+        py_utils.setValueError("Array must have shape (rows, cols, 1|3|4)", .{});
         return null;
     }
 
@@ -381,7 +381,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const cols = @as(usize, @intCast(shape[1]));
     const channels: usize = @as(usize, @intCast(shape[2]));
     if (!(channels == 1 or channels == 3 or channels == 4)) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must have 1 channel (grayscale), 3 channels (RGB) or 4 channels (RGBA)");
+        py_utils.setValueError("Array must have 1 channel (grayscale), 3 channels (RGB) or 4 channels (RGBA)", .{});
         return null;
     }
 
@@ -392,7 +392,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     // Check that pixels within a row are contiguous
     const expected_pixel_stride = item * @as(c.Py_ssize_t, @intCast(channels));
     if (strides[2] != item or strides[1] != expected_pixel_stride) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array pixels must be contiguous. Use numpy.ascontiguousarray() first.");
+        py_utils.setValueError("Array pixels must be contiguous. Use numpy.ascontiguousarray() first.", .{});
         return null;
     }
 
@@ -400,7 +400,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const row_stride_bytes = strides[0];
     const pixel_size: c.Py_ssize_t = @intCast(channels);
     if (@rem(row_stride_bytes, pixel_size) != 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array row stride must be a multiple of pixel size.");
+        py_utils.setValueError("Array row stride must be a multiple of pixel size.", .{});
         return null;
     }
     const row_stride_pixels = @divExact(row_stride_bytes, pixel_size);
@@ -430,7 +430,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         // Wrap as PyImage non-owning grayscale
         const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
             c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            py_utils.setMemoryError("image");
             return null;
         };
         self.?.py_image = pimg;
@@ -456,7 +456,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         // Wrap as PyImage non-owning RGBA
         const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
             c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            py_utils.setMemoryError("image");
             return null;
         };
         self.?.py_image = pimg;
@@ -479,7 +479,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         self.?.numpy_ref = array_obj;
         const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
             c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
+            py_utils.setMemoryError("image");
             return null;
         };
         self.?.py_image = pimg;

@@ -42,40 +42,31 @@ pub const AssignmentObject = extern struct {
     assignment_ptr: ?*optimization.Assignment,
 };
 
-fn assignment_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    _ = kwds;
-
-    const self = @as(?*AssignmentObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
-    if (self) |obj| {
-        obj.assignment_ptr = null;
-    }
-    return @as(?*c.PyObject, @ptrCast(self));
-}
+// Using genericNew helper for standard object creation
+const assignment_new = py_utils.genericNew(AssignmentObject);
 
 fn assignment_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = self_obj;
     _ = args;
     _ = kwds;
     // Assignment objects are created internally, not by users
-    c.PyErr_SetString(c.PyExc_TypeError, "Assignment objects cannot be created directly");
+    py_utils.setTypeError("Assignment objects (internal only)", null);
     return -1;
 }
 
-fn assignment_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*AssignmentObject, @ptrCast(self_obj.?));
-
-    // Free the assignment if we have one
+// Helper function for custom cleanup
+fn assignmentDeinit(self: *AssignmentObject) void {
     if (self.assignment_ptr) |ptr| {
         ptr.deinit();
         allocator.destroy(ptr);
     }
-
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
+// Using genericDealloc helper
+const assignment_dealloc = py_utils.genericDealloc(AssignmentObject, assignmentDeinit);
+
 fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*AssignmentObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         var buffer: [256]u8 = undefined;
@@ -91,7 +82,7 @@ fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Property getters
 fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*AssignmentObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         // Create a Python list
@@ -115,19 +106,19 @@ fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
         return list;
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Assignment not initialized");
+    py_utils.setValueError("Assignment not initialized", .{});
     return null;
 }
 
 fn assignment_get_total_cost(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*AssignmentObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         return c.PyFloat_FromDouble(ptr.total_cost);
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Assignment not initialized");
+    py_utils.setValueError("Assignment not initialized", .{});
     return null;
 }
 
@@ -210,13 +201,13 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     // Check matrix type
     const matrix_type_obj = @as(*c.PyObject, @ptrCast(&matrix_module.MatrixType));
     if (c.PyObject_IsInstance(matrix_obj, matrix_type_obj) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "cost_matrix must be a Matrix object");
+        py_utils.setTypeError("Matrix object", matrix_obj);
         return null;
     }
 
-    const matrix = @as(*MatrixObject, @ptrCast(matrix_obj.?));
+    const matrix = py_utils.safeCast(MatrixObject, matrix_obj);
     if (matrix.matrix_ptr == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix is not initialized");
+        py_utils.setValueError("Matrix is not initialized", .{});
         return null;
     }
 
@@ -233,10 +224,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         matrix.matrix_ptr.?.*,
         policy,
     ) catch |err| {
-        const err_msg = switch (err) {
-            error.OutOfMemory => "Out of memory",
-        };
-        c.PyErr_SetString(c.PyExc_RuntimeError, err_msg);
+        py_utils.setZigError(err);
         return null;
     };
 
@@ -248,14 +236,14 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         return null;
     }
 
-    const assignment = @as(*AssignmentObject, @ptrCast(assignment_obj));
+    const assignment = py_utils.safeCast(AssignmentObject, assignment_obj);
 
     // Allocate and store the result
     assignment.assignment_ptr = allocator.create(optimization.Assignment) catch {
         c.Py_DECREF(assignment_obj);
         var temp_result = result;
         temp_result.deinit();
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Assignment");
+        py_utils.setMemoryError("Assignment");
         return null;
     };
     assignment.assignment_ptr.?.* = result;

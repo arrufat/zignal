@@ -42,18 +42,8 @@ pub const MatrixObject = extern struct {
     owns_memory: bool, // True if we allocated the matrix
 };
 
-fn matrix_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    _ = args;
-    _ = kwds;
-
-    const self = @as(?*MatrixObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
-    if (self) |obj| {
-        obj.matrix_ptr = null;
-        obj.numpy_ref = null;
-        obj.owns_memory = false;
-    }
-    return @as(?*c.PyObject, @ptrCast(self));
-}
+// Using genericNew helper for standard object creation
+const matrix_new = py_utils.genericNew(MatrixObject);
 
 const matrix_init_doc =
     \\Create a new Matrix from a list of lists.
@@ -70,7 +60,7 @@ const matrix_init_doc =
 ;
 
 fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     // Check if already initialized (e.g., from from_numpy)
     if (self.matrix_ptr != null) {
@@ -86,7 +76,7 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Matrix() takes a list of lists as argument");
+        c.PyErr_SetString(c.PyExc_TypeError, "Matrix data must be a list of lists");
         return -1;
     }
 
@@ -143,7 +133,7 @@ fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
         // TODO(py3.10): remove explicit cast once Python 3.10 support is dropped
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        py_utils.setMemoryError("Matrix");
         return null;
     };
 
@@ -151,7 +141,7 @@ fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
         allocator.destroy(matrix_ptr);
         // TODO(py3.10): remove explicit cast once Python 3.10 support is dropped
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate matrix data");
+        py_utils.setMemoryError("matrix data");
         return null;
     };
 
@@ -169,7 +159,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
     // Get dimensions
     const n_rows = c.PyList_Size(list_obj);
     if (n_rows == 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Cannot create Matrix from empty list");
+        py_utils.setValueError("Cannot create Matrix from empty list", .{});
         return -1;
     }
 
@@ -182,19 +172,19 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
 
     const n_cols = c.PyList_Size(first_row);
     if (n_cols == 0) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Cannot create Matrix with empty rows");
+        py_utils.setValueError("Cannot create Matrix with empty rows", .{});
         return -1;
     }
 
     // Create the matrix
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        py_utils.setMemoryError("Matrix");
         return -1;
     };
 
     matrix_ptr.* = Matrix(f64).init(allocator, @intCast(n_rows), @intCast(n_cols)) catch {
         allocator.destroy(matrix_ptr);
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate matrix data");
+        py_utils.setMemoryError("matrix data");
         return -1;
     };
 
@@ -207,7 +197,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
         if (c.PyList_Check(row_obj) != 1) {
             matrix_ptr.deinit();
             allocator.destroy(matrix_ptr);
-            c.PyErr_SetString(c.PyExc_TypeError, "All rows must be lists");
+            py_utils.setTypeError("list", row_obj);
             return -1;
         }
 
@@ -216,7 +206,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
         if (row_size != n_cols) {
             matrix_ptr.deinit();
             allocator.destroy(matrix_ptr);
-            c.PyErr_SetString(c.PyExc_ValueError, "All rows must have the same number of columns");
+            py_utils.setValueError("All rows must have the same number of columns", .{});
             return -1;
         }
 
@@ -233,6 +223,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
             if (value == -1.0 and c.PyErr_Occurred() != null) {
                 matrix_ptr.deinit();
                 allocator.destroy(matrix_ptr);
+                c.PyErr_Clear();
                 c.PyErr_SetString(c.PyExc_TypeError, "Matrix elements must be numeric");
                 return -1;
             }
@@ -248,9 +239,8 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
     return 0;
 }
 
-fn matrix_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
-
+// Helper function for custom cleanup
+fn matrixDeinit(self: *MatrixObject) void {
     // Free the matrix if we own it
     if (self.matrix_ptr) |ptr| {
         if (self.owns_memory) {
@@ -263,12 +253,13 @@ fn matrix_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     if (self.numpy_ref) |ref| {
         c.Py_DECREF(ref);
     }
-
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
+// Using genericDealloc helper
+const matrix_dealloc = py_utils.genericDealloc(MatrixObject, matrixDeinit);
+
 fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     if (self.matrix_ptr) |ptr| {
         // Create a string representation
@@ -283,7 +274,7 @@ fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     if (self.matrix_ptr) |ptr| {
         // For small matrices, show the actual values
@@ -322,37 +313,37 @@ fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Properties
 fn matrix_rows_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     if (self.matrix_ptr) |ptr| {
         return c.PyLong_FromLong(@intCast(ptr.rows));
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+    py_utils.setValueError("Matrix not initialized", .{});
     return null;
 }
 
 fn matrix_cols_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     if (self.matrix_ptr) |ptr| {
         return c.PyLong_FromLong(@intCast(ptr.cols));
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+    py_utils.setValueError("Matrix not initialized", .{});
     return null;
 }
 
 fn matrix_shape_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     if (self.matrix_ptr) |ptr| {
         return c.PyTuple_Pack(2, c.PyLong_FromLong(@intCast(ptr.rows)), c.PyLong_FromLong(@intCast(ptr.cols)));
     }
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+    py_utils.setValueError("Matrix not initialized", .{});
     return null;
 }
 
@@ -374,16 +365,16 @@ const matrix_to_numpy_doc =
 
 fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     const ptr = self.matrix_ptr orelse {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+        py_utils.setValueError("Matrix not initialized", .{});
         return null;
     };
 
     // Import numpy
     const np_module = c.PyImport_ImportModule("numpy") orelse {
-        c.PyErr_SetString(c.PyExc_ImportError, "NumPy is not installed. Please install it with: pip install numpy");
+        py_utils.setImportError("NumPy is not installed. Please install it with: pip install numpy", .{});
         return null;
     };
     defer c.Py_DECREF(np_module);
@@ -464,7 +455,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     if (array_obj == null or array_obj == c.Py_None()) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Array cannot be None");
+        py_utils.setTypeError("non-None array", array_obj);
         return null;
     }
 
@@ -481,13 +472,13 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     // Check dimensions
     if (buffer.ndim != 2) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must be 2-dimensional");
+        py_utils.setValueError("Array must be 2-dimensional", .{});
         return null;
     }
 
     // Check dtype - must be float64 ('d')
     if (buffer.format == null or buffer.format[0] != 'd' or buffer.format[1] != 0) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Array must have dtype float64. Use array.astype(np.float64) to convert.");
+        py_utils.setTypeError("float64 array", array_obj);
         return null;
     }
 
@@ -500,7 +491,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     if (buffer.strides[0] != @as(c.Py_ssize_t, @intCast(expected_stride_row)) or
         buffer.strides[1] != @as(c.Py_ssize_t, @intCast(expected_stride_col)))
     {
-        c.PyErr_SetString(c.PyExc_ValueError, "Array must be C-contiguous. Use np.ascontiguousarray() to convert.");
+        py_utils.setValueError("Array must be C-contiguous. Use np.ascontiguousarray() to convert.", .{});
         return null;
     }
 
@@ -512,7 +503,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
         // TODO: remove explicit cast when we don't use Python < 3.13
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
-        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate Matrix");
+        py_utils.setMemoryError("Matrix");
         return null;
     };
 
@@ -537,10 +528,10 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
 // Indexing support
 fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     const ptr = self.matrix_ptr orelse {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+        py_utils.setValueError("Matrix not initialized", .{});
         return null;
     };
 
@@ -548,7 +539,7 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
     if (c.PyTuple_Check(key) == 1) {
         const size = c.PyTuple_Size(key);
         if (size != 2) {
-            c.PyErr_SetString(c.PyExc_IndexError, "Matrix indices must be a tuple of two integers");
+            py_utils.setIndexError("Matrix indices must be a tuple of two integers", .{});
             return null;
         }
 
@@ -575,7 +566,7 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
 
         // Bounds checking
         if (actual_row >= ptr.rows or actual_col >= ptr.cols) {
-            c.PyErr_SetString(c.PyExc_IndexError, "Matrix index out of bounds");
+            py_utils.setIndexError("Matrix index out of bounds", .{});
             return null;
         }
 
@@ -583,15 +574,15 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
         return c.PyFloat_FromDouble(value);
     }
 
-    c.PyErr_SetString(c.PyExc_TypeError, "Matrix indices must be a tuple of two integers");
+    py_utils.setTypeError("tuple of two integers", key);
     return null;
 }
 
 fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject) callconv(.c) c_int {
-    const self = @as(*MatrixObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(MatrixObject, self_obj);
 
     const ptr = self.matrix_ptr orelse {
-        c.PyErr_SetString(c.PyExc_ValueError, "Matrix not initialized");
+        py_utils.setValueError("Matrix not initialized", .{});
         return -1;
     };
 
@@ -599,7 +590,7 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
     if (c.PyTuple_Check(key) == 1) {
         const size = c.PyTuple_Size(key);
         if (size != 2) {
-            c.PyErr_SetString(c.PyExc_IndexError, "Matrix indices must be a tuple of two integers");
+            py_utils.setIndexError("Matrix indices must be a tuple of two integers", .{});
             return -1;
         }
 
@@ -626,7 +617,7 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
 
         // Bounds checking
         if (actual_row >= ptr.rows or actual_col >= ptr.cols) {
-            c.PyErr_SetString(c.PyExc_IndexError, "Matrix index out of bounds");
+            py_utils.setIndexError("Matrix index out of bounds", .{});
             return -1;
         }
 
@@ -640,7 +631,7 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
         return 0;
     }
 
-    c.PyErr_SetString(c.PyExc_TypeError, "Matrix indices must be a tuple of two integers");
+    py_utils.setTypeError("tuple of two integers", key);
     return -1;
 }
 
@@ -747,20 +738,17 @@ pub const matrix_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Type object definition
-pub var MatrixType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Matrix",
-    .tp_basicsize = @sizeOf(MatrixObject),
-    .tp_itemsize = 0,
-    .tp_dealloc = matrix_dealloc,
-    .tp_repr = matrix_repr,
-    .tp_str = matrix_str,
-    .tp_as_mapping = &matrix_as_mapping,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = matrix_class_doc,
-    .tp_methods = @ptrCast(&matrix_methods),
-    .tp_getset = @ptrCast(&matrix_getset),
-    .tp_init = matrix_init,
-    .tp_new = matrix_new,
-};
+// Using buildTypeObject helper for cleaner initialization
+pub var MatrixType = py_utils.buildTypeObject(.{
+    .name = "zignal.Matrix",
+    .basicsize = @sizeOf(MatrixObject),
+    .doc = matrix_class_doc,
+    .methods = @ptrCast(&matrix_methods),
+    .getset = @ptrCast(&matrix_getset),
+    .init = matrix_init,
+    .new = matrix_new,
+    .dealloc = matrix_dealloc,
+    .repr = matrix_repr,
+    .str = matrix_str,
+    .as_mapping = &matrix_as_mapping,
+});
