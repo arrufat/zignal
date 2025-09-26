@@ -1,9 +1,7 @@
-"""Bindings-level smoke tests for Canvas API."""
-
 import zignal
 
 
-class TestCanvasSmoke:
+class TestCanvas:
     def test_create_and_draw(self):
         img = zignal.Image(20, 30, 0)
         canvas = img.canvas()

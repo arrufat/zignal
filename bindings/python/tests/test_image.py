@@ -1,12 +1,10 @@
-"""Bindings-level smoke tests for Image API."""
-
 import numpy as np
 import pytest
 
 import zignal
 
 
-class TestImageSmoke:
+class TestImage:
     def test_from_numpy_and_props(self):
         arr = np.zeros((3, 4, 4), dtype=np.uint8)
         img = zignal.Image.from_numpy(arr)
@@ -41,13 +39,12 @@ class TestImageSmoke:
         assert (arr[1, 1] == np.array([5, 6, 7, 255], dtype=np.uint8)).all()
 
     def test_view_with_tuple(self):
-        """Test that view() accepts tuple input"""
         img = zignal.Image(4, 4, (0, 0, 0, 0), dtype=zignal.Rgba)
         # Create view using tuple (left, top, right, bottom)
         v = img.view((1, 1, 3, 3))
         assert (v.rows, v.cols) == (2, 2)
 
-    def test_set_border_smoke(self):
+    def test_set_border(self):
         img = zignal.Image(4, 4, (10, 20, 30), dtype=zignal.Rgb)
         rect = zignal.Rectangle(1, 1, 3, 3)
 
@@ -81,7 +78,7 @@ class TestImageSmoke:
         with pytest.raises(TypeError):
             img.set_border(None)
 
-    def test_get_rectangle_smoke(self):
+    def test_get_rectangle(self):
         img = zignal.Image(5, 7)
         rect = img.get_rectangle()
         assert isinstance(rect, zignal.Rectangle)
@@ -105,13 +102,12 @@ class TestImageSmoke:
         with pytest.raises(ValueError):
             zignal.Image.from_numpy(np.zeros((2, 3, 2), dtype=np.uint8))
 
-    def test_method_smoke(self):
+    def test_filtering_methods(self):
         img = zignal.Image(5, 5, (0, 0, 0, 255), dtype=zignal.Rgba)
         out = img.box_blur(1)
         assert (out.rows, out.cols) == (5, 5)
         with pytest.raises(ValueError):
             img.gaussian_blur(0.0)
-
 
     def test_blend_api(self):
         # Test RGBA base blending
@@ -136,7 +132,6 @@ class TestImageSmoke:
         assert isinstance(gray_pixel, int)
 
     def test_pixel_proxy_methods(self):
-        """Test that pixel proxy objects have color methods"""
         # Create RGB image
         img = zignal.Image(10, 10, (255, 0, 0), dtype=zignal.Rgb)
         pixel = img[0, 0]
@@ -168,7 +163,6 @@ class TestImageSmoke:
         assert "\x1b[" in sgr_str  # ANSI escape sequence
 
     def test_rgba_pixel_proxy_methods(self):
-        """Test RGBA pixel proxy has all methods"""
         img = zignal.Image(10, 10, (255, 0, 0, 200), dtype=zignal.Rgba)
         pixel = img[0, 0]
         assert isinstance(pixel.item(), zignal.Rgba)
@@ -189,8 +183,7 @@ class TestImageSmoke:
         assert isinstance(rgb, zignal.Rgb)
         assert rgb.r == 255
 
-    def test_warp_smoke(self):
-        """Test image warp API exists and is callable."""
+    def test_warp(self):
         img = zignal.Image(10, 10)
 
         # Can warp with similarity
@@ -223,7 +216,6 @@ class TestImageSmoke:
         assert warped is not None
 
     def test_invert(self):
-        """Test color inversion"""
         # Test grayscale
         gray = zignal.Image(2, 2, 100, dtype=zignal.Grayscale)
         inverted = gray.invert()
@@ -239,8 +231,7 @@ class TestImageSmoke:
         inverted = rgba.invert()
         assert inverted[0, 0].item() == zignal.Rgba(255, 127, 0, 64)
 
-    def test_motion_blur_smoke(self):
-        """Test motion blur API basics"""
+    def test_motion_blur(self):
         # Create test image
         img = zignal.Image(10, 10, (255, 0, 0), dtype=zignal.Rgb)
 
@@ -259,8 +250,7 @@ class TestImageSmoke:
         blurred = img.motion_blur(spin_config)
         assert blurred.rows == 10 and blurred.cols == 10
 
-    def test_shen_castan_smoke(self):
-        """Test Shen-Castan edge detection API basics"""
+    def test_shen_castan(self):
         # Create test image with some structure
         img = zignal.Image(20, 20, (128, 128, 128), dtype=zignal.Rgb)
 
@@ -305,8 +295,7 @@ class TestImageSmoke:
         with pytest.raises(ValueError):
             img.shen_castan(high_ratio=0.0)  # Must be in (0, 1)
 
-    def test_autocontrast_smoke(self):
-        """Smoke test for autocontrast method"""
+    def test_autocontrast(self):
         # Grayscale
         gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
         enhanced = gray.autocontrast()
@@ -322,8 +311,7 @@ class TestImageSmoke:
         enhanced_rgba = rgba.autocontrast()
         assert enhanced_rgba.rows == 5 and enhanced_rgba.cols == 5
 
-    def test_equalize_smoke(self):
-        """Smoke test for equalize method"""
+    def test_equalize(self):
         # Grayscale
         gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
         equalized = gray.equalize()

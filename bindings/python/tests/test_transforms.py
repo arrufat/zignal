@@ -1,13 +1,8 @@
-"""Smoke tests for geometric transforms API."""
-
 import zignal
 
 
-class TestTransformsSmoke:
-    """Smoke tests for transform API - just verify methods exist and are callable."""
-
-    def test_similarity_transform_smoke(self):
-        """Test SimilarityTransform API exists."""
+class TestTransforms:
+    def test_similarity_transform(self):
         # Can construct
         transform = zignal.SimilarityTransform([(0, 0), (10, 0)], [(5, 5), (15, 5)])
 
@@ -19,8 +14,7 @@ class TestTransformsSmoke:
         results = transform.project([(0, 0), (5, 5)])
         assert results is not None
 
-    def test_affine_transform_smoke(self):
-        """Test AffineTransform API exists."""
+    def test_affine_transform(self):
         # Can construct
         transform = zignal.AffineTransform([(0, 0), (10, 0), (0, 10)], [(1, 1), (11, 2), (2, 11)])
 
@@ -32,8 +26,7 @@ class TestTransformsSmoke:
         results = transform.project([(0, 0), (5, 5)])
         assert results is not None
 
-    def test_projective_transform_smoke(self):
-        """Test ProjectiveTransform API exists."""
+    def test_projective_transform(self):
         # Can construct
         transform = zignal.ProjectiveTransform(
             [(0, 0), (10, 0), (10, 10), (0, 10)], [(1, 1), (9, 2), (8, 8), (2, 9)]
@@ -48,7 +41,6 @@ class TestTransformsSmoke:
         assert results is not None
 
     def test_transform_with_warp(self):
-        """Test transforms work with Image.warp()."""
         img = zignal.Image(10, 10)
 
         # Similarity with warp

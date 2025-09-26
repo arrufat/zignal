@@ -1,1 +1,1 @@
-"""Tests for zignal Python bindings."""
+"""Smoke tests for zignal Python bindings."""

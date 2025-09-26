@@ -1,11 +1,9 @@
-"""Bindings-level smoke tests for convex hull."""
-
 import pytest
 
 import zignal
 
 
-def test_convex_hull_smoke_and_invalids():
+def test_convex_hull_api_and_invalids():
     hull = zignal.ConvexHull()
     assert repr(hull) == "ConvexHull()"
 

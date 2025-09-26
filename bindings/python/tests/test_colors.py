@@ -1,5 +1,3 @@
-"""Bindings-level smoke tests for color types."""
-
 import pytest
 
 import zignal
@@ -33,7 +31,7 @@ def test_equality_duck_typing():
     assert zignal.Rgba(1, 2, 3, 255) == zignal.Rgb(1, 2, 3)
 
 
-def test_blend_mode_and_blend_smoke():
+def test_blend_mode_and_blend():
     # Enum available and usable
     assert hasattr(zignal, "Blending")
     base = zignal.Rgb(100, 100, 100)
