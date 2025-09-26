@@ -7,7 +7,7 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 
 
 def get_native_platform():
@@ -120,32 +120,41 @@ def run_command(cmd: List[str], cwd: Path = None, env: dict = None) -> subproces
     return result
 
 
+def _iter_paths(patterns: Iterable[str], base_dir: Path):
+    for pattern in patterns:
+        yield from base_dir.glob(pattern)
+
+
 def prepare_clean_build_env(bindings_dir: Path) -> None:
     """Prepare a clean build environment by removing any precompiled extensions."""
     print("\n=== Preparing clean build environment ===")
 
     # Remove any existing built extensions from the package directory
     package_dir = bindings_dir / "zignal"
-    for ext in [".so", ".dylib", ".pyd", ".dll"]:
-        ext_file = package_dir / f"zignal{ext}"
-        if ext_file.exists():
+    for ext in (".so", ".dylib", ".pyd", ".dll"):
+        for ext_file in package_dir.glob(f"*{ext}"):
             print(f"Removing existing extension: {ext_file}")
             ext_file.unlink()
 
-    # Clean up build directories
-    for build_dir in ["build", "dist", "*.egg-info"]:
-        full_path = bindings_dir / build_dir
-        if full_path.exists():
-            print(f"Removing build directory: {full_path}")
-            if full_path.is_dir():
-                import shutil
+    # Clean up build artefacts
+    import shutil
 
-                shutil.rmtree(full_path)
-            else:
-                full_path.unlink()
+    for path in _iter_paths(("build", "dist", "*.egg-info"), bindings_dir):
+        if not path.exists():
+            continue
+        print(f"Removing build artefact: {path}")
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
 
 
-def create_wheel(zig_target: str, platform_tag: str, extension: str, bindings_dir: Path) -> Path:
+def create_wheel(
+    zig_target: str,
+    platform_tag: str,
+    expected_ext: str,
+    bindings_dir: Path,
+) -> Path:
     """Create a wheel for the given platform."""
     print(f"\n=== Creating wheel for {platform_tag} ===")
 
@@ -180,13 +189,15 @@ def create_wheel(zig_target: str, platform_tag: str, extension: str, bindings_di
 
     print(f"Created wheel: {latest_wheel}")
 
-    # Debug: Check wheel contents
+    # Debug/validation: Check wheel contents include compiled extension
     import zipfile
 
-    print("DEBUG: Wheel contents:")
     with zipfile.ZipFile(latest_wheel, "r") as zf:
-        for name in zf.namelist():
-            print(f"  {name}")
+        names = zf.namelist()
+        if expected_ext and not any(name.endswith(expected_ext) for name in names):
+            raise RuntimeError(
+                f"Wheel {latest_wheel.name} does not contain an extension with suffix '{expected_ext}'"
+            )
 
     # On macOS, use delocate to fix library dependencies
     if platform.system() == "Darwin" and "macos" in platform_tag:
