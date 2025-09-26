@@ -225,6 +225,92 @@ test "circle outline has correct thickness" {
     }
 }
 
+test "drawImage copies opaque pixels" {
+    const allocator = testing.allocator;
+
+    var dest = try Image(Rgba).init(allocator, 4, 4);
+    defer dest.deinit(allocator);
+
+    // Fill destination with white
+    for (dest.data) |*pixel| {
+        pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    }
+
+    var src = try Image(Rgba).init(allocator, 2, 2);
+    defer src.deinit(allocator);
+    src.at(0, 0).* = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    src.at(0, 1).* = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
+    src.at(1, 0).* = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+    src.at(1, 1).* = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
+
+    const canvas = Canvas(Rgba).init(allocator, dest);
+    canvas.drawImage(src, .point(.{ 1, 1 }), null);
+
+    try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, dest.at(1, 1).*);
+    try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, dest.at(1, 2).*);
+    try expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, dest.at(2, 1).*);
+    try expectEqual(Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 }, dest.at(2, 2).*);
+
+    // Ensure unrelated pixel remains white
+    try expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 }, dest.at(0, 0).*);
+}
+
+test "drawImage blends alpha" {
+    const allocator = testing.allocator;
+
+    var dest = try Image(Rgba).init(allocator, 2, 2);
+    defer dest.deinit(allocator);
+
+    // Fill destination with blue
+    const base = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+    for (dest.data) |*pixel| {
+        pixel.* = base;
+    }
+
+    var src = try Image(Rgba).init(allocator, 1, 1);
+    defer src.deinit(allocator);
+    const overlay = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    src.at(0, 0).* = overlay;
+
+    const canvas = Canvas(Rgba).init(allocator, dest);
+    canvas.drawImage(src, .point(.{ 0, 0 }), null);
+
+    const expected = base.blend(overlay, .normal);
+    try expectEqual(expected, dest.at(0, 0).*);
+}
+
+test "drawImage supports source rect and clipping" {
+    const allocator = testing.allocator;
+
+    var dest = try Image(Rgba).init(allocator, 2, 3);
+    defer dest.deinit(allocator);
+    for (dest.data) |*pixel| {
+        pixel.* = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    }
+
+    var src = try Image(Rgba).init(allocator, 2, 3);
+    defer src.deinit(allocator);
+    src.at(0, 0).* = Rgba{ .r = 10, .g = 20, .b = 30, .a = 255 };
+    src.at(0, 1).* = Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 };
+    src.at(0, 2).* = Rgba{ .r = 70, .g = 80, .b = 90, .a = 255 };
+    src.at(1, 0).* = Rgba{ .r = 110, .g = 120, .b = 130, .a = 255 };
+    src.at(1, 1).* = Rgba{ .r = 140, .g = 150, .b = 160, .a = 255 };
+    src.at(1, 2).* = Rgba{ .r = 170, .g = 180, .b = 190, .a = 255 };
+
+    const canvas = Canvas(Rgba).init(allocator, dest);
+    const src_rect = Rectangle(usize).init(1, 0, 3, 2);
+    canvas.drawImage(src, .point(.{ 0, 0 }), src_rect);
+
+    try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
+    try expectEqual(Rgba{ .r = 70, .g = 80, .b = 90, .a = 255 }, dest.at(0, 1).*);
+    try expectEqual(Rgba{ .r = 140, .g = 150, .b = 160, .a = 255 }, dest.at(1, 0).*);
+    try expectEqual(Rgba{ .r = 170, .g = 180, .b = 190, .a = 255 }, dest.at(1, 1).*);
+
+    // Draw partially off-canvas to ensure clipping works
+    canvas.drawImage(src, .point(.{ -1, 0 }), null);
+    try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
+}
+
 test "filled rectangle has correct area" {
     const allocator = testing.allocator;
     const width = 200;

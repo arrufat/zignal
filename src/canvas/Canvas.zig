@@ -573,6 +573,57 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
+        /// Draws another image onto this canvas at the given top-left position.
+        /// Supports automatic clipping, optional source sub-rectangles, and alpha blending for `Rgba` pixels.
+        pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(usize)) void {
+            const src_rows = source.rows;
+            const src_cols = source.cols;
+            if (src_rows == 0 or src_cols == 0) return;
+
+            const SourceRect = Rectangle(usize);
+            const full_rect = SourceRect.init(0, 0, src_cols, src_rows);
+            const requested = source_rect_opt orelse full_rect;
+            const src_rect = full_rect.intersect(requested) orelse return;
+
+            if (src_rect.isEmpty()) return;
+
+            const origin_x = @as(isize, @intFromFloat(@round(position.x())));
+            const origin_y = @as(isize, @intFromFloat(@round(position.y())));
+
+            const dest_rows: isize = @intCast(self.rows());
+            const dest_cols: isize = @intCast(self.cols());
+
+            const SourcePixelType = std.meta.Child(@TypeOf(source.data));
+
+            var src_r: usize = src_rect.t;
+            while (src_r < src_rect.b) : (src_r += 1) {
+                const row_offset = src_r - src_rect.t;
+                const dest_y_i = origin_y + @as(isize, @intCast(row_offset));
+                if (dest_y_i < 0 or dest_y_i >= dest_rows) continue;
+
+                var src_c: usize = src_rect.l;
+                while (src_c < src_rect.r) : (src_c += 1) {
+                    const col_offset = src_c - src_rect.l;
+                    const dest_x_i = origin_x + @as(isize, @intCast(col_offset));
+                    if (dest_x_i < 0 or dest_x_i >= dest_cols) continue;
+
+                    const pixel_ptr = source.at(src_r, src_c);
+                    const pixel_value = pixel_ptr.*;
+
+                    const rgba_pixel = if (comptime SourcePixelType == Rgba)
+                        pixel_value
+                    else
+                        convertColor(Rgba, pixel_value);
+
+                    const dest_point = Point(2, f32).point(.{
+                        @as(f32, @floatFromInt(@as(usize, @intCast(dest_x_i)))),
+                        @as(f32, @floatFromInt(@as(usize, @intCast(dest_y_i)))),
+                    });
+                    self.setPixel(dest_point, rgba_pixel);
+                }
+            }
+        }
+
         /// Returns the fractional part of a floating-point number.
         /// Used in Wu's anti-aliasing algorithm to calculate pixel coverage.
         /// Example: fpart(3.7) = 0.7, fpart(-2.3) = 0.7
@@ -1823,12 +1874,3 @@ pub fn Canvas(comptime T: type) type {
         }
     };
 }
-
-// Property-based tests for drawing functions
-
-// MD5 checksum tests for pixel-perfect stability
-//
-// These tests ensure that drawing operations produce identical results across releases.
-// To update the checksums after intentional changes to drawing algorithms:
-//   zig build test -Dprint-md5sums=true
-// Then copy the printed checksums into the md5_checksums array below.
