@@ -27,10 +27,11 @@ def get_native_platform():
         elif machine in ["aarch64", "arm64"]:
             return ("native", "win_arm64", ".pyd")
     elif system == "darwin":
+        # Python extension modules are packaged as .so files even on macOS wheels
         if machine in ["x86_64", "amd64"]:
-            return ("native", "macosx_10_9_x86_64", ".dylib")
+            return ("native", "macosx_10_9_x86_64", ".so")
         elif machine in ["aarch64", "arm64"]:
-            return ("native", "macosx_11_0_arm64", ".dylib")
+            return ("native", "macosx_11_0_arm64", ".so")
 
     # Fallback - let setuptools determine the platform
     return ("native", "", ".so")
