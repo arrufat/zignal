@@ -6,6 +6,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
+const Interpolation = @import("../../root.zig").Interpolation;
 
 test "getRectangle" {
     var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
@@ -349,7 +350,7 @@ test "insert and extract inverse relationship" {
         var canvas = try Image(u8).init(allocator, 64, 64);
         defer canvas.deinit(allocator);
         @memset(canvas.data, 0);
-        canvas.insert(extracted, tc.rect, tc.angle, tc.method);
+        canvas.insert(extracted, tc.rect, tc.angle, tc.method, color.Blending.none);
 
         // Check reconstruction error in center region
         const cx = (tc.rect.l + tc.rect.r) * 0.5;
@@ -379,4 +380,30 @@ test "insert and extract inverse relationship" {
         const tolerance: f32 = if (tc.method == .nearest_neighbor) 10 else 25;
         try std.testing.expect(avg_error < tolerance);
     }
+}
+
+test "insert applies blending when requested" {
+    const allocator = std.testing.allocator;
+
+    var dest = try Image(color.Rgba).init(allocator, 1, 1);
+    defer dest.deinit(allocator);
+    const base = color.Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+    dest.at(0, 0).* = base;
+
+    var source = try Image(color.Rgba).init(allocator, 1, 1);
+    defer source.deinit(allocator);
+    const overlay = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    source.at(0, 0).* = overlay;
+
+    const rect = Rectangle(f32).init(0, 0, 1, 1);
+
+    // Without a blend mode the pixel should be copied directly.
+    dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.none);
+    try expectEqualDeep(overlay, dest.at(0, 0).*);
+
+    // Reset destination pixel and apply blending.
+    dest.at(0, 0).* = base;
+    const expected = base.blend(overlay, color.Blending.normal);
+    dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.normal);
+    try expectEqualDeep(expected, dest.at(0, 0).*);
 }

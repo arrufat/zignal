@@ -12,6 +12,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
+const Rgba = @import("color.zig").Rgba;
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
@@ -36,6 +37,7 @@ const convolution = @import("image/convolution.zig");
 pub const BorderMode = convolution.BorderMode;
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
+const Blending = @import("color/blending.zig").Blending;
 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
@@ -333,6 +335,38 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Assigns `pixel` into `dest`, optionally applying blending when both
+        /// sample and destination support RGBA compositing.
+        pub inline fn assignPixel(dest: *T, pixel: anytype, blend_mode: Blending) void {
+            const Src = @TypeOf(pixel);
+
+            if (comptime Src == Rgba) {
+                const rgba_sample: Rgba = pixel;
+                if (blend_mode != .none) {
+                    if (comptime T == Rgba) {
+                        dest.* = dest.*.blend(rgba_sample, blend_mode);
+                    } else {
+                        const dst_rgba = convertColor(Rgba, dest.*);
+                        const blended = dst_rgba.blend(rgba_sample, blend_mode);
+                        dest.* = convertColor(T, blended);
+                    }
+                } else {
+                    if (comptime T == Rgba) {
+                        dest.* = rgba_sample;
+                    } else {
+                        dest.* = convertColor(T, rgba_sample);
+                    }
+                }
+                return;
+            }
+
+            if (comptime Src == T) {
+                dest.* = pixel;
+            } else {
+                dest.* = convertColor(T, pixel);
+            }
+        }
+
         /// Creates a formatter for terminal display with custom options.
         /// Provides fine-grained control over output format, palette modes, and dithering.
         ///
@@ -485,17 +519,20 @@ pub fn Image(comptime T: type) type {
         /// `insert` places a source image into a destination region.
         ///
         /// Parameters:
-        /// - `source`: The image to insert into self.
+        /// - `source`: The image to insert into self. Can be any Image type.
         /// - `rect`: Destination rectangle (in self's coordinates) where source will be placed.
         /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
         /// - `method`: Interpolation method used when sampling from the source.
+        /// - `blend_mode`: Blending mode to apply while inserting the image.
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
+        /// - For Image(Rgba) sources, alpha blending is applied using the specified blend mode.
+        /// - When the source is not RGBA, pixels are copied directly.
         /// - Pixels outside the source bounds are not modified in self.
         /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: @import("image/interpolation.zig").Interpolation) void {
-            return Transform(T).insert(self, source, rect, angle, method);
+        pub fn insert(self: *Self, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
+            return Transform(T).insert(self, source, rect, angle, method, blend_mode);
         }
 
         /// Applies a geometric transform to the image using the specified interpolation method.
@@ -871,7 +908,6 @@ pub fn Image(comptime T: type) type {
         /// Returns a Histogram struct with channel-specific bins.
         pub fn histogram(self: Self) Histogram(T) {
             const Rgb = @import("color/Rgb.zig");
-            const Rgba = @import("color/Rgba.zig").Rgba;
 
             var hist: Histogram(T) = .init();
 

@@ -5,6 +5,7 @@ pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
+const Blending = zignal.Blending;
 const BitmapFont = zignal.BitmapFont;
 const Rectangle = zignal.Rectangle;
 
@@ -15,6 +16,7 @@ pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const PyImage = @import("PyImage.zig").PyImage;
 const stub_metadata = @import("stub_metadata.zig");
+const enum_utils = @import("enum_utils.zig");
 
 /// A variant canvas type that mirrors PyImage structure
 pub const PyCanvas = struct {
@@ -166,10 +168,10 @@ pub const PyCanvas = struct {
     }
 
     /// Draw another image onto the canvas.
-    pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(usize)) void {
+    pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(usize), blend_mode: Blending) void {
         switch (self.data) {
             inline else => |*canvas| switch (source.data) {
-                inline else => |img| canvas.drawImage(img, position, source_rect),
+                inline else => |img| canvas.drawImage(img, position, source_rect, blend_mode),
             },
         }
     }
@@ -528,6 +530,7 @@ fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         image: ?*c.PyObject,
         position: ?*c.PyObject,
         source_rect: ?*c.PyObject = null,
+        blend_mode: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
@@ -553,8 +556,20 @@ fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
+    var blend_mode: Blending = .normal;
+    if (params.blend_mode) |obj| {
+        if (obj != c.Py_None()) {
+            blend_mode = enum_utils.pyToEnum(Blending, obj) catch {
+                py_utils.setValueError("Invalid blend_mode", .{});
+                return null;
+            };
+        } else {
+            blend_mode = .none;
+        }
+    }
+
     const canvas = py_utils.validateNonNull(*PyCanvas, self.py_canvas, "Canvas") catch return null;
-    canvas.drawImage(py_image_ptr, pos, rect_opt);
+    canvas.drawImage(py_image_ptr, pos, rect_opt, blend_mode);
 
     return py_utils.getPyNone();
 }
@@ -567,9 +582,10 @@ const canvas_draw_image_doc =
     \\- `position` (tuple[float, float]): Top-left destination position `(x, y)`.
     \\- `source_rect` (Rectangle | tuple[float, float, float, float] | None, optional): Optional source rectangle in
     \\  source image coordinates. When omitted or `None`, the entire image is used.
+    \\- `blend_mode` (Blending | None, optional): Blending mode applied when drawing RGBA sources. Defaults to `Blending.NORMAL`; use `None` or `Blending.NONE` for direct copy.
     \\
     \\## Notes
-    \\- Alpha blending is handled automatically based on the source image dtype.
+    \\- Alpha blending is handled automatically based on the source image dtype; non-RGBA images always copy pixels directly.
     \\- Drawing is clipped to the canvas bounds.
 ;
 
@@ -1057,7 +1073,7 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_image),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_image_doc,
-        .params = "self, image: Image, position: tuple[float, float], source_rect: Rectangle | tuple[float, float, float, float] | None = None",
+        .params = "self, image: Image, position: tuple[float, float], source_rect: Rectangle | tuple[float, float, float, float] | None = None, blend_mode: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{

@@ -6,6 +6,7 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const Interpolation = zignal.Interpolation;
+const Blending = zignal.Blending;
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
@@ -708,6 +709,7 @@ pub const image_insert_doc =
     \\- `rect` (Rectangle): Destination rectangle where the source will be placed
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
     \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
+    \\- `blend_mode` (Blending, optional): Compositing mode for RGBA images. Default: NONE
     \\
     \\## Examples
     \\```python
@@ -733,11 +735,12 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     var rect_obj: ?*c.PyObject = undefined;
     var angle: f64 = 0.0;
     var method_value: c_long = 1; // Default to BILINEAR
+    var blend_obj: ?*c.PyObject = null;
 
-    const kw = comptime py_utils.kw(&.{ "source", "rect", "angle", "method" });
-    const format = std.fmt.comptimePrint("OO|dl", .{});
+    const kw = comptime py_utils.kw(&.{ "source", "rect", "angle", "method", "blend_mode" });
+    const format = std.fmt.comptimePrint("OO|dlO", .{});
     // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &source_obj, &rect_obj, &angle, &method_value) == 0) {
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &source_obj, &rect_obj, &angle, &method_value, &blend_obj) == 0) {
         return null;
     }
 
@@ -757,6 +760,16 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     };
     const method = tagToInterpolation(tag_insert);
+
+    var blend_mode: Blending = .none;
+    if (blend_obj) |obj| {
+        if (obj != c.Py_None()) {
+            blend_mode = enum_utils.pyToEnum(Blending, obj) catch {
+                py_utils.setValueError("Invalid blend_mode", .{});
+                return null;
+            };
+        }
+    }
 
     // Variant-aware in-place insert
     if (self.py_image) |pimg| {
@@ -780,7 +793,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                     },
                 }
                 defer src_u8.deinit(allocator);
-                dst.insert(src_u8, rect, @floatCast(angle), method);
+                dst.insert(src_u8, rect, @floatCast(angle), method, blend_mode);
             },
             .rgb => |*dst| {
                 var src_rgb: Image(Rgb) = undefined;
@@ -801,7 +814,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                     },
                 }
                 defer src_rgb.deinit(allocator);
-                dst.insert(src_rgb, rect, @floatCast(angle), method);
+                dst.insert(src_rgb, rect, @floatCast(angle), method, blend_mode);
             },
             .rgba => |*dst| {
                 var src_rgba: Image(Rgba) = undefined;
@@ -821,7 +834,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                         return null;
                     },
                 }
-                dst.insert(src_rgba, rect, @floatCast(angle), method);
+                dst.insert(src_rgba, rect, @floatCast(angle), method, blend_mode);
             },
         }
         const none = c.Py_None();

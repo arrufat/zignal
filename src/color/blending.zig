@@ -11,6 +11,8 @@ const Rgba = @import("Rgba.zig").Rgba;
 
 /// Available blending modes for color composition
 pub const Blending = enum {
+    /// Performs no blending. The overlay fully replaces the base color.
+    none,
     /// Standard alpha blending. The overlay color is painted on top of the base with transparency.
     normal,
 
@@ -110,6 +112,7 @@ pub fn blendColors(base: Rgba, overlay: Rgba, mode: Blending) Rgba {
 
     // Blend based on mode - each function handles alpha compositing internally
     return switch (mode) {
+        .none => overlay,
         .normal => blendNormal(base, overlay),
         .multiply => blendMultiply(base, overlay),
         .screen => blendScreen(base, overlay),
