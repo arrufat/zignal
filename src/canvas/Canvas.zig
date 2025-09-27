@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const convertColor = @import("../color.zig").convertColor;
 const isColor = @import("../color.zig").isColor;
 const Rgba = @import("../color.zig").Rgba;
+const Blending = @import("../color.zig").Blending;
 const BitmapFont = @import("../font.zig").BitmapFont;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
@@ -556,32 +557,26 @@ pub fn Canvas(comptime T: type) type {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
             if (self.atOrNull(@intFromFloat(point.y()), @intFromFloat(point.x()))) |pixel| {
-                switch (ColorType) {
-                    Rgba => {
-                        if (color.a == 255) {
-                            // Opaque - direct assignment
-                            pixel.* = convertColor(T, color);
-                        } else if (color.a > 0) {
-                            // Transparent - blend
-                            const dst = convertColor(Rgba, pixel.*);
-                            const blended = dst.blend(color, .normal);
-                            pixel.* = convertColor(T, blended);
-                        }
-                    },
-                    else => pixel.* = convertColor(T, color),
+                if (comptime ColorType == Rgba) {
+                    const mode: Blending = if (color.a == 255) .none else .normal;
+                    Image(T).assignPixel(pixel, color, mode);
+                } else {
+                    const converted = convertColor(T, color);
+                    Image(T).assignPixel(pixel, converted, .none);
                 }
             }
         }
 
         /// Draws another image onto this canvas at the given top-left position.
-        /// Supports automatic clipping, optional source sub-rectangles, and alpha blending for `Rgba` pixels.
-        pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(usize)) void {
-            const src_rows = source.rows;
-            const src_cols = source.cols;
-            if (src_rows == 0 or src_cols == 0) return;
+        /// Supports alpha blending for RGBA images with the normal blend mode.
+        /// For rotation, scaling, or custom blend modes, users should access the canvas's image field directly.
+        pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(usize), blend_mode: Blending) void {
+            const SourcePixelType = std.meta.Child(@TypeOf(source.data));
+
+            if (source.rows == 0 or source.cols == 0) return;
 
             const SourceRect = Rectangle(usize);
-            const full_rect = SourceRect.init(0, 0, src_cols, src_rows);
+            const full_rect = SourceRect.init(0, 0, source.cols, source.rows);
             const requested = source_rect_opt orelse full_rect;
             const src_rect = full_rect.intersect(requested) orelse return;
 
@@ -590,36 +585,27 @@ pub fn Canvas(comptime T: type) type {
             const origin_x = @as(isize, @intFromFloat(@round(position.x())));
             const origin_y = @as(isize, @intFromFloat(@round(position.y())));
 
-            const dest_rows: isize = @intCast(self.rows());
-            const dest_cols: isize = @intCast(self.cols());
-
-            const SourcePixelType = std.meta.Child(@TypeOf(source.data));
-
-            var src_r: usize = src_rect.t;
-            while (src_r < src_rect.b) : (src_r += 1) {
+            // Simple blit loop with type-based blending
+            for (src_rect.t..src_rect.b) |src_r| {
                 const row_offset = src_r - src_rect.t;
-                const dest_y_i = origin_y + @as(isize, @intCast(row_offset));
-                if (dest_y_i < 0 or dest_y_i >= dest_rows) continue;
+                const dest_y = origin_y + @as(isize, @intCast(row_offset));
 
-                var src_c: usize = src_rect.l;
-                while (src_c < src_rect.r) : (src_c += 1) {
+                for (src_rect.l..src_rect.r) |src_c| {
                     const col_offset = src_c - src_rect.l;
-                    const dest_x_i = origin_x + @as(isize, @intCast(col_offset));
-                    if (dest_x_i < 0 or dest_x_i >= dest_cols) continue;
+                    const dest_x = origin_x + @as(isize, @intCast(col_offset));
 
-                    const pixel_ptr = source.at(src_r, src_c);
-                    const pixel_value = pixel_ptr.*;
-
-                    const rgba_pixel = if (comptime SourcePixelType == Rgba)
-                        pixel_value
-                    else
-                        convertColor(Rgba, pixel_value);
-
-                    const dest_point = Point(2, f32).point(.{
-                        @as(f32, @floatFromInt(@as(usize, @intCast(dest_x_i)))),
-                        @as(f32, @floatFromInt(@as(usize, @intCast(dest_y_i)))),
-                    });
-                    self.setPixel(dest_point, rgba_pixel);
+                    if (self.atOrNull(dest_y, dest_x)) |dest_pixel| {
+                        const src_pixel = source.at(src_r, src_c).*;
+                        if (comptime SourcePixelType == Rgba) {
+                            Image(T).assignPixel(dest_pixel, src_pixel, blend_mode);
+                        } else {
+                            const converted = if (SourcePixelType == T)
+                                src_pixel
+                            else
+                                convertColor(T, src_pixel);
+                            Image(T).assignPixel(dest_pixel, converted, .none);
+                        }
+                    }
                 }
             }
         }

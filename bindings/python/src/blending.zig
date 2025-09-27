@@ -14,6 +14,7 @@ pub const blending_doc =
     \\
     \\| Mode        | Description                                            | Best Use Case     |
     \\|-------------|--------------------------------------------------------|-------------------|
+    \\| NONE        | No blending; overlay replaces base pixel               | Direct copy       |
     \\| NORMAL      | Standard alpha blending with transparency              | Layering images   |
     \\| MULTIPLY    | Darkens by multiplying colors (white has no effect)    | Shadows, darkening|
     \\| SCREEN      | Lightens by inverting, multiplying, then inverting     | Highlights, glow  |
@@ -39,13 +40,15 @@ pub const blending_doc =
     \\```
     \\
     \\## Notes
-    \\- All blend modes respect alpha channel for proper compositing
+    \\- `NONE` performs a direct copy and is the default for APIs that accept blending
+    \\- All other blend modes respect alpha channel for proper compositing
     \\- Result color type matches the base color type
     \\- Overlay must be RGBA or convertible to RGBA
 ;
 
 // Per-value documentation for stub generation
 pub const blending_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "NONE", .doc = "No blending; overlay replaces base pixel" },
     .{ .name = "NORMAL", .doc = "Standard alpha blending with transparency" },
     .{ .name = "MULTIPLY", .doc = "Darkens by multiplying colors" },
     .{ .name = "SCREEN", .doc = "Lightens by inverting, multiplying, inverting" },

@@ -6,8 +6,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Blending = @import("../color/blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
+const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
 
 /// Rotation bounds result
@@ -360,19 +362,22 @@ pub fn Transform(comptime T: type) type {
         /// `insert` places a source image into a destination region.
         ///
         /// Parameters:
-        /// - `source`: The image to insert into self.
+        /// - `source`: The image to insert into self. Can be any Image type.
         /// - `rect`: Destination rectangle (in self's coordinates) where source will be placed.
         /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
         /// - `method`: Interpolation method used when sampling from the source.
+        /// - `blend_mode`: Blending mode to apply while inserting the image.
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
+        /// - For Image(Rgba) sources, alpha blending is applied using the specified blend mode.
+        /// - When the source is not RGBA, pixels are copied directly.
         /// - Pixels outside the source bounds are not modified in self.
         /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: Self, rect: Rectangle(f32), angle: f32, method: Interpolation) void {
-            const interpolation = @import("interpolation.zig");
-
+        pub fn insert(self: *Self, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
             if (source.rows == 0 or source.cols == 0) return;
+
+            const SourcePixelType = std.meta.Child(@TypeOf(source.data));
 
             const frows: f32 = @floatFromInt(source.rows);
             const fcols: f32 = @floatFromInt(source.cols);
@@ -392,7 +397,7 @@ pub fn Transform(comptime T: type) type {
                     for (0..source.cols) |c| {
                         const x: isize = dst_left + @as(isize, @intCast(c));
                         if (self.atOrNull(y, x)) |dest| {
-                            dest.* = source.at(r, c).*;
+                            Self.assignPixel(dest, source.at(r, c).*, blend_mode);
                         }
                     }
                 }
@@ -402,8 +407,8 @@ pub fn Transform(comptime T: type) type {
             // General path with rotation/scaling
             const cx = (rect.l + rect.r) * 0.5;
             const cy = (rect.t + rect.b) * 0.5;
-            const cos_a = @cos(angle);
-            const sin_a = @sin(angle);
+            const cos = @cos(angle);
+            const sin = @sin(angle);
 
             // Pre-compute for efficiency
             const inv_width = 1.0 / rect_width;
@@ -412,8 +417,8 @@ pub fn Transform(comptime T: type) type {
             const half_height = rect_height * 0.5;
 
             // Exact bounding box of rotated rectangle
-            const abs_cos = @abs(cos_a);
-            const abs_sin = @abs(sin_a);
+            const abs_cos = @abs(cos);
+            const abs_sin = @abs(sin);
             const bound_hw = half_width * abs_cos + half_height * abs_sin;
             const bound_hh = half_width * abs_sin + half_height * abs_cos;
 
@@ -432,8 +437,8 @@ pub fn Transform(comptime T: type) type {
                     const dx = dest_x - cx;
 
                     // Inverse rotate to rectangle space
-                    const rect_x = cos_a * dx + sin_a * dy;
-                    const rect_y = -sin_a * dx + cos_a * dy;
+                    const rect_x = cos * dx + sin * dy;
+                    const rect_y = -sin * dx + cos * dy;
 
                     // Check if inside rectangle (simplified bounds check)
                     if (@abs(rect_x) > half_width or @abs(rect_y) > half_height) continue;
@@ -446,9 +451,11 @@ pub fn Transform(comptime T: type) type {
                     const src_x = if (source.cols == 1) 0 else norm_x * (fcols - 1);
                     const src_y = if (source.rows == 1) 0 else norm_y * (frows - 1);
 
-                    // Sample and write
-                    if (interpolation.interpolate(T, source, src_x, src_y, method)) |val| {
-                        self.at(r, c).* = val;
+                    // Sample from source
+                    if (interpolate(SourcePixelType, source, src_x, src_y, method)) |src_val| {
+                        // Type-specific handling with compile-time optimization
+                        const dest_pixel = self.at(r, c);
+                        Self.assignPixel(dest_pixel, src_val, blend_mode);
                     }
                 }
             }

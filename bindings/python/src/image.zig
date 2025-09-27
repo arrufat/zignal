@@ -1064,7 +1064,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&transforms.image_insert),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_insert_doc,
-            .params = "self, source: Image, rect: Rectangle | tuple[float, float, float, float], angle: float = 0.0, method: Interpolation = Interpolation.BILINEAR",
+            .params = "self, source: Image, rect: Rectangle | tuple[float, float, float, float], angle: float = 0.0, method: Interpolation = Interpolation.BILINEAR, blend_mode: Blending = Blending.NONE",
             .returns = "None",
         },
     };

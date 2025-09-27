@@ -244,7 +244,7 @@ test "drawImage copies opaque pixels" {
     src.at(1, 1).* = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
 
     const canvas = Canvas(Rgba).init(allocator, dest);
-    canvas.drawImage(src, .point(.{ 1, 1 }), null);
+    canvas.drawImage(src, .point(.{ 1, 1 }), null, .normal);
 
     try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, dest.at(1, 1).*);
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, dest.at(1, 2).*);
@@ -273,7 +273,7 @@ test "drawImage blends alpha" {
     src.at(0, 0).* = overlay;
 
     const canvas = Canvas(Rgba).init(allocator, dest);
-    canvas.drawImage(src, .point(.{ 0, 0 }), null);
+    canvas.drawImage(src, .point(.{ 0, 0 }), null, .normal);
 
     const expected = base.blend(overlay, .normal);
     try expectEqual(expected, dest.at(0, 0).*);
@@ -299,7 +299,7 @@ test "drawImage supports source rect and clipping" {
 
     const canvas = Canvas(Rgba).init(allocator, dest);
     const src_rect = Rectangle(usize).init(1, 0, 3, 2);
-    canvas.drawImage(src, .point(.{ 0, 0 }), src_rect);
+    canvas.drawImage(src, .point(.{ 0, 0 }), src_rect, .normal);
 
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
     try expectEqual(Rgba{ .r = 70, .g = 80, .b = 90, .a = 255 }, dest.at(0, 1).*);
@@ -307,7 +307,7 @@ test "drawImage supports source rect and clipping" {
     try expectEqual(Rgba{ .r = 170, .g = 180, .b = 190, .a = 255 }, dest.at(1, 1).*);
 
     // Draw partially off-canvas to ensure clipping works
-    canvas.drawImage(src, .point(.{ -1, 0 }), null);
+    canvas.drawImage(src, .point(.{ -1, 0 }), null, .normal);
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
 }
 
