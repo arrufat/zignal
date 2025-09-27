@@ -14,6 +14,7 @@ const color_utils = @import("color_utils.zig");
 const grayscale_format = @import("grayscale_format.zig");
 const core = @import("image/core.zig");
 const filtering = @import("image/filtering.zig");
+const binary = @import("image/binary.zig");
 const numpy_interop = @import("image/numpy_interop.zig");
 const transforms = @import("image/transforms.zig");
 const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
@@ -1130,6 +1131,22 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "threshold_otsu",
+            .meth = @ptrCast(&binary.image_threshold_otsu),
+            .flags = c.METH_NOARGS,
+            .doc = binary.image_threshold_otsu_doc,
+            .params = "self",
+            .returns = "tuple[Image, int]",
+        },
+        .{
+            .name = "threshold_adaptive_mean",
+            .meth = @ptrCast(&binary.image_threshold_adaptive_mean),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = binary.image_threshold_adaptive_mean_doc,
+            .params = "self, radius: int = 6, c: float = 5.0",
+            .returns = "Image",
+        },
+        .{
             .name = "sobel",
             .meth = @ptrCast(&filtering.image_sobel),
             .flags = c.METH_NOARGS,
@@ -1152,6 +1169,38 @@ pub const image_methods_metadata = blk: {
             .doc = filtering.image_blend_doc,
             .params = "self, overlay: Image, mode: Blending = Blending.NORMAL",
             .returns = "None",
+        },
+        .{
+            .name = "dilate_binary",
+            .meth = @ptrCast(&binary.image_dilate_binary),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = binary.image_dilate_binary_doc,
+            .params = "self, kernel_size: int = 3, iterations: int = 1",
+            .returns = "Image",
+        },
+        .{
+            .name = "erode_binary",
+            .meth = @ptrCast(&binary.image_erode_binary),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = binary.image_erode_binary_doc,
+            .params = "self, kernel_size: int = 3, iterations: int = 1",
+            .returns = "Image",
+        },
+        .{
+            .name = "open_binary",
+            .meth = @ptrCast(&binary.image_open_binary),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = binary.image_open_binary_doc,
+            .params = "self, kernel_size: int = 3, iterations: int = 1",
+            .returns = "Image",
+        },
+        .{
+            .name = "close_binary",
+            .meth = @ptrCast(&binary.image_close_binary),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = binary.image_close_binary_doc,
+            .params = "self, kernel_size: int = 3, iterations: int = 1",
+            .returns = "Image",
         },
     };
 

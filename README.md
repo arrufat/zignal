@@ -57,7 +57,7 @@ pip install zignal-processing
 - **Color spaces** - RGB, HSL, HSV, Lab, XYZ, Oklab, Oklch conversions
 - **Matrix operations** - Linear algebra functions and SVD
 - **Geometry** - Points, rectangles, transforms, convex hull
-- **Image processing** - Resize, rotate, crop, blur, sharpen
+- **Image processing** - Resize, rotate, crop, blur, sharpen, threshold, morphology
 - **Canvas API** - Lines, circles, polygons, Bézier curves with antialiasing
 
 ## Motivation

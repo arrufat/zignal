@@ -24,6 +24,7 @@ const png = @import("png.zig");
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
+const binary = @import("image/binary.zig");
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 
@@ -33,6 +34,7 @@ pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const Histogram = @import("image/histogram.zig").Histogram;
+pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
 pub const BorderMode = convolution.BorderMode;
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
@@ -656,6 +658,56 @@ pub fn Image(comptime T: type) type {
             return Enhancement(T).equalize(self);
         }
 
+        /// Computes Otsu's threshold and produces a binary image.
+        /// Returns the threshold value that maximizes between-class variance.
+        pub fn thresholdOtsu(self: Self, allocator: Allocator, out: *Image(u8)) !u8 {
+            if (comptime T != u8) {
+                @compileError("thresholdOtsu is only available for Image(u8)");
+            }
+            return binary.Binary.thresholdOtsu(self, allocator, out);
+        }
+
+        /// Applies adaptive mean thresholding using a square window defined by `radius`.
+        /// Each pixel is compared against the mean of its local neighborhood minus `c`.
+        pub fn thresholdAdaptiveMean(self: Self, allocator: Allocator, radius: usize, c: f32, out: *Image(u8)) !void {
+            if (comptime T != u8) {
+                @compileError("thresholdAdaptiveMean is only available for Image(u8)");
+            }
+            return binary.Binary.thresholdAdaptiveMean(self, allocator, radius, c, out);
+        }
+
+        /// Performs binary dilation using the provided structuring element.
+        pub fn dilateBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: *Image(u8)) !void {
+            if (comptime T != u8) {
+                @compileError("dilateBinary is only available for Image(u8)");
+            }
+            try binary.Binary.dilate(self, allocator, kernel, iterations, out);
+        }
+
+        /// Performs binary erosion using the provided structuring element.
+        pub fn erodeBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: *Image(u8)) !void {
+            if (comptime T != u8) {
+                @compileError("erodeBinary is only available for Image(u8)");
+            }
+            try binary.Binary.erode(self, allocator, kernel, iterations, out);
+        }
+
+        /// Performs a binary opening (erosion followed by dilation).
+        pub fn openBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: *Image(u8)) !void {
+            if (comptime T != u8) {
+                @compileError("openBinary is only available for Image(u8)");
+            }
+            try binary.Binary.open(self, allocator, kernel, iterations, out);
+        }
+
+        /// Performs a binary closing (dilation followed by erosion).
+        pub fn closeBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: *Image(u8)) !void {
+            if (comptime T != u8) {
+                @compileError("closeBinary is only available for Image(u8)");
+            }
+            try binary.Binary.close(self, allocator, kernel, iterations, out);
+        }
+
         /// Applies a 2D convolution with the given kernel to the image.
         ///
         /// Parameters:
@@ -950,4 +1002,5 @@ test {
     _ = @import("image/tests/resize.zig");
     _ = @import("image/tests/psnr.zig");
     _ = @import("image/tests/shen_castan.zig");
+    _ = @import("image/tests/binary.zig");
 }

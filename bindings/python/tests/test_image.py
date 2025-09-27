@@ -109,6 +109,48 @@ class TestImage:
         with pytest.raises(ValueError):
             img.gaussian_blur(0.0)
 
+    def test_threshold_otsu_and_rgb_autoconvert(self):
+        img = zignal.Image(4, 4, dtype=zignal.Grayscale)
+        arr = img.to_numpy()
+        arr[:2, :] = 20
+        arr[2:, :] = 200
+
+        binary, threshold = img.threshold_otsu()
+        assert isinstance(binary, zignal.Image)
+        assert 0 <= threshold <= 255
+        binary_arr = binary.to_numpy()
+        assert set(np.unique(binary_arr)) <= {0, 255}
+
+        rgb = zignal.Image(4, 4, dtype=zignal.Rgb)
+        rgb_arr = rgb.to_numpy()
+        rgb_arr[:, :2] = [30, 30, 30]
+        rgb_arr[:, 2:] = [220, 220, 220]
+        rgb_binary, _ = rgb.threshold_otsu()
+        assert set(np.unique(rgb_binary.to_numpy())) <= {0, 255}
+
+    def test_adaptive_threshold_and_morphology(self):
+        base = zignal.Image(10, 10, dtype=zignal.Grayscale)
+        arr = base.to_numpy()
+        arr[:] = np.linspace(10, 200, arr.size, dtype=np.uint8).reshape(arr.shape)
+
+        adaptive = base.threshold_adaptive_mean(radius=2, c=3.0)
+        adaptive_arr = adaptive.to_numpy()
+        assert set(np.unique(adaptive_arr)) <= {0, 255}
+
+        dilated = adaptive.dilate_binary(kernel_size=5, iterations=2)
+        eroded = adaptive.erode_binary()
+        opened = adaptive.open_binary()
+        closed = adaptive.close_binary(iterations=2)
+
+        for result in (dilated, eroded, opened, closed):
+            assert isinstance(result, zignal.Image)
+            data = result.to_numpy()
+            assert data.shape == arr.shape
+            assert set(np.unique(data)) <= {0, 255}
+
+        with pytest.raises(ValueError):
+            adaptive.dilate_binary(kernel_size=2)
+
     def test_blend_api(self):
         # Test RGBA base blending
         base = zignal.Image(5, 5, (255, 0, 0), dtype=zignal.Rgba)
