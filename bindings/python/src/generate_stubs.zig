@@ -20,6 +20,7 @@ const convex_hull_module = @import("convex_hull.zig");
 const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
 const interpolation_module = @import("interpolation.zig");
+const border_mode_module = @import("border_mode.zig");
 const optimization_module = @import("optimization.zig");
 const transforms_module = @import("transforms.zig");
 
@@ -410,6 +411,15 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .doc = blending_module.blending_doc,
         .zig_type = zignal.Blending,
         .value_docs = &blending_module.blending_values,
+    });
+
+    // Generate BorderMode enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "BorderMode",
+        .base = "IntEnum",
+        .doc = border_mode_module.border_mode_doc,
+        .zig_type = zignal.BorderMode,
+        .value_docs = &border_mode_module.border_mode_values,
     });
 
     // Generate DrawMode enum

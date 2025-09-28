@@ -27,6 +27,7 @@ const Enhancement = @import("image/enhancement.zig").Enhancement;
 const binary = @import("image/binary.zig");
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
+const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
@@ -591,6 +592,113 @@ pub fn Image(comptime T: type) type {
             try Self.Integral.compute(self, allocator, &sat);
             defer sat.deinit(allocator);
             Self.Integral.boxBlur(sat, self, blurred, radius);
+        }
+
+        /// Applies a median blur using a square window with the given radius.
+        /// Radius specifies half the window size; window size = `radius * 2 + 1`.
+        pub fn medianBlur(self: Self, allocator: Allocator, radius: usize, out: *Self) !void {
+            try OrderStatisticBlurOps(T).medianBlur(self, allocator, radius, out);
+        }
+
+        /// Applies a percentile blur (order-statistic filter) with the given percentile fraction.
+        /// Percentile must be in the range [0, 1]; 0.5 corresponds to a median blur.
+        ///
+        /// Useful when you want fine-grained control over which ranked pixel is kept from the
+        /// neighborhood. For example, `percentile = 0.1` can suppress bright outliers while
+        /// retaining much of the local structure.
+        ///
+        /// ```zig
+        /// var robust: Image(u8) = .empty;
+        /// try image.percentileBlur(allocator, 2, 0.1, &robust, .mirror);
+        /// ```
+        pub fn percentileBlur(
+            self: Self,
+            allocator: Allocator,
+            radius: usize,
+            percentile: f64,
+            out: *Self,
+            border: BorderMode,
+        ) !void {
+            try OrderStatisticBlurOps(T).percentileBlur(self, allocator, radius, percentile, out, border);
+        }
+
+        /// Applies a minimum blur (percentile zero) over a square window with the given radius.
+        ///
+        /// This is the morphological *erosion* operator – great for removing "salt" noise or
+        /// shrinking bright speckles while leaving darker structures intact.
+        ///
+        /// ```zig
+        /// var denoised: Image(u8) = .empty;
+        /// try image.minBlur(allocator, 1, &denoised, .mirror);
+        /// ```
+        pub fn minBlur(
+            self: Self,
+            allocator: Allocator,
+            radius: usize,
+            out: *Self,
+            border: BorderMode,
+        ) !void {
+            try OrderStatisticBlurOps(T).minBlur(self, allocator, radius, out, border);
+        }
+
+        /// Applies a maximum blur (percentile one) over a square window with the given radius.
+        ///
+        /// Equivalent to morphological *dilation*. It can fill in small gaps or expand highlights,
+        /// which is helpful for creating masks or closing thin cracks.
+        ///
+        /// ```zig
+        /// var mask: Image(u8) = .empty;
+        /// try binary.maxBlur(allocator, 2, &mask, .mirror);
+        /// ```
+        pub fn maxBlur(
+            self: Self,
+            allocator: Allocator,
+            radius: usize,
+            out: *Self,
+            border: BorderMode,
+        ) !void {
+            try OrderStatisticBlurOps(T).maxBlur(self, allocator, radius, out, border);
+        }
+
+        /// Applies a midpoint blur that averages the minimum and maximum values within the window.
+        ///
+        /// Midpoint filtering is a fast way to reduce random impulse noise while retaining thin
+        /// edges. Think of it as a compromise between min and max filters.
+        ///
+        /// ```zig
+        /// var softened: Image(u8) = .empty;
+        /// try image.midpointBlur(allocator, 1, &softened, .mirror);
+        /// ```
+        pub fn midpointBlur(
+            self: Self,
+            allocator: Allocator,
+            radius: usize,
+            out: *Self,
+            border: BorderMode,
+        ) !void {
+            try OrderStatisticBlurOps(T).midpointBlur(self, allocator, radius, out, border);
+        }
+
+        /// Applies an alpha-trimmed mean blur, discarding a fraction of the lowest and highest pixels.
+        /// `trim_fraction` must be in [0, 0.5).
+        ///
+        /// This filter is useful when you want the smoothness of an average but need robustness to
+        /// extremes (for example, sensor hot pixels or specular highlights). Trimming 10% from each
+        /// tail delivers a strong denoise without smearing edges.
+        ///
+        /// ```zig
+        /// var robust_mean: Image(Rgba) = .empty;
+        /// try color_image.alphaTrimmedMeanBlur(allocator, 2, 0.1, &robust_mean, .mirror);
+        /// ```
+        pub fn alphaTrimmedMeanBlur(
+            self: Self,
+            allocator: Allocator,
+            radius: usize,
+            trim_fraction: f64,
+            out: *Self,
+            border: BorderMode,
+        ) !void {
+            try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, allocator, radius, trim_fraction, out, border);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.

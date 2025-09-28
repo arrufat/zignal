@@ -3,11 +3,13 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
+const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
 const Rgb = color.Rgb;
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
+const BorderMode = @import("../../image.zig").BorderMode;
 
 test "invert" {
     // Test grayscale
@@ -745,6 +747,158 @@ test "gaussianBlur preserves color" {
         try expectEqual(true, edge.g < edge.r / 2);
         try expectEqual(true, edge.b < edge.r / 2);
     }
+}
+
+test "medianBlur removes impulse noise" {
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    image.fill(0);
+    image.at(2, 2).* = 255;
+
+    var blurred: Image(u8) = .empty;
+    try image.medianBlur(std.testing.allocator, 1, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    try expectEqual(@as(u8, 0), blurred.at(2, 2).*);
+    try expectEqual(@as(u8, 0), blurred.at(2, 1).*);
+    try expectEqual(@as(u8, 0), blurred.at(1, 2).*);
+}
+
+test "percentileBlur max filter" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    var value: u8 = 0;
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = value;
+            value += 1;
+        }
+    }
+
+    var out: Image(u8) = .empty;
+    try image.percentileBlur(std.testing.allocator, 1, 1.0, &out, BorderMode.zero);
+    defer out.deinit(std.testing.allocator);
+
+    try expectEqual(@as(u8, 8), out.at(1, 1).*);
+    try expectEqual(@as(u8, 4), out.at(0, 0).*);
+}
+
+test "medianBlur preserves dominant RGB color" {
+    var image: Image(Rgb) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    const base = Rgb{ .r = 32, .g = 64, .b = 96 };
+    for (image.data) |*pixel| pixel.* = base;
+    image.at(1, 1).* = Rgb{ .r = 255, .g = 0, .b = 0 };
+
+    var blurred: Image(Rgb) = .empty;
+    try image.medianBlur(std.testing.allocator, 1, &blurred);
+    defer blurred.deinit(std.testing.allocator);
+
+    try expectEqualDeep(base, blurred.at(1, 1).*);
+    try expectEqualDeep(base, blurred.at(0, 0).*);
+}
+
+test "minBlur matches percentile zero" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    var value: u8 = 0;
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = value;
+            value += 1;
+        }
+    }
+
+    var min_blur: Image(u8) = .empty;
+    var percentile: Image(u8) = .empty;
+    defer min_blur.deinit(std.testing.allocator);
+    defer percentile.deinit(std.testing.allocator);
+
+    try image.minBlur(std.testing.allocator, 1, &min_blur, BorderMode.replicate);
+    try image.percentileBlur(std.testing.allocator, 1, 0.0, &percentile, BorderMode.replicate);
+
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(min_blur.at(r, c).*, percentile.at(r, c).*);
+        }
+    }
+}
+
+test "maxBlur matches percentile one" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    var max_blur: Image(u8) = .empty;
+    var percentile: Image(u8) = .empty;
+    defer max_blur.deinit(std.testing.allocator);
+    defer percentile.deinit(std.testing.allocator);
+
+    try image.maxBlur(std.testing.allocator, 1, &max_blur, BorderMode.replicate);
+    try image.percentileBlur(std.testing.allocator, 1, 1.0, &percentile, BorderMode.replicate);
+
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            try expectEqual(max_blur.at(r, c).*, percentile.at(r, c).*);
+        }
+    }
+}
+
+test "midpointBlur averages extremes" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    var value: u8 = 0;
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = value;
+            value += 1;
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    defer blurred.deinit(std.testing.allocator);
+    try image.midpointBlur(std.testing.allocator, 1, &blurred, BorderMode.replicate);
+
+    try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
+}
+
+test "alphaTrimmedMeanBlur drops extremes" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    var value: u8 = 0;
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = value;
+            value += 1;
+        }
+    }
+
+    var blurred: Image(u8) = .empty;
+    defer blurred.deinit(std.testing.allocator);
+    try image.alphaTrimmedMeanBlur(std.testing.allocator, 1, 0.12, &blurred, BorderMode.replicate);
+
+    try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
+}
+
+test "alphaTrimmedMeanBlur invalid trim" {
+    var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
+    defer image.deinit(std.testing.allocator);
+
+    var out: Image(u8) = .empty;
+    defer if (out.data.len != 0) out.deinit(std.testing.allocator);
+
+    try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(std.testing.allocator, 1, 0.6, &out, BorderMode.replicate));
 }
 
 test "linearMotionBlur horizontal" {

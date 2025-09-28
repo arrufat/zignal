@@ -14,6 +14,7 @@ const pixel_proxy = @import("pixel_proxy.zig");
 const matrix = @import("matrix.zig");
 const motion_blur = @import("motion_blur.zig");
 const interpolation = @import("interpolation.zig");
+const border_mode = @import("border_mode.zig");
 const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
@@ -111,6 +112,12 @@ pub export fn PyInit__zignal() ?*c.PyObject {
 
     enum_utils.registerEnum(zignal.Interpolation, @ptrCast(m), interpolation.interpolation_doc) catch |err| {
         std.log.err("Failed to register Interpolation: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    enum_utils.registerEnum(zignal.BorderMode, @ptrCast(m), border_mode.border_mode_doc) catch |err| {
+        std.log.err("Failed to register BorderMode: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
