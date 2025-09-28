@@ -5,10 +5,10 @@
 
 Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](https://dlib.net).
 
-## Disclaimer
+## Status
 
-This library is in early stages of development and being used internally.
-As a result, the API might change often.
+Zignal is under active development and powers production workloads at [Ameli](https://ameli.co.kr/).
+The API continues to evolve, so expect occasional breaking changes between minor releases.
 
 ## Installation
 
@@ -35,6 +35,8 @@ module.addImport("zignal", zignal.module("zignal"));
 pip install zignal-processing
 ```
 
+Requires Python 3.10+, no external dependencies
+
 <img src="./assets/python_print.gif" width=600>
 
 [Bindings](bindings/python) | [PyPI Package](https://pypi.org/project/zignal-processing/) | [Documentation](https://bfactory-ai.github.io/zignal/python/zignal.html)
@@ -53,12 +55,17 @@ pip install zignal-processing
 
 ## Features
 
-- **PCA** - Principal Component Analysis with SIMD acceleration
+- **PCA** - Principal Component Analysis
 - **Color spaces** - RGB, HSL, HSV, Lab, XYZ, Oklab, Oklch conversions
 - **Matrix operations** - Linear algebra functions and SVD
 - **Geometry** - Points, rectangles, transforms, convex hull
+- **Image I/O** - Load and save PNG/JPEG images without in-house codecs
 - **Image processing** - Resize, rotate, crop, blur, sharpen, threshold, morphology
 - **Canvas API** - Lines, circles, polygons, Bézier curves with antialiasing
+- **Fonts** - Bitmap font rendering, BDF/PCF loading, and Unicode range filters
+- **Compression** - DEFLATE, zlib, gzip, and LZ77 bitstream primitives
+- **Terminal graphics** - Kitty and sixel with capability detection utilities
+- **Optimization** - Hungarian assignment solver for cost/profit matrices
 
 ## Motivation
 
