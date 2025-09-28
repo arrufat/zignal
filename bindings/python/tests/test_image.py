@@ -109,6 +109,29 @@ class TestImage:
         with pytest.raises(ValueError):
             img.gaussian_blur(0.0)
 
+        median = img.median_blur(1)
+        assert isinstance(median, zignal.Image)
+
+        percentile = img.percentile_blur(1, 1.0)
+        assert isinstance(percentile, zignal.Image)
+
+        wrapped = img.percentile_blur(1, 0.0, border=zignal.BorderMode.WRAP)
+        assert isinstance(wrapped, zignal.Image)
+
+        with pytest.raises(ValueError):
+            img.percentile_blur(1, 1.5)
+
+        min_filter = img.min_blur(1)
+        max_filter = img.max_blur(1)
+        midpoint = img.midpoint_blur(1)
+        trimmed = img.alpha_trimmed_mean_blur(1, 0.1)
+
+        for result in (min_filter, max_filter, midpoint, trimmed):
+            assert isinstance(result, zignal.Image)
+
+        with pytest.raises(ValueError):
+            img.alpha_trimmed_mean_blur(1, 0.6)
+
     def test_threshold_otsu_and_rgb_autoconvert(self):
         img = zignal.Image(4, 4, dtype=zignal.Grayscale)
         arr = img.to_numpy()

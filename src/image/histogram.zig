@@ -32,6 +32,11 @@ pub fn Histogram(comptime T: type) type {
                 return stats.max(&self.values);
             }
 
+            /// Reset all counts to zero.
+            pub fn clear(self: *Self) void {
+                @memset(&self.values, 0);
+            }
+
             /// Calculate the mean value from the histogram
             pub fn mean(self: Self) u8 {
                 const mean_val = stats.mean(&self.values);
@@ -41,6 +46,61 @@ pub fn Histogram(comptime T: type) type {
             /// Calculate the median value from the histogram
             pub fn median(self: Self) u8 {
                 return stats.median(&self.values);
+            }
+
+            /// Calculate percentile from the histogram
+            pub fn percentile(self: Self, p: f64) u8 {
+                return stats.percentile(&self.values, p);
+            }
+
+            /// Calculate percentile from a fraction in the range [0, 1].
+            pub fn percentileFraction(self: Self, fraction: f64) u8 {
+                std.debug.assert(fraction >= 0.0 and fraction <= 1.0);
+                return stats.percentile(&self.values, fraction);
+            }
+
+            /// Return the smallest intensity with a non-zero count, or null if empty.
+            pub fn firstNonZero(self: Self) ?u8 {
+                for (self.values, 0..) |count, value| {
+                    if (count > 0) return @intCast(value);
+                }
+                return null;
+            }
+
+            /// Return the largest intensity with a non-zero count, or null if empty.
+            pub fn lastNonZero(self: Self) ?u8 {
+                var idx: usize = self.values.len;
+                while (idx > 0) : (idx -= 1) {
+                    const count = self.values[idx - 1];
+                    if (count > 0) return @intCast(idx - 1);
+                }
+                return null;
+            }
+
+            /// Increment the count for a single value.
+            pub fn addValue(self: *Self, value: u8) void {
+                self.values[value] += 1;
+            }
+
+            /// Decrement the count for a single value.
+            pub fn removeValue(self: *Self, value: u8) void {
+                std.debug.assert(self.values[value] > 0);
+                self.values[value] -= 1;
+            }
+
+            /// Add counts from another histogram into this one.
+            pub fn addCounts(self: *Self, other: Self) void {
+                inline for (self.values[0..], 0..) |*count, i| {
+                    count.* += other.values[i];
+                }
+            }
+
+            /// Subtract counts from another histogram out of this one.
+            pub fn subtractCounts(self: *Self, other: Self) void {
+                inline for (self.values[0..], 0..) |*count, i| {
+                    std.debug.assert(count.* >= other.values[i]);
+                    count.* -= other.values[i];
+                }
             }
 
             /// Calculate the variance from the histogram
@@ -56,11 +116,6 @@ pub fn Histogram(comptime T: type) type {
             /// Find the mode (most frequent value)
             pub fn mode(self: Self) u8 {
                 return stats.mode(&self.values);
-            }
-
-            /// Calculate percentile from the histogram
-            pub fn percentile(self: Self, p: f64) u8 {
-                return stats.percentile(&self.values, p);
             }
 
             /// Find the minimum value after excluding cutoff pixels
@@ -530,18 +585,23 @@ const stats = struct {
     pub fn percentile(bins: []const u32, p: f64) u8 {
         assert(p >= 0 and p <= 1);
 
-        var total: u32 = 0;
+        var total: usize = 0;
         for (bins) |count| {
             total += count;
         }
         if (total == 0) return 0;
 
-        const target = @as(u32, @intFromFloat(p * @as(f64, @floatFromInt(total))));
-        var cumulative: u32 = 0;
+        const total_minus_one = total - 1;
+        const rank_f = p * @as(f64, @floatFromInt(total_minus_one));
+        const rank_floor = std.math.floor(rank_f + 1e-12);
+        const rank = std.math.clamp(@as(usize, @intFromFloat(rank_floor)), 0, total_minus_one);
+
+        var cumulative: usize = 0;
 
         for (bins, 0..) |count, value| {
+            if (count == 0) continue;
             cumulative += count;
-            if (cumulative >= target) {
+            if (cumulative > rank) {
                 return @intCast(value);
             }
         }

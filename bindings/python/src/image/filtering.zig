@@ -10,6 +10,7 @@ const MotionBlur = zignal.MotionBlur;
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
+const enum_utils = @import("../enum_utils.zig");
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
 const c = py_utils.c;
@@ -49,6 +50,372 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
                 var out = @TypeOf(img).empty;
                 img.boxBlur(allocator, &out, @intCast(radius)) catch {
                     py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_median_blur_doc =
+    \\Apply a median blur (order-statistic filter) to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius in pixels. `0` returns an unmodified copy.
+    \\
+    \\## Notes
+    \\- Uses `BorderMode.MIRROR` at the image edges to avoid introducing artificial borders.
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("noisy.png")
+    \\denoised = img.median_blur(2)
+    \\```
+;
+
+pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    const kw = comptime py_utils.kw(&.{"radius"});
+    const format = std.fmt.comptimePrint("l", .{});
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.medianBlur(allocator, @intCast(radius), &out) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                        error.UnsupportedPixelType => py_utils.setValueError("median blur requires u8, RGB, or RGBA images", .{}),
+                        else => py_utils.setMemoryError("image operation"),
+                    }
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_min_blur_doc =
+    \\Apply a minimum filter (rank 0 percentile) to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius in pixels. `0` returns an unmodified copy.
+    \\- `border` (BorderMode, optional): Border handling strategy. Defaults to `BorderMode.MIRROR`.
+    \\
+    \\## Use case
+    \\- Morphological erosion to remove "salt" noise or shrink bright speckles.
+;
+
+pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    var border_obj: ?*c.PyObject = null;
+
+    const kw = comptime py_utils.kw(&.{ "radius", "border" });
+    const format = std.fmt.comptimePrint("l|O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    var border = zignal.BorderMode.mirror;
+    if (border_obj) |obj| {
+        if (obj == c.Py_None()) {
+            py_utils.setValueError("border must be a BorderMode enum", .{});
+            return null;
+        }
+        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.minBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => {
+                            py_utils.setValueError("radius must be > 0", .{});
+                        },
+                        error.UnsupportedPixelType => {
+                            py_utils.setValueError("min blur requires u8, RGB, or RGBA images", .{});
+                        },
+                        else => {
+                            py_utils.setMemoryError("image operation");
+                        },
+                    }
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_max_blur_doc =
+    \\Apply a maximum filter (rank 1 percentile) to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius in pixels.
+    \\- `border` (BorderMode, optional): Border handling strategy. Defaults to `BorderMode.MIRROR`.
+    \\
+    \\## Use case
+    \\- Morphological dilation to expand highlights or fill gaps in masks.
+;
+
+pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    var border_obj: ?*c.PyObject = null;
+
+    const kw = comptime py_utils.kw(&.{ "radius", "border" });
+    const format = std.fmt.comptimePrint("l|O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    var border = zignal.BorderMode.mirror;
+    if (border_obj) |obj| {
+        if (obj == c.Py_None()) {
+            py_utils.setValueError("border must be a BorderMode enum", .{});
+            return null;
+        }
+        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.maxBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => {
+                            py_utils.setValueError("radius must be > 0", .{});
+                        },
+                        error.UnsupportedPixelType => {
+                            py_utils.setValueError("max blur requires u8, RGB, or RGBA images", .{});
+                        },
+                        else => {
+                            py_utils.setMemoryError("image operation");
+                        },
+                    }
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_midpoint_blur_doc =
+    \\Apply a midpoint filter (average of min and max) to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius.
+    \\- `border` (BorderMode, optional): Border handling strategy. Defaults to `BorderMode.MIRROR`.
+    \\
+    \\## Use case
+    \\- Softens impulse noise while preserving thin edges (midpoint between min/max).
+;
+
+pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    var border_obj: ?*c.PyObject = null;
+
+    const kw = comptime py_utils.kw(&.{ "radius", "border" });
+    const format = std.fmt.comptimePrint("l|O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    var border = zignal.BorderMode.mirror;
+    if (border_obj) |obj| {
+        if (obj == c.Py_None()) {
+            py_utils.setValueError("border must be a BorderMode enum", .{});
+            return null;
+        }
+        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.midpointBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => {
+                            py_utils.setValueError("radius must be > 0", .{});
+                        },
+                        error.UnsupportedPixelType => {
+                            py_utils.setValueError("midpoint blur requires u8, RGB, or RGBA images", .{});
+                        },
+                        else => {
+                            py_utils.setMemoryError("image operation");
+                        },
+                    }
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_percentile_blur_doc =
+    \\Apply a percentile blur (order-statistic filter) to the image.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius defining the neighborhood window.
+    \\- `percentile` (float): Value in the range [0.0, 1.0] selecting which ordered pixel to keep.
+    \\- `border` (BorderMode, optional): Border handling strategy. Defaults to `BorderMode.MIRROR`.
+    \\
+    \\## Use case
+    \\- Fine control over ordered statistics (e.g., `percentile=0.1` suppresses bright outliers).
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("noisy.png")
+    \\median = img.percentile_blur(2, 0.5)
+    \\max_filter = img.percentile_blur(1, 1.0, border=zignal.BorderMode.ZERO)
+    \\```
+;
+
+pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    var percentile: f64 = 0.5;
+    var border_obj: ?*c.PyObject = null;
+
+    const kw = comptime py_utils.kw(&.{ "radius", "percentile", "border" });
+    const format = std.fmt.comptimePrint("ld|O", .{});
+    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &percentile, &border_obj) == 0) {
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const percentile_value = py_utils.validateRange(f64, percentile, 0.0, 1.0, "percentile") catch return null;
+    var border_mode = zignal.BorderMode.mirror;
+    if (border_obj) |obj| {
+        if (obj == c.Py_None()) {
+            py_utils.setValueError("border must be a BorderMode enum", .{});
+            return null;
+        }
+        border_mode = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.percentileBlur(allocator, @intCast(radius), percentile_value, &out, border_mode) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                        error.InvalidPercentile => py_utils.setValueError("percentile must be between 0 and 1", .{}),
+                        error.UnsupportedPixelType => py_utils.setValueError("percentile blur requires u8, RGB, or RGBA images", .{}),
+                        else => py_utils.setMemoryError("image operation"),
+                    }
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
+            },
+        }
+        return null;
+    }
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
+pub const image_alpha_trimmed_mean_blur_doc =
+    \\Apply an alpha-trimmed mean blur, discarding a fraction of low/high pixels.
+    \\
+    \\## Parameters
+    \\- `radius` (int): Non-negative blur radius.
+    \\- `trim_fraction` (float): Fraction in [0, 0.5) removed from both tails.
+    \\- `border` (BorderMode, optional): Border handling strategy. Defaults to `BorderMode.MIRROR`.
+    \\
+    \\## Use case
+    \\- Robust alternative to averaging that discards extremes (hot pixels, specular highlights).
+;
+
+pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    var radius_long: c_long = 0;
+    var trim_fraction: f64 = 0;
+    var border_obj: ?*c.PyObject = null;
+
+    const kw = comptime py_utils.kw(&.{ "radius", "trim_fraction", "border" });
+    const format = std.fmt.comptimePrint("ld|O", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &trim_fraction, &border_obj) == 0) {
+        return null;
+    }
+
+    if (!std.math.isFinite(trim_fraction)) {
+        py_utils.setValueError("trim_fraction must be finite", .{});
+        return null;
+    }
+
+    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    var border = zignal.BorderMode.mirror;
+    if (border_obj) |obj| {
+        if (obj == c.Py_None()) {
+            py_utils.setValueError("border must be a BorderMode enum", .{});
+            return null;
+        }
+        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+    }
+
+    if (self.py_image) |pimg| {
+        switch (pimg.data) {
+            inline else => |img| {
+                var out = @TypeOf(img).empty;
+                img.alphaTrimmedMeanBlur(allocator, @intCast(radius), trim_fraction, &out, border) catch |err| {
+                    switch (err) {
+                        error.InvalidRadius => {
+                            py_utils.setValueError("radius must be > 0", .{});
+                        },
+                        error.InvalidTrim => {
+                            py_utils.setValueError("trim_fraction must be in [0, 0.5)", .{});
+                        },
+                        error.UnsupportedPixelType => {
+                            py_utils.setValueError("alpha trimmed mean requires u8, RGB, or RGBA images", .{});
+                        },
+                        else => {
+                            py_utils.setMemoryError("image operation");
+                        },
+                    }
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -637,7 +1004,6 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Get blend mode (default to normal if not specified)
     var blend_mode = zignal.Blending.normal;
     if (mode_obj != null and mode_obj != c.Py_None()) {
-        const enum_utils = @import("../enum_utils.zig");
         blend_mode = enum_utils.pyToEnum(zignal.Blending, mode_obj.?) catch {
             return null; // Error already set
         };
