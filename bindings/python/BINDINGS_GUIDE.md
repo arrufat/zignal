@@ -8,7 +8,7 @@ This guide shows how to expose new Zignal APIs to Python using the patterns and 
   - `image/` (filters, transforms), `canvas.zig`, `matrix.zig`, `optimization.zig`, etc.
 - Register types/enums in `src/main.zig`.
 - Generate type stubs with `zig build python-stubs`.
-- Run tests with `cd bindings/python && uv run pytest -q`.
+- Run tests with `cd bindings/python && python -m pytest -q`.
 
 ## Conventions
 
@@ -29,25 +29,32 @@ Suppose Zignal adds `Image(T).medianBlur(radius: usize)`. To expose `image.media
 
 ```zig
 pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*ImageObject, @ptrCast(self_obj.?));
+    const self = py_utils.safeCast(ImageObject, self_obj);
 
     var radius_long: c_long = 0;
-    const kw = comptime py_utils.kw(&.{ "radius" });
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "l", @ptrCast(@constCast(&kw)), &radius_long) == 0) return null;
+    const kw = comptime py_utils.kw(&.{"radius"});
+    const format = std.fmt.comptimePrint("l", .{});
+    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
+        return null;
+    }
     const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
 
     if (self.py_image) |pimg| switch (pimg.data) {
         inline else => |img| {
             var out = @TypeOf(img).empty;
-            img.medianBlur(allocator, &out, @intCast(radius)) catch {
-                c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
+            img.medianBlur(allocator, @intCast(radius), &out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("median blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
                 return null;
             };
             return @ptrCast(moveImageToPython(out) orelse return null);
         },
     };
 
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
+    py_utils.setValueError("Image not initialized", .{});
     return null;
 }
 ```
@@ -60,8 +67,8 @@ pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
 
 ```bash
 zig build python-bindings
-cd bindings/python && uv run pytest -q
-zig build python-stubs
+cd bindings/python
+python -m pytest -q
 ```
 
 ## Adding a New Type
@@ -87,10 +94,9 @@ const type_table = [_]TypeReg{
 ## Testing
 
 - Prefer adding tests in `bindings/python/tests/test_*.py`.
-- Run: `cd bindings/python && uv run pytest -q`.
+- Run: `cd bindings/python && python -m pytest -q`.
 
 ## Troubleshooting
 
 - If Python headers/libs aren’t auto‑detected: set `PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, `PYTHON_LIB_NAME`.
-- If build cache permissions fail in sandboxed environments, rerun without sandboxing or with proper cache dirs.
-
+- Ensure Python 3.10 or newer is on PATH; the bindings target 3.10–3.13.
