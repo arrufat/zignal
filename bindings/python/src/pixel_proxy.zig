@@ -404,31 +404,27 @@ var rgba_proxy_getset = RgbaProxyBinding.generateGetSet();
 var rgb_proxy_methods = RgbProxyBinding.generateMethods();
 var rgba_proxy_methods = RgbaProxyBinding.generateMethods();
 
-pub var RgbPixelProxyType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.RgbPixelProxy",
-    .tp_basicsize = @sizeOf(RgbPixelProxy),
-    .tp_dealloc = RgbProxyBinding.dealloc,
-    .tp_repr = RgbProxyBinding.repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Proxy object for RGB pixel access",
-    .tp_methods = @ptrCast(&rgb_proxy_methods),
-    .tp_getset = @ptrCast(&rgb_proxy_getset),
-    .tp_richcompare = RgbProxyBinding.richcompare,
-};
+pub var RgbPixelProxyType = py_utils.buildTypeObject(.{
+    .name = "zignal.RgbPixelProxy",
+    .basicsize = @sizeOf(RgbPixelProxy),
+    .doc = "Proxy object for RGB pixel access",
+    .methods = @ptrCast(&rgb_proxy_methods),
+    .getset = @ptrCast(&rgb_proxy_getset),
+    .dealloc = RgbProxyBinding.dealloc,
+    .repr = RgbProxyBinding.repr,
+    .richcompare = RgbProxyBinding.richcompare,
+});
 
-pub var RgbaPixelProxyType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.RgbaPixelProxy",
-    .tp_basicsize = @sizeOf(RgbaPixelProxy),
-    .tp_dealloc = RgbaProxyBinding.dealloc,
-    .tp_repr = RgbaProxyBinding.repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Proxy object for RGBA pixel access",
-    .tp_methods = @ptrCast(&rgba_proxy_methods),
-    .tp_getset = @ptrCast(&rgba_proxy_getset),
-    .tp_richcompare = RgbaProxyBinding.richcompare,
-};
+pub var RgbaPixelProxyType = py_utils.buildTypeObject(.{
+    .name = "zignal.RgbaPixelProxy",
+    .basicsize = @sizeOf(RgbaPixelProxy),
+    .doc = "Proxy object for RGBA pixel access",
+    .methods = @ptrCast(&rgba_proxy_methods),
+    .getset = @ptrCast(&rgba_proxy_getset),
+    .dealloc = RgbaProxyBinding.dealloc,
+    .repr = RgbaProxyBinding.repr,
+    .richcompare = RgbaProxyBinding.richcompare,
+});
 
 pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) ?*c.PyObject {
     const proxy_obj = c.PyType_GenericAlloc(@ptrCast(&RgbPixelProxyType), 0);

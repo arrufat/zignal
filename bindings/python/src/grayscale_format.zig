@@ -12,13 +12,11 @@ fn grayscale_repr(self: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
     return c.PyUnicode_FromString("Grayscale");
 }
 
-pub var GrayscaleType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Grayscale",
-    .tp_basicsize = @sizeOf(GrayscaleTypeObject),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Grayscale image format (single channel, u8)",
-    .tp_new = null, // not instantiable; used as a sentinel
-    .tp_repr = grayscale_repr,
-    .tp_str = grayscale_repr,
-};
+pub var GrayscaleType = py_utils.buildTypeObject(.{
+    .name = "zignal.Grayscale",
+    .basicsize = @sizeOf(GrayscaleTypeObject),
+    .doc = "Grayscale image format (single channel, u8)",
+    .new = null, // not instantiable; used as a sentinel
+    .repr = grayscale_repr,
+    .str = grayscale_repr,
+});

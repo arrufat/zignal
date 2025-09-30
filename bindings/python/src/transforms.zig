@@ -163,19 +163,17 @@ var similarity_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var SimilarityTransformType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.SimilarityTransform",
-    .tp_basicsize = @sizeOf(SimilarityTransformObject),
-    .tp_dealloc = similarity_dealloc,
-    .tp_repr = similarity_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Similarity transform (rotation + uniform scale + translation)",
-    .tp_methods = &similarity_methods,
-    .tp_getset = &similarity_getset,
-    .tp_init = similarity_init,
-    .tp_new = similarity_new,
-};
+pub var SimilarityTransformType = py_utils.buildTypeObject(.{
+    .name = "zignal.SimilarityTransform",
+    .basicsize = @sizeOf(SimilarityTransformObject),
+    .doc = "Similarity transform (rotation + uniform scale + translation)",
+    .methods = @ptrCast(&similarity_methods),
+    .getset = @ptrCast(&similarity_getset),
+    .new = similarity_new,
+    .init = similarity_init,
+    .dealloc = similarity_dealloc,
+    .repr = similarity_repr,
+});
 
 // ============================================================================
 // AFFINE TRANSFORM
@@ -333,19 +331,17 @@ var affine_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var AffineTransformType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.AffineTransform",
-    .tp_basicsize = @sizeOf(AffineTransformObject),
-    .tp_dealloc = affine_dealloc,
-    .tp_repr = affine_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Affine transform (general 2D linear transform)",
-    .tp_methods = &affine_methods,
-    .tp_getset = &affine_getset,
-    .tp_init = affine_init,
-    .tp_new = affine_new,
-};
+pub var AffineTransformType = py_utils.buildTypeObject(.{
+    .name = "zignal.AffineTransform",
+    .basicsize = @sizeOf(AffineTransformObject),
+    .doc = "Affine transform (general 2D linear transform)",
+    .methods = @ptrCast(&affine_methods),
+    .getset = @ptrCast(&affine_getset),
+    .new = affine_new,
+    .init = affine_init,
+    .dealloc = affine_dealloc,
+    .repr = affine_repr,
+});
 
 // ============================================================================
 // PROJECTIVE TRANSFORM
@@ -545,19 +541,17 @@ var projective_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var ProjectiveTransformType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.ProjectiveTransform",
-    .tp_basicsize = @sizeOf(ProjectiveTransformObject),
-    .tp_dealloc = projective_dealloc,
-    .tp_repr = projective_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Projective transform (homography/perspective transform)",
-    .tp_methods = &projective_methods,
-    .tp_getset = &projective_getset,
-    .tp_init = projective_init,
-    .tp_new = projective_new,
-};
+pub var ProjectiveTransformType = py_utils.buildTypeObject(.{
+    .name = "zignal.ProjectiveTransform",
+    .basicsize = @sizeOf(ProjectiveTransformObject),
+    .doc = "Projective transform (homography/perspective transform)",
+    .methods = @ptrCast(&projective_methods),
+    .getset = @ptrCast(&projective_getset),
+    .new = projective_new,
+    .init = projective_init,
+    .dealloc = projective_dealloc,
+    .repr = projective_repr,
+});
 
 // ============================================================================
 // STUB GENERATION METADATA

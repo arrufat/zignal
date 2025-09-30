@@ -107,16 +107,14 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return result;
 }
 
-pub var PixelIteratorType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.PixelIterator",
-    .tp_basicsize = @sizeOf(PixelIteratorObject),
-    .tp_dealloc = pixel_iterator_dealloc,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = pixel_iterator_doc,
-    .tp_iter = pixel_iterator_iter,
-    .tp_iternext = pixel_iterator_next,
-};
+pub var PixelIteratorType = py_utils.buildTypeObject(.{
+    .name = "zignal.PixelIterator",
+    .basicsize = @sizeOf(PixelIteratorObject),
+    .doc = pixel_iterator_doc,
+    .dealloc = pixel_iterator_dealloc,
+    .iter = pixel_iterator_iter,
+    .iternext = pixel_iterator_next,
+});
 
 /// Create a new iterator bound to the given Image PyObject
 pub fn new(image_obj: ?*c.PyObject) ?*c.PyObject {
