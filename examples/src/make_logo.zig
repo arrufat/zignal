@@ -40,7 +40,7 @@ pub fn main() !void {
     // Add decorative elements
     drawDecorativeElements(&canvas);
 
-    std.debug.print("{f}\n", .{image.display(.auto)});
+    std.debug.print("{f}\n", .{image.display(.{ .auto = .{} })});
 
     // Save the logo
     try image.save(allocator, "zignal_logo.png");
