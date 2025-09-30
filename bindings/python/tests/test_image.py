@@ -391,3 +391,51 @@ class TestImage:
         rgba = zignal.Image(5, 5, (100, 150, 200, 255), dtype=zignal.Rgba)
         equalized_rgba = rgba.equalize()
         assert equalized_rgba.rows == 5 and equalized_rgba.cols == 5
+
+    def test_canny(self):
+        # Create simple test image
+        img = zignal.Image(20, 20, dtype=zignal.Grayscale)
+
+        # Test with defaults
+        edges = img.canny()
+        assert edges.rows == 20 and edges.cols == 20
+        assert edges.dtype == zignal.Grayscale
+
+        # Test with custom parameters
+        edges = img.canny(sigma=1.0, low=30, high=90)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # Test with sigma=0 (no blur)
+        edges = img.canny(sigma=0)
+        assert edges.rows == 20 and edges.cols == 20
+
+        # Test parameter validation
+        with pytest.raises(ValueError):
+            img.canny(sigma=-1)
+
+    def test_canny_rejects_non_finite(self):
+        img = zignal.Image(20, 20, dtype=zignal.Grayscale)
+
+        # Test NaN
+        with pytest.raises(ValueError):
+            img.canny(sigma=float("nan"))
+        with pytest.raises(ValueError):
+            img.canny(low=float("nan"))
+        with pytest.raises(ValueError):
+            img.canny(high=float("nan"))
+
+        # Test infinity
+        with pytest.raises(ValueError):
+            img.canny(sigma=float("inf"))
+        with pytest.raises(ValueError):
+            img.canny(low=float("inf"))
+        with pytest.raises(ValueError):
+            img.canny(high=float("inf"))
+
+        # Test negative infinity
+        with pytest.raises(ValueError):
+            img.canny(sigma=float("-inf"))
+        with pytest.raises(ValueError):
+            img.canny(low=float("-inf"))
+        with pytest.raises(ValueError):
+            img.canny(high=float("-inf"))

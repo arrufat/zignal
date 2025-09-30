@@ -1211,6 +1211,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "canny",
+            .meth = @ptrCast(&filtering.image_canny),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_canny_doc,
+            .params = "self, sigma: float = 1.4, low: float = 50, high: float = 150",
+            .returns = "Image",
+        },
+        .{
             .name = "blend",
             .meth = @ptrCast(&filtering.image_blend),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,

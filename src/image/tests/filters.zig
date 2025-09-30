@@ -1113,3 +1113,125 @@ test "gaussianBlur with sigma=0" {
         }
     }
 }
+
+test "canny edge detection basic" {
+    // Test basic Canny edge detection on a simple vertical edge
+    var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a vertical edge at column 5
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = if (c < 5) 0 else 255;
+        }
+    }
+
+    var edges: Image(u8) = .empty;
+    try image.canny(std.testing.allocator, 1.0, 50, 100, &edges);
+    defer edges.deinit(std.testing.allocator);
+
+    try expectEqual(image.rows, edges.rows);
+    try expectEqual(image.cols, edges.cols);
+
+    // Should detect an edge somewhere near column 5
+    var edge_detected = false;
+    for (0..edges.rows) |r| {
+        for (4..7) |c| {
+            if (edges.at(r, c).* > 0) {
+                edge_detected = true;
+                break;
+            }
+        }
+    }
+    try expectEqual(true, edge_detected);
+}
+
+test "canny edge detection parameter validation" {
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    var edges: Image(u8) = .empty;
+    defer if (edges.data.len > 0) edges.deinit(std.testing.allocator);
+
+    // Test sigma=0 is valid (no blur)
+    try image.canny(std.testing.allocator, 0, 50, 100, &edges);
+    edges.deinit(std.testing.allocator);
+    edges = .empty;
+
+    // Test invalid sigma
+    try expectError(error.InvalidSigma, image.canny(std.testing.allocator, -1, 50, 100, &edges));
+
+    // Test invalid thresholds
+    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, -1, 100, &edges));
+    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, 50, -1, &edges));
+    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, 100, 50, &edges));
+}
+
+test "canny rejects non-finite parameters" {
+    var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
+    defer image.deinit(std.testing.allocator);
+
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            image.at(r, c).* = @intCast(r * 10 + c);
+        }
+    }
+
+    var edges: Image(u8) = .empty;
+    defer if (edges.data.len > 0) edges.deinit(std.testing.allocator);
+
+    // Test NaN
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, std.math.nan(f32), 50, 100, &edges));
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, std.math.nan(f32), 100, &edges));
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, 50, std.math.nan(f32), &edges));
+
+    // Test infinity
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, std.math.inf(f32), 50, 100, &edges));
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, std.math.inf(f32), 100, &edges));
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, 50, std.math.inf(f32), &edges));
+
+    // Test negative infinity
+    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, -std.math.inf(f32), 50, 100, &edges));
+}
+
+test "canny edge detection on RGB" {
+    // Test that Canny works with RGB images (converts to grayscale internally)
+    var image: Image(Rgb) = try .init(std.testing.allocator, 8, 8);
+    defer image.deinit(std.testing.allocator);
+
+    // Create a colored vertical edge
+    for (0..image.rows) |r| {
+        for (0..image.cols) |c| {
+            if (c < 4) {
+                image.at(r, c).* = .{ .r = 255, .g = 0, .b = 0 };
+            } else {
+                image.at(r, c).* = .{ .r = 0, .g = 255, .b = 0 };
+            }
+        }
+    }
+
+    var edges: Image(u8) = .empty;
+    try image.canny(std.testing.allocator, 1.0, 30, 90, &edges);
+    defer edges.deinit(std.testing.allocator);
+
+    try expectEqual(image.rows, edges.rows);
+    try expectEqual(image.cols, edges.cols);
+
+    // Should detect the edge
+    var edge_detected = false;
+    for (0..edges.rows) |r| {
+        for (3..6) |c| {
+            if (edges.at(r, c).* > 0) {
+                edge_detected = true;
+                break;
+            }
+        }
+    }
+    try expectEqual(true, edge_detected);
+}

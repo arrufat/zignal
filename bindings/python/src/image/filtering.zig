@@ -923,6 +923,104 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     return null;
 }
 
+pub const image_canny_doc =
+    \\Apply Canny edge detection to the image.
+    \\
+    \\The Canny algorithm is a classic multi-stage edge detector that produces thin,
+    \\well-localized edges with good noise suppression. It consists of five main steps:
+    \\1. Gaussian smoothing to reduce noise
+    \\2. Gradient computation using Sobel operators
+    \\3. Non-maximum suppression to thin edges
+    \\4. Double thresholding to classify strong and weak edges
+    \\5. Edge tracking by hysteresis to link edges
+    \\
+    \\Returns a binary edge map where edges are 255 (white) and non-edges are 0 (black).
+    \\
+    \\## Parameters
+    \\- `sigma` (float, optional): Standard deviation for Gaussian blur. Default: 1.4.
+    \\                             Typical values: 1.0-2.0. Higher values = more smoothing, fewer edges.
+    \\- `low` (float, optional): Lower threshold for hysteresis. Default: 50.
+    \\- `high` (float, optional): Upper threshold for hysteresis. Default: 150.
+    \\                            Should be 2-3x larger than `low`.
+    \\
+    \\## Returns
+    \\A new grayscale image (`dtype=zignal.Grayscale`) with binary edge map.
+    \\
+    \\## Raises
+    \\- `ValueError`: If sigma < 0, thresholds are negative, or low >= high
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image.load("photo.png")
+    \\
+    \\# Use defaults (sigma=1.4, low=50, high=150)
+    \\edges = img.canny()
+    \\
+    \\# Custom parameters - more aggressive edge detection (lower thresholds)
+    \\edges_sensitive = img.canny(sigma=1.0, low=30, high=90)
+    \\
+    \\# Conservative edge detection (higher thresholds)
+    \\edges_conservative = img.canny(sigma=2.0, low=100, high=200)
+    \\```
+;
+
+pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    const Params = struct {
+        sigma: f64 = 1.4,
+        low: f64 = 50,
+        high: f64 = 150,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    // Validate parameters are finite first
+    if (!std.math.isFinite(params.sigma)) {
+        py_utils.setValueError("sigma must be finite", .{});
+        return null;
+    }
+    if (!std.math.isFinite(params.low) or !std.math.isFinite(params.high)) {
+        py_utils.setValueError("thresholds must be finite", .{});
+        return null;
+    }
+
+    const sigma = py_utils.validateNonNegative(f32, params.sigma, "sigma") catch return null;
+    const low = py_utils.validateNonNegative(f32, params.low, "low") catch return null;
+    const high = py_utils.validateNonNegative(f32, params.high, "high") catch return null;
+
+    if (low >= high) {
+        py_utils.setValueError("low must be less than high", .{});
+        return null;
+    }
+
+    if (self.py_image) |pimg| {
+        var out = Image(u8).empty;
+
+        // Apply Canny edge detection
+        switch (pimg.data) {
+            inline else => |img| {
+                img.canny(allocator, sigma, low, high, &out) catch |err| {
+                    if (err == error.InvalidParameter) {
+                        py_utils.setValueError("parameters must be finite numbers", .{});
+                    } else if (err == error.InvalidSigma) {
+                        py_utils.setValueError("sigma must be non-negative", .{});
+                    } else if (err == error.InvalidThreshold) {
+                        py_utils.setValueError("thresholds are invalid", .{});
+                    } else {
+                        py_utils.setMemoryError("image operation");
+                    }
+                    return null;
+                };
+            },
+        }
+        return @ptrCast(moveImageToPython(out) orelse return null);
+    }
+
+    py_utils.setValueError("Image not initialized", .{});
+    return null;
+}
+
 pub const image_blend_doc =
     \\Blend an overlay image onto this image using the specified blend mode.
     \\

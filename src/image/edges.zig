@@ -209,6 +209,106 @@ pub fn Edges(comptime T: type) type {
             // Apply hysteresis thresholding with computed thresholds
             try applyHysteresis(edges_for_thresh, gradients, t_low, t_high, out, allocator);
         }
+
+        /// Applies the Canny edge detection algorithm, a classic multi-stage edge detector.
+        /// This algorithm produces thin, well-localized edges with good noise suppression.
+        ///
+        /// The Canny algorithm consists of five main steps:
+        /// 1. Gaussian smoothing to reduce noise
+        /// 2. Gradient computation using Sobel operators
+        /// 3. Non-maximum suppression to thin edges
+        /// 4. Double thresholding to classify strong and weak edges
+        /// 5. Edge tracking by hysteresis to link edges
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers
+        /// - `sigma`: Standard deviation for Gaussian blur (typical: 1.0-2.0)
+        /// - `low_threshold`: Lower threshold for hysteresis (0-255)
+        /// - `high_threshold`: Upper threshold for hysteresis (0-255)
+        /// - `out`: Output edge map as binary image (0 or 255)
+        ///
+        /// Note: high_threshold should be 2-3x larger than low_threshold
+        pub fn canny(
+            self: Image(T),
+            allocator: Allocator,
+            sigma: f32,
+            low_threshold: f32,
+            high_threshold: f32,
+            out: *Image(u8),
+        ) !void {
+            // Check for non-finite values first to prevent runtime traps
+            if (!std.math.isFinite(sigma) or !std.math.isFinite(low_threshold) or !std.math.isFinite(high_threshold)) {
+                return error.InvalidParameter;
+            }
+            if (sigma < 0) return error.InvalidSigma;
+            if (low_threshold < 0 or high_threshold < 0) return error.InvalidThreshold;
+            if (low_threshold >= high_threshold) return error.InvalidThreshold;
+
+            // Ensure output is allocated
+            if (!self.hasSameShape(out.*)) {
+                if (out.data.len > 0) out.deinit(allocator);
+                out.* = try Image(u8).init(allocator, self.rows, self.cols);
+            }
+
+            // Step 1: Convert to grayscale float for processing
+            var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
+            defer gray_float.deinit(allocator);
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const gray_val = convertColor(u8, self.at(r, c).*);
+                    gray_float.at(r, c).* = as(f32, gray_val);
+                }
+            }
+
+            // Step 2: Apply Gaussian blur (or skip if sigma == 0)
+            var blurred = try Image(f32).init(allocator, self.rows, self.cols);
+            defer blurred.deinit(allocator);
+            if (sigma == 0) {
+                // No blur - just copy
+                @memcpy(blurred.data, gray_float.data);
+            } else {
+                try blurGaussian(gray_float, sigma, &blurred, allocator);
+            }
+
+            // Step 3: Compute gradients using Sobel operators
+            const sobel_x = [3][3]f32{
+                .{ -1, 0, 1 },
+                .{ -2, 0, 2 },
+                .{ -1, 0, 1 },
+            };
+            const sobel_y = [3][3]f32{
+                .{ -1, -2, -1 },
+                .{ 0, 0, 0 },
+                .{ 1, 2, 1 },
+            };
+
+            var grad_x = Image(f32).empty;
+            var grad_y = Image(f32).empty;
+            defer grad_x.deinit(allocator);
+            defer grad_y.deinit(allocator);
+
+            try convolve(f32, blurred, allocator, sobel_x, &grad_x, .replicate);
+            try convolve(f32, blurred, allocator, sobel_y, &grad_y, .replicate);
+
+            // Compute gradient magnitude
+            var magnitude = try Image(f32).init(allocator, self.rows, self.cols);
+            defer magnitude.deinit(allocator);
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const gx = grad_x.at(r, c).*;
+                    const gy = grad_y.at(r, c).*;
+                    magnitude.at(r, c).* = @sqrt(gx * gx + gy * gy);
+                }
+            }
+
+            // Step 4: Non-maximum suppression
+            var nms_edges = try Image(u8).init(allocator, self.rows, self.cols);
+            defer nms_edges.deinit(allocator);
+            try nonMaxSuppressionCanny(grad_x, grad_y, magnitude, &nms_edges);
+
+            // Step 5: Double thresholding and hysteresis
+            try applyHysteresis(nms_edges, magnitude, low_threshold, high_threshold, out, allocator);
+        }
     };
 }
 
@@ -592,6 +692,114 @@ fn nonMaxSuppressEdges(
             const m = gradients.at(r, c).*;
             const n1 = gradients.at(@intCast(@as(isize, @intCast(r)) + dr1), @intCast(@as(isize, @intCast(c)) + dc1)).*;
             const n2 = gradients.at(@intCast(@as(isize, @intCast(r)) + dr2), @intCast(@as(isize, @intCast(c)) + dc2)).*;
+
+            if (m >= n1 and m >= n2) {
+                edges_out.at(r, c).* = 255;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Canny Edge Detection Helper Functions
+// ============================================================================
+
+/// Applies Gaussian blur to an image for Canny edge detection preprocessing.
+/// Uses separable convolution for efficiency.
+fn blurGaussian(src: Image(f32), sigma: f32, dst: *Image(f32), allocator: Allocator) !void {
+    // Calculate kernel size (3 sigma on each side)
+    const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
+    const kernel_size = 2 * radius + 1;
+
+    // Generate 1D Gaussian kernel
+    var kernel = try allocator.alloc(f32, kernel_size);
+    defer allocator.free(kernel);
+
+    var sum: f32 = 0;
+    for (0..kernel_size) |i| {
+        const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius));
+        kernel[i] = @exp(-(x * x) / (2.0 * sigma * sigma));
+        sum += kernel[i];
+    }
+
+    // Normalize kernel
+    for (kernel) |*k| {
+        k.* /= sum;
+    }
+
+    // Apply separable convolution
+    const convolution_mod = @import("convolution.zig");
+    try convolution_mod.convolveSeparable(f32, src, allocator, kernel, kernel, dst, .replicate);
+}
+
+/// Non-maximum suppression specifically for Canny edge detection.
+/// Suppresses gradient magnitudes that are not local maxima along the gradient direction.
+/// Marks pixels as 255 if they survive NMS, 0 otherwise.
+fn nonMaxSuppressionCanny(
+    grad_x: Image(f32),
+    grad_y: Image(f32),
+    magnitude: Image(f32),
+    edges_out: *Image(u8),
+) !void {
+    const rows = magnitude.rows;
+    const cols = magnitude.cols;
+
+    // Initialize output to zero
+    for (0..rows) |r| {
+        for (0..cols) |c| {
+            edges_out.at(r, c).* = 0;
+        }
+    }
+
+    // Constants for direction quantization without atan2
+    const K: f32 = 0.414213562; // tan(22.5°)
+
+    if (rows < 3 or cols < 3) return; // Too small to compute central differences
+
+    // Skip image border to avoid bounds checks; border remains zero
+    for (1..rows - 1) |r| {
+        for (1..cols - 1) |c| {
+            const gx = grad_x.at(r, c).*;
+            const gy = grad_y.at(r, c).*;
+
+            const ax = @abs(gx);
+            const ay = @abs(gy);
+
+            // Choose neighbor offsets along quantized direction
+            var dr1: isize = 0;
+            var dc1: isize = 0;
+            var dr2: isize = 0;
+            var dc2: isize = 0;
+
+            if (ay <= K * ax) {
+                // 0°: compare left/right
+                dr1 = 0;
+                dc1 = -1;
+                dr2 = 0;
+                dc2 = 1;
+            } else if (ax <= K * ay) {
+                // 90°: compare up/down
+                dr1 = -1;
+                dc1 = 0;
+                dr2 = 1;
+                dc2 = 0;
+            } else if (gx * gy > 0) {
+                // 45°: up-right and down-left
+                dr1 = -1;
+                dc1 = 1;
+                dr2 = 1;
+                dc2 = -1;
+            } else {
+                // 135°: up-left and down-right
+                dr1 = -1;
+                dc1 = -1;
+                dr2 = 1;
+                dc2 = 1;
+            }
+
+            const m = magnitude.at(r, c).*;
+            const n1 = magnitude.at(@intCast(@as(isize, @intCast(r)) + dr1), @intCast(@as(isize, @intCast(c)) + dc1)).*;
+            const n2 = magnitude.at(@intCast(@as(isize, @intCast(r)) + dr2), @intCast(@as(isize, @intCast(c)) + dc2)).*;
 
             if (m >= n1 and m >= n2) {
                 edges_out.at(r, c).* = 255;
