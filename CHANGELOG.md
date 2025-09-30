@@ -1,24 +1,83 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2025-09-30
+
+### Major Features
+
+#### Image Processing
+- **Binary Image Operations**: Complete thresholding and morphology suite
+  - Otsu and adaptive mean thresholding
+  - Morphological operations: erosion, dilation, opening, closing
+- **Order-Statistic Filters**: Median, minimum, maximum blur filters
+  - Edge-preserving noise reduction with configurable kernel sizes
+- **Image Enhancement**: Histogram equalization and autocontrast
+  - Adaptive contrast enhancement for improved visibility
+- **Edge Detection**: Advanced edge detection algorithms
+  - **Canny Edge Detection**: Classic multi-stage edge detector with Gaussian smoothing, Sobel gradients, non-maximum suppression, and hysteresis thresholding
+  - **Shen-Castan**: Edge detection with ISEF smoothing and adaptive gradient computation
+- **Canvas Drawing**: Added `drawImage` method for image compositing
+  - Support for blending modes during insertion
+
+#### Format Support
+- **JPEG Encoder**: Complete baseline JPEG encoding implementation
+  - DCT-based compression with quality control
+  - Support for grayscale and RGB images
+  - Optimized encoding performance
+
+#### Compression
+- **Deflate/Zlib/Gzip**: Full compression implementation
+  - Multiple compression levels and strategies
+  - Dynamic Huffman encoding
+  - LZ77 hash-based compression
+  - Compatible with standard zlib format
+
+#### Matrix Improvements
+- **Chainable Operations API**: Simplified matrix operations
+  - Direct method chaining: `matrix.transpose().inverse().eval()`
+  - Deferred error checking at terminal operations
+  - Added `dupe()` method for explicit copying
 
 ### Breaking Changes
-- **Matrix API Refactoring**: Removed `OpsBuilder` and merged all functionality directly into `Matrix`
-  - Operations are now chainable directly on Matrix: `matrix.transpose().inverse().eval()`
-  - Errors are deferred and checked at terminal operation (`.eval()`)
-  - For operation chains, use `ArenaAllocator` to manage intermediate allocations
-  - All SIMD optimizations preserved, including optimized GEMM operations
-  - Added `Matrix.dupe(allocator)` to explicitly copy before in-place chains and avoid aliasing/double-free issues.
+- **Image Processing**: Removed `differenceOfGaussians`, easy to do manually
+- **Matrix API**: Removed `OpsBuilder`, merged functionality into `Matrix`
+  - Use `ArenaAllocator` for managing intermediate allocations in chains
+  - All SIMD optimizations preserved
+- **YCbCr Color Space**: Components now use `u8` type instead of other numeric types
+- **Alpha Compositing**: Corrected blend mode compositing behavior
+
+### Architecture Improvements
+- **Image Module Reorganization**: Separated into focused sub-modules
+  - `image/binary.zig` - Binary operations and morphology
+  - `image/convolution.zig` - Convolution framework
+  - `image/edges.zig` - Edge detection algorithms
+  - `image/enhancement.zig` - Histogram and contrast operations
+  - `image/histogram.zig` - Histogram computation
+  - `image/integral.zig` - Integral image operations
+  - `image/motion_blur.zig` - Motion blur effects
+  - `image/order_statistic_blur.zig` - Order-statistic filters
+- **Compression Modules**: Modular compression implementation
+  - Separate modules for deflate, zlib, gzip, huffman, and LZ77
+- **ORB Feature Detection**: Improved with learned BRIEF patterns
 
 ### Python Bindings
-- Consolidated CPython type registration in `bindings/python/src/main.zig` via a compile‑time table + loop.
-- Added `py_utils.kw(...)` helper to build CPython kwlists; adopted across transforms, canvas (including macro‑generated methods), filtering, matrix, PCA, motion blur, pixel proxy, rectangle.
-- Introduced numeric validators in `py_utils.zig` and normalized error messages:
-  - `validatePositive`, `validateNonNegative`, `validateRange` used for consistent ValueError messages.
-  - Standardized tuple messages to "size/shape must be a 2‑tuple of (rows, cols)".
-- Unified enum registration/parsing using `enum_utils.zig` (DrawMode, Blending, Interpolation, OptimizationPolicy).
-- Reduced boilerplate for returning new images with `moveImageToPython`.
-- All Python tests pass (`uv run pytest`), stubs generate successfully.
+- Standardized argument parsing with `py_utils.kw()` helper
+- Numeric validators for consistent error messages
+- Unified enum registration system via `enum_utils.zig`
+- Consolidated type registration with compile-time tables
+- Reduced boilerplate with `moveImageToPython` helper
+
+### Performance Optimizations
+- SIMD-optimized f32 separable convolution
+- Vectorized DoG and Gaussian blur calculations
+- Optimized JPEG encoding with fast DCT
+- Improved PNG compression configuration
+
+### Bug Fixes
+- Fixed alpha compositing for blend modes
+- Corrected JPEG restart marker handling and partial MCU decoding
+- Improved PNG filter selection alignment with spec
+- Fixed DoG filter output with offset handling
+- Better memory management for convolution operations
 
 ## [0.5.1] - 2025-09-03
 
