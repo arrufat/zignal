@@ -908,6 +908,42 @@ pub fn Image(comptime T: type) type {
             return Edges(T).shenCastan(self, allocator, opts, out);
         }
 
+        /// Applies the Canny edge detection algorithm, a classic multi-stage edge detector.
+        /// This algorithm produces thin, well-localized edges with good noise suppression.
+        ///
+        /// The Canny algorithm consists of five main steps:
+        /// 1. Gaussian smoothing to reduce noise
+        /// 2. Gradient computation using Sobel operators
+        /// 3. Non-maximum suppression to thin edges
+        /// 4. Double thresholding to classify strong and weak edges
+        /// 5. Edge tracking by hysteresis to link edges
+        ///
+        /// Parameters:
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `sigma`: Standard deviation for Gaussian blur (typical: 1.0-2.0).
+        /// - `low_threshold`: Lower threshold for hysteresis (0-255).
+        /// - `high_threshold`: Upper threshold for hysteresis (0-255).
+        /// - `out`: Output edge map as binary image (0 or 255).
+        ///
+        /// Note: `high_threshold` should be 2-3x larger than `low_threshold` for best results.
+        ///
+        /// Example:
+        /// ```zig
+        /// var edges: Image(u8) = .empty;
+        /// try image.canny(allocator, 1.4, 50, 150, &edges);
+        /// defer edges.deinit(allocator);
+        /// ```
+        pub fn canny(
+            self: Self,
+            allocator: Allocator,
+            sigma: f32,
+            low_threshold: f32,
+            high_threshold: f32,
+            out: *Image(u8),
+        ) !void {
+            return Edges(T).canny(self, allocator, sigma, low_threshold, high_threshold, out);
+        }
+
         /// Applies motion blur effect to the image.
         /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
         ///
