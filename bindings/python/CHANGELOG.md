@@ -1,23 +1,36 @@
 # Python Bindings Changelog
 
-## [Unreleased]
+## [0.6.0] - 2025-09-30
 
 ### Added
-- `py_utils.kw(&.{ ... })` helper for building CPython kwlists at comptime.
-- `validatePositive`, `validateNonNegative`, `validateRange` numeric validators with consistent error messages.
-- Binding conventions documented (see BINDINGS_GUIDE.md) for enums, arg parsing, image wrapping, and exceptions.
+- **Binary Image Operations**: Thresholding and morphology functions
+  - `threshold_otsu()`, `threshold_adaptive_mean()`
+  - `erode()`, `dilate()`, `opening()`, `closing()`
+- **Order-Statistic Filters**: Edge-preserving blur methods
+  - `blur_median()`, `blur_min()`, `blur_max()`
+- **Image Enhancement**: Histogram and contrast operations
+  - `equalize()` - Histogram equalization
+  - `autocontrast()` - Automatic contrast adjustment
+- **Edge Detection**: Advanced edge detection algorithms
+  - `canny()` - Classic Canny edge detector with configurable sigma and thresholds (defaults: sigma=1.4, low=50, high=150)
+  - `shen_castan()` - Edge detection with ISEF smoothing and adaptive gradient computation
+- **Canvas**: `draw_image()` method for compositing images with blending
+- **Image I/O**: `save()` method now supports JPEG format
+- Binding conventions documented in `BINDINGS_GUIDE.md`
 
 ### Changed
-- Consolidated type registration in `src/main.zig` using a compile‑time table.
-- Adopted kw helper across the codebase (transforms, canvas, filtering, matrix, PCA, motion blur, pixel proxy, rectangle).
-- Normalized tuple error messages to "size/shape must be a 2‑tuple of (rows, cols)".
-- Moved new‑image return paths to `moveImageToPython` to reduce duplication.
+- **API Improvements**: Standardized argument parsing across all modules
+  - `py_utils.kw()` helper for CPython keyword argument lists
+  - Numeric validators (`validatePositive`, `validateNonNegative`, `validateRange`)
+  - Consistent error messages for invalid inputs
+- **Type Registration**: Consolidated in `src/main.zig` using compile-time tables
+- **Enum Handling**: Unified registration and parsing via `enum_utils.zig`
+- **Image Creation**: Simplified with `moveImageToPython` helper
+- Normalized tuple error messages to "size/shape must be a 2-tuple of (rows, cols)"
 
 ### Fixed
-- Improved consistency of Python exceptions (TypeError vs ValueError) and messages across APIs.
-
-### Quality
-- 77 tests passing with `uv run pytest`; stubs regenerated via `zig build python-stubs`.
+- Improved consistency of Python exceptions (TypeError vs ValueError)
+- Better error messages across all APIs
 
 ## [0.5.1] - 2025-09-03
 
