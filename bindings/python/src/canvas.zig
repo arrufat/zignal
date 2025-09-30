@@ -328,12 +328,13 @@ fn canvas_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const self = py_utils.safeCast(CanvasObject, self_obj);
 
     // Parse color argument
-    var color_obj: ?*c.PyObject = undefined;
-    const kw = comptime py_utils.kw(&.{"color"});
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &color_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        color: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const color_obj = params.color;
 
     // Parse color and fill
     const rgba = color_utils.parseColor(Rgba, @ptrCast(color_obj)) catch return null;

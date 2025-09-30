@@ -136,13 +136,15 @@ pub fn image_threshold_adaptive_mean(self_obj: ?*c.PyObject, args: ?*c.PyObject,
         return null;
     }
 
-    var radius_long: c_long = 6;
-    var c_value: f64 = 5.0;
-    const kw = comptime py_utils.kw(&.{ "radius", "c" });
-    const format = std.fmt.comptimePrint("|ld", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &c_value) == 0) {
-        return null;
-    }
+    const Params = struct {
+        radius: c_long = 6,
+        c: f64 = 5.0,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const radius_long = params.radius;
+    const c_value = params.c;
 
     if (!std.math.isFinite(c_value)) {
         py_utils.setValueError("c must be finite", .{});
@@ -219,14 +221,14 @@ pub const image_dilate_binary_doc =
 
 pub fn image_dilate_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
-    var kernel_size_long: c_long = 3;
-    var iterations_long: c_long = 1;
-    const kw = comptime py_utils.kw(&.{ "kernel_size", "iterations" });
-    const format = std.fmt.comptimePrint("|ll", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &kernel_size_long, &iterations_long) == 0) {
-        return null;
-    }
-    return morphologyCommon(self, kernel_size_long, iterations_long, .dilate);
+    const Params = struct {
+        kernel_size: c_long = 3,
+        iterations: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    return morphologyCommon(self, params.kernel_size, params.iterations, .dilate);
 }
 
 pub const image_erode_binary_doc =
@@ -237,14 +239,14 @@ pub const image_erode_binary_doc =
 
 pub fn image_erode_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
-    var kernel_size_long: c_long = 3;
-    var iterations_long: c_long = 1;
-    const kw = comptime py_utils.kw(&.{ "kernel_size", "iterations" });
-    const format = std.fmt.comptimePrint("|ll", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &kernel_size_long, &iterations_long) == 0) {
-        return null;
-    }
-    return morphologyCommon(self, kernel_size_long, iterations_long, .erode);
+    const Params = struct {
+        kernel_size: c_long = 3,
+        iterations: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    return morphologyCommon(self, params.kernel_size, params.iterations, .erode);
 }
 
 pub const image_open_binary_doc =
@@ -255,14 +257,14 @@ pub const image_open_binary_doc =
 
 pub fn image_open_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
-    var kernel_size_long: c_long = 3;
-    var iterations_long: c_long = 1;
-    const kw = comptime py_utils.kw(&.{ "kernel_size", "iterations" });
-    const format = std.fmt.comptimePrint("|ll", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &kernel_size_long, &iterations_long) == 0) {
-        return null;
-    }
-    return morphologyCommon(self, kernel_size_long, iterations_long, .open);
+    const Params = struct {
+        kernel_size: c_long = 3,
+        iterations: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    return morphologyCommon(self, params.kernel_size, params.iterations, .open);
 }
 
 pub const image_close_binary_doc =
@@ -273,12 +275,12 @@ pub const image_close_binary_doc =
 
 pub fn image_close_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
-    var kernel_size_long: c_long = 3;
-    var iterations_long: c_long = 1;
-    const kw = comptime py_utils.kw(&.{ "kernel_size", "iterations" });
-    const format = std.fmt.comptimePrint("|ll", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &kernel_size_long, &iterations_long) == 0) {
-        return null;
-    }
-    return morphologyCommon(self, kernel_size_long, iterations_long, .close);
+    const Params = struct {
+        kernel_size: c_long = 3,
+        iterations: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    return morphologyCommon(self, params.kernel_size, params.iterations, .close);
 }

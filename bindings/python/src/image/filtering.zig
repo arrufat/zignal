@@ -33,16 +33,11 @@ pub const image_box_blur_doc =
 pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments
-    var radius_long: c_long = 0;
-    const kw = comptime py_utils.kw(&.{"radius"});
-    const format = std.fmt.comptimePrint("l", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
-        return null;
-    }
+    const Params = struct { radius: c_long };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -80,15 +75,11 @@ pub const image_median_blur_doc =
 pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    const kw = comptime py_utils.kw(&.{"radius"});
-    const format = std.fmt.comptimePrint("l", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
-        return null;
-    }
+    const Params = struct { radius: c_long };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -125,18 +116,16 @@ pub const image_min_blur_doc =
 pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    var border_obj: ?*c.PyObject = null;
+    const Params = struct {
+        radius: c_long,
+        border: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "radius", "border" });
-    const format = std.fmt.comptimePrint("l|O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
-        return null;
-    }
-
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
     var border = zignal.BorderMode.mirror;
-    if (border_obj) |obj| {
+    if (params.border) |obj| {
         if (obj == c.Py_None()) {
             py_utils.setValueError("border must be a BorderMode enum", .{});
             return null;
@@ -185,18 +174,16 @@ pub const image_max_blur_doc =
 pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    var border_obj: ?*c.PyObject = null;
+    const Params = struct {
+        radius: c_long,
+        border: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "radius", "border" });
-    const format = std.fmt.comptimePrint("l|O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
-        return null;
-    }
-
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
     var border = zignal.BorderMode.mirror;
-    if (border_obj) |obj| {
+    if (params.border) |obj| {
         if (obj == c.Py_None()) {
             py_utils.setValueError("border must be a BorderMode enum", .{});
             return null;
@@ -245,18 +232,16 @@ pub const image_midpoint_blur_doc =
 pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    var border_obj: ?*c.PyObject = null;
+    const Params = struct {
+        radius: c_long,
+        border: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "radius", "border" });
-    const format = std.fmt.comptimePrint("l|O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &border_obj) == 0) {
-        return null;
-    }
-
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
     var border = zignal.BorderMode.mirror;
-    if (border_obj) |obj| {
+    if (params.border) |obj| {
         if (obj == c.Py_None()) {
             py_utils.setValueError("border must be a BorderMode enum", .{});
             return null;
@@ -313,21 +298,18 @@ pub const image_percentile_blur_doc =
 pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    var percentile: f64 = 0.5;
-    var border_obj: ?*c.PyObject = null;
+    const Params = struct {
+        radius: c_long,
+        percentile: f64,
+        border: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "radius", "percentile", "border" });
-    const format = std.fmt.comptimePrint("ld|O", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &percentile, &border_obj) == 0) {
-        return null;
-    }
-
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
-    const percentile_value = py_utils.validateRange(f64, percentile, 0.0, 1.0, "percentile") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
+    const percentile_value = py_utils.validateRange(f64, params.percentile, 0.0, 1.0, "percentile") catch return null;
     var border_mode = zignal.BorderMode.mirror;
-    if (border_obj) |obj| {
+    if (params.border) |obj| {
         if (obj == c.Py_None()) {
             py_utils.setValueError("border must be a BorderMode enum", .{});
             return null;
@@ -372,30 +354,30 @@ pub const image_alpha_trimmed_mean_blur_doc =
 pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    var radius_long: c_long = 0;
-    var trim_fraction: f64 = 0;
-    var border_obj: ?*c.PyObject = null;
+    const Params = struct {
+        radius: c_long,
+        trim_fraction: f64,
+        border: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "radius", "trim_fraction", "border" });
-    const format = std.fmt.comptimePrint("ld|O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long, &trim_fraction, &border_obj) == 0) {
-        return null;
-    }
-
-    if (!std.math.isFinite(trim_fraction)) {
+    if (!std.math.isFinite(params.trim_fraction)) {
         py_utils.setValueError("trim_fraction must be finite", .{});
         return null;
     }
 
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
     var border = zignal.BorderMode.mirror;
-    if (border_obj) |obj| {
+    if (params.border) |obj| {
         if (obj == c.Py_None()) {
             py_utils.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
         border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
+
+    const trim_fraction = params.trim_fraction;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -444,21 +426,16 @@ pub const image_gaussian_blur_doc =
 pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments
-    var sigma: f64 = 0;
-    const kw = comptime py_utils.kw(&.{"sigma"});
-    const format = std.fmt.comptimePrint("d", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &sigma) == 0) {
-        return null;
-    }
+    const Params = struct { sigma: f64 };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Validate sigma: must be finite and > 0
-    if (!std.math.isFinite(sigma)) {
+    if (!std.math.isFinite(params.sigma)) {
         py_utils.setValueError("sigma must be finite", .{});
         return null;
     }
-    const sigma_pos = py_utils.validatePositive(f64, sigma, "sigma") catch return null;
+    const sigma_pos = py_utils.validatePositive(f64, params.sigma, "sigma") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -539,15 +516,11 @@ pub const image_sharpen_doc =
 pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments
-    var radius_long: c_long = 0;
-    const kw = comptime py_utils.kw(&.{"radius"});
-    const format = std.fmt.comptimePrint("l", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &radius_long) == 0) {
-        return null;
-    }
-    const radius = py_utils.validateNonNegative(u32, radius_long, "radius") catch return null;
+    const Params = struct { radius: c_long };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -595,20 +568,17 @@ pub const image_autocontrast_doc =
 pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments
-    var cutoff: f32 = 0.0;
-    const kw = comptime py_utils.kw(&.{"cutoff"});
-    const format = std.fmt.comptimePrint("|f", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &cutoff) == 0) {
-        return null;
-    }
+    const Params = struct { cutoff: f64 = 0.0 };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Validate cutoff range (0.0 to 0.5 fraction)
-    if (cutoff < 0 or cutoff >= 0.5) {
+    if (params.cutoff < 0 or params.cutoff >= 0.5) {
         py_utils.setValueError("cutoff must be between 0 and 0.5", .{});
         return null;
     }
+
+    const cutoff: f32 = @floatCast(params.cutoff);
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -723,12 +693,11 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const self = py_utils.safeCast(ImageObject, self_obj);
     const motion_blur = @import("../motion_blur.zig");
 
-    // Parse the single argument (config object)
-    var config_obj: ?*c.PyObject = undefined;
-    const kw = comptime py_utils.kw(&.{"config"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &config_obj) == 0) {
-        return null;
-    }
+    const Params = struct { config: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const config_obj = params.config;
 
     // Check that it's a MotionBlur object
     const type_obj = c.Py_TYPE(config_obj);
@@ -860,42 +829,45 @@ pub const image_shen_castan_doc =
 pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments with defaults matching ShenCastan.zig
-    var smooth: f64 = 0.9;
-    var window_size: c_long = 7;
-    var high_ratio: f64 = 0.99;
-    var low_rel: f64 = 0.5;
-    var hysteresis: c_int = 1; // True by default
-    var use_nms: c_int = 0; // False by default
-
-    const kw = comptime py_utils.kw(&.{ "smooth", "window_size", "high_ratio", "low_rel", "hysteresis", "use_nms" });
-    const format = std.fmt.comptimePrint("|dlddpp", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &smooth, &window_size, &high_ratio, &low_rel, &hysteresis, &use_nms) == 0) {
-        return null;
-    }
+    const Params = struct {
+        smooth: f64 = 0.9,
+        window_size: c_long = 7,
+        high_ratio: f64 = 0.99,
+        low_rel: f64 = 0.5,
+        hysteresis: c_int = 1, // True by default
+        use_nms: c_int = 0, // False by default
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Validate parameters
-    if (smooth <= 0 or smooth >= 1) {
+    if (params.smooth <= 0 or params.smooth >= 1) {
         py_utils.setValueError("smooth must be between 0 and 1", .{});
         return null;
     }
-    if (window_size < 3) {
+    if (params.window_size < 3) {
         py_utils.setValueError("window_size must be >= 3", .{});
         return null;
     }
-    if (@mod(window_size, 2) == 0) {
+    if (@mod(params.window_size, 2) == 0) {
         py_utils.setValueError("window_size must be odd", .{});
         return null;
     }
-    if (high_ratio <= 0 or high_ratio >= 1) {
+    if (params.high_ratio <= 0 or params.high_ratio >= 1) {
         c.PyErr_SetString(c.PyExc_ValueError, "high_ratio must be between 0 and 1");
         return null;
     }
-    if (low_rel <= 0 or low_rel >= 1) {
+    if (params.low_rel <= 0 or params.low_rel >= 1) {
         c.PyErr_SetString(c.PyExc_ValueError, "low_rel must be between 0 and 1");
         return null;
     }
+
+    const smooth = params.smooth;
+    const window_size = params.window_size;
+    const high_ratio = params.high_ratio;
+    const low_rel = params.low_rel;
+    const hysteresis = params.hysteresis;
+    const use_nms = params.use_nms;
 
     if (self.py_image) |pimg| {
         // Additional validation: window_size should not exceed image dimensions
@@ -982,16 +954,15 @@ pub const image_blend_doc =
 pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse arguments: overlay image and optional blend mode
-    var overlay_obj: ?*c.PyObject = null;
-    var mode_obj: ?*c.PyObject = null;
+    const Params = struct {
+        overlay: ?*c.PyObject,
+        mode: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "overlay", "mode" });
-    const fmt = std.fmt.comptimePrint("O|O", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(@constCast(&kw)), &overlay_obj, &mode_obj) == 0) {
-        return null;
-    }
+    const overlay_obj = params.overlay;
+    const mode_obj = params.mode;
 
     // Check if overlay is an Image instance
     if (c.PyObject_IsInstance(overlay_obj, @ptrCast(getImageType())) <= 0) {

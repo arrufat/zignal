@@ -61,16 +61,11 @@ pub const image_load_doc =
 pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = type_obj;
 
-    // Parse file path argument
-    var file_path: [*c]const u8 = undefined;
-    const format = std.fmt.comptimePrint("s", .{});
-    const kw = comptime py_utils.kw(&.{"path"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &file_path) == 0) {
-        return null;
-    }
+    const Params = struct { path: [*c]const u8 };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    // Convert C string to Zig slice
-    const path_slice = std.mem.span(file_path);
+    const path_slice = std.mem.span(params.path);
 
     // Detect format and load accordingly
     const is_jpeg = std.mem.endsWith(u8, path_slice, ".jpg") or
@@ -164,16 +159,11 @@ pub const image_save_doc =
 pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse file path argument
-    var file_path: [*c]const u8 = undefined;
-    const format = std.fmt.comptimePrint("s", .{});
-    const kw2 = comptime py_utils.kw(&.{"path"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw2)), &file_path) == 0) {
-        return null;
-    }
+    const Params = struct { path: [*c]const u8 };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    // Convert C string to Zig slice
-    const path_slice = std.mem.span(file_path);
+    const path_slice = std.mem.span(params.path);
 
     // Save image using the core library's save method which handles format detection
     if (self.py_image) |pimg| {
@@ -259,13 +249,11 @@ pub const image_fill_doc =
 pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse the color argument (already validated in init)
-    var color_obj: ?*c.PyObject = undefined;
-    const format = std.fmt.comptimePrint("O", .{});
-    const kw3 = comptime py_utils.kw(&.{"color"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw3)), &color_obj) == 0) {
-        return null;
-    }
+    const Params = struct { color: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const color_obj = params.color;
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
@@ -313,13 +301,11 @@ pub const image_view_doc =
 pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse optional rectangle argument
-    var rect_obj: ?*c.PyObject = null;
-    const format = std.fmt.comptimePrint("|O", .{});
-    const kw4 = comptime py_utils.kw(&.{"rect"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw4)), &rect_obj) == 0) {
-        return null;
-    }
+    const Params = struct { rect: ?*c.PyObject = null };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const rect_obj = params.rect;
 
     if (self.py_image) |pimg| {
         // Create view based on current image type
@@ -441,13 +427,11 @@ pub const image_convert_doc =
 pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse one argument: target dtype sentinel or instance of Rgb/Rgba
-    var dtype_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"dtype"});
-    const fmt = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, fmt.ptr, @ptrCast(@constCast(&kw)), &dtype_obj) == 0) {
-        return null;
-    }
+    const Params = struct { dtype: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const dtype_obj = params.dtype;
 
     if (dtype_obj == null) {
         py_utils.setTypeError("target dtype (zignal.Grayscale, zignal.Rgb, or zignal.Rgba)", null);
@@ -621,15 +605,17 @@ pub const image_psnr_doc =
 pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse other image argument
-    var other_obj: ?*c.PyObject = undefined;
-    const format = std.fmt.comptimePrint("O!", .{});
-    const kw5 = comptime py_utils.kw(&.{"other"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw5)), getImageType(), &other_obj) == 0) {
+    const Params = struct { other: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    // Validate it's an Image object
+    if (c.PyObject_IsInstance(params.other, @ptrCast(getImageType())) <= 0) {
+        py_utils.setTypeError("Image", params.other);
         return null;
     }
 
-    const other = py_utils.safeCast(ImageObject, other_obj);
+    const other = py_utils.safeCast(ImageObject, params.other);
 
     if (self.py_image == null or other.py_image == null) {
         py_utils.setValueError("Both images must be initialized", .{});
@@ -814,16 +800,15 @@ pub const image_set_border_doc =
 pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
 
-    // Parse required rect and optional color
-    var rect_obj: ?*c.PyObject = null;
-    var color_obj: ?*c.PyObject = null;
-    const format = std.fmt.comptimePrint("O|O", .{});
-    const kw6 = comptime py_utils.kw(&.{ "rect", "color" });
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw6)), &rect_obj, &color_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        rect: ?*c.PyObject,
+        color: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const rect = py_utils.parseRectangle(usize, rect_obj) catch return null;
+    const rect = py_utils.parseRectangle(usize, params.rect) catch return null;
+    const color_obj = params.color;
 
     if (self.py_image) |pimg| {
         if (color_obj) |cobj| {

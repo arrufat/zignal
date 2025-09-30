@@ -38,14 +38,15 @@ fn similarity_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
 
-    var from_points_obj: ?*c.PyObject = null;
-    var to_points_obj: ?*c.PyObject = null;
+    const Params = struct {
+        from_points: ?*c.PyObject,
+        to_points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
-        return -1;
-    }
+    const from_points_obj = params.from_points;
+    const to_points_obj = params.to_points;
 
     // Parse point lists
     const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
@@ -91,9 +92,13 @@ fn similarity_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
 
-    var point_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"points"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
+    const Params = struct {
+        points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const point_obj = params.points;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
@@ -200,14 +205,15 @@ fn affine_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = py_utils.safeCast(AffineTransformObject, self_obj);
 
-    var from_points_obj: ?*c.PyObject = null;
-    var to_points_obj: ?*c.PyObject = null;
+    const Params = struct {
+        from_points: ?*c.PyObject,
+        to_points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
-        return -1;
-    }
+    const from_points_obj = params.from_points;
+    const to_points_obj = params.to_points;
 
     // Parse point lists
     const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
@@ -256,9 +262,13 @@ fn affine_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(AffineTransformObject, self_obj);
 
-    var point_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"points"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
+    const Params = struct {
+        points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const point_obj = params.points;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
@@ -366,14 +376,15 @@ fn projective_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
-    var from_points_obj: ?*c.PyObject = null;
-    var to_points_obj: ?*c.PyObject = null;
+    const Params = struct {
+        from_points: ?*c.PyObject,
+        to_points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const kw = comptime py_utils.kw(&.{ "from_points", "to_points" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "OO", @ptrCast(@constCast(&kw)), &from_points_obj, &to_points_obj) == 0) {
-        return -1;
-    }
+    const from_points_obj = params.from_points;
+    const to_points_obj = params.to_points;
 
     // Parse point lists
     const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
@@ -418,9 +429,13 @@ fn projective_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
 
-    var point_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"points"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O", @ptrCast(@constCast(&kw)), &point_obj) == 0) return null;
+    const Params = struct {
+        points: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const point_obj = params.points;
 
     // Check if it's a single tuple (x, y)
     if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {

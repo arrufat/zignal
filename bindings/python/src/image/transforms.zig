@@ -119,15 +119,15 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var shape_or_scale: ?*c.PyObject = null;
-    var method_value: c_long = 1; // Default to BILINEAR
+    const Params = struct {
+        size: ?*c.PyObject,
+        method: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "size", "method" });
-    const format = std.fmt.comptimePrint("O|l", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &shape_or_scale, &method_value) == 0) {
-        return null;
-    }
+    const shape_or_scale = params.size;
+    const method_value = params.method;
 
     if (shape_or_scale == null) {
         py_utils.setTypeError("size argument", null);
@@ -201,15 +201,15 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var size: ?*c.PyObject = null;
-    var method_value: c_long = 1; // Default to BILINEAR
-    const kw = comptime py_utils.kw(&.{ "size", "method" });
-    const format = std.fmt.comptimePrint("O|l", .{});
+    const Params = struct {
+        size: ?*c.PyObject,
+        method: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &size, &method_value) == 0) {
-        return null;
-    }
+    const size = params.size;
+    const method_value = params.method;
 
     if (size == null) {
         py_utils.setTypeError("size argument", null);
@@ -294,15 +294,15 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var angle: f64 = 0;
-    var method_value: c_long = 1; // Default to BILINEAR
-    const kw = comptime py_utils.kw(&.{ "angle", "method" });
-    const format = std.fmt.comptimePrint("d|l", .{});
+    const Params = struct {
+        angle: f64,
+        method: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &angle, &method_value) == 0) {
-        return null;
-    }
+    const angle = params.angle;
+    const method_value = params.method;
 
     const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         py_utils.setValueError("Invalid interpolation method", .{});
@@ -355,17 +355,17 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var transform_obj: ?*c.PyObject = null;
-    var shape_obj: ?*c.PyObject = null;
-    var method_value: c_long = 1; // Default to BILINEAR
+    const Params = struct {
+        transform: ?*c.PyObject,
+        shape: ?*c.PyObject = null,
+        method: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "transform", "shape", "method" });
-    const format = std.fmt.comptimePrint("O|Ol", .{});
-
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &transform_obj, &shape_obj, &method_value) == 0) {
-        return null;
-    }
+    const transform_obj = params.transform;
+    const shape_obj = params.shape;
+    const method_value = params.method;
 
     // Check if image is initialized
     if (self.py_image == null) {
@@ -619,17 +619,19 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var rect_obj: ?*c.PyObject = undefined;
-    var angle: f64 = 0.0;
-    var size_obj: ?*c.PyObject = null;
-    var method_value: c_long = 1; // Default to BILINEAR
+    const Params = struct {
+        rect: ?*c.PyObject,
+        angle: f64 = 0.0,
+        size: ?*c.PyObject = null,
+        method: c_long = 1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "rect", "angle", "size", "method" });
-    const format = std.fmt.comptimePrint("O|dOl", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &rect_obj, &angle, &size_obj, &method_value) == 0) {
-        return null;
-    }
+    const rect_obj = params.rect;
+    const angle = params.angle;
+    const size_obj = params.size;
+    const method_value = params.method;
 
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
@@ -731,18 +733,21 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     // Parse arguments
-    var source_obj: ?*c.PyObject = undefined;
-    var rect_obj: ?*c.PyObject = undefined;
-    var angle: f64 = 0.0;
-    var method_value: c_long = 1; // Default to BILINEAR
-    var blend_obj: ?*c.PyObject = null;
+    const Params = struct {
+        source: ?*c.PyObject,
+        rect: ?*c.PyObject,
+        angle: f64 = 0.0,
+        method: c_long = 1,
+        blend_mode: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "source", "rect", "angle", "method", "blend_mode" });
-    const format = std.fmt.comptimePrint("OO|dlO", .{});
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &source_obj, &rect_obj, &angle, &method_value, &blend_obj) == 0) {
-        return null;
-    }
+    const source_obj = params.source;
+    const rect_obj = params.rect;
+    const angle = params.angle;
+    const method_value = params.method;
+    const blend_obj = params.blend_mode;
 
     // Check if source is an Image object
     if (c.PyObject_IsInstance(source_obj, @ptrCast(getImageType())) <= 0) {

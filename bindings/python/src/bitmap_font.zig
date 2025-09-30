@@ -69,12 +69,13 @@ const bitmap_font_load_doc =
 ;
 
 fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    var file_path: [*c]const u8 = undefined;
+    const Params = struct {
+        path: [*c]const u8,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{"path"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "s", @ptrCast(@constCast(&kw)), &file_path) == 0) {
-        return null;
-    }
+    const file_path = params.path;
 
     // Convert C string to Zig slice
     const path_slice = std.mem.span(file_path);

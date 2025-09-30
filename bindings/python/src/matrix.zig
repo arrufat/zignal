@@ -68,11 +68,13 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     }
 
     // Parse single argument: list of lists
-    var list_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"data"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:Matrix", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
-        return -1;
-    }
+    const Params = struct {
+        data: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
+
+    const list_obj = params.data;
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
@@ -109,17 +111,17 @@ const matrix_full_doc =
 ;
 
 fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    var rows: c_int = 0;
-    var cols: c_int = 0;
-    var fill_value: f64 = 0.0;
+    const Params = struct {
+        rows: c_int,
+        cols: c_int,
+        fill_value: f64 = 0.0,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "rows", "cols", "fill_value" });
-    const format = std.fmt.comptimePrint("ii|d:full", .{});
-
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &rows, &cols, &fill_value) == 0) {
-        return null;
-    }
+    const rows = params.rows;
+    const cols = params.cols;
+    const fill_value = params.fill_value;
 
     // Validate dimensions
     const rows_pos = py_utils.validatePositive(usize, rows, "rows") catch return null;
@@ -447,12 +449,13 @@ const matrix_from_numpy_doc =
 ;
 
 fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    var array_obj: ?*c.PyObject = undefined;
-    const kw = comptime py_utils.kw(&.{"array"});
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &array_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        array: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const array_obj = params.array;
 
     if (array_obj == null or array_obj == c.Py_None()) {
         py_utils.setTypeError("non-None array", array_obj);

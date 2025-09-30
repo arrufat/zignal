@@ -337,13 +337,13 @@ pub const image_from_numpy_doc =
 ;
 
 pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    var array_obj: ?*c.PyObject = undefined;
+    const Params = struct {
+        array: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{"array"});
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &array_obj) == 0) {
-        return null;
-    }
+    const array_obj = params.array;
 
     if (array_obj == null or array_obj == c.Py_None()) {
         py_utils.setTypeError("non-None array", array_obj);

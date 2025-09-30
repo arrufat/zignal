@@ -72,12 +72,13 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgb), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
-    var target_obj: ?*c.PyObject = undefined;
-    const kw = comptime py_utils.kw(&.{"image"});
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &target_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        image: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const target_obj = params.image;
 
     // Check if argument is an Image object and cast
     if (target_obj == null) {
@@ -138,12 +139,13 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgb), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
-    var source_obj: ?*c.PyObject = undefined;
-    const kw = comptime py_utils.kw(&.{"image"});
-    const format = std.fmt.comptimePrint("O", .{});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, format.ptr, @ptrCast(@constCast(&kw)), &source_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        image: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const source_obj = params.image;
 
     // Check if argument is an Image object and cast
     if (source_obj == null) {

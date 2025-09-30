@@ -6,6 +6,12 @@ const Point = zignal.Point;
 
 pub const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
+    // NOTE: Python bindings currently broken on Zig 0.16+ due to arocc bugs.
+    // arocc (Zig's new C compiler) cannot parse glibc's complex math header macros
+    // (__MATHCALL, __MATHCALL_VEC, __MATHDECL, etc.) which Python.h transitively includes.
+    // No workaround exists - this requires upstream arocc fixes.
+    // Use Zig 0.15.x or earlier (which use Clang for translate-c) as a temporary solution.
+    // See: arocc_python_bug/ for minimal reproduction case
     @cInclude("Python.h");
 });
 
@@ -103,6 +109,51 @@ pub fn autoGetSet(
         }
         defs[field_names.len] = .{ .name = null, .get = null, .set = null, .doc = null, .closure = null };
         return defs;
+    }
+}
+
+/// Create PyGetSetDef array with auto-generated field getters plus custom entries.
+/// This eliminates the need for manual array copying when combining autoGetSet with custom getters.
+/// - Obj: the Python object struct type
+/// - field_names: comptime list of field names to auto-generate getters for
+/// - custom: comptime array of custom PyGetSetDef entries (without sentinel)
+/// Returns a combined array with auto-generated + custom + sentinel.
+///
+/// Example usage:
+/// ```zig
+/// const getset = py_utils.autoGetSetCustom(RectangleObject, &.{"left", "top", "right", "bottom"}, &[_]c.PyGetSetDef{
+///     .{ .name = "width", .get = @ptrCast(&rectangle_get_width), .set = null, .doc = "Width", .closure = null },
+///     .{ .name = "height", .get = @ptrCast(&rectangle_get_height), .set = null, .doc = "Height", .closure = null },
+/// });
+/// ```
+pub fn autoGetSetCustom(
+    comptime Obj: type,
+    comptime field_names: []const []const u8,
+    comptime custom: []const c.PyGetSetDef,
+) [field_names.len + custom.len + 1]c.PyGetSetDef {
+    comptime {
+        var result: [field_names.len + custom.len + 1]c.PyGetSetDef = undefined;
+
+        // Add auto-generated field getters
+        for (field_names, 0..) |fname, i| {
+            result[i] = .{
+                .name = fname.ptr,
+                .get = @ptrCast(@alignCast(getterForField(Obj, fname))),
+                .set = null,
+                .doc = null,
+                .closure = null,
+            };
+        }
+
+        // Add custom getters
+        for (custom, 0..) |custom_def, i| {
+            result[field_names.len + i] = custom_def;
+        }
+
+        // Add sentinel
+        result[field_names.len + custom.len] = .{ .name = null, .get = null, .set = null, .doc = null, .closure = null };
+
+        return result;
     }
 }
 
@@ -720,12 +771,13 @@ pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: 
             const type_chars = switch (@typeInfo(actual_type)) {
                 .float => "d",
                 .int => |info| blk2: {
+                    if (actual_type == c.Py_ssize_t) break :blk2 "n";
                     if (info.signedness == .signed) {
                         if (info.bits <= 32) break :blk2 "i";
-                        break :blk2 "l";
+                        break :blk2 "L";
                     } else {
                         if (info.bits <= 32) break :blk2 "I";
-                        break :blk2 "k";
+                        break :blk2 "K";
                     }
                 },
                 .pointer => |ptr| blk2: {
