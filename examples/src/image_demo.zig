@@ -37,5 +37,5 @@ pub fn main() !void {
     try image.resize(gpa, resized, .lanczos);
     try resized.save(gpa, "liza-resized-lanczos.png");
     std.debug.print("{f}\n", .{image});
-    std.debug.print("{f}\n", .{image.display(.auto)});
+    std.debug.print("{f}\n", .{image.display(.{ .auto = .{} })});
 }
