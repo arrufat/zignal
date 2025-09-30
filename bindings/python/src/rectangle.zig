@@ -564,38 +564,27 @@ pub const rectangle_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-// Auto-generate getset for field-backed properties, then append derived ones
-fn make_rectangle_getset() [6 + 1]c.PyGetSetDef {
-    comptime {
-        const auto_defs = py_utils.autoGetSet(RectangleObject, &.{ "left", "top", "right", "bottom" });
-        var result: [6 + 1]c.PyGetSetDef = undefined;
-        // Copy auto-generated field-backed properties (without their sentinel)
-        result[0] = auto_defs[0];
-        result[1] = auto_defs[1];
-        result[2] = auto_defs[2];
-        result[3] = auto_defs[3];
-        // Append derived width/height getters
-        result[4] = .{
+// Auto-generate field getters with custom width/height getters
+var rectangle_getset = py_utils.autoGetSetCustom(
+    RectangleObject,
+    &.{ "left", "top", "right", "bottom" },
+    &[_]c.PyGetSetDef{
+        .{
             .name = "width".ptr,
             .get = @ptrCast(@alignCast(&rectangle_get_width)),
             .set = null,
             .doc = "Width of the rectangle (right - left)".ptr,
             .closure = null,
-        };
-        result[5] = .{
+        },
+        .{
             .name = "height".ptr,
             .get = @ptrCast(@alignCast(&rectangle_get_height)),
             .set = null,
             .doc = "Height of the rectangle (bottom - top)".ptr,
             .closure = null,
-        };
-        // Sentinel
-        result[6] = .{ .name = null, .get = null, .set = null, .doc = null, .closure = null };
-        return result;
-    }
-}
-
-var rectangle_getset = make_rectangle_getset();
+        },
+    },
+);
 
 // Class documentation - keep it simple
 const rectangle_class_doc = "A rectangle defined by its left, top, right, and bottom coordinates.";

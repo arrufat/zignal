@@ -242,14 +242,15 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
         // blend method implementation
         fn blendMethod(self_obj: ?*c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) ?*c.PyObject {
-            var overlay_obj: ?*c.PyObject = null;
-            var mode_obj: ?*c.PyObject = null;
+            const Params = struct {
+                overlay: ?*c.PyObject,
+                mode: ?*c.PyObject = null,
+            };
+            var params: Params = undefined;
+            py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-            const kw = comptime @import("py_utils.zig").kw(&.{ "overlay", "mode" });
-            // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-            if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|O:blend", @ptrCast(@constCast(&kw)), &overlay_obj, &mode_obj) == 0) {
-                return null;
-            }
+            const overlay_obj = params.overlay;
+            const mode_obj = params.mode;
 
             const parent = Self.parentFromObj(self_obj) orelse {
                 c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");

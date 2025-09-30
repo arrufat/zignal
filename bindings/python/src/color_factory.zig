@@ -710,16 +710,16 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const self = @as(*ObjectType, @ptrCast(self_obj));
 
             // Parse arguments: overlay (required) and mode (optional keyword, defaults to NORMAL)
-            var overlay_obj: [*c]c.PyObject = null;
-            var mode_obj: [*c]c.PyObject = null;
+            const py_utils_local = @import("py_utils.zig");
+            const Params = struct {
+                overlay: ?*c.PyObject,
+                mode: ?*c.PyObject = null,
+            };
+            var params: Params = undefined;
+            py_utils_local.parseArgs(Params, args, kwds, &params) catch return null;
 
-            // Define keyword names
-            const kw = comptime @import("py_utils.zig").kw(&.{ "overlay", "mode" });
-
-            // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-            if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|O", @ptrCast(@constCast(&kw)), &overlay_obj, &mode_obj) == 0) {
-                return null;
-            }
+            const overlay_obj = params.overlay;
+            const mode_obj = params.mode;
 
             // Import Rgba type to check instance
             const rgba_module = @import("color.zig");
@@ -768,8 +768,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
 
             // Convert mode to Zig Blending (use NORMAL if not provided)
-            const mode = if (mode_obj != null)
-                enum_utils.pyToEnum(zignal.Blending, mode_obj) catch {
+            const mode = if (mode_obj) |obj|
+                enum_utils.pyToEnum(zignal.Blending, obj) catch {
                     // Error already set by enum_utils
                     return null;
                 }

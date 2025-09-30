@@ -133,14 +133,15 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     }
 
     // Parse arguments
-    var matrix_obj: ?*c.PyObject = null;
-    var num_components: c.Py_ssize_t = -1; // -1 means not provided
+    const Params = struct {
+        data: ?*c.PyObject,
+        num_components: c.Py_ssize_t = -1,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const kw = comptime py_utils.kw(&.{ "data", "num_components" });
-    // TODO(py3.13): drop @constCast once minimum Python >= 3.13
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O|n:fit", @ptrCast(@constCast(&kw)), &matrix_obj, &num_components) == 0) {
-        return null;
-    }
+    const matrix_obj = params.data;
+    const num_components = params.num_components;
 
     // Check if matrix_obj is a Matrix
     if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
@@ -210,11 +211,13 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     }
 
     // Parse single argument: list of floats
-    var list_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"vector"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:project", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        vector: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const list_obj = params.vector;
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
@@ -309,11 +312,13 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     }
 
     // Parse single argument: Matrix
-    var matrix_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"data"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:transform", @ptrCast(@constCast(&kw)), &matrix_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        data: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const matrix_obj = params.data;
 
     // Check if matrix_obj is a Matrix
     if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
@@ -402,11 +407,13 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 
     // Parse single argument: list of floats
-    var list_obj: ?*c.PyObject = null;
-    const kw = comptime py_utils.kw(&.{"coefficients"});
-    if (c.PyArg_ParseTupleAndKeywords(args, kwds, "O:reconstruct", @ptrCast(@constCast(&kw)), &list_obj) == 0) {
-        return null;
-    }
+    const Params = struct {
+        coefficients: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const list_obj = params.coefficients;
 
     // Check if it's a list
     if (c.PyList_Check(list_obj) != 1) {
