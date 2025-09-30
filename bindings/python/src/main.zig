@@ -83,11 +83,30 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         };
     }
 
-    enum_utils.registerEnum(zignal.DrawMode, @ptrCast(m), canvas.draw_mode_doc) catch |err| {
-        std.log.err("Failed to register DrawMode: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
+    // ========================================================================
+    // Enum Registration (table-driven)
+    // ========================================================================
+
+    const EnumReg = struct {
+        type: type,
+        doc: []const u8,
     };
+
+    const enum_registrations = [_]EnumReg{
+        .{ .type = zignal.DrawMode, .doc = canvas.draw_mode_doc },
+        .{ .type = zignal.Blending, .doc = blending.blending_doc },
+        .{ .type = zignal.Interpolation, .doc = interpolation.interpolation_doc },
+        .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc },
+        .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc },
+    };
+
+    inline for (enum_registrations) |reg| {
+        enum_utils.registerEnum(reg.type, @ptrCast(m), reg.doc) catch |err| {
+            std.log.err("Failed to register {s}: {}", .{ @typeName(reg.type), err });
+            c.Py_DECREF(m);
+            return null;
+        };
+    }
 
     // ========================================================================
     // Color Management
@@ -100,41 +119,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         return null;
     };
 
-    enum_utils.registerEnum(zignal.Blending, @ptrCast(m), blending.blending_doc) catch |err| {
-        std.log.err("Failed to register Blending: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
     // ========================================================================
     // Image Processing & Analysis
     // ========================================================================
 
-    enum_utils.registerEnum(zignal.Interpolation, @ptrCast(m), interpolation.interpolation_doc) catch |err| {
-        std.log.err("Failed to register Interpolation: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    enum_utils.registerEnum(zignal.BorderMode, @ptrCast(m), border_mode.border_mode_doc) catch |err| {
-        std.log.err("Failed to register BorderMode: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
     // Register MotionBlur classes
     motion_blur.registerMotionBlur(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register MotionBlur: {}", .{err});
-        c.Py_DECREF(m);
-        return null;
-    };
-
-    // ========================================================================
-    // Optimization & Utilities
-    // ========================================================================
-
-    enum_utils.registerEnum(zignal.optimization.OptimizationPolicy, @ptrCast(m), optimization.optimization_policy_doc) catch |err| {
-        std.log.err("Failed to register OptimizationPolicy: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };

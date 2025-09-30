@@ -13,245 +13,150 @@ const c = py_utils.c;
 // 2. The getset and methods arrays
 // 3. The PyTypeObject (e.g., RgbType)
 
-// RGB
-pub const RgbBinding = color_factory.ColorBinding(zignal.Rgb);
+// ============================================================================
+// COMPTIME COLOR TYPE GENERATION
+// ============================================================================
+
+/// Generate binding struct for a color type
+fn ColorBindingFor(comptime ColorType: type) type {
+    return color_factory.ColorBinding(ColorType);
+}
+
+/// Color type information struct for storing generated data
+fn ColorTypeInfo(comptime ColorType: type) type {
+    const Binding = ColorBindingFor(ColorType);
+    return struct {
+        binding: type,
+        getset: [@typeInfo(@TypeOf(Binding.generateGetSet())).array.len]c.PyGetSetDef,
+        methods: [@typeInfo(@TypeOf(Binding.generateMethods())).array.len]c.PyMethodDef,
+        type_object: c.PyTypeObject,
+    };
+}
+
+/// Generate all color type bindings at comptime
+const ColorBindings = blk: {
+    const num_types = color_registry.color_types.len;
+    var bindings: [num_types]type = undefined;
+
+    for (color_registry.color_types, 0..) |ColorType, i| {
+        bindings[i] = ColorBindingFor(ColorType);
+    }
+
+    break :blk bindings;
+};
+
+/// Generate getset arrays for all color types
+var color_getsets = blk: {
+    const num_types = color_registry.color_types.len;
+    var getsets: [num_types][]c.PyGetSetDef = undefined;
+
+    for (ColorBindings, 0..) |Binding, i| {
+        var arr = Binding.generateGetSet();
+        getsets[i] = &arr;
+    }
+
+    break :blk getsets;
+};
+
+/// Generate methods arrays for all color types
+var color_methods = blk: {
+    const num_types = color_registry.color_types.len;
+    var methods: [num_types][]c.PyMethodDef = undefined;
+
+    for (ColorBindings, 0..) |Binding, i| {
+        var arr = Binding.generateMethods();
+        methods[i] = &arr;
+    }
+
+    break :blk methods;
+};
+
+/// Generate PyTypeObject for a specific color type
+fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, getset_ptr: [*]c.PyGetSetDef, methods_ptr: [*]c.PyMethodDef) c.PyTypeObject {
+    const type_name = comptime blk: {
+        const full_name = @typeName(ColorType);
+        // Extract just the type name (e.g., "Rgb" from "zignal.Rgb")
+        var i = full_name.len;
+        while (i > 0) : (i -= 1) {
+            if (full_name[i - 1] == '.') break;
+        }
+        break :blk full_name[i..];
+    };
+
+    const module_name = comptime "zignal." ++ type_name;
+
+    return c.PyTypeObject{
+        .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
+        .tp_name = module_name,
+        .tp_basicsize = @sizeOf(Binding.PyObjectType),
+        .tp_dealloc = @ptrCast(&Binding.dealloc),
+        .tp_repr = @ptrCast(&Binding.repr),
+        .tp_str = @ptrCast(&Binding.repr),
+        .tp_flags = c.Py_TPFLAGS_DEFAULT,
+        .tp_doc = color_registry.getDocumentationString(ColorType).ptr,
+        .tp_methods = methods_ptr,
+        .tp_getset = getset_ptr,
+        .tp_init = @ptrCast(&Binding.init),
+        .tp_new = @ptrCast(&Binding.new),
+        .tp_richcompare = @ptrCast(&Binding.richcompare),
+    };
+}
+
+// Generate individual bindings (exported for external use)
+pub const RgbBinding = ColorBindings[0];
+pub const RgbaBinding = ColorBindings[1];
+pub const HslBinding = ColorBindings[2];
+pub const HsvBinding = ColorBindings[3];
+pub const LabBinding = ColorBindings[4];
+pub const LchBinding = ColorBindings[5];
+pub const LmsBinding = ColorBindings[6];
+pub const OklabBinding = ColorBindings[7];
+pub const OklchBinding = ColorBindings[8];
+pub const XybBinding = ColorBindings[9];
+pub const XyzBinding = ColorBindings[10];
+pub const YcbcrBinding = ColorBindings[11];
+
+// Generate getset arrays
 var rgb_getset = RgbBinding.generateGetSet();
-var rgb_methods = RgbBinding.generateMethods();
-pub var RgbType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Rgb",
-    .tp_basicsize = @sizeOf(RgbBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&RgbBinding.dealloc),
-    .tp_repr = @ptrCast(&RgbBinding.repr),
-    .tp_str = @ptrCast(&RgbBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Rgb).ptr,
-    .tp_methods = @ptrCast(&rgb_methods),
-    .tp_getset = @ptrCast(&rgb_getset),
-    .tp_init = @ptrCast(&RgbBinding.init),
-    .tp_new = @ptrCast(&RgbBinding.new),
-    .tp_richcompare = @ptrCast(&RgbBinding.richcompare),
-};
-
-// RGBA
-pub const RgbaBinding = color_factory.ColorBinding(zignal.Rgba);
 var rgba_getset = RgbaBinding.generateGetSet();
-var rgba_methods = RgbaBinding.generateMethods();
-pub var RgbaType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Rgba",
-    .tp_basicsize = @sizeOf(RgbaBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&RgbaBinding.dealloc),
-    .tp_repr = @ptrCast(&RgbaBinding.repr),
-    .tp_str = @ptrCast(&RgbaBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Rgba).ptr,
-    .tp_methods = @ptrCast(&rgba_methods),
-    .tp_getset = @ptrCast(&rgba_getset),
-    .tp_init = @ptrCast(&RgbaBinding.init),
-    .tp_new = @ptrCast(&RgbaBinding.new),
-    .tp_richcompare = @ptrCast(&RgbaBinding.richcompare),
-};
-
-// HSV
-pub const HsvBinding = color_factory.ColorBinding(zignal.Hsv);
-var hsv_getset = HsvBinding.generateGetSet();
-var hsv_methods = HsvBinding.generateMethods();
-pub var HsvType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Hsv",
-    .tp_basicsize = @sizeOf(HsvBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&HsvBinding.dealloc),
-    .tp_repr = @ptrCast(&HsvBinding.repr),
-    .tp_str = @ptrCast(&HsvBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Hsv).ptr,
-    .tp_methods = @ptrCast(&hsv_methods),
-    .tp_getset = @ptrCast(&hsv_getset),
-    .tp_init = @ptrCast(&HsvBinding.init),
-    .tp_new = @ptrCast(&HsvBinding.new),
-    .tp_richcompare = @ptrCast(&HsvBinding.richcompare),
-};
-
-// HSL
-pub const HslBinding = color_factory.ColorBinding(zignal.Hsl);
 var hsl_getset = HslBinding.generateGetSet();
-var hsl_methods = HslBinding.generateMethods();
-pub var HslType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Hsl",
-    .tp_basicsize = @sizeOf(HslBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&HslBinding.dealloc),
-    .tp_repr = @ptrCast(&HslBinding.repr),
-    .tp_str = @ptrCast(&HslBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Hsl).ptr,
-    .tp_methods = @ptrCast(&hsl_methods),
-    .tp_getset = @ptrCast(&hsl_getset),
-    .tp_init = @ptrCast(&HslBinding.init),
-    .tp_new = @ptrCast(&HslBinding.new),
-    .tp_richcompare = @ptrCast(&HslBinding.richcompare),
-};
-
-// LAB
-pub const LabBinding = color_factory.ColorBinding(zignal.Lab);
+var hsv_getset = HsvBinding.generateGetSet();
 var lab_getset = LabBinding.generateGetSet();
-var lab_methods = LabBinding.generateMethods();
-pub var LabType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Lab",
-    .tp_basicsize = @sizeOf(LabBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&LabBinding.dealloc),
-    .tp_repr = @ptrCast(&LabBinding.repr),
-    .tp_str = @ptrCast(&LabBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Lab).ptr,
-    .tp_methods = @ptrCast(&lab_methods),
-    .tp_getset = @ptrCast(&lab_getset),
-    .tp_init = @ptrCast(&LabBinding.init),
-    .tp_new = @ptrCast(&LabBinding.new),
-    .tp_richcompare = @ptrCast(&LabBinding.richcompare),
-};
-
-// XYZ
-pub const XyzBinding = color_factory.ColorBinding(zignal.Xyz);
-var xyz_getset = XyzBinding.generateGetSet();
-var xyz_methods = XyzBinding.generateMethods();
-pub var XyzType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Xyz",
-    .tp_basicsize = @sizeOf(XyzBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&XyzBinding.dealloc),
-    .tp_repr = @ptrCast(&XyzBinding.repr),
-    .tp_str = @ptrCast(&XyzBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Xyz).ptr,
-    .tp_methods = @ptrCast(&xyz_methods),
-    .tp_getset = @ptrCast(&xyz_getset),
-    .tp_init = @ptrCast(&XyzBinding.init),
-    .tp_new = @ptrCast(&XyzBinding.new),
-    .tp_richcompare = @ptrCast(&XyzBinding.richcompare),
-};
-
-// OKLAB
-pub const OklabBinding = color_factory.ColorBinding(zignal.Oklab);
-var oklab_getset = OklabBinding.generateGetSet();
-var oklab_methods = OklabBinding.generateMethods();
-pub var OklabType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Oklab",
-    .tp_basicsize = @sizeOf(OklabBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&OklabBinding.dealloc),
-    .tp_repr = @ptrCast(&OklabBinding.repr),
-    .tp_str = @ptrCast(&OklabBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Oklab).ptr,
-    .tp_methods = @ptrCast(&oklab_methods),
-    .tp_getset = @ptrCast(&oklab_getset),
-    .tp_init = @ptrCast(&OklabBinding.init),
-    .tp_new = @ptrCast(&OklabBinding.new),
-    .tp_richcompare = @ptrCast(&OklabBinding.richcompare),
-};
-
-// OKLCH
-pub const OklchBinding = color_factory.ColorBinding(zignal.Oklch);
-var oklch_getset = OklchBinding.generateGetSet();
-var oklch_methods = OklchBinding.generateMethods();
-pub var OklchType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Oklch",
-    .tp_basicsize = @sizeOf(OklchBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&OklchBinding.dealloc),
-    .tp_repr = @ptrCast(&OklchBinding.repr),
-    .tp_str = @ptrCast(&OklchBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Oklch).ptr,
-    .tp_methods = @ptrCast(&oklch_methods),
-    .tp_getset = @ptrCast(&oklch_getset),
-    .tp_init = @ptrCast(&OklchBinding.init),
-    .tp_new = @ptrCast(&OklchBinding.new),
-    .tp_richcompare = @ptrCast(&OklchBinding.richcompare),
-};
-
-// LCH
-pub const LchBinding = color_factory.ColorBinding(zignal.Lch);
 var lch_getset = LchBinding.generateGetSet();
-var lch_methods = LchBinding.generateMethods();
-pub var LchType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Lch",
-    .tp_basicsize = @sizeOf(LchBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&LchBinding.dealloc),
-    .tp_repr = @ptrCast(&LchBinding.repr),
-    .tp_str = @ptrCast(&LchBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Lch).ptr,
-    .tp_methods = @ptrCast(&lch_methods),
-    .tp_getset = @ptrCast(&lch_getset),
-    .tp_init = @ptrCast(&LchBinding.init),
-    .tp_new = @ptrCast(&LchBinding.new),
-    .tp_richcompare = @ptrCast(&LchBinding.richcompare),
-};
-
-// LMS
-pub const LmsBinding = color_factory.ColorBinding(zignal.Lms);
 var lms_getset = LmsBinding.generateGetSet();
-var lms_methods = LmsBinding.generateMethods();
-pub var LmsType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Lms",
-    .tp_basicsize = @sizeOf(LmsBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&LmsBinding.dealloc),
-    .tp_repr = @ptrCast(&LmsBinding.repr),
-    .tp_str = @ptrCast(&LmsBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Lms).ptr,
-    .tp_methods = @ptrCast(&lms_methods),
-    .tp_getset = @ptrCast(&lms_getset),
-    .tp_init = @ptrCast(&LmsBinding.init),
-    .tp_new = @ptrCast(&LmsBinding.new),
-    .tp_richcompare = @ptrCast(&LmsBinding.richcompare),
-};
-
-// XYB
-pub const XybBinding = color_factory.ColorBinding(zignal.Xyb);
+var oklab_getset = OklabBinding.generateGetSet();
+var oklch_getset = OklchBinding.generateGetSet();
 var xyb_getset = XybBinding.generateGetSet();
-var xyb_methods = XybBinding.generateMethods();
-pub var XybType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Xyb",
-    .tp_basicsize = @sizeOf(XybBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&XybBinding.dealloc),
-    .tp_repr = @ptrCast(&XybBinding.repr),
-    .tp_str = @ptrCast(&XybBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Xyb).ptr,
-    .tp_methods = @ptrCast(&xyb_methods),
-    .tp_getset = @ptrCast(&xyb_getset),
-    .tp_init = @ptrCast(&XybBinding.init),
-    .tp_new = @ptrCast(&XybBinding.new),
-    .tp_richcompare = @ptrCast(&XybBinding.richcompare),
-};
-
-// YCBCR
-pub const YcbcrBinding = color_factory.ColorBinding(zignal.Ycbcr);
+var xyz_getset = XyzBinding.generateGetSet();
 var ycbcr_getset = YcbcrBinding.generateGetSet();
+
+// Generate methods arrays
+var rgb_methods = RgbBinding.generateMethods();
+var rgba_methods = RgbaBinding.generateMethods();
+var hsl_methods = HslBinding.generateMethods();
+var hsv_methods = HsvBinding.generateMethods();
+var lab_methods = LabBinding.generateMethods();
+var lch_methods = LchBinding.generateMethods();
+var lms_methods = LmsBinding.generateMethods();
+var oklab_methods = OklabBinding.generateMethods();
+var oklch_methods = OklchBinding.generateMethods();
+var xyb_methods = XybBinding.generateMethods();
+var xyz_methods = XyzBinding.generateMethods();
 var ycbcr_methods = YcbcrBinding.generateMethods();
-pub var YcbcrType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Ycbcr",
-    .tp_basicsize = @sizeOf(YcbcrBinding.PyObjectType),
-    .tp_dealloc = @ptrCast(&YcbcrBinding.dealloc),
-    .tp_repr = @ptrCast(&YcbcrBinding.repr),
-    .tp_str = @ptrCast(&YcbcrBinding.repr),
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = color_registry.getDocumentationString(zignal.Ycbcr).ptr,
-    .tp_methods = @ptrCast(&ycbcr_methods),
-    .tp_getset = @ptrCast(&ycbcr_getset),
-    .tp_init = @ptrCast(&YcbcrBinding.init),
-    .tp_new = @ptrCast(&YcbcrBinding.new),
-    .tp_richcompare = @ptrCast(&YcbcrBinding.richcompare),
-};
+
+// Generate type objects
+pub var RgbType = generateColorTypeObject(zignal.Rgb, RgbBinding, @ptrCast(&rgb_getset), @ptrCast(&rgb_methods));
+pub var RgbaType = generateColorTypeObject(zignal.Rgba, RgbaBinding, @ptrCast(&rgba_getset), @ptrCast(&rgba_methods));
+pub var HslType = generateColorTypeObject(zignal.Hsl, HslBinding, @ptrCast(&hsl_getset), @ptrCast(&hsl_methods));
+pub var HsvType = generateColorTypeObject(zignal.Hsv, HsvBinding, @ptrCast(&hsv_getset), @ptrCast(&hsv_methods));
+pub var LabType = generateColorTypeObject(zignal.Lab, LabBinding, @ptrCast(&lab_getset), @ptrCast(&lab_methods));
+pub var LchType = generateColorTypeObject(zignal.Lch, LchBinding, @ptrCast(&lch_getset), @ptrCast(&lch_methods));
+pub var LmsType = generateColorTypeObject(zignal.Lms, LmsBinding, @ptrCast(&lms_getset), @ptrCast(&lms_methods));
+pub var OklabType = generateColorTypeObject(zignal.Oklab, OklabBinding, @ptrCast(&oklab_getset), @ptrCast(&oklab_methods));
+pub var OklchType = generateColorTypeObject(zignal.Oklch, OklchBinding, @ptrCast(&oklch_getset), @ptrCast(&oklch_methods));
+pub var XybType = generateColorTypeObject(zignal.Xyb, XybBinding, @ptrCast(&xyb_getset), @ptrCast(&xyb_methods));
+pub var XyzType = generateColorTypeObject(zignal.Xyz, XyzBinding, @ptrCast(&xyz_getset), @ptrCast(&xyz_methods));
+pub var YcbcrType = generateColorTypeObject(zignal.Ycbcr, YcbcrBinding, @ptrCast(&ycbcr_getset), @ptrCast(&ycbcr_methods));
 
 // ============================================================================
 // REGISTRATION HELPER
@@ -259,18 +164,18 @@ pub var YcbcrType = c.PyTypeObject{
 
 /// Register all color types from the registry in one go
 pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
-    // Register each type - the order must match the registry
+    // Register each type - order matches color_registry.color_types
     try registerType(@ptrCast(module), "Rgb", @ptrCast(&RgbType));
     try registerType(@ptrCast(module), "Rgba", @ptrCast(&RgbaType));
-    try registerType(@ptrCast(module), "Hsv", @ptrCast(&HsvType));
     try registerType(@ptrCast(module), "Hsl", @ptrCast(&HslType));
+    try registerType(@ptrCast(module), "Hsv", @ptrCast(&HsvType));
     try registerType(@ptrCast(module), "Lab", @ptrCast(&LabType));
-    try registerType(@ptrCast(module), "Xyz", @ptrCast(&XyzType));
-    try registerType(@ptrCast(module), "Oklab", @ptrCast(&OklabType));
-    try registerType(@ptrCast(module), "Oklch", @ptrCast(&OklchType));
     try registerType(@ptrCast(module), "Lch", @ptrCast(&LchType));
     try registerType(@ptrCast(module), "Lms", @ptrCast(&LmsType));
+    try registerType(@ptrCast(module), "Oklab", @ptrCast(&OklabType));
+    try registerType(@ptrCast(module), "Oklch", @ptrCast(&OklchType));
     try registerType(@ptrCast(module), "Xyb", @ptrCast(&XybType));
+    try registerType(@ptrCast(module), "Xyz", @ptrCast(&XyzType));
     try registerType(@ptrCast(module), "Ycbcr", @ptrCast(&YcbcrType));
 }
 
@@ -285,15 +190,15 @@ pub fn createColorPyObject(color: anytype) ?*c.PyObject {
     return switch (ColorType) {
         zignal.Rgb => RgbBinding.createPyObject(color, &RgbType),
         zignal.Rgba => RgbaBinding.createPyObject(color, &RgbaType),
-        zignal.Hsv => HsvBinding.createPyObject(color, &HsvType),
         zignal.Hsl => HslBinding.createPyObject(color, &HslType),
+        zignal.Hsv => HsvBinding.createPyObject(color, &HsvType),
         zignal.Lab => LabBinding.createPyObject(color, &LabType),
-        zignal.Xyz => XyzBinding.createPyObject(color, &XyzType),
-        zignal.Oklab => OklabBinding.createPyObject(color, &OklabType),
-        zignal.Oklch => OklchBinding.createPyObject(color, &OklchType),
         zignal.Lch => LchBinding.createPyObject(color, &LchType),
         zignal.Lms => LmsBinding.createPyObject(color, &LmsType),
+        zignal.Oklab => OklabBinding.createPyObject(color, &OklabType),
+        zignal.Oklch => OklchBinding.createPyObject(color, &OklchType),
         zignal.Xyb => XybBinding.createPyObject(color, &XybType),
+        zignal.Xyz => XyzBinding.createPyObject(color, &XyzType),
         zignal.Ycbcr => YcbcrBinding.createPyObject(color, &YcbcrType),
         else => null,
     };

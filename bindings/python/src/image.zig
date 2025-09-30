@@ -1393,22 +1393,17 @@ pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
     return result;
 }
 
-pub var ImageType = c.PyTypeObject{
-    .ob_base = .{
-        .ob_base = .{},
-        .ob_size = 0,
-    },
-    .tp_name = "zignal.Image",
-    .tp_basicsize = @sizeOf(ImageObject),
-    .tp_dealloc = image_dealloc,
-    .tp_repr = image_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = image_class_doc,
-    .tp_methods = @ptrCast(&image_methods),
-    .tp_getset = @ptrCast(&image_getset),
-    .tp_as_mapping = @ptrCast(&image_as_mapping),
-    .tp_iter = image_iter,
-    .tp_init = image_init,
-    .tp_new = image_new,
-    .tp_richcompare = @ptrCast(&image_richcompare),
-};
+pub var ImageType = py_utils.buildTypeObject(.{
+    .name = "zignal.Image",
+    .basicsize = @sizeOf(ImageObject),
+    .doc = image_class_doc,
+    .methods = @ptrCast(&image_methods),
+    .getset = @ptrCast(&image_getset),
+    .as_mapping = @ptrCast(&image_as_mapping),
+    .new = image_new,
+    .init = image_init,
+    .dealloc = image_dealloc,
+    .repr = image_repr,
+    .iter = image_iter,
+    .richcompare = @ptrCast(&image_richcompare),
+});

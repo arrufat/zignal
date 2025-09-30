@@ -1220,19 +1220,14 @@ pub const canvas_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-pub var CanvasType = c.PyTypeObject{
-    .ob_base = .{
-        .ob_base = .{},
-        .ob_size = 0,
-    },
-    .tp_name = "zignal.Canvas",
-    .tp_basicsize = @sizeOf(CanvasObject),
-    .tp_dealloc = canvas_dealloc,
-    .tp_repr = canvas_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = canvas_class_doc,
-    .tp_methods = @ptrCast(&canvas_methods),
-    .tp_getset = @ptrCast(&canvas_getset),
-    .tp_init = canvas_init,
-    .tp_new = canvas_new,
-};
+pub var CanvasType = py_utils.buildTypeObject(.{
+    .name = "zignal.Canvas",
+    .basicsize = @sizeOf(CanvasObject),
+    .doc = canvas_class_doc,
+    .methods = @ptrCast(&canvas_methods),
+    .getset = @ptrCast(&canvas_getset),
+    .new = canvas_new,
+    .init = canvas_init,
+    .dealloc = canvas_dealloc,
+    .repr = canvas_repr,
+});

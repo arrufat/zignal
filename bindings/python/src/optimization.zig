@@ -141,18 +141,16 @@ var assignment_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var AssignmentType = c.PyTypeObject{
-    .ob_base = .{ .ob_base = .{}, .ob_size = 0 },
-    .tp_name = "zignal.Assignment",
-    .tp_basicsize = @sizeOf(AssignmentObject),
-    .tp_dealloc = assignment_dealloc,
-    .tp_repr = assignment_repr,
-    .tp_flags = c.Py_TPFLAGS_DEFAULT,
-    .tp_doc = assignment_doc,
-    .tp_getset = &assignment_getset,
-    .tp_init = assignment_init,
-    .tp_new = assignment_new,
-};
+pub var AssignmentType = py_utils.buildTypeObject(.{
+    .name = "zignal.Assignment",
+    .basicsize = @sizeOf(AssignmentObject),
+    .doc = assignment_doc,
+    .getset = &assignment_getset,
+    .new = assignment_new,
+    .init = assignment_init,
+    .dealloc = assignment_dealloc,
+    .repr = assignment_repr,
+});
 
 // ============================================================================
 // MODULE FUNCTIONS
