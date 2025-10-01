@@ -87,15 +87,9 @@ pub fn extractAlignedFace(
 
     // Perform blurring or sharpening to the aligned face.
     if (blurring > 0) {
-        var temp = try Image(T).initLike(allocator, out.*);
-        defer temp.deinit(allocator);
-        try out.boxBlur(allocator, @intCast(blurring), temp);
-        @memcpy(out.data, temp.data);
+        try out.boxBlur(allocator, @intCast(blurring), out.*);
     } else if (blurring < 0) {
-        var temp = try Image(T).initLike(allocator, out.*);
-        defer temp.deinit(allocator);
-        try out.sharpen(allocator, @intCast(-blurring), temp);
-        @memcpy(out.data, temp.data);
+        try out.sharpen(allocator, @intCast(-blurring), out.*);
     }
 }
 
