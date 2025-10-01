@@ -19,13 +19,9 @@ pub fn Edges(comptime T: type) type {
         /// The output is a grayscale image representing the magnitude of gradients at each pixel.
         ///
         /// Parameters:
-        /// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
-        /// - `out`: An out-parameter pointer to an `Image(u8)` that will be filled with the Sobel magnitude image.
-        pub fn sobel(self: Image(T), allocator: Allocator, out: *Image(u8)) !void {
-            if (!self.hasSameShape(out.*)) {
-                out.* = try Image(u8).init(allocator, self.rows, self.cols);
-            }
-
+        /// - `allocator`: The allocator to use for temporary buffers.
+        /// - `out`: Output image that will be filled with the Sobel magnitude image.
+        pub fn sobel(self: Image(T), allocator: Allocator, out: Image(u8)) !void {
             // For now, use float path for all types to ensure correctness
             {
                 // Original float path for other types
@@ -56,13 +52,13 @@ pub fn Edges(comptime T: type) type {
                 defer if (needs_conversion) gray_float.deinit(allocator);
 
                 // Apply Sobel X and Y filters
-                var grad_x = Image(f32).empty;
-                var grad_y = Image(f32).empty;
+                var grad_x = try Image(f32).initLike(allocator, gray_float);
+                var grad_y = try Image(f32).initLike(allocator, gray_float);
                 defer grad_x.deinit(allocator);
                 defer grad_y.deinit(allocator);
 
-                try convolve(f32, gray_float, allocator, sobel_x, &grad_x, .replicate);
-                try convolve(f32, gray_float, allocator, sobel_y, &grad_y, .replicate);
+                try convolve(f32, gray_float, allocator, sobel_x, .replicate, grad_x);
+                try convolve(f32, gray_float, allocator, sobel_y, .replicate, grad_y);
 
                 // Compute gradient magnitude
                 for (0..self.rows) |r| {
@@ -91,15 +87,9 @@ pub fn Edges(comptime T: type) type {
             self: Image(T),
             allocator: Allocator,
             opts: ShenCastan,
-            out: *Image(u8),
+            out: Image(u8),
         ) !void {
             try opts.validate();
-
-            // Ensure output is allocated (deinit old buffer if shape differs to prevent leak)
-            if (!self.hasSameShape(out.*)) {
-                if (out.data.len > 0) out.deinit(allocator);
-                out.* = try Image(u8).init(allocator, self.rows, self.cols);
-            }
 
             // Convert to grayscale float for processing
             var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
@@ -234,7 +224,7 @@ pub fn Edges(comptime T: type) type {
             sigma: f32,
             low_threshold: f32,
             high_threshold: f32,
-            out: *Image(u8),
+            out: Image(u8),
         ) !void {
             // Check for non-finite values first to prevent runtime traps
             if (!std.math.isFinite(sigma) or !std.math.isFinite(low_threshold) or !std.math.isFinite(high_threshold)) {
@@ -243,12 +233,6 @@ pub fn Edges(comptime T: type) type {
             if (sigma < 0) return error.InvalidSigma;
             if (low_threshold < 0 or high_threshold < 0) return error.InvalidThreshold;
             if (low_threshold >= high_threshold) return error.InvalidThreshold;
-
-            // Ensure output is allocated
-            if (!self.hasSameShape(out.*)) {
-                if (out.data.len > 0) out.deinit(allocator);
-                out.* = try Image(u8).init(allocator, self.rows, self.cols);
-            }
 
             // Step 1: Convert to grayscale float for processing
             var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
@@ -267,7 +251,7 @@ pub fn Edges(comptime T: type) type {
                 // No blur - just copy
                 @memcpy(blurred.data, gray_float.data);
             } else {
-                try blurGaussian(gray_float, sigma, &blurred, allocator);
+                try blurGaussian(gray_float, sigma, blurred, allocator);
             }
 
             // Step 3: Compute gradients using Sobel operators
@@ -282,13 +266,13 @@ pub fn Edges(comptime T: type) type {
                 .{ 1, 2, 1 },
             };
 
-            var grad_x = Image(f32).empty;
-            var grad_y = Image(f32).empty;
+            var grad_x = try Image(f32).initLike(allocator, blurred);
+            var grad_y = try Image(f32).initLike(allocator, blurred);
             defer grad_x.deinit(allocator);
             defer grad_y.deinit(allocator);
 
-            try convolve(f32, blurred, allocator, sobel_x, &grad_x, .replicate);
-            try convolve(f32, blurred, allocator, sobel_y, &grad_y, .replicate);
+            try convolve(f32, blurred, allocator, sobel_x, .replicate, grad_x);
+            try convolve(f32, blurred, allocator, sobel_y, .replicate, grad_y);
 
             // Compute gradient magnitude
             var magnitude = try Image(f32).init(allocator, self.rows, self.cols);
@@ -546,7 +530,7 @@ fn applyHysteresis(
     gradients: Image(f32),
     threshold_low: f32,
     threshold_high: f32,
-    out: *Image(u8),
+    out: Image(u8),
     allocator: Allocator,
 ) !void {
     const rows = edges.rows;
@@ -706,7 +690,7 @@ fn nonMaxSuppressEdges(
 
 /// Applies Gaussian blur to an image for Canny edge detection preprocessing.
 /// Uses separable convolution for efficiency.
-fn blurGaussian(src: Image(f32), sigma: f32, dst: *Image(f32), allocator: Allocator) !void {
+fn blurGaussian(src: Image(f32), sigma: f32, dst: Image(f32), allocator: Allocator) !void {
     // Calculate kernel size (3 sigma on each side)
     const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
     const kernel_size = 2 * radius + 1;
@@ -729,7 +713,7 @@ fn blurGaussian(src: Image(f32), sigma: f32, dst: *Image(f32), allocator: Alloca
 
     // Apply separable convolution
     const convolution_mod = @import("convolution.zig");
-    try convolution_mod.convolveSeparable(f32, src, allocator, kernel, kernel, dst, .replicate);
+    try convolution_mod.convolveSeparable(f32, src, allocator, kernel, kernel, .replicate, dst);
 }
 
 /// Non-maximum suppression specifically for Canny edge detection.

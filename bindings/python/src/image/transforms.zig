@@ -313,9 +313,8 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.rotate(allocator, @floatCast(angle), method, &out) catch {
-                    py_utils.setMemoryError("image resize");
+                const out = img.rotate(allocator, @floatCast(angle), method) catch {
+                    py_utils.setMemoryError("image rotate");
                     return null;
                 };
                 return @ptrCast(moveImageToPython(out) orelse return null);
@@ -562,13 +561,8 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            inline else => |*img| {
-                var out = @TypeOf(img.*).init(allocator, img.rows, img.cols) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image");
-                    return null;
-                };
-                img.crop(allocator, rect, &out) catch {
-                    out.deinit(allocator);
+            inline else => |img| {
+                const out = img.crop(allocator, rect) catch {
                     py_utils.setMemoryError("cropped image");
                     return null;
                 };

@@ -88,8 +88,9 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 ///
 /// Parameters:
 /// - T: The pixel type of the image
+/// - allocator: Used for temporary buffers during RGB/RGBA channel processing
 /// - self: The source image
-/// - out: The destination image (must be pre-allocated)
+/// - out: The destination image (must be pre-allocated with desired dimensions)
 /// - method: The interpolation method to use
 ///
 /// Special optimizations:

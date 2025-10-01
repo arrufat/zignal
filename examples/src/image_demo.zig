@@ -14,12 +14,12 @@ pub fn main() !void {
     var edges: Image(u8) = try .init(gpa, image.rows, image.cols);
     defer edges.deinit(gpa);
 
-    try image.sobel(gpa, &edges);
+    try image.sobel(gpa, edges);
     try edges.save(gpa, "liza-sobel.png");
 
     var blurred: Image(Rgba) = try .init(gpa, image.rows, image.cols);
     defer blurred.deinit(gpa);
-    try image.gaussianBlur(gpa, 5.0, &blurred);
+    try image.gaussianBlur(gpa, 5.0, blurred);
     try blurred.save(gpa, "liza-gaussian.png");
 
     var resized: Image(Rgba) = try .init(gpa, image.rows / 2, image.cols / 2);

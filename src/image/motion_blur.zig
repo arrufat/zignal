@@ -68,14 +68,9 @@ pub fn MotionBlurOps(comptime T: type) type {
         /// - `angle`: Direction of motion in radians (0 = horizontal, π/2 = vertical).
         /// - `distance`: Length of the blur effect in pixels.
         /// - `out`: Output image containing the motion blurred result.
-        pub fn linear(image: Image(T), allocator: Allocator, angle: f32, distance: usize, out: *Image(T)) !void {
-            if (!image.hasSameShape(out.*)) {
-                out.deinit(allocator);
-                out.* = try .init(allocator, image.rows, image.cols);
-            }
-
+        pub fn linear(image: Image(T), allocator: Allocator, angle: f32, distance: usize, out: Image(T)) !void {
             if (distance == 0) {
-                image.copy(out.*);
+                image.copy(out);
                 return;
             }
 
@@ -105,7 +100,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (horizontal blur only)
-                try image.convolveSeparable(allocator, kernel, &identity, out, .replicate);
+                try image.convolveSeparable(allocator, kernel, &identity, .replicate, out);
             } else if (is_vertical) {
                 // Use separable convolution for vertical motion blur
                 const kernel_size = distance;
@@ -122,7 +117,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (vertical blur only)
-                try image.convolveSeparable(allocator, &identity, kernel, out, .replicate);
+                try image.convolveSeparable(allocator, &identity, kernel, .replicate, out);
             } else {
                 // General diagonal motion blur
                 switch (@typeInfo(T)) {
@@ -248,20 +243,15 @@ pub fn MotionBlurOps(comptime T: type) type {
         /// - `out`: Output image containing the radial motion blurred result.
         pub fn radial(
             image: Image(T),
-            allocator: Allocator,
+            _: Allocator,
             center_x: f32,
             center_y: f32,
             strength: f32,
             blur_type: RadialType,
-            out: *Image(T),
+            out: Image(T),
         ) !void {
-            if (!image.hasSameShape(out.*)) {
-                out.deinit(allocator);
-                out.* = try .init(allocator, image.rows, image.cols);
-            }
-
             if (strength == 0) {
-                image.copy(out.*);
+                image.copy(out);
                 return;
             }
 

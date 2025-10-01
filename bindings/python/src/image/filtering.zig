@@ -42,8 +42,11 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.boxBlur(allocator, &out, @intCast(radius)) catch {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.boxBlur(allocator, @intCast(radius), out) catch {
                     py_utils.setMemoryError("image operation");
                     return null;
                 };
@@ -84,8 +87,11 @@ pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.medianBlur(allocator, @intCast(radius), &out) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.medianBlur(allocator, @intCast(radius), out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
                         error.UnsupportedPixelType => py_utils.setValueError("median blur requires u8, RGB, or RGBA images", .{}),
@@ -136,8 +142,11 @@ pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.minBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.minBlur(allocator, @intCast(radius), border, out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => {
                             py_utils.setValueError("radius must be > 0", .{});
@@ -194,8 +203,11 @@ pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.maxBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.maxBlur(allocator, @intCast(radius), border, out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => {
                             py_utils.setValueError("radius must be > 0", .{});
@@ -252,8 +264,11 @@ pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.midpointBlur(allocator, @intCast(radius), &out, border) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.midpointBlur(allocator, @intCast(radius), border, out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => {
                             py_utils.setValueError("radius must be > 0", .{});
@@ -320,8 +335,11 @@ pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.percentileBlur(allocator, @intCast(radius), percentile_value, &out, border_mode) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.percentileBlur(allocator, @intCast(radius), percentile_value, border_mode, out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
                         error.InvalidPercentile => py_utils.setValueError("percentile must be between 0 and 1", .{}),
@@ -382,8 +400,11 @@ pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject,
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.alphaTrimmedMeanBlur(allocator, @intCast(radius), trim_fraction, &out, border) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.alphaTrimmedMeanBlur(allocator, @intCast(radius), trim_fraction, border, out) catch |err| {
                     switch (err) {
                         error.InvalidRadius => {
                             py_utils.setValueError("radius must be > 0", .{});
@@ -440,8 +461,11 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.gaussianBlur(allocator, @floatCast(sigma_pos), &out) catch |err| {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.gaussianBlur(allocator, @floatCast(sigma_pos), out) catch |err| {
                     if (err == error.InvalidSigma) {
                         py_utils.setValueError("Invalid sigma value", .{});
                     } else {
@@ -525,8 +549,11 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
-                img.sharpen(allocator, &out, @intCast(radius)) catch {
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.sharpen(allocator, @intCast(radius), out) catch {
                     py_utils.setMemoryError("image operation");
                     return null;
                 };
@@ -714,7 +741,10 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     if (self.py_image) |pimg| {
         switch (pimg.data) {
             inline else => |img| {
-                var out = @TypeOf(img).empty;
+                const out = @TypeOf(img).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
 
                 // Create the appropriate MotionBlur config based on the type
                 const blur_config: MotionBlur = switch (blur_obj.blur_type) {
@@ -740,7 +770,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                     },
                 };
 
-                img.motionBlur(allocator, blur_config, &out) catch {
+                img.motionBlur(allocator, blur_config, out) catch {
                     py_utils.setMemoryError("image operation");
                     return null;
                 };
@@ -772,16 +802,20 @@ pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
-        var out = Image(u8).empty;
         switch (pimg.data) {
             inline else => |img| {
-                img.sobel(allocator, &out) catch {
+                const out = Image(u8).initLike(allocator, img) catch {
                     py_utils.setMemoryError("image operation");
                     return null;
                 };
+                img.sobel(allocator, out) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        return @ptrCast(moveImageToPython(out) orelse return null);
+        return null;
     }
 
     py_utils.setValueError("Image not initialized", .{});
@@ -884,8 +918,6 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
             return null;
         }
 
-        var out = Image(u8).empty;
-
         // Create the simplified ShenCastan configuration
         const opts = zignal.ShenCastan{
             .smooth = @floatCast(smooth),
@@ -899,7 +931,11 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         // Apply Shen-Castan edge detection
         switch (pimg.data) {
             inline else => |img| {
-                img.shenCastan(allocator, opts, &out) catch |err| {
+                const out = Image(u8).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.shenCastan(allocator, opts, out) catch |err| {
                     if (err == error.InvalidBParameter) {
                         c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
                     } else if (err == error.WindowSizeMustBeOdd) {
@@ -913,10 +949,9 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                     }
                     return null;
                 };
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-
-        return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
     py_utils.setValueError("Image not initialized", .{});
@@ -995,12 +1030,14 @@ pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 
     if (self.py_image) |pimg| {
-        var out = Image(u8).empty;
-
         // Apply Canny edge detection
         switch (pimg.data) {
             inline else => |img| {
-                img.canny(allocator, sigma, low, high, &out) catch |err| {
+                const out = Image(u8).initLike(allocator, img) catch {
+                    py_utils.setMemoryError("image operation");
+                    return null;
+                };
+                img.canny(allocator, sigma, low, high, out) catch |err| {
                     if (err == error.InvalidParameter) {
                         py_utils.setValueError("parameters must be finite numbers", .{});
                     } else if (err == error.InvalidSigma) {
@@ -1012,9 +1049,9 @@ pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
                     }
                     return null;
                 };
+                return @ptrCast(moveImageToPython(out) orelse return null);
             },
         }
-        return @ptrCast(moveImageToPython(out) orelse return null);
     }
 
     py_utils.setValueError("Image not initialized", .{});

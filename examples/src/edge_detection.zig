@@ -24,17 +24,17 @@ pub fn main() !void {
     const font = zignal.font.font8x8.basic;
 
     var sobel = edges.view(.{ .t = 0, .l = 0, .r = scaled.cols, .b = scaled.rows });
-    try scaled.sobel(gpa, &sobel);
+    try scaled.sobel(gpa, sobel);
     canvas = .init(gpa, sobel);
     canvas.drawText("Sobel", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
     var shenCastan = edges.view(.{ .t = 0, .l = scaled.cols, .r = 2 * scaled.cols, .b = scaled.rows });
-    try scaled.shenCastan(gpa, .heavy_smooth, &shenCastan);
+    try scaled.shenCastan(gpa, .heavy_smooth, shenCastan);
     canvas = .init(gpa, shenCastan);
     canvas.drawText("Shen Castan", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
     var canny = edges.view(.{ .t = 0, .l = 2 * scaled.cols, .r = 3 * scaled.cols, .b = scaled.rows });
-    try scaled.canny(gpa, 1.4, 75, 150, &canny);
+    try scaled.canny(gpa, 1.4, 75, 150, canny);
     canvas = .init(gpa, canny);
     canvas.drawText("Canny", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
