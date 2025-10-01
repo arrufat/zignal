@@ -18,14 +18,14 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Create a 512x512 image for the logo
-    var image = try Image(Rgb).init(allocator, 512, 512);
+    var image: Image(Rgb) = try .init(allocator, 512, 512);
     defer image.deinit(allocator);
 
     // Create canvas for drawing
     var canvas = Canvas(Rgb).init(allocator, image);
 
     // Fill background with a dark color
-    const bg_color = Rgb{ .r = 20, .g = 24, .b = 32 };
+    const bg_color: Rgb = .{ .r = 20, .g = 24, .b = 32 };
     canvas.fill(bg_color);
 
     // Draw a subtle grid pattern in the background
@@ -54,25 +54,13 @@ fn drawBackgroundGrid(canvas: *Canvas(Rgb)) void {
     // Draw vertical lines
     var x: f32 = grid_spacing;
     while (x < 512) : (x += grid_spacing) {
-        canvas.drawLine(
-            .point(.{ x, 0 }),
-            .point(.{ x, 512 }),
-            grid_color,
-            1,
-            .fast,
-        );
+        canvas.drawLine(.init(.{ x, 0 }), .init(.{ x, 512 }), grid_color, 1, .fast);
     }
 
     // Draw horizontal lines
     var y: f32 = grid_spacing;
     while (y < 512) : (y += grid_spacing) {
-        canvas.drawLine(
-            .point(.{ 0, y }),
-            .point(.{ 512, y }),
-            grid_color,
-            1,
-            .fast,
-        );
+        canvas.drawLine(.init(.{ 0, y }), .init(.{ 512, y }), grid_color, 1, .fast);
     }
 }
 
@@ -108,7 +96,7 @@ fn drawSignalWaves(canvas: *Canvas(Rgb), allocator: std.mem.Allocator) !void {
             const x = @as(f32, @floatFromInt(i)) * 512.0 / @as(f32, @floatFromInt(n_points - 1));
             const normalized_x = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n_points - 1));
             const y = config.y_offset + config.amplitude * std.math.sin(config.frequency * 2 * std.math.pi * normalized_x + config.phase);
-            wave_points[i] = zignal.Point(2, f32).point(.{ x, y });
+            wave_points[i] = .init(.{ x, y });
         }
 
         // Draw the wave as connected lines
@@ -153,24 +141,10 @@ fn drawZignalText(canvas: *Canvas(Rgb)) void {
         const char_str = [_]u8{char};
 
         // Shadow layer for depth
-        canvas.drawText(
-            &char_str,
-            .point(.{ current_x + 2, y_pos + 2 }),
-            shadow_color,
-            font,
-            scale,
-            .fast,
-        );
+        canvas.drawText(&char_str, .init(.{ current_x + 2, y_pos + 2 }), shadow_color, font, scale, .fast);
 
         // Main character
-        canvas.drawText(
-            &char_str,
-            .point(.{ current_x, y_pos }),
-            text_color,
-            font,
-            scale,
-            .fast,
-        );
+        canvas.drawText(&char_str, .init(.{ current_x, y_pos }), text_color, font, scale, .fast);
 
         // Calculate next position using tight bounds
         const tight_bounds = font.getTextBoundsTight(&char_str, scale);
@@ -284,7 +258,7 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
             const alpha = @as(u8, @intFromFloat(@min(255, intensity * 255)));
             const color_with_alpha = adjusted_rgb.toRgba(alpha);
 
-            const rect = zignal.Rectangle(f32).init(x, y, x + pixel_size - 1, y + pixel_size - 1);
+            const rect: zignal.Rectangle(f32) = .init(x, y, x + pixel_size - 1, y + pixel_size - 1);
             // Now fillRectangle with .soft mode properly supports alpha blending
             canvas.fillRectangle(rect, color_with_alpha, .soft);
         }
@@ -298,7 +272,7 @@ fn drawFrequencySpectrum(canvas: *Canvas(Rgb)) void {
     const num_bars = 50;
     const spectrum_start_x = (512 - (num_bars * (bar_width + bar_spacing))) / 2;
 
-    var prng = std.Random.DefaultPrng.init(42);
+    var prng: std.Random.DefaultPrng = .init(42);
     const random = prng.random();
 
     for (0..num_bars) |i| {
@@ -336,11 +310,11 @@ fn drawFrequencySpectrum(canvas: *Canvas(Rgb)) void {
         const color = oklch_color.toRgb();
 
         // Draw bar
-        const rect = zignal.Rectangle(f32).init(x, spectrum_y - height, x + bar_width, spectrum_y);
+        const rect: zignal.Rectangle(f32) = .init(x, spectrum_y - height, x + bar_width, spectrum_y);
         canvas.fillRectangle(rect, color, .fast);
 
         // Add a faint reflection with reduced lightness
-        const reflection_rect = zignal.Rectangle(f32).init(x, spectrum_y + 2, x + bar_width, spectrum_y + height * 0.3);
+        const reflection_rect: zignal.Rectangle(f32) = .init(x, spectrum_y + 2, x + bar_width, spectrum_y + height * 0.3);
         canvas.fillRectangle(reflection_rect, color.toRgba(64), .soft);
     }
 }

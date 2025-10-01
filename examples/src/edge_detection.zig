@@ -5,6 +5,7 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb;
 const Canvas = zignal.Canvas;
+const p = zignal.Point(2, f32).init;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -23,20 +24,20 @@ pub fn main() !void {
     defer edges.deinit(gpa);
     const font = zignal.font.font8x8.basic;
 
-    var sobel = edges.view(.{ .t = 0, .l = 0, .r = scaled.cols, .b = scaled.rows });
+    const sobel = edges.view(.{ .t = 0, .l = 0, .r = scaled.cols, .b = scaled.rows });
     try scaled.sobel(gpa, sobel);
     canvas = .init(gpa, sobel);
-    canvas.drawText("Sobel", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
+    canvas.drawText("Sobel", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
-    var shenCastan = edges.view(.{ .t = 0, .l = scaled.cols, .r = 2 * scaled.cols, .b = scaled.rows });
+    const shenCastan = edges.view(.{ .t = 0, .l = scaled.cols, .r = 2 * scaled.cols, .b = scaled.rows });
     try scaled.shenCastan(gpa, .heavy_smooth, shenCastan);
     canvas = .init(gpa, shenCastan);
-    canvas.drawText("Shen Castan", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
+    canvas.drawText("Shen Castan", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
-    var canny = edges.view(.{ .t = 0, .l = 2 * scaled.cols, .r = 3 * scaled.cols, .b = scaled.rows });
+    const canny = edges.view(.{ .t = 0, .l = 2 * scaled.cols, .r = 3 * scaled.cols, .b = scaled.rows });
     try scaled.canny(gpa, 1.4, 75, 150, canny);
     canvas = .init(gpa, canny);
-    canvas.drawText("Canny", .point(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
+    canvas.drawText("Canny", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
     std.debug.print("{f}\n", .{edges.display(.{ .auto = .{} })});
     try edges.save(gpa, "edges.png");

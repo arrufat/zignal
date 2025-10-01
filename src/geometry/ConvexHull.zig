@@ -109,13 +109,13 @@ pub fn ConvexHull(comptime T: type) type {
 
 test "convex hull" {
     const points: []const Point(2, f32) = &.{
-        .point(.{ 0.0, 0.0 }),
-        .point(.{ 1.0, 1.0 }),
-        .point(.{ 2.0, 2.0 }),
-        .point(.{ 3.0, 1.0 }),
-        .point(.{ 4.0, 0.0 }),
-        .point(.{ 2.0, 4.0 }),
-        .point(.{ 1.0, 3.0 }),
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 1.0, 1.0 }),
+        .init(.{ 2.0, 2.0 }),
+        .init(.{ 3.0, 1.0 }),
+        .init(.{ 4.0, 0.0 }),
+        .init(.{ 2.0, 4.0 }),
+        .init(.{ 1.0, 3.0 }),
     };
     var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
     defer convex_hull.deinit();
@@ -142,9 +142,9 @@ test "computeOrientation" {
     defer convex_hull.deinit();
     const computeOrientation = ConvexHull(f32).computeOrientation;
     // These three points can have different orientations due to floating point precision.
-    const a: Point(2, f32) = .point(.{ 4.9171928e-1, 6.473901e-1 });
-    const b: Point(2, f32) = .point(.{ 3.6271343e-1, 9.712454e-1 });
-    const c: Point(2, f32) = .point(.{ 3.9276862e-1, 8.9579517e-1 });
+    const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
+    const b: Point(2, f32) = .init(.{ 3.6271343e-1, 9.712454e-1 });
+    const c: Point(2, f32) = .init(.{ 3.9276862e-1, 8.9579517e-1 });
     const orientation_abc = computeOrientation(a, b, c);
     const orientation_acb = computeOrientation(a, c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);

@@ -41,11 +41,11 @@ pub fn extractAlignedFace(
 ) !void {
     // These are the normalized coordinates of the aligned landmarks taken from dlib.
     var from_points: [5]Point = .{
-        .point(.{ 0.8595674595992, 0.2134981538014 }),
-        .point(.{ 0.6460604764104, 0.2289674387677 }),
-        .point(.{ 0.1205750620789, 0.2137274526848 }),
-        .point(.{ 0.3340850613712, 0.2290642403242 }),
-        .point(.{ 0.4901123135679, 0.6277975316475 }),
+        .init(.{ 0.8595674595992, 0.2134981538014 }),
+        .init(.{ 0.6460604764104, 0.2289674387677 }),
+        .init(.{ 0.1205750620789, 0.2137274526848 }),
+        .init(.{ 0.3340850613712, 0.2290642403242 }),
+        .init(.{ 0.4901123135679, 0.6277975316475 }),
     };
     const fcols: f32 = @floatFromInt(image.cols);
     const frows: f32 = @floatFromInt(image.rows);
@@ -62,7 +62,7 @@ pub fn extractAlignedFace(
     assert(out.cols == out.rows);
     assert(out.cols > 0);
     const side: f32 = @floatFromInt(out.cols);
-    for (&from_points) |*p| p.* = .point(.{
+    for (&from_points) |*p| p.* = .init(.{
         (padding + p.x()) / (2 * padding + 1) * side,
         (padding + p.y()) / (2 * padding + 1) * side,
     });
@@ -75,7 +75,7 @@ pub fn extractAlignedFace(
     for (0..out.rows) |r| {
         for (0..out.cols) |c| {
             // Current pixel in output space
-            const out_point: Point = .point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
+            const out_point: Point = .init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
 
             // Transform to source image space
             const src_point = transform.project(out_point);

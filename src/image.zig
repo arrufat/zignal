@@ -234,7 +234,7 @@ pub fn Image(comptime T: type) type {
         /// try image.rotate(allocator, image.getCenter(), angle, &rotated);
         /// ```
         pub fn getCenter(self: Self) Point(2, f32) {
-            return .point(.{
+            return .init(.{
                 @as(f32, @floatFromInt(self.cols)) / 2.0,
                 @as(f32, @floatFromInt(self.rows)) / 2.0,
             });

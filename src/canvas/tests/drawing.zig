@@ -13,7 +13,7 @@ test "line endpoints are connected" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
     // Fill with white
@@ -21,15 +21,15 @@ test "line endpoints are connected" {
         pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
     }
 
-    const canvas = Canvas(Rgba).init(allocator, img);
-    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const canvas: Canvas(Rgba) = .init(allocator, img);
+    const color: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test various line directions
     const test_cases = [_]struct { p1: Point(2, f32), p2: Point(2, f32) }{
-        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 90, 10 }) }, // horizontal
-        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 10, 90 }) }, // vertical
-        .{ .p1 = .point(.{ 10, 10 }), .p2 = .point(.{ 90, 90 }) }, // diagonal
-        .{ .p1 = .point(.{ 90, 10 }), .p2 = .point(.{ 10, 90 }) }, // reverse diagonal
+        .{ .p1 = .init(.{ 10, 10 }), .p2 = .init(.{ 90, 10 }) }, // horizontal
+        .{ .p1 = .init(.{ 10, 10 }), .p2 = .init(.{ 10, 90 }) }, // vertical
+        .{ .p1 = .init(.{ 10, 10 }), .p2 = .init(.{ 90, 90 }) }, // diagonal
+        .{ .p1 = .init(.{ 90, 10 }), .p2 = .init(.{ 10, 90 }) }, // reverse diagonal
     };
 
     for (test_cases) |tc| {
@@ -74,10 +74,10 @@ test "thick lines have correct width" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test different line widths
@@ -91,7 +91,7 @@ test "thick lines have correct width" {
 
         // Draw horizontal line in the middle
         const y = @as(f32, @floatFromInt(height / 2));
-        canvas.drawLine(.point(.{ 50, y }), .point(.{ 150, y }), color, line_width, .fast);
+        canvas.drawLine(.init(.{ 50, y }), .init(.{ 150, y }), color, line_width, .fast);
 
         // Measure actual width at several points along the line
         var measured_widths: [3]usize = .{ 0, 0, 0 };
@@ -125,14 +125,14 @@ test "filled circle has correct radius" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     const test_radii = [_]f32{ 5, 10, 20, 30, 40 };
-    const center: Point(2, f32) = .point(.{ 100, 100 });
+    const center: Point(2, f32) = .init(.{ 100, 100 });
 
     for (test_radii) |radius| {
         // Clear image
@@ -181,13 +181,13 @@ test "circle outline has correct thickness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
-    const center: Point(2, f32) = .point(.{ 100, 100 });
+    const center: Point(2, f32) = .init(.{ 100, 100 });
     const radius: f32 = 40;
     const line_widths = [_]usize{ 1, 3, 5, 10 };
 
@@ -228,7 +228,7 @@ test "circle outline has correct thickness" {
 test "drawImage copies opaque pixels" {
     const allocator = testing.allocator;
 
-    var dest = try Image(Rgba).init(allocator, 4, 4);
+    var dest: Image(Rgba) = try .init(allocator, 4, 4);
     defer dest.deinit(allocator);
 
     // Fill destination with white
@@ -236,15 +236,15 @@ test "drawImage copies opaque pixels" {
         pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
     }
 
-    var src = try Image(Rgba).init(allocator, 2, 2);
+    var src: Image(Rgba) = try .init(allocator, 2, 2);
     defer src.deinit(allocator);
     src.at(0, 0).* = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
     src.at(0, 1).* = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
     src.at(1, 0).* = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
     src.at(1, 1).* = Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
 
-    const canvas = Canvas(Rgba).init(allocator, dest);
-    canvas.drawImage(src, .point(.{ 1, 1 }), null, .normal);
+    const canvas: Canvas(Rgba) = .init(allocator, dest);
+    canvas.drawImage(src, .init(.{ 1, 1 }), null, .normal);
 
     try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, dest.at(1, 1).*);
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, dest.at(1, 2).*);
@@ -258,7 +258,7 @@ test "drawImage copies opaque pixels" {
 test "drawImage blends alpha" {
     const allocator = testing.allocator;
 
-    var dest = try Image(Rgba).init(allocator, 2, 2);
+    var dest: Image(Rgba) = try .init(allocator, 2, 2);
     defer dest.deinit(allocator);
 
     // Fill destination with blue
@@ -267,13 +267,13 @@ test "drawImage blends alpha" {
         pixel.* = base;
     }
 
-    var src = try Image(Rgba).init(allocator, 1, 1);
+    var src: Image(Rgba) = try .init(allocator, 1, 1);
     defer src.deinit(allocator);
     const overlay = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
     src.at(0, 0).* = overlay;
 
-    const canvas = Canvas(Rgba).init(allocator, dest);
-    canvas.drawImage(src, .point(.{ 0, 0 }), null, .normal);
+    const canvas: Canvas(Rgba) = .init(allocator, dest);
+    canvas.drawImage(src, .init(.{ 0, 0 }), null, .normal);
 
     const expected = base.blend(overlay, .normal);
     try expectEqual(expected, dest.at(0, 0).*);
@@ -282,24 +282,22 @@ test "drawImage blends alpha" {
 test "drawImage supports source rect and clipping" {
     const allocator = testing.allocator;
 
-    var dest = try Image(Rgba).init(allocator, 2, 3);
+    var dest: Image(Rgba) = try .init(allocator, 2, 3);
     defer dest.deinit(allocator);
-    for (dest.data) |*pixel| {
-        pixel.* = Rgba{ .r = 0, .g = 0, .b = 0, .a = 0 };
-    }
+    dest.fill(Rgba.transparent);
 
-    var src = try Image(Rgba).init(allocator, 2, 3);
+    var src: Image(Rgba) = try .init(allocator, 2, 3);
     defer src.deinit(allocator);
-    src.at(0, 0).* = Rgba{ .r = 10, .g = 20, .b = 30, .a = 255 };
-    src.at(0, 1).* = Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 };
-    src.at(0, 2).* = Rgba{ .r = 70, .g = 80, .b = 90, .a = 255 };
-    src.at(1, 0).* = Rgba{ .r = 110, .g = 120, .b = 130, .a = 255 };
-    src.at(1, 1).* = Rgba{ .r = 140, .g = 150, .b = 160, .a = 255 };
-    src.at(1, 2).* = Rgba{ .r = 170, .g = 180, .b = 190, .a = 255 };
+    src.at(0, 0).* = .{ .r = 10, .g = 20, .b = 30, .a = 255 };
+    src.at(0, 1).* = .{ .r = 40, .g = 50, .b = 60, .a = 255 };
+    src.at(0, 2).* = .{ .r = 70, .g = 80, .b = 90, .a = 255 };
+    src.at(1, 0).* = .{ .r = 110, .g = 120, .b = 130, .a = 255 };
+    src.at(1, 1).* = .{ .r = 140, .g = 150, .b = 160, .a = 255 };
+    src.at(1, 2).* = .{ .r = 170, .g = 180, .b = 190, .a = 255 };
 
-    const canvas = Canvas(Rgba).init(allocator, dest);
-    const src_rect = Rectangle(usize).init(1, 0, 3, 2);
-    canvas.drawImage(src, .point(.{ 0, 0 }), src_rect, .normal);
+    const canvas: Canvas(Rgba) = .init(allocator, dest);
+    const src_rect: Rectangle(usize) = .init(1, 0, 3, 2);
+    canvas.drawImage(src, .init(.{ 0, 0 }), src_rect, .normal);
 
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
     try expectEqual(Rgba{ .r = 70, .g = 80, .b = 90, .a = 255 }, dest.at(0, 1).*);
@@ -307,7 +305,7 @@ test "drawImage supports source rect and clipping" {
     try expectEqual(Rgba{ .r = 170, .g = 180, .b = 190, .a = 255 }, dest.at(1, 1).*);
 
     // Draw partially off-canvas to ensure clipping works
-    canvas.drawImage(src, .point(.{ -1, 0 }), null, .normal);
+    canvas.drawImage(src, .init(.{ -1, 0 }), null, .normal);
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
 }
 
@@ -315,11 +313,10 @@ test "filled rectangle has correct area" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
-    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const canvas: Canvas(Rgba) = .init(allocator, img);
 
     const rect = Rectangle(f32){ .l = 50, .t = 50, .r = 150, .b = 130 };
     const rect_width = rect.r - rect.l;
@@ -332,12 +329,12 @@ test "filled rectangle has correct area" {
     }
 
     const corners = [_]Point(2, f32){
-        .point(.{ rect.l, rect.t }),
-        .point(.{ rect.r, rect.t }),
-        .point(.{ rect.r, rect.b }),
-        .point(.{ rect.l, rect.b }),
+        .init(.{ rect.l, rect.t }),
+        .init(.{ rect.r, rect.t }),
+        .init(.{ rect.r, rect.b }),
+        .init(.{ rect.l, rect.b }),
     };
-    try canvas.fillPolygon(&corners, color, .fast);
+    try canvas.fillPolygon(&corners, Rgba.black, .fast);
 
     // Count black pixels
     var black_pixels: usize = 0;
@@ -355,17 +352,17 @@ test "polygon fill respects convexity" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test convex polygon (triangle)
     const triangle = [_]Point(2, f32){
-        .point(.{ 100, 30 }),
-        .point(.{ 170, 150 }),
-        .point(.{ 30, 150 }),
+        .init(.{ 100, 30 }),
+        .init(.{ 170, 150 }),
+        .init(.{ 30, 150 }),
     };
 
     for (img.data) |*pixel| {
@@ -376,12 +373,12 @@ test "polygon fill respects convexity" {
 
     // Check that points inside triangle are filled
     const test_points = [_]struct { p: Point(2, f32), inside: bool }{
-        .{ .p = .point(.{ 100, 100 }), .inside = true }, // centroid
-        .{ .p = .point(.{ 100, 50 }), .inside = true }, // near top
-        .{ .p = .point(.{ 50, 140 }), .inside = true }, // near bottom left
-        .{ .p = .point(.{ 150, 140 }), .inside = true }, // near bottom right
-        .{ .p = .point(.{ 20, 20 }), .inside = false }, // outside
-        .{ .p = .point(.{ 180, 180 }), .inside = false }, // outside
+        .{ .p = .init(.{ 100, 100 }), .inside = true }, // centroid
+        .{ .p = .init(.{ 100, 50 }), .inside = true }, // near top
+        .{ .p = .init(.{ 50, 140 }), .inside = true }, // near bottom left
+        .{ .p = .init(.{ 150, 140 }), .inside = true }, // near bottom right
+        .{ .p = .init(.{ 20, 20 }), .inside = false }, // outside
+        .{ .p = .init(.{ 180, 180 }), .inside = false }, // outside
     };
 
     for (test_points) |tp| {
@@ -399,14 +396,13 @@ test "antialiased vs solid fill coverage" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
-    var img_solid = try Image(Rgba).init(allocator, width, height);
+    var img_solid: Image(Rgba) = try .init(allocator, width, height);
     defer img_solid.deinit(allocator);
-    var img_smooth = try Image(Rgba).init(allocator, width, height);
+    var img_smooth: Image(Rgba) = try .init(allocator, width, height);
     defer img_smooth.deinit(allocator);
 
-    const canvas_solid = Canvas(Rgba).init(allocator, img_solid);
-    const canvas_smooth = Canvas(Rgba).init(allocator, img_smooth);
-    const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const canvas_solid: Canvas(Rgba) = .init(allocator, img_solid);
+    const canvas_smooth: Canvas(Rgba) = .init(allocator, img_smooth);
 
     // Clear both images
     for (img_solid.data, img_smooth.data) |*p1, *p2| {
@@ -415,11 +411,11 @@ test "antialiased vs solid fill coverage" {
     }
 
     // Draw same circle with different modes
-    const center: Point(2, f32) = .point(.{ 50, 50 });
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     const radius: f32 = 20;
 
-    canvas_solid.fillCircle(center, radius, color, .fast);
-    canvas_smooth.fillCircle(center, radius, color, .soft);
+    canvas_solid.fillCircle(center, radius, Rgba.black, .fast);
+    canvas_smooth.fillCircle(center, radius, Rgba.black, .soft);
 
     // Count coverage (sum of darkness)
     var solid_coverage: f32 = 0;
@@ -440,10 +436,10 @@ test "bezier curve smoothness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
-    var img = try Image(Rgba).init(allocator, width, height);
+    var img: Image(Rgba) = try .init(allocator, width, height);
     defer img.deinit(allocator);
 
-    const canvas = Canvas(Rgba).init(allocator, img);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Clear image
@@ -452,10 +448,10 @@ test "bezier curve smoothness" {
     }
 
     // Draw cubic bezier
-    const p0: Point(2, f32) = .point(.{ 20, 100 });
-    const p1: Point(2, f32) = .point(.{ 60, 20 });
-    const p2: Point(2, f32) = .point(.{ 140, 180 });
-    const p3: Point(2, f32) = .point(.{ 180, 100 });
+    const p0: Point(2, f32) = .init(.{ 20, 100 });
+    const p1: Point(2, f32) = .init(.{ 60, 20 });
+    const p2: Point(2, f32) = .init(.{ 140, 180 });
+    const p3: Point(2, f32) = .init(.{ 180, 100 });
 
     canvas.drawCubicBezier(p0, p1, p2, p3, color, 2, .fast);
 

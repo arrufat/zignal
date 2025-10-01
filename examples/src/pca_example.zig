@@ -14,7 +14,7 @@ const Bounds = struct { min: @Vector(2, f64), max: @Vector(2, f64) };
 
 /// Generate a 2D point cloud with a clear dominant direction
 fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) !Matrix(f64) {
-    var points = try Matrix(f64).init(allocator, num_points, 2);
+    var points: Matrix(f64) = try .init(allocator, num_points, 2);
 
     // Use a deterministic random number generator for reproducible results
     var prng: std.Random.DefaultPrng = .init(42);
@@ -72,7 +72,7 @@ fn worldToCanvas(world_point: @Vector(2, f64), canvas_size: f32, world_bounds: B
     const canvas_x = @as(f32, @floatCast(centered_point[0])) * scale + canvas_center;
     const canvas_y = -@as(f32, @floatCast(centered_point[1])) * scale + canvas_center; // Flip Y axis
 
-    return Point(2, f32).point(.{ canvas_x, canvas_y });
+    return .init(.{ canvas_x, canvas_y });
 }
 
 /// Find bounding box of point cloud
@@ -122,7 +122,7 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64), bounds: Bounds) !void {
 
     for (0..pca.num_components) |i| {
         var component: @Vector(2, f64) = undefined;
-        for (0..2) |j| {
+        inline for (0..2) |j| {
             component[j] = pca.components.at(j, i).*;
         }
 
@@ -151,11 +151,11 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64), bounds: Bounds) !void {
             const norm_dir_x = dir_x / length;
             const norm_dir_y = dir_y / length;
 
-            const arrow1: Point(2, f32) = .point(.{
+            const arrow1: Point(2, f32) = .init(.{
                 end_canvas.x() - arrow_size * (norm_dir_x + norm_dir_y * 0.5),
                 end_canvas.y() - arrow_size * (norm_dir_y - norm_dir_x * 0.5),
             });
-            const arrow2: Point(2, f32) = .point(.{
+            const arrow2: Point(2, f32) = .init(.{
                 end_canvas.x() - arrow_size * (norm_dir_x - norm_dir_y * 0.5),
                 end_canvas.y() - arrow_size * (norm_dir_y + norm_dir_x * 0.5),
             });
@@ -209,10 +209,10 @@ pub fn main() !void {
     var aligned_points = try projectAndAlign(pca, original_points);
     defer aligned_points.deinit();
 
-    var aligned_image = try Image(Rgb).init(gpa, canvas_size, canvas_size);
+    var aligned_image: Image(Rgb) = try .init(gpa, canvas_size, canvas_size);
     defer aligned_image.deinit(gpa);
 
-    const aligned_canvas = Canvas(Rgb).init(gpa, aligned_image);
+    const aligned_canvas: Canvas(Rgb) = .init(gpa, aligned_image);
     aligned_canvas.fill(Rgb{ .r = 40, .g = 20, .b = 20 }); // Dark red background
 
     const aligned_bounds = findBounds(aligned_points);
