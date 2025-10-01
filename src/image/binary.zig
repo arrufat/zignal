@@ -31,16 +31,10 @@ pub const Kernel = struct {
 const Operation = enum { dilate, erode };
 
 pub const Binary = struct {
-    pub fn thresholdOtsu(image: Image(u8), allocator: std.mem.Allocator, out: *Image(u8)) !u8 {
+    pub fn thresholdOtsu(image: Image(u8), _: std.mem.Allocator, out: Image(u8)) !u8 {
         if (image.rows == 0 or image.cols == 0) {
-            if (out.data.len != 0) {
-                out.deinit(allocator);
-            }
-            out.* = Image(u8).empty;
             return 0;
         }
-
-        try ensureOutput(image, allocator, out);
 
         const hist = image.histogram();
         const total_pixels: f64 = @as(f64, @floatFromInt(image.rows * image.cols));
@@ -89,18 +83,12 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         radius: usize,
         c: f32,
-        out: *Image(u8),
+        out: Image(u8),
     ) !void {
         if (radius == 0) return error.InvalidRadius;
         if (image.rows == 0 or image.cols == 0) {
-            if (out.data.len != 0) {
-                out.deinit(allocator);
-            }
-            out.* = Image(u8).empty;
             return;
         }
-
-        try ensureOutput(image, allocator, out);
 
         var sat: Image(f32) = .empty;
         defer if (sat.data.len != 0) sat.deinit(allocator);
@@ -129,7 +117,7 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
     ) !void {
         try morph(image, allocator, kernel, iterations, out, .dilate);
     }
@@ -139,7 +127,7 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
     ) !void {
         try morph(image, allocator, kernel, iterations, out, .erode);
     }
@@ -149,7 +137,7 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
     ) !void {
         try morphComposite(image, allocator, kernel, iterations, out, .erode, .dilate);
     }
@@ -159,7 +147,7 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
     ) !void {
         try morphComposite(image, allocator, kernel, iterations, out, .dilate, .erode);
     }
@@ -169,20 +157,19 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
         first_op: Operation,
         second_op: Operation,
     ) !void {
         if (iterations == 0) {
-            try ensureOutput(image, allocator, out);
-            image.copy(out.*);
+            image.copy(out);
             return;
         }
 
-        var temp: Image(u8) = .empty;
-        defer if (temp.data.len != 0) temp.deinit(allocator);
+        var temp = try Image(u8).initLike(allocator, image);
+        defer temp.deinit(allocator);
 
-        try morph(image, allocator, kernel, iterations, &temp, first_op);
+        try morph(image, allocator, kernel, iterations, temp, first_op);
         try morph(temp, allocator, kernel, iterations, out, second_op);
     }
 
@@ -191,28 +178,19 @@ pub const Binary = struct {
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: *Image(u8),
+        out: Image(u8),
         op: Operation,
     ) !void {
         if (image.rows == 0 or image.cols == 0) {
-            if (out.data.len != 0) {
-                out.deinit(allocator);
-            }
-            out.* = Image(u8).empty;
             return;
         }
 
         if (iterations == 0) {
-            try ensureOutput(image, allocator, out);
-            image.copy(out.*);
+            image.copy(out);
             return;
         }
 
         const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
-
-        // Set up buffers for morphological operations
-        var temp: Image(u8) = .empty;
-        defer if (temp.data.len != 0) temp.deinit(allocator);
 
         var source = image;
         var owned_source: ?Image(u8) = null;
@@ -224,25 +202,24 @@ pub const Binary = struct {
             source = owned_source.?;
         }
 
-        try ensureOutput(image, allocator, out);
-
         if (iterations == 1) {
             // Single iteration: source -> out
-            applyMorph(source, out.*, kernel, op);
+            applyMorph(source, out, kernel, op);
         } else {
             // Multiple iterations: ping-pong between temp and out
-            temp = try Image(u8).init(allocator, image.rows, image.cols);
+            var temp = try Image(u8).initLike(allocator, image);
+            defer temp.deinit(allocator);
 
             // Perform iterations, alternating buffers
             for (0..iterations) |i| {
-                const src = if (i == 0) source else if (i % 2 == 1) temp else out.*;
-                const dst = if (i % 2 == 0) &temp else out;
-                applyMorph(src, dst.*, kernel, op);
+                const src = if (i == 0) source else if (i % 2 == 1) temp else out;
+                const dst = if (i % 2 == 0) temp else out;
+                applyMorph(src, dst, kernel, op);
             }
 
             // If final result is in temp, copy to out
             if (iterations % 2 == 1) {
-                temp.copy(out.*);
+                temp.copy(out);
             }
         }
     }
@@ -296,15 +273,6 @@ pub const Binary = struct {
 
                 dst.at(r_usize, c_usize).* = value;
             }
-        }
-    }
-
-    fn ensureOutput(image: Image(u8), allocator: std.mem.Allocator, out: *Image(u8)) !void {
-        if (!image.hasSameShape(out.*) or out.data.len == 0) {
-            if (out.data.len != 0) {
-                out.deinit(allocator);
-            }
-            out.* = try Image(u8).init(allocator, image.rows, image.cols);
         }
     }
 };

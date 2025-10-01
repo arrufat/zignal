@@ -80,7 +80,8 @@ pub fn ImagePyramid(comptime T: type) type {
 
                 // Apply Gaussian blur if sigma > 0.5
                 if (sigma > 0.5) {
-                    try source.gaussianBlur(allocator, sigma, &blurred);
+                    blurred = try Image(T).initLike(allocator, source);
+                    try source.gaussianBlur(allocator, sigma, blurred);
                 }
 
                 // Allocate and resize to create the new level

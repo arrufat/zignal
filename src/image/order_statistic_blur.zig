@@ -22,9 +22,9 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             image: Image(T),
             allocator: Allocator,
             radius: usize,
-            out: *Image(T),
+            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 0.5, out, .mirror);
+            try Self.percentileBlur(image, allocator, radius, 0.5, .mirror, out);
         }
 
         pub fn percentileBlur(
@@ -32,22 +32,15 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             allocator: Allocator,
             radius: usize,
             percentile: f64,
-            out: *Image(T),
             border: BorderMode,
+            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
-                if (out.data.len != 0 and out.data.ptr != image.data.ptr) {
-                    out.deinit(allocator);
-                }
-                out.* = Image(T).empty;
                 return;
             }
 
             if (radius == 0) {
-                if (!image.hasSameShape(out.*)) {
-                    out.* = try Image(T).init(allocator, image.rows, image.cols);
-                }
-                image.copy(out.*);
+                image.copy(out);
                 return;
             }
 
@@ -55,17 +48,15 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return Error.InvalidPercentile;
             }
 
-            const alias = out.data.len != 0 and out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
 
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
-            var target: *Image(T) = out;
+            var target: Image(T) = out;
             if (alias) {
-                temp_out = try Image(T).init(allocator, image.rows, image.cols);
-                target = &temp_out;
-            } else if (!image.hasSameShape(out.*)) {
-                out.* = try Image(T).init(allocator, image.rows, image.cols);
+                temp_out = try Image(T).initLike(allocator, image);
+                target = temp_out;
             }
 
             switch (@typeInfo(T)) {
@@ -84,7 +75,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
 
             if (alias) {
-                target.*.copy(out.*);
+                target.copy(out);
             }
         }
 
@@ -92,55 +83,46 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             image: Image(T),
             allocator: Allocator,
             radius: usize,
-            out: *Image(T),
             border: BorderMode,
+            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 0.0, out, border);
+            try Self.percentileBlur(image, allocator, radius, 0.0, border, out);
         }
 
         pub fn maxBlur(
             image: Image(T),
             allocator: Allocator,
             radius: usize,
-            out: *Image(T),
             border: BorderMode,
+            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 1.0, out, border);
+            try Self.percentileBlur(image, allocator, radius, 1.0, border, out);
         }
 
         pub fn midpointBlur(
             image: Image(T),
             allocator: Allocator,
             radius: usize,
-            out: *Image(T),
             border: BorderMode,
+            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
-                if (out.data.len != 0 and out.data.ptr != image.data.ptr) {
-                    out.deinit(allocator);
-                }
-                out.* = Image(T).empty;
                 return;
             }
 
             if (radius == 0) {
-                if (!image.hasSameShape(out.*)) {
-                    out.* = try Image(T).init(allocator, image.rows, image.cols);
-                }
-                image.copy(out.*);
+                image.copy(out);
                 return;
             }
 
-            const alias = out.data.len != 0 and out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
-            var target: *Image(T) = out;
+            var target: Image(T) = out;
             if (alias) {
-                temp_out = try Image(T).init(allocator, image.rows, image.cols);
-                target = &temp_out;
-            } else if (!image.hasSameShape(out.*)) {
-                out.* = try Image(T).init(allocator, image.rows, image.cols);
+                temp_out = try Image(T).initLike(allocator, image);
+                target = temp_out;
             }
 
             const reducer = MidpointReducer{};
@@ -158,7 +140,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
 
             if (alias) {
-                target.*.copy(out.*);
+                target.copy(out);
             }
         }
 
@@ -167,14 +149,10 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             allocator: Allocator,
             radius: usize,
             trim_fraction: f64,
-            out: *Image(T),
             border: BorderMode,
+            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
-                if (out.data.len != 0 and out.data.ptr != image.data.ptr) {
-                    out.deinit(allocator);
-                }
-                out.* = Image(T).empty;
                 return;
             }
 
@@ -183,23 +161,18 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
 
             if (radius == 0) {
-                if (!image.hasSameShape(out.*)) {
-                    out.* = try Image(T).init(allocator, image.rows, image.cols);
-                }
-                image.copy(out.*);
+                image.copy(out);
                 return;
             }
 
-            const alias = out.data.len != 0 and out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
-            var target: *Image(T) = out;
+            var target: Image(T) = out;
             if (alias) {
-                temp_out = try Image(T).init(allocator, image.rows, image.cols);
-                target = &temp_out;
-            } else if (!image.hasSameShape(out.*)) {
-                out.* = try Image(T).init(allocator, image.rows, image.cols);
+                temp_out = try Image(T).initLike(allocator, image);
+                target = temp_out;
             }
 
             const reducer = AlphaTrimmedMeanReducer{ .trim_fraction = trim_fraction };
@@ -218,7 +191,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
 
             if (alias) {
-                target.*.copy(out.*);
+                target.copy(out);
             }
         }
 
@@ -226,7 +199,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             image: Image(T),
             allocator: Allocator,
             radius: usize,
-            target: *Image(T),
+            target: Image(T),
             border: BorderMode,
             reducer: anytype,
         ) !void {
@@ -248,34 +221,32 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 plane_wrappers[idx] = Image(u8).initFromSlice(image.rows, image.cols, dst_planes[idx]);
 
                 const src_plane = Image(u8).initFromSlice(image.rows, image.cols, plane);
-                try applyScalarOp(src_plane, allocator, radius, &plane_wrappers[idx], border, reducer);
+                try applyScalarOp(src_plane, allocator, radius, plane_wrappers[idx], border, reducer);
             }
 
-            channel_ops.mergeChannels(T, dst_planes, target.*);
+            channel_ops.mergeChannels(T, dst_planes, target);
         }
 
         fn applyScalarOp(
             image: Image(u8),
             allocator: Allocator,
             radius: usize,
-            out: *Image(u8),
+            out: Image(u8),
             border: BorderMode,
             reducer_in: anytype,
         ) !void {
             const window = radius * 2 + 1;
             if (window > @as(usize, std.math.maxInt(u32))) return Error.InvalidRadius;
 
-            const alias = out.data.len != 0 and out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
 
             var temp_out: Image(u8) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
-            var target: *Image(u8) = out;
+            var target: Image(u8) = out;
             if (alias) {
-                temp_out = try Image(u8).init(allocator, image.rows, image.cols);
-                target = &temp_out;
-            } else if (!image.hasSameShape(out.*)) {
-                out.* = try Image(u8).init(allocator, image.rows, image.cols);
+                temp_out = try Image(u8).initLike(allocator, image);
+                target = temp_out;
             }
 
             var column_hists = try allocator.alloc(Histogram(u8), image.cols);
@@ -353,7 +324,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
 
             if (alias) {
-                target.*.copy(out.*);
+                target.copy(out);
             }
         }
 

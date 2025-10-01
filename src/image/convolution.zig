@@ -192,7 +192,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 /// - `kernel`: A 2D array representing the convolution kernel.
 /// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
 /// - `border_mode`: How to handle pixels at the image borders.
-pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: anytype, out: *Image(T), border_mode: BorderMode) !void {
+pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: anytype, border_mode: BorderMode, out: Image(T)) !void {
     const kernel_info = @typeInfo(@TypeOf(kernel));
     if (kernel_info != .array) @compileError("Kernel must be a 2D array");
     const outer_array = kernel_info.array;
@@ -201,16 +201,11 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
     const kernel_height = outer_array.len;
     const kernel_width = @typeInfo(outer_array.child).array.len;
 
-    if (!self.hasSameShape(out.*)) {
-        out.deinit(allocator);
-        out.* = try .init(allocator, self.rows, self.cols);
-    }
-
     switch (T) {
         u8, f32 => {
             const Kernel = ConvolutionKernel(T, kernel_height, kernel_width);
             const flat_kernel = Kernel.flatten(kernel);
-            Kernel.convolve(self, out.*, flat_kernel, border_mode);
+            Kernel.convolve(self, out, flat_kernel, border_mode);
         },
         else => switch (@typeInfo(T)) {
             .@"struct" => {
@@ -271,7 +266,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                             final_channels[i] = out_ch;
                         }
                     }
-                    channel_ops.mergeChannels(T, final_channels, out.*);
+                    channel_ops.mergeChannels(T, final_channels, out);
                 } else {
                     @compileError("Convolution only supports structs where all fields are u8. Type " ++ @typeName(T) ++ " is not supported.");
                 }
@@ -296,15 +291,9 @@ pub fn convolveSeparable(
     allocator: Allocator,
     kernel_x: []const f32,
     kernel_y: []const f32,
-    out: *Image(T),
     border: BorderMode,
+    out: Image(T),
 ) !void {
-    // Ensure output is properly allocated
-    if (out.rows == 0 or out.cols == 0 or !image.hasSameShape(out.*)) {
-        out.deinit(allocator);
-        out.* = try .init(allocator, image.rows, image.cols);
-    }
-
     // Allocate temporary buffer for intermediate result
     var temp: Image(T) = try .init(allocator, image.rows, image.cols);
     defer temp.deinit(allocator);
@@ -326,7 +315,7 @@ pub fn convolveSeparable(
                 kernel_y_int[i] = @intFromFloat(@round(k * scale));
             }
 
-            convolveSeparablePlane(u8, image, out.*, temp, kernel_x_int, kernel_y_int, border);
+            convolveSeparablePlane(u8, image, out, temp, kernel_x_int, kernel_y_int, border);
         },
         f32 => {
             const src_plane: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = image.data };
@@ -412,7 +401,7 @@ pub fn convolveSeparable(
                             final_channels[i] = out_ch;
                         }
                     }
-                    channel_ops.mergeChannels(T, final_channels, out.*);
+                    channel_ops.mergeChannels(T, final_channels, out);
                 } else {
                     @compileError("Separable convolution only supports structs where all fields are u8. Type " ++ @typeName(T) ++ " is not supported.");
                 }

@@ -141,18 +141,18 @@ pub fn Integral(comptime T: type) type {
         pub fn boxBlur(
             sat: anytype,
             src: Image(T),
-            dst: *Image(T),
+            dst: Image(T),
             radius: usize,
         ) void {
             if (radius == 0) {
-                src.copy(dst.*);
+                src.copy(dst);
                 return;
             }
 
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Single channel blur
-                    boxBlurPlane(T, sat, dst.*, radius);
+                    boxBlurPlane(T, sat, dst, radius);
                 },
                 .@"struct" => {
                     // Multi-channel blur
@@ -269,18 +269,18 @@ pub fn Integral(comptime T: type) type {
         pub fn sharpen(
             sat: anytype,
             src: Image(T),
-            dst: *Image(T),
+            dst: Image(T),
             radius: usize,
         ) void {
             if (radius == 0) {
-                src.copy(dst.*);
+                src.copy(dst);
                 return;
             }
 
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Single channel sharpen
-                    sharpenPlane(T, src, sat, dst.*, radius);
+                    sharpenPlane(T, src, sat, dst, radius);
                 },
                 .@"struct" => {
                     // Multi-channel sharpen
