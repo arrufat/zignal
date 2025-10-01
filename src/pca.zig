@@ -376,7 +376,7 @@ pub fn Pca(comptime T: type) type {
 test "PCA initialization and cleanup" {
     const allocator = std.testing.allocator;
 
-    var pca = try Pca(f64).init(allocator);
+    var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), pca.num_components);
@@ -387,7 +387,7 @@ test "PCA on 2D vectors" {
     const allocator = std.testing.allocator;
 
     // Create data matrix with 4 samples of 2D points
-    var data = try Matrix(f64).init(allocator, 4, 2);
+    var data: Matrix(f64) = try .init(allocator, 4, 2);
     defer data.deinit();
     data.at(0, 0).* = 1.0;
     data.at(0, 1).* = 2.0;
@@ -421,31 +421,29 @@ test "PCA on 2D vectors" {
 
 test "PCA on image color data using Point conversion" {
     const allocator = std.testing.allocator;
-    const Point3 = @import("geometry/Point.zig").Point(3, f64);
 
     // Create a simple gradient image
     var image = try Image(Rgb).init(allocator, 2, 2);
     defer image.deinit(allocator);
 
-    image.data[0] = Rgb{ .r = 0, .g = 0, .b = 0 }; // Black
-    image.data[1] = Rgb{ .r = 85, .g = 85, .b = 85 }; // Dark gray
-    image.data[2] = Rgb{ .r = 170, .g = 170, .b = 170 }; // Light gray
-    image.data[3] = Rgb{ .r = 255, .g = 255, .b = 255 }; // White
+    image.data[0] = .{ .r = 0, .g = 0, .b = 0 }; // Black
+    image.data[1] = .{ .r = 85, .g = 85, .b = 85 }; // Dark gray
+    image.data[2] = .{ .r = 170, .g = 170, .b = 170 }; // Light gray
+    image.data[3] = .{ .r = 255, .g = 255, .b = 255 }; // White
 
     // Convert to color matrix (4 samples × 3 dimensions)
     var color_matrix = try Matrix(f64).init(allocator, 4, 3);
     defer color_matrix.deinit();
 
     for (image.data, 0..) |pixel, i| {
-        const point = Point3.fromColor(pixel);
-        const vec = point.asVector();
-        color_matrix.at(i, 0).* = vec[0];
-        color_matrix.at(i, 1).* = vec[1];
-        color_matrix.at(i, 2).* = vec[2];
+        // Convert RGB values (0-255) to normalized float (0-1)
+        color_matrix.at(i, 0).* = @as(f64, @floatFromInt(pixel.r)) / 255.0;
+        color_matrix.at(i, 1).* = @as(f64, @floatFromInt(pixel.g)) / 255.0;
+        color_matrix.at(i, 2).* = @as(f64, @floatFromInt(pixel.b)) / 255.0;
     }
 
     // Apply PCA to color data
-    var pca = try Pca(f64).init(allocator);
+    var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
     try pca.fit(color_matrix, 1); // Keep only 1 component
@@ -467,7 +465,7 @@ test "PCA Gram path normalization and direction" {
     const allocator = std.testing.allocator;
 
     // Two 3D samples along x-axis -> triggers Gram path (n_samples <= dim)
-    var data = try Matrix(f64).init(allocator, 2, 3);
+    var data: Matrix(f64) = try .init(allocator, 2, 3);
     defer data.deinit();
     data.at(0, 0).* = 1.0;
     data.at(0, 1).* = 0.0;
@@ -476,7 +474,7 @@ test "PCA Gram path normalization and direction" {
     data.at(1, 1).* = 0.0;
     data.at(1, 2).* = 0.0;
 
-    var pca = try Pca(f64).init(allocator);
+    var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
     try pca.fit(data, 1);
 

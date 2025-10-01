@@ -26,37 +26,37 @@ fn saveDebugImage(allocator: std.mem.Allocator, image: Image(Rgba), name: []cons
 // Test drawing helper functions
 fn drawLineHorizontal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    canvas.drawLine(.point(.{ 10, 50 }), .point(.{ 90, 50 }), color, 1, .fast);
+    canvas.drawLine(.init(.{ 10, 50 }), .init(.{ 90, 50 }), color, 1, .fast);
 }
 
 fn drawLineVertical(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
-    canvas.drawLine(.point(.{ 50, 10 }), .point(.{ 50, 90 }), color, 1, .fast);
+    canvas.drawLine(.init(.{ 50, 10 }), .init(.{ 50, 90 }), color, 1, .fast);
 }
 
 fn drawLineDiagonal(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
-    canvas.drawLine(.point(.{ 10, 10 }), .point(.{ 90, 90 }), color, 1, .fast);
+    canvas.drawLine(.init(.{ 10, 10 }), .init(.{ 90, 90 }), color, 1, .fast);
 }
 
 fn drawLineThick(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 128, .b = 0, .a = 255 };
-    canvas.drawLine(.point(.{ 20, 20 }), .point(.{ 80, 80 }), color, 5, .soft);
+    canvas.drawLine(.init(.{ 20, 20 }), .init(.{ 80, 80 }), color, 5, .soft);
 }
 
 fn drawCircleFilledSolid(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 255, .b = 128, .a = 255 };
-    canvas.fillCircle(.point(.{ 50, 50 }), 30, color, .fast);
+    canvas.fillCircle(.init(.{ 50, 50 }), 30, color, .fast);
 }
 
 fn drawCircleFilledSmooth(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 128, .g = 128, .b = 255, .a = 255 };
-    canvas.fillCircle(.point(.{ 50, 50 }), 25, color, .soft);
+    canvas.fillCircle(.init(.{ 50, 50 }), 25, color, .soft);
 }
 
 fn drawCircleOutline(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 0, .b = 255, .a = 255 };
-    canvas.drawCircle(.point(.{ 50, 50 }), 35, color, 3, .soft);
+    canvas.drawCircle(.init(.{ 50, 50 }), 35, color, 3, .soft);
 }
 
 fn drawRectangleFilled(canvas: Canvas(Rgba)) void {
@@ -74,92 +74,92 @@ fn drawRectangleOutline(canvas: Canvas(Rgba)) void {
 fn drawTriangleFilled(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 255, .g = 192, .b = 128, .a = 255 };
     const triangle = [_]Point(2, f32){
-        .point(.{ 50, 20 }),
-        .point(.{ 80, 70 }),
-        .point(.{ 20, 70 }),
+        .init(.{ 50, 20 }),
+        .init(.{ 80, 70 }),
+        .init(.{ 20, 70 }),
     };
     canvas.fillPolygon(&triangle, color, .soft) catch {};
 }
 
 fn drawBezierCubic(canvas: Canvas(Rgba)) void {
     const color = Rgba{ .r = 0, .g = 192, .b = 192, .a = 255 };
-    const p0 = Point(2, f32).point(.{ 10, 50 });
-    const p1 = Point(2, f32).point(.{ 30, 10 });
-    const p2 = Point(2, f32).point(.{ 70, 90 });
-    const p3 = Point(2, f32).point(.{ 90, 50 });
+    const p0: Point(2, f32) = .init(.{ 10, 50 });
+    const p1: Point(2, f32) = .init(.{ 30, 10 });
+    const p2: Point(2, f32) = .init(.{ 70, 90 });
+    const p3: Point(2, f32) = .init(.{ 90, 50 });
     canvas.drawCubicBezier(p0, p1, p2, p3, color, 2, .soft);
 }
 
 fn drawBezierQuadratic(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 255, .g = 128, .b = 192, .a = 255 };
-    const p0 = Point(2, f32).point(.{ 20, 80 });
-    const p1 = Point(2, f32).point(.{ 50, 20 });
-    const p2 = Point(2, f32).point(.{ 80, 80 });
+    const color: Rgba = .{ .r = 255, .g = 128, .b = 192, .a = 255 };
+    const p0: Point(2, f32) = .init(.{ 20, 80 });
+    const p1: Point(2, f32) = .init(.{ 50, 20 });
+    const p2: Point(2, f32) = .init(.{ 80, 80 });
     canvas.drawQuadraticBezier(p0, p1, p2, color, 3, .soft);
 }
 
 fn drawPolygonComplex(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 128, .g = 255, .b = 128, .a = 255 };
+    const color: Rgba = .{ .r = 128, .g = 255, .b = 128, .a = 255 };
     const polygon = [_]Point(2, f32){
-        .point(.{ 50, 10 }),
-        .point(.{ 70, 30 }),
-        .point(.{ 90, 40 }),
-        .point(.{ 70, 60 }),
-        .point(.{ 50, 90 }),
-        .point(.{ 30, 60 }),
-        .point(.{ 10, 40 }),
-        .point(.{ 30, 30 }),
+        .init(.{ 50, 10 }),
+        .init(.{ 70, 30 }),
+        .init(.{ 90, 40 }),
+        .init(.{ 70, 60 }),
+        .init(.{ 50, 90 }),
+        .init(.{ 30, 60 }),
+        .init(.{ 10, 40 }),
+        .init(.{ 30, 30 }),
     };
     canvas.fillPolygon(&polygon, color, .soft) catch {};
 }
 
 fn drawSplinePolygon(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 192, .g = 128, .b = 255, .a = 255 };
+    const color: Rgba = .{ .r = 192, .g = 128, .b = 255, .a = 255 };
     const polygon = [_]Point(2, f32){
-        .point(.{ 50, 20 }),
-        .point(.{ 80, 35 }),
-        .point(.{ 80, 65 }),
-        .point(.{ 50, 80 }),
-        .point(.{ 20, 65 }),
-        .point(.{ 20, 35 }),
+        .init(.{ 50, 20 }),
+        .init(.{ 80, 35 }),
+        .init(.{ 80, 65 }),
+        .init(.{ 50, 80 }),
+        .init(.{ 20, 65 }),
+        .init(.{ 20, 35 }),
     };
     canvas.drawSplinePolygon(&polygon, color, 2, 0.5, .soft);
 }
 
 // Arc drawing test functions
 fn drawArcQuarter(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 255, .g = 128, .b = 64, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 255, .g = 128, .b = 64, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.drawArc(center, 35, 0, std.math.pi / 2.0, color, 2, .fast) catch {};
 }
 
 fn drawArcHalf(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 64, .g = 192, .b = 255, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 64, .g = 192, .b = 255, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.drawArc(center, 30, 0, std.math.pi, color, 1, .soft) catch {};
 }
 
 fn drawArcThick(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 128, .g = 64, .b = 192, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 128, .g = 64, .b = 192, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.drawArc(center, 40, std.math.pi / 4.0, 3.0 * std.math.pi / 2.0, color, 5, .fast) catch {};
 }
 
 fn fillArcQuarter(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 255, .g = 255, .b = 128, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 255, .g = 255, .b = 128, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.fillArc(center, 35, 0, std.math.pi / 2.0, color, .fast) catch {};
 }
 
 fn fillArcHalf(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 192, .g = 255, .b = 192, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 192, .g = 255, .b = 192, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.fillArc(center, 30, -std.math.pi / 2.0, std.math.pi / 2.0, color, .soft) catch {};
 }
 
 fn fillArcFull(canvas: Canvas(Rgba)) void {
-    const color = Rgba{ .r = 128, .g = 192, .b = 255, .a = 255 };
-    const center = Point(2, f32).point(.{ 50, 50 });
+    const color: Rgba = .{ .r = 128, .g = 192, .b = 255, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
     canvas.fillArc(center, 25, 0, 2.0 * std.math.pi, color, .fast) catch {};
 }
 
@@ -196,12 +196,12 @@ test "MD5 checksum regression tests" {
     const height = 100;
 
     for (md5_checksums) |test_case| {
-        var img = try Image(Rgba).init(allocator, width, height);
+        var img: Image(Rgba) = try .init(allocator, width, height);
         defer img.deinit(allocator);
 
         // White background
         for (img.data) |*pixel| {
-            pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+            pixel.* = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
         }
 
         const canvas = Canvas(Rgba).init(allocator, img);
@@ -214,7 +214,7 @@ test "MD5 checksum regression tests" {
             };
         }
 
-        var hasher = std.crypto.hash.Md5.init(.{});
+        var hasher: std.crypto.hash.Md5 = .init(.{});
         hasher.update(std.mem.sliceAsBytes(img.data));
         var digest: [16]u8 = undefined;
         hasher.final(&digest);

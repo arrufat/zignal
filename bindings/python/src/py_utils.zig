@@ -410,7 +410,7 @@ pub fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
         return error.InvalidPoint;
     }
 
-    return .point(.{ @as(T, @floatCast(x)), @as(T, @floatCast(y)) });
+    return .init(.{ @as(T, @floatCast(x)), @as(T, @floatCast(y)) });
 }
 
 /// Parse a Python tuple representing a rectangle (left, top, right, bottom)

@@ -32,23 +32,23 @@ pub fn main() !void {
 
     // Apply different motion blur effects using the unified API
     std.debug.print("Applying horizontal motion blur...\n", .{});
-    try image.motionBlur(allocator, .{ .linear = .{ .angle = 0, .distance = 30 } }, &horizontal_blur);
+    try image.motionBlur(allocator, .{ .linear = .{ .angle = 0, .distance = 30 } }, horizontal_blur);
     try horizontal_blur.save(allocator, "motion_blur_horizontal.png");
 
     std.debug.print("Applying vertical motion blur...\n", .{});
-    try image.motionBlur(allocator, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 30 } }, &vertical_blur);
+    try image.motionBlur(allocator, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 30 } }, vertical_blur);
     try vertical_blur.save(allocator, "motion_blur_vertical.png");
 
     std.debug.print("Applying diagonal motion blur...\n", .{});
-    try image.motionBlur(allocator, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 25 } }, &diagonal_blur);
+    try image.motionBlur(allocator, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 25 } }, diagonal_blur);
     try diagonal_blur.save(allocator, "motion_blur_diagonal.png");
 
     std.debug.print("Applying zoom blur...\n", .{});
-    try image.motionBlur(allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.7 } }, &zoom_blur);
+    try image.motionBlur(allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.7 } }, zoom_blur);
     try zoom_blur.save(allocator, "motion_blur_zoom.png");
 
     std.debug.print("Applying spin blur...\n", .{});
-    try image.motionBlur(allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, &spin_blur);
+    try image.motionBlur(allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, spin_blur);
     try spin_blur.save(allocator, "motion_blur_spin.png");
 
     std.debug.print("Motion blur examples saved successfully!\n", .{});

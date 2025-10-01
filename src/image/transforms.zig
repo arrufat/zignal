@@ -539,7 +539,7 @@ pub fn Transform(comptime T: type) type {
             for (0..out_rows) |r| {
                 for (0..out_cols) |c| {
                     // Current pixel in output space
-                    const out_point = Point(2, f32).point(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
+                    const out_point: Point(2, f32) = .init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
 
                     // Transform to source image space using backward mapping
                     const src_point = transform.project(out_point);

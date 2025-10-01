@@ -19,7 +19,7 @@ pub fn pointInTriangle(comptime T: type, p: Point(2, T), tri: [3]Point(2, T)) bo
 
 /// Returns the barycenter (geometric centroid) of the triangle.
 pub fn findBarycenter(comptime T: type, triangle: [3]Point(2, T)) Point(2, T) {
-    return .point(.{
+    return .init(.{
         (triangle[0].x() + triangle[1].x() + triangle[2].x()) / 3,
         (triangle[0].y() + triangle[1].y() + triangle[2].y()) / 3,
     });
@@ -28,42 +28,42 @@ pub fn findBarycenter(comptime T: type, triangle: [3]Point(2, T)) Point(2, T) {
 test "pointInTriangle" {
     // Test case 1: Point inside triangle.
     const tri = [_]Point(2, f32){
-        .point(.{ 0, 0 }),
-        .point(.{ 2, 0 }),
-        .point(.{ 1, 2 }),
+        .init(.{ 0, 0 }),
+        .init(.{ 2, 0 }),
+        .init(.{ 1, 2 }),
     };
-    var p: Point(2, f32) = .point(.{ 1, 1 });
+    var p: Point(2, f32) = .init(.{ 1, 1 });
     try expect(pointInTriangle(f32, p, tri));
 
     // Test case 2: Point outside triangle.
-    p = .point(.{ 3, 1 });
+    p = .init(.{ 3, 1 });
     try expect(!pointInTriangle(f32, p, tri));
 
     // Test case 3: Point on edge.
-    p = .point(.{ 1, 0 });
+    p = .init(.{ 1, 0 });
     try expect(pointInTriangle(f32, p, tri));
 
     // Test case 4: Point exactly at vertex.
-    p = .point(.{ 0, 0 });
+    p = .init(.{ 0, 0 });
     try expect(pointInTriangle(f32, p, tri));
 }
 
 test "findBarycenter" {
     // Test case 1: Simple triangle.
     var tri = [_]Point(2, f32){
-        .point(.{ 0, 0 }),
-        .point(.{ 2, 0 }),
-        .point(.{ 1, 2 }),
+        .init(.{ 0, 0 }),
+        .init(.{ 2, 0 }),
+        .init(.{ 1, 2 }),
     };
     var barycenter = findBarycenter(f32, tri);
-    try expectEqualDeep(barycenter, Point(2, f32).point(.{ 1, 2.0 / 3.0 }));
+    try expectEqualDeep(barycenter, Point(2, f32).init(.{ 1, 2.0 / 3.0 }));
 
     // Test case 2: Another triangle to ensure precision.
     tri = .{
-        .point(.{ -1, -1 }),
-        .point(.{ 1, -1 }),
-        .point(.{ 0, 2 }),
+        .init(.{ -1, -1 }),
+        .init(.{ 1, -1 }),
+        .init(.{ 0, 2 }),
     };
     barycenter = findBarycenter(f32, tri);
-    try expectEqualDeep(barycenter, Point(2, f32).point(.{ 0, 0 }));
+    try expectEqualDeep(barycenter, Point(2, f32).init(.{ 0, 0 }));
 }

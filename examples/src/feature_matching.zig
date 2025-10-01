@@ -121,8 +121,8 @@ fn createMatchVisualizationWithParams(
         const kp2 = features2.keypoints[match.train_idx];
 
         // Points in combined image
-        const p1: Point(2, f32) = .point(.{ kp1.x, kp1.y });
-        const p2: Point(2, f32) = .point(.{ kp2.x + @as(f32, @floatFromInt(offset_x)), kp2.y });
+        const p1: Point(2, f32) = .init(.{ kp1.x, kp1.y });
+        const p2: Point(2, f32) = .init(.{ kp2.x + @as(f32, @floatFromInt(offset_x)), kp2.y });
 
         // Color based on match quality
         const color = if (match.distance < 30)
@@ -141,7 +141,7 @@ fn createMatchVisualizationWithParams(
     for (features1.keypoints) |kp| {
         const color_idx = @min(@as(usize, @intCast(kp.octave)), octave_colors.len - 1);
         const color = octave_colors[color_idx];
-        const center: Point(2, f32) = .point(.{ kp.x, kp.y });
+        const center: Point(2, f32) = .init(.{ kp.x, kp.y });
 
         // Draw circle
         const radius = @max(3.0, kp.size / 2);
@@ -152,7 +152,7 @@ fn createMatchVisualizationWithParams(
         const line_length = radius * 2;
         const end_x = kp.x + @cos(angle_rad) * line_length;
         const end_y = kp.y + @sin(angle_rad) * line_length;
-        const end_point: Point(2, f32) = .point(.{ end_x, end_y });
+        const end_point: Point(2, f32) = .init(.{ end_x, end_y });
         canvas.drawLine(center, end_point, color, 1, .soft);
     }
 
@@ -162,7 +162,7 @@ fn createMatchVisualizationWithParams(
         const color = octave_colors[color_idx];
         const center_x = kp.x + @as(f32, @floatFromInt(offset_x));
         const center_y = kp.y;
-        const center: Point(2, f32) = .point(.{ center_x, center_y });
+        const center: Point(2, f32) = .init(.{ center_x, center_y });
 
         // Draw circle
         const radius = @max(3.0, kp.size / 2);
@@ -173,7 +173,7 @@ fn createMatchVisualizationWithParams(
         const line_length = radius * 2;
         const end_x = center_x + @cos(angle_rad) * line_length;
         const end_y = center_y + @sin(angle_rad) * line_length;
-        const end_point: Point(2, f32) = .point(.{ end_x, end_y });
+        const end_point: Point(2, f32) = .init(.{ end_x, end_y });
         canvas.drawLine(center, end_point, color, 1, .soft);
     }
 

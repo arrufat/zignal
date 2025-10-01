@@ -477,7 +477,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             inline for (0..dim) |i| {
                 components[i] = self.items[i][0];
             }
-            return .fromArray(components);
+            return .init(components);
         }
 
         /// Computes the trace (sum of diagonal elements) of a square matrix.
