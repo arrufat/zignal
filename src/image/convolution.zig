@@ -37,7 +37,7 @@ fn PixelIO(comptime T: type, comptime vec_len: usize) type {
         inline fn store(accum: Scalar) T {
             if (T == u8) {
                 const rounded = @divTrunc(accum + scale / 2, scale);
-                return @intCast(@max(0, @min(255, rounded)));
+                return meta.clampU8(rounded);
             } else {
                 return accum;
             }
@@ -50,7 +50,7 @@ fn PixelIO(comptime T: type, comptime vec_len: usize) type {
                 const rounded_vec = @divTrunc(accum_vec + half_scale_vec, scale_vec);
 
                 inline for (0..vec_len) |i| {
-                    dst[offset + i] = @intCast(@max(0, @min(255, rounded_vec[i])));
+                    dst[offset + i] = meta.clampU8(rounded_vec[i]);
                 }
             } else {
                 inline for (0..vec_len) |i| {
