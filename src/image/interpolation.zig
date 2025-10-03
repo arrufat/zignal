@@ -31,7 +31,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const as = @import("../meta.zig").as;
+const meta = @import("../meta.zig");
+const as = meta.as;
 const channel_ops = @import("channel_ops.zig");
 const Image = @import("../image.zig").Image;
 
@@ -111,7 +112,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
     }
 
     // Channel separation for RGB/RGBA types with u8 components
-    if (comptime isRgb(T)) {
+    if (comptime meta.isRgb(T)) {
         const channels = channel_ops.splitChannels(T, self, allocator) catch {
             // Fallback to generic implementation on allocation failure
             resizeGeneric(T, self, out, method);
@@ -202,37 +203,6 @@ fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interp
             }
         }
     }
-}
-
-/// Check if a type is an RGB/RGBA type with u8 components
-fn isRgb(comptime T: type) bool {
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") return false;
-
-    const fields = std.meta.fields(T);
-    if (fields.len < 3 or fields.len > 4) return false;
-
-    // Check first three fields are u8 and named appropriately
-    if (fields[0].type != u8) return false;
-    if (fields[1].type != u8) return false;
-    if (fields[2].type != u8) return false;
-
-    // Check for RGB naming pattern
-    const has_rgb_names = (std.mem.eql(u8, fields[0].name, "r") and
-        std.mem.eql(u8, fields[1].name, "g") and
-        std.mem.eql(u8, fields[2].name, "b")) or
-        (std.mem.eql(u8, fields[0].name, "red") and
-            std.mem.eql(u8, fields[1].name, "green") and
-            std.mem.eql(u8, fields[2].name, "blue"));
-
-    if (!has_rgb_names) return false;
-
-    // If 4 fields, check alpha is also u8
-    if (fields.len == 4) {
-        return fields[3].type == u8;
-    }
-
-    return true;
 }
 
 // ============================================================================

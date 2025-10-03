@@ -6,14 +6,7 @@
 
 const std = @import("std");
 const Image = @import("../image.zig").Image;
-
-/// Check if a struct type has an alpha channel (4th field named 'a' or 'alpha')
-pub fn hasAlphaChannel(comptime T: type) bool {
-    const fields = std.meta.fields(T);
-    if (fields.len != 4) return false;
-    const last_field = fields[3];
-    return std.mem.eql(u8, last_field.name, "a") or std.mem.eql(u8, last_field.name, "alpha");
-}
+const meta = @import("../meta.zig");
 
 /// Find the uniform value of a channel if all values are the same.
 /// Returns the uniform value if all elements are identical, null otherwise.
@@ -162,7 +155,7 @@ pub fn resizePlaneBilinearU8(
             const bottom = bl * (SCALE - @as(i32, @intCast(fx))) + br * @as(i32, @intCast(fx));
             const result = @divTrunc(top * (SCALE - @as(i32, @intCast(fy))) + bottom * @as(i32, @intCast(fy)), SCALE * SCALE);
 
-            dst[r * dst_cols + c] = @intCast(@max(0, @min(255, result)));
+            dst[r * dst_cols + c] = meta.clampU8(result);
         }
     }
 }
@@ -265,7 +258,7 @@ pub fn resizePlaneBicubicU8(
             else
                 0;
 
-            dst[r * dst_cols + c] = @intCast(@max(0, @min(255, result)));
+            dst[r * dst_cols + c] = meta.clampU8(result);
         }
     }
 }
@@ -347,7 +340,7 @@ pub fn resizePlaneCatmullRomU8(
             else
                 0;
 
-            dst[r * dst_cols + c] = @intCast(@max(0, @min(255, result)));
+            dst[r * dst_cols + c] = meta.clampU8(result);
         }
     }
 }

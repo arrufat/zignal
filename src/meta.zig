@@ -111,3 +111,67 @@ pub inline fn clampTo(comptime T: type, value: anytype) T {
         else => @compileError("clampTo only supports integer and float types, got: " ++ @typeName(T)),
     }
 }
+
+/// Check if a type is an RGB or RGBA type with u8 components.
+/// Returns true for structs with 3 or 4 u8 fields named (r,g,b[,a]) or (red,green,blue[,alpha]).
+///
+/// Example usage:
+/// ```zig
+/// const is_rgb = meta.isRgb(Rgb);  // true
+/// const is_rgba = meta.isRgb(Rgba); // true
+/// const not_rgb = meta.isRgb(Hsv); // false
+/// ```
+pub fn isRgb(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return false;
+
+    const fields = std.meta.fields(T);
+    if (fields.len < 3 or fields.len > 4) return false;
+
+    // Check first three fields are u8 and named appropriately
+    if (fields[0].type != u8) return false;
+    if (fields[1].type != u8) return false;
+    if (fields[2].type != u8) return false;
+
+    // Check for RGB naming pattern
+    const has_rgb_names = (std.mem.eql(u8, fields[0].name, "r") and
+        std.mem.eql(u8, fields[1].name, "g") and
+        std.mem.eql(u8, fields[2].name, "b")) or
+        (std.mem.eql(u8, fields[0].name, "red") and
+            std.mem.eql(u8, fields[1].name, "green") and
+            std.mem.eql(u8, fields[2].name, "blue"));
+
+    if (!has_rgb_names) return false;
+
+    // If 4 fields, check alpha is also u8
+    if (fields.len == 4) {
+        return fields[3].type == u8;
+    }
+
+    return true;
+}
+
+/// Check if a struct type has an alpha channel (4th field named 'a' or 'alpha').
+///
+/// Example usage:
+/// ```zig
+/// const has_alpha = meta.hasAlphaChannel(Rgba); // true
+/// const no_alpha = meta.hasAlphaChannel(Rgb);   // false
+/// ```
+pub fn hasAlphaChannel(comptime T: type) bool {
+    const fields = std.meta.fields(T);
+    if (fields.len != 4) return false;
+    const last_field = fields[3];
+    return std.mem.eql(u8, last_field.name, "a") or std.mem.eql(u8, last_field.name, "alpha");
+}
+
+/// Check if a type is specifically an RGBA type (RGB + alpha channel).
+///
+/// Example usage:
+/// ```zig
+/// const is_rgba = meta.isRgba(Rgba); // true
+/// const not_rgba = meta.isRgba(Rgb); // false
+/// ```
+pub inline fn isRgba(comptime T: type) bool {
+    return isRgb(T) and hasAlphaChannel(T);
+}

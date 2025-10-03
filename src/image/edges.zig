@@ -11,6 +11,20 @@ const convertColor = @import("../color.zig").convertColor;
 const convolve = @import("convolution.zig").convolve;
 const Integral = @import("integral.zig").Integral;
 
+/// Sobel X gradient kernel (horizontal edges)
+const sobel_x = [3][3]f32{
+    .{ -1, 0, 1 },
+    .{ -2, 0, 2 },
+    .{ -1, 0, 1 },
+};
+
+/// Sobel Y gradient kernel (vertical edges)
+const sobel_y = [3][3]f32{
+    .{ -1, -2, -1 },
+    .{ 0, 0, 0 },
+    .{ 1, 2, 1 },
+};
+
 /// Edge detection operations.
 /// Provides Sobel and Shen-Castan edge detection algorithms.
 pub fn Edges(comptime T: type) type {
@@ -24,18 +38,6 @@ pub fn Edges(comptime T: type) type {
         pub fn sobel(self: Image(T), allocator: Allocator, out: Image(u8)) !void {
             // For now, use float path for all types to ensure correctness
             {
-                // Original float path for other types
-                const sobel_x = [3][3]f32{
-                    .{ -1, 0, 1 },
-                    .{ -2, 0, 2 },
-                    .{ -1, 0, 1 },
-                };
-                const sobel_y = [3][3]f32{
-                    .{ -1, -2, -1 },
-                    .{ 0, 0, 0 },
-                    .{ 1, 2, 1 },
-                };
-
                 // Convert input to grayscale float if needed
                 var gray_float: Image(f32) = undefined;
                 const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
@@ -248,24 +250,12 @@ pub fn Edges(comptime T: type) type {
             var blurred = try Image(f32).init(allocator, self.rows, self.cols);
             defer blurred.deinit(allocator);
             if (sigma == 0) {
-                // No blur - just copy
-                @memcpy(blurred.data, gray_float.data);
+                blurred.copy(gray_float);
             } else {
                 try blurGaussian(gray_float, sigma, blurred, allocator);
             }
 
             // Step 3: Compute gradients using Sobel operators
-            const sobel_x = [3][3]f32{
-                .{ -1, 0, 1 },
-                .{ -2, 0, 2 },
-                .{ -1, 0, 1 },
-            };
-            const sobel_y = [3][3]f32{
-                .{ -1, -2, -1 },
-                .{ 0, 0, 0 },
-                .{ 1, 2, 1 },
-            };
-
             var grad_x = try Image(f32).initLike(allocator, blurred);
             var grad_y = try Image(f32).initLike(allocator, blurred);
             defer grad_x.deinit(allocator);
