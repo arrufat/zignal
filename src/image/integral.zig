@@ -206,11 +206,9 @@ pub fn Integral(comptime T: type) type {
                         const s = sum(sat, r1, c1, r2, c2);
                         const val = s / area;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(val))))))
-                        else if (@typeInfo(PlaneType) == .int)
-                            @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(val))))
+                            meta.clampU8(val)
                         else
-                            @as(PlaneType, val);
+                            meta.clampTo(PlaneType, val);
                     }
 
                     // SIMD middle section
@@ -234,11 +232,11 @@ pub fn Integral(comptime T: type) type {
 
                             if (PlaneType == u8) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(vals[i]))))));
+                                    dst.data[r * dst.stride + c + i] = meta.clampU8(vals[i]);
                                 }
                             } else if (@typeInfo(PlaneType) == .int) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(vals[i]))));
+                                    dst.data[r * dst.stride + c + i] = meta.clampTo(PlaneType, vals[i]);
                                 }
                             } else {
                                 dst.data[r * dst.stride + c ..][0..simd_len].* = vals;
@@ -254,12 +252,11 @@ pub fn Integral(comptime T: type) type {
                     const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                     const s = sum(sat, r1, c1, r2, c2);
+                    const val = s / area;
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(s / area))))))
-                    else if (@typeInfo(PlaneType) == .int)
-                        @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(s / area))))
+                        meta.clampU8(val)
                     else
-                        s / area;
+                        meta.clampTo(PlaneType, val);
                 }
             }
         }
@@ -348,11 +345,9 @@ pub fn Integral(comptime T: type) type {
                         const original = as(f32, src.data[r * src.stride + c]);
                         const sharpened = 2 * original - blurred;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                            @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
-                        else if (@typeInfo(PlaneType) == .int)
-                            @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened))))
+                            meta.clampU8(sharpened)
                         else
-                            sharpened;
+                            meta.clampTo(PlaneType, sharpened);
                     }
 
                     // SIMD middle section
@@ -384,11 +379,11 @@ pub fn Integral(comptime T: type) type {
 
                             if (PlaneType == u8) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened_vec[i]))))));
+                                    dst.data[r * dst.stride + c + i] = meta.clampU8(sharpened_vec[i]);
                                 }
                             } else if (@typeInfo(PlaneType) == .int) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened_vec[i]))));
+                                    dst.data[r * dst.stride + c + i] = meta.clampTo(PlaneType, sharpened_vec[i]);
                                 }
                             } else {
                                 dst.data[r * dst.stride + c ..][0..simd_len].* = sharpened_vec;
@@ -408,11 +403,9 @@ pub fn Integral(comptime T: type) type {
                     const original = as(f32, src.data[r * src.stride + c]);
                     const sharpened = 2 * original - blurred;
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                        @intCast(@max(0, @min(255, @as(i32, @intFromFloat(@round(sharpened))))))
-                    else if (@typeInfo(PlaneType) == .int)
-                        @intFromFloat(@max(std.math.minInt(PlaneType), @min(std.math.maxInt(PlaneType), @round(sharpened))))
+                        meta.clampU8(sharpened)
                     else
-                        sharpened;
+                        meta.clampTo(PlaneType, sharpened);
                 }
             }
         }

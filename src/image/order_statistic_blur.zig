@@ -3,7 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const Histogram = @import("../image.zig").Histogram;
-const BorderMode = @import("convolution.zig").BorderMode;
+const border_module = @import("border.zig");
+const BorderMode = border_module.BorderMode;
 const channel_ops = @import("channel_ops.zig");
 const meta = @import("../meta.zig");
 
@@ -48,7 +49,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return Error.InvalidPercentile;
             }
 
-            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.isAliased(image);
 
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
@@ -115,7 +116,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.isAliased(image);
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
@@ -165,7 +166,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.isAliased(image);
             var temp_out: Image(T) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
 
@@ -238,7 +239,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             const window = radius * 2 + 1;
             if (window > @as(usize, std.math.maxInt(u32))) return Error.InvalidRadius;
 
-            const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+            const alias = out.isAliased(image);
 
             var temp_out: Image(u8) = .empty;
             defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
@@ -272,7 +273,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 var window_hist = Histogram(u8).init();
                 for (0..window) |offset| {
                     const col_idx = @as(isize, @intCast(offset)) - radius_isize;
-                    if (resolveIndex(image.cols, col_idx, border)) |resolved| {
+                    if (border_module.resolveIndex(col_idx, @intCast(image.cols), border)) |resolved| {
                         window_hist.addCounts(column_hists[resolved]);
                     } else {
                         window_hist.addCounts(zero_column);
@@ -284,14 +285,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
                 for (1..image.cols) |col| {
                     const left_idx = @as(isize, @intCast(col)) - radius_isize - 1;
-                    if (resolveIndex(image.cols, left_idx, border)) |resolved| {
+                    if (border_module.resolveIndex(left_idx, @intCast(image.cols), border)) |resolved| {
                         window_hist.subtractCounts(column_hists[resolved]);
                     } else {
                         window_hist.subtractCounts(zero_column);
                     }
 
                     const right_idx = @as(isize, @intCast(col)) + radius_isize;
-                    if (resolveIndex(image.cols, right_idx, border)) |resolved| {
+                    if (border_module.resolveIndex(right_idx, @intCast(image.cols), border)) |resolved| {
                         window_hist.addCounts(column_hists[resolved]);
                     } else {
                         window_hist.addCounts(zero_column);
@@ -307,14 +308,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 const add_row = @as(isize, @intCast(row)) + radius_isize + 1;
 
                 for (0..image.cols) |col| {
-                    if (resolveIndex(image.rows, remove_row, border)) |resolved| {
+                    if (border_module.resolveIndex(remove_row, @intCast(image.rows), border)) |resolved| {
                         const value = image.at(resolved, col).*;
                         column_hists[col].removeValue(value);
                     } else {
                         column_hists[col].removeValue(0);
                     }
 
-                    if (resolveIndex(image.rows, add_row, border)) |resolved| {
+                    if (border_module.resolveIndex(add_row, @intCast(image.rows), border)) |resolved| {
                         const value = image.at(resolved, col).*;
                         column_hists[col].addValue(value);
                     } else {
@@ -335,45 +336,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
         }
 
         fn getPixel(image: Image(u8), border: BorderMode, row: isize, col: isize) u8 {
-            const r = resolveIndex(image.rows, row, border);
-            const c = resolveIndex(image.cols, col, border);
+            const r = border_module.resolveIndex(row, @intCast(image.rows), border);
+            const c = border_module.resolveIndex(col, @intCast(image.cols), border);
             if (r) |row_idx| {
                 if (c) |col_idx| {
                     return image.at(row_idx, col_idx).*;
                 }
             }
             return 0;
-        }
-
-        fn resolveIndex(length: usize, idx: isize, border: BorderMode) ?usize {
-            const len_isize: isize = @intCast(length);
-            return switch (border) {
-                .zero => if (idx < 0 or idx >= len_isize) null else @intCast(idx),
-                .replicate => blk: {
-                    if (len_isize == 0) break :blk null;
-                    const clamped = std.math.clamp(idx, 0, len_isize - 1);
-                    break :blk @intCast(clamped);
-                },
-                .mirror => blk: {
-                    if (len_isize == 0) break :blk null;
-                    if (len_isize == 1) break :blk 0;
-                    var i = idx;
-                    const max = len_isize - 1;
-                    while (i < 0 or i > max) {
-                        if (i < 0) {
-                            i = -i - 1;
-                        } else {
-                            i = 2 * len_isize - i - 2;
-                        }
-                    }
-                    break :blk @intCast(i);
-                },
-                .wrap => blk: {
-                    if (len_isize == 0) break :blk null;
-                    const wrapped = @mod(idx, len_isize);
-                    break :blk @intCast(wrapped);
-                },
-            };
         }
 
         const PercentileReducer = struct {

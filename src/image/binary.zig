@@ -190,7 +190,7 @@ pub const Binary = struct {
             return;
         }
 
-        const alias = out.data.ptr == image.data.ptr and out.data.len == image.data.len;
+        const alias = out.isAliased(image);
 
         var source = image;
         var owned_source: ?Image(u8) = null;

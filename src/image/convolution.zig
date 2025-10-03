@@ -5,18 +5,10 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const channel_ops = @import("channel_ops.zig");
+const border = @import("border.zig");
 
 /// Border handling modes for filter operations
-pub const BorderMode = enum {
-    /// Pad with zeros
-    zero,
-    /// Replicate edge pixels
-    replicate,
-    /// Mirror at edges
-    mirror,
-    /// Wrap around (circular)
-    wrap,
-};
+pub const BorderMode = border.BorderMode;
 
 /// Pixel I/O operations for type-specific convolution.
 /// Provides unified load/store operations for both u8 (with integer scaling) and f32.
@@ -108,7 +100,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             return result;
         }
 
-        fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border: BorderMode) void {
+        fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border_mode: BorderMode) void {
             // Pre-create kernel vectors for SIMD (for f32)
             var kernel_vecs: [size]@Vector(vec_len, Scalar) = undefined;
             if (T == f32) {
@@ -173,7 +165,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                             inline for (0..cols) |kx| {
                                 const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                                 const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                const pixel_val = getPixel(T, src, iry, icx, border);
+                                const pixel_val = getPixel(T, src, iry, icx, border_mode);
                                 result += pixel_val * kernel[ky * cols + kx];
                             }
                         }
@@ -291,7 +283,7 @@ pub fn convolveSeparable(
     allocator: Allocator,
     kernel_x: []const f32,
     kernel_y: []const f32,
-    border: BorderMode,
+    border_mode: BorderMode,
     out: Image(T),
 ) !void {
     // Allocate temporary buffer for intermediate result
@@ -315,13 +307,13 @@ pub fn convolveSeparable(
                 kernel_y_int[i] = @intFromFloat(@round(k * scale));
             }
 
-            convolveSeparablePlane(u8, image, out, temp, kernel_x_int, kernel_y_int, border);
+            convolveSeparablePlane(u8, image, out, temp, kernel_x_int, kernel_y_int, border_mode);
         },
         f32 => {
             const src_plane: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = image.data };
             const dst_plane: Image(f32) = .{ .rows = out.rows, .cols = out.cols, .stride = out.stride, .data = out.data };
             const tmp_plane: Image(f32) = .{ .rows = temp.rows, .cols = temp.cols, .stride = temp.stride, .data = temp.data };
-            convolveSeparablePlane(f32, src_plane, dst_plane, tmp_plane, kernel_x, kernel_y, border);
+            convolveSeparablePlane(f32, src_plane, dst_plane, tmp_plane, kernel_x, kernel_y, border_mode);
         },
         else => switch (@typeInfo(T)) {
             .@"struct" => {
@@ -387,7 +379,7 @@ pub fn convolveSeparable(
                             const src_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_data };
                             const dst_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_data };
                             const tmp_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = temp_data };
-                            convolveSeparablePlane(u8, src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border);
+                            convolveSeparablePlane(u8, src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
                         }
                     }
 
@@ -571,64 +563,9 @@ fn convolveSeparablePlane(
 
 /// Get pixel value with border handling, automatically converting to appropriate scalar type.
 /// Returns i32 for u8 pixels (for integer arithmetic), f32 for f32 pixels.
-fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border: BorderMode) if (T == u8) i32 else f32 {
+fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border_mode: BorderMode) if (T == u8) i32 else f32 {
     if (T != u8 and T != f32) @compileError("getPixel only works with u8 and f32 types");
-    const coords = computeBorderCoords(row, col, @intCast(img.rows), @intCast(img.cols), border);
+    const coords = border.computeCoords(row, col, @intCast(img.rows), @intCast(img.cols), border_mode);
     const pixel = if (coords) |c| img.at(c.row, c.col).* else 0;
     return if (T == u8) @as(i32, pixel) else pixel;
-}
-
-/// Common border mode logic that returns adjusted coordinates.
-/// Returns null when the result should be zero (out of bounds with .zero mode, or empty image).
-fn computeBorderCoords(
-    row: isize,
-    col: isize,
-    rows: isize,
-    cols: isize,
-    border: BorderMode,
-) ?struct { row: usize, col: usize } {
-    switch (border) {
-        .zero => {
-            if (row < 0 or col < 0 or row >= rows or col >= cols) {
-                return null;
-            }
-            return .{ .row = @intCast(row), .col = @intCast(col) };
-        },
-        .replicate => {
-            const r = @max(0, @min(row, rows - 1));
-            const c = @max(0, @min(col, cols - 1));
-            return .{ .row = @intCast(r), .col = @intCast(c) };
-        },
-        .mirror => {
-            if (rows == 0 or cols == 0) return null;
-            var r = row;
-            var c = col;
-            // Handle negative row indices
-            while (r < 0) {
-                r = -r - 1;
-                if (r >= rows) r = 2 * rows - r - 1;
-            }
-            // Handle row indices >= rows
-            while (r >= rows) {
-                r = 2 * rows - r - 1;
-                if (r < 0) r = -r - 1;
-            }
-            // Handle negative column indices
-            while (c < 0) {
-                c = -c - 1;
-                if (c >= cols) c = 2 * cols - c - 1;
-            }
-            // Handle column indices >= cols
-            while (c >= cols) {
-                c = 2 * cols - c - 1;
-                if (c < 0) c = -c - 1;
-            }
-            return .{ .row = @intCast(r), .col = @intCast(c) };
-        },
-        .wrap => {
-            const r = @mod(row, rows);
-            const c = @mod(col, cols);
-            return .{ .row = @intCast(r), .col = @intCast(c) };
-        },
-    }
 }

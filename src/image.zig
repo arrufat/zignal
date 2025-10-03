@@ -270,6 +270,23 @@ pub fn Image(comptime T: type) type {
             return self.cols == self.stride;
         }
 
+        /// Checks if this image's buffer is aliased with (shares the same memory as) another image.
+        /// Returns true if both images point to the same data buffer with the same length.
+        /// This is useful for determining if in-place operations need a temporary buffer.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// if (output.isAliased(input)) {
+        ///     // Need temporary buffer for in-place operation
+        ///     var temp = try Image(T).initLike(allocator, input);
+        ///     defer temp.deinit(allocator);
+        ///     // ... perform operation with temp, then copy to output
+        /// }
+        /// ```
+        pub fn isAliased(self: Self, other: Self) bool {
+            return self.data.ptr == other.data.ptr and self.data.len == other.data.len;
+        }
+
         /// Creates a duplicate of the image with newly allocated memory.
         /// Correctly handles views by copying only the visible data.
         ///

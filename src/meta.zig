@@ -74,3 +74,40 @@ pub fn allFieldsAreU8(comptime T: type) bool {
         if (field.type != u8) break false;
     } else true;
 }
+
+/// Clamps a value to the range [0, 255] and converts to u8.
+/// Useful for ensuring pixel values stay within valid u8 bounds after arithmetic operations.
+///
+/// Example usage:
+/// ```zig
+/// const result = meta.clampU8(some_calculation); // Safely converts to u8
+/// ```
+pub inline fn clampU8(value: anytype) u8 {
+    const f = as(f32, value);
+    return @intFromFloat(@max(0, @min(255, @round(f))));
+}
+
+/// Clamps a value to the valid range for type T and converts it.
+/// For unsigned integers, clamps to [0, maxInt(T)].
+/// For signed integers, clamps to [minInt(T), maxInt(T)].
+/// For floats, performs a direct cast without clamping.
+///
+/// Example usage:
+/// ```zig
+/// const clamped_u8 = meta.clampTo(u8, -5); // Returns 0
+/// const clamped_i16 = meta.clampTo(i16, 40000); // Returns 32767
+/// ```
+pub inline fn clampTo(comptime T: type, value: anytype) T {
+    switch (@typeInfo(T)) {
+        .int => |int_info| {
+            const f = as(f32, value);
+            if (int_info.signedness == .unsigned) {
+                return @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(T))), @round(f))));
+            } else {
+                return @intFromFloat(@max(@as(f32, @floatFromInt(std.math.minInt(T))), @min(@as(f32, @floatFromInt(std.math.maxInt(T))), @round(f))));
+            }
+        },
+        .float => return as(T, value),
+        else => @compileError("clampTo only supports integer and float types, got: " ++ @typeName(T)),
+    }
+}
