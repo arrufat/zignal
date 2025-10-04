@@ -92,7 +92,7 @@ pub inline fn clamp(comptime T: type, value: anytype) T {
             switch (@typeInfo(ValueType)) {
                 .int, .comptime_int => {
                     return std.math.cast(T, value) orelse if (value < 0)
-                        (if (int_info.signedness == .unsigned) @as(T, 0) else std.math.minInt(T))
+                        if (int_info.signedness == .unsigned) @as(T, 0) else std.math.minInt(T)
                     else
                         std.math.maxInt(T);
                 },
