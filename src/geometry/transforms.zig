@@ -130,12 +130,12 @@ pub fn AffineTransform(comptime T: type) type {
                 q.at(1, i).* = to_points[i].y();
             }
             // Use Matrix operations to perform matrix operations
-            // Invert p
-            var p_inv = try p.inverse().eval();
-            defer p_inv.deinit();
+            // Compute the pseudo-inverse so we can support additional correspondences
+            var pinv = try p.pseudoInverse(.{}).eval();
+            defer pinv.deinit();
 
-            // Calculate m = q * p^-1
-            var m = try q.dot(p_inv).eval();
+            // Calculate m = q * p^+
+            var m = try q.dot(pinv).eval();
             defer m.deinit();
 
             // Extract the 2x2 matrix
@@ -232,13 +232,56 @@ test "affine3" {
     const tf = try AffineTransform(f64).init(std.testing.allocator, from_points[0..3], to_points[0..3]);
     const matrix: SMatrix(T, 2, 2) = .init(.{ .{ 0, 1 }, .{ -1, 0 } });
     const bias: SMatrix(T, 2, 1) = .init(.{ .{0}, .{1} });
-    try std.testing.expectEqualDeep(tf.matrix, matrix);
-    try std.testing.expectEqualDeep(tf.bias, bias);
+    for (0..matrix.rows) |r| {
+        for (0..matrix.cols) |c| {
+            try std.testing.expectApproxEqAbs(matrix.at(r, c).*, tf.matrix.at(r, c).*, 1e-9);
+        }
+    }
+    for (0..bias.rows) |r| {
+        try std.testing.expectApproxEqAbs(bias.at(r, 0).*, tf.bias.at(r, 0).*, 1e-9);
+    }
 
     const itf = try AffineTransform(f64).init(std.testing.allocator, to_points[0..3], from_points[0..3]);
     for (from_points, to_points) |f, t| {
-        try std.testing.expectEqualDeep(tf.project(f), t);
-        try std.testing.expectEqualDeep(itf.project(t), f);
+        const forward = tf.project(f);
+        try std.testing.expectApproxEqAbs(forward.x(), t.x(), 1e-9);
+        try std.testing.expectApproxEqAbs(forward.y(), t.y(), 1e-9);
+        const back = itf.project(t);
+        try std.testing.expectApproxEqAbs(back.x(), f.x(), 1e-9);
+        try std.testing.expectApproxEqAbs(back.y(), f.y(), 1e-9);
+    }
+}
+
+test "affine with additional correspondences" {
+    const T = f64;
+    const from_points: []const Point(2, T) = &.{
+        .init(.{ 0, 0 }),
+        .init(.{ 0, 1 }),
+        .init(.{ 1, 1 }),
+        .init(.{ 1, 0 }),
+    };
+    const to_points: []const Point(2, T) = &.{
+        .init(.{ 0, 1 }),
+        .init(.{ 1, 1 }),
+        .init(.{ 1, 0 }),
+        .init(.{ 0, 0 }),
+    };
+    const tf = try AffineTransform(f64).init(std.testing.allocator, from_points, to_points);
+    const matrix: SMatrix(T, 2, 2) = .init(.{ .{ 0, 1 }, .{ -1, 0 } });
+    const bias: SMatrix(T, 2, 1) = .init(.{ .{0}, .{1} });
+    for (0..matrix.rows) |r| {
+        for (0..matrix.cols) |c| {
+            try std.testing.expectApproxEqAbs(matrix.at(r, c).*, tf.matrix.at(r, c).*, 1e-9);
+        }
+    }
+    for (0..bias.rows) |r| {
+        try std.testing.expectApproxEqAbs(bias.at(r, 0).*, tf.bias.at(r, 0).*, 1e-9);
+    }
+
+    for (from_points, to_points) |f, t| {
+        const projected = tf.project(f);
+        try std.testing.expectApproxEqAbs(projected.x(), t.x(), 1e-9);
+        try std.testing.expectApproxEqAbs(projected.y(), t.y(), 1e-9);
     }
 }
 

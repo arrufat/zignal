@@ -237,8 +237,19 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     }
 
     // Create and fit the transform
-    const transform = AffineTransform(f64).init(allocator, from_points, to_points) catch {
-        py_utils.setMemoryError("affine transform");
+    const transform = AffineTransform(f64).init(allocator, from_points, to_points) catch |err| {
+        switch (err) {
+            error.OutOfMemory => py_utils.setMemoryError("affine transform"),
+            error.DimensionMismatch => py_utils.setValueError(
+                "Point arrays must be 2D coordinates",
+                .{},
+            ),
+            error.Singular, error.NotConverged => py_utils.setValueError(
+                "Point correspondences are rank deficient; cannot fit affine transform",
+                .{},
+            ),
+            else => py_utils.setRuntimeError("Failed to compute affine transform: {s}", .{@errorName(err)}),
+        }
         return -1;
     };
 
