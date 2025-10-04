@@ -470,21 +470,21 @@ pub fn Image(comptime T: type) type {
 
         /// Performs interpolation at position x, y using the specified method.
         /// Returns `null` if the coordinates are outside valid bounds for the chosen method.
-        pub fn interpolate(self: Self, x: f32, y: f32, method: @import("image/interpolation.zig").Interpolation) ?T {
+        pub fn interpolate(self: Self, x: f32, y: f32, method: Interpolation) ?T {
             return interpolation.interpolate(T, self, x, y, method);
         }
 
         /// Resizes an image to fit in out, using the specified interpolation method.
         /// The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: @import("image/interpolation.zig").Interpolation) !void {
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) !void {
             try interpolation.resize(T, allocator, self, out, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
         /// A factor > 1.0 enlarges the image, < 1.0 shrinks it.
         /// The caller is responsible for calling deinit() on the returned image.
-        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: @import("image/interpolation.zig").Interpolation) !Self {
+        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
             const new_rows = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor)));
@@ -500,7 +500,7 @@ pub fn Image(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: @import("image/interpolation.zig").Interpolation) !Rectangle(usize) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(usize) {
             return Transform(T).letterbox(self, allocator, out, method);
         }
 
@@ -518,7 +518,7 @@ pub fn Image(comptime T: type) type {
         /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear);
         /// defer rotated.deinit(allocator);
         /// ```
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: @import("image/interpolation.zig").Interpolation) !Self {
+        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation) !Self {
             return Transform(T).rotate(self, allocator, angle, method);
         }
 
@@ -601,7 +601,7 @@ pub fn Image(comptime T: type) type {
         /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
         /// defer warped.deinit(allocator);
         /// ```
-        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: @import("image/interpolation.zig").Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
+        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
             return Transform(T).warp(self, allocator, transform, method, out, out_rows, out_cols);
         }
 
