@@ -968,6 +968,14 @@ pub const image_methods_metadata = blk: {
             .params = "self, other: Image",
             .returns = "float",
         },
+        .{
+            .name = "ssim",
+            .meth = @ptrCast(&core.image_ssim),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = core.image_ssim_doc,
+            .params = "self, other: Image",
+            .returns = "float",
+        },
     };
 
     // ========================================================================

@@ -724,6 +724,98 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 // ============================================================================
+// IMAGE SSIM
+// ============================================================================
+
+pub const image_ssim_doc =
+    \\Calculate Structural Similarity Index between two images.
+    \\
+    \\SSIM is a perceptual metric in the range [0, 1] where higher values indicate
+    \\greater structural similarity.
+    \\
+    \\## Parameters
+    \\- `other` (Image): The image to compare against. Must have same dimensions and dtype.
+    \\
+    \\## Returns
+    \\float: SSIM value between 0 and 1 (inclusive)
+    \\
+    \\## Raises
+    \\- `ValueError`: If images have different dimensions or dtypes, or are smaller than 11x11
+    \\
+    \\## Examples
+    \\```python
+    \\original = Image.load("frame.png")
+    \\processed = pipeline(original)
+    \\score = original.ssim(processed)
+    \\print(f"SSIM: {score:.4f}")
+    \\```
+;
+
+pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    const Params = struct { other: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    if (c.PyObject_IsInstance(params.other, @ptrCast(getImageType())) <= 0) {
+        py_utils.setTypeError("Image", params.other);
+        return null;
+    }
+
+    const other = py_utils.safeCast(ImageObject, params.other);
+
+    if (self.py_image == null or other.py_image == null) {
+        py_utils.setValueError("Both images must be initialized", .{});
+        return null;
+    }
+
+    const self_tag = std.meta.activeTag(self.py_image.?.data);
+    const other_tag = std.meta.activeTag(other.py_image.?.data);
+    if (self_tag != other_tag) {
+        py_utils.setValueError("Images must have the same dtype for SSIM calculation", .{});
+        return null;
+    }
+
+    const min_size_error = "Images must be at least 11x11 for SSIM";
+
+    const other_variant = other.py_image.?.data;
+    const ssim_value = switch (self.py_image.?.data) {
+        inline else => |img1| blk: {
+            const img2 = switch (other_variant) {
+                inline else => |img| variant_blk: {
+                    if (@TypeOf(img) != @TypeOf(img1)) unreachable;
+                    break :variant_blk img;
+                },
+            };
+
+            if (img1.rows != img2.rows or img1.cols != img2.cols) {
+                py_utils.setValueError("Images must have the same dimensions", .{});
+                return null;
+            }
+            if (img1.rows < 11 or img1.cols < 11) {
+                py_utils.setValueError(min_size_error, .{});
+                return null;
+            }
+
+            const result = img1.ssim(img2) catch |err| switch (err) {
+                error.ImageTooSmall => {
+                    py_utils.setValueError(min_size_error, .{});
+                    return null;
+                },
+                else => {
+                    py_utils.setZigError(err);
+                    return null;
+                },
+            };
+            break :blk result;
+        },
+    };
+
+    return c.PyFloat_FromDouble(ssim_value);
+}
+
+// ============================================================================
 // PROPERTY GETTERS
 // ============================================================================
 

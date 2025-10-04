@@ -102,6 +102,21 @@ class TestImage:
         with pytest.raises(ValueError):
             zignal.Image.from_numpy(np.zeros((2, 3, 2), dtype=np.uint8))
 
+    def test_ssim_matches_zig(self):
+        img = zignal.Image(16, 16, (10, 20, 30), dtype=zignal.Rgb)
+        noisy = img.copy()
+        noisy_arr = noisy.to_numpy()
+        noisy_arr[0, 0] = [12, 22, 32]
+        value = img.ssim(noisy)
+        assert 0.0 <= value <= 1.0
+        identical = img.copy()
+        assert img.ssim(identical) == pytest.approx(1.0)
+
+    def test_ssim_requires_minimum_size(self):
+        small = zignal.Image(8, 8, dtype=zignal.Grayscale)
+        with pytest.raises(ValueError):
+            small.ssim(small.copy())
+
     def test_filtering_methods(self):
         img = zignal.Image(5, 5, (0, 0, 0, 255), dtype=zignal.Rgba)
         out = img.box_blur(1)
