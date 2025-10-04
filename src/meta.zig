@@ -75,18 +75,6 @@ pub fn allFieldsAreU8(comptime T: type) bool {
     } else true;
 }
 
-/// Clamps a value to the range [0, 255] and converts to u8.
-/// Useful for ensuring pixel values stay within valid u8 bounds after arithmetic operations.
-///
-/// Example usage:
-/// ```zig
-/// const result = meta.clampU8(some_calculation); // Safely converts to u8
-/// ```
-pub inline fn clampU8(value: anytype) u8 {
-    const f = as(f32, value);
-    return @intFromFloat(@max(0, @min(255, @round(f))));
-}
-
 /// Clamps a value to the valid range for type T and converts it.
 /// For unsigned integers, clamps to [0, maxInt(T)].
 /// For signed integers, clamps to [minInt(T), maxInt(T)].
@@ -94,21 +82,33 @@ pub inline fn clampU8(value: anytype) u8 {
 ///
 /// Example usage:
 /// ```zig
-/// const clamped_u8 = meta.clampTo(u8, -5); // Returns 0
-/// const clamped_i16 = meta.clampTo(i16, 40000); // Returns 32767
+/// const clamped_u8 = meta.clamp(u8, -5); // Returns 0
+/// const clamped_i16 = meta.clamp(i16, 40000); // Returns 32767
 /// ```
-pub inline fn clampTo(comptime T: type, value: anytype) T {
+pub inline fn clamp(comptime T: type, value: anytype) T {
     switch (@typeInfo(T)) {
         .int => |int_info| {
-            const f = as(f32, value);
-            if (int_info.signedness == .unsigned) {
-                return @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(T))), @round(f))));
-            } else {
-                return @intFromFloat(@max(@as(f32, @floatFromInt(std.math.minInt(T))), @min(@as(f32, @floatFromInt(std.math.maxInt(T))), @round(f))));
+            const ValueType = @TypeOf(value);
+            switch (@typeInfo(ValueType)) {
+                .int, .comptime_int => {
+                    return std.math.cast(T, value) orelse if (value < 0)
+                        (if (int_info.signedness == .unsigned) @as(T, 0) else std.math.minInt(T))
+                    else
+                        std.math.maxInt(T);
+                },
+                .float, .comptime_float => {
+                    const min = if (int_info.signedness == .unsigned)
+                        0.0
+                    else
+                        @as(f64, @floatFromInt(std.math.minInt(T)));
+                    const max = @as(f64, @floatFromInt(std.math.maxInt(T)));
+                    return @intFromFloat(std.math.clamp(@round(as(f64, value)), min, max));
+                },
+                else => @compileError("clamp only supports numeric inputs, got: " ++ @typeName(ValueType)),
             }
         },
         .float => return as(T, value),
-        else => @compileError("clampTo only supports integer and float types, got: " ++ @typeName(T)),
+        else => @compileError("clamp only supports integer and float types, got: " ++ @typeName(T)),
     }
 }
 

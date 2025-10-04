@@ -205,10 +205,7 @@ pub fn Integral(comptime T: type) type {
 
                         const s = sum(sat, r1, c1, r2, c2);
                         const val = s / area;
-                        dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                            meta.clampU8(val)
-                        else
-                            meta.clampTo(PlaneType, val);
+                        dst.data[r * dst.stride + c] = meta.clamp(PlaneType, val);
                     }
 
                     // SIMD middle section
@@ -232,11 +229,11 @@ pub fn Integral(comptime T: type) type {
 
                             if (PlaneType == u8) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = meta.clampU8(vals[i]);
+                                    dst.data[r * dst.stride + c + i] = meta.clamp(u8, vals[i]);
                                 }
                             } else if (@typeInfo(PlaneType) == .int) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = meta.clampTo(PlaneType, vals[i]);
+                                    dst.data[r * dst.stride + c + i] = meta.clamp(PlaneType, vals[i]);
                                 }
                             } else {
                                 dst.data[r * dst.stride + c ..][0..simd_len].* = vals;
@@ -254,9 +251,9 @@ pub fn Integral(comptime T: type) type {
                     const s = sum(sat, r1, c1, r2, c2);
                     const val = s / area;
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                        meta.clampU8(val)
+                        meta.clamp(u8, val)
                     else
-                        meta.clampTo(PlaneType, val);
+                        meta.clamp(PlaneType, val);
                 }
             }
         }
@@ -345,9 +342,9 @@ pub fn Integral(comptime T: type) type {
                         const original = as(f32, src.data[r * src.stride + c]);
                         const sharpened = 2 * original - blurred;
                         dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                            meta.clampU8(sharpened)
+                            meta.clamp(u8, sharpened)
                         else
-                            meta.clampTo(PlaneType, sharpened);
+                            meta.clamp(PlaneType, sharpened);
                     }
 
                     // SIMD middle section
@@ -379,11 +376,11 @@ pub fn Integral(comptime T: type) type {
 
                             if (PlaneType == u8) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = meta.clampU8(sharpened_vec[i]);
+                                    dst.data[r * dst.stride + c + i] = meta.clamp(u8, sharpened_vec[i]);
                                 }
                             } else if (@typeInfo(PlaneType) == .int) {
                                 inline for (0..simd_len) |i| {
-                                    dst.data[r * dst.stride + c + i] = meta.clampTo(PlaneType, sharpened_vec[i]);
+                                    dst.data[r * dst.stride + c + i] = meta.clamp(PlaneType, sharpened_vec[i]);
                                 }
                             } else {
                                 dst.data[r * dst.stride + c ..][0..simd_len].* = sharpened_vec;
@@ -403,9 +400,9 @@ pub fn Integral(comptime T: type) type {
                     const original = as(f32, src.data[r * src.stride + c]);
                     const sharpened = 2 * original - blurred;
                     dst.data[r * dst.stride + c] = if (PlaneType == u8)
-                        meta.clampU8(sharpened)
+                        meta.clamp(u8, sharpened)
                     else
-                        meta.clampTo(PlaneType, sharpened);
+                        meta.clamp(PlaneType, sharpened);
                 }
             }
         }
