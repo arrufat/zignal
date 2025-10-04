@@ -136,7 +136,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const size: usize = 256;
+    const size: usize = 512;
     var original = try Image(u8).init(allocator, size, size);
     defer original.deinit(allocator);
     original.fill(0);
@@ -144,7 +144,7 @@ pub fn main() !void {
 
     try original.save(allocator, "blur_original.png");
 
-    const sigma: f32 = 3.0;
+    const sigma: f32 = 5.0;
     var gaussian = try Image(u8).initLike(allocator, original);
     defer gaussian.deinit(allocator);
 
@@ -154,7 +154,7 @@ pub fn main() !void {
     try gaussian.save(allocator, "blur_gaussian.png");
 
     std.debug.print("Gaussian blur sigma={d:.1} took {d:.3} ms\n\n", .{ sigma, @as(f64, @floatFromInt(gaussian_ns)) / std.time.ns_per_ms });
-    std.debug.print("Box blur approximations using formula: wIdeal = sqrt((12*σ²/n) + 1)\n", .{});
+    std.debug.print("Box blur approximations using formula: w_ideal = sqrt((12*σ²/n) + 1)\n", .{});
     std.debug.print("{s:^6} | {s:^15} | {s:^13} | {s:^9} | {s:^9} | {s:^7} | {s:^10}\n", .{
         "passes",
         "widths",
