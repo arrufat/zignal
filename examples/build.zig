@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
         "image_demo",
         "motion_blur_demo",
         "edge_detection",
+        "blur_box_vs_gaussian",
     };
 
     // Build exec_examples with run steps and check compilation
