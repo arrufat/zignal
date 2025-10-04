@@ -250,7 +250,7 @@ pub fn Edges(comptime T: type) type {
             var blurred = try Image(f32).init(allocator, self.rows, self.cols);
             defer blurred.deinit(allocator);
             if (sigma == 0) {
-                blurred.copy(gray_float);
+                gray_float.copy(blurred);
             } else {
                 try blurGaussian(gray_float, sigma, blurred, allocator);
             }
