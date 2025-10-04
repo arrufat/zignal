@@ -668,9 +668,9 @@ pub fn Canvas(comptime T: type) type {
                     // Fast mode: Use @memset for optimal performance (no alpha blending)
                     const target_color = convertColor(T, color);
                     for (bounds.t..bounds.b) |row| {
-                        const start_idx = row * self.image.cols + bounds.l;
-                        const end_idx = row * self.image.cols + bounds.r;
-                        @memset(self.image.data[start_idx..end_idx], target_color);
+                        const start_idx = row * self.image.stride + bounds.l;
+                        const len = bounds.r - bounds.l;
+                        @memset(self.image.data[start_idx .. start_idx + len], target_color);
                     }
                 },
                 .soft => {
@@ -806,7 +806,7 @@ pub fn Canvas(comptime T: type) type {
                         const outer_radius_sq = outer_radius * outer_radius;
 
                         if (dist_sq >= inner_radius_sq and dist_sq <= outer_radius_sq) {
-                            const pos = r * self.image.cols + c;
+                            const pos = r * self.image.stride + c;
                             self.image.data[pos] = solid_color;
                         }
                     }
