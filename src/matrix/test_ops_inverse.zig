@@ -146,3 +146,106 @@ test "Matrix inverse - singular matrix error" {
 
     try std.testing.expectError(error.Singular, sing4.inverse().eval());
 }
+
+test "Matrix pseudo-inverse handles tall and wide matrices" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var tall = try Matrix(f64).init(allocator, 4, 3);
+    defer tall.deinit();
+    tall.at(0, 0).* = 1.0;
+    tall.at(0, 1).* = 2.0;
+    tall.at(0, 2).* = -1.0;
+    tall.at(1, 0).* = 0.0;
+    tall.at(1, 1).* = 3.0;
+    tall.at(1, 2).* = 4.0;
+    tall.at(2, 0).* = -2.0;
+    tall.at(2, 1).* = 1.0;
+    tall.at(2, 2).* = 0.5;
+    tall.at(3, 0).* = 5.0;
+    tall.at(3, 1).* = -1.0;
+    tall.at(3, 2).* = 2.0;
+
+    var tall_rank: usize = undefined;
+    var tall_pinv = try tall.pseudoInverse(.{ .effective_rank = &tall_rank }).eval();
+    defer tall_pinv.deinit();
+    var tall_recon = try tall.dot(tall_pinv).dot(tall).eval();
+    defer tall_recon.deinit();
+    var tall_pinv_recon = try tall_pinv.dot(tall).dot(tall_pinv).eval();
+    defer tall_pinv_recon.deinit();
+
+    const tol = 1e-9;
+    try std.testing.expect(tall_rank == 3);
+    for (0..tall.rows) |r| {
+        for (0..tall.cols) |c| {
+            try std.testing.expectApproxEqAbs(tall.at(r, c).*, tall_recon.at(r, c).*, tol);
+        }
+    }
+    for (0..tall_pinv.rows) |r| {
+        for (0..tall_pinv.cols) |c| {
+            try std.testing.expectApproxEqAbs(tall_pinv.at(r, c).*, tall_pinv_recon.at(r, c).*, tol);
+        }
+    }
+
+    var wide = try Matrix(f64).init(allocator, 3, 5);
+    defer wide.deinit();
+    wide.at(0, 0).* = 1.0;
+    wide.at(0, 1).* = -2.0;
+    wide.at(0, 2).* = 3.0;
+    wide.at(0, 3).* = 0.5;
+    wide.at(0, 4).* = -1.5;
+    wide.at(1, 0).* = 2.0;
+    wide.at(1, 1).* = 0.0;
+    wide.at(1, 2).* = -4.0;
+    wide.at(1, 3).* = 1.0;
+    wide.at(1, 4).* = 2.5;
+    wide.at(2, 0).* = -3.0;
+    wide.at(2, 1).* = 1.0;
+    wide.at(2, 2).* = 2.0;
+    wide.at(2, 3).* = -2.0;
+    wide.at(2, 4).* = 0.25;
+
+    var wide_rank: usize = undefined;
+    var wide_pinv = try wide.pseudoInverse(.{ .effective_rank = &wide_rank }).eval();
+    defer wide_pinv.deinit();
+    var wide_recon = try wide.dot(wide_pinv).dot(wide).eval();
+    defer wide_recon.deinit();
+    var wide_pinv_recon = try wide_pinv.dot(wide).dot(wide_pinv).eval();
+    defer wide_pinv_recon.deinit();
+
+    try std.testing.expectEqual(wide.cols, wide_pinv.rows);
+    try std.testing.expectEqual(wide.rows, wide_pinv.cols);
+    try std.testing.expect(wide_rank == 3);
+
+    for (0..wide.rows) |r| {
+        for (0..wide.cols) |c| {
+            try std.testing.expectApproxEqAbs(wide.at(r, c).*, wide_recon.at(r, c).*, tol);
+        }
+    }
+    for (0..wide_pinv.rows) |r| {
+        for (0..wide_pinv.cols) |c| {
+            try std.testing.expectApproxEqAbs(wide_pinv.at(r, c).*, wide_pinv_recon.at(r, c).*, tol);
+        }
+    }
+}
+
+test "Matrix pseudo-inverse zero matrix" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var zero = try Matrix(f64).initAll(allocator, 4, 2, 0);
+    defer zero.deinit();
+
+    var rank: usize = 1234;
+    var pinv = try zero.pseudoInverse(.{ .effective_rank = &rank }).eval();
+    defer pinv.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), pinv.rows);
+    try std.testing.expectEqual(@as(usize, 4), pinv.cols);
+    for (0..pinv.items.len) |i| {
+        try std.testing.expectEqual(@as(f64, 0), pinv.items[i]);
+    }
+    try std.testing.expectEqual(@as(usize, 0), rank);
+}

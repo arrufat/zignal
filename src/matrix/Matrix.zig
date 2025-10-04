@@ -60,6 +60,7 @@ pub const MatrixError = error{
     Singular,
     OutOfBounds,
     OutOfMemory,
+    NotConverged,
 };
 
 /// Matrix with runtime dimensions using flat array storage
@@ -72,6 +73,14 @@ pub fn Matrix(comptime T: type) type {
         cols: usize,
         allocator: std.mem.Allocator,
         err: ?MatrixError = null,
+
+        pub const PseudoInverseOptions = struct {
+            /// Optional absolute tolerance used to discard very small singular values.
+            /// When null, a tolerance derived from the largest singular value is used.
+            tolerance: ?T = null,
+            /// Optional pointer that receives the effective numerical rank (#σ > tol).
+            effective_rank: ?*usize = null,
+        };
 
         pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
             const data = try allocator.alloc(T, rows * cols);
@@ -310,6 +319,95 @@ pub fn Matrix(comptime T: type) type {
                 // Use Gauss-Jordan elimination for larger matrices
                 return self.inverseGaussJordan();
             }
+        }
+
+        /// Computes the Moore-Penrose pseudoinverse using an SVD-based algorithm.
+        /// Works for rectangular matrices and gracefully handles rank deficiency
+        /// by discarding singular values below the provided tolerance. The optional
+        /// `effective_rank` pointer receives the number of singular values kept.
+        pub fn pseudoInverse(self: Self, options: PseudoInverseOptions) Self {
+            if (self.err != null) return self;
+
+            if (self.rows == 0 or self.cols == 0) {
+                return errorMatrix(self.allocator, error.DimensionMismatch);
+            }
+
+            if (self.rows >= self.cols) {
+                return self.pseudoInverseTall(options);
+            }
+
+            var transposed = self.transpose();
+            if (transposed.err != null) return transposed;
+            defer transposed.deinit();
+
+            var pinv_transposed = transposed.pseudoInverseTall(options);
+            if (pinv_transposed.err != null) return pinv_transposed;
+
+            const result = pinv_transposed.transpose();
+            pinv_transposed.deinit();
+            return result;
+        }
+
+        fn pseudoInverseTall(self: Self, options: PseudoInverseOptions) Self {
+            if (self.err != null) return self;
+            std.debug.assert(self.rows >= self.cols);
+
+            const allocator = self.allocator;
+            const svd_options = SvdOptions{ .with_u = true, .with_v = true, .mode = .skinny_u };
+
+            var svd_result = self.svd(allocator, svd_options) catch |e| {
+                return errorMatrix(allocator, e);
+            };
+            defer svd_result.deinit();
+
+            if (svd_result.converged != 0) {
+                return errorMatrix(allocator, error.NotConverged);
+            }
+
+            const singular_count = svd_result.s.rows;
+            const sigma_max: T = if (singular_count > 0) svd_result.s.at(0, 0).* else 0;
+            if (sigma_max == 0) {
+                const zero_rows = self.cols;
+                const zero_cols = self.rows;
+                const zero = Matrix(T).initAll(allocator, zero_rows, zero_cols, 0) catch |e| {
+                    return errorMatrix(allocator, e);
+                };
+                if (options.effective_rank) |rank_ptr| {
+                    rank_ptr.* = 0;
+                }
+                return zero;
+            }
+            const max_dim = if (self.rows > self.cols) self.rows else self.cols;
+            const default_tol: T = sigma_max * @as(T, @floatFromInt(max_dim)) * std.math.floatEps(T);
+            const tol = options.tolerance orelse default_tol;
+
+            var sigma_inv = Matrix(T).initAll(allocator, singular_count, singular_count, 0) catch |e| {
+                return errorMatrix(allocator, e);
+            };
+            defer sigma_inv.deinit();
+
+            var effective_rank: usize = 0;
+            for (0..singular_count) |i| {
+                const sigma = svd_result.s.at(i, 0).*;
+                if (sigma > tol) {
+                    sigma_inv.at(i, i).* = 1 / sigma;
+                    effective_rank += 1;
+                }
+            }
+
+            if (options.effective_rank) |rank_ptr| {
+                rank_ptr.* = effective_rank;
+            }
+
+            var u_t = svd_result.u.transpose();
+            if (u_t.err != null) return u_t;
+            defer u_t.deinit();
+
+            var v_sigma = svd_result.v.dot(sigma_inv);
+            if (v_sigma.err != null) return v_sigma;
+            defer v_sigma.deinit();
+
+            return v_sigma.dot(u_t);
         }
 
         /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
