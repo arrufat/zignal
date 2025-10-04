@@ -155,7 +155,7 @@ pub fn resizePlaneBilinearU8(
             const bottom = bl * (SCALE - @as(i32, @intCast(fx))) + br * @as(i32, @intCast(fx));
             const result = @divTrunc(top * (SCALE - @as(i32, @intCast(fy))) + bottom * @as(i32, @intCast(fy)), SCALE * SCALE);
 
-            dst[r * dst_cols + c] = meta.clampU8(result);
+            dst[r * dst_cols + c] = meta.clamp(u8, result);
         }
     }
 }
@@ -258,7 +258,7 @@ pub fn resizePlaneBicubicU8(
             else
                 0;
 
-            dst[r * dst_cols + c] = meta.clampU8(result);
+            dst[r * dst_cols + c] = meta.clamp(u8, result);
         }
     }
 }
@@ -340,7 +340,7 @@ pub fn resizePlaneCatmullRomU8(
             else
                 0;
 
-            dst[r * dst_cols + c] = meta.clampU8(result);
+            dst[r * dst_cols + c] = meta.clamp(u8, result);
         }
     }
 }
