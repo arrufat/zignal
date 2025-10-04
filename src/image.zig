@@ -1199,6 +1199,235 @@ pub fn Image(comptime T: type) type {
             return 20.0 * std.math.log10(max_val) - 10.0 * std.math.log10(mse);
         }
 
+        /// Generate a normalized 2D Gaussian window at compile time for SSIM.
+        /// Window size is 11x11 with sigma=1.5 as per the SSIM paper.
+        fn generateSsimWindow() [121]f64 {
+            const window_size = 11;
+            const window_radius = window_size / 2;
+            const sigma: f64 = 1.5;
+
+            var gaussian_window: [window_size * window_size]f64 = undefined;
+            var gaussian_sum: f64 = 0.0;
+
+            for (0..window_size) |dy| {
+                for (0..window_size) |dx| {
+                    const y: f64 = @as(f64, @floatFromInt(dy)) - @as(f64, @floatFromInt(window_radius));
+                    const x: f64 = @as(f64, @floatFromInt(dx)) - @as(f64, @floatFromInt(window_radius));
+                    const gauss = @exp(-(x * x + y * y) / (2.0 * sigma * sigma));
+                    gaussian_window[dy * window_size + dx] = gauss;
+                    gaussian_sum += gauss;
+                }
+            }
+
+            // Normalize Gaussian weights
+            for (&gaussian_window) |*w| {
+                w.* /= gaussian_sum;
+            }
+
+            return gaussian_window;
+        }
+
+        /// Calculates the Structural Similarity Index (SSIM) between two images.
+        /// SSIM is a perceptual metric that measures structural similarity, with values in [0, 1].
+        /// 1.0 = identical images, 0.0 = completely different.
+        ///
+        /// This is more perceptually meaningful than PSNR for image quality assessment.
+        /// Uses an 11x11 Gaussian window with σ=1.5, as recommended in the original paper.
+        ///
+        /// Reference: Wang et al., "Image Quality Assessment: From Error Visibility to
+        /// Structural Similarity", IEEE Transactions on Image Processing, 2004.
+        ///
+        /// ## Implementation Notes:
+        /// - For RGB/RGBA pixels: converts to luminance using Rec. 709 weights (ignores alpha)
+        /// - For grayscale pixels: uses pixel value directly
+        /// - For float pixels: assumes normalized [0, 1] range
+        /// - Uses "valid" windowing: drops 5-pixel border (no padding/reflection)
+        ///
+        /// Returns an error if the images have different dimensions or are too small (< 11x11).
+        pub fn ssim(self: Self, other: Self) !f64 {
+            // Check dimensions match
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+
+            // SSIM requires at least an 11x11 image for the default window
+            if (self.rows < 11 or self.cols < 11) {
+                return error.ImageTooSmall;
+            }
+
+            // Constants from the SSIM paper
+            const L: f64 = blk: {
+                const component_type = switch (@typeInfo(T)) {
+                    .int, .float => T,
+                    .@"struct" => std.meta.fields(T)[0].type,
+                    .array => |array_info| array_info.child,
+                    else => unreachable,
+                };
+
+                break :blk switch (@typeInfo(component_type)) {
+                    .int => |int_info| if (int_info.signedness == .unsigned)
+                        @floatFromInt(std.math.maxInt(component_type))
+                    else
+                        @compileError("Signed integers not supported for SSIM"),
+                    .float => 1.0,
+                    else => unreachable,
+                };
+            };
+
+            const k1: f64 = 0.01;
+            const k2: f64 = 0.03;
+            const c1: f64 = (k1 * L) * (k1 * L);
+            const c2: f64 = (k2 * L) * (k2 * L);
+
+            var ssim_sum: f64 = 0.0;
+            var weight_sum: f64 = 0.0;
+
+            // Use an 11x11 sliding window
+            const window_size: usize = 11;
+            const window_radius: usize = window_size / 2;
+
+            // Use precomputed Gaussian window
+            const gaussian_window = comptime generateSsimWindow();
+
+            // Slide window over the image
+            for (window_radius..self.rows - window_radius) |row| {
+                for (window_radius..self.cols - window_radius) |col| {
+                    var mu_x: f64 = 0.0;
+                    var mu_y: f64 = 0.0;
+
+                    // Calculate weighted means
+                    for (0..window_size) |dy| {
+                        for (0..window_size) |dx| {
+                            const r = row - window_radius + dy;
+                            const c = col - window_radius + dx;
+                            const weight = gaussian_window[dy * window_size + dx];
+
+                            const pixel_x = self.at(r, c).*;
+                            const pixel_y = other.at(r, c).*;
+
+                            // Average across all components
+                            const val_x = getPixelMean(T, pixel_x);
+                            const val_y = getPixelMean(T, pixel_y);
+
+                            mu_x += val_x * weight;
+                            mu_y += val_y * weight;
+                        }
+                    }
+
+                    // Calculate weighted variances and covariance
+                    var sigma_x_sq: f64 = 0.0;
+                    var sigma_y_sq: f64 = 0.0;
+                    var sigma_xy: f64 = 0.0;
+
+                    for (0..window_size) |dy| {
+                        for (0..window_size) |dx| {
+                            const r = row - window_radius + dy;
+                            const c = col - window_radius + dx;
+                            const weight = gaussian_window[dy * window_size + dx];
+
+                            const pixel_x = self.at(r, c).*;
+                            const pixel_y = other.at(r, c).*;
+
+                            const val_x = getPixelMean(T, pixel_x);
+                            const val_y = getPixelMean(T, pixel_y);
+
+                            const diff_x = val_x - mu_x;
+                            const diff_y = val_y - mu_y;
+
+                            sigma_x_sq += weight * diff_x * diff_x;
+                            sigma_y_sq += weight * diff_y * diff_y;
+                            sigma_xy += weight * diff_x * diff_y;
+                        }
+                    }
+
+                    // Calculate SSIM for this window
+                    const numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * sigma_xy + c2);
+                    const denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x_sq + sigma_y_sq + c2);
+                    const ssim_val = numerator / denominator;
+
+                    ssim_sum += ssim_val;
+                    weight_sum += 1.0;
+                }
+            }
+
+            return ssim_sum / weight_sum;
+        }
+
+        /// Helper function to get the luminance value of a pixel.
+        /// For RGB/RGBA: uses standard Rec. 709 luminance weights via rgbLuma()
+        /// For grayscale: returns the pixel value directly
+        /// For arrays: uses luminance formula for 3/4-element arrays, averages otherwise
+        /// Note: Alpha channel is ignored for RGBA to match standard SSIM behavior
+        inline fn getPixelMean(comptime PixelType: type, pixel: PixelType) f64 {
+            const meta = @import("meta.zig");
+            const color = @import("color.zig");
+
+            switch (@typeInfo(PixelType)) {
+                .int, .float => {
+                    return switch (@typeInfo(PixelType)) {
+                        .int => @floatFromInt(pixel),
+                        .float => @floatCast(pixel),
+                        else => unreachable,
+                    };
+                },
+                .@"struct" => {
+                    // Use meta.isRgb to detect RGB/RGBA types
+                    if (comptime meta.isRgb(PixelType)) {
+                        return pixel.luma();
+                    } else {
+                        // For other structs, average all fields
+                        var sum: f64 = 0.0;
+                        var count: usize = 0;
+                        inline for (std.meta.fields(PixelType)) |field| {
+                            const val = @field(pixel, field.name);
+                            sum += switch (@typeInfo(field.type)) {
+                                .int => @floatFromInt(val),
+                                .float => @floatCast(val),
+                                else => 0.0,
+                            };
+                            count += 1;
+                        }
+                        return sum / @as(f64, @floatFromInt(count));
+                    }
+                },
+                .array => |array_info| {
+                    // For arrays, check if it's a 3 or 4 element array (likely RGB/RGBA)
+                    if (array_info.len == 3 or array_info.len == 4) {
+                        // Convert to u8 if needed and use rgbLuma
+                        const r: u8 = switch (@typeInfo(array_info.child)) {
+                            .int => meta.clamp(u8, pixel[0]),
+                            .float => meta.clamp(u8, pixel[0] * 255.0),
+                            else => 0,
+                        };
+                        const g: u8 = switch (@typeInfo(array_info.child)) {
+                            .int => meta.clamp(u8, pixel[1]),
+                            .float => meta.clamp(u8, pixel[1] * 255.0),
+                            else => 0,
+                        };
+                        const b: u8 = switch (@typeInfo(array_info.child)) {
+                            .int => meta.clamp(u8, pixel[2]),
+                            .float => meta.clamp(u8, pixel[2] * 255.0),
+                            else => 0,
+                        };
+                        return color.conversions.rgbLuma(r, g, b);
+                    } else {
+                        // For other array sizes, average all elements
+                        var sum: f64 = 0.0;
+                        for (0..array_info.len) |i| {
+                            const val = pixel[i];
+                            sum += switch (@typeInfo(array_info.child)) {
+                                .int => @floatFromInt(val),
+                                .float => @floatCast(val),
+                                else => 0.0,
+                            };
+                        }
+                        return sum / @as(f64, @floatFromInt(array_info.len));
+                    }
+                },
+                else => return 0.0,
+            }
+        }
+
         /// Returns an iterator over all pixels in the image
         pub fn pixels(self: Self) PixelIterator(T) {
             return .{
