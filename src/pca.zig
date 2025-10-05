@@ -40,6 +40,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const simd = std.simd;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
@@ -188,13 +189,42 @@ pub fn Pca(comptime T: type) type {
             if (dst.len != self.num_components) return error.InvalidCoefficients;
             if (vector.len != self.dim) return error.DimensionMismatch;
 
-            for (0..self.num_components) |i| {
-                var sum: T = 0;
-                for (0..self.dim) |j| {
-                    const centered = vector[j] - self.mean[j];
-                    sum += centered * self.components.at(j, i).*;
+            // SIMD-accelerated version for f32/f64 when dim is large enough
+            if (comptime T == f32 or T == f64) {
+                const VecSize = std.simd.suggestVectorLength(T) orelse 1;
+                for (0..self.num_components) |i| {
+                    var sum: T = 0;
+                    var j: usize = 0;
+                    // Vectorized loop
+                    while (j + VecSize <= self.dim) : (j += VecSize) {
+                        var centered_arr: [VecSize]T = undefined;
+                        var comp_arr: [VecSize]T = undefined;
+                        inline for (0..VecSize) |k| {
+                            centered_arr[k] = vector[j + k] - self.mean[j + k];
+                            comp_arr[k] = self.components.at(j + k, i).*;
+                        }
+                        const centered_vec: @Vector(VecSize, T) = centered_arr;
+                        const comp_vec: @Vector(VecSize, T) = comp_arr;
+                        const prod = centered_vec * comp_vec;
+                        sum += @reduce(.Add, prod);
+                    }
+                    // Handle remainder
+                    while (j < self.dim) : (j += 1) {
+                        const centered = vector[j] - self.mean[j];
+                        sum += centered * self.components.at(j, i).*;
+                    }
+                    dst[i] = sum;
                 }
-                dst[i] = sum;
+            } else {
+                // Fallback for other types
+                for (0..self.num_components) |i| {
+                    var sum: T = 0;
+                    for (0..self.dim) |j| {
+                        const centered = vector[j] - self.mean[j];
+                        sum += centered * self.components.at(j, i).*;
+                    }
+                    dst[i] = sum;
+                }
             }
         }
 
@@ -212,11 +242,42 @@ pub fn Pca(comptime T: type) type {
             // Start with mean
             @memcpy(result, self.mean);
 
-            // Add weighted components
-            for (0..self.num_components) |i| {
-                const weight = coefficients[i];
-                for (0..self.dim) |j| {
-                    result[j] += weight * self.components.at(j, i).*;
+            // Add weighted components (SIMD-accelerated for f32/f64)
+            if (comptime T == f32 or T == f64) {
+                const VecSize = std.simd.suggestVectorLength(T) orelse 1;
+                for (0..self.num_components) |i| {
+                    const weight = coefficients[i];
+                    var j: usize = 0;
+                    // Vectorized loop
+                    while (j + VecSize <= self.dim) : (j += VecSize) {
+                        var comp_arr: [VecSize]T = undefined;
+                        var res_arr: [VecSize]T = undefined;
+                        inline for (0..VecSize) |k| {
+                            comp_arr[k] = self.components.at(j + k, i).*;
+                            res_arr[k] = result[j + k];
+                        }
+                        const comp_vec: @Vector(VecSize, T) = comp_arr;
+                        const res_vec: @Vector(VecSize, T) = res_arr;
+                        const weight_vec = @as(@Vector(VecSize, T), @splat(weight));
+                        const weighted = weight_vec * comp_vec;
+                        const new_vec = res_vec + weighted;
+                        const new_arr = @as([VecSize]T, new_vec);
+                        inline for (0..VecSize) |k| {
+                            result[j + k] = new_arr[k];
+                        }
+                    }
+                    // Handle remainder
+                    while (j < self.dim) : (j += 1) {
+                        result[j] += weight * self.components.at(j, i).*;
+                    }
+                }
+            } else {
+                // Fallback
+                for (0..self.num_components) |i| {
+                    const weight = coefficients[i];
+                    for (0..self.dim) |j| {
+                        result[j] += weight * self.components.at(j, i).*;
+                    }
                 }
             }
 
@@ -499,6 +560,37 @@ test "PCA Gram path normalization and direction" {
     try pca.projectInto(coeffs0, &test_vec);
 
     try std.testing.expect(@abs(coeffs0[0] - coeffs_matrix.at(0, 0).*) < 1e-12);
+}
+
+test "PCA SIMD path on larger dimensions" {
+    const allocator = std.testing.allocator;
+
+    // 10D data with 5 samples to trigger SIMD (if VecSize <=10)
+    var data: Matrix(f64) = try .init(allocator, 5, 10);
+    defer data.deinit();
+    for (0..5) |i| {
+        for (0..10) |j| {
+            data.at(i, j).* = @as(f64, @floatFromInt(i + j));
+        }
+    }
+
+    var pca: Pca(f64) = try .init(allocator);
+    defer pca.deinit();
+    try pca.fit(data, null);
+
+    // Test projection and reconstruction on larger dim
+    var test_vec: [10]f64 = undefined;
+    for (0..10) |j| test_vec[j] = @as(f64, @floatFromInt(j));
+    const coeffs = try pca.project(&test_vec);
+    defer allocator.free(coeffs);
+
+    const reconstructed = try pca.reconstruct(coeffs);
+    defer allocator.free(reconstructed);
+
+    // Verify reconstruction accuracy
+    for (0..10) |j| {
+        try std.testing.expect(@abs(reconstructed[j] - test_vec[j]) < 1e-10);
+    }
 }
 
 test "PCA edge case: minimum samples (n=2)" {
