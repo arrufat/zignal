@@ -62,7 +62,7 @@ fn countDecimalPlaces(val: anytype) u8 {
     var temp = abs_val - @floor(abs_val); // Remove integer part
 
     // Count decimal places (up to precision limits)
-    while (temp > 0.0001 and count < 8) {
+    while (temp > 0.000001 and count < 7) {
         temp = temp * 10 - @floor(temp * 10);
         count += 1;
     }
@@ -96,11 +96,21 @@ pub fn solveAssignmentProblem(
 
     const scale_factor = if (@typeInfo(T) == .float) findScaleFactor(T, cost_matrix) else 1;
 
-    // Create square working matrix with optional values for padding
-    var work = try allocator.alloc(?i64, n * n);
+    // Create square working matrix - pad with large values
+    var work = try allocator.alloc(i64, n * n);
     defer allocator.free(work);
 
-    // Initialize work matrix - convert all types to i64 with appropriate scaling for floats.
+    // Find a large padding value (sum of all absolute values + 1)
+    var padding_value: i64 = 1;
+    for (0..n_rows) |i| {
+        for (0..n_cols) |j| {
+            const base_val = cost_matrix.at(i, j).*;
+            const abs_val = @abs(as(f64, base_val));
+            padding_value += @intFromFloat(@ceil(abs_val * @as(f64, @floatFromInt(scale_factor))));
+        }
+    }
+
+    // Initialize work matrix - convert all types to i64 with appropriate scaling for floats
     for (0..n) |i| {
         for (0..n) |j| {
             if (i < n_rows and j < n_cols) {
@@ -114,59 +124,39 @@ pub fn solveAssignmentProblem(
                     else => @compileError("Unsupported type for cost matrix"),
                 };
             } else {
-                work[i * n + j] = null;
+                work[i * n + j] = padding_value;
             }
         }
     }
 
     // Step 1: Row reduction - subtract row minimum from each row
     for (0..n) |i| {
-        // Find minimum value in non-null cells of this row
-        var min_val: ?i64 = null;
+        // Find minimum value in this row
+        var min_val: i64 = work[i * n];
         for (0..n) |j| {
-            if (work[i * n + j]) |val| {
-                if (min_val) |current_min| {
-                    min_val = @min(current_min, val);
-                } else {
-                    min_val = val;
-                }
-            }
+            min_val = @min(min_val, work[i * n + j]);
         }
 
-        // Subtract minimum from all non-null cells in the row
-        if (min_val) |min| {
-            if (min != 0) {
-                for (0..n) |j| {
-                    if (work[i * n + j]) |*val| {
-                        val.* -= min;
-                    }
-                }
+        // Subtract minimum from all cells in the row
+        if (min_val != 0) {
+            for (0..n) |j| {
+                work[i * n + j] -= min_val;
             }
         }
     }
 
     // Step 2: Column reduction - subtract column minimum from each column
     for (0..n) |j| {
-        // Find minimum value in non-null cells of this column
-        var min_val: ?i64 = null;
+        // Find minimum value in this column
+        var min_val: i64 = work[j];
         for (0..n) |i| {
-            if (work[i * n + j]) |val| {
-                if (min_val) |current_min| {
-                    min_val = @min(current_min, val);
-                } else {
-                    min_val = val;
-                }
-            }
+            min_val = @min(min_val, work[i * n + j]);
         }
 
-        // Subtract minimum from all non-null cells in the column
-        if (min_val) |min| {
-            if (min != 0) {
-                for (0..n) |i| {
-                    if (work[i * n + j]) |*val| {
-                        val.* -= min;
-                    }
-                }
+        // Subtract minimum from all cells in the column
+        if (min_val != 0) {
+            for (0..n) |i| {
+                work[i * n + j] -= min_val;
             }
         }
     }
@@ -197,12 +187,10 @@ pub fn solveAssignmentProblem(
     // Step 1: Find initial zeros and create stars (assignments)
     for (0..n) |i| {
         for (0..n) |j| {
-            if (work[i * n + j]) |val| {
-                if (val == 0 and row_assignment[i] == null and col_assignment[j] == null) {
-                    row_assignment[i] = j;
-                    col_assignment[j] = i;
-                    starred[i * n + j] = true; // Star the zero
-                }
+            if (work[i * n + j] == 0 and row_assignment[i] == null and col_assignment[j] == null) {
+                row_assignment[i] = j;
+                col_assignment[j] = i;
+                starred[i * n + j] = true; // Star the zero
             }
         }
     }
@@ -225,23 +213,24 @@ pub fn solveAssignmentProblem(
         }
 
         // Check if all columns are covered (optimal assignment found)
+        var covered_count: usize = 0;
         for (col_covered) |covered| {
-            if (!covered) break;
-        } else {
-            break;
+            if (covered) covered_count += 1;
         }
+        if (covered_count >= n) break;
 
-        // Step 3: Find uncovered zero
-        var found_zero = false;
-        var zero_row: usize = 0;
-        var zero_col: usize = 0;
+        // Step 3: Keep finding uncovered zeros until we construct a path or need to modify matrix
+        while (true) {
+            // Find uncovered zero
+            var found_zero = false;
+            var zero_row: usize = 0;
+            var zero_col: usize = 0;
 
-        search: for (0..n) |i| {
-            if (!row_covered[i]) {
-                for (0..n) |j| {
-                    if (!col_covered[j]) {
-                        if (work[i * n + j]) |val| {
-                            if (val == 0) {
+            search: for (0..n) |i| {
+                if (!row_covered[i]) {
+                    for (0..n) |j| {
+                        if (!col_covered[j]) {
+                            if (work[i * n + j] == 0) {
                                 zero_row = i;
                                 zero_col = j;
                                 found_zero = true;
@@ -251,69 +240,68 @@ pub fn solveAssignmentProblem(
                     }
                 }
             }
-        }
 
-        if (found_zero) {
-            // Prime the zero
-            primed[zero_row * n + zero_col] = true;
+            if (found_zero) {
+                // Prime the zero
+                primed[zero_row * n + zero_col] = true;
 
-            // Check if there's a starred zero in the same row
-            const star_col = for (0..n) |j| {
-                if (starred[zero_row * n + j]) {
-                    break j;
+                // Check if there's a starred zero in the same row
+                const star_col = for (0..n) |j| {
+                    if (starred[zero_row * n + j]) {
+                        break j;
+                    }
+                } else null;
+
+                if (star_col) |col| {
+                    // Cover this row and uncover the star's column
+                    row_covered[zero_row] = true;
+                    col_covered[col] = false;
+                    // Continue loop to find next uncovered zero
+                } else {
+                    // No starred zero in row, construct augmenting path
+                    try constructAugmentingPath(allocator, starred, primed, zero_row, zero_col, row_assignment, col_assignment, n);
+
+                    // Clear primes and break to restart from step 2
+                    @memset(primed, false);
+                    break;
                 }
-            } else null;
-
-            if (star_col) |col| {
-                // Cover this row and uncover the star's column
-                row_covered[zero_row] = true;
-                col_covered[col] = false;
             } else {
-                // No starred zero in row, construct augmenting path
-                try constructAugmentingPath(starred, primed, zero_row, zero_col, row_assignment, col_assignment, n);
+                // Step 4: No uncovered zeros, modify matrix
+                var min_uncovered: ?i64 = null;
 
-                // Clear primes and reset covers
-                @memset(primed, false);
-                @memset(row_covered, false);
-                @memset(col_covered, false);
-            }
-        } else {
-            // Step 4: No uncovered zeros, modify matrix
-            var min_uncovered: ?i64 = null;
-
-            // Find minimum uncovered value
-            for (0..n) |i| {
-                if (!row_covered[i]) {
-                    for (0..n) |j| {
-                        if (!col_covered[j]) {
-                            if (work[i * n + j]) |val| {
-                                if (min_uncovered) |current_min| {
-                                    min_uncovered = @min(current_min, val);
+                // Find minimum uncovered value
+                var found_uncovered = false;
+                for (0..n) |i| {
+                    if (!row_covered[i]) {
+                        for (0..n) |j| {
+                            if (!col_covered[j]) {
+                                if (!found_uncovered) {
+                                    min_uncovered = work[i * n + j];
+                                    found_uncovered = true;
                                 } else {
-                                    min_uncovered = val;
+                                    min_uncovered = @min(min_uncovered.?, work[i * n + j]);
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (min_uncovered == null) break; // No valid solution
+                if (!found_uncovered) break; // No valid solution
 
-            // Add to covered rows, subtract from uncovered columns
-            if (min_uncovered) |min| {
-                for (0..n) |i| {
-                    for (0..n) |j| {
-                        if (work[i * n + j]) |*val| {
+                // Add to covered rows, subtract from uncovered columns
+                if (min_uncovered) |min| {
+                    for (0..n) |i| {
+                        for (0..n) |j| {
                             if (row_covered[i]) {
-                                val.* += min;
+                                work[i * n + j] += min;
                             }
                             if (!col_covered[j]) {
-                                val.* -= min;
+                                work[i * n + j] -= min;
                             }
                         }
                     }
                 }
+                break; // Break inner while loop after modifying matrix
             }
         }
     }
@@ -352,6 +340,7 @@ fn countAssignments(assignments: []const ?usize) usize {
 }
 
 fn constructAugmentingPath(
+    allocator: Allocator,
     starred: []bool,
     primed: []bool,
     start_row: usize,
@@ -360,42 +349,51 @@ fn constructAugmentingPath(
     col_assignment: []?usize,
     n: usize,
 ) !void {
-    // Build augmenting path starting from uncovered primed zero
-    const path_row = start_row;
-    var path_col = start_col;
+    // Build augmenting path: alternating primed and starred zeros
+    // Path can have up to 2*n elements (alternating starred and primed)
+    const PathNode = struct { row: usize, col: usize };
+    const path = try allocator.alloc(PathNode, 2 * n);
+    defer allocator.free(path);
+    var path_len: usize = 0;
 
+    path[path_len] = .{ .row = start_row, .col = start_col };
+    path_len += 1;
+
+    var current_col = start_col;
     while (true) {
-        // Find starred zero in column (if any)
+        // Find starred zero in current column
         const star_row = for (0..n) |i| {
-            if (starred[i * n + path_col]) {
-                break i;
-            }
+            if (starred[i * n + current_col]) break i;
         } else null;
 
-        if (star_row) |row| {
-            // Unstar the zero
-            starred[row * n + path_col] = false;
+        if (star_row) |r| {
+            // Add starred zero to path
+            path[path_len] = .{ .row = r, .col = current_col };
+            path_len += 1;
 
-            // Find primed zero in row (must exist)
+            // Find primed zero in this row
             const prime_col = for (0..n) |j| {
-                if (primed[row * n + j]) {
-                    break j;
-                }
+                if (primed[r * n + j]) break j;
             } else null;
 
-            if (prime_col) |col| {
-                // Star the primed zero
-                starred[row * n + col] = true;
-                path_col = col;
+            if (prime_col) |c| {
+                // Add primed zero to path
+                path[path_len] = .{ .row = r, .col = c };
+                path_len += 1;
+                current_col = c;
             } else {
-                // This shouldn't happen in a correct implementation
                 break;
             }
         } else {
-            // No starred zero in column, star the primed zero and end
-            starred[path_row * n + path_col] = true;
             break;
         }
+    }
+
+    // Flip the path: star even indices (primed), unstar odd indices (starred)
+    for (0..path_len) |i| {
+        const r = path[i].row;
+        const c = path[i].col;
+        starred[r * n + c] = (i % 2) == 0;
     }
 
     // Update assignments based on starred zeros
@@ -436,9 +434,9 @@ test "Hungarian algorithm - simple 3x3" {
     var result = try solveAssignmentProblem(f32, allocator, cost, .min);
     defer result.deinit();
 
-    // Optimal assignment should have cost 1+4+9=14 or similar minimal
+    // Optimal: row0->col2 (3), row1->col1 (4), row2->col0 (3), total=10
     try expectEqual(@as(usize, 3), result.assignments.len);
-    try expectEqual(true, result.total_cost <= 15); // Allow some flexibility for the simple implementation
+    try expectEqual(@as(f64, 10), result.total_cost);
 }
 
 test "Hungarian algorithm - integer matrix" {
@@ -470,8 +468,8 @@ test "Hungarian algorithm - integer matrix" {
         try expectEqual(true, assignment != null);
     }
 
-    // Verify total cost is reasonable (should be 10+25+40=75 for diagonal)
-    try expectEqual(true, result.total_cost <= 80);
+    // Optimal: row0->col0 (10), row1->col1 (25), row2->col2 (40), total=75
+    try expectEqual(@as(f64, 75), result.total_cost);
 }
 
 test "Hungarian algorithm - rectangular matrix" {
@@ -492,6 +490,6 @@ test "Hungarian algorithm - rectangular matrix" {
     defer result.deinit();
 
     try expectEqual(@as(usize, 2), result.assignments.len);
-    // One possible optimal: row 0 -> col 0 (cost 1), row 1 -> col 2 (cost 1), total = 2
-    try expectEqual(true, result.total_cost <= 3);
+    // Optimal: row0->col0 (1), row1->col2 (1), total=2
+    try expectEqual(@as(f64, 2), result.total_cost);
 }
