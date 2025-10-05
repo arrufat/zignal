@@ -1,21 +1,32 @@
 # Zignal Python Bindings
 
-Zero‑dependency image processing primitives in Zig, exposed to Python.
+[![PyPI version](https://img.shields.io/pypi/v/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Python versions](https://img.shields.io/pypi/pyversions/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bfactory-ai/zignal/blob/main/LICENSE)
 
-## Install
+Zero-dependency image processing primitives written in Zig and packaged for Python.
 
-```console
-pip install zignal-processing
-```
+## Key Features
 
-Docs: https://bfactory-ai.github.io/zignal/python/zignal.html
+- Image pipelines: load/save, resize/warp, crop/letterbox, extract/insert, blur/sharpen, flips
+- Pixels: direct get/set, slice assignment, zero-copy NumPy views
+- Colors: 12 color models (Rgb/Rgba, Hsl/Hsv, Lab/Lch, Xyz/Xyb, Oklab/Oklch, Lms, Ycbcr)
+- Canvas: lines, circles, polygons, bitmap font text drawing
+- Geometry: Rectangle, ConvexHull, Similarity/Affine/Projective transforms
+- Terminal output: SGR, Braille, Sixel, Kitty
+- All of the above backed by Zig with no external runtime dependencies
+
+## Installation
+
+- Python 3.9 or newer
+- `pip install zignal-processing`
+
+Prebuilt wheels are published for common platforms. If pip falls back to building from source, ensure `zig` is available on your PATH.
 
 ## Quickstart
 
 ```python
 import zignal
 
-# Load / create
+# Load or create an image
 img = zignal.Image.load("photo.jpg")                # PNG/JPEG
 img = zignal.Image(480, 640, color=(30, 144, 255))  # RGB fill
 
@@ -26,13 +37,13 @@ img = img.resize(0.5, zignal.InterpolationMethod.BILINEAR)
 # Pixels and NumPy interop with shared memory
 img[10, 20] = zignal.Hsv(60, 100, 100)
 arr = img.to_numpy()                 # (rows, cols, 3) uint8 view
-img2 = zignal.Image.from_numpy(arr)  # zero‑copy with shared memory
+img2 = zignal.Image.from_numpy(arr)  # zero-copy with shared memory
 
 # Draw
 canvas = img.canvas()
 canvas.draw_line((10, 10), (100, 60), zignal.Rgb(255, 0, 0))
 
-# Terminal preview (auto: kitty → sixel → sgr)
+# Terminal preview (auto: kitty -> sixel -> sgr)
 print(f"{img:auto}")
 print(f"{img2:auto}")  # also modified
 
@@ -40,31 +51,23 @@ print(f"{img2:auto}")  # also modified
 img.save("out.png")
 ```
 
-## Highlights
+## Project Links
 
-- Image ops: load/save, resize/warp, crop/letterbox, extract/insert, blur/sharpen, flips
-- Pixels: direct get/set; slice assignment; NumPy zero‑copy to/from
-- Colors: 12 spaces (Rgb/Rgba, Hsl/Hsv, Lab/Lch, Xyz/Xyb, Oklab/Oklch, Lms, Ycbcr)
-- Canvas: lines, circles, polygons, text via bitmap BDF/PCF fonts
-- Geometry: Rectangle, ConvexHull, SimilarityTransform, AffineTranform, ProjectiveTransform
-- Matrix: float64 matrices with NumPy bridge
-- Terminal: SGR, Braille, Sixel, Kitty
-- Advanced: FeatureDistributionMatching
-- Core: Zig, no external dependencies
+- Documentation: https://bfactory-ai.github.io/zignal/python/zignal.html
+- Source code: https://github.com/bfactory-ai/zignal
+- Issue tracker: https://github.com/bfactory-ai/zignal/issues
 
 ## Development
 
-- Build native extension: `zig build python-bindings`
-- Generate stubs (`.pyi`): `zig build python-stubs`
+- Build native extension and `.pyi` stubs: `zig build python-bindings`
 - Editable install: `cd bindings/python && uv venv && uv pip install -e .`
-- Tests: `uv run pytest -q`
+- Run tests: `uv run pytest -q`
 
-If Python headers/libs aren’t auto‑detected during build, set:
-`PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, `PYTHON_LIB_NAME`.
+If Python headers or libs are not auto-detected during build, set the environment variables `PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, and `PYTHON_LIB_NAME`.
 
 ## Binding New Functionality
 
-See BINDINGS_GUIDE.md for patterns and conventions to expose new Zignal APIs to Python (kwlists, validators, enums, image wrapping, stubs).
+See https://github.com/bfactory-ai/zignal/blob/main/BINDINGS_GUIDE.md for patterns and conventions to expose new Zignal APIs to Python (keyword lists, validators, enums, image wrapping, stubs).
 
 ## License
 
