@@ -11,6 +11,7 @@ const testing = std.testing;
 /// Running statistics for streaming data.
 /// Computes mean, variance, skewness, and kurtosis in a single pass.
 /// Uses Welford's algorithm for numerical stability.
+/// Inspired by dlib's running_stats implementation.
 pub fn RunningStats(comptime T: type) type {
     comptime {
         const info = @typeInfo(T);
@@ -23,25 +24,36 @@ pub fn RunningStats(comptime T: type) type {
         const Self = @This();
 
         // Core statistics
-        n: usize = 0, // Number of samples
-        sum: T = 0, // Sum of values
-        sum_sqr: T = 0, // Sum of squared deviations
-        sum_cub: T = 0, // Sum of cubed deviations
-        sum_four: T = 0, // Sum of fourth power deviations
+        n: usize, // Number of samples
+        sum: T, // Sum of values
 
         // Running mean for Welford's algorithm
-        m1: T = 0, // Mean
-        m2: T = 0, // Second moment
-        m3: T = 0, // Third moment
-        m4: T = 0, // Fourth moment
+        m1: T, // Mean
+        m2: T, // Second moment
+        m3: T, // Third moment
+        m4: T, // Fourth moment
 
         // Extrema
-        min_val: T = std.math.inf(T),
-        max_val: T = -std.math.inf(T),
+        min_val: T,
+        max_val: T,
+
+        /// Initialize a new RunningStats instance with zero values
+        pub fn init() Self {
+            return .{
+                .n = 0,
+                .sum = 0,
+                .m1 = 0,
+                .m2 = 0,
+                .m3 = 0,
+                .m4 = 0,
+                .min_val = std.math.inf(T),
+                .max_val = -std.math.inf(T),
+            };
+        }
 
         /// Clear all statistics and reset to initial state
         pub fn clear(self: *Self) void {
-            self.* = .{};
+            self.* = Self.init();
         }
 
         /// Add a new value to the running statistics
@@ -149,7 +161,7 @@ pub fn RunningStats(comptime T: type) type {
             if (self.n == 0) return other;
             if (other.n == 0) return self;
 
-            var result = Self{};
+            var result = Self.init();
             result.n = self.n + other.n;
             result.sum = self.sum + other.sum;
 
@@ -191,7 +203,7 @@ pub fn RunningStats(comptime T: type) type {
 // ============================================================================
 
 test "RunningStats: basic operations" {
-    var stats = RunningStats(f64){};
+    var stats: RunningStats(f64) = .init();
 
     // Test with known values
     stats.add(2.0);
@@ -214,7 +226,7 @@ test "RunningStats: basic operations" {
 }
 
 test "RunningStats: skewness and kurtosis" {
-    var stats = RunningStats(f64){};
+    var stats: RunningStats(f64) = .init();
 
     // Normal-like distribution
     const values = [_]f64{ 1, 2, 2, 3, 3, 3, 4, 4, 5 };
@@ -230,9 +242,9 @@ test "RunningStats: skewness and kurtosis" {
 }
 
 test "RunningStats: combine" {
-    var stats1 = RunningStats(f64){};
-    var stats2 = RunningStats(f64){};
-    var combined_direct = RunningStats(f64){};
+    var stats1: RunningStats(f64) = .init();
+    var stats2: RunningStats(f64) = .init();
+    var combined_direct: RunningStats(f64) = .init();
 
     // Add to first stats
     stats1.add(1.0);
@@ -259,4 +271,114 @@ test "RunningStats: combine" {
     try testing.expectEqual(combined_direct.currentN(), combined.currentN());
     try testing.expectApproxEqAbs(combined_direct.mean(), combined.mean(), 1e-10);
     try testing.expectApproxEqAbs(combined_direct.variance(), combined.variance(), 1e-10);
+}
+
+test "RunningStats: edge cases" {
+    var stats: RunningStats(f64) = .init();
+
+    // Empty stats
+    try testing.expectEqual(@as(usize, 0), stats.currentN());
+    try testing.expectEqual(@as(f64, 0), stats.mean());
+    try testing.expectEqual(@as(f64, 0), stats.variance());
+    try testing.expectEqual(@as(f64, 0), stats.stdDev());
+    try testing.expectEqual(@as(f64, 0), stats.skewness());
+    try testing.expectEqual(@as(f64, 0), stats.exKurtosis());
+    try testing.expectEqual(@as(f64, 0), stats.min());
+    try testing.expectEqual(@as(f64, 0), stats.max());
+    try testing.expectEqual(@as(f64, 0), stats.scale(1.0));
+
+    // Single value
+    stats.add(5.0);
+    try testing.expectEqual(@as(usize, 1), stats.currentN());
+    try testing.expectApproxEqAbs(@as(f64, 5.0), stats.mean(), 1e-10);
+    try testing.expectEqual(@as(f64, 0), stats.variance());
+    try testing.expectEqual(@as(f64, 0), stats.stdDev());
+    try testing.expectEqual(@as(f64, 0), stats.skewness());
+    try testing.expectEqual(@as(f64, 0), stats.exKurtosis());
+    try testing.expectApproxEqAbs(@as(f64, 5.0), stats.min(), 1e-10);
+    try testing.expectApproxEqAbs(@as(f64, 5.0), stats.max(), 1e-10);
+    try testing.expectEqual(@as(f64, 0), stats.scale(5.0));
+
+    // Constant values (zero variance)
+    stats.clear();
+    stats.add(2.0);
+    stats.add(2.0);
+    stats.add(2.0);
+    try testing.expectEqual(@as(f64, 0), stats.variance());
+    try testing.expectEqual(@as(f64, 0), stats.skewness());
+    try testing.expectEqual(@as(f64, 0), stats.exKurtosis());
+}
+
+test "RunningStats: normal distribution approximation" {
+    var stats: RunningStats(f64) = .init();
+
+    // Generate standard normal data using Zig's built-in normal random generator
+    var prng = std.Random.DefaultPrng.init(42); // Fixed seed for deterministic test
+    const rand = prng.random();
+
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        const value = rand.floatNorm(f64);
+        stats.add(value);
+    }
+
+    try testing.expectEqual(100, stats.currentN());
+    try testing.expectApproxEqAbs(0, @abs(stats.mean()), 0.1); // Should be near 0
+    try testing.expectApproxEqAbs(1.0, stats.variance(), 0.04); // Should be near 1
+    try testing.expectApproxEqAbs(1.0, stats.stdDev(), 0.04); // Should be near 1
+    try testing.expectApproxEqAbs(0, @abs(stats.skewness()), 0.25); // Should be near 0 for symmetric
+    try testing.expectApproxEqAbs(0, @abs(stats.exKurtosis()), 0.15); // Should be near 0 for normal-like
+}
+
+test "RunningStats: skewed distribution" {
+    var stats: RunningStats(f64) = .init();
+
+    // Generate right-skewed data using Zig's exponential random generator
+    var prng = std.Random.DefaultPrng.init(123); // Fixed seed for deterministic test
+    const rand = prng.random();
+
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        const value = rand.floatExp(f64); // Exponential distribution: mean 1, skewed right
+        stats.add(value);
+    }
+
+    try testing.expectEqual(@as(usize, 100), stats.currentN());
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.mean(), 0.05); // Should be near 1
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.variance(), 0.12); // Should be near 1
+    try testing.expect(stats.skewness() > 1.9); // Positive skewness expected for exponential
+    try testing.expect(stats.exKurtosis() > 3.1); // High excess kurtosis for exponential
+}
+
+test "RunningStats: scaling/z-score" {
+    var stats: RunningStats(f64) = .init();
+
+    // Add values with known mean and std
+    stats.add(10.0);
+    stats.add(12.0);
+    stats.add(14.0);
+    stats.add(16.0);
+    stats.add(18.0);
+
+    try testing.expectApproxEqAbs(@as(f64, 14.0), stats.mean(), 1e-10);
+    try testing.expectApproxEqAbs(@as(f64, 10.0), stats.variance(), 1e-10); // Variance: sum of squared diffs / (n-1)
+    try testing.expectApproxEqAbs(@as(f64, 3.162), stats.stdDev(), 0.001);
+
+    // Test scaling
+    try testing.expectApproxEqAbs(@as(f64, -1.265), stats.scale(10.0), 0.001); // (10-14)/3.162
+    try testing.expectApproxEqAbs(@as(f64, 0.0), stats.scale(14.0), 0.001); // Mean
+    try testing.expectApproxEqAbs(@as(f64, 1.265), stats.scale(18.0), 0.001); // (18-14)/3.162
+}
+
+test "RunningStats: large values for numerical stability" {
+    var stats: RunningStats(f64) = .init();
+
+    // Add large values to test numerical stability
+    stats.add(1e10);
+    stats.add(1e10 + 1.0);
+    stats.add(1e10 + 2.0);
+
+    try testing.expectApproxEqAbs(@as(f64, 1e10 + 1.0), stats.mean(), 1e-5);
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.variance(), 1e-4);
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.stdDev(), 1e-4);
 }

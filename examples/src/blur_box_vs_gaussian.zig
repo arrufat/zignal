@@ -200,7 +200,7 @@ pub fn main() !void {
         const ssim_value = try gaussian.ssim(last_result.*);
 
         // Calculate average error per pixel as percentage (like the blog post)
-        var error_stats: RunningStats(f64) = .{};
+        var error_stats: RunningStats(f64) = .init();
         for (0..gaussian.rows) |r| {
             for (0..gaussian.cols) |c| {
                 const g_val: f64 = @floatFromInt(gaussian.at(r, c).*);
