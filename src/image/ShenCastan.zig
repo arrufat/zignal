@@ -50,25 +50,25 @@ pub fn validate(self: ShenCastan) !void {
 
 /// Default configuration with balanced settings.
 /// Good starting point for most images.
-pub const default = ShenCastan{};
+pub const default: ShenCastan = .{};
 
 /// Optimized for low-noise, high-quality images.
 /// Less smoothing to preserve fine details, stricter edge thresholds.
-pub const low_noise = ShenCastan{
+pub const low_noise: ShenCastan = .{
     .smooth = 0.95,
     .high_ratio = 0.98,
 };
 
 /// Optimized for noisy images.
 /// More aggressive smoothing with larger window to suppress noise.
-pub const high_noise = ShenCastan{
+pub const high_noise: ShenCastan = .{
     .smooth = 0.7,
     .window_size = 11,
 };
 
 /// Heavy smoothing for very noisy or low-quality images.
 /// Uses strong ISEF smoothing with moderate thresholds to suppress artifacts.
-pub const heavy_smooth = ShenCastan{
+pub const heavy_smooth: ShenCastan = .{
     .smooth = 0.5,
     .window_size = 9,
     .high_ratio = 0.95,
@@ -76,19 +76,19 @@ pub const heavy_smooth = ShenCastan{
 
 /// Higher sensitivity configuration.
 /// Detects more edges by using lower thresholds.
-pub const sensitive = ShenCastan{
+pub const sensitive: ShenCastan = .{
     .high_ratio = 0.97,
     .low_rel = 0.4,
 };
 
 /// Produces single-pixel wide edges using non-maximum suppression.
 /// Slower but gives cleaner, thinner edge lines.
-pub const thin = ShenCastan{
+pub const thin: ShenCastan = .{
     .use_nms = true,
 };
 
 /// Detects only strong edges without hysteresis linking.
 /// Useful when you want only the most prominent edges.
-pub const strong_only = ShenCastan{
+pub const strong_only: ShenCastan = .{
     .hysteresis = false,
 };
