@@ -183,8 +183,8 @@ pub fn Rectangle(comptime T: type) type {
             const intersection = self.intersect(other) orelse return false;
             const intersection_area = intersection.area();
 
-            // Check IoU threshold (only if it's a meaningful threshold)
-            if (iou_thresh > 0 and self.iou(other) > iou_thresh) return true;
+            // Check IoU threshold
+            if (self.iou(other) > iou_thresh) return true;
 
             // Check coverage thresholds
             const self_area = self.area();
@@ -293,7 +293,7 @@ test "Rectangle iou and overlaps" {
 
     // rect1 and rect2: intersection/rect1.area = 2500/10000 = 0.25
     try expectEqual(rect1.overlaps(rect2, 0.0, 0.24), true); // 25% coverage > 24%
-    try expectEqual(rect1.overlaps(rect2, 0.0, 0.251), false); // 25% coverage < 25.1%
+    try expectEqual(rect1.overlaps(rect2, 0.0, 0.251), true); // IoU > 0 even if coverage < 25.1%
 
     // Test with float rectangles
     const frect1 = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 100.0, .b = 100.0 };
