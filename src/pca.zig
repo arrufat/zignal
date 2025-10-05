@@ -350,7 +350,7 @@ pub fn Pca(comptime T: type) type {
                 const eigenval = result.s.at(i, 0).*;
                 self.eigenvalues[i] = eigenval;
 
-                if (eigenval > 1e-10) {
+                if (eigenval > 1e-12) {
                     // Principal component: X^T u_i / sqrt((n-1) * eigenval)
                     for (0..self.dim) |j| {
                         var sum: T = 0;
@@ -499,4 +499,87 @@ test "PCA Gram path normalization and direction" {
     try pca.projectInto(coeffs0, &test_vec);
 
     try std.testing.expect(@abs(coeffs0[0] - coeffs_matrix.at(0, 0).*) < 1e-12);
+}
+
+test "PCA edge case: minimum samples (n=2)" {
+    const allocator = std.testing.allocator;
+
+    // Two 2D samples
+    var data: Matrix(f64) = try .init(allocator, 2, 2);
+    defer data.deinit();
+    data.at(0, 0).* = 1.0;
+    data.at(0, 1).* = 2.0;
+    data.at(1, 0).* = 3.0;
+    data.at(1, 1).* = 4.0;
+
+    var pca: Pca(f64) = try .init(allocator);
+    defer pca.deinit();
+
+    try pca.fit(data, null); // Should fit with 1 component
+    try std.testing.expectEqual(@as(usize, 1), pca.num_components);
+
+    // Test projection
+    const test_vec = [_]f64{ 2.0, 3.0 };
+    const coeffs = try pca.project(&test_vec);
+    defer allocator.free(coeffs);
+    try std.testing.expectEqual(@as(usize, 1), coeffs.len);
+}
+
+test "PCA edge case: zero variance data" {
+    const allocator = std.testing.allocator;
+
+    // All identical 2D points
+    var data: Matrix(f64) = try .init(allocator, 3, 2);
+    defer data.deinit();
+    for (0..3) |i| {
+        data.at(i, 0).* = 1.0;
+        data.at(i, 1).* = 1.0;
+    }
+
+    var pca: Pca(f64) = try .init(allocator);
+    defer pca.deinit();
+
+    try pca.fit(data, null); // Should fit, but eigenvalues near zero
+    try std.testing.expect(pca.num_components > 0);
+
+    // All eigenvalues should be very small
+    for (pca.eigenvalues) |ev| {
+        try std.testing.expect(@abs(ev) < 1e-10);
+    }
+
+    // Projection should work but coefficients near zero
+    const test_vec = [_]f64{ 1.0, 1.0 };
+    const coeffs = try pca.project(&test_vec);
+    defer allocator.free(coeffs);
+    for (coeffs) |c| {
+        try std.testing.expect(@abs(c) < 1e-10);
+    }
+}
+
+test "PCA error cases: invalid inputs" {
+    const allocator = std.testing.allocator;
+
+    var pca: Pca(f64) = try .init(allocator);
+    defer pca.deinit();
+
+    // Not fitted yet
+    const test_vec = [_]f64{ 1.0, 2.0 };
+    try std.testing.expectError(error.NotFitted, pca.project(&test_vec));
+
+    // Fit with minimal data
+    var data: Matrix(f64) = try .init(allocator, 2, 2);
+    defer data.deinit();
+    data.at(0, 0).* = 1.0;
+    data.at(0, 1).* = 2.0;
+    data.at(1, 0).* = 3.0;
+    data.at(1, 1).* = 4.0;
+    try pca.fit(data, null);
+
+    // Wrong dimension
+    const wrong_dim_vec = [_]f64{1.0}; // 1D instead of 2D
+    try std.testing.expectError(error.DimensionMismatch, pca.project(&wrong_dim_vec));
+
+    // Wrong coefficients length for reconstruct
+    const wrong_coeffs = [_]f64{ 1.0, 2.0 }; // 2 instead of 1
+    try std.testing.expectError(error.InvalidCoefficients, pca.reconstruct(&wrong_coeffs));
 }
