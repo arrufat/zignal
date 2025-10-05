@@ -132,6 +132,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Linear interpolation between two points
         pub fn lerp(self: Self, other: Self, t: T) Self {
+            comptime assert(@typeInfo(T) == .float);
             var result: @Vector(dim, T) = undefined;
             inline for (0..dim) |i| {
                 result[i] = std.math.lerp(self.items[i], other.items[i], t);
@@ -209,6 +210,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         // Special methods for common dimensions
         /// Rotate 2D point around center by given angle (radians)
         pub fn rotate(self: Self, angle: T, center: Self) Self {
+            comptime assert(@typeInfo(T) == .float);
             comptime assert(dim == 2);
             const cos_a = @cos(angle);
             const sin_a = @sin(angle);
@@ -348,7 +350,7 @@ test "Point arithmetic operations" {
     try std.testing.expectEqual(@as(f64, 5.0), norm); // 3-4-5 triangle
 }
 
-test "Point new operations" {
+test "Point advanced operations" {
 
     // Normalize
     const p: Point(2, f64) = .init(.{ 3.0, 4.0 });
