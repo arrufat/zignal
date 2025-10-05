@@ -12,11 +12,11 @@ Zero-dependency image processing primitives written in Zig and packaged for Pyth
 - Canvas: lines, circles, polygons, bitmap font text drawing
 - Geometry: Rectangle, ConvexHull, Similarity/Affine/Projective transforms
 - Terminal output: SGR, Braille, Sixel, Kitty
-- All of the above backed by Zig with no external runtime dependencies
+- All of the above backed by Zig with no dependencies
 
 ## Installation
 
-- Python 3.9 or newer
+- Python 3.10 or newer
 - `pip install zignal-processing`
 
 Prebuilt wheels are published for common platforms. If pip falls back to building from source, ensure `zig` is available on your PATH.
