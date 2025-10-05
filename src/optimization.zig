@@ -48,7 +48,9 @@ fn findScaleFactor(comptime T: type, matrix: Matrix(T)) i32 {
     }
 
     const capped_places = @min(max_decimal_places, 6); // Cap at 6 decimal places
-    return std.math.pow(i32, 10, capped_places);
+    var scale: i32 = 1;
+    for (0..capped_places) |_| scale *= 10;
+    return scale;
 }
 
 /// Count the number of significant decimal places in a float
