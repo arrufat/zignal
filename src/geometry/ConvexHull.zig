@@ -149,3 +149,65 @@ test "computeOrientation" {
     const orientation_acb = computeOrientation(a, c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);
 }
+
+test "convex hull square" {
+    const points: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 1.0, 0.0 }),
+        .init(.{ 1.0, 1.0 }),
+        .init(.{ 0.0, 1.0 }),
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+    const result = (try convex_hull.find(points)).?;
+    try expectEqual(result.len, 4);
+    const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
+    try expectEqualDeep(result, expected[0..]);
+}
+
+test "convex hull triangle" {
+    const points: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 1.0, 0.0 }),
+        .init(.{ 0.5, 1.0 }),
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+    const result = (try convex_hull.find(points)).?;
+    try expectEqual(result.len, 3);
+    const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
+    try expectEqualDeep(result, expected[0..]);
+}
+
+test "convex hull with interior points" {
+    const points: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 2.0, 0.0 }),
+        .init(.{ 1.0, 2.0 }),
+        .init(.{ 1.0, 1.0 }), // Interior point
+        .init(.{ 0.5, 0.5 }), // Interior point
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+    const hull = (try convex_hull.find(points)).?;
+    try expectEqual(hull.len, 3);
+    const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
+    try expectEqualDeep(hull, expected[0..]);
+}
+
+test "convex hull duplicate points" {
+    const points: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 1.0, 0.0 }),
+        .init(.{ 1.0, 1.0 }),
+        .init(.{ 0.0, 1.0 }),
+        .init(.{ 0.0, 0.0 }), // Duplicate
+        .init(.{ 1.0, 0.0 }), // Duplicate
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+    const result = (try convex_hull.find(points)).?;
+    try expectEqual(result.len, 4);
+    const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
+    try expectEqualDeep(result, expected[0..]);
+}
