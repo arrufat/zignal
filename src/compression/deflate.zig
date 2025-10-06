@@ -73,10 +73,6 @@ pub const CompressionLevel = enum(u8) {
     level_8 = 8,
     /// Slowest compression, best compression ratio
     level_9 = 9,
-
-    pub fn toInt(self: CompressionLevel) u8 {
-        return @intFromEnum(self);
-    }
 };
 
 pub const CompressionStrategy = enum { default, filtered, huffman_only, rle };
