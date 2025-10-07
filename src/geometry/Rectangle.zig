@@ -90,6 +90,12 @@ pub fn Rectangle(comptime T: type) type {
 
         /// Returns true if the point at x, y is inside the rectangle.
         pub fn contains(self: Self, x: T, y: T) bool {
+            switch (@typeInfo(T)) {
+                .float => {
+                    if (std.math.isNan(x) or std.math.isNan(y)) return false;
+                },
+                else => {},
+            }
             if (x < self.l or x >= self.r or y < self.t or y >= self.b) {
                 return false;
             }
@@ -305,4 +311,11 @@ test "Rectangle iou and overlaps" {
     // Self intersection
     const self_intersection = rect1.intersect(rect1);
     try expectEqualDeep(self_intersection, rect1);
+}
+
+test "Rectangle contains rejects NaN" {
+    const rect = Rectangle(f32){ .l = -10.0, .t = -10.0, .r = 10.0, .b = 10.0 };
+    const nan = std.math.nan(f32);
+    try expectEqual(false, rect.contains(nan, 0.0));
+    try expectEqual(false, rect.contains(0.0, nan));
 }
