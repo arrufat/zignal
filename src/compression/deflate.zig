@@ -100,6 +100,7 @@ pub const DeflateDecoder = struct {
     }
 
     pub fn decode(self: *DeflateDecoder, compressed_data: []const u8) !ArrayList(u8) {
+        self.output.clearRetainingCapacity();
         var reader = BitReader.init(compressed_data);
         self.current_byte_offset = 0;
         while (true) {
@@ -347,6 +348,7 @@ pub const DeflateEncoder = struct {
     }
 
     pub fn encode(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        self.output.clearRetainingCapacity();
         // Store-only for no compression
         if (self.level == .level_0) return self.encodeUncompressed(data);
 
@@ -380,6 +382,15 @@ pub const DeflateEncoder = struct {
     }
 
     fn encodeUncompressed(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
+        if (data.len == 0) {
+            try self.output.append(self.gpa, 0x01); // final block, stored type
+            try self.output.append(self.gpa, 0x00); // LEN = 0 (little endian)
+            try self.output.append(self.gpa, 0x00);
+            try self.output.append(self.gpa, 0xFF); // NLEN = ~LEN
+            try self.output.append(self.gpa, 0xFF);
+            return self.output.clone(self.gpa);
+        }
+
         const block_size = @min(data.len, MAX_UNCOMPRESSED_BLOCK_SIZE);
         var pos: usize = 0;
         while (pos < data.len) {
@@ -801,6 +812,38 @@ test "deflate uncompressed header endianness" {
     const nlen = compressed[3] | (@as(u16, compressed[4]) << 8);
     try std.testing.expectEqual(@as(u16, 4), len);
     try std.testing.expectEqual(@as(u16, 0xFFFB), nlen);
+}
+
+test "deflate uncompressed empty payload" {
+    const allocator = std.testing.allocator;
+    const compressed = try deflate(allocator, "", .level_0, .default);
+    defer allocator.free(compressed);
+    try std.testing.expectEqual(@as(usize, 5), compressed.len);
+    const decompressed = try inflate(allocator, compressed);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqual(@as(usize, 0), decompressed.len);
+}
+
+test "deflate encoder and decoder reuse without residue" {
+    const allocator = std.testing.allocator;
+    var encoder = DeflateEncoder.init(allocator, .level_0, .default);
+    defer encoder.deinit();
+    var decoder = DeflateDecoder.init(allocator);
+    defer decoder.deinit();
+
+    const first = "reusable encoder";
+    var encoded_first = try encoder.encode(first);
+    defer encoded_first.deinit(allocator);
+    var decoded_first = try decoder.decode(encoded_first.items);
+    defer decoded_first.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, first, decoded_first.items);
+
+    const second = "second payload";
+    var encoded_second = try encoder.encode(second);
+    defer encoded_second.deinit(allocator);
+    var decoded_second = try decoder.decode(encoded_second.items);
+    defer decoded_second.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, second, decoded_second.items);
 }
 
 test "encodeCodeLengths emits spec-compliant stream" {
