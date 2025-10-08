@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.7.0] - 2025-10-08
+
+### Major Features
+
+#### Image Quality Metrics
+- **Structural Similarity Index (SSIM)**: Added `Image.ssim` to compute perceptual similarity using the standard 11×11 Gaussian window and Rec. 709 luminance weighting, with support for grayscale and RGB/RGBA data.
+
+#### Linear Algebra & Geometry
+- **Moore–Penrose Pseudoinverse**: Added `Matrix.pseudoInverse` with tolerance controls and rank reporting, enabling stable solutions for rectangular systems.
+- **Improved Affine Fitting**: `AffineTransform.init` now uses the pseudoinverse to support overdetermined point sets while preserving numerical stability.
+
+### Breaking Changes
+- **Image Processing Outputs**: All image filters and morphology routines now expect the caller to supply an initialized output image (`Image.initLike`/`dupe`). `Image.crop` and `Image.rotate` return freshly allocated images instead of writing through an output pointer.
+- **Geometry Point API**: Replace `Point.point(...)` with the new `Point.init(...)` constructor; the legacy helper has been removed.
+- **Meta Utilities**: `meta.clampU8`/`clampTo` have been consolidated into the generic `meta.clamp(T, value)` helper and must be updated accordingly.
+
+### Architecture & API Improvements
+- **Unified Border Handling**: Introduced `image/border.zig` to centralize zero, replicate, mirror, and wrap modes used across convolution and order-statistic filters.
+- **Running Statistics**: `RunningStats` gains an explicit `.init()` constructor, clearer reset semantics, and broader edge-case coverage in tests.
+- **Matrix Errors**: Added `MatrixError.NotConverged` so SVD-backed routines report convergence failures instead of silently returning invalid data.
+
+### Performance Optimizations
+- **PCA**: SIMD-accelerated `project`/`reconstruct` paths for f32 and f64 reduce latency on high-dimensional datasets.
+
+### Bug Fixes
+- **Compression**: Deflate encoder/decoder now clear internal state when reused, preventing cross-run contamination.
+- **Canvas**: Row indexing honors image stride, fixing drawing artifacts on non-contiguous buffers.
+- **Geometry**: `Rectangle.contains` rejects NaN inputs and `Rectangle.overlaps` correctly enforces the configured IoU threshold.
+- **Edge Detection**: Corrected source/destination ordering during gradient copying, fixing regression in the edges module.
+
+### Tooling & Documentation
+- **Python Toolchain**: Minimum supported Python bumped to 3.10 with full CI coverage through Python 3.14.
+- **Docs**: Expanded Python README with badges, feature overview, and clarified version matrix.
+
 ## [0.6.0] - 2025-09-30
 
 ### Major Features
