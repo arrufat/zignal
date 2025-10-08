@@ -44,9 +44,15 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
 
     return switch (@typeInfo(T)) {
         .int => |info| if (info.signedness == .unsigned)
-            c.PyLong_FromUnsignedLong(value)
+            c.PyLong_FromUnsignedLongLong(@as(
+                @typeInfo(@TypeOf(c.PyLong_FromUnsignedLongLong)).@"fn".params[0].type.?,
+                @intCast(value),
+            ))
         else
-            c.PyLong_FromLong(value),
+            c.PyLong_FromLongLong(@as(
+                @typeInfo(@TypeOf(c.PyLong_FromLongLong)).@"fn".params[0].type.?,
+                @intCast(value),
+            )),
         .float => c.PyFloat_FromDouble(value),
         .bool => @ptrCast(getPyBool(value)),
         .pointer => |ptr| blk: {

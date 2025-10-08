@@ -49,9 +49,6 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_module = @import("svd.zig");
-pub const SvdMode = svd_module.SvdMode;
-pub const SvdOptions = svd_module.SvdOptions;
-pub const SvdResult = svd_module.SvdResult;
 
 /// Matrix-specific errors
 pub const MatrixError = error{
@@ -66,6 +63,9 @@ pub const MatrixError = error{
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
     return struct {
+        pub const SvdMode = svd_module.SvdMode;
+        pub const SvdOptions = svd_module.SvdOptions;
+        pub const SvdResult = svd_module.SvdResult;
         const Self = @This();
 
         items: []T,

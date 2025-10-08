@@ -8,13 +8,13 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const Point = @import("../geometry/Point.zig").Point;
 const formatting = @import("formatting.zig");
 const svd_module = @import("svd_static.zig");
-pub const SvdMode = svd_module.SvdMode;
-pub const SvdOptions = svd_module.SvdOptions;
-pub const SvdResult = svd_module.SvdResult;
 
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
     return struct {
+        pub const SvdMode = svd_module.SvdMode;
+        pub const SvdOptions = svd_module.SvdOptions;
+        pub const SvdResult = svd_module.SvdResult;
         const Self = @This();
         items: [rows][cols]T = undefined,
         comptime rows: usize = rows,
