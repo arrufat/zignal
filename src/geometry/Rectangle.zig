@@ -189,26 +189,40 @@ pub fn Rectangle(comptime T: type) type {
             const intersection = self.intersect(other) orelse return false;
             const intersection_area = intersection.area();
 
-            // Check IoU threshold
-            if (self.iou(other) > iou_thresh) return true;
-
-            // Check coverage thresholds
             const self_area = self.area();
             const other_area = other.area();
 
-            const self_coverage = switch (@typeInfo(T)) {
-                .int => if (self_area == 0) 0.0 else @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(self_area)),
-                .float => if (self_area == 0) 0.0 else @as(f64, intersection_area) / @as(f64, self_area),
-                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
-            };
+            // Check IoU threshold
+            const union_area = self_area + other_area - intersection_area;
+            if (union_area > 0) {
+                const iou_value = switch (@typeInfo(T)) {
+                    .int => @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(union_area)),
+                    .float => @as(f64, intersection_area) / @as(f64, union_area),
+                    else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+                };
+                if (iou_value > iou_thresh) return true;
+            }
 
-            const other_coverage = switch (@typeInfo(T)) {
-                .int => if (other_area == 0) 0.0 else @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(other_area)),
-                .float => if (other_area == 0) 0.0 else @as(f64, intersection_area) / @as(f64, other_area),
-                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
-            };
+            // Check coverage thresholds
+            if (self_area > 0) {
+                const self_coverage = switch (@typeInfo(T)) {
+                    .int => @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(self_area)),
+                    .float => @as(f64, intersection_area) / @as(f64, self_area),
+                    else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+                };
+                if (self_coverage > coverage_thresh) return true;
+            }
 
-            return self_coverage > coverage_thresh or other_coverage > coverage_thresh;
+            if (other_area > 0) {
+                const other_coverage = switch (@typeInfo(T)) {
+                    .int => @as(f64, @floatFromInt(intersection_area)) / @as(f64, @floatFromInt(other_area)),
+                    .float => @as(f64, intersection_area) / @as(f64, other_area),
+                    else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+                };
+                if (other_coverage > coverage_thresh) return true;
+            }
+
+            return false;
         }
     };
 }
@@ -297,9 +311,15 @@ test "Rectangle iou and overlaps" {
     try expectEqual(rect1.overlaps(rect5, 0.0, 0.9), true); // rect5 is 100% covered
     try expectEqual(rect5.overlaps(rect1, 0.0, 0.9), true); // Same check from other direction
 
-    // rect1 and rect2: intersection/rect1.area = 2500/10000 = 0.25
-    try expectEqual(rect1.overlaps(rect2, 0.0, 0.24), true); // 25% coverage > 24%
-    try expectEqual(rect1.overlaps(rect2, 0.0, 0.251), true); // IoU > 0 even if coverage < 25.1%
+    // rect1 and rect2: intersection/rect1.area = 2500/10000 = 0.25. IoU is ~0.143.
+    // Test when only coverage passes
+    try expectEqual(rect1.overlaps(rect2, 0.2, 0.24), true); // IoU fails (0.143 < 0.2), but coverage passes (0.25 > 0.24)
+    // Test when only IoU passes
+    try expectEqual(rect1.overlaps(rect2, 0.1, 0.26), true); // IoU passes (0.143 > 0.1), coverage fails (0.25 < 0.26)
+    // Test when both fail
+    try expectEqual(rect1.overlaps(rect2, 0.2, 0.26), false); // Both fail
+    // Test when both pass
+    try expectEqual(rect1.overlaps(rect2, 0.1, 0.24), true); // Both pass
 
     // Test with float rectangles
     const frect1 = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 100.0, .b = 100.0 };
