@@ -1,5 +1,21 @@
 # Python Bindings Changelog
 
+## [0.7.0] - 2025-10-08
+
+### Added
+- **Matrix Numeric Protocol**: `Matrix` objects now participate fully in Python arithmetic (`+`, `-`, `*`, `/`, unary `-`, scalar combos, and `@` for matrix multiplication) while preserving float64 semantics.
+- **Linear Algebra Suite**: Added `.transpose()`, the `.T` property, `.inverse()`, `.det()`, `.norm()`, `.dot()`, `.gram()`, `.cov()`, and element-wise helpers like `.pow()`, along with new convenience constructors `.zeros()`, `.ones()`, `.identity()`, and `.random(seed=...)`.
+- **Decomposition APIs**: New `.lu()`, `.qr()`, `.svd()`, `.rank()`, and `.pinv()` methods expose the underlying Zig implementations and return rich dictionaries (e.g., `{q, r, rank, perm}` for QR).
+- **Image Quality Metric**: Added `Image.ssim()` for perceptual comparisons that mirrors the Zig SSIM implementation (requires images ≥11×11).
+
+### Changed
+- **Python Support Matrix**: Package now requires Python 3.10 or newer and advertises support through Python 3.14; metadata and documentation were updated accordingly.
+- **Integer Handling**: Argument parsing uses CPython’s `LongLong` conversions to accept full 64-bit integers in matrix APIs.
+
+### Fixed
+- **Image Ownership**: Resolved stale view pointers when Python takes ownership of image buffers, preventing latent crashes when re-wrapping Zig images.
+- **Image Views**: Corrected dereferencing while creating Python image views so stride/addressing stay aligned with Zig-side expectations.
+
 ## [0.6.0] - 2025-09-30
 
 ### Added
