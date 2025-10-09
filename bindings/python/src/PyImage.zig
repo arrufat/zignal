@@ -89,77 +89,21 @@ pub const PyImage = struct {
     /// Copy pixels from another PyImage to this one.
     /// Both images must have the same dimensions.
     pub fn copyFrom(self: *PyImage, src: PyImage) void {
-        // The underlying Image type already has a copy method that handles views correctly
-        // Note: Image.copy signature is source.copy(destination)
         switch (self.data) {
-            .grayscale => |dst_img| {
-                switch (src.data) {
-                    .grayscale => |src_img| src_img.copy(dst_img), // src.copy(dst)
-                    .rgb => |src_img| {
-                        // Convert RGB to gray while copying
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const rgb_pixel = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = rgb_pixel.toGray();
-                            }
-                        }
-                    },
-                    .rgba => |src_img| {
-                        // Convert RGBA to gray while copying
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const rgba_pixel = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = rgba_pixel.toGray();
-                            }
-                        }
-                    },
-                }
+            .grayscale => |*dst_img| switch (src.data) {
+                .grayscale => |src_img| src_img.copy(dst_img.*),
+                .rgb => |src_img| src_img.convertInto(u8, dst_img.*),
+                .rgba => |src_img| src_img.convertInto(u8, dst_img.*),
             },
-            .rgb => |dst_img| {
-                switch (src.data) {
-                    .grayscale => |src_img| {
-                        // Convert gray to RGB while copying
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const gray_val = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = Rgb{ .r = gray_val, .g = gray_val, .b = gray_val };
-                            }
-                        }
-                    },
-                    .rgb => |src_img| src_img.copy(dst_img), // src.copy(dst)
-                    .rgba => |src_img| {
-                        // Convert RGBA to RGB while copying (drop alpha)
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const rgba_pixel = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = Rgb{ .r = rgba_pixel.r, .g = rgba_pixel.g, .b = rgba_pixel.b };
-                            }
-                        }
-                    },
-                }
+            .rgb => |*dst_img| switch (src.data) {
+                .grayscale => |src_img| src_img.convertInto(Rgb, dst_img.*),
+                .rgb => |src_img| src_img.copy(dst_img.*),
+                .rgba => |src_img| src_img.convertInto(Rgb, dst_img.*),
             },
-            .rgba => |dst_img| {
-                switch (src.data) {
-                    .grayscale => |src_img| {
-                        // Convert gray to RGBA while copying
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const gray_val = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = Rgba{ .r = gray_val, .g = gray_val, .b = gray_val, .a = 255 };
-                            }
-                        }
-                    },
-                    .rgb => |src_img| {
-                        // Convert RGB to RGBA while copying
-                        for (0..dst_img.rows) |r| {
-                            for (0..dst_img.cols) |c| {
-                                const rgb_pixel = src_img.at(r, c).*;
-                                dst_img.at(r, c).* = Rgba{ .r = rgb_pixel.r, .g = rgb_pixel.g, .b = rgb_pixel.b, .a = 255 };
-                            }
-                        }
-                    },
-                    .rgba => |src_img| src_img.copy(dst_img), // src.copy(dst)
-                }
+            .rgba => |*dst_img| switch (src.data) {
+                .grayscale => |src_img| src_img.convertInto(Rgba, dst_img.*),
+                .rgb => |src_img| src_img.convertInto(Rgba, dst_img.*),
+                .rgba => |src_img| src_img.copy(dst_img.*),
             },
         }
     }

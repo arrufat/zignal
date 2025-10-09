@@ -17,6 +17,83 @@ const PyImage = PyImageMod.PyImage;
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
 
+const BufferExtra = extern struct {
+    shape: [3]c.Py_ssize_t,
+    strides: [3]c.Py_ssize_t,
+};
+
+/// Helper to convert a zignal.Image to a NumPy array
+fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
+    const T = @TypeOf(img.data[0]);
+    const channels = comptime if (T == u8) 1 else if (T == Rgb) 3 else if (T == Rgba) 4 else @compileError("unsupported type");
+
+    const np_module = c.PyImport_ImportModule("numpy") orelse {
+        py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
+        return null;
+    };
+    defer c.Py_DECREF(np_module);
+
+    const extra_raw = c.PyMem_Malloc(@sizeOf(BufferExtra)) orelse {
+        py_utils.setMemoryError("buffer metadata");
+        return null;
+    };
+    const extra = @as(*BufferExtra, @ptrCast(@alignCast(extra_raw)));
+    var cleanup_extra = true;
+    defer if (cleanup_extra) c.PyMem_Free(extra_raw);
+
+    extra.shape = .{
+        @intCast(img.rows),
+        @intCast(img.cols),
+        channels,
+    };
+    extra.strides = .{
+        @intCast(img.stride * @sizeOf(T)),
+        @sizeOf(T),
+        if (channels == 1) @sizeOf(T) else 1,
+    };
+
+    var buffer = c.Py_buffer{
+        .buf = @ptrCast(img.data.ptr),
+        .obj = self_obj,
+        .len = @intCast(img.data.len * @sizeOf(T)),
+        .itemsize = 1,
+        .readonly = 0,
+        .ndim = 3,
+        .format = @constCast("B"),
+        .shape = @ptrCast(&extra.shape[0]),
+        .strides = @ptrCast(&extra.strides[0]),
+        .suboffsets = null,
+        .internal = extra_raw,
+    };
+    c.Py_INCREF(self_obj);
+
+    const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
+        c.Py_DECREF(self_obj);
+        return null;
+    };
+    cleanup_extra = false;
+
+    const np_asarray = c.PyObject_GetAttrString(np_module, "asarray") orelse {
+        c.Py_DECREF(memview);
+        return null;
+    };
+    defer c.Py_DECREF(np_asarray);
+
+    const args_tuple = c.Py_BuildValue("(O)", memview) orelse {
+        c.Py_DECREF(memview);
+        return null;
+    };
+    defer c.Py_DECREF(args_tuple);
+
+    const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
+        c.Py_DECREF(memview);
+        return null;
+    };
+
+    c.Py_DECREF(memview);
+    return array;
+}
+
 // ============================================================================
 // IMAGE TO NUMPY
 // ============================================================================
@@ -43,251 +120,9 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     const self = py_utils.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            .grayscale => |img| {
-                // Import numpy
-                const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
-                    return null;
-                };
-                defer c.Py_DECREF(np_module);
-
-                // Allocate shape and strides arrays that persist for the lifetime of the array
-                const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    py_utils.setMemoryError("shape array");
-                    return null;
-                };
-                const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    allocator.free(shape_array);
-                    py_utils.setMemoryError("strides array");
-                    return null;
-                };
-
-                // Set shape: (rows, cols, 1)
-                shape_array[0] = @intCast(img.rows);
-                shape_array[1] = @intCast(img.cols);
-                shape_array[2] = 1;
-
-                // Set strides for proper memory layout: (stride*1, 1, 1)
-                strides_array[0] = @intCast(img.stride * @sizeOf(u8));
-                strides_array[1] = @sizeOf(u8);
-                strides_array[2] = 1;
-
-                // Create a 3D buffer view with proper strides
-                var buffer = c.Py_buffer{
-                    .buf = @ptrCast(img.data.ptr),
-                    .obj = self_obj,
-                    .len = @intCast(img.data.len * @sizeOf(u8)),
-                    .itemsize = 1,
-                    .readonly = 0,
-                    .ndim = 3,
-                    .format = @constCast("B"),
-                    .shape = @ptrCast(shape_array.ptr),
-                    .strides = @ptrCast(strides_array.ptr),
-                    .suboffsets = null,
-                    .internal = @ptrCast(shape_array.ptr), // Store for cleanup
-                };
-                c.Py_INCREF(self_obj); // Keep parent alive
-
-                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
-                    c.Py_DECREF(self_obj);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Create numpy array from memoryview
-                const np_asarray = c.PyObject_GetAttrString(np_module, "asarray") orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(np_asarray);
-
-                const args_tuple = c.Py_BuildValue("(O)", memview) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(args_tuple);
-
-                const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Clean up memoryview but arrays are kept alive by numpy array
-                c.Py_DECREF(memview);
-
-                return array;
-            },
-            .rgb => |img| {
-                // Import numpy
-                const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
-                    return null;
-                };
-                defer c.Py_DECREF(np_module);
-
-                // Allocate shape and strides arrays that persist for the lifetime of the array
-                const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    py_utils.setMemoryError("shape array");
-                    return null;
-                };
-                const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    allocator.free(shape_array);
-                    py_utils.setMemoryError("strides array");
-                    return null;
-                };
-
-                // Set shape: (rows, cols, 3)
-                shape_array[0] = @intCast(img.rows);
-                shape_array[1] = @intCast(img.cols);
-                shape_array[2] = 3;
-
-                // Set strides for proper memory layout: (stride*3, 3, 1)
-                strides_array[0] = @intCast(img.stride * @sizeOf(Rgb));
-                strides_array[1] = @sizeOf(Rgb);
-                strides_array[2] = 1;
-
-                // Create a 3D buffer view with proper strides
-                var buffer = c.Py_buffer{
-                    .buf = @ptrCast(img.data.ptr),
-                    .obj = self_obj,
-                    .len = @intCast(img.data.len * @sizeOf(Rgb)),
-                    .itemsize = 1,
-                    .readonly = 0,
-                    .ndim = 3,
-                    .format = @constCast("B"),
-                    .shape = @ptrCast(shape_array.ptr),
-                    .strides = @ptrCast(strides_array.ptr),
-                    .suboffsets = null,
-                    .internal = @ptrCast(shape_array.ptr), // Store for cleanup
-                };
-                c.Py_INCREF(self_obj); // Keep parent alive
-
-                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
-                    c.Py_DECREF(self_obj);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Create numpy array from memoryview
-                const np_asarray = c.PyObject_GetAttrString(np_module, "asarray") orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(np_asarray);
-
-                const args_tuple = c.Py_BuildValue("(O)", memview) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(args_tuple);
-
-                const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Clean up memoryview but arrays are kept alive by numpy array
-                c.Py_DECREF(memview);
-
-                return array;
-            },
-            .rgba => |img| {
-                // Import numpy
-                const np_module = c.PyImport_ImportModule("numpy") orelse {
-                    py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
-                    return null;
-                };
-                defer c.Py_DECREF(np_module);
-
-                // Allocate shape and strides arrays that persist for the lifetime of the array
-                const shape_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    py_utils.setMemoryError("shape array");
-                    return null;
-                };
-                const strides_array = allocator.alloc(c.Py_ssize_t, 3) catch {
-                    allocator.free(shape_array);
-                    py_utils.setMemoryError("strides array");
-                    return null;
-                };
-
-                // Set shape: (rows, cols, 4)
-                shape_array[0] = @intCast(img.rows);
-                shape_array[1] = @intCast(img.cols);
-                shape_array[2] = 4;
-
-                // Set strides for proper memory layout: (stride*4, 4, 1)
-                strides_array[0] = @intCast(img.stride * @sizeOf(Rgba));
-                strides_array[1] = @sizeOf(Rgba);
-                strides_array[2] = 1;
-
-                // Create a 3D buffer view with proper strides
-                var buffer = c.Py_buffer{
-                    .buf = @ptrCast(img.data.ptr),
-                    .obj = self_obj,
-                    .len = @intCast(img.data.len * @sizeOf(Rgba)),
-                    .itemsize = 1,
-                    .readonly = 0,
-                    .ndim = 3,
-                    .format = @constCast("B"),
-                    .shape = @ptrCast(shape_array.ptr),
-                    .strides = @ptrCast(strides_array.ptr),
-                    .suboffsets = null,
-                    .internal = @ptrCast(shape_array.ptr), // Store for cleanup
-                };
-                c.Py_INCREF(self_obj); // Keep parent alive
-
-                const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
-                    c.Py_DECREF(self_obj);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Create numpy array from memoryview
-                const np_asarray = c.PyObject_GetAttrString(np_module, "asarray") orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(np_asarray);
-
-                const args_tuple = c.Py_BuildValue("(O)", memview) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-                defer c.Py_DECREF(args_tuple);
-
-                const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
-                    c.Py_DECREF(memview);
-                    allocator.free(shape_array);
-                    allocator.free(strides_array);
-                    return null;
-                };
-
-                // Clean up memoryview but arrays are kept alive by numpy array
-                c.Py_DECREF(memview);
-
-                return array;
-            },
-        }
+        return switch (pimg.data) {
+            inline else => |img| imageToNumpyHelper(self_obj, img),
+        };
     }
     py_utils.setValueError("Image not initialized", .{});
     return null;
@@ -296,6 +131,47 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 // ============================================================================
 // IMAGE FROM NUMPY
 // ============================================================================
+
+/// Helper to create a zignal.Image from a NumPy buffer
+fn imageFromNumpyHelper(
+    comptime T: type,
+    self_opt: ?*ImageObject,
+    array_obj: ?*c.PyObject,
+    buffer: *c.Py_buffer,
+    rows: usize,
+    cols: usize,
+    row_stride_pixels: usize,
+) ?*c.PyObject {
+    const self = self_opt orelse {
+        // This should be unreachable if called correctly
+        py_utils.setRuntimeError("Internal error: ImageObject is null", .{});
+        return null;
+    };
+
+    const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
+    const pixel_ptr = @as([*]T, @ptrCast(@alignCast(data_ptr)));
+    const data_slice = pixel_ptr[0..@divExact(@as(usize, @intCast(buffer.len)), @sizeOf(T))];
+
+    const img = Image(T){
+        .rows = rows,
+        .cols = cols,
+        .data = data_slice,
+        .stride = row_stride_pixels,
+    };
+
+    c.Py_INCREF(array_obj.?);
+    self.numpy_ref = array_obj;
+
+    const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
+        c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+        py_utils.setMemoryError("image");
+        return null;
+    };
+    self.py_image = pimg;
+    self.parent_ref = null;
+
+    return @as(?*c.PyObject, @ptrCast(self));
+}
 
 pub const image_from_numpy_doc =
     \\Create Image from a NumPy array with dtype uint8.
@@ -350,140 +226,58 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         return null;
     }
 
-    // Get buffer interface from the array
     var buffer: c.Py_buffer = undefined;
     buffer = std.mem.zeroes(c.Py_buffer);
 
-    // Request buffer with strides info
     const flags: c_int = 0x001c; // PyBUF_ND | PyBUF_STRIDES | PyBUF_FORMAT
     if (c.PyObject_GetBuffer(array_obj, &buffer, flags) != 0) {
-        // Error already set by PyObject_GetBuffer
         return null;
     }
     defer c.PyBuffer_Release(&buffer);
 
-    // Validate buffer format if available (should be 'B' for uint8)
-    // Note: format might be null if PyBUF_FORMAT wasn't requested
     if (buffer.format != null and (buffer.format[0] != 'B' or buffer.format[1] != 0)) {
         py_utils.setTypeError("uint8 array", array_obj);
         return null;
     }
 
-    // Validate dimensions and shape: only 3D arrays with 1, 3 or 4 channels are supported
-    const ndim: c_int = buffer.ndim;
-    if (ndim != 3) {
+    if (buffer.ndim != 3) {
         py_utils.setValueError("Array must have shape (rows, cols, 1|3|4)", .{});
         return null;
     }
 
     const shape = @as([*]c.Py_ssize_t, @ptrCast(buffer.shape));
-    const rows = @as(usize, @intCast(shape[0]));
-    const cols = @as(usize, @intCast(shape[1]));
-    const channels: usize = @as(usize, @intCast(shape[2]));
-    if (!(channels == 1 or channels == 3 or channels == 4)) {
-        py_utils.setValueError("Array must have 1 channel (grayscale), 3 channels (RGB) or 4 channels (RGBA)", .{});
+    const rows: usize = @intCast(shape[0]);
+    const cols: usize = @intCast(shape[1]);
+    const channels: usize = @intCast(shape[2]);
+
+    if (channels != 1 and channels != 3 and channels != 4) {
+        py_utils.setValueError("Array must have 1, 3, or 4 channels", .{});
         return null;
     }
 
-    // Check if array strides are compatible (pixels must be contiguous within rows)
     const strides = @as([*]c.Py_ssize_t, @ptrCast(buffer.strides));
-    const item = buffer.itemsize; // 1 for uint8
+    const item_size = buffer.itemsize;
 
-    // Check that pixels within a row are contiguous
-    const expected_pixel_stride = item * @as(c.Py_ssize_t, @intCast(channels));
-    if (strides[2] != item or strides[1] != expected_pixel_stride) {
+    const expected_pixel_stride = item_size * @as(c.Py_ssize_t, @intCast(channels));
+    if (strides[2] != item_size or strides[1] != expected_pixel_stride) {
         py_utils.setValueError("Array pixels must be contiguous. Use numpy.ascontiguousarray() first.", .{});
         return null;
     }
 
-    // Calculate row stride in pixels (not bytes)
     const row_stride_bytes = strides[0];
     const pixel_size: c.Py_ssize_t = @intCast(channels);
     if (@rem(row_stride_bytes, pixel_size) != 0) {
         py_utils.setValueError("Array row stride must be a multiple of pixel size.", .{});
         return null;
     }
-    const row_stride_pixels = @divExact(row_stride_bytes, pixel_size);
+    const row_stride_pixels: usize = @intCast(@divExact(row_stride_bytes, pixel_size));
 
-    // Create new Python object
-    const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(getImageType()), 0)));
-    if (self == null) {
-        return null;
-    }
+    const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(getImageType()), 0))) orelse return null;
 
-    if (channels == 1) {
-        // Zero-copy: create grayscale image that points to NumPy's data directly
-        const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
-        const data_slice = data_ptr[0..@intCast(buffer.len)];
-
-        // Create image with custom stride to handle non-contiguous arrays
-        const img = Image(u8){
-            .rows = rows,
-            .cols = cols,
-            .data = data_slice,
-            .stride = @intCast(row_stride_pixels),
-        };
-
-        // Keep a reference to the NumPy array to prevent deallocation
-        c.Py_INCREF(array_obj.?);
-        self.?.numpy_ref = array_obj;
-        // Wrap as PyImage non-owning grayscale
-        const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
-            c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            py_utils.setMemoryError("image");
-            return null;
-        };
-        self.?.py_image = pimg;
-        self.?.parent_ref = null;
-        return @as(?*c.PyObject, @ptrCast(self));
-    } else if (channels == 4) {
-        // Zero-copy: create image that points to NumPy's data directly
-        const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
-        const rgba_ptr = @as([*]Rgba, @ptrCast(@alignCast(data_ptr)));
-        const data_slice = rgba_ptr[0..@divExact(@as(usize, @intCast(buffer.len)), @sizeOf(Rgba))];
-
-        // Create image with custom stride to handle non-contiguous arrays
-        const img = Image(Rgba){
-            .rows = rows,
-            .cols = cols,
-            .data = data_slice,
-            .stride = @intCast(row_stride_pixels),
-        };
-
-        // Keep a reference to the NumPy array to prevent deallocation
-        c.Py_INCREF(array_obj.?);
-        self.?.numpy_ref = array_obj;
-        // Wrap as PyImage non-owning RGBA
-        const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
-            c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            py_utils.setMemoryError("image");
-            return null;
-        };
-        self.?.py_image = pimg;
-        self.?.parent_ref = null;
-        return @as(?*c.PyObject, @ptrCast(self));
-    } else if (channels == 3) {
-        // Zero-copy RGB
-        const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
-        const rgb_ptr = @as([*]Rgb, @ptrCast(@alignCast(data_ptr)));
-        const data_slice = rgb_ptr[0..@divExact(@as(usize, @intCast(buffer.len)), @sizeOf(Rgb))];
-
-        // Create image with custom stride to handle non-contiguous arrays
-        const img = Image(Rgb){
-            .rows = rows,
-            .cols = cols,
-            .data = data_slice,
-            .stride = @intCast(row_stride_pixels),
-        };
-        c.Py_INCREF(array_obj.?);
-        self.?.numpy_ref = array_obj;
-        const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
-            c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-            py_utils.setMemoryError("image");
-            return null;
-        };
-        self.?.py_image = pimg;
-        self.?.parent_ref = null;
-    } else unreachable; // validated above
-    return @as(?*c.PyObject, @ptrCast(self));
+    return switch (channels) {
+        1 => imageFromNumpyHelper(u8, self, array_obj, &buffer, rows, cols, row_stride_pixels),
+        3 => imageFromNumpyHelper(Rgb, self, array_obj, &buffer, rows, cols, row_stride_pixels),
+        4 => imageFromNumpyHelper(Rgba, self, array_obj, &buffer, rows, cols, row_stride_pixels),
+        else => unreachable,
+    };
 }

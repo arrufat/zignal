@@ -590,121 +590,87 @@ var matrix_as_mapping = c.PyMappingMethods{
 
 // ===== Operator overloads for number protocol =====
 
-fn matrix_add(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    // Check if both are matrices
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1 and
-        c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1)
-    {
-        // Matrix + Matrix: element-wise addition
-        const self_ptr = requireMatrixPtr(left) orelse return null;
-        const other_ptr = requireMatrixPtr(right) orelse return null;
+/// Generic dispatcher for binary matrix operations
+fn dispatchMatrixOp(
+    left: ?*c.PyObject,
+    right: ?*c.PyObject,
+    mat_mat_op: fn (*Matrix(f64), *Matrix(f64)) Matrix(f64),
+    mat_scalar_op: fn (*Matrix(f64), f64) Matrix(f64),
+    scalar_mat_op: ?fn (f64, *Matrix(f64)) Matrix(f64),
+) ?*c.PyObject {
+    const left_is_mat = c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1;
+    const right_is_mat = c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1;
 
-        const result_matrix = self_ptr.add(other_ptr.*);
-        return matrixToObject(result_matrix);
+    if (left_is_mat and right_is_mat) {
+        const left_ptr = requireMatrixPtr(left) orelse return null;
+        const right_ptr = requireMatrixPtr(right) orelse return null;
+        return matrixToObject(mat_mat_op(left_ptr, right_ptr));
     }
 
-    // Check if right is a scalar
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1) {
+    if (left_is_mat) {
         const scalar = c.PyFloat_AsDouble(right);
         if (c.PyErr_Occurred() == null) {
-            // Matrix + scalar: offset
-            const self_ptr = requireMatrixPtr(left) orelse return null;
-
-            const result_matrix = self_ptr.offset(scalar);
-            return matrixToObject(result_matrix);
+            const left_ptr = requireMatrixPtr(left) orelse return null;
+            return matrixToObject(mat_scalar_op(left_ptr, scalar));
         }
         c.PyErr_Clear();
     }
 
+    if (right_is_mat) {
+        if (scalar_mat_op) |op| {
+            const scalar = c.PyFloat_AsDouble(left);
+            if (c.PyErr_Occurred() == null) {
+                const right_ptr = requireMatrixPtr(right) orelse return null;
+                return matrixToObject(op(scalar, right_ptr));
+            }
+            c.PyErr_Clear();
+        }
+    }
+
     c.Py_INCREF(c.Py_NotImplemented());
     return c.Py_NotImplemented();
+}
+
+fn op_add(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+    return a.add(b.*);
+}
+fn op_add_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+    return a.offset(s);
+}
+fn op_radd_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
+    return a.offset(s);
+}
+fn op_sub(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+    return a.sub(b.*);
+}
+fn op_sub_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+    return a.offset(-s);
+}
+fn op_rsub_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
+    var negated = a.scale(-1.0);
+    defer negated.deinit();
+    return negated.offset(s);
+}
+fn op_mul(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+    return a.times(b.*);
+}
+fn op_mul_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+    return a.scale(s);
+}
+fn op_rmul_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
+    return a.scale(s);
+}
+
+fn matrix_add(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    return dispatchMatrixOp(left, right, op_add, op_add_scalar, op_radd_scalar);
 }
 
 fn matrix_subtract(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    // Check if both are matrices
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1 and
-        c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1)
-    {
-        // Matrix - Matrix: element-wise subtraction
-        const self_ptr = requireMatrixPtr(left) orelse return null;
-        const other_ptr = requireMatrixPtr(right) orelse return null;
-
-        const result_matrix = self_ptr.sub(other_ptr.*);
-        return matrixToObject(result_matrix);
-    }
-
-    // Check if left is matrix and right is scalar (normal subtraction)
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1) {
-        const scalar = c.PyFloat_AsDouble(right);
-        if (c.PyErr_Occurred() == null) {
-            // Matrix - scalar: offset by negative
-            const self_ptr = requireMatrixPtr(left) orelse return null;
-
-            const result_matrix = self_ptr.offset(-scalar);
-            return matrixToObject(result_matrix);
-        }
-        c.PyErr_Clear();
-    }
-
-    // Check if left is scalar and right is matrix (reflected subtraction: scalar - matrix)
-    if (c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1) {
-        const scalar = c.PyFloat_AsDouble(left);
-        if (c.PyErr_Occurred() == null) {
-            // scalar - Matrix: compute -(Matrix) + scalar
-            const self_ptr = requireMatrixPtr(right) orelse return null;
-
-            // Negate the matrix and add the scalar: scalar - matrix = -matrix + scalar
-            var negated = self_ptr.scale(-1.0);
-            defer negated.deinit();
-            const result_matrix = negated.offset(scalar);
-            return matrixToObject(result_matrix);
-        }
-        c.PyErr_Clear();
-    }
-
-    c.Py_INCREF(c.Py_NotImplemented());
-    return c.Py_NotImplemented();
+    return dispatchMatrixOp(left, right, op_sub, op_sub_scalar, op_rsub_scalar);
 }
 
 fn matrix_multiply(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    // Check if both are matrices
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1 and
-        c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1)
-    {
-        // Matrix * Matrix: element-wise multiplication
-        const self_ptr = requireMatrixPtr(left) orelse return null;
-        const other_ptr = requireMatrixPtr(right) orelse return null;
-
-        const result_matrix = self_ptr.times(other_ptr.*);
-        return matrixToObject(result_matrix);
-    }
-
-    // Check if left is matrix and right is scalar
-    if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1) {
-        const scalar = c.PyFloat_AsDouble(right);
-        if (c.PyErr_Occurred() == null) {
-            const self_ptr = requireMatrixPtr(left) orelse return null;
-
-            const result_matrix = self_ptr.scale(scalar);
-            return matrixToObject(result_matrix);
-        }
-        c.PyErr_Clear();
-    }
-
-    // Check if left is scalar and right is matrix (for rmul)
-    if (c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1) {
-        const scalar = c.PyFloat_AsDouble(left);
-        if (c.PyErr_Occurred() == null) {
-            const self_ptr = requireMatrixPtr(right) orelse return null;
-
-            const result_matrix = self_ptr.scale(scalar);
-            return matrixToObject(result_matrix);
-        }
-        c.PyErr_Clear();
-    }
-
-    c.Py_INCREF(c.Py_NotImplemented());
-    return c.Py_NotImplemented();
+    return dispatchMatrixOp(left, right, op_mul, op_mul_scalar, op_rmul_scalar);
 }
 
 fn matrix_matmul(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
