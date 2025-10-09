@@ -305,6 +305,7 @@ pub fn Image(comptime T: type) type {
         /// If src and dst are the same object, does nothing (no-op).
         /// Uses fast @memcpy when neither image is a view, falls back to row-by-row copying otherwise.
         pub fn copy(self: Self, dst: Self) void {
+            assert(self.hasSameShape(dst));
             if (self.data.ptr == dst.data.ptr) {
                 return; // Same underlying data, nothing to copy
             }
@@ -324,6 +325,21 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Converts the image to a different pixel type, writing into a pre-allocated output image.
+        /// The output image `out` must have the same dimensions as `self`.
+        pub fn convertInto(self: Self, comptime TargetType: type, out: Image(TargetType)) void {
+            assert(self.hasSameShape(out));
+            if (comptime T == TargetType) {
+                self.copy(out);
+            } else {
+                for (0..self.rows) |r| {
+                    for (0..self.cols) |c| {
+                        out.at(r, c).* = convertColor(TargetType, self.at(r, c).*);
+                    }
+                }
+            }
+        }
+
         /// Converts the image to a different pixel type.
         /// Allocates a new image with the target pixel type and converts each pixel using the color conversion system.
         ///
@@ -334,18 +350,8 @@ pub fn Image(comptime T: type) type {
         /// defer gray_image.deinit(allocator);
         /// ```
         pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
-            var result: Image(TargetType) = try .init(allocator, self.rows, self.cols);
-            if (T == TargetType) {
-                self.copy(result);
-            } else {
-                var row: usize = 0;
-                while (row < self.rows) : (row += 1) {
-                    var col: usize = 0;
-                    while (col < self.cols) : (col += 1) {
-                        result.at(row, col).* = convertColor(TargetType, self.at(row, col).*);
-                    }
-                }
-            }
+            const result = try Image(TargetType).init(allocator, self.rows, self.cols);
+            self.convertInto(TargetType, result);
             return result;
         }
 

@@ -68,7 +68,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         pub fn createPyObject(zig_color: ZigType, type_obj: *c.PyTypeObject) ?*c.PyObject {
             const obj = c.PyType_GenericNew(@ptrCast(type_obj), null, null);
             if (obj == null) return null;
-            const py_obj = @as(*PyObjectType, @ptrCast(obj));
+            const py_obj: *PyObjectType = @ptrCast(obj);
             zigColorToObject(zig_color, py_obj);
             return obj;
         }
@@ -94,7 +94,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return struct {
                 fn getter(self_obj: [*c]c.PyObject, closure: ?*anyopaque) callconv(.c) [*c]c.PyObject {
                     _ = closure;
-                    const self = @as(*ObjectType, @ptrCast(self_obj));
+                    const self: *ObjectType = @ptrCast(self_obj);
                     const value = switch (field_index) {
                         0 => self.field0,
                         1 => if (fields.len > 1) self.field1 else unreachable,
@@ -112,7 +112,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return struct {
                 fn setter(self_obj: [*c]c.PyObject, value_obj: [*c]c.PyObject, closure: ?*anyopaque) callconv(.c) c_int {
                     _ = closure;
-                    const self = @as(*ObjectType, @ptrCast(self_obj));
+                    const self: *ObjectType = @ptrCast(self_obj);
 
                     // Get field info
                     const field = fields[field_index];
@@ -301,7 +301,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 // Special case for Rgba due to default alpha parameter
                 zignal.Rgba => struct {
                     fn method(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-                        const self = @as(*ObjectType, @ptrCast(self_obj));
+                        const self: *ObjectType = @ptrCast(self_obj);
 
                         // Parse optional alpha parameter (default to 255)
                         var alpha: c_int = 255;
@@ -320,7 +320,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 }.method,
                 else => struct {
                     fn method(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-                        const self = @as(*ObjectType, @ptrCast(self_obj));
+                        const self: *ObjectType = @ptrCast(self_obj);
                         const zig_color = objectToZigColor(self);
                         const method_name = comptime getZigConversionMethodName(TargetColorType);
                         const result = @field(ZigColorType, method_name)(zig_color);
@@ -434,10 +434,10 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             _ = kwds;
 
             // Handle null pointers using Zig's type system
-            const self = @as(*ObjectType, @ptrCast(self_obj orelse {
+            const self: *ObjectType = @ptrCast(self_obj orelse {
                 c.PyErr_SetString(c.PyExc_SystemError, "self object is null");
                 return -1;
-            }));
+            });
 
             const args_tuple = args orelse {
                 c.PyErr_SetString(c.PyExc_SystemError, "args object is null");
@@ -547,7 +547,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             _ = args;
             _ = kwds;
 
-            const self = @as(?*ObjectType, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+            const self: ?*ObjectType = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
             if (self) |obj| {
                 // Initialize fields to zero
                 obj.field0 = std.mem.zeroes(fields[0].type);
@@ -559,7 +559,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         }
 
         pub fn repr(self_obj: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-            const self = @as(*ObjectType, @ptrCast(self_obj));
+            const self: *ObjectType = @ptrCast(self_obj);
 
             var buffer: [128]u8 = undefined;
             const formatted = switch (fields.len) {
@@ -612,7 +612,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
         /// __format__ method implementation
         pub fn formatMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-            const self = @as(*ObjectType, @ptrCast(self_obj));
+            const self: *ObjectType = @ptrCast(self_obj);
 
             // Parse format_spec argument
             var format_spec: [*c]const u8 = undefined;
@@ -699,15 +699,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
         /// to_gray method implementation
         pub fn toGrayMethod(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-            const self = @as(*ObjectType, @ptrCast(self_obj));
+            const self: *ObjectType = @ptrCast(self_obj);
             const zig_color = objectToZigColor(self);
-            const gray_value = zig_color.toGray();
-            return @ptrCast(c.PyLong_FromLong(gray_value));
+            return @ptrCast(c.PyLong_FromLong(@intCast(zig_color.toGray())));
         }
 
         /// Blend method implementation
         pub fn blendMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
-            const self = @as(*ObjectType, @ptrCast(self_obj));
+            const self: *ObjectType = @ptrCast(self_obj);
 
             // Parse arguments: overlay (required) and mode (optional keyword, defaults to NORMAL)
             const py_utils_local = @import("py_utils.zig");
@@ -730,8 +729,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             // Check if overlay is an Rgba instance
             if (c.PyObject_IsInstance(overlay_obj, @ptrCast(&rgba_module.RgbaType)) == 1) {
                 // It's an Rgba object, extract directly
-                const overlay_pyobj = @as(*rgba_module.RgbaBinding.PyObjectType, @ptrCast(overlay_obj));
-                overlay = zignal.Rgba{
+                const overlay_pyobj: *rgba_module.RgbaBinding.PyObjectType = @ptrCast(overlay_obj);
+                overlay = .{
                     .r = overlay_pyobj.field0,
                     .g = overlay_pyobj.field1,
                     .b = overlay_pyobj.field2,
@@ -756,7 +755,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 const b_val = py_utils.validateRange(u8, b, 0, 255, "b") catch return null;
                 const a_val = py_utils.validateRange(u8, a, 0, 255, "a") catch return null;
 
-                overlay = zignal.Rgba{
+                overlay = .{
                     .r = r_val,
                     .g = g_val,
                     .b = b_val,
@@ -767,14 +766,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 return null;
             }
 
-            // Convert mode to Zig Blending (use NORMAL if not provided)
-            const mode = if (mode_obj) |obj|
-                enum_utils.pyToEnum(zignal.Blending, obj) catch {
-                    // Error already set by enum_utils
-                    return null;
-                }
-            else
-                zignal.Blending.normal;
+            // Convert mode to Zig Blending (use NORMAL if not provided), in case of failure the error set by enum_utils
+            const mode = if (mode_obj) |obj| enum_utils.pyToEnum(zignal.Blending, obj) catch return null else .normal;
 
             // Convert self to Zig color
             const zig_color = objectToZigColor(self);
@@ -783,7 +776,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const blended = zig_color.blend(overlay, mode);
 
             // Create and return new Python object with the blended result
-            const type_obj = @as(*c.PyTypeObject, @ptrCast(self_obj.*.ob_type));
+            const type_obj: *c.PyTypeObject = @ptrCast(self_obj.*.ob_type);
             return createPyObject(blended, type_obj);
         }
     };

@@ -11,6 +11,67 @@ class TestImage:
         assert (img.rows, img.cols) == (3, 4)
         assert img.is_contiguous() is True
 
+    def test_slice_assignment_converts_between_color_spaces(self):
+        rgb = zignal.Image(2, 2, dtype=zignal.Rgb)
+        rgb_np = rgb.to_numpy()
+        pattern = np.array(
+            [
+                [[10, 10, 10], [20, 20, 20]],
+                [[30, 30, 30], [40, 40, 40]],
+            ],
+            dtype=np.uint8,
+        )
+        rgb_np[:] = pattern
+
+        gray = zignal.Image(2, 2, dtype=zignal.Grayscale)
+        gray_np = gray.to_numpy()
+        gray_np.fill(0)
+
+        rgba = zignal.Image(2, 2, dtype=zignal.Rgba)
+        rgba_np = rgba.to_numpy()
+        rgba_np.fill(0)
+
+        gray[:] = rgb
+        rgba[:] = rgb
+
+        expected_gray = np.empty((2, 2), dtype=np.uint8)
+        for r in range(2):
+            for c in range(2):
+                rgb_pixel = zignal.Rgb(*map(int, pattern[r, c]))
+                expected_gray[r, c] = rgb_pixel.to_gray()
+
+        converted_gray = gray.to_numpy()[..., 0]
+        assert np.array_equal(converted_gray, expected_gray)
+
+        converted_rgba = rgba.to_numpy()
+        assert np.array_equal(converted_rgba[..., :3], pattern)
+        assert np.array_equal(converted_rgba[..., 3], np.full((2, 2), 255, dtype=np.uint8))
+
+    def test_slice_assignment_handles_strided_views(self):
+        base_rgb = zignal.Image(4, 4, dtype=zignal.Rgb)
+        base_gray = zignal.Image(4, 4, dtype=zignal.Grayscale)
+
+        rgb_np = base_rgb.to_numpy()
+        gray_np = base_gray.to_numpy()
+        gray_np.fill(0)
+
+        left_values = np.arange(8, dtype=np.uint8).reshape(4, 2)
+        rgb_np[:, :2] = np.repeat(left_values[..., None], 3, axis=2)
+
+        src_view = base_rgb.view((0, 0, 2, 4))
+        dst_view = base_gray.view((0, 0, 2, 4))
+        dst_view[:] = src_view
+
+        expected_left = np.empty_like(left_values)
+        for r in range(left_values.shape[0]):
+            for c in range(left_values.shape[1]):
+                value = int(left_values[r, c])
+                expected_left[r, c] = zignal.Rgb(value, value, value).to_gray()
+
+        gray_after = base_gray.to_numpy()[..., 0]
+        assert np.array_equal(gray_after[:, :2], expected_left)
+        assert np.array_equal(gray_after[:, 2:], np.zeros((4, 2), dtype=np.uint8))
+
     def test_equality_and_copy(self):
         img1 = zignal.Image(3, 4, (1, 2, 3, 255), dtype=zignal.Rgba)
         img2 = img1.copy()
@@ -454,3 +515,48 @@ class TestImage:
             img.canny(low=float("-inf"))
         with pytest.raises(ValueError):
             img.canny(high=float("-inf"))
+
+    def test_image_copy_from_conversion(self):
+        # Create source images
+        src_gray = zignal.Image(10, 10, 128, dtype=zignal.Grayscale)
+        src_rgb = zignal.Image(10, 10, (10, 20, 30), dtype=zignal.Rgb)
+        src_rgba = zignal.Image(10, 10, (40, 50, 60, 128), dtype=zignal.Rgba)
+
+        # Test conversions to RGB
+        dst_rgb = zignal.Image(10, 10, dtype=zignal.Rgb)
+        dst_rgb[:] = src_gray
+        assert dst_rgb[0, 0].item() == zignal.Rgb(128, 128, 128)
+
+        dst_rgb[:] = src_rgba
+        assert dst_rgb[0, 0].item() == zignal.Rgb(40, 50, 60)
+
+        # Test conversions to RGBA
+        dst_rgba = zignal.Image(10, 10, dtype=zignal.Rgba)
+        dst_rgba[:] = src_gray
+        assert dst_rgba[0, 0].item() == zignal.Rgba(128, 128, 128, 255)
+
+        dst_rgba[:] = src_rgb
+        assert dst_rgba[0, 0].item() == zignal.Rgba(10, 20, 30, 255)
+
+        # Test conversions to Grayscale
+        dst_gray = zignal.Image(10, 10, dtype=zignal.Grayscale)
+        dst_gray[:] = src_rgb  # luma of (10, 20, 30)
+        expected_rgb_gray = zignal.Rgb(10, 20, 30).to_gray()
+        assert dst_gray[0, 0] == expected_rgb_gray
+
+        dst_gray[:] = src_rgba  # luma of (40, 50, 60) with alpha ignored
+        expected_rgba_gray = zignal.Rgb(40, 50, 60).to_gray()
+        assert dst_gray[0, 0] == expected_rgba_gray
+
+        # Test with a strided view as destination
+        dst_view_img = zignal.Image(20, 20, dtype=zignal.Rgb)
+        dst_view = dst_view_img.view(zignal.Rectangle(5, 5, 15, 15))
+        assert not dst_view.is_contiguous()
+
+        dst_view[:] = src_rgba
+        # Check a pixel in the view
+        assert dst_view[0, 0].item() == zignal.Rgb(40, 50, 60)
+        # Check the corresponding pixel in the original image
+        assert dst_view_img[5, 5].item() == zignal.Rgb(40, 50, 60)
+        # Check a pixel outside the view to make sure it's untouched
+        assert dst_view_img[0, 0].item() == zignal.Rgb(0, 0, 0)
