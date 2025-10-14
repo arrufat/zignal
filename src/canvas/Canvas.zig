@@ -556,7 +556,9 @@ pub fn Canvas(comptime T: type) type {
         pub fn setPixel(self: Self, point: Point(2, f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
-            if (self.atOrNull(@intFromFloat(point.y()), @intFromFloat(point.x()))) |pixel| {
+            const row: isize = @intFromFloat(@floor(point.y()));
+            const col: isize = @intFromFloat(@floor(point.x()));
+            if (self.atOrNull(row, col)) |pixel| {
                 if (comptime ColorType == Rgba) {
                     const mode: Blending = if (color.a == 255) .none else .normal;
                     Image(T).assignPixel(pixel, color, mode);
