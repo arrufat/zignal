@@ -42,6 +42,41 @@ pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 const Blending = @import("color/blending.zig").Blending;
 
+/// Assigns `sample` into `dest`, applying blending when requested and converting
+/// between color spaces as needed. `dest` must be a pointer to the pixel to
+/// modify. When `sample` is `Rgba` and a blend mode other than `.none` is
+/// requested, the destination pixel is converted to `Rgba`, composited, and
+/// converted back to the destination type. Otherwise the sample is converted to
+/// the target type and stored directly.
+pub inline fn assignPixel(dest: anytype, sample: anytype, blend_mode: Blending) void {
+    comptime {
+        const info = @typeInfo(@TypeOf(dest));
+        if (info != .pointer) @compileError("assignPixel expects a pointer destination");
+    }
+    const DestType = std.meta.Child(@TypeOf(dest));
+    const SrcType = @TypeOf(sample);
+
+    if (comptime SrcType == Rgba) {
+        if (blend_mode != .none) {
+            const rgba_sample: Rgba = sample;
+            if (comptime DestType == Rgba) {
+                dest.* = dest.*.blend(rgba_sample, blend_mode);
+            } else {
+                const dst_rgba = convertColor(Rgba, dest.*);
+                const blended = dst_rgba.blend(rgba_sample, blend_mode);
+                dest.* = convertColor(DestType, blended);
+            }
+            return;
+        }
+    }
+
+    if (comptime SrcType == DestType) {
+        dest.* = sample;
+    } else {
+        dest.* = convertColor(DestType, sample);
+    }
+}
+
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
     return struct {
@@ -371,38 +406,6 @@ pub fn Image(comptime T: type) type {
                 return null;
             } else {
                 return self.at(@intCast(row), @intCast(col));
-            }
-        }
-
-        /// Assigns `pixel` into `dest`, optionally applying blending when both
-        /// sample and destination support RGBA compositing.
-        pub inline fn assignPixel(dest: *T, pixel: anytype, blend_mode: Blending) void {
-            const Src = @TypeOf(pixel);
-
-            if (comptime Src == Rgba) {
-                const rgba_sample: Rgba = pixel;
-                if (blend_mode != .none) {
-                    if (comptime T == Rgba) {
-                        dest.* = dest.*.blend(rgba_sample, blend_mode);
-                    } else {
-                        const dst_rgba = convertColor(Rgba, dest.*);
-                        const blended = dst_rgba.blend(rgba_sample, blend_mode);
-                        dest.* = convertColor(T, blended);
-                    }
-                } else {
-                    if (comptime T == Rgba) {
-                        dest.* = rgba_sample;
-                    } else {
-                        dest.* = convertColor(T, rgba_sample);
-                    }
-                }
-                return;
-            }
-
-            if (comptime Src == T) {
-                dest.* = pixel;
-            } else {
-                dest.* = convertColor(T, pixel);
             }
         }
 

@@ -11,6 +11,7 @@ const BitmapFont = @import("../font.zig").BitmapFont;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const Image = @import("../image.zig").Image;
+const assignPixel = @import("../image.zig").assignPixel;
 const as = @import("../meta.zig").as;
 
 /// Rendering quality mode for drawing operations
@@ -559,13 +560,11 @@ pub fn Canvas(comptime T: type) type {
             const row: isize = @intFromFloat(@floor(point.y()));
             const col: isize = @intFromFloat(@floor(point.x()));
             if (self.atOrNull(row, col)) |pixel| {
-                if (comptime ColorType == Rgba) {
-                    const mode: Blending = if (color.a == 255) .none else .normal;
-                    Image(T).assignPixel(pixel, color, mode);
-                } else {
-                    const converted = convertColor(T, color);
-                    Image(T).assignPixel(pixel, converted, .none);
-                }
+                const mode: Blending = if (comptime ColorType == Rgba)
+                    if (color.a != 255) .normal else .none
+                else
+                    .none;
+                assignPixel(pixel, if (comptime ColorType == T) color else convertColor(T, color), mode);
             }
         }
 
@@ -598,15 +597,8 @@ pub fn Canvas(comptime T: type) type {
 
                     if (self.atOrNull(dest_y, dest_x)) |dest_pixel| {
                         const src_pixel = source.at(src_r, src_c).*;
-                        if (comptime SourcePixelType == Rgba) {
-                            Image(T).assignPixel(dest_pixel, src_pixel, blend_mode);
-                        } else {
-                            const converted = if (SourcePixelType == T)
-                                src_pixel
-                            else
-                                convertColor(T, src_pixel);
-                            Image(T).assignPixel(dest_pixel, converted, .none);
-                        }
+                        const mode = if (comptime SourcePixelType == Rgba) blend_mode else .none;
+                        assignPixel(dest_pixel, src_pixel, mode);
                     }
                 }
             }
