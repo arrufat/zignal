@@ -11,6 +11,7 @@ const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
+const assignPixel = @import("../image.zig").assignPixel;
 
 /// Rotation bounds result
 pub const RotationBounds = struct { rows: usize, cols: usize };
@@ -361,7 +362,7 @@ pub fn Transform(comptime T: type) type {
                     for (0..source.cols) |c| {
                         const x: isize = dst_left + @as(isize, @intCast(c));
                         if (self.atOrNull(y, x)) |dest| {
-                            Self.assignPixel(dest, source.at(r, c).*, blend_mode);
+                            assignPixel(dest, source.at(r, c).*, blend_mode);
                         }
                     }
                 }
@@ -419,7 +420,7 @@ pub fn Transform(comptime T: type) type {
                     if (interpolate(SourcePixelType, source, src_x, src_y, method)) |src_val| {
                         // Type-specific handling with compile-time optimization
                         const dest_pixel = self.at(r, c);
-                        Self.assignPixel(dest_pixel, src_val, blend_mode);
+                        assignPixel(dest_pixel, src_val, blend_mode);
                     }
                 }
             }
