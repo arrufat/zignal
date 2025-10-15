@@ -148,8 +148,7 @@ pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 
         // Detect FAST corners with adaptive threshold
         // Lower threshold for higher pyramid levels to maintain detection
-        const threshold_scale = 1.0 - (@as(f32, @floatFromInt(level)) * 0.1);
-        const adaptive_threshold = @max(5, @as(u8, @intFromFloat(@as(f32, @floatFromInt(self.fast_threshold)) * threshold_scale)));
+        const adaptive_threshold = self.computeAdaptiveThreshold(level);
 
         var fast_detector = Fast{
             .threshold = adaptive_threshold,
@@ -262,8 +261,7 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
 
         // Detect FAST corners with adaptive threshold
         // Lower threshold for higher pyramid levels to maintain detection
-        const threshold_scale = 1.0 - (@as(f32, @floatFromInt(level)) * 0.1);
-        const adaptive_threshold = @max(5, @as(u8, @intFromFloat(@as(f32, @floatFromInt(self.fast_threshold)) * threshold_scale)));
+        const adaptive_threshold = self.computeAdaptiveThreshold(level);
 
         var fast_detector = Fast{
             .threshold = adaptive_threshold,
@@ -395,23 +393,27 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
     const n_features_f = @as(f32, @floatFromInt(self.n_features));
 
     for (0..self.n_levels) |level| {
+        const remaining = if (assigned < self.n_features) self.n_features - assigned else 0;
+        if (level == self.n_levels - 1 or remaining == 0) {
+            n_features_per_level[level] = remaining;
+            assigned += remaining;
+            continue;
+        }
+
         const scale_factor_level = std.math.pow(f32, factor, @as(f32, @floatFromInt(level)));
 
         // Calculate desired features for this level
         const desired_float = n_features_f * (1.0 - factor) / (1.0 - factor_to_n) * scale_factor_level;
-        const n_desired = @as(usize, @intFromFloat(@round(desired_float)));
+        const desired_clamped = @min(@as(usize, @intFromFloat(@round(desired_float))), remaining);
 
         // Ensure at least some features per level (except possibly last level)
-        // Reduced minimum to allow more flexible distribution
-        const min_features = if (level < self.n_levels - 1) @max(10, self.n_features / (self.n_levels * 3)) else 0;
+        // Reduced minimum to allow more flexible distribution, but never exceed remaining budget
+        const base_min = @max(10, self.n_features / (self.n_levels * 3));
+        const min_features = @min(remaining, base_min);
 
-        if (level == self.n_levels - 1) {
-            // Last level gets remaining features
-            n_features_per_level[level] = if (assigned < self.n_features) self.n_features - assigned else 0;
-        } else {
-            n_features_per_level[level] = @max(min_features, @min(n_desired, self.n_features - assigned));
-            assigned += n_features_per_level[level];
-        }
+        const allocated = if (desired_clamped < min_features) min_features else desired_clamped;
+        n_features_per_level[level] = allocated;
+        assigned += n_features_per_level[level];
     }
 
     return n_features_per_level;
@@ -564,6 +566,15 @@ fn samplePixel(image: Image(u8), x: f32, y: f32) u8 {
     return image.at(@intCast(iy), @intCast(ix)).*;
 }
 
+/// Compute an adaptive FAST threshold for the given pyramid level (bounded to >= 5)
+fn computeAdaptiveThreshold(self: Orb, level: usize) u8 {
+    const level_scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
+    const attenuation = 1.0 / level_scale;
+    const base_threshold = @as(f32, @floatFromInt(self.fast_threshold));
+    const scaled_threshold = std.math.clamp(base_threshold * attenuation, @as(f32, 5.0), @as(f32, 255.0));
+    return @as(u8, @intFromFloat(@round(scaled_threshold)));
+}
+
 // Tests
 test "ORB initialization" {
     const orb = Orb{
@@ -675,4 +686,37 @@ test "ORB detect and compute on synthetic image" {
         }
     }
     try expectEqual(true, non_zero_found);
+}
+
+test "ORB feature distribution respects budget" {
+    const allocator = std.testing.allocator;
+
+    const orb = Orb{
+        .n_features = 5,
+        .n_levels = 4,
+        .scale_factor = 1.2,
+    };
+
+    const features_per_level = try orb.computeFeaturesPerLevel(allocator);
+    defer allocator.free(features_per_level);
+
+    var total: usize = 0;
+    for (features_per_level) |n| {
+        total += n;
+        try expectEqual(true, n <= orb.n_features);
+    }
+
+    try expectEqual(@as(usize, 5), total);
+}
+
+test "ORB adaptive FAST threshold stays within bounds" {
+    const orb = Orb{
+        .fast_threshold = 20,
+        .scale_factor = 1.2,
+        .n_levels = 12,
+    };
+
+    try expectEqual(@as(u8, 20), orb.computeAdaptiveThreshold(0));
+    try expectEqual(true, orb.computeAdaptiveThreshold(10) >= 5);
+    try expectEqual(true, orb.computeAdaptiveThreshold(11) >= 5);
 }

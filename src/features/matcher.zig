@@ -144,6 +144,7 @@ pub const BruteForceMatcher = struct {
 
             // Keep top k matches that pass distance threshold
             var k_matches: ArrayList(Match) = .{};
+            errdefer k_matches.deinit(allocator);
             for (distances[0..@min(k, distances.len)]) |m| {
                 if (m.distance <= @as(f32, @floatFromInt(self.max_distance))) {
                     try k_matches.append(allocator, m);
@@ -180,6 +181,7 @@ pub const BruteForceMatcher = struct {
         // For each query descriptor
         for (query_descriptors, 0..) |q_desc, q_idx| {
             var radius_matches: ArrayList(Match) = .{};
+            errdefer radius_matches.deinit(allocator);
 
             // Find all matches within radius
             for (train_descriptors, 0..) |t_desc, t_idx| {
