@@ -1351,12 +1351,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
         data_offset += dims.height * (pass_scanline_bytes + 1);
     }
 
-    return Image(T){
-        .rows = @intCast(header.height),
-        .cols = @intCast(header.width),
-        .data = output_data,
-        .stride = @intCast(header.width),
-    };
+    return Image(T).initFromSlice(@intCast(header.height), @intCast(header.width), output_data);
 }
 
 // Apply gamma correction to a color value
