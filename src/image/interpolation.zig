@@ -101,13 +101,21 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) !void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
-        // If dimensions match exactly, just copy the data
-        if (self.data.ptr == out.data.ptr) {
-            // Same buffer, nothing to do
-            return;
+        if (self.data.ptr == out.data.ptr) return;
+
+        if (self.isContiguous() and out.isContiguous()) {
+            const total = try std.math.mul(usize, self.rows, self.cols);
+            @memcpy(out.data[0..total], self.data[0..total]);
+        } else {
+            for (0..self.rows) |r| {
+                const src_row_start = r * self.stride;
+                const dst_row_start = r * out.stride;
+                @memcpy(
+                    out.data[dst_row_start .. dst_row_start + out.cols],
+                    self.data[src_row_start .. src_row_start + self.cols],
+                );
+            }
         }
-        // Different buffers, need to copy
-        @memcpy(out.data[0..out.data.len], self.data[0..self.data.len]);
         return;
     }
 

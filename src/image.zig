@@ -106,7 +106,13 @@ pub fn Image(comptime T: type) type {
         /// Constructs an image of rows and cols size allocating its own memory.
         /// The image owns the memory and deinit should be called to free it.
         pub fn init(allocator: Allocator, rows: usize, cols: usize) !Image(T) {
-            return .{ .rows = rows, .cols = cols, .data = try allocator.alloc(T, rows * cols), .stride = cols };
+            const pixel_count = try std.math.mul(usize, rows, cols);
+            return .{
+                .rows = rows,
+                .cols = cols,
+                .data = try allocator.alloc(T, pixel_count),
+                .stride = cols,
+            };
         }
 
         /// Constructs an image with the same dimensions as the reference image.
@@ -125,27 +131,50 @@ pub fn Image(comptime T: type) type {
         /// Sets the image rows and cols to zero and frees the memory from the image.  It should
         /// only be called if the image owns the memory.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.rows = 0;
-            self.cols = 0;
-            self.stride = 0;
-            allocator.free(self.data);
+            defer self.* = Self.empty;
+
+            if (self.isOwned()) {
+                allocator.free(self.data);
+            }
         }
 
         /// Constructs an image of rows and cols size from an existing slice.
         pub fn initFromSlice(rows: usize, cols: usize, data: []T) Image(T) {
-            return .{ .rows = rows, .cols = cols, .data = data, .stride = cols };
+            const expected_len = std.math.mul(usize, rows, cols) catch @panic("Image.initFromSlice overflow");
+            assert(data.len >= expected_len);
+            return .{
+                .rows = rows,
+                .cols = cols,
+                .data = data[0..expected_len],
+                .stride = cols,
+            };
         }
 
         /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
         /// The length of the `bytes` slice must be exactly `rows * cols * @sizeOf(T)`.
         pub fn initFromBytes(rows: usize, cols: usize, bytes: []u8) Image(T) {
-            assert(rows * cols * @sizeOf(T) == bytes.len);
+            const expected_len = std.math.mul(usize, rows, cols) catch @panic("Image.initFromBytes overflow");
+            const expected_bytes = std.math.mul(usize, expected_len, @sizeOf(T)) catch @panic("Image.initFromBytes overflow");
+            assert(expected_bytes == bytes.len);
             return .{
                 .rows = rows,
                 .cols = cols,
                 .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
                 .stride = cols,
             };
+        }
+
+        /// Returns true when this image appears to fully own its underlying buffer.
+        /// The check is conservative: only contiguous buffers with the expected length
+        /// (`rows * cols`) report true. Views, zero-sized placeholders, or images backed
+        /// by external storage will return false.
+        pub fn isOwned(self: Self) bool {
+            if (self.data.len == 0) return false;
+            if (self.rows == 0 or self.cols == 0) return false;
+            if (self.stride != self.cols) return false;
+
+            const expected_len = std.math.mul(usize, self.rows, self.cols) catch return false;
+            return self.data.len == expected_len;
         }
 
         /// Fills the entire image with a solid value.
@@ -280,10 +309,10 @@ pub fn Image(comptime T: type) type {
         /// or copies.
         pub fn view(self: Self, rect: Rectangle(usize)) Image(T) {
             const clipped = self.getRectangle().intersect(rect) orelse {
-                return .empty;
+                return Self.empty;
             };
             if (clipped.isEmpty()) {
-                return .empty;
+                return Self.empty;
             }
 
             const rows = clipped.height();
