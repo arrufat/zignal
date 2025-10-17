@@ -206,42 +206,57 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                     const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
                     // Channel separation approach for optimal performance
                     const kernel_int = Kernel.flatten(kernel);
+                    var kernel_sum: Kernel.Scalar = 0;
+                    inline for (kernel_int) |weight| {
+                        kernel_sum += weight;
+                    }
                     const plane_size = self.rows * self.cols;
+                    const Pixel = PixelIO(u8, 1);
+                    const scale = Pixel.scale;
 
                     // Separate channels using helper
                     const channels = try channel_ops.splitChannels(T, self, allocator);
                     defer for (channels) |channel| allocator.free(channel);
 
-                    // Check which channels are uniform to avoid unnecessary processing
-                    var is_uniform: [channels.len]bool = undefined;
+                    const ChannelStrategy = enum { normalized, scaled, non_uniform };
+                    var uniform_values: [channels.len]?u8 = undefined;
+                    var strategies: [channels.len]ChannelStrategy = undefined;
 
                     inline for (channels, 0..) |src_data, i| {
-                        if (channel_ops.findUniformValue(u8, src_data)) |_| {
-                            is_uniform[i] = true;
+                        if (channel_ops.findUniformValue(u8, src_data)) |value| {
+                            uniform_values[i] = value;
+                            strategies[i] = if (kernel_sum == scale) .normalized else .scaled;
                         } else {
-                            is_uniform[i] = false;
+                            uniform_values[i] = null;
+                            strategies[i] = .non_uniform;
                         }
                     }
 
-                    // Allocate output planes only for non-uniform channels
+                    // Allocate output planes for strategies that require storage
                     var out_channels: [channels.len][]u8 = undefined;
-                    inline for (&out_channels, is_uniform) |*ch, uniform| {
-                        if (uniform) {
-                            // For uniform channels with normalized kernels, output is same as input
-                            ch.* = &[_]u8{}; // Empty slice as placeholder
-                        } else {
-                            ch.* = try allocator.alloc(u8, plane_size);
+                    inline for (&out_channels, strategies, 0..) |*out_ch, strategy, i| {
+                        switch (strategy) {
+                            .normalized => out_ch.* = &[_]u8{}, // Placeholder for merge
+                            .scaled, .non_uniform => out_ch.* = try allocator.alloc(u8, plane_size),
+                        }
+                        if (strategy == .scaled) {
+                            const accum = @as(Kernel.Scalar, @intCast(uniform_values[i].?)) * kernel_sum;
+                            const stored = Pixel.store(accum);
+                            @memset(out_ch.*, stored);
                         }
                     }
                     defer {
-                        inline for (out_channels, is_uniform) |ch, uniform| {
-                            if (!uniform and ch.len > 0) allocator.free(ch);
+                        inline for (out_channels, strategies) |ch, strategy| {
+                            switch (strategy) {
+                                .normalized => {},
+                                .scaled, .non_uniform => if (ch.len > 0) allocator.free(ch),
+                            }
                         }
                     }
 
                     // Convolve only non-uniform channels
-                    inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
-                        if (!uniform) {
+                    inline for (channels, out_channels, strategies) |src_data, dst_data, strategy| {
+                        if (strategy == .non_uniform) {
                             const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
                             const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
                             Kernel.convolve(src_plane, dst_plane, kernel_int, border_mode);
@@ -250,12 +265,10 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
 
                     // Recombine channels, using original values for uniform channels
                     var final_channels: [channels.len][]const u8 = undefined;
-                    inline for (is_uniform, out_channels, channels, 0..) |uniform, out_ch, src_ch, i| {
-                        if (uniform) {
-                            // For uniform channels, convolution with normalized kernel preserves the value
-                            final_channels[i] = src_ch;
-                        } else {
-                            final_channels[i] = out_ch;
+                    inline for (strategies, out_channels, channels, 0..) |strategy, out_ch, src_ch, i| {
+                        switch (strategy) {
+                            .normalized => final_channels[i] = src_ch,
+                            .scaled, .non_uniform => final_channels[i] = out_ch,
                         }
                     }
                     channel_ops.mergeChannels(T, final_channels, out);
@@ -286,13 +299,12 @@ pub fn convolveSeparable(
     border_mode: BorderMode,
     out: Image(T),
 ) !void {
-    // Allocate temporary buffer for intermediate result
-    var temp: Image(T) = try .init(allocator, image.rows, image.cols);
-    defer temp.deinit(allocator);
-
     // Process based on type
     switch (T) {
         u8 => {
+            var temp = try Image(T).init(allocator, image.rows, image.cols);
+            defer temp.deinit(allocator);
+
             // Convert kernels to integer
             const scale = 256;
             const kernel_x_int = try allocator.alloc(i32, kernel_x.len);
@@ -310,6 +322,9 @@ pub fn convolveSeparable(
             convolveSeparablePlane(u8, image, out, temp, kernel_x_int, kernel_y_int, border_mode);
         },
         f32 => {
+            var temp = try Image(T).init(allocator, image.rows, image.cols);
+            defer temp.deinit(allocator);
+
             const src_plane: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = image.data };
             const dst_plane: Image(f32) = .{ .rows = out.rows, .cols = out.cols, .stride = out.stride, .data = out.data };
             const tmp_plane: Image(f32) = .{ .rows = temp.rows, .cols = temp.cols, .stride = temp.stride, .data = temp.data };
