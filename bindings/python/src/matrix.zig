@@ -370,14 +370,10 @@ fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     const flat_array = c.PyObject_CallFunctionObjArgs(frombuffer, memview, dtype_str, @as(?*c.PyObject, null)) orelse return null;
     defer c.Py_DECREF(flat_array);
 
-    // Reshape to 2D
-    const reshape_method = c.PyObject_GetAttrString(flat_array, "reshape") orelse return null;
-    defer c.Py_DECREF(reshape_method);
-
     const shape_tuple = c.PyTuple_Pack(2, c.PyLong_FromLong(@intCast(ptr.rows)), c.PyLong_FromLong(@intCast(ptr.cols))) orelse return null;
     defer c.Py_DECREF(shape_tuple);
 
-    return c.PyObject_CallObject(reshape_method, shape_tuple);
+    return py_utils.callMethodBorrowingArgs(flat_array, "reshape", shape_tuple);
 }
 
 const matrix_from_numpy_doc =

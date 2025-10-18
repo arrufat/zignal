@@ -79,6 +79,54 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
     };
 }
 
+/// Wrapper for arguments tuple ownership. If `owned` is true, `tuple` must be decref'd.
+pub const ArgsTupleHandle = struct {
+    tuple: ?*c.PyObject,
+    owned: bool,
+
+    pub fn deinit(self: ArgsTupleHandle) void {
+        if (self.owned and self.tuple != null) {
+            c.Py_DECREF(self.tuple.?);
+        }
+    }
+};
+
+/// Ensure we always have a tuple for varargs-style APIs.
+/// Returns a handle describing whether the tuple is newly allocated (thus owned).
+pub fn ensureArgsTuple(args: ?*c.PyObject) ?ArgsTupleHandle {
+    if (args) |existing| {
+        return ArgsTupleHandle{ .tuple = existing, .owned = false };
+    }
+
+    const empty = c.PyTuple_New(0);
+    if (empty == null) return null;
+    return ArgsTupleHandle{ .tuple = empty, .owned = true };
+}
+
+/// Call an object's method borrowing the provided args tuple.
+pub fn callMethodBorrowingArgs(target: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
+    if (target == null or args == null) return null;
+
+    const method_ptr = c.PyObject_GetAttrString(target.?, method_name);
+    if (method_ptr == null) return null;
+    defer c.Py_DECREF(method_ptr);
+
+    return c.PyObject_CallObject(method_ptr, args.?);
+}
+
+/// Call an object's method, automatically creating an empty args tuple when needed.
+pub fn callMethod(target: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
+    const handle = ensureArgsTuple(args) orelse return null;
+    defer handle.deinit();
+    return callMethodBorrowingArgs(target, method_name, handle.tuple);
+}
+
+/// Build a `(row, col, pixel)` tuple while consuming the pixel reference.
+pub fn buildPixelTuple(row: usize, col: usize, pixel_obj: ?*c.PyObject) ?*c.PyObject {
+    if (pixel_obj == null) return null;
+    return c.Py_BuildValue("(nnN)", @as(c.Py_ssize_t, @intCast(row)), @as(c.Py_ssize_t, @intCast(col)), pixel_obj.?);
+}
+
 /// Build a field getter function pointer for a Python-exposed struct.
 /// The returned pointer matches Python's `getter` signature and uses
 /// `convertToPython` to return a new Python object for the field value.
