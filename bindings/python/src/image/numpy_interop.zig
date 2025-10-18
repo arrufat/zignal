@@ -79,18 +79,15 @@ fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
     };
     defer c.Py_DECREF(np_asarray);
 
-    const args_tuple = c.Py_BuildValue("(O)", memview) orelse {
-        c.Py_DECREF(memview);
+    const args_tuple = c.Py_BuildValue("(N)", memview) orelse {
         return null;
     };
     defer c.Py_DECREF(args_tuple);
 
     const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
-        c.Py_DECREF(memview);
         return null;
     };
 
-    c.Py_DECREF(memview);
     return array;
 }
 
