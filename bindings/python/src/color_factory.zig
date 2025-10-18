@@ -296,16 +296,16 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         }
 
         /// Generic conversion method generator - creates specific methods for each target type
-        fn generateConversionMethod(comptime TargetColorType: type) fn ([*c]c.PyObject, [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+        fn generateConversionMethod(comptime TargetColorType: type) fn ([*c]c.PyObject, ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             return switch (TargetColorType) {
                 // Special case for Rgba due to default alpha parameter
                 zignal.Rgba => struct {
-                    fn method(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+                    fn method(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
                         const self: *ObjectType = @ptrCast(self_obj);
 
                         // Parse optional alpha parameter (default to 255)
                         var alpha: c_int = 255;
-                        if (c.PyArg_ParseTuple(args, "|i", &alpha) == 0) {
+                        if (args == null or c.PyArg_ParseTuple(args.?, "|i", &alpha) == 0) {
                             return null;
                         }
 
@@ -319,7 +319,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     }
                 }.method,
                 else => struct {
-                    fn method(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+                    fn method(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
                         const self: *ObjectType = @ptrCast(self_obj);
                         const zig_color = objectToZigColor(self);
                         const method_name = comptime getZigConversionMethodName(TargetColorType);
@@ -611,13 +611,13 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         }
 
         /// __format__ method implementation
-        pub fn formatMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+        pub fn formatMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
 
             // Parse format_spec argument
             var format_spec: [*c]const u8 = undefined;
             const format = std.fmt.comptimePrint("s", .{});
-            if (c.PyArg_ParseTuple(args, format.ptr, &format_spec) == 0) {
+            if (args == null or c.PyArg_ParseTuple(args.?, format.ptr, &format_spec) == 0) {
                 return null;
             }
 
@@ -698,14 +698,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         }
 
         /// to_gray method implementation
-        pub fn toGrayMethod(self_obj: [*c]c.PyObject, _: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+        pub fn toGrayMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             const zig_color = objectToZigColor(self);
             return @ptrCast(c.PyLong_FromLong(@intCast(zig_color.toGray())));
         }
 
         /// Blend method implementation
-        pub fn blendMethod(self_obj: [*c]c.PyObject, args: [*c]c.PyObject, kwds: [*c]c.PyObject) callconv(.c) [*c]c.PyObject {
+        pub fn blendMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
 
             // Parse arguments: overlay (required) and mode (optional keyword, defaults to NORMAL)

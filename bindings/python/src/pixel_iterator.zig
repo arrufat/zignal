@@ -97,11 +97,8 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
     if (pixel_obj == null) return null;
 
-    // Build tuple (row, col, pixel)
-    const result = c.Py_BuildValue("(nnO)", @as(c.Py_ssize_t, @intCast(row)), @as(c.Py_ssize_t, @intCast(col)), pixel_obj.?) orelse {
-        c.Py_DECREF(pixel_obj.?);
-        return null;
-    };
+    // Build tuple (row, col, pixel) using shared helper to manage refcounts
+    const result = py_utils.buildPixelTuple(row, col, pixel_obj) orelse return null;
 
     self.index += 1;
     return result;
