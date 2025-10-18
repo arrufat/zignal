@@ -51,7 +51,7 @@ pub const DitherMode = enum {
     floyd_steinberg,
     /// Atkinson dithering (used by original Macintosh)
     atkinson,
-    /// Automatic selection based on palette size
+    /// Automatic heuristics based on palette size and image dimensions
     auto,
 };
 
@@ -88,6 +88,25 @@ pub const Options = struct {
     };
 };
 
+/// Profiling metrics for sixel encoding. All values are measured in nanoseconds.
+pub const Profile = struct {
+    total_ns: u64 = 0,
+    scale_convert_ns: u64 = 0,
+    palette_ns: u64 = 0,
+    lut_ns: u64 = 0,
+    dither_ns: u64 = 0,
+    palette_emit_ns: u64 = 0,
+    encode_ns: u64 = 0,
+
+    pub fn reset(self: *Profile) void {
+        self.* = .{};
+    }
+};
+
+inline fn monotonicNs() u64 {
+    return @as(u64, @intCast(std.time.nanoTimestamp()));
+}
+
 // ========== Main Entry Point ==========
 
 /// Converts an image to sixel format
@@ -97,6 +116,23 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
+    return fromImageProfiled(T, image, gpa, options, null);
+}
+
+/// Converts an image to sixel format while capturing optional profiling data.
+pub fn fromImageProfiled(
+    comptime T: type,
+    image: Image(T),
+    gpa: Allocator,
+    options: Options,
+    profiler: ?*Profile,
+) ![]u8 {
+    var total_start: u64 = 0;
+    if (profiler) |p| {
+        p.reset();
+        total_start = monotonicNs();
+    }
+
     // Calculate scaling if needed
     var width = image.cols;
     var height = image.rows;
@@ -109,6 +145,9 @@ pub fn fromImage(
     // Prepare palette based on mode
     var palette: [256]Rgb = undefined;
     var palette_size: usize = options.palette.size();
+
+    var palette_start: u64 = 0;
+    if (profiler != null) palette_start = monotonicNs();
 
     switch (options.palette) {
         .fixed_6x7x6 => {
@@ -128,53 +167,104 @@ pub fn fromImage(
         },
     }
 
+    if (profiler) |p| {
+        p.palette_ns += monotonicNs() - palette_start;
+    }
+
     // Build lookup table for all palettes
-    const color_lut = ColorLookupTable.init(palette[0..palette_size]);
+    var lut_start: u64 = 0;
+    if (profiler != null) lut_start = monotonicNs();
+    const color_lut = ColorLookupTable.cache.get(options.palette, palette[0..palette_size]);
+    if (profiler) |p| {
+        p.lut_ns += monotonicNs() - lut_start;
+    }
 
     // Determine dithering mode
     const dither_mode = switch (options.dither) {
-        .auto => if (palette_size <= 16) DitherMode.atkinson else DitherMode.floyd_steinberg,
+        .auto => blk: {
+            const total_pixels = std.math.mul(usize, width, height) catch std.math.maxInt(usize);
+            if (palette_size >= 128 and total_pixels >= 512 * 512) {
+                break :blk DitherMode.none;
+            }
+            if (palette_size <= 16) break :blk DitherMode.atkinson;
+            break :blk DitherMode.floyd_steinberg;
+        },
         else => options.dither,
     };
 
-    // Prepare image for dithering if needed
-    var dithered_img: ?Image(Rgb) = null;
-    defer if (dithered_img) |*img| img.deinit(gpa);
+    // Prepare image for fast sampling and optional dithering
+    const is_rgb = comptime std.meta.eql(@typeInfo(T), @typeInfo(Rgb));
+    const need_prepared_image = dither_mode != .none or scale != 1.0 or !is_rgb;
 
-    if (dither_mode != .none) {
-        var working_img: Image(Rgb) = undefined;
+    var prepared_img_opt: ?Image(Rgb) = null;
+    var prepared_img_ptr: ?*Image(Rgb) = null;
+    defer if (prepared_img_opt) |*img| img.deinit(gpa);
+
+    if (need_prepared_image) {
+        var convert_start: u64 = 0;
+        if (profiler != null) convert_start = monotonicNs();
 
         if (scale == 1.0) {
-            // No scaling needed - use convert for optimal performance
-            // For Rgb images, this does a direct memcpy
-            // For Rgba images, this efficiently drops the alpha channel
-            // For other types, this handles proper color conversion
-            working_img = try image.convert(Rgb, gpa);
+            prepared_img_opt = try image.convert(Rgb, gpa);
         } else {
-            // Scaling needed - use interpolation
-            working_img = try Image(Rgb).init(gpa, height, width);
+            var scaled_img = try Image(Rgb).init(gpa, height, width);
 
-            // Copy scaled image data to working image
-            for (0..height) |row| {
-                for (0..width) |col| {
-                    const src_x = @as(f32, @floatFromInt(col)) / scale;
-                    const src_y = @as(f32, @floatFromInt(row)) / scale;
+            for (0..height) |row_idx| {
+                for (0..width) |col_idx| {
+                    const src_x = @as(f32, @floatFromInt(col_idx)) / scale;
+                    const src_y = @as(f32, @floatFromInt(row_idx)) / scale;
 
-                    if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
-                        working_img.at(row, col).* = convertColor(Rgb, pixel);
-                    }
+                    const rgb_value = blk: {
+                        if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
+                            break :blk convertColor(Rgb, pixel);
+                        }
+
+                        // Fallback to clamped nearest-neighbor sample to avoid leaving pixels uninitialized.
+                        const clamped_col = clamp(
+                            @as(isize, @intFromFloat(@round(src_x))),
+                            0,
+                            @as(isize, @intCast(image.cols - 1)),
+                        );
+                        const clamped_row = clamp(
+                            @as(isize, @intFromFloat(@round(src_y))),
+                            0,
+                            @as(isize, @intCast(image.rows - 1)),
+                        );
+                        const fallback_pixel = image.at(@intCast(clamped_row), @intCast(clamped_col)).*;
+                        break :blk convertColor(Rgb, fallback_pixel);
+                    };
+
+                    scaled_img.at(row_idx, col_idx).* = rgb_value;
                 }
             }
+
+            prepared_img_opt = scaled_img;
         }
 
-        // Apply dithering in-place
+        if (profiler) |p| {
+            p.scale_convert_ns += monotonicNs() - convert_start;
+        }
+
+        if (prepared_img_opt) |*img| {
+            prepared_img_ptr = img;
+        }
+    }
+
+    if (dither_mode != .none) {
+        var dither_start: u64 = 0;
+        if (profiler != null) dither_start = monotonicNs();
+
+        const working_img = prepared_img_ptr orelse unreachable;
+
         switch (dither_mode) {
-            .floyd_steinberg => applyErrorDiffusion(working_img, palette[0..palette_size], color_lut, floyd_steinberg_config),
-            .atkinson => applyErrorDiffusion(working_img, palette[0..palette_size], color_lut, atkinson_config),
+            .floyd_steinberg => applyErrorDiffusion(working_img.*, palette[0..palette_size], color_lut, floyd_steinberg_config),
+            .atkinson => applyErrorDiffusion(working_img.*, palette[0..palette_size], color_lut, atkinson_config),
             else => {},
         }
 
-        dithered_img = working_img; // Transfer ownership
+        if (profiler) |p| {
+            p.dither_ns += monotonicNs() - dither_start;
+        }
     }
 
     // Pre-allocate output buffer with estimated size
@@ -202,6 +292,9 @@ pub fn fromImage(
 
     // Define palette - unified approach
     var palette_buf: [64]u8 = undefined; // Buffer for building palette strings
+
+    var palette_emit_start: u64 = 0;
+    if (profiler != null) palette_emit_start = monotonicNs();
 
     for (0..palette_size) |i| {
         const p = if (options.palette == .fixed_6x7x6) blk: {
@@ -237,96 +330,122 @@ pub fn fromImage(
         try output.appendSlice(gpa, palette_buf[0..pos]);
     }
 
+    if (profiler) |p| {
+        p.palette_emit_ns += monotonicNs() - palette_emit_start;
+    }
+
     // Encode pixels as sixels
+    var encode_start: u64 = 0;
+    if (profiler != null) encode_start = monotonicNs();
+
+    const color_map_len = palette_size * width;
+    var color_map_storage = try gpa.alloc(u8, color_map_len);
+    defer gpa.free(color_map_storage);
+    var color_map_generation = try gpa.alloc(u32, color_map_len);
+    defer gpa.free(color_map_generation);
+    @memset(color_map_generation[0..color_map_len], 0);
+    var color_generation_counter: u32 = 1;
+
+    var column_stamp: [256]u32 = undefined;
+    @memset(column_stamp[0..], 0);
+    var column_index: [256]u16 = undefined;
+    var column_colors: [256]u8 = undefined;
+    var column_bits: [256]u8 = undefined;
+    var column_generation_counter: u32 = 1;
+
     var row: usize = 0;
     while (row < height) : (row += 6) {
-        // Build a map of which colors are used in this sixel row
-        var colors_used: [256]bool = undefined;
-        @memset(colors_used[0..palette_size], false);
-
-        // Use a flat array for color_map to avoid nested allocations
         if (width > max_supported_width) {
             return error.ImageTooWide;
         }
 
-        var color_map_storage: [256 * max_supported_width]u8 = undefined;
-        // Initialize only the portion we'll use
-        @memset(color_map_storage[0..(palette_size * width)], 0);
+        var colors_used: [256]bool = undefined;
+        @memset(colors_used[0..palette_size], false);
 
-        // First pass: build bitmaps for each color
+        const row_generation = color_generation_counter;
+        color_generation_counter += 1;
+        if (color_generation_counter == 0) {
+            @memset(color_map_generation[0..], 0);
+            color_generation_counter = 1;
+        }
+
         for (0..width) |col| {
-            var sixel_bits: [256]u8 = undefined;
-            @memset(sixel_bits[0..palette_size], 0);
-
-            // Check all 6 pixels in this column
-            for (0..6) |bit| {
-                const pixel_row = row + bit;
-                if (pixel_row < height) {
-                    const color_idx = if (dithered_img) |img| blk: {
-                        // Use dithered data
-                        const rgb = img.at(pixel_row, col).*;
-                        break :blk color_lut.lookup(rgb);
-                    } else blk: {
-                        // Use original data without dithering
-                        const src_x = @as(f32, @floatFromInt(col)) / scale;
-                        const src_y = @as(f32, @floatFromInt(pixel_row)) / scale;
-
-                        if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
-                            const rgb = convertColor(Rgb, pixel);
-
-                            // Use lookup table for all palettes
-                            break :blk color_lut.lookup(rgb);
-                        } else {
-                            continue;
-                        }
-                    };
-
-                    // Set the bit for this color
-                    sixel_bits[color_idx] |= @as(u8, 1) << @intCast(bit);
-                    colors_used[color_idx] = true;
-                }
+            const column_generation = column_generation_counter;
+            column_generation_counter += 1;
+            if (column_generation_counter == 0) {
+                @memset(column_stamp[0..], 0);
+                column_generation_counter = 1;
             }
 
-            // Store the sixel characters for each color
-            for (0..palette_size) |c| {
-                if (sixel_bits[c] != 0) {
-                    // Access flat array: color_map[c][col] becomes color_map_storage[c * width + col]
-                    color_map_storage[c * width + col] = sixel_bits[c] + sixel_char_offset; // Add to '?' to get sixel char
+            var column_len: usize = 0;
+
+            for (0..6) |bit| {
+                const pixel_row = row + bit;
+                if (pixel_row >= height) continue;
+
+                const color_idx = if (prepared_img_ptr) |img_ptr| blk: {
+                    const rgb = img_ptr.at(pixel_row, col).*;
+                    break :blk color_lut.lookup(rgb);
+                } else blk: {
+                    if (comptime is_rgb) {
+                        const rgb = image.at(pixel_row, col).*;
+                        break :blk color_lut.lookup(rgb);
+                    } else {
+                        const rgb = convertColor(Rgb, image.at(pixel_row, col).*); // fallback conversion
+                        break :blk color_lut.lookup(rgb);
+                    }
+                };
+
+                if (!colors_used[color_idx]) {
+                    colors_used[color_idx] = true;
                 }
+
+                if (column_stamp[color_idx] != column_generation) {
+                    column_stamp[color_idx] = column_generation;
+                    column_index[color_idx] = @intCast(column_len);
+                    column_colors[column_len] = @intCast(color_idx);
+                    column_bits[column_len] = 0;
+                    column_len += 1;
+                }
+
+                const idx = column_index[color_idx];
+                column_bits[idx] |= @as(u8, 1) << @intCast(bit);
+            }
+
+            for (0..column_len) |idx| {
+                const color_idx = column_colors[idx];
+                const bits = column_bits[idx];
+                const offset = @as(usize, color_idx) * width + col;
+                color_map_storage[offset] = if (bits != 0) bits + sixel_char_offset else sixel_char_offset;
+                color_map_generation[offset] = row_generation;
             }
         }
 
-        // Second pass: output sixels for each color
-        var current_color: usize = std.math.maxInt(usize); // Invalid color
+        var current_color: usize = std.math.maxInt(usize);
         for (0..palette_size) |c| {
             if (!colors_used[c]) continue;
 
-            // Select color if different
             if (c != current_color) {
                 current_color = c;
-                // Use fast integer conversion
                 var color_select_buf: [16]u8 = undefined;
                 color_select_buf[0] = '#';
                 const len = std.fmt.printInt(color_select_buf[1..], current_color, 10, .lower, .{});
                 try output.appendSlice(gpa, color_select_buf[0 .. len + 1]);
             }
 
-            // Output all sixels for this color - build complete row first
-            var row_buffer: [max_supported_width]u8 = undefined; // Stack buffer for row data
-            if (width > row_buffer.len) {
-                return error.ImageTooWide;
-            }
+            var row_buffer: [max_supported_width]u8 = undefined;
+            if (width > row_buffer.len) return error.ImageTooWide;
 
-            // Build the entire row in the buffer
+            @memset(row_buffer[0..width], sixel_char_offset);
             for (0..width) |col| {
-                const char = color_map_storage[c * width + col];
-                row_buffer[col] = if (char != 0) char else sixel_char_offset;
+                const offset = c * width + col;
+                if (color_map_generation[offset] == row_generation) {
+                    row_buffer[col] = color_map_storage[offset];
+                }
             }
 
-            // Write the entire row at once
             try output.appendSlice(gpa, row_buffer[0..width]);
 
-            // Carriage return to go back to start of line (except for last color)
             var more_colors = false;
             for (c + 1..palette_size) |nc| {
                 if (colors_used[nc]) {
@@ -335,18 +454,22 @@ pub fn fromImage(
                 }
             }
             if (more_colors) {
-                try output.appendSlice(gpa, "$"); // Graphics carriage return
+                try output.appendSlice(gpa, "$");
             }
         }
 
-        // Move to next sixel row if not at end
         if (row + 6 < height) {
-            try output.appendSlice(gpa, "-"); // Graphics new line
+            try output.appendSlice(gpa, "-");
         }
     }
 
     // End sixel sequence with ST
     try output.appendSlice(gpa, "\x1b\\");
+
+    if (profiler) |p| {
+        p.encode_ns += monotonicNs() - encode_start;
+        p.total_ns = monotonicNs() - total_start;
+    }
 
     return output.toOwnedSlice(gpa);
 }
@@ -445,24 +568,147 @@ const ColorLookupTable = struct {
         const b5 = rgb.b >> (8 - color_quantize_bits);
         return self.table[r5][g5][b5];
     }
+
+    const cache = struct {
+        var mutex = std.Thread.Mutex{};
+        var fixed_6x7x6: ?ColorLookupTable = null;
+        var fixed_vga16: ?ColorLookupTable = null;
+        var fixed_web216: ?ColorLookupTable = null;
+
+        fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
+            cache.mutex.lock();
+            defer cache.mutex.unlock();
+
+            if (cache_field.*) |cached| {
+                return cached;
+            }
+            const lut: ColorLookupTable = .init(palette);
+            cache_field.* = lut;
+            return lut;
+        }
+
+        pub fn get(mode: PaletteMode, palette: []const Rgb) ColorLookupTable {
+            return switch (mode) {
+                .fixed_6x7x6 => getOrInit(&cache.fixed_6x7x6, palette),
+                .fixed_vga16 => getOrInit(&cache.fixed_vga16, palette),
+                .fixed_web216 => getOrInit(&cache.fixed_web216, palette),
+                .adaptive => .init(palette),
+            };
+        }
+    };
 };
 
+const AdaptiveHistogramHandle = struct {
+    counts: []u32,
+    stamps: []u32,
+    generation: u32,
+};
+
+const AdaptiveHistogramCache = struct {
+    var mutex = std.Thread.Mutex{};
+    var cond = std.Thread.Condition{};
+    var counts: []u32 = &[_]u32{};
+    var stamps: []u32 = &[_]u32{};
+    var generation: u32 = 1;
+    var in_use: bool = false;
+};
+
+fn acquireAdaptiveHistogram() !AdaptiveHistogramHandle {
+    const required_len: usize = @as(usize, 1) << (3 * color_quantize_bits);
+    AdaptiveHistogramCache.mutex.lock();
+    defer AdaptiveHistogramCache.mutex.unlock();
+
+    while (AdaptiveHistogramCache.in_use) {
+        AdaptiveHistogramCache.cond.wait(&AdaptiveHistogramCache.mutex);
+    }
+
+    AdaptiveHistogramCache.in_use = true;
+
+    if (AdaptiveHistogramCache.counts.len != required_len or AdaptiveHistogramCache.stamps.len != required_len) {
+        const new_counts = std.heap.page_allocator.alloc(u32, required_len) catch |err| {
+            AdaptiveHistogramCache.in_use = false;
+            AdaptiveHistogramCache.cond.signal();
+            return err;
+        };
+        errdefer std.heap.page_allocator.free(new_counts);
+
+        const new_stamps = std.heap.page_allocator.alloc(u32, required_len) catch |err| {
+            AdaptiveHistogramCache.in_use = false;
+            AdaptiveHistogramCache.cond.signal();
+            return err;
+        };
+        errdefer std.heap.page_allocator.free(new_stamps);
+
+        const old_counts = AdaptiveHistogramCache.counts;
+        const old_stamps = AdaptiveHistogramCache.stamps;
+
+        AdaptiveHistogramCache.counts = new_counts;
+        AdaptiveHistogramCache.stamps = new_stamps;
+        @memset(AdaptiveHistogramCache.stamps, 0);
+
+        if (old_counts.len != 0) std.heap.page_allocator.free(old_counts);
+        if (old_stamps.len != 0) std.heap.page_allocator.free(old_stamps);
+    }
+
+    var generation_token = AdaptiveHistogramCache.generation;
+    AdaptiveHistogramCache.generation +%= 1;
+    if (AdaptiveHistogramCache.generation == 0) {
+        @memset(AdaptiveHistogramCache.stamps, 0);
+        AdaptiveHistogramCache.generation = 1;
+        generation_token = 1;
+    }
+
+    return AdaptiveHistogramHandle{
+        .counts = AdaptiveHistogramCache.counts,
+        .stamps = AdaptiveHistogramCache.stamps,
+        .generation = generation_token,
+    };
+}
+
+fn releaseAdaptiveHistogram(handle: AdaptiveHistogramHandle) void {
+    _ = handle;
+    AdaptiveHistogramCache.mutex.lock();
+    AdaptiveHistogramCache.in_use = false;
+    AdaptiveHistogramCache.cond.signal();
+    AdaptiveHistogramCache.mutex.unlock();
+}
+
+inline fn divTruncPow2(value: i32, shift: u3) i32 {
+    if (shift == 0) return value;
+    if (value >= 0) {
+        return value >> shift;
+    }
+    const d: i32 = @as(i32, 1) << shift;
+    return (value + d - 1) >> shift;
+}
+
+inline fn clampToU8(value: i32) u8 {
+    if (value < 0) return 0;
+    if (value > 255) return 255;
+    return @intCast(value);
+}
+
 /// Error diffusion dithering configuration
+const DitherEntry = struct {
+    dx: i16,
+    dy: i16,
+    weight: i16,
+    divisor_shift: u3,
+};
+
 const DitherConfig = struct {
-    // Error distribution matrix offsets and weights
-    // Format: {dx, dy, weight, divisor}
-    distributions: []const [4]i16,
+    distributions: []const DitherEntry,
 };
 
 // Floyd-Steinberg error distribution:
 //          X   7/16
 //  3/16  5/16  1/16
 const floyd_steinberg_config = DitherConfig{
-    .distributions = &[_][4]i16{
-        .{ 1, 0, 7, 16 }, // right
-        .{ -1, 1, 3, 16 }, // bottom-left
-        .{ 0, 1, 5, 16 }, // bottom
-        .{ 1, 1, 1, 16 }, // bottom-right
+    .distributions = &[_]DitherEntry{
+        .{ .dx = 1, .dy = 0, .weight = 7, .divisor_shift = 4 }, // right
+        .{ .dx = -1, .dy = 1, .weight = 3, .divisor_shift = 4 }, // bottom-left
+        .{ .dx = 0, .dy = 1, .weight = 5, .divisor_shift = 4 }, // bottom
+        .{ .dx = 1, .dy = 1, .weight = 1, .divisor_shift = 4 }, // bottom-right
     },
 };
 
@@ -471,13 +717,13 @@ const floyd_steinberg_config = DitherConfig{
 //   1/8   1/8  1/8
 //         1/8
 const atkinson_config = DitherConfig{
-    .distributions = &[_][4]i16{
-        .{ 1, 0, 1, 8 }, // right
-        .{ 2, 0, 1, 8 }, // right+1
-        .{ -1, 1, 1, 8 }, // bottom-left
-        .{ 0, 1, 1, 8 }, // bottom
-        .{ 1, 1, 1, 8 }, // bottom-right
-        .{ 0, 2, 1, 8 }, // bottom+1
+    .distributions = &[_]DitherEntry{
+        .{ .dx = 1, .dy = 0, .weight = 1, .divisor_shift = 3 }, // right
+        .{ .dx = 2, .dy = 0, .weight = 1, .divisor_shift = 3 }, // right+1
+        .{ .dx = -1, .dy = 1, .weight = 1, .divisor_shift = 3 }, // bottom-left
+        .{ .dx = 0, .dy = 1, .weight = 1, .divisor_shift = 3 }, // bottom
+        .{ .dx = 1, .dy = 1, .weight = 1, .divisor_shift = 3 }, // bottom-right
+        .{ .dx = 0, .dy = 2, .weight = 1, .divisor_shift = 3 }, // bottom+1
     },
 };
 
@@ -488,34 +734,44 @@ fn applyErrorDiffusion(
     lut: ColorLookupTable,
     config: DitherConfig,
 ) void {
-    for (0..img.rows) |r| {
-        for (0..img.cols) |c| {
-            const original = img.at(r, c).*;
+    const rows = img.rows;
+    const cols = img.cols;
+    const stride = img.stride;
+    const rows_isize: isize = @intCast(rows);
+    const cols_isize: isize = @intCast(cols);
 
-            // Find nearest palette color using LUT
-            const idx = lut.lookup(original);
+    for (0..rows) |r| {
+        const row_offset = r * stride;
+        const row_slice = img.data[row_offset .. row_offset + cols];
+        for (0..cols) |c| {
+            const current = row_slice[c];
+            const idx = lut.lookup(current);
             const quantized = pal[idx];
 
-            // Calculate error for each channel
-            const r_error = @as(i16, original.r) - @as(i16, quantized.r);
-            const g_error = @as(i16, original.g) - @as(i16, quantized.g);
-            const b_error = @as(i16, original.b) - @as(i16, quantized.b);
+            const r_error = @as(i16, current.r) - @as(i16, quantized.r);
+            const g_error = @as(i16, current.g) - @as(i16, quantized.g);
+            const b_error = @as(i16, current.b) - @as(i16, quantized.b);
 
-            // Update pixel to quantized color
-            img.at(r, c).* = quantized;
+            row_slice[c] = quantized;
 
-            // Distribute error to neighboring pixels
             for (config.distributions) |dist| {
-                const nc = @as(isize, @intCast(c)) + dist[0];
-                const nr = @as(isize, @intCast(r)) + dist[1];
+                const nc_signed = @as(isize, @intCast(c)) + dist.dx;
+                const nr_signed = @as(isize, @intCast(r)) + dist.dy;
+                if (nr_signed < 0 or nr_signed >= rows_isize or nc_signed < 0 or nc_signed >= cols_isize) continue;
 
-                if (img.atOrNull(nr, nc)) |neighbor| {
-                    neighbor.* = Rgb{
-                        .r = @intCast(clamp(@as(i16, neighbor.r) + @divTrunc(r_error * dist[2], dist[3]), 0, 255)),
-                        .g = @intCast(clamp(@as(i16, neighbor.g) + @divTrunc(g_error * dist[2], dist[3]), 0, 255)),
-                        .b = @intCast(clamp(@as(i16, neighbor.b) + @divTrunc(b_error * dist[2], dist[3]), 0, 255)),
-                    };
-                }
+                const nr: usize = @intCast(nr_signed);
+                const nc: usize = @intCast(nc_signed);
+                const neighbor_index = nr * stride + nc;
+
+                const weight = @as(i32, dist.weight);
+                const r_delta = divTruncPow2(@as(i32, r_error) * weight, dist.divisor_shift);
+                const g_delta = divTruncPow2(@as(i32, g_error) * weight, dist.divisor_shift);
+                const b_delta = divTruncPow2(@as(i32, b_error) * weight, dist.divisor_shift);
+
+                var neighbor_ptr = &img.data[neighbor_index];
+                neighbor_ptr.r = clampToU8(@as(i32, neighbor_ptr.r) + r_delta);
+                neighbor_ptr.g = clampToU8(@as(i32, neighbor_ptr.g) + g_delta);
+                neighbor_ptr.b = clampToU8(@as(i32, neighbor_ptr.b) + b_delta);
             }
         }
     }
@@ -584,55 +840,99 @@ fn generateAdaptivePalette(
     palette: []Rgb,
     max_colors: u16,
 ) !usize {
-    const HashMap = std.hash_map.HashMap(u16, u32, std.hash_map.AutoContext(u16), 80);
-    var histogram = HashMap.init(gpa);
-    defer histogram.deinit();
-
-    // Build color histogram (quantized to 5-bit per channel for efficiency)
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const pixel = image.at(r, c).*;
-            const rgb = convertColor(Rgb, pixel);
-
-            // Quantize to 5-bit per channel for histogram
-            const r5 = rgb.r >> (8 - color_quantize_bits);
-            const g5 = rgb.g >> (8 - color_quantize_bits);
-            const b5 = rgb.b >> (8 - color_quantize_bits);
-            const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
-
-            const result = try histogram.getOrPut(key);
-            if (result.found_existing) {
-                result.value_ptr.* += 1;
-            } else {
-                result.value_ptr.* = 1;
-            }
-        }
-    }
-
-    // Convert histogram to array for median cut
     var color_list: std.ArrayList(ColorCount) = .empty;
     defer color_list.deinit(gpa);
 
-    var iter = histogram.iterator();
-    while (iter.next()) |entry| {
-        const key = entry.key_ptr.*;
-        const count = entry.value_ptr.*;
+    var touched_indices = try std.ArrayList(u16).initCapacity(gpa, 1024);
+    defer touched_indices.deinit(gpa);
 
-        const r5 = @as(u8, @intCast((key >> (2 * color_quantize_bits)) & 0x1F));
-        const g5 = @as(u8, @intCast((key >> color_quantize_bits) & 0x1F));
-        const b5 = @as(u8, @intCast(key & 0x1F));
+    const histogram_len = @as(usize, 1) << (3 * color_quantize_bits);
+    const hist_handle_result = acquireAdaptiveHistogram();
 
-        // Convert back to 8-bit with proper scaling
-        const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
-        const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
-        const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
+    if (hist_handle_result) |hist_handle| {
+        defer releaseAdaptiveHistogram(hist_handle);
 
-        try color_list.append(gpa, .{
-            .r = r8,
-            .g = g8,
-            .b = b8,
-            .count = count,
-        });
+        // Build histogram using reusable buffers with generation tracking
+        for (0..image.rows) |r| {
+            for (0..image.cols) |c| {
+                const pixel = image.at(r, c).*;
+                const rgb = convertColor(Rgb, pixel);
+
+                const r5 = rgb.r >> (8 - color_quantize_bits);
+                const g5 = rgb.g >> (8 - color_quantize_bits);
+                const b5 = rgb.b >> (8 - color_quantize_bits);
+                const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
+                const hist_index: usize = @intCast(key);
+
+                if (hist_handle.stamps[hist_index] != hist_handle.generation) {
+                    hist_handle.stamps[hist_index] = hist_handle.generation;
+                    hist_handle.counts[hist_index] = 0;
+                    try touched_indices.append(gpa, @intCast(hist_index));
+                }
+                hist_handle.counts[hist_index] += 1;
+            }
+        }
+
+        try color_list.ensureTotalCapacityPrecise(gpa, touched_indices.items.len);
+        for (touched_indices.items) |key_u16| {
+            const key = @as(usize, key_u16);
+            const count = hist_handle.counts[key];
+            if (count == 0) continue;
+
+            const r5 = @as(u8, @intCast((key >> (2 * color_quantize_bits)) & 0x1F));
+            const g5 = @as(u8, @intCast((key >> color_quantize_bits) & 0x1F));
+            const b5 = @as(u8, @intCast(key & 0x1F));
+
+            const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
+            const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
+            const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
+
+            color_list.appendAssumeCapacity(.{
+                .r = r8,
+                .g = g8,
+                .b = b8,
+                .count = count,
+            });
+        }
+    } else |_| {
+        // Fallback: allocate temporary histogram and zero it
+        var counts = try gpa.alloc(u32, histogram_len);
+        defer gpa.free(counts);
+        @memset(counts[0..histogram_len], 0);
+
+        for (0..image.rows) |r| {
+            for (0..image.cols) |c| {
+                const pixel = image.at(r, c).*;
+                const rgb = convertColor(Rgb, pixel);
+
+                const r5 = rgb.r >> (8 - color_quantize_bits);
+                const g5 = rgb.g >> (8 - color_quantize_bits);
+                const b5 = rgb.b >> (8 - color_quantize_bits);
+                const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
+                const hist_index: usize = @intCast(key);
+                counts[hist_index] += 1;
+            }
+        }
+
+        for (counts, 0..) |count, key_idx| {
+            if (count == 0) continue;
+
+            const key: u32 = @intCast(key_idx);
+            const r5 = @as(u8, @intCast((key >> (2 * color_quantize_bits)) & 0x1F));
+            const g5 = @as(u8, @intCast((key >> color_quantize_bits) & 0x1F));
+            const b5 = @as(u8, @intCast(key & 0x1F));
+
+            const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
+            const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
+            const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
+
+            try color_list.append(gpa, .{
+                .r = r8,
+                .g = g8,
+                .b = b8,
+                .count = count,
+            });
+        }
     }
 
     const palette_size = @min(@min(color_list.items.len, max_colors), palette.len);
