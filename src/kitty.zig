@@ -302,3 +302,37 @@ test "imageToKitty with scaling" {
     // but we can check that it produces valid output
     try testing.expect(kitty_data.len > 100);
 }
+
+test "imageToKitty with chunking enabled" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Create a larger image with low-compressibility pixel data to trigger chunking
+    var img = try Image(Rgb).init(allocator, 128, 128);
+    defer img.deinit(allocator);
+
+    for (0..img.rows) |y| {
+        for (0..img.cols) |x| {
+            const r = @as(u8, @intCast((x * 17 + y * 31) & 0xff));
+            const g = @as(u8, @intCast((x * 43 + y * 7) & 0xff));
+            const b = @as(u8, @intCast((x * 11 + y * 19) & 0xff));
+            img.at(y, x).* = Rgb{ .r = r, .g = g, .b = b };
+        }
+    }
+
+    const options = Options{
+        .enable_chunking = true,
+        .width = 512,
+        .height = 512,
+    };
+
+    const kitty_data = try fromImage(Rgb, img, allocator, options);
+    defer allocator.free(kitty_data);
+
+    // Expect multiple escape sequences when chunking is active
+    try testing.expect(std.mem.count(u8, kitty_data, "\x1b_G") >= 2);
+    // Continuation flag should be present for non-final chunks
+    try testing.expect(std.mem.indexOf(u8, kitty_data, "m=1") != null);
+    // Ensure the final terminator is present
+    try testing.expect(std.mem.endsWith(u8, kitty_data, "\x1b\\"));
+}
