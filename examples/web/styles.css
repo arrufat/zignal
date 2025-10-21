@@ -31,6 +31,76 @@ body {
   font-size: clamp(0.9rem, 2.5vw, 1rem);
   padding: 0 10px;
 }
+.metrics-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.canvas-group {
+  text-align: center;
+  min-width: 220px;
+}
+.canvas-group h3 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: clamp(0.9rem, 3vw, 1.1rem);
+}
+.image-drop {
+  width: 320px;
+  height: 200px;
+  max-width: 90vw;
+  border: 2px dashed #888;
+  border-radius: 6px;
+  background-color: #fff;
+  cursor: pointer;
+  box-sizing: border-box;
+  object-fit: contain;
+}
+.image-drop:hover {
+  border-color: #555;
+}
+.metrics-controls {
+  text-align: center;
+  margin-bottom: 16px;
+}
+.metrics-controls button {
+  padding: 12px 24px;
+  font-size: clamp(1rem, 3vw, 1.1rem);
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+.metrics-controls button:hover {
+  background-color: #0056b3;
+}
+.metrics-results {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  font-size: clamp(0.95rem, 2.5vw, 1.1rem);
+  color: #333;
+  text-align: center;
+}
+.metrics-results div {
+  background: #fff;
+  padding: 10px 16px;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+#status {
+  display: block;
+  margin-top: 8px;
+  color: #666;
+  font-size: clamp(0.85rem, 2.5vw, 1rem);
+}
 #image-container {
   display: flex;
   flex-direction: row;
@@ -92,6 +162,166 @@ canvas:hover {
   margin-top: 10px;
   color: #666;
   font-size: clamp(0.8rem, 2.5vw, 1rem);
+}
+
+#upload-area {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.upload-box {
+  width: 320px;
+  max-width: 90vw;
+  height: 200px;
+  border: 2px dashed #888;
+  border-radius: 6px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.upload-box:hover {
+  border-color: #555;
+}
+
+.upload-box.has-image {
+  border-style: solid;
+  border-color: #007bff;
+}
+
+.upload-box img {
+  max-width: 100%;
+  max-height: 100%;
+  position: absolute;
+  object-fit: contain;
+}
+
+.upload-label {
+  color: #666;
+  text-align: center;
+  pointer-events: none;
+  font-size: clamp(0.9rem, 2.5vw, 1rem);
+}
+
+#parameters {
+  display: none;
+  background: #fff;
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 800px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+#parameters.show {
+  display: block;
+}
+
+#parameters label {
+  display: block;
+  margin-bottom: 5px;
+  color: #333;
+}
+
+#parameters h3 {
+  color: #333;
+  margin: 20px 0 10px 0;
+}
+
+#parameters h3:first-of-type {
+  margin-top: 0;
+}
+
+#parameters input[type="range"] {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.param-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 15px;
+}
+
+.checkbox-inline-label {
+  display: inline-block;
+  margin-left: 8px;
+  color: #333;
+}
+
+#stats {
+  text-align: center;
+  margin: 20px 0;
+  font-family: monospace;
+  color: #333;
+}
+
+.stat-row {
+  margin: 5px 0;
+}
+
+.legend {
+  text-align: center;
+  margin: 10px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.legend span {
+  margin: 0 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  color: #333;
+  background: #eee;
+}
+
+.badge {
+  color: #333;
+  background: #eef1f6;
+}
+
+.badge--excellent {
+  background: #b8f5b8;
+}
+
+.badge--good {
+  background: #fff7b3;
+}
+
+.badge--fair {
+  background: #ffd4a3;
+}
+
+.badge--poor {
+  background: #ffb3b3;
+  color: #8c0000;
+}
+
+#result-area {
+  text-align: center;
+  margin: 20px auto;
+}
+
+#result-canvas {
+  display: none;
+  width: 100%;
+  max-width: min(900px, 90vw);
+  height: auto;
+  border: 2px solid #333;
+  background: #fff;
+}
+
+#result-canvas.visible {
+  display: inline-block;
 }
 
 /* Mobile-specific styles */

@@ -5,94 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ORB Feature Matching</title>
     <link rel="stylesheet" href="styles.css">
-    <style>
-      #upload-area {
-        display: flex;
-        gap: 20px;
-        justify-content: center;
-        margin: 20px 0;
-      }
-      .upload-box {
-        width: 200px;
-        height: 150px;
-        border: 2px dashed #666;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        background: #222;
-        position: relative;
-      }
-      .upload-box.has-image {
-        border-color: #4a9eff;
-        border-style: solid;
-      }
-      .upload-box img {
-        max-width: 100%;
-        max-height: 100%;
-        position: absolute;
-      }
-      .upload-label {
-        color: #888;
-        text-align: center;
-        pointer-events: none;
-      }
-      #result-area {
-        text-align: center;
-        margin: 20px auto;
-      }
-      #result-canvas {
-        border: 2px solid #444;
-        background: #222;
-        display: none;
-        max-width: 100%;
-        height: auto;
-      }
-      #result-canvas.visible {
-        display: inline-block;
-      }
-      .controls {
-        text-align: center;
-        margin: 20px 0;
-      }
-      .controls button {
-        padding: 10px 20px;
-        font-size: 16px;
-        margin: 0 5px;
-      }
-      #parameters label {
-        display: block;
-        margin-bottom: 5px;
-        color: #ccc;
-      }
-      #parameters input[type="range"] {
-        width: 100%;
-        margin-bottom: 10px;
-      }
-      #parameters h3 {
-        color: #fff;
-        margin: 20px 0 10px 0;
-      }
-      #stats {
-        text-align: center;
-        margin: 20px 0;
-        font-family: monospace;
-      }
-      .stat-row {
-        margin: 5px 0;
-      }
-      .legend {
-        text-align: center;
-        margin: 10px 0;
-        font-size: 14px;
-      }
-      .legend span {
-        margin: 0 10px;
-        padding: 2px 6px;
-        border-radius: 3px;
-      }
-    </style>
+    <link rel="icon" type="image/png" href="favicon.png">
   </head>
   <body>
     <div class="header">
@@ -121,9 +34,9 @@
       <button id="toggle-params">Parameters ▼</button>
     </div>
 
-    <div id="parameters" style="display: none; background: #333; padding: 20px; margin: 20px auto; max-width: 800px; border-radius: 8px;">
-      <h3 style="margin-top: 0;">ORB Parameters</h3>
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+    <div id="parameters">
+      <h3>ORB Parameters</h3>
+      <div class="param-grid">
         <div>
           <label for="n-features">Max Features: <span id="n-features-value">300</span></label>
           <input type="range" id="n-features" min="50" max="1000" value="300" step="50">
@@ -143,7 +56,7 @@
       </div>
 
       <h3>Matcher Parameters</h3>
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+      <div class="param-grid">
         <div>
           <label for="max-distance">Max Distance: <span id="max-distance-value">80</span></label>
           <input type="range" id="max-distance" min="20" max="256" value="80" step="10">
@@ -154,7 +67,7 @@
         </div>
         <div>
           <input type="checkbox" id="cross-check" checked>
-          <label for="cross-check" style="display: inline; margin-left: 5px;">Cross-Check Validation</label>
+          <label for="cross-check" class="checkbox-inline-label">Cross-Check Validation</label>
         </div>
       </div>
     </div>
@@ -169,19 +82,17 @@
 
     <div class="legend">
       Match Quality:
-      <span style="background: #00ff00; color: black;">Excellent (<30)</span>
-      <span style="background: #ffff00; color: black;">Good (30-50)</span>
-      <span style="background: #ff8800; color: black;">Fair (50-70)</span>
-      <span style="background: #ff0000; color: white;">Poor (>70)</span>
+      <span class="badge badge--excellent">Excellent (&lt;30)</span>
+      <span class="badge badge--good">Good (30-50)</span>
+      <span class="badge badge--fair">Fair (50-70)</span>
+      <span class="badge badge--poor">Poor (&gt;70)</span>
     </div>
 
     <div id="result-area">
       <canvas id="result-canvas"></canvas>
     </div>
 
-    <input type="file" id="file1" style="display: none;" accept="image/*">
-    <input type="file" id="file2" style="display: none;" accept="image/*">
-
+    <script src="utils.js"></script>
     <script src="./feature_matching.js"></script>
   </body>
 </html>

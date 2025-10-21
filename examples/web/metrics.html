@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Metrics Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="favicon.png">
+  </head>
+  <body>
+    <div class="header">
+      <h1>Metrics Analyzer</h1>
+      <p>Compare two images directly in your browser using PSNR and SSIM</p>
+    </div>
+
+    <div class="instructions">
+      Drop or click the panels below to load a reference image and a distorted image. When both are loaded, click "Compute Metrics" to see the quality scores.
+    </div>
+
+    <div class="metrics-container">
+      <div class="canvas-group">
+        <h3>Reference Image</h3>
+        <canvas id="reference-canvas" class="image-drop" width="320" height="200"></canvas>
+      </div>
+      <div class="canvas-group">
+        <h3>Distorted Image</h3>
+        <canvas id="distorted-canvas" class="image-drop" width="320" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="metrics-controls">
+      <button id="compute-button">Compute Metrics</button>
+      <span id="status"></span>
+    </div>
+
+    <div class="metrics-results">
+      <div><code>PSNR</code>: <span id="psnr-value">--</span></div>
+      <div><code>SSIM</code>: <span id="ssim-value">--</span></div>
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="metrics.js"></script>
+  </body>
+</html>

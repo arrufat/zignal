@@ -52,6 +52,7 @@ Requires Python 3.10+, no external dependencies
 - [Feature distribution matching](https://bfactory-ai.github.io/zignal/examples/fdm.html) - Statistical color transfer
 - [White balance](https://bfactory-ai.github.io/zignal/examples/white-balance.html) - Automatic color correction
 - [Feature matching](https://bfactory-ai.github.io/zignal/examples/feature_matching.html) - ORB feature detection and matching between images
+- [Metrics analyzer](https://bfactory-ai.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
 
 ## Features
 

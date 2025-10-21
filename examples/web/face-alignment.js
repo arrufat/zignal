@@ -1,4 +1,6 @@
 (function () {
+  const { createFileInput, enableDrop } = window.ZignalUtils;
+
   async function setupMediaPipeLandmarks(mode, delegate) {
     const mediapipeVersion = "0.10.15";
     const visionBundle = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${mediapipeVersion}`);
@@ -59,26 +61,6 @@
     processFn();
   });
 
-  canvasWebcam.ondragover = function (event) {
-    event.preventDefault();
-  };
-
-  canvasWebcam.ondrop = function (event) {
-    event.preventDefault();
-    let img = new Image();
-    img.onload = function () {
-      canvasWebcam.width = img.width;
-      canvasWebcam.height = img.height;
-      ctx1.drawImage(img, 0, 0);
-      image = ctx1.getImageData(0, 0, canvasWebcam.width, canvasWebcam.height);
-      original = new ImageData(image.width, image.height);
-      original.data.set(image.data);
-      displayImageSize();
-    };
-    img.src = URL.createObjectURL(event.dataTransfer.files[0]);
-    alignButton.disabled = false;
-  };
-
   function displayImage(file) {
     const reader = new FileReader();
     reader.onload = function (e) {
@@ -98,17 +80,19 @@
     reader.readAsDataURL(file);
   }
 
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.style.display = "none";
-  fileInput.addEventListener("change", function (e) {
-    const file = e.target.files[0];
+  const fileInput = createFileInput(function (file) {
     displayImage(file);
     alignButton.disabled = false;
   });
 
-  canvasWebcam.addEventListener("click", function () {
-    fileInput.click();
+  enableDrop(canvasWebcam, {
+    onClick: function () {
+      fileInput.click();
+    },
+    onDrop: function (file) {
+      displayImage(file);
+      alignButton.disabled = false;
+    },
   });
 
   function startMediaStream() {

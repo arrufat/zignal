@@ -1,4 +1,6 @@
 (function () {
+  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+
   let wasmPromise = fetch("seam_carving.wasm");
   var wasmExports = null;
   const text_decoder = new TextDecoder();
@@ -7,6 +9,7 @@
   let originalHeight = 0;
   let currentImageX = 0;
   let cleanImageData = null;
+  let original = null;
 
   const removeButton = document.getElementById("remove-button");
   const canvas = document.getElementById("canvas-seam");
@@ -15,9 +18,6 @@
 
   // Disable button initially
   removeButton.disabled = true;
-  canvas.ondragover = function (event) {
-    event.preventDefault();
-  };
 
   function displayImageSize() {
     let sizeElement = document.getElementById("size");
@@ -34,7 +34,6 @@
   }
 
   function drawSeamOverlay(seam, offsetX) {
-    // Clear first to ensure we only show one seam
     clearSeamOverlay();
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -51,64 +50,58 @@
     seamOverlay.appendChild(path);
   }
 
-  canvas.ondrop = function (event) {
-    event.preventDefault();
-    let img = new Image();
-    img.onload = function () {
-      originalWidth = img.width;
-      originalHeight = img.height;
-      canvas.width = originalWidth;
-      canvas.height = originalHeight;
-      currentImageX = 0;
-      ctx.drawImage(img, 0, 0);
-      image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      cleanImageData = new ImageData(image.width, image.height);
-      cleanImageData.data.set(image.data);
-      original = new ImageData(image.width, image.height);
-      original.data.set(image.data);
-      clearSeamOverlay();
-      removeButton.disabled = false;
-      displayImageSize();
-    };
-    img.src = URL.createObjectURL(event.dataTransfer.files[0]);
-  };
-
   function displayImage(file) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      const imageData = e.target.result;
-      const img = document.createElement("img");
-      img.src = imageData;
-      img.onload = function () {
-        originalWidth = img.width;
-        originalHeight = img.height;
-        canvas.width = originalWidth;
-        canvas.height = originalHeight;
-        currentImageX = 0;
-        ctx.drawImage(img, 0, 0);
-        image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        cleanImageData = new ImageData(image.width, image.height);
-        cleanImageData.data.set(image.data);
-        original = new ImageData(image.width, image.height);
-        original.data.set(image.data);
-        clearSeamOverlay();
-        removeButton.disabled = false;
-        displayImageSize();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const imageData = e.target.result;
+        const img = document.createElement("img");
+        img.onload = function () {
+          originalWidth = img.width;
+          originalHeight = img.height;
+          canvas.width = originalWidth;
+          canvas.height = originalHeight;
+          currentImageX = 0;
+          ctx.drawImage(img, 0, 0);
+          image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          cleanImageData = new ImageData(image.width, image.height);
+          cleanImageData.data.set(image.data);
+          original = new ImageData(image.width, image.height);
+          original.data.set(image.data);
+          clearSeamOverlay();
+          displayImageSize();
+          resolve();
+        };
+        img.onerror = function () {
+          reject(new Error("Failed to decode image."));
+        };
+        img.src = imageData;
       };
-    };
-    reader.readAsDataURL(file);
+      reader.onerror = function () {
+        reject(new Error("Failed to read file."));
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.style.display = "none";
-  fileInput.addEventListener("change", function (e) {
-    const file = e.target.files[0];
-    displayImage(file);
+  const handleImageFile = createImageLoadHandler({
+    load: displayImage,
+    setLoaded: function (loaded) {
+      removeButton.disabled = !loaded;
+    },
+    onError: function (error) {
+      console.error(error);
+      removeButton.disabled = image == null;
+    },
   });
 
-  canvas.addEventListener("click", function () {
-    fileInput.click();
+  const fileInput = createFileInput(handleImageFile);
+
+  enableDrop(canvas, {
+    onClick: function () {
+      fileInput.click();
+    },
+    onDrop: handleImageFile,
   });
 
   function decodeString(ptr, len) {
