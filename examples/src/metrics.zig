@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Image = @import("zignal").Image;
 const Rgba = @import("zignal").Rgba;
-const metrics = @import("zignal").metrics;
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -38,6 +37,6 @@ pub export fn compute_metrics(
     const reference_img: Image(Rgba) = .initFromSlice(reference_rows, reference_cols, reference_slice);
     const distorted_img: Image(Rgba) = .initFromSlice(distorted_rows, distorted_cols, distorted_slice);
 
-    result_ptr[0] = metrics.psnr(Rgba, reference_img, distorted_img) catch @panic("PSNR computation failed");
-    result_ptr[1] = metrics.ssim(Rgba, reference_img, distorted_img) catch @panic("SSIM computation failed");
+    result_ptr[0] = Image(Rgba).psnr(reference_img, distorted_img) catch @panic("PSNR computation failed");
+    result_ptr[1] = Image(Rgba).ssim(reference_img, distorted_img) catch @panic("SSIM computation failed");
 }
