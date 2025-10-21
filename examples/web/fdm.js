@@ -1,4 +1,6 @@
 (function () {
+  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+
   const canvasSrc = document.getElementById("canvas-src");
   const canvasRef = document.getElementById("canvas-ref");
   const canvasRes = document.getElementById("canvas-res");
@@ -11,6 +13,8 @@
   let refImage = null;
   let srcImageObj = null;
   let refImageObj = null;
+  let srcReady = false;
+  let refReady = false;
   let wasm_exports = null;
 
   const text_decoder = new TextDecoder();
@@ -23,91 +27,103 @@
   // Removed resizeCanvases function - using CSS scaling instead
 
   function displayImage(canvas, ctx, file, isSource) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      const img = new Image();
-      img.onload = function () {
-        // Limit image size to max 2048 on longest side
-        const maxSize = 2048;
-        let width = img.width;
-        let height = img.height;
-        let wasResized = false;
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const img = new Image();
+        img.onload = function () {
+          const maxSize = 2048;
+          let width = img.width;
+          let height = img.height;
+          let wasResized = false;
 
-        if (width > maxSize || height > maxSize) {
-          const scale = Math.min(maxSize / width, maxSize / height);
-          width = Math.floor(width * scale);
-          height = Math.floor(height * scale);
-          wasResized = true;
-          console.log(`Image resized from ${img.width}x${img.height} to ${width}x${height}`);
-        }
+          if (width > maxSize || height > maxSize) {
+            const scale = Math.min(maxSize / width, maxSize / height);
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+            wasResized = true;
+            console.log(`Image resized from ${img.width}x${img.height} to ${width}x${height}`);
+          }
 
-        if (isSource) {
-          srcImageObj = img;
-          srcImage = file;
-        } else {
-          refImageObj = img;
-          refImage = file;
-        }
+          if (isSource) {
+            srcImageObj = img;
+            srcImage = file;
+          } else {
+            refImageObj = img;
+            refImage = file;
+          }
 
-        // Set canvas to resized dimensions
-        canvas.width = width;
-        canvas.height = height;
-
-        // Draw resized image
-        ctx.drawImage(img, 0, 0, width, height);
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve({ wasResized });
+        };
+        img.onerror = function () {
+          reject(new Error("Failed to decode image."));
+        };
+        img.src = e.target.result;
       };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+      reader.onerror = function () {
+        reject(new Error("Failed to read file."));
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
-  // File input for source image
-  const fileInput1 = document.createElement("input");
-  fileInput1.type = "file";
-  fileInput1.style.display = "none";
-  fileInput1.addEventListener("change", function (e) {
-    const file = e.target.files[0];
-    displayImage(canvasSrc, ctxSrc, file, true);
+  function updateMatchButton() {
+    matchButton.disabled = !(srcReady && refReady);
+  }
+
+  const handleSrcFile = createImageLoadHandler({
+    load: function (file) {
+      return displayImage(canvasSrc, ctxSrc, file, true);
+    },
+    setLoaded: function (loaded) {
+      srcReady = loaded;
+      updateMatchButton();
+    },
+    onError: function (error) {
+      console.error(error);
+      if (srcImage && srcImageObj) {
+        srcReady = true;
+        updateMatchButton();
+      }
+    },
   });
 
-  // File input for target image
-  const fileInput2 = document.createElement("input");
-  fileInput2.type = "file";
-  fileInput2.style.display = "none";
-  fileInput2.addEventListener("change", function (e) {
-    const file = e.target.files[0];
-    displayImage(canvasRef, ctxRef, file, false);
+  const handleRefFile = createImageLoadHandler({
+    load: function (file) {
+      return displayImage(canvasRef, ctxRef, file, false);
+    },
+    setLoaded: function (loaded) {
+      refReady = loaded;
+      updateMatchButton();
+    },
+    onError: function (error) {
+      console.error(error);
+      if (refImage && refImageObj) {
+        refReady = true;
+        updateMatchButton();
+      }
+    },
   });
 
-  canvasSrc.addEventListener("click", function () {
-    fileInput1.click();
+  const fileInput1 = createFileInput(handleSrcFile);
+  const fileInput2 = createFileInput(handleRefFile);
+
+  enableDrop(canvasSrc, {
+    onClick: function () {
+      fileInput1.click();
+    },
+    onDrop: handleSrcFile,
   });
 
-  canvasRef.addEventListener("click", function () {
-    fileInput2.click();
+  enableDrop(canvasRef, {
+    onClick: function () {
+      fileInput2.click();
+    },
+    onDrop: handleRefFile,
   });
-
-  // Drag and drop for source image
-  canvasSrc.ondragover = function (event) {
-    event.preventDefault();
-  };
-
-  canvasSrc.ondrop = function (event) {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    displayImage(canvasSrc, ctxSrc, file, true);
-  };
-
-  // Drag and drop for target image
-  canvasRef.ondragover = function (event) {
-    event.preventDefault();
-  };
-
-  canvasRef.ondrop = function (event) {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    displayImage(canvasRef, ctxRef, file, false);
-  };
 
   matchButton.addEventListener("click", function () {
     if (!srcImage || !refImage) {
