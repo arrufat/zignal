@@ -281,7 +281,7 @@ fn parseHeader(chunk: Chunk) !Header {
     }
 
     // Prevent resource exhaustion with reasonable size limits
-    const MAX_DIMENSION = 32767; // PNG spec limit
+    const MAX_DIMENSION: u32 = 0x7FFF_FFFF; // PNG spec maximum (2^31 - 1)
     const MAX_PIXELS = 268435456; // 16K x 16K = 256 MB pixels
     if (width > MAX_DIMENSION or height > MAX_DIMENSION) {
         return error.ImageTooLarge;
@@ -1418,8 +1418,10 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
 
 /// Extract RGB pixel from Adam7 pass data with optional transparency
 fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
-    const offset = pass_x * 3;
-    if (offset + 2 >= src_row.len) {
+    const channel_stride: usize = if (header.bit_depth == 16) 2 else 1;
+    const total_bytes: usize = channel_stride * header.channels();
+    const offset = pass_x * total_bytes;
+    if (offset + total_bytes > src_row.len) {
         return switch (T) {
             u8 => 0,
             Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
@@ -1433,13 +1435,13 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
     else
         src_row[offset];
     const g = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8))
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8))
     else
-        src_row[offset + 1];
+        src_row[offset + channel_stride];
     const b = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8))
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8))
     else
-        src_row[offset + 2];
+        src_row[offset + channel_stride * 2];
 
     // Check for transparency
     const is_transparent = if (config.transparency) |trans_data| blk: {
@@ -1476,8 +1478,10 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
 
 /// Extract RGBA pixel from Adam7 pass data
 fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
-    const offset = pass_x * 4;
-    if (offset + 3 >= src_row.len) {
+    const channel_stride: usize = if (header.bit_depth == 16) 2 else 1;
+    const total_bytes: usize = channel_stride * header.channels();
+    const offset = pass_x * total_bytes;
+    if (offset + total_bytes > src_row.len) {
         return switch (T) {
             u8 => 0,
             Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
@@ -1491,17 +1495,17 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
     else
         src_row[offset];
     const g = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8))
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8))
     else
-        src_row[offset + 1];
+        src_row[offset + channel_stride];
     const b = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8))
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8))
     else
-        src_row[offset + 2];
+        src_row[offset + channel_stride * 2];
     const a = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + 6 .. offset + 8][0..2], .big) >> 8))
+        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 3 .. offset + channel_stride * 3 + 2][0..2], .big) >> 8))
     else
-        src_row[offset + 3];
+        src_row[offset + channel_stride * 3];
 
     // Apply gamma correction to RGB channels (not alpha)
     const corrected_r = applyGammaCorrection(r, config);
@@ -2097,8 +2101,18 @@ test "Adam7 interlaced PNG support" {
     const rgb_pixel = extractRgbPixel(Rgb, &rgb_src, 1, interlaced_header, PixelExtractionConfig{});
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 255, .b = 0 }, rgb_pixel);
 
+    const rgba_header = Header{
+        .width = 4,
+        .height = 4,
+        .bit_depth = 8,
+        .color_type = .rgba,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 1,
+    };
+
     const rgba_src = [_]u8{ 255, 0, 0, 255, 0, 255, 0, 128 }; // red (alpha=255), green (alpha=128)
-    const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, interlaced_header, PixelExtractionConfig{});
+    const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, rgba_header, PixelExtractionConfig{});
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
 }
 
