@@ -304,3 +304,47 @@ test "Matrix SIMD 9x9 matrix with known values" {
     try expectEqual(@as(f32, 45.0), result4.at(8, 0).*);
     try expectEqual(@as(f32, 405.0), result4.at(8, 8).*);
 }
+
+test "Matrix GEMM double transpose respects operands" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var a: Matrix(f64) = try .init(arena.allocator(), 40, 3);
+    // Fill A with distinctive values to make incorrect strides evident
+    for (0..a.rows) |i| {
+        for (0..a.cols) |j| {
+            a.at(i, j).* = @floatFromInt(i * a.cols + j + 1);
+        }
+    }
+
+    var b: Matrix(f64) = try .init(arena.allocator(), 5, 40);
+    for (0..b.rows) |i| {
+        for (0..b.cols) |j| {
+            // Variation per row/column, ensures mismatch shows up in result
+            b.at(i, j).* = @floatFromInt((i + 1) * 100 + j);
+        }
+    }
+
+    // Forces SIMD path: a_rows * a_cols * b_cols = 3 * 40 * 5 = 600 >= 512
+    const simd_result = try a.gemm(true, b, true, 1.0, 0.0, null).eval();
+
+    const expected = blk: {
+        var temp = try Matrix(f64).init(arena.allocator(), a.cols, b.rows);
+        for (0..a.cols) |i| {
+            for (0..b.rows) |j| {
+                var accum: f64 = 0;
+                for (0..a.rows) |k| {
+                    accum += a.at(k, i).* * b.at(j, k).*;
+                }
+                temp.at(i, j).* = accum;
+            }
+        }
+        break :blk temp;
+    };
+
+    for (0..expected.rows) |i| {
+        for (0..expected.cols) |j| {
+            try expectEqual(expected.at(i, j).*, simd_result.at(i, j).*);
+        }
+    }
+}
