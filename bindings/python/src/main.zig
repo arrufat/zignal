@@ -18,6 +18,7 @@ const border_mode = @import("border_mode.zig");
 const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
+const running_stats = @import("running_stats.zig");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const rectangle = @import("rectangle.zig");
@@ -73,6 +74,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .name = "FeatureDistributionMatching", .ty = @ptrCast(&fdm.FeatureDistributionMatchingType) },
         .{ .name = "Assignment", .ty = @ptrCast(&optimization.AssignmentType) },
         .{ .name = "PixelIterator", .ty = @ptrCast(&pixel_iterator.PixelIteratorType) },
+        .{ .name = "RunningStats", .ty = @ptrCast(&running_stats.RunningStatsType) },
     };
 
     inline for (type_table) |entry| {
