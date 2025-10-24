@@ -113,9 +113,9 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 var c: usize = 0;
 
                 // SIMD path for interior pixels
-                if (r >= half_h and r + half_h < src.rows and src.cols > vec_len + cols) {
+                if (r >= half_h and r + half_h < src.rows and src.cols >= vec_len + 2 * half_w) {
                     c = half_w;
-                    const safe_end = if (src.cols > vec_len + half_w) src.cols - vec_len - half_w else half_w;
+                    const safe_end = src.cols - half_w;
 
                     while (c + vec_len <= safe_end) : (c += vec_len) {
                         var result_vec: @Vector(vec_len, Scalar) = @splat(0);
@@ -215,32 +215,32 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                     const scale = Pixel.scale;
 
                     // Separate channels using helper
-                    const channels = try channel_ops.splitChannels(T, self, allocator);
+                    const split = try channel_ops.splitChannelsWithUniform(T, self, allocator);
+                    const channels = split.channels;
+                    const uniforms = split.uniforms;
                     defer for (channels) |channel| allocator.free(channel);
 
                     const ChannelStrategy = enum { normalized, scaled, non_uniform };
-                    var uniform_values: [channels.len]?u8 = undefined;
                     var strategies: [channels.len]ChannelStrategy = undefined;
 
-                    inline for (channels, 0..) |src_data, i| {
-                        if (channel_ops.findUniformValue(u8, src_data)) |value| {
-                            uniform_values[i] = value;
+                    inline for (uniforms, 0..) |uniform_value, i| {
+                        if (uniform_value) |_| {
                             strategies[i] = if (kernel_sum == scale) .normalized else .scaled;
                         } else {
-                            uniform_values[i] = null;
                             strategies[i] = .non_uniform;
                         }
                     }
 
                     // Allocate output planes for strategies that require storage
                     var out_channels: [channels.len][]u8 = undefined;
-                    inline for (&out_channels, strategies, 0..) |*out_ch, strategy, i| {
+                    inline for (&out_channels, strategies, uniforms) |*out_ch, strategy, uniform_value| {
                         switch (strategy) {
                             .normalized => out_ch.* = &[_]u8{}, // Placeholder for merge
                             .scaled, .non_uniform => out_ch.* = try allocator.alloc(u8, plane_size),
                         }
                         if (strategy == .scaled) {
-                            const accum = @as(Kernel.Scalar, @intCast(uniform_values[i].?)) * kernel_sum;
+                            const value = uniform_value orelse unreachable;
+                            const accum = @as(Kernel.Scalar, @intCast(value)) * kernel_sum;
                             const stored = Pixel.store(accum);
                             @memset(out_ch.*, stored);
                         }
@@ -352,48 +352,45 @@ pub fn convolveSeparable(
                     }
 
                     // Separate channels using helper
-                    const channels = try channel_ops.splitChannels(T, image, allocator);
+                    const split = try channel_ops.splitChannelsWithUniform(T, image, allocator);
+                    const channels = split.channels;
+                    const uniforms = split.uniforms;
                     defer for (channels) |channel| allocator.free(channel);
 
                     // Check which channels are uniform to avoid unnecessary processing
                     var is_uniform: [channels.len]bool = undefined;
 
-                    inline for (channels, 0..) |src_data, i| {
-                        if (channel_ops.findUniformValue(u8, src_data)) |_| {
-                            is_uniform[i] = true;
-                        } else {
-                            is_uniform[i] = false;
-                        }
+                    inline for (uniforms, 0..) |uniform_value, i| {
+                        is_uniform[i] = uniform_value != null;
                     }
 
-                    // Allocate output and temp planes only for non-uniform channels
+                    // Allocate output planes and a shared temp buffer only for non-uniform channels
                     var out_channels: [channels.len][]u8 = undefined;
-                    var temp_channels: [channels.len][]u8 = undefined;
-                    inline for (&out_channels, &temp_channels, is_uniform) |*out_ch, *temp_ch, uniform| {
+                    var temp_plane: []u8 = &[_]u8{};
+                    defer if (temp_plane.len > 0) allocator.free(temp_plane);
+
+                    inline for (&out_channels, is_uniform) |*out_ch, uniform| {
                         if (uniform) {
-                            // For uniform channels, no processing needed
                             out_ch.* = &[_]u8{};
-                            temp_ch.* = &[_]u8{};
                         } else {
                             out_ch.* = try allocator.alloc(u8, plane_size);
-                            temp_ch.* = try allocator.alloc(u8, plane_size);
-                        }
-                    }
-                    defer {
-                        inline for (out_channels, temp_channels, is_uniform) |out_ch, temp_ch, uniform| {
-                            if (!uniform) {
-                                if (out_ch.len > 0) allocator.free(out_ch);
-                                if (temp_ch.len > 0) allocator.free(temp_ch);
+                            if (temp_plane.len == 0) {
+                                temp_plane = try allocator.alloc(u8, plane_size);
                             }
                         }
                     }
+                    defer {
+                        inline for (out_channels, is_uniform) |out_ch, uniform| {
+                            if (!uniform and out_ch.len > 0) allocator.free(out_ch);
+                        }
+                    }
 
-                    // Convolve only non-uniform channels
-                    inline for (channels, out_channels, temp_channels, is_uniform) |src_data, dst_data, temp_data, uniform| {
+                    // Convolve only non-uniform channels, reusing the shared temp buffer
+                    inline for (channels, out_channels, is_uniform) |src_data, dst_data, uniform| {
                         if (!uniform) {
                             const src_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_data };
                             const dst_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_data };
-                            const tmp_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = temp_data };
+                            const tmp_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = temp_plane };
                             convolveSeparablePlane(u8, src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
                         }
                     }

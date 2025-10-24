@@ -51,16 +51,20 @@ fn FieldTypeOf(comptime T: type) type {
     return first_type;
 }
 
-/// Separate all channels from a struct image into individual planes.
-/// Allocates and fills channel planes for all fields.
-/// The caller is responsible for freeing the returned slices.
-pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
+/// Separate all channels from a struct image into individual planes while tracking uniform channels.
+pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: std.mem.Allocator) !struct {
+    channels: [Image(T).channels()][]FieldTypeOf(T),
+    uniforms: [Image(T).channels()]?FieldTypeOf(T),
+} {
     const num_channels = comptime Image(T).channels();
     const fields = std.meta.fields(T);
     const FieldType = FieldTypeOf(T);
     const plane_size = image.rows * image.cols;
 
     var channels: [num_channels][]FieldType = undefined;
+    var has_value: [num_channels]bool = @splat(false);
+    var is_uniform: [num_channels]bool = @splat(true);
+    var uniform_values: [num_channels]FieldType = undefined;
 
     // Allocate each channel with proper error handling
     var allocated_count: usize = 0;
@@ -81,13 +85,36 @@ pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Alloc
         for (0..image.cols) |c| {
             const pixel = image.at(r, c).*;
             inline for (fields, 0..) |field, i| {
-                channels[i][idx] = @field(pixel, field.name);
+                const value: FieldType = @field(pixel, field.name);
+                channels[i][idx] = value;
+
+                if (!has_value[i]) {
+                    uniform_values[i] = value;
+                    has_value[i] = true;
+                } else if (is_uniform[i] and value != uniform_values[i]) {
+                    is_uniform[i] = false;
+                }
             }
             idx += 1;
         }
     }
 
-    return channels;
+    var uniforms: [num_channels]?FieldType = undefined;
+    inline for (&uniforms, has_value, is_uniform, uniform_values) |*slot, have, uni, value| {
+        slot.* = if (have and uni) value else null;
+    }
+
+    return .{
+        .channels = channels,
+        .uniforms = uniforms,
+    };
+}
+
+/// Separate all channels from a struct image into individual planes.
+/// Allocates and fills channel planes for all fields.
+/// The caller is responsible for freeing the returned slices.
+pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
+    return (try splitChannelsWithUniform(T, image, allocator)).channels;
 }
 
 /// Combine channels back into struct image.
