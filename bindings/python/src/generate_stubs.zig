@@ -23,6 +23,7 @@ const interpolation_module = @import("interpolation.zig");
 const border_mode_module = @import("border_mode.zig");
 const optimization_module = @import("optimization.zig");
 const transforms_module = @import("transforms.zig");
+const running_stats_module = @import("running_stats.zig");
 
 const GeneratedStub = struct {
     content: std.ArrayList(u8),
@@ -338,7 +339,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         \\from __future__ import annotations
         \\
         \\from enum import IntEnum
-        \\from typing import Literal, TypeAlias
+        \\from typing import Iterable, Literal, TypeAlias
         \\
         \\import numpy as np
         \\from numpy.typing import NDArray
@@ -528,6 +529,19 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &fdm_module.fdm_special_methods_metadata,
     });
 
+    // Generate RunningStats class from metadata
+    const running_stats_methods = stub_metadata.extractMethodInfo(&running_stats_module.running_stats_methods_metadata);
+    const running_stats_properties = stub_metadata.extractPropertyInfo(&running_stats_module.running_stats_properties_metadata);
+    const running_stats_doc = std.mem.span(running_stats_module.RunningStatsType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "RunningStats",
+        .doc = running_stats_doc,
+        .methods = &running_stats_methods,
+        .properties = &running_stats_properties,
+        .bases = &.{},
+        .special_methods = &running_stats_module.running_stats_special_methods_metadata,
+    });
+
     // Generate PCA class from metadata
     const pca_doc = std.mem.span(pca_module.PCAType.tp_doc);
     try generateClassFromMetadata(&stub, .{
@@ -636,6 +650,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     try stub.write("    Assignment as Assignment,\n");
     try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
     try stub.write("    PCA as PCA,\n");
+    try stub.write("    RunningStats as RunningStats,\n");
     try stub.write("    ConvexHull as ConvexHull,\n");
     try stub.write("    SimilarityTransform as SimilarityTransform,\n");
     try stub.write("    AffineTransform as AffineTransform,\n");
