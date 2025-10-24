@@ -1,6 +1,6 @@
 .{
     .name = .zignal,
-    .version = "0.8.0-dev",
+    .version = "0.7.1",
     .fingerprint = 0x5303c43db377b63a,
     .minimum_zig_version = "0.16.0-dev.368+2a97e0af6",
     .dependencies = .{},

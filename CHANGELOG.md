@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.1] - 2025-10-24
+
+### Performance
+- **Convolution Pipeline**: Added SIMD-accelerated inner loops and early-outs when all three color channels share identical data, cutting blur runtimes substantially on large uniform regions.
+- **Terminal Rendering**: Reworked the sixel encoder with improved palette generation, chunking heuristics, and profiling hooks to lower output size and CPU time for high-resolution frames.
+
+### Fixes
+- **Matrix GEMM**: Correctly handles `Aᵀ * Bᵀ` paths when dispatching to SIMD kernels, eliminating shape-related crashes in advanced linear algebra workflows.
+- **PNG Decoder**: Fixed 16-bit pixel extraction offsets to stop channel swapping in high bit-depth images.
+- **JPEG Decoder**: Hardened restart-marker handling and memory management to avoid buffer overruns on truncated streams.
+- **Feature Distribution Matching**: Ensures color-source matching respects grayscale targets, yielding stable feature histograms.
+- **Rectangle Geometry**: Tightened overlap/containment logic for greater numerical stability in downstream layout calculations.
+- **Canvas Drawing**: Floors floating-point coordinates before pixel writes, preventing occasional off-by-one artefacts.
+
+### Internal & Tooling
+- **Image Metrics Module**: Consolidated PSNR/SSIM helpers into `image/metrics.zig`, simplifying reuse from examples and keeping `image.zig` lean.
+- **Examples**: Added an image-quality metrics showcase and refreshed web demos to highlight the new encoder improvements.
+
 ## [0.7.0] - 2025-10-08
 
 ### Major Features

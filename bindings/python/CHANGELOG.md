@@ -1,5 +1,17 @@
 # Python Bindings Changelog
 
+## [0.7.1] - 2025-10-24
+
+### Added
+- **RunningStats**: New streaming statistics class mirroring the Zig API, with methods for `add()`, `extend()`, `scale()`, `combine()`, and read-only properties (`count`, `mean`, `variance`, `skewness`, etc.).
+- **Perlin Noise**: Exposed `zignal.perlin(...)` for procedural noise generation with amplitude, frequency, octave, persistence, and lacunarity controls.
+
+### Changed
+- **Argument Validation**: Tightened range checks and error messaging for Perlin noise parameters, providing descriptive `ValueError`s when inputs fall outside supported bounds.
+
+### Fixed
+- **Pixel Iterator & Proxy Lifetime**: Corrected reference management when returning pixel proxies from iterators, eliminating GC crashes during long-running image traversals.
+
 ## [0.7.0] - 2025-10-08
 
 ### Added
