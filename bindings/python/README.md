@@ -1,6 +1,7 @@
 # Zignal Python Bindings
 
-[![PyPI version](https://img.shields.io/pypi/v/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Python versions](https://img.shields.io/pypi/pyversions/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bfactory-ai/zignal/blob/main/LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Python versions](https://img.shields.io/pypi/pyversions/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Downloads](https://static.pepy.tech/badge/zignal-processing)](https://pepy.tech/project/zignal-processing) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bfactory-ai/zignal/blob/main/LICENSE)
+
 
 Zero-dependency image processing primitives written in Zig and packaged for Python.
 
