@@ -19,6 +19,7 @@ const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
 const running_stats = @import("running_stats.zig");
+const perlin = @import("perlin.zig");
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const rectangle = @import("rectangle.zig");
@@ -42,7 +43,18 @@ var zignal_module = c.PyModuleDef{
 };
 
 // Module function metadata - combines functions from various modules
-pub const module_functions_metadata = optimization.module_functions_metadata;
+pub const module_functions_metadata = blk: {
+    const opt_funcs = optimization.module_functions_metadata;
+    const perlin_funcs = perlin.perlin_functions_metadata;
+    var combined: [opt_funcs.len + perlin_funcs.len]stub_metadata.FunctionWithMetadata = undefined;
+    for (opt_funcs, 0..) |func, idx| {
+        combined[idx] = func;
+    }
+    for (perlin_funcs, 0..) |func, idx| {
+        combined[opt_funcs.len + idx] = func;
+    }
+    break :blk combined;
+};
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);
