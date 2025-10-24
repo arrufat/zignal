@@ -61,7 +61,7 @@ pub inline fn assignPixel(dest: anytype, sample: anytype, blend_mode: Blending) 
         if (blend_mode != .none) {
             const rgba_sample: Rgba = sample;
             if (comptime DestType == Rgba) {
-                dest.* = dest.*.blend(rgba_sample, blend_mode);
+                dest.* = dest.blend(rgba_sample, blend_mode);
             } else {
                 const dst_rgba = convertColor(Rgba, dest.*);
                 const blended = dst_rgba.blend(rgba_sample, blend_mode);

@@ -350,14 +350,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             percentile: f64,
 
             fn compute(self: *const @This(), hist: *const Histogram(u8), _: usize) Error!u8 {
-                return hist.*.percentileFraction(self.percentile);
+                return hist.percentileFraction(self.percentile);
             }
         };
 
         const MidpointReducer = struct {
             fn compute(_: *const @This(), hist: *const Histogram(u8), _: usize) Error!u8 {
-                const min = hist.*.firstNonZero() orelse 0;
-                const max = hist.*.lastNonZero() orelse min;
+                const min = hist.firstNonZero() orelse 0;
+                const max = hist.lastNonZero() orelse min;
                 const sum: u16 = @as(u16, min) + @as(u16, max);
                 return @intCast((sum + 1) / 2);
             }
@@ -373,14 +373,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 const trim_each = @min(trimmed_each, window_area / 2);
 
                 var total_sum: u64 = 0;
-                for (hist.*.values, 0..) |count, value| {
+                for (hist.values, 0..) |count, value| {
                     total_sum += @as(u64, count) * @as(u64, value);
                 }
 
                 var low_sum: u64 = 0;
                 var low_count: usize = 0;
                 var remaining = trim_each;
-                for (hist.*.values, 0..) |count, value| {
+                for (hist.values, 0..) |count, value| {
                     if (remaining == 0) break;
                     const take = @min(@as(usize, count), remaining);
                     low_sum += @as(u64, take) * @as(u64, value);
@@ -391,9 +391,9 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 var high_sum: u64 = 0;
                 var high_count: usize = 0;
                 remaining = trim_each;
-                var idx: usize = hist.*.values.len;
+                var idx: usize = hist.values.len;
                 while (idx > 0 and remaining > 0) : (idx -= 1) {
-                    const count = hist.*.values[idx - 1];
+                    const count = hist.values[idx - 1];
                     if (count == 0) continue;
                     const take = @min(@as(usize, count), remaining);
                     high_sum += @as(u64, take) * @as(u64, idx - 1);
