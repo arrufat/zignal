@@ -102,6 +102,43 @@ pub fn Rectangle(comptime T: type) type {
             return true;
         }
 
+        /// Returns the center of the rectangle as an (x, y) tuple.
+        pub fn center(self: Self) std.meta.Tuple(&.{ T, T }) {
+            switch (@typeInfo(T)) {
+                .int => {
+                    const half_width = @divTrunc(self.r - self.l, 2);
+                    const half_height = @divTrunc(self.b - self.t, 2);
+                    return .{ self.l + half_width, self.t + half_height };
+                },
+                .float => {
+                    const half_width = (self.r - self.l) / 2;
+                    const half_height = (self.b - self.t) / 2;
+                    return .{ self.l + half_width, self.t + half_height };
+                },
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            }
+        }
+
+        /// Returns the top-left corner as an (x, y) tuple.
+        pub fn topLeft(self: Self) std.meta.Tuple(&.{ T, T }) {
+            return .{ self.l, self.t };
+        }
+
+        /// Returns the top-right corner as an (x, y) tuple.
+        pub fn topRight(self: Self) std.meta.Tuple(&.{ T, T }) {
+            return .{ self.r, self.t };
+        }
+
+        /// Returns the bottom-left corner as an (x, y) tuple.
+        pub fn bottomLeft(self: Self) std.meta.Tuple(&.{ T, T }) {
+            return .{ self.l, self.b };
+        }
+
+        /// Returns the bottom-right corner as an (x, y) tuple.
+        pub fn bottomRight(self: Self) std.meta.Tuple(&.{ T, T }) {
+            return .{ self.r, self.b };
+        }
+
         /// Grows the given rectangle by expanding its borders by `amount`.
         pub fn grow(self: Self, amount: T) Self {
             return switch (@typeInfo(T)) {
@@ -140,6 +177,35 @@ pub fn Rectangle(comptime T: type) type {
             };
         }
 
+        /// Returns a new rectangle translated by (dx, dy).
+        pub fn translate(self: Self, dx: T, dy: T) Self {
+            return switch (@typeInfo(T)) {
+                .int => .{
+                    .l = self.l +| dx,
+                    .t = self.t +| dy,
+                    .r = self.r +| dx,
+                    .b = self.b +| dy,
+                },
+                .float => .{
+                    .l = self.l + dx,
+                    .t = self.t + dy,
+                    .r = self.r + dx,
+                    .b = self.b + dy,
+                },
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+        }
+
+        /// Returns the rectangle clipped to `bounds`.
+        pub fn clip(self: Self, bounds: Self) Self {
+            return .{
+                .l = @max(self.l, bounds.l),
+                .t = @max(self.t, bounds.t),
+                .r = @min(self.r, bounds.r),
+                .b = @min(self.b, bounds.b),
+            };
+        }
+
         /// Returns the intersection of two rectangles, or null if they don't overlap.
         pub fn intersect(self: Self, other: Self) ?Self {
             const l = @max(self.l, other.l);
@@ -153,6 +219,28 @@ pub fn Rectangle(comptime T: type) type {
                 .float => if (l >= r or t >= b) null else Self.init(l, t, r, b),
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             };
+        }
+
+        /// Returns the diagonal length of the rectangle as an f64.
+        pub fn diagonal(self: Self) f64 {
+            const width_val = switch (@typeInfo(T)) {
+                .int => @as(f64, @floatFromInt(self.width())),
+                .float => @as(f64, self.width()),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+            const height_val = switch (@typeInfo(T)) {
+                .int => @as(f64, @floatFromInt(self.height())),
+                .float => @as(f64, self.height()),
+                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            };
+            return std.math.hypot(width_val, height_val);
+        }
+
+        /// Returns true if `other` is fully contained within `self`.
+        pub fn covers(self: Self, other: Self) bool {
+            if (self.isEmpty()) return false;
+            if (other.isEmpty()) return true;
+            return other.l >= self.l and other.t >= self.t and other.r <= self.r and other.b <= self.b;
         }
 
         /// Calculates the Intersection over Union (IoU) of two rectangles.
@@ -177,11 +265,13 @@ pub fn Rectangle(comptime T: type) type {
             };
         }
 
-        /// Checks if two rectangles overlap "enough" based on IoU and coverage thresholds.
-        /// Returns true if any of these conditions are met:
+        /// Determines whether two rectangles overlap enough using intersection-over-union (IoU)
+        /// and coverage thresholds. A rectangle is considered overlapping if:
         /// - IoU > iou_thresh
-        /// - intersection.area / self.area > coverage_thresh
-        /// - intersection.area / other.area > coverage_thresh
+        /// - intersection.area / self.area ≥ coverage_thresh
+        /// - intersection.area / other.area ≥ coverage_thresh
+        /// Set `iou_thresh = 0` and `coverage_thresh = 0` to test simple intersection.
+        /// Use `contains` for directional containment checks.
         pub fn overlaps(self: Self, other: Self, iou_thresh: f64, coverage_thresh: f64) bool {
             assert(iou_thresh >= 0 and iou_thresh <= 1);
             assert(coverage_thresh >= 0 and coverage_thresh <= 1);
@@ -210,7 +300,8 @@ pub fn Rectangle(comptime T: type) type {
                     .float => @as(f64, intersection_area) / @as(f64, self_area),
                     else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
                 };
-                if (self_coverage > coverage_thresh) return true;
+                // Inclusive comparison lets coverage_thresh = 1 represent full containment.
+                if (self_coverage >= coverage_thresh) return true;
             }
 
             if (other_area > 0) {
@@ -219,7 +310,8 @@ pub fn Rectangle(comptime T: type) type {
                     .float => @as(f64, intersection_area) / @as(f64, other_area),
                     else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
                 };
-                if (other_coverage > coverage_thresh) return true;
+                // Same rationale as above—coverage_thresh = 1 means the other rect is fully covered.
+                if (other_coverage >= coverage_thresh) return true;
             }
 
             return false;
@@ -338,4 +430,45 @@ test "Rectangle contains rejects NaN" {
     const nan = std.math.nan(f32);
     try expectEqual(false, rect.contains(nan, 0.0));
     try expectEqual(false, rect.contains(0.0, nan));
+}
+
+test "Rectangle helpers" {
+    const expectApproxEqAbs = std.testing.expectApproxEqAbs;
+
+    const rect = Rectangle(i32){ .l = 10, .t = 20, .r = 30, .b = 50 };
+    try expectEqual(rect.center(), .{ 20, 35 });
+    try expectEqual(rect.topLeft(), .{ 10, 20 });
+    try expectEqual(rect.topRight(), .{ 30, 20 });
+    try expectEqual(rect.bottomLeft(), .{ 10, 50 });
+    try expectEqual(rect.bottomRight(), .{ 30, 50 });
+
+    const moved = rect.translate(5, -5);
+    try expectEqualDeep(moved, Rectangle(i32){ .l = 15, .t = 15, .r = 35, .b = 45 });
+
+    const moved_again = rect.translate(-5, 5);
+    try expectEqualDeep(moved_again, Rectangle(i32){ .l = 5, .t = 25, .r = 25, .b = 55 });
+
+    const bounds = Rectangle(i32){ .l = 0, .t = 0, .r = 25, .b = 40 };
+    const clipped = rect.clip(bounds);
+    try expectEqualDeep(clipped, Rectangle(i32){ .l = 10, .t = 20, .r = 25, .b = 40 });
+
+    const outside = Rectangle(i32){ .l = 100, .t = 100, .r = 120, .b = 120 };
+    const clipped_empty = outside.clip(bounds);
+    try expectEqual(true, clipped_empty.isEmpty());
+
+    const inner = Rectangle(i32){ .l = 12, .t = 22, .r = 18, .b = 30 };
+    try expectEqual(rect.covers(inner), true);
+    try expectEqual(inner.covers(rect), false);
+
+    const overlapping = Rectangle(i32){ .l = 25, .t = 45, .r = 40, .b = 60 };
+    try expectEqual(rect.overlaps(overlapping, 0.0, 0.0), true);
+    try expectEqual(rect.overlaps(outside, 0.0, 0.0), false);
+
+    try expectApproxEqAbs(rect.diagonal(), std.math.hypot(20.0, 30.0), 1e-9);
+
+    const frect = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 2.0, .b = 2.0 };
+    try expectEqual(frect.center(), .{ 1.0, 1.0 });
+    const float_bounds = Rectangle(f32){ .l = -1.0, .t = -1.0, .r = 4.0, .b = 4.0 };
+    try expectEqual(false, frect.clip(float_bounds).isEmpty());
+    try expectEqual(frect.covers(Rectangle(f32){ .l = 0.5, .t = 0.5, .r = 1.5, .b = 1.5 }), true);
 }

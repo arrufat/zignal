@@ -191,6 +191,51 @@ fn rectangle_contains(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     return @ptrCast(py_utils.getPyBool(contains));
 }
 
+const rectangle_center_doc =
+    \\Get the center of the rectangle as (x, y).
+    \\
+    \\## Returns
+    \\- `tuple[float, float]`: Center coordinates `(x, y)`
+;
+
+fn rectangle_center(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+
+    const center_x = (self.left + self.right) / 2;
+    const center_y = (self.top + self.bottom) / 2;
+
+    return c.Py_BuildValue("(dd)", center_x, center_y);
+}
+
+const rectangle_corner_doc =
+    \\Return a rectangle corner as (x, y).
+;
+
+fn rectangle_top_left(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+    return c.Py_BuildValue("(dd)", self.left, self.top);
+}
+
+fn rectangle_top_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+    return c.Py_BuildValue("(dd)", self.right, self.top);
+}
+
+fn rectangle_bottom_left(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+    return c.Py_BuildValue("(dd)", self.left, self.bottom);
+}
+
+fn rectangle_bottom_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+    return c.Py_BuildValue("(dd)", self.right, self.bottom);
+}
+
 const rectangle_grow_doc =
     \\Create a new rectangle expanded by the given amount.
     \\
@@ -255,6 +300,78 @@ fn rectangle_shrink(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const new_rect = c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
     return new_rect;
+}
+
+const rectangle_translate_doc =
+    \\Create a new rectangle translated by (dx, dy).
+    \\
+    \\## Parameters
+    \\- `dx` (float): Horizontal translation
+    \\- `dy` (float): Vertical translation
+    \\
+    \\## Returns
+    \\- `Rectangle`: A new rectangle shifted by the offsets
+;
+
+fn rectangle_translate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+
+    const Params = struct {
+        dx: f64,
+        dy: f64,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const new_args = c.Py_BuildValue(
+        "(dddd)",
+        self.left + params.dx,
+        self.top + params.dy,
+        self.right + params.dx,
+        self.bottom + params.dy,
+    ) orelse return null;
+    defer c.Py_DECREF(new_args);
+
+    return c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
+}
+
+const rectangle_clip_doc =
+    \\Return a new rectangle clipped to the given bounds.
+    \\
+    \\## Parameters
+    \\- `bounds` (Rectangle | tuple[float, float, float, float]): Rectangle to clip against
+    \\
+    \\## Returns
+    \\- `Rectangle`: The clipped rectangle (may be empty)
+;
+
+fn rectangle_clip(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+
+    const Params = struct {
+        bounds: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const bounds_rect = py_utils.parseRectangle(f64, params.bounds) catch return null;
+
+    var left = @max(self.left, bounds_rect.l);
+    var top = @max(self.top, bounds_rect.t);
+    const right = @min(self.right, bounds_rect.r);
+    const bottom = @min(self.bottom, bounds_rect.b);
+
+    if (left > right) {
+        left = right;
+    }
+    if (top > bottom) {
+        top = bottom;
+    }
+
+    const new_args = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
+    defer c.Py_DECREF(new_args);
+
+    return c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
 }
 
 const rectangle_intersect_doc =
@@ -390,6 +507,12 @@ const rectangle_overlaps_doc =
     \\small = Rectangle(25, 25, 75, 75)
     \\overlaps = rect1.overlaps(small, coverage_thresh=0.9)  # True (small is 100% covered)
     \\
+    \\# Simple intersection (any positive overlap)
+    \\rect1.overlaps(rect2, iou_thresh=0.0, coverage_thresh=0.0)
+    \\
+    \\# Full containment test
+    \\rect1.overlaps(small, iou_thresh=0.0, coverage_thresh=1.0)
+    \\
     \\# Can use tuple
     \\overlaps = rect1.overlaps((50, 50, 150, 150), iou_thresh=0.1)
     \\```
@@ -424,6 +547,51 @@ fn rectangle_overlaps(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwargs: ?*c.Py
     const overlaps = self_rect.overlaps(other_rect, iou_thresh, coverage_thresh);
 
     return @ptrCast(py_utils.getPyBool(overlaps));
+}
+
+const rectangle_diagonal_doc =
+    \\Compute the diagonal length of the rectangle.
+    \\
+    \\## Returns
+    \\- `float`: Length of the diagonal (0.0 for empty rectangles)
+;
+
+fn rectangle_diagonal(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+
+    const width = if (self.left >= self.right) 0 else self.right - self.left;
+    const height = if (self.top >= self.bottom) 0 else self.bottom - self.top;
+    const length = std.math.hypot(width, height);
+
+    return c.PyFloat_FromDouble(length);
+}
+
+const rectangle_covers_doc =
+    \\Check if this rectangle fully contains another rectangle.
+    \\
+    \\## Parameters
+    \\- `other` (Rectangle | tuple[float, float, float, float]): Rectangle to test
+    \\
+    \\## Returns
+    \\- `bool`: True if `other` lies completely inside this rectangle
+;
+
+fn rectangle_covers(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(RectangleObject, self_obj);
+
+    const Params = struct {
+        other: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const other = py_utils.parseRectangle(f64, params.other) catch return null;
+
+    const self_rect = Rectangle(f64).init(self.left, self.top, self.right, self.bottom);
+    const covers = self_rect.covers(other);
+
+    return @ptrCast(py_utils.getPyBool(covers));
 }
 
 // Property getters
@@ -476,6 +644,46 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "bool",
     },
     .{
+        .name = "center",
+        .meth = @ptrCast(&rectangle_center),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_center_doc,
+        .params = "self",
+        .returns = "tuple[float, float]",
+    },
+    .{
+        .name = "top_left",
+        .meth = @ptrCast(&rectangle_top_left),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_corner_doc,
+        .params = "self",
+        .returns = "tuple[float, float]",
+    },
+    .{
+        .name = "top_right",
+        .meth = @ptrCast(&rectangle_top_right),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_corner_doc,
+        .params = "self",
+        .returns = "tuple[float, float]",
+    },
+    .{
+        .name = "bottom_left",
+        .meth = @ptrCast(&rectangle_bottom_left),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_corner_doc,
+        .params = "self",
+        .returns = "tuple[float, float]",
+    },
+    .{
+        .name = "bottom_right",
+        .meth = @ptrCast(&rectangle_bottom_right),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_corner_doc,
+        .params = "self",
+        .returns = "tuple[float, float]",
+    },
+    .{
         .name = "grow",
         .meth = @ptrCast(&rectangle_grow),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
@@ -489,6 +697,22 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = rectangle_shrink_doc,
         .params = "self, amount: float",
+        .returns = "Rectangle",
+    },
+    .{
+        .name = "translate",
+        .meth = @ptrCast(&rectangle_translate),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = rectangle_translate_doc,
+        .params = "self, dx: float, dy: float",
+        .returns = "Rectangle",
+    },
+    .{
+        .name = "clip",
+        .meth = @ptrCast(&rectangle_clip),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = rectangle_clip_doc,
+        .params = "self, bounds: Rectangle | tuple[float, float, float, float]",
         .returns = "Rectangle",
     },
     .{
@@ -514,6 +738,22 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = rectangle_overlaps_doc,
         .params = "self, other: Rectangle | tuple[float, float, float, float], iou_thresh: float = 0.5, coverage_thresh: float = 1.0",
         .returns = "bool",
+    },
+    .{
+        .name = "covers",
+        .meth = @ptrCast(&rectangle_covers),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = rectangle_covers_doc,
+        .params = "self, other: Rectangle | tuple[float, float, float, float]",
+        .returns = "bool",
+    },
+    .{
+        .name = "diagonal",
+        .meth = @ptrCast(&rectangle_diagonal),
+        .flags = c.METH_NOARGS,
+        .doc = rectangle_diagonal_doc,
+        .params = "self",
+        .returns = "float",
     },
 };
 
