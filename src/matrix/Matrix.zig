@@ -45,6 +45,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
+const expectError = std.testing.expectError;
 
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
@@ -181,6 +182,7 @@ pub fn Matrix(comptime T: type) type {
         /// Add another matrix element-wise
         pub fn add(self: Self, other: Self) Self {
             if (self.err != null) return self;
+            if (other.err != null) return other;
 
             if (self.rows != other.rows or self.cols != other.cols) {
                 return errorMatrix(self.allocator, error.DimensionMismatch);
@@ -199,6 +201,7 @@ pub fn Matrix(comptime T: type) type {
         /// Subtract another matrix element-wise
         pub fn sub(self: Self, other: Self) Self {
             if (self.err != null) return self;
+            if (other.err != null) return other;
 
             if (self.rows != other.rows or self.cols != other.cols) {
                 return errorMatrix(self.allocator, error.DimensionMismatch);
@@ -247,6 +250,7 @@ pub fn Matrix(comptime T: type) type {
         /// Perform element-wise multiplication
         pub fn times(self: Self, other: Self) Self {
             if (self.err != null) return self;
+            if (other.err != null) return other;
 
             if (self.rows != other.rows or self.cols != other.cols) {
                 return errorMatrix(self.allocator, error.DimensionMismatch);
@@ -628,6 +632,11 @@ pub fn Matrix(comptime T: type) type {
             c: ?Self,
         ) Self {
             if (self.err != null) return self;
+            if (other.err != null) return other;
+
+            if (c) |c_mat| {
+                if (c_mat.err != null) return c_mat;
+            }
 
             // Determine dimensions after potential transposition
             const a_rows = if (trans_a) self.cols else self.rows;
@@ -1375,6 +1384,49 @@ pub fn Matrix(comptime T: type) type {
 }
 
 // Tests for dynamic Matrix functionality
+test "matrix propagates chained errors" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var singular = try Matrix(f64).init(arena.allocator(), 2, 2);
+    defer singular.deinit();
+
+    singular.at(0, 0).* = 1;
+    singular.at(0, 1).* = 2;
+    singular.at(1, 0).* = 2;
+    singular.at(1, 1).* = 4;
+
+    var invalid = singular.inverse();
+    defer invalid.deinit();
+
+    var valid = try Matrix(f64).initAll(arena.allocator(), 2, 2, 1.0);
+    defer valid.deinit();
+
+    var left_error = invalid.add(valid);
+    defer left_error.deinit();
+    try expectError(MatrixError.Singular, left_error.eval());
+
+    var right_error = valid.add(invalid);
+    defer right_error.deinit();
+    try expectError(MatrixError.Singular, right_error.eval());
+
+    var sub_error = valid.sub(invalid);
+    defer sub_error.deinit();
+    try expectError(MatrixError.Singular, sub_error.eval());
+
+    var times_error = valid.times(invalid);
+    defer times_error.deinit();
+    try expectError(MatrixError.Singular, times_error.eval());
+
+    var gemm_other_error = valid.gemm(false, invalid, false, 1.0, 0.0, null);
+    defer gemm_other_error.deinit();
+    try expectError(MatrixError.Singular, gemm_other_error.eval());
+
+    var gemm_c_error = valid.gemm(false, valid, false, 1.0, 1.0, invalid);
+    defer gemm_c_error.deinit();
+    try expectError(MatrixError.Singular, gemm_c_error.eval());
+}
+
 test "dynamic matrix format" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
