@@ -45,34 +45,17 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const from_points_obj = params.from_points;
-    const to_points_obj = params.to_points;
-
-    // Parse point lists
-    const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(from_points);
-
-    const to_points = py_utils.parsePointList(f64, to_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(to_points);
-
-    // Check we have same number of points
-    if (from_points.len != to_points.len) {
-        py_utils.setValueError("from_points and to_points must have the same length", .{});
-        return -1;
-    }
-
-    // Check we have at least 2 points
-    if (from_points.len < 2) {
-        py_utils.setValueError("Need at least 2 point correspondences for similarity transform", .{});
-        return -1;
-    }
+    var pairs = py_utils.parsePointPairs(
+        f64,
+        params.from_points,
+        params.to_points,
+        2,
+        "Need at least 2 point correspondences for similarity transform",
+    ) catch return -1;
+    defer pairs.deinit();
 
     // Create and fit the transform
-    const transform = SimilarityTransform(f64).init(from_points, to_points);
+    const transform = SimilarityTransform(f64).init(pairs.from_points, pairs.to_points);
 
     // Store matrix components
     self.matrix[0][0] = transform.matrix.at(0, 0).*;
@@ -98,44 +81,14 @@ fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const point_obj = params.points;
+    return py_utils.projectPoints2D(params.points, self, applyLinear2D);
+}
 
-    // Check if it's a single tuple (x, y)
-    if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
-        // Single point - return single tuple
-        const point = py_utils.parsePointTuple(f64, point_obj) catch return null;
-
-        // Apply transform: new = matrix * point + bias
-        const new_x = self.matrix[0][0] * point.x() + self.matrix[0][1] * point.y() + self.bias[0];
-        const new_y = self.matrix[1][0] * point.x() + self.matrix[1][1] * point.y() + self.bias[1];
-
-        return c.PyTuple_Pack(2, c.PyFloat_FromDouble(new_x), c.PyFloat_FromDouble(new_y));
-    } else if (c.PySequence_Check(point_obj) != 0) {
-        // List/sequence of points - return list of tuples
-        const points = py_utils.parsePointList(f64, point_obj) catch return null;
-        defer allocator.free(points);
-
-        const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
-
-        for (points, 0..) |point, i| {
-            const new_x = self.matrix[0][0] * point.x() + self.matrix[0][1] * point.y() + self.bias[0];
-            const new_y = self.matrix[1][0] * point.x() + self.matrix[1][1] * point.y() + self.bias[1];
-
-            const tuple = c.PyTuple_Pack(2, c.PyFloat_FromDouble(new_x), c.PyFloat_FromDouble(new_y)) orelse {
-                c.Py_DECREF(result_list);
-                return null;
-            };
-
-            // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-            // PyList_SET_ITEM is a macro that doesn't translate properly in Python 3.10
-            _ = c.PyList_SetItem(result_list, @intCast(i), tuple);
-        }
-
-        return result_list;
-    } else {
-        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
-        return null;
-    }
+inline fn applyLinear2D(self: anytype, x: f64, y: f64) [2]f64 {
+    return .{
+        self.matrix[0][0] * x + self.matrix[0][1] * y + self.bias[0],
+        self.matrix[1][0] * x + self.matrix[1][1] * y + self.bias[1],
+    };
 }
 
 fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -210,34 +163,17 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const from_points_obj = params.from_points;
-    const to_points_obj = params.to_points;
-
-    // Parse point lists
-    const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(from_points);
-
-    const to_points = py_utils.parsePointList(f64, to_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(to_points);
-
-    // Check we have same number of points
-    if (from_points.len != to_points.len) {
-        py_utils.setValueError("from_points and to_points must have the same length", .{});
-        return -1;
-    }
-
-    // Check we have at least 3 points
-    if (from_points.len < 3) {
-        py_utils.setValueError("Need at least 3 point correspondences for affine transform", .{});
-        return -1;
-    }
+    var pairs = py_utils.parsePointPairs(
+        f64,
+        params.from_points,
+        params.to_points,
+        3,
+        "Need at least 3 point correspondences for affine transform",
+    ) catch return -1;
+    defer pairs.deinit();
 
     // Create and fit the transform
-    const transform = AffineTransform(f64).init(allocator, from_points, to_points) catch |err| {
+    const transform = AffineTransform(f64).init(allocator, pairs.from_points, pairs.to_points) catch |err| {
         switch (err) {
             error.OutOfMemory => py_utils.setMemoryError("affine transform"),
             error.DimensionMismatch => py_utils.setValueError(
@@ -277,44 +213,7 @@ fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const point_obj = params.points;
-
-    // Check if it's a single tuple (x, y)
-    if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
-        // Single point - return single tuple
-        const point = py_utils.parsePointTuple(f64, point_obj) catch return null;
-
-        // Apply transform: new = matrix * point + bias
-        const new_x = self.matrix[0][0] * point.x() + self.matrix[0][1] * point.y() + self.bias[0];
-        const new_y = self.matrix[1][0] * point.x() + self.matrix[1][1] * point.y() + self.bias[1];
-
-        return c.PyTuple_Pack(2, c.PyFloat_FromDouble(new_x), c.PyFloat_FromDouble(new_y));
-    } else if (c.PySequence_Check(point_obj) != 0) {
-        // List/sequence of points - return list of tuples
-        const points = py_utils.parsePointList(f64, point_obj) catch return null;
-        defer allocator.free(points);
-
-        const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
-
-        for (points, 0..) |point, i| {
-            const new_x = self.matrix[0][0] * point.x() + self.matrix[0][1] * point.y() + self.bias[0];
-            const new_y = self.matrix[1][0] * point.x() + self.matrix[1][1] * point.y() + self.bias[1];
-
-            const tuple = c.PyTuple_Pack(2, c.PyFloat_FromDouble(new_x), c.PyFloat_FromDouble(new_y)) orelse {
-                c.Py_DECREF(result_list);
-                return null;
-            };
-
-            // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-            // PyList_SET_ITEM is a macro that doesn't translate properly in Python 3.10
-            _ = c.PyList_SetItem(result_list, @intCast(i), tuple);
-        }
-
-        return result_list;
-    } else {
-        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
-        return null;
-    }
+    return py_utils.projectPoints2D(params.points, self, applyLinear2D);
 }
 
 fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -390,34 +289,17 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const from_points_obj = params.from_points;
-    const to_points_obj = params.to_points;
-
-    // Parse point lists
-    const from_points = py_utils.parsePointList(f64, from_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(from_points);
-
-    const to_points = py_utils.parsePointList(f64, to_points_obj) catch {
-        return -1;
-    };
-    defer allocator.free(to_points);
-
-    // Check we have same number of points
-    if (from_points.len != to_points.len) {
-        py_utils.setValueError("from_points and to_points must have the same length", .{});
-        return -1;
-    }
-
-    // Check we have at least 4 points
-    if (from_points.len < 4) {
-        py_utils.setValueError("Need at least 4 point correspondences for projective transform", .{});
-        return -1;
-    }
+    var pairs = py_utils.parsePointPairs(
+        f64,
+        params.from_points,
+        params.to_points,
+        4,
+        "Need at least 4 point correspondences for projective transform",
+    ) catch return -1;
+    defer pairs.deinit();
 
     // Create and fit the transform
-    const transform = ProjectiveTransform(f64).init(from_points, to_points);
+    const transform = ProjectiveTransform(f64).init(pairs.from_points, pairs.to_points);
 
     // Store matrix components
     for (0..3) |i| {
@@ -442,58 +324,22 @@ fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const point_obj = params.points;
+    return py_utils.projectPoints2D(params.points, self, applyProjective);
+}
 
-    // Check if it's a single tuple (x, y)
-    if (c.PyTuple_Check(point_obj) != 0 and c.PyTuple_Size(point_obj) == 2) {
-        // Single point - return single tuple
-        const point = py_utils.parsePointTuple(f64, point_obj) catch return null;
+fn applyProjective(self: *ProjectiveTransformObject, x: f64, y: f64) [2]f64 {
+    const new_x = self.matrix[0][0] * x + self.matrix[0][1] * y + self.matrix[0][2];
+    const new_y = self.matrix[1][0] * x + self.matrix[1][1] * y + self.matrix[1][2];
+    const w = self.matrix[2][0] * x + self.matrix[2][1] * y + self.matrix[2][2];
 
-        // Apply projective transform: [x', y', w'] = matrix * [x, y, 1]
-        const x = point.x();
-        const y = point.y();
-        const new_x = self.matrix[0][0] * x + self.matrix[0][1] * y + self.matrix[0][2];
-        const new_y = self.matrix[1][0] * x + self.matrix[1][1] * y + self.matrix[1][2];
-        const w = self.matrix[2][0] * x + self.matrix[2][1] * y + self.matrix[2][2];
-
-        // Normalize by w
-        const result_x = if (w != 0) new_x / w else new_x;
-        const result_y = if (w != 0) new_y / w else new_y;
-
-        return c.PyTuple_Pack(2, c.PyFloat_FromDouble(result_x), c.PyFloat_FromDouble(result_y));
-    } else if (c.PySequence_Check(point_obj) != 0) {
-        // List/sequence of points - return list of tuples
-        const points = py_utils.parsePointList(f64, point_obj) catch return null;
-        defer allocator.free(points);
-
-        const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
-
-        for (points, 0..) |point, i| {
-            const x = point.x();
-            const y = point.y();
-            const new_x = self.matrix[0][0] * x + self.matrix[0][1] * y + self.matrix[0][2];
-            const new_y = self.matrix[1][0] * x + self.matrix[1][1] * y + self.matrix[1][2];
-            const w = self.matrix[2][0] * x + self.matrix[2][1] * y + self.matrix[2][2];
-
-            // Normalize by w
-            const result_x = if (w != 0) new_x / w else new_x;
-            const result_y = if (w != 0) new_y / w else new_y;
-
-            const tuple = c.PyTuple_Pack(2, c.PyFloat_FromDouble(result_x), c.PyFloat_FromDouble(result_y)) orelse {
-                c.Py_DECREF(result_list);
-                return null;
-            };
-
-            // TODO: Use PyList_SET_ITEM once we drop Python 3.10 support
-            // PyList_SET_ITEM is a macro that doesn't translate properly in Python 3.10
-            _ = c.PyList_SetItem(result_list, @intCast(i), tuple);
-        }
-
-        return result_list;
-    } else {
-        py_utils.setTypeError("(x, y) tuple or list of tuples", point_obj);
-        return null;
+    if (w == 0) {
+        const inf = std.math.inf(f64);
+        return .{
+            std.math.copysign(inf, new_x),
+            std.math.copysign(inf, new_y),
+        };
     }
+    return .{ new_x / w, new_y / w };
 }
 
 fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {

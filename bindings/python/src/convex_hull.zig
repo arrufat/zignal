@@ -91,7 +91,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return py_utils.getPyNone();
     }
 
-    const result_list = py_utils.listFromSlice(Point2F, hull_points.?, struct {
+    const result_list = py_utils.listFromSliceCustom(Point2F, hull_points.?, struct {
         fn toPythonTuple(point: Point2F, _: usize) ?*c.PyObject {
             const tuple = c.PyTuple_New(2);
             if (tuple == null) return null;
