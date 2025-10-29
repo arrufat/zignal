@@ -266,22 +266,7 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     };
     defer allocator.free(coeffs);
 
-    // Convert coefficients to Python list
-    const result = c.PyList_New(@intCast(coeffs.len));
-    if (result == null) {
-        return null;
-    }
-
-    for (coeffs, 0..) |coeff, i| {
-        const py_float = c.PyFloat_FromDouble(coeff);
-        if (py_float == null) {
-            c.Py_DECREF(result);
-            return null;
-        }
-        _ = c.PyList_SetItem(result, @intCast(i), py_float);
-    }
-
-    return result;
+    return py_utils.listFromSlice(f64, coeffs);
 }
 
 const pca_transform_doc =
@@ -462,22 +447,7 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     };
     defer allocator.free(reconstructed);
 
-    // Convert reconstructed vector to Python list
-    const result = c.PyList_New(@intCast(reconstructed.len));
-    if (result == null) {
-        return null;
-    }
-
-    for (reconstructed, 0..) |value, i| {
-        const py_float = c.PyFloat_FromDouble(value);
-        if (py_float == null) {
-            c.Py_DECREF(result);
-            return null;
-        }
-        _ = c.PyList_SetItem(result, @intCast(i), py_float);
-    }
-
-    return result;
+    return py_utils.listFromSlice(f64, reconstructed);
 }
 
 // Property getters
@@ -499,22 +469,7 @@ fn pca_get_mean(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.P
         return null;
     }
 
-    // Convert mean to Python list
-    const result = c.PyList_New(@intCast(mean.len));
-    if (result == null) {
-        return null;
-    }
-
-    for (mean, 0..) |value, i| {
-        const py_float = c.PyFloat_FromDouble(value);
-        if (py_float == null) {
-            c.Py_DECREF(result);
-            return null;
-        }
-        _ = c.PyList_SetItem(result, @intCast(i), py_float);
-    }
-
-    return result;
+    return py_utils.listFromSlice(f64, mean);
 }
 
 fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -583,22 +538,7 @@ fn pca_get_eigenvalues(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
         return null;
     }
 
-    // Convert eigenvalues to Python list
-    const result = c.PyList_New(@intCast(pca.eigenvalues.len));
-    if (result == null) {
-        return null;
-    }
-
-    for (pca.eigenvalues, 0..) |value, i| {
-        const py_float = c.PyFloat_FromDouble(value);
-        if (py_float == null) {
-            c.Py_DECREF(result);
-            return null;
-        }
-        _ = c.PyList_SetItem(result, @intCast(i), py_float);
-    }
-
-    return result;
+    return py_utils.listFromSlice(f64, pca.eigenvalues);
 }
 
 fn pca_get_num_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {

@@ -229,6 +229,36 @@ pub fn getterOptionalFieldWhere(
     return @ptrCast(&Gen.get);
 }
 
+/// Build a getter for optional pointer fields, returning converter(value) or Python None.
+pub fn getterOptionalPtr(
+    comptime Obj: type,
+    comptime field_name: []const u8,
+    comptime converter: anytype,
+) *const anyopaque {
+    const field_index = std.meta.fieldIndex(Obj, field_name) orelse
+        @compileError("Field '" ++ field_name ++ "' not found on type " ++ @typeName(Obj));
+    const FieldType = std.meta.fields(Obj)[field_index].type;
+    const opt_info = @typeInfo(FieldType);
+    if (opt_info != .optional) {
+        @compileError("Field '" ++ field_name ++ "' on type " ++ @typeName(Obj) ++ " must be optional");
+    }
+    const child_type = opt_info.optional.child;
+    if (@typeInfo(child_type) != .pointer) {
+        @compileError("Field '" ++ field_name ++ "' on type " ++ @typeName(Obj) ++ " must be an optional pointer");
+    }
+
+    const Gen = struct {
+        fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
+            const self = safeCast(Obj, self_obj);
+            if (@field(self, field_name)) |ptr| {
+                return converter(ptr);
+            }
+            return getPyNone();
+        }
+    };
+    return @ptrCast(&Gen.get);
+}
+
 /// Build a getter that packs two fields into a tuple when Predicate(self) is true,
 /// otherwise returns Python None. Uses Py_BuildValue with (NN) and steals references
 /// of the intermediate objects created via convertToPython.
@@ -608,6 +638,96 @@ pub fn parsePointList(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     }
 
     return points;
+}
+
+pub fn PointPairs(comptime T: type) type {
+    return struct {
+        from_points: []Point(2, T),
+        to_points: []Point(2, T),
+
+        pub fn deinit(self: *@This()) void {
+            allocator.free(self.from_points);
+            allocator.free(self.to_points);
+        }
+    };
+}
+
+pub fn parsePointPairs(
+    comptime T: type,
+    from_obj: ?*c.PyObject,
+    to_obj: ?*c.PyObject,
+    min_points: usize,
+    comptime min_points_message: []const u8,
+) !PointPairs(T) {
+    const from_points = parsePointList(T, from_obj) catch |err| return err;
+    errdefer allocator.free(from_points);
+
+    const to_points = parsePointList(T, to_obj) catch |err| return err;
+    errdefer allocator.free(to_points);
+
+    if (from_points.len != to_points.len) {
+        setValueError("from_points and to_points must have the same length", .{});
+        return error.InvalidPointList;
+    }
+
+    if (from_points.len < min_points) {
+        setValueError(min_points_message, .{});
+        return error.InvalidPointList;
+    }
+
+    return PointPairs(T){
+        .from_points = from_points,
+        .to_points = to_points,
+    };
+}
+
+pub fn projectPoints2D(points_obj: ?*c.PyObject, ctx: anytype, comptime apply: anytype) ?*c.PyObject {
+    if (points_obj == null) {
+        setTypeError("(x, y) tuple or list of tuples", null);
+        return null;
+    }
+
+    if (c.PyTuple_Check(points_obj) != 0 and c.PyTuple_Size(points_obj) == 2) {
+        const point = parsePointTuple(f64, points_obj) catch return null;
+        const result = @call(.auto, apply, .{ ctx, point.x(), point.y() });
+        const x_obj = c.PyFloat_FromDouble(result[0]) orelse return null;
+        const y_obj = c.PyFloat_FromDouble(result[1]) orelse {
+            c.Py_DECREF(x_obj);
+            return null;
+        };
+        return c.PyTuple_Pack(2, x_obj, y_obj);
+    }
+
+    if (c.PySequence_Check(points_obj) != 0) {
+        const points = parsePointList(f64, points_obj) catch return null;
+        defer allocator.free(points);
+
+        const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
+
+        for (points, 0..) |point, i| {
+            const result = @call(.auto, apply, .{ ctx, point.x(), point.y() });
+            const x_obj = c.PyFloat_FromDouble(result[0]) orelse {
+                c.Py_DECREF(result_list);
+                return null;
+            };
+            const y_obj = c.PyFloat_FromDouble(result[1]) orelse {
+                c.Py_DECREF(x_obj);
+                c.Py_DECREF(result_list);
+                return null;
+            };
+            const tuple = c.PyTuple_Pack(2, x_obj, y_obj) orelse {
+                // PyTuple_Pack decrements references on failure.
+                c.Py_DECREF(result_list);
+                return null;
+            };
+            _ = c.PyList_SetItem(result_list, @intCast(i), tuple);
+        }
+
+        return result_list;
+    }
+
+    setTypeError("(x, y) tuple or list of tuples", points_obj);
+    return null;
 }
 
 /// Set a Python exception with an error message that includes a file path.
@@ -1127,8 +1247,9 @@ pub fn expectTupleLen(
     return result;
 }
 
-/// Build a Python list from a Zig slice using the provided converter.
-pub fn listFromSlice(
+/// Build a Python list from a Zig slice using a custom element converter.
+/// The converter must return a new reference for each element or null to signal failure.
+pub fn listFromSliceCustom(
     comptime T: type,
     slice: []const T,
     comptime converter: fn (value: T, index: usize) ?*c.PyObject,
@@ -1146,4 +1267,35 @@ pub fn listFromSlice(
     }
 
     return list;
+}
+
+/// Convert a slice of known type into a Python list using built-in converters.
+/// Currently supports floating-point and integer slices; extend the switch to add more types.
+pub fn listFromSlice(comptime T: type, slice: []const T) ?*c.PyObject {
+    return switch (@typeInfo(T)) {
+        .float => blk: {
+            const Converter = struct {
+                fn convert(value: T, _: usize) ?*c.PyObject {
+                    const as_f64: f64 = @floatCast(value);
+                    return c.PyFloat_FromDouble(as_f64);
+                }
+            };
+            break :blk listFromSliceCustom(T, slice, Converter.convert);
+        },
+        .int => blk: {
+            const info = @typeInfo(T).int;
+            const SignedParam = @typeInfo(@TypeOf(c.PyLong_FromLongLong)).@"fn".params[0].type.?;
+            const UnsignedParam = @typeInfo(@TypeOf(c.PyLong_FromUnsignedLongLong)).@"fn".params[0].type.?;
+            const Converter = struct {
+                fn convert(value: T, _: usize) ?*c.PyObject {
+                    return if (info.signedness == .signed)
+                        c.PyLong_FromLongLong(@as(SignedParam, @intCast(value)))
+                    else
+                        c.PyLong_FromUnsignedLongLong(@as(UnsignedParam, @intCast(value)));
+                }
+            };
+            break :blk listFromSliceCustom(T, slice, Converter.convert);
+        },
+        else => @compileError("listFromSlice for type " ++ @typeName(T) ++ " requires a custom converter overload"),
+    };
 }

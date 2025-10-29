@@ -150,41 +150,16 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     return cached_font8x8;
 }
 
-// Property getter for font name
-fn bitmap_font_get_name(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = py_utils.safeCast(BitmapFontObject, self_obj);
-
-    if (self.font) |font| {
-        // Use PyUnicode_FromStringAndSize for Zig slices (not null-terminated)
-        return c.PyUnicode_FromStringAndSize(font.name.ptr, @intCast(font.name.len));
-    }
-
-    return py_utils.getPyNone();
+fn fontNameToPyObject(font: *BitmapFont) ?*c.PyObject {
+    return c.PyUnicode_FromStringAndSize(font.name.ptr, @intCast(font.name.len));
 }
 
-// Property getter for char_width
-fn bitmap_font_get_width(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = py_utils.safeCast(BitmapFontObject, self_obj);
-
-    if (self.font) |font| {
-        return c.PyLong_FromLong(font.char_width);
-    }
-
-    return py_utils.getPyNone();
+fn fontWidthToPyObject(font: *BitmapFont) ?*c.PyObject {
+    return c.PyLong_FromLong(font.char_width);
 }
 
-// Property getter for char_height
-fn bitmap_font_get_height(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = py_utils.safeCast(BitmapFontObject, self_obj);
-
-    if (self.font) |font| {
-        return c.PyLong_FromLong(font.char_height);
-    }
-
-    return py_utils.getPyNone();
+fn fontHeightToPyObject(font: *BitmapFont) ?*c.PyObject {
+    return c.PyLong_FromLong(font.char_height);
 }
 
 // Methods metadata (used for both C API and stub generation)
@@ -213,21 +188,21 @@ var bitmap_font_methods = stub_metadata.toPyMethodDefArray(&bitmap_font_methods_
 var bitmap_font_getsetters = [_]c.PyGetSetDef{
     .{
         .name = "name",
-        .get = bitmap_font_get_name,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontNameToPyObject))),
         .set = null,
         .doc = "Font name",
         .closure = null,
     },
     .{
         .name = "width",
-        .get = bitmap_font_get_width,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontWidthToPyObject))),
         .set = null,
         .doc = "Character width in pixels",
         .closure = null,
     },
     .{
         .name = "height",
-        .get = bitmap_font_get_height,
+        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontHeightToPyObject))),
         .set = null,
         .doc = "Character height in pixels",
         .closure = null,

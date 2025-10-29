@@ -1677,11 +1677,7 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     c.Py_DECREF(rank_obj);
 
     // Convert permutation to Python list
-    const perm_list = py_utils.listFromSlice(usize, qr_result.perm, struct {
-        fn toPy(value: usize, _: usize) ?*c.PyObject {
-            return c.PyLong_FromSize_t(value);
-        }
-    }.toPy) orelse {
+    const perm_list = py_utils.listFromSlice(usize, qr_result.perm) orelse {
         c.Py_DECREF(q_obj);
         c.Py_DECREF(r_obj);
         c.Py_DECREF(result_dict);
@@ -1690,11 +1686,7 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     _ = c.PyDict_SetItemString(result_dict, "perm", perm_list);
 
     // Convert col_norms to Python list
-    const col_norms_list = py_utils.listFromSlice(f64, qr_result.col_norms, struct {
-        fn toPy(value: f64, _: usize) ?*c.PyObject {
-            return c.PyFloat_FromDouble(value);
-        }
-    }.toPy) orelse {
+    const col_norms_list = py_utils.listFromSlice(f64, qr_result.col_norms) orelse {
         c.Py_DECREF(q_obj);
         c.Py_DECREF(r_obj);
         c.Py_DECREF(perm_list);
