@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
         "fdm",
         "feature_matching",
         "metrics",
+        "contrast_enhancement",
     };
 
     // List of additional examples to build as executables

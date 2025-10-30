@@ -140,6 +140,11 @@ canvas:hover {
   margin-top: 20px;
   padding: 0 10px;
 }
+#image-container .hint {
+  margin-top: 8px;
+  color: #666;
+  font-size: clamp(0.75rem, 2.5vw, 0.9rem);
+}
 #match-button {
   padding: 12px 24px;
   font-size: clamp(1rem, 3vw, 1.1rem);
