@@ -8,6 +8,31 @@ const allocator = py_utils.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
+fn matrixErrorToPython(err: anytype, context: []const u8) void {
+    switch (err) {
+        error.DimensionMismatch => py_utils.setValueError("Matrix dimension mismatch", .{}),
+        error.NotSquare => py_utils.setValueError("Matrix must be square", .{}),
+        error.Singular => py_utils.setValueError("Matrix is singular", .{}),
+        error.OutOfBounds => py_utils.setIndexError("Matrix index out of bounds", .{}),
+        error.OutOfMemory => py_utils.setMemoryError(context),
+        error.NotConverged => py_utils.setValueError("Matrix operation did not converge", .{}),
+        error.InvalidArgument => py_utils.setValueError("Invalid argument", .{}),
+    }
+}
+
+fn parsePNormParam(p_obj_opt: ?*c.PyObject) ?f64 {
+    if (p_obj_opt) |p_obj| {
+        if (p_obj == c.Py_None()) return 2.0;
+        const value = c.PyFloat_AsDouble(p_obj);
+        if (c.PyErr_Occurred() != null) {
+            py_utils.setTypeError("float for p", p_obj);
+            return null;
+        }
+        return value;
+    }
+    return 2.0;
+}
+
 const matrix_class_doc =
     \\Matrix for numerical computations with f64 (float64) values.
     \\
@@ -717,14 +742,7 @@ fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Helper function to convert Zig Matrix to Python MatrixObject
 fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
     if (matrix.err) |e| {
-        switch (e) {
-            error.DimensionMismatch => py_utils.setValueError("Matrix dimension mismatch", .{}),
-            error.NotSquare => py_utils.setValueError("Matrix must be square", .{}),
-            error.Singular => py_utils.setValueError("Matrix is singular", .{}),
-            error.OutOfBounds => py_utils.setIndexError("Matrix index out of bounds", .{}),
-            error.OutOfMemory => py_utils.setMemoryError("Matrix"),
-            error.NotConverged => py_utils.setValueError("Matrix operation did not converge", .{}),
-        }
+        matrixErrorToPython(e, "Matrix");
         return null;
     }
 
@@ -1225,47 +1243,184 @@ fn matrix_covariance_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     return matrixToObject(result_matrix);
 }
 
-const matrix_norm_doc =
-    \\Compute matrix norm.
-    \\
-    \\## Parameters
-    \\- `kind` (str, optional): Norm type - 'fro' (Frobenius, default), 'l1', 'max'
+const matrix_frobenius_norm_doc =
+    \\Frobenius norm (entrywise ℓ2).
     \\
     \\## Returns
-    \\float: The norm value
+    \\float: Frobenius norm value
 ;
 
-fn matrix_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    // Parse with optional string argument
+fn matrix_frobenius_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    return c.PyFloat_FromDouble(ptr.frobeniusNorm());
+}
+
+const matrix_l1_norm_doc =
+    \\Entrywise L1 norm (sum of absolute values).
+    \\
+    \\## Returns
+    \\float: L1 norm value
+;
+
+fn matrix_l1_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    return c.PyFloat_FromDouble(ptr.l1Norm());
+}
+
+const matrix_max_norm_doc =
+    \\Entrywise infinity norm (maximum absolute value).
+    \\
+    \\## Returns
+    \\float: Infinity norm value
+;
+
+fn matrix_max_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    return c.PyFloat_FromDouble(ptr.maxNorm());
+}
+
+const matrix_element_norm_doc =
+    \\Entrywise ℓᵖ norm with runtime exponent.
+    \\
+    \\## Parameters
+    \\- `p` (float, optional): Exponent (default 2).
+    \\
+    \\## Returns
+    \\float: Element norm value
+;
+
+fn matrix_element_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const Params = struct {
-        kind: ?*c.PyObject = null,
+        p: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = requireMatrixPtr(self_obj) orelse return null;
-
-    // Default to Frobenius norm
-    var kind_str: []const u8 = "fro";
-    if (params.kind) |kind_obj| {
-        if (kind_obj != c.Py_None()) {
-            const kind_cstr = c.PyUnicode_AsUTF8(kind_obj);
-            if (kind_cstr == null) {
-                py_utils.setTypeError("string for norm kind", kind_obj);
-                return null;
-            }
-            kind_str = std.mem.span(kind_cstr);
+    const p = parsePNormParam(params.p) orelse return null;
+    if (!std.math.isFinite(p)) {
+        if (!std.math.isInf(p)) {
+            py_utils.setValueError("Element norm exponent must be finite or ±inf", .{});
+            return null;
         }
+    } else if (p < 0) {
+        py_utils.setValueError("Element norm requires p >= 0 (or ±inf)", .{});
+        return null;
     }
 
-    const result = if (std.mem.eql(u8, kind_str, "fro"))
-        ptr.frobeniusNorm()
-    else if (std.mem.eql(u8, kind_str, "l1"))
-        ptr.l1Norm()
-    else if (std.mem.eql(u8, kind_str, "max"))
-        ptr.maxNorm()
-    else {
-        py_utils.setValueError("Unknown norm type: {s}. Use 'fro', 'l1', or 'max'", .{kind_str});
+    const result = ptr.elementNorm(p) catch |err| {
+        matrixErrorToPython(err, "element norm");
+        return null;
+    };
+
+    return c.PyFloat_FromDouble(result);
+}
+
+const matrix_schatten_norm_doc =
+    \\Schatten ℓᵖ norm based on singular values.
+    \\
+    \\## Parameters
+    \\- `p` (float, optional): Exponent (default 2, must be ≥ 1 when finite).
+    \\
+    \\## Returns
+    \\float: Schatten norm value
+;
+
+fn matrix_schatten_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const Params = struct {
+        p: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const p = parsePNormParam(params.p) orelse return null;
+    if (!std.math.isFinite(p)) {
+        if (!(std.math.isInf(p) and p > 0)) {
+            py_utils.setValueError("Schatten norm exponent must be finite ≥ 1 or +inf", .{});
+            return null;
+        }
+    } else if (p < 1) {
+        py_utils.setValueError("Schatten norm requires p >= 1", .{});
+        return null;
+    }
+
+    const result = ptr.schattenNorm(allocator, p) catch |err| {
+        matrixErrorToPython(err, "schatten norm");
+        return null;
+    };
+
+    return c.PyFloat_FromDouble(result);
+}
+
+const matrix_induced_norm_doc =
+    \\Induced operator norm with p ∈ {1, 2, ∞}.
+    \\
+    \\## Parameters
+    \\- `p` (float, optional): Exponent (allowed values: 1, 2, +inf; default 2).
+    \\
+    \\## Returns
+    \\float: Induced norm value
+;
+
+fn matrix_induced_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const Params = struct {
+        p: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const p = parsePNormParam(params.p) orelse return null;
+    const valid = (p == 1) or (p == 2) or (std.math.isInf(p) and p > 0);
+    if (!valid) {
+        py_utils.setValueError("Induced norm supports p = 1, 2, or +inf", .{});
+        return null;
+    }
+
+    const result = ptr.inducedNorm(allocator, p) catch |err| {
+        matrixErrorToPython(err, "induced norm");
+        return null;
+    };
+
+    return c.PyFloat_FromDouble(result);
+}
+
+const matrix_nuclear_norm_doc =
+    \\Nuclear norm (sum of singular values).
+    \\
+    \\## Returns
+    \\float: Nuclear norm value
+;
+
+fn matrix_nuclear_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+
+    const result = ptr.nuclearNorm(allocator) catch |err| {
+        matrixErrorToPython(err, "nuclear norm");
+        return null;
+    };
+
+    return c.PyFloat_FromDouble(result);
+}
+
+const matrix_spectral_norm_doc =
+    \\Spectral norm (largest singular value).
+    \\
+    \\## Returns
+    \\float: Spectral norm value
+;
+
+fn matrix_spectral_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const ptr = requireMatrixPtr(self_obj) orelse return null;
+
+    const result = ptr.spectralNorm(allocator) catch |err| {
+        matrixErrorToPython(err, "spectral norm");
         return null;
     };
 
@@ -1946,14 +2101,6 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "float",
     },
     .{
-        .name = "det",
-        .meth = @ptrCast(&matrix_determinant_method),
-        .flags = c.METH_NOARGS,
-        .doc = matrix_determinant_doc,
-        .params = "self",
-        .returns = "float",
-    },
-    .{
         .name = "gram",
         .meth = @ptrCast(&matrix_gram_method),
         .flags = c.METH_NOARGS,
@@ -1970,19 +2117,67 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .returns = "Matrix",
     },
     .{
-        .name = "cov",
-        .meth = @ptrCast(&matrix_covariance_method),
+        .name = "frobenius_norm",
+        .meth = @ptrCast(&matrix_frobenius_norm_method),
         .flags = c.METH_NOARGS,
-        .doc = matrix_covariance_doc,
+        .doc = matrix_frobenius_norm_doc,
         .params = "self",
-        .returns = "Matrix",
+        .returns = "float",
     },
     .{
-        .name = "norm",
-        .meth = @ptrCast(&matrix_norm_method),
+        .name = "l1_norm",
+        .meth = @ptrCast(&matrix_l1_norm_method),
+        .flags = c.METH_NOARGS,
+        .doc = matrix_l1_norm_doc,
+        .params = "self",
+        .returns = "float",
+    },
+    .{
+        .name = "max_norm",
+        .meth = @ptrCast(&matrix_max_norm_method),
+        .flags = c.METH_NOARGS,
+        .doc = matrix_max_norm_doc,
+        .params = "self",
+        .returns = "float",
+    },
+    .{
+        .name = "element_norm",
+        .meth = @ptrCast(&matrix_element_norm_method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
-        .doc = matrix_norm_doc,
-        .params = "self, kind: str = 'fro'",
+        .doc = matrix_element_norm_doc,
+        .params = "self, p: float | None = None",
+        .returns = "float",
+    },
+    .{
+        .name = "schatten_norm",
+        .meth = @ptrCast(&matrix_schatten_norm_method),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = matrix_schatten_norm_doc,
+        .params = "self, p: float | None = None",
+        .returns = "float",
+    },
+    .{
+        .name = "induced_norm",
+        .meth = @ptrCast(&matrix_induced_norm_method),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = matrix_induced_norm_doc,
+        .params = "self, p: float | None = None",
+        .returns = "float",
+    },
+    .{
+        .name = "nuclear_norm",
+        .meth = @ptrCast(&matrix_nuclear_norm_method),
+        .flags = c.METH_NOARGS,
+        .doc = matrix_nuclear_norm_doc,
+        .params = "self",
+        .returns = "float",
+    },
+    .{
+        .name = "spectral_norm",
+        .meth = @ptrCast(&matrix_spectral_norm_method),
+        .flags = c.METH_NOARGS,
+        .doc = matrix_spectral_norm_doc,
+        .params = "self",
         .returns = "float",
     },
     .{

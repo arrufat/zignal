@@ -59,6 +59,7 @@ pub const MatrixError = error{
     OutOfBounds,
     OutOfMemory,
     NotConverged,
+    InvalidArgument,
 };
 
 /// Matrix with runtime dimensions using flat array storage
@@ -868,6 +869,11 @@ pub fn Matrix(comptime T: type) type {
             return self.apply(powN, .{n});
         }
 
+        fn ensureFloat(comptime context: []const u8) void {
+            comptime if (@typeInfo(T) != .float)
+                @compileError(context ++ " requires floating-point elements");
+        }
+
         /// Terminal operation - evaluates the chain and returns result or error
         pub fn eval(self: Self) MatrixError!Self {
             if (self.err) |e| return e;
@@ -898,7 +904,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
-            comptime assert(@typeInfo(T) == .float);
+            ensureFloat("frobeniusNorm");
             var squared_sum: T = 0;
             for (self.items) |val| {
                 squared_sum += val * val;
@@ -924,7 +930,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Standard deviation: sqrt(variance)
         pub fn stdDev(self: Self) T {
-            comptime assert(@typeInfo(T) == .float);
+            ensureFloat("stdDev");
             return @sqrt(self.variance());
         }
 
@@ -950,8 +956,9 @@ pub fn Matrix(comptime T: type) type {
             return max_val;
         }
 
-        /// L1 norm (nuclear norm): sum of absolute values of all elements
+        /// Entrywise L1 norm: sum of absolute values of all elements
         pub fn l1Norm(self: Self) T {
+            ensureFloat("l1Norm");
             var sum_abs: T = 0;
             for (self.items) |val| {
                 sum_abs += @abs(val);
@@ -961,6 +968,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Max norm (L-infinity): maximum absolute value
         pub fn maxNorm(self: Self) T {
+            ensureFloat("maxNorm");
             var max_abs: T = 0;
             for (self.items) |val| {
                 const abs_val = @abs(val);
@@ -969,6 +977,170 @@ pub fn Matrix(comptime T: type) type {
                 }
             }
             return max_abs;
+        }
+
+        /// Minimum absolute value among all elements.
+        pub fn minNorm(self: Self) T {
+            ensureFloat("minNorm");
+            if (self.items.len == 0) return 0;
+            var min_abs = @abs(self.items[0]);
+            for (self.items[1..]) |val| {
+                const abs_val = @abs(val);
+                if (abs_val < min_abs) {
+                    min_abs = abs_val;
+                }
+            }
+            return min_abs;
+        }
+
+        /// Counts non-zero elements.
+        pub fn sparseNorm(self: Self) T {
+            ensureFloat("sparseNorm");
+            var count: T = 0;
+            for (self.items) |val| {
+                if (val != 0) count += 1;
+            }
+            return count;
+        }
+
+        /// Entrywise ℓᵖ norm with optional runtime exponent.
+        pub fn elementNorm(self: Self, p: T) MatrixError!T {
+            ensureFloat("elementNorm");
+            if (std.math.isInf(p)) {
+                if (p > 0) {
+                    return self.maxNorm();
+                } else if (p < 0) {
+                    return self.minNorm();
+                }
+                return error.InvalidArgument;
+            }
+            if (!std.math.isFinite(p)) {
+                return error.InvalidArgument;
+            }
+            if (p == 0) {
+                return self.sparseNorm();
+            } else if (p == 1) {
+                return self.l1Norm();
+            } else if (p == 2) {
+                return self.frobeniusNorm();
+            } else if (p > 0) {
+                var accum: T = 0;
+                for (self.items) |val| {
+                    const abs_val = @abs(val);
+                    if (abs_val != 0) {
+                        accum += std.math.pow(T, abs_val, p);
+                    }
+                }
+                return std.math.pow(T, accum, 1 / p);
+            }
+            return error.InvalidArgument;
+        }
+
+        fn leadingSingularValue(self: Self, allocator: std.mem.Allocator) !T {
+            ensureFloat("leadingSingularValue");
+            if (self.rows == 0 or self.cols == 0) return 0;
+
+            if (self.rows < self.cols) {
+                var transposed = self.transpose();
+                if (transposed.err) |err| return err;
+                defer transposed.deinit();
+                return transposed.leadingSingularValue(allocator);
+            }
+
+            var svd_result = try self.svd(allocator, .{ .with_u = false, .with_v = false, .mode = .skinny_u });
+            defer svd_result.deinit();
+            if (svd_result.converged != 0) {
+                return error.NotConverged;
+            }
+            return svd_result.s.at(0, 0).*;
+        }
+
+        fn sumSingularP(self: Self, allocator: std.mem.Allocator, exponent: T) !T {
+            ensureFloat("schattenNorm");
+            if (self.rows == 0 or self.cols == 0) return 0;
+
+            if (self.rows >= self.cols) {
+                var svd_result = try self.svd(allocator, .{ .with_u = false, .with_v = false, .mode = .skinny_u });
+                defer svd_result.deinit();
+                if (svd_result.converged != 0) {
+                    return error.NotConverged;
+                }
+                var accum: T = 0;
+                for (0..svd_result.s.rows) |i| {
+                    accum += std.math.pow(T, svd_result.s.at(i, 0).*, exponent);
+                }
+                return accum;
+            }
+
+            var transposed = self.transpose();
+            if (transposed.err) |err| return err;
+            defer transposed.deinit();
+            return transposed.sumSingularP(allocator, exponent);
+        }
+
+        /// Schatten p-norm of the matrix.
+        pub fn schattenNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
+            ensureFloat("schattenNorm");
+            if (std.math.isInf(p)) {
+                if (p > 0) {
+                    return self.leadingSingularValue(allocator);
+                }
+                return error.InvalidArgument;
+            }
+            if (!std.math.isFinite(p) or p < 1) {
+                return error.InvalidArgument;
+            }
+            if (p == 1) {
+                return self.sumSingularP(allocator, 1);
+            } else if (p == 2) {
+                return self.frobeniusNorm();
+            } else {
+                const accum = try self.sumSingularP(allocator, p);
+                return std.math.pow(T, accum, 1 / p);
+            }
+        }
+
+        /// Sum of singular values.
+        pub fn nuclearNorm(self: Self, allocator: std.mem.Allocator) !T {
+            return self.schattenNorm(allocator, 1);
+        }
+
+        /// Largest singular value.
+        pub fn spectralNorm(self: Self, allocator: std.mem.Allocator) !T {
+            return self.schattenNorm(allocator, std.math.inf(T));
+        }
+
+        /// Induced operator norms with p ∈ {1, 2, ∞}.
+        pub fn inducedNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
+            ensureFloat("inducedNorm");
+            if (p == 1) {
+                var max_sum: T = 0;
+                for (0..self.cols) |c| {
+                    var col_sum: T = 0;
+                    for (0..self.rows) |r| {
+                        col_sum += @abs(self.items[r * self.cols + c]);
+                    }
+                    if (col_sum > max_sum) {
+                        max_sum = col_sum;
+                    }
+                }
+                return max_sum;
+            } else if (p == 2) {
+                return try self.leadingSingularValue(allocator);
+            } else if (std.math.isInf(p) and p > 0) {
+                var max_sum: T = 0;
+                for (0..self.rows) |r| {
+                    var row_sum: T = 0;
+                    for (0..self.cols) |c| {
+                        row_sum += @abs(self.items[r * self.cols + c]);
+                    }
+                    if (row_sum > max_sum) {
+                        max_sum = row_sum;
+                    }
+                }
+                return max_sum;
+            }
+            return error.InvalidArgument;
         }
 
         /// Trace: sum of diagonal elements (square matrices only)
@@ -1425,6 +1597,18 @@ test "matrix propagates chained errors" {
     var gemm_c_error = valid.gemm(false, valid, false, 1.0, 1.0, invalid);
     defer gemm_c_error.deinit();
     try expectError(MatrixError.Singular, gemm_c_error.eval());
+}
+
+test "matrix elementNorm invalid exponent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var m = try Matrix(f64).init(arena.allocator(), 1, 1);
+    defer m.deinit();
+    m.at(0, 0).* = 1.0;
+
+    try std.testing.expectError(MatrixError.InvalidArgument, m.elementNorm(-1.0));
+    try std.testing.expectError(MatrixError.InvalidArgument, m.elementNorm(std.math.nan(f64)));
 }
 
 test "dynamic matrix format" {
