@@ -4,6 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
+const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const Point = @import("../geometry/Point.zig").Point;
 const formatting = @import("formatting.zig");
@@ -19,6 +20,11 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         items: [rows][cols]T = undefined,
         comptime rows: usize = rows,
         comptime cols: usize = cols,
+
+        fn ensureFloat(comptime context: []const u8) void {
+            comptime if (@typeInfo(T) != .float)
+                @compileError(context ++ " requires floating-point elements");
+        }
 
         /// Initialize a SMatrix with the given items.
         pub fn init(items: [rows][cols]T) Self {
@@ -87,6 +93,28 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return accum;
         }
 
+        /// Sums all elements across each row, returning a 1 × cols row vector of column sums.
+        pub fn sumRows(self: Self) SMatrix(T, 1, cols) {
+            var result: SMatrix(T, 1, cols) = .initAll(0);
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    result.items[0][c] += self.items[r][c];
+                }
+            }
+            return result;
+        }
+
+        /// Sums all elements down each column, returning a rows × 1 column vector of row sums.
+        pub fn sumCols(self: Self) SMatrix(T, rows, 1) {
+            var result: SMatrix(T, rows, 1) = .initAll(0);
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    result.items[r][0] += self.items[r][c];
+                }
+            }
+            return result;
+        }
+
         /// Scales all matrix values.
         pub fn scale(self: Self, value: T) Self {
             var result: Self = .{};
@@ -136,13 +164,53 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return @sqrt(self.times(self).sum());
         }
 
-        /// Computes the nuclear norm of the matrix as sum of the absolute values of all elements.
+        /// Computes the nuclear norm (sum of singular values) of the matrix.
         pub fn nuclearNorm(self: Self) T {
+            return self.schattenNorm(@as(T, 1.0));
+        }
+
+        /// Computes the element-wise L1 norm (sum of absolute entries).
+        pub fn l1Norm(self: Self) T {
             var accum: T = 0;
             for (0..rows) |r| {
                 for (0..cols) |c| {
                     accum += @abs(self.items[r][c]);
                 }
+            }
+            return accum;
+        }
+
+        /// Computes the spectral norm (largest singular value) of the matrix.
+        pub fn spectralNorm(self: Self) T {
+            return self.schattenNorm(std.math.inf(T));
+        }
+
+        fn leadingSingularValue(self: Self) T {
+            ensureFloat("leadingSingularValue");
+            if (rows == 0 or cols == 0) return 0;
+
+            if (rows < cols) {
+                const transposed = self.transpose();
+                return transposed.leadingSingularValue();
+            }
+
+            const svd_result = self.svd(.{ .mode = .skinny_u, .with_u = false, .with_v = false });
+            return svd_result.s.items[0][0];
+        }
+
+        fn sumSingularP(self: Self, exponent: T) T {
+            ensureFloat("schattenNorm");
+            if (rows == 0 or cols == 0) return 0;
+
+            if (rows < cols) {
+                const transposed = self.transpose();
+                return transposed.sumSingularP(exponent);
+            }
+
+            const svd_result = self.svd(.{ .mode = .skinny_u, .with_u = false, .with_v = false });
+            var accum: T = 0;
+            for (0..svd_result.s.rows) |i| {
+                accum += std.math.pow(T, svd_result.s.items[i][0], exponent);
             }
             return accum;
         }
@@ -192,28 +260,89 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
             return count;
         }
 
-        /// Computes the "element-wise" matrix norm of the matrix.
-        pub fn norm(self: Self, p: T) T {
-            if (p == std.math.inf(T)) {
-                return self.maxNorm();
-            } else if (p == -std.math.inf(T)) {
-                return self.minNorm();
+        /// Entrywise norms that treat the matrix as a flat vector of elements.
+        pub fn elementNorm(self: Self, p: T) T {
+            ensureFloat("elementNorm");
+            if (std.math.isInf(p)) {
+                if (p > 0) return self.maxNorm();
+                if (p < 0) return self.minNorm();
             }
-            assert(p >= 0);
+            if (!std.math.isFinite(p)) {
+                @panic("elementNorm: unsupported exponent");
+            }
             if (p == 0) {
                 return self.sparseNorm();
             } else if (p == 1) {
-                return self.nuclearNorm();
+                return self.l1Norm();
             } else if (p == 2) {
                 return self.frobeniusNorm();
-            } else {
-                var result: T = 0;
-                for (self.items) |row_data| {
-                    for (row_data) |value| {
-                        result += if (value == 0) 0 else std.math.pow(T, @abs(value), p);
+            } else if (p > 0) {
+                var accum: T = 0;
+                for (0..rows) |r| {
+                    for (0..cols) |c| {
+                        const value = @abs(self.items[r][c]);
+                        if (value != 0) {
+                            accum += std.math.pow(T, value, p);
+                        }
                     }
                 }
-                return std.math.pow(T, result, 1 / p);
+                return std.math.pow(T, accum, 1 / p);
+            } else {
+                @panic("elementNorm: exponent must be positive (or 0, ±inf)");
+            }
+        }
+
+        /// Schatten p-norms derived from the singular values of the matrix.
+        pub fn schattenNorm(self: Self, p: T) T {
+            ensureFloat("schattenNorm");
+            if (std.math.isInf(p)) {
+                if (p > 0) return self.leadingSingularValue();
+                @panic("schattenNorm: negative infinity not supported");
+            }
+            if (!std.math.isFinite(p) or p < 1) {
+                @panic("schattenNorm: exponent must be finite and ≥ 1 (or +inf)");
+            }
+            if (p == 2) {
+                return self.frobeniusNorm();
+            } else if (p == 1) {
+                return self.sumSingularP(1);
+            } else {
+                const accum = self.sumSingularP(p);
+                return std.math.pow(T, accum, 1 / p);
+            }
+        }
+
+        /// Induced/operator norms compatible with p ∈ {1, 2, ∞}.
+        pub fn inducedNorm(self: Self, p: T) T {
+            ensureFloat("inducedNorm");
+            if (p == 1) {
+                var max_sum: T = 0;
+                for (0..cols) |c| {
+                    var col_sum: T = 0;
+                    for (0..rows) |r| {
+                        col_sum += @abs(self.items[r][c]);
+                    }
+                    if (col_sum > max_sum) {
+                        max_sum = col_sum;
+                    }
+                }
+                return max_sum;
+            } else if (p == 2) {
+                return self.leadingSingularValue();
+            } else if (std.math.isInf(p) and p > 0) {
+                var max_sum: T = 0;
+                for (0..rows) |r| {
+                    var row_sum: T = 0;
+                    for (0..cols) |c| {
+                        row_sum += @abs(self.items[r][c]);
+                    }
+                    if (row_sum > max_sum) {
+                        max_sum = row_sum;
+                    }
+                }
+                return max_sum;
+            } else {
+                @panic("inducedNorm only supports p = 1, 2, or ∞");
             }
         }
 
@@ -564,28 +693,6 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         pub fn format(self: Self, writer: *std.Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
         }
-
-        /// Sums all the elements in rows.
-        pub fn sumRows(self: Self) SMatrix(T, 1, cols) {
-            var result: SMatrix(T, 1, cols) = .initAll(0);
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    result.items[0][c] = result.items[0][c] + self.items[r][c];
-                }
-            }
-            return result;
-        }
-
-        /// Sums all the elements in columns.
-        pub fn sumCols(self: Self) SMatrix(T, rows, 1) {
-            var result: SMatrix(T, rows, 1) = .initAll(0);
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    result.items[r][0] = result.items[r][0] + self.items[r][c];
-                }
-            }
-            return result;
-        }
     };
 }
 
@@ -652,37 +759,42 @@ test "SMatrix norm" {
     var matrix: SMatrix(f32, 3, 4) = .random(null);
     try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.times(matrix).sum()));
 
-    const f = struct {
-        fn f(x: f32) f32 {
-            return @abs(x);
-        }
-    }.f;
-    try expectEqual(matrix.nuclearNorm(), matrix.apply(f).sum());
-
     matrix.at(2, 3).* = 1000000;
-    try expectEqual(matrix.maxNorm(), 1000000);
+    try expectEqual(matrix.elementNorm(std.math.inf(f32)), matrix.maxNorm());
 
     matrix = matrix.offset(10);
     matrix.at(2, 3).* = -5;
-    try expectEqual(matrix.minNorm(), 5);
+    try expectEqual(matrix.elementNorm(-std.math.inf(f32)), matrix.minNorm());
 
     matrix.at(2, 3).* = 0;
-    try expectEqual(matrix.sparseNorm(), 11);
+    try expectEqual(matrix.elementNorm(@as(f32, 0.0)), matrix.sparseNorm());
 
-    // Test general norm function
-    try expectEqual(matrix.norm(0), matrix.sparseNorm());
-    try expectEqual(matrix.norm(1), matrix.nuclearNorm());
-    try expectEqual(matrix.norm(2), matrix.frobeniusNorm());
-    try expectEqual(matrix.norm(std.math.inf(f32)), matrix.maxNorm());
-    try expectEqual(matrix.norm(-std.math.inf(f32)), matrix.minNorm());
+    const diag_matrix: SMatrix(f32, 2, 3) = .init(.{
+        .{ 3.0, 0.0, 0.0 },
+        .{ 0.0, 4.0, 0.0 },
+    });
+    try expectApproxEqAbs(@as(f32, 7.0), diag_matrix.elementNorm(@as(f32, 1.0)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 5.0), diag_matrix.elementNorm(@as(f32, 2.0)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.elementNorm(std.math.inf(f32)), 1e-4);
+
+    try expectApproxEqAbs(@as(f32, 7.0), diag_matrix.schattenNorm(@as(f32, 1.0)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 5.0), diag_matrix.schattenNorm(@as(f32, 2.0)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.schattenNorm(std.math.inf(f32)), 1e-4);
+
+    const expected_schatten_three = std.math.pow(f32, 91.0, 1.0 / 3.0);
+    try expectApproxEqAbs(expected_schatten_three, diag_matrix.schattenNorm(@as(f32, 3.0)), 1e-4);
+
+    try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.inducedNorm(@as(f32, 1.0)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.inducedNorm(std.math.inf(f32)), 1e-4);
+    try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.inducedNorm(@as(f32, 2.0)), 1e-4);
 }
 
 test "SMatrix sum" {
     var matrix: SMatrix(f32, 3, 4) = .initAll(1);
-    const matrixSumCols: SMatrix(f32, 3, 1) = .initAll(4);
-    const matrixSumRows: SMatrix(f32, 1, 4) = .initAll(3);
-    try expectEqual(matrix.sumRows(), matrixSumRows);
-    try expectEqual(matrix.sumCols(), matrixSumCols);
+    const col_sums: SMatrix(f32, 1, 4) = .initAll(3);
+    const row_sums: SMatrix(f32, 3, 1) = .initAll(4);
+    try expectEqual(matrix.sumRows(), col_sums);
+    try expectEqual(matrix.sumCols(), row_sums);
     try expectEqual(matrix.sumCols().sumRows().item(), matrix.sum());
 }
 

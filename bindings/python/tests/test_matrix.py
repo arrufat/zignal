@@ -140,18 +140,33 @@ def test_linear_algebra_methods():
 
     # Determinant
     assert isinstance(m.determinant(), float)
-    assert isinstance(m.det(), float)  # alias
 
     # Gram and covariance
     a = zignal.Matrix([[1, 2], [3, 4], [5, 6]])
     assert isinstance(a.gram(), zignal.Matrix)
     assert isinstance(a.covariance(), zignal.Matrix)
-    assert isinstance(a.cov(), zignal.Matrix)  # alias
 
     # Norms
-    assert isinstance(m.norm("fro"), float)
-    assert isinstance(m.norm("l1"), float)
-    assert isinstance(m.norm("max"), float)
+    assert isinstance(m.frobenius_norm(), float)
+    assert isinstance(m.l1_norm(), float)
+    assert isinstance(m.max_norm(), float)
+    assert isinstance(m.element_norm(), float)
+    assert isinstance(m.element_norm(p=3.5), float)
+    assert isinstance(m.schatten_norm(), float)
+    assert isinstance(m.schatten_norm(p=1), float)
+    assert isinstance(m.induced_norm(), float)
+    assert isinstance(m.induced_norm(p=1), float)
+    assert isinstance(m.nuclear_norm(), float)
+    assert isinstance(m.spectral_norm(), float)
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        _ = m.element_norm(p=-1)
+    with pytest.raises(ValueError):
+        _ = m.schatten_norm(p=0.5)
+    with pytest.raises(ValueError):
+        _ = m.induced_norm(p=3)
 
 
 def test_element_wise_operations():

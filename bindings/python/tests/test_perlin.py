@@ -41,11 +41,23 @@ INVALID_PARAMETER_CASES = [
     pytest.param({"amplitude": 0.0}, r"amplitude must be between", id="amplitude-nonpositive"),
     pytest.param({"frequency": 0.0}, r"frequency must be between", id="frequency-nonpositive"),
     pytest.param({"octaves": 0}, r"octaves must be between 1 and 32", id="octaves-too-small"),
-    pytest.param({"persistence": -0.1}, r"persistence must be between 0 and 1", id="persistence-negative"),
-    pytest.param({"persistence": 1.1}, r"persistence must be between 0 and 1", id="persistence-gt-one"),
-    pytest.param({"lacunarity": 0.5}, r"lacunarity must be between 1 and 16", id="lacunarity-too-small"),
-    pytest.param({"lacunarity": MAX_LACUNARITY + 1}, r"lacunarity must be between 1 and 16", id="lacunarity-too-large"),
-    pytest.param({"octaves": MAX_OCTAVES + 1}, r"octaves must be between 1 and 32", id="octaves-too-large"),
+    pytest.param(
+        {"persistence": -0.1}, r"persistence must be between 0 and 1", id="persistence-negative"
+    ),
+    pytest.param(
+        {"persistence": 1.1}, r"persistence must be between 0 and 1", id="persistence-gt-one"
+    ),
+    pytest.param(
+        {"lacunarity": 0.5}, r"lacunarity must be between 1 and 16", id="lacunarity-too-small"
+    ),
+    pytest.param(
+        {"lacunarity": MAX_LACUNARITY + 1},
+        r"lacunarity must be between 1 and 16",
+        id="lacunarity-too-large",
+    ),
+    pytest.param(
+        {"octaves": MAX_OCTAVES + 1}, r"octaves must be between 1 and 32", id="octaves-too-large"
+    ),
 ]
 
 
