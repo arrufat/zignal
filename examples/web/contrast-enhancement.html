@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Contrast Enhancement</title>
+		<link rel="stylesheet" href="styles.css">
+		<link rel="icon" type="image/png" href="favicon.png">
+	</head>
+	<body>
+		<div class="header">
+			<h1>Contrast Enhancement</h1>
+			<p>Autocontrast and histogram equalization running entirely in WebAssembly</p>
+		</div>
+
+		<div class="instructions">
+			Drop an image or generate a synthetic sample. Tune the autocontrast clipping percentage or run histogram equalization.
+		</div>
+
+		<div id="image-container">
+			<div class="canvas-wrapper">
+				<h3>Original</h3>
+				<canvas id="canvas-original" width="512" height="512"></canvas>
+				<div class="hint">Click or drop to replace</div>
+			</div>
+			<div class="canvas-wrapper">
+				<h3>Processed</h3>
+				<canvas id="canvas-processed" width="512" height="512"></canvas>
+				<div class="hint">Updates after each operation</div>
+			</div>
+		</div>
+
+		<div class="controls">
+			<div class="metrics-controls">
+				<button id="sample-button">Generate Low-Contrast Sample</button>
+				<button id="reset-button" disabled>Reset to Original</button>
+				<button id="download-button" disabled>Download Processed</button>
+			</div>
+
+			<div class="metrics-controls">
+				<label for="cutoff-range"><strong>Clip per channel:</strong>
+				<span id="cutoff-value">1.0%</span></label>
+				<input type="range" id="cutoff-range" min="0" max="10" step="0.1" value="1.0">
+			</div>
+
+			<div class="metrics-controls">
+				<button id="autocontrast-button" disabled>Autocontrast</button>
+				<button id="equalize-button" disabled>Equalize</button>
+			</div>
+		</div>
+
+		<div class="metrics-container">
+			<div class="metrics-results" id="stats-original" data-title="Original Stats"></div>
+			<div class="metrics-results" id="stats-processed" data-title="Processed Stats"></div>
+		</div>
+
+		<div id="status">WASM loading…</div>
+
+		<script src="utils.js"></script>
+		<script src="contrast-enhancement.js"></script>
+	</body>
+</html>

@@ -50,6 +50,7 @@ Requires Python 3.10+, no external dependencies
 - [Perlin noise generation](https://bfactory-ai.github.io/zignal/examples/perlin-noise.html) - Procedural texture generation
 - [Seam carving](https://bfactory-ai.github.io/zignal/examples/seam-carving.html) - Content-aware image resizing
 - [Feature distribution matching](https://bfactory-ai.github.io/zignal/examples/fdm.html) - Statistical color transfer
+- [Contrast enhancement](https://bfactory-ai.github.io/zignal/examples/contrast-enhancement.html) - Autocontrast and histogram equalization side-by-side
 - [White balance](https://bfactory-ai.github.io/zignal/examples/white-balance.html) - Automatic color correction
 - [Feature matching](https://bfactory-ai.github.io/zignal/examples/feature_matching.html) - ORB feature detection and matching between images
 - [Metrics analyzer](https://bfactory-ai.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
