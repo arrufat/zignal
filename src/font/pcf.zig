@@ -57,16 +57,25 @@ const TableType = enum(u32) {
 
 /// PCF format flags structure for better type safety
 const FormatFlags = struct {
+    const glyph_pad_mask: u32 = 0x3;
+    const byte_order_mask: u32 = 1 << 2;
+    const bit_order_mask: u32 = 1 << 3;
+    const scan_unit_mask: u32 = 0x30;
+    const scan_unit_shift: u5 = 4;
+    const compressed_metrics_mask: u32 = 0x100;
+    const accel_w_inkbounds_mask: u32 = 0x200;
+    const ink_bounds_mask: u32 = 0x400;
+
     // Helper to decode format flags from u32
     pub fn decode(format: u32) FormatFlags {
         return FormatFlags{
-            .glyph_pad = @as(u2, @truncate(format & 0x3)),
-            .byte_order_msb = (format & (1 << 3)) != 0,
-            .bit_order_msb = (format & (1 << 2)) != 0,
-            .scan_unit = @as(u2, @truncate((format >> 4) & 0x3)),
-            .compressed_metrics = (format & 0x100) != 0,
-            .ink_bounds = (format & 0x200) != 0,
-            .accel_w_inkbounds = (format & 0x100) != 0,
+            .glyph_pad = @as(u2, @truncate(format & glyph_pad_mask)),
+            .byte_order_msb = (format & byte_order_mask) != 0,
+            .bit_order_msb = (format & bit_order_mask) != 0,
+            .scan_unit = @as(u2, @truncate((format & scan_unit_mask) >> scan_unit_shift)),
+            .compressed_metrics = (format & compressed_metrics_mask) != 0,
+            .accel_w_inkbounds = (format & accel_w_inkbounds_mask) != 0,
+            .ink_bounds = (format & ink_bounds_mask) != 0,
         };
     }
 
@@ -74,9 +83,9 @@ const FormatFlags = struct {
     byte_order_msb: bool,
     bit_order_msb: bool,
     scan_unit: u2,
+    accel_w_inkbounds: bool,
     compressed_metrics: bool,
     ink_bounds: bool,
-    accel_w_inkbounds: bool,
 };
 
 /// PCF glyph padding values
@@ -809,8 +818,14 @@ fn convertToBitmapFont(
         // Store converted bitmap offset
         const converted_offset = converted_bitmaps.items.len;
 
+        if (glyph_info.glyph_index >= bitmap_info.offsets.len) {
+            return PcfError.InvalidBitmapData;
+        }
         // Convert bitmap data for this glyph
         const bitmap_offset = bitmap_info.offsets[glyph_info.glyph_index];
+        if (bitmap_offset >= bitmap_info.bitmap_data.len) {
+            return PcfError.InvalidBitmapData;
+        }
         const format_flags = FormatFlags.decode(bitmap_info.format);
         const pad_bits = @as(u2, @truncate(bitmap_info.format & 0x3));
         const glyph_pad = @as(GlyphPadding, @enumFromInt(pad_bits));
@@ -871,9 +886,33 @@ test "FormatFlags decoding" {
                 .byte_order_msb = false,
                 .bit_order_msb = false,
                 .scan_unit = 0,
+                .accel_w_inkbounds = false,
                 .compressed_metrics = false,
                 .ink_bounds = false,
+            },
+        },
+        .{
+            .format = 0x00000004,
+            .expected = .{
+                .glyph_pad = 0,
+                .byte_order_msb = true,
+                .bit_order_msb = false,
+                .scan_unit = 0,
                 .accel_w_inkbounds = false,
+                .compressed_metrics = false,
+                .ink_bounds = false,
+            },
+        },
+        .{
+            .format = 0x00000008,
+            .expected = .{
+                .glyph_pad = 0,
+                .byte_order_msb = false,
+                .bit_order_msb = true,
+                .scan_unit = 0,
+                .accel_w_inkbounds = false,
+                .compressed_metrics = false,
+                .ink_bounds = false,
             },
         },
         .{
@@ -883,19 +922,40 @@ test "FormatFlags decoding" {
                 .byte_order_msb = true,
                 .bit_order_msb = true,
                 .scan_unit = 0,
+                .accel_w_inkbounds = false,
                 .compressed_metrics = true,
                 .ink_bounds = false,
+            },
+        },
+        .{
+            .format = 0x00000031, // glyph pad 1, scan unit 3
+            .expected = .{
+                .glyph_pad = 1,
+                .byte_order_msb = false,
+                .bit_order_msb = false,
+                .scan_unit = 3,
+                .accel_w_inkbounds = false,
+                .compressed_metrics = false,
+                .ink_bounds = false,
+            },
+        },
+        .{
+            .format = 0x0000070C, // compressed + accel inkbounds + ink bounds
+            .expected = .{
+                .glyph_pad = 0,
+                .byte_order_msb = true,
+                .bit_order_msb = true,
+                .scan_unit = 0,
                 .accel_w_inkbounds = true,
+                .compressed_metrics = true,
+                .ink_bounds = true,
             },
         },
     };
 
     for (test_cases) |tc| {
         const flags = FormatFlags.decode(tc.format);
-        try testing.expectEqual(tc.expected.glyph_pad, flags.glyph_pad);
-        try testing.expectEqual(tc.expected.byte_order_msb, flags.byte_order_msb);
-        try testing.expectEqual(tc.expected.bit_order_msb, flags.bit_order_msb);
-        try testing.expectEqual(tc.expected.compressed_metrics, flags.compressed_metrics);
+        try testing.expectEqualDeep(tc.expected, flags);
     }
 }
 
