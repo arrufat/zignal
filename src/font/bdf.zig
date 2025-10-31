@@ -202,6 +202,26 @@ fn parseHeader(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any)) !BdfFont
     return font;
 }
 
+fn hexCharToNibble(ch: u8) BdfError!u8 {
+    return switch (ch) {
+        '0'...'9' => ch - '0',
+        'A'...'F' => ch - 'A' + 10,
+        'a'...'f' => ch - 'a' + 10,
+        else => BdfError.InvalidBitmapData,
+    };
+}
+
+fn parseHexByte(hex: []const u8, byte_index: usize) BdfError!u8 {
+    const pos = byte_index * 2;
+    if (pos >= hex.len) {
+        return 0;
+    }
+
+    const hi = try hexCharToNibble(hex[pos]);
+    const lo = if (pos + 1 < hex.len) try hexCharToNibble(hex[pos + 1]) else 0;
+    return (@as(u8, hi) << 4) | lo;
+}
+
 /// Parse a single glyph and its bitmap data
 fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *BdfParseState, filter: LoadFilter) !bool {
     var glyph = BdfGlyph{
@@ -280,11 +300,10 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
                     return BdfError.InvalidBitmapData;
                 }
 
-                // Parse hex data
-                const hex_value = try std.fmt.parseInt(u32, bitmap_trimmed, 16);
                 const hex_chars = bitmap_trimmed.len;
-                const shift_amount = if (hex_chars < 8) (8 - hex_chars) * 4 else 0;
-                const aligned_value = hex_value << @intCast(shift_amount);
+                if (hex_chars > bytes_per_row * 2) {
+                    return BdfError.InvalidBitmapData;
+                }
 
                 // Convert to our byte format
                 for (0..bytes_per_row) |byte_idx| {
@@ -293,13 +312,12 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
                     const end_bit = @min(start_bit + 8, glyph.bbox.width);
 
                     if (end_bit > start_bit) {
-                        for (start_bit..end_bit) |bit| {
-                            if (bit < 32) {
-                                if ((aligned_value >> @intCast(31 - bit)) & 1 != 0) {
-                                    our_byte |= @as(u8, 1) << @intCast(bit - start_bit);
-                                }
-                            }
-                        }
+                        // BDF stores pixels MSB-first per byte; convert to zignal's LSB-first layout
+                        const raw_byte = try parseHexByte(bitmap_trimmed, byte_idx);
+                        const reversed_byte = @bitReverse(raw_byte);
+                        const bits_to_take: u4 = @intCast(end_bit - start_bit);
+                        const mask: u8 = @intCast((@as(u16, 1) << bits_to_take) - 1);
+                        our_byte = reversed_byte & mask;
                     }
 
                     try state.bitmap_data.append(gpa, our_byte);
@@ -554,6 +572,48 @@ test "BDF to BitmapFont conversion" {
     // Check bitmap conversion
     try testing.expectEqual(@as(u8, 0x18), char_data.?[0]);
     try testing.expectEqual(@as(u8, 0x24), char_data.?[1]);
+}
+
+test "BDF parses glyph rows wider than 32 bits" {
+    const wide_bdf =
+        \\STARTFONT 2.1
+        \\FONT wide-test
+        \\SIZE 10 75 75
+        \\FONTBOUNDINGBOX 40 1 0 0
+        \\CHARS 1
+        \\STARTCHAR WIDE
+        \\ENCODING 65
+        \\SWIDTH 400 0
+        \\DWIDTH 40 0
+        \\BBX 40 1 0 0
+        \\BITMAP
+        \\1234567890
+        \\ENDCHAR
+        \\ENDFONT
+    ;
+
+    var tmp_dir = testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const dir_path = try tmp_dir.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(dir_path);
+
+    const file_path = try std.fs.path.join(testing.allocator, &.{ dir_path, "wide_font.bdf" });
+    defer testing.allocator.free(file_path);
+
+    try tmp_dir.dir.writeFile(.{ .sub_path = "wide_font.bdf", .data = wide_bdf });
+
+    var font = try load(testing.allocator, file_path, .all);
+    defer font.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 40), font.char_width);
+    try testing.expectEqual(@as(u8, 1), font.char_height);
+
+    const maybe_data = font.getCharData(65);
+    try testing.expect(maybe_data != null);
+    const data = maybe_data.?;
+    const expected = [_]u8{ 0x48, 0x2C, 0x6A, 0x1E, 0x09 };
+    try testing.expectEqualSlices(u8, &expected, data[0..expected.len]);
 }
 
 test "BDF save and load compressed roundtrip" {
