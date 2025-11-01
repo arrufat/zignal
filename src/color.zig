@@ -220,7 +220,7 @@ test "color formatting" {
 }
 
 test "100 random colors" {
-    const seed: u64 = @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
+    const seed: u64 = std.crypto.random.int(u64);
     var prng: std.Random.DefaultPrng = .init(seed);
     var random = prng.random();
     for (0..100) |_| {

@@ -104,7 +104,19 @@ pub const Profile = struct {
 };
 
 inline fn monotonicNs() u64 {
-    return @as(u64, @intCast(std.time.nanoTimestamp()));
+    const instant = std.time.Instant.now() catch {
+        @panic("monotonic clock not supported");
+    };
+
+    if (@TypeOf(instant.timestamp) == u64) {
+        return instant.timestamp;
+    }
+
+    const ts = instant.timestamp;
+    const seconds = @as(u128, @intCast(ts.sec));
+    const nanoseconds = @as(u128, @intCast(ts.nsec));
+    const total = seconds * @as(u128, std.time.ns_per_s) + nanoseconds;
+    return @truncate(total);
 }
 
 // ========== Main Entry Point ==========
