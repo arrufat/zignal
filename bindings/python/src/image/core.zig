@@ -5,6 +5,7 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
+const ImageFormat = zignal.ImageFormat;
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
@@ -22,6 +23,58 @@ const moveImageToPython = @import("../image.zig").moveImageToPython;
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
+
+fn setDecodeError(kind: []const u8, err: anyerror) void {
+    switch (err) {
+        error.OutOfMemory => py_utils.setMemoryError(kind),
+        else => py_utils.setValueError("Failed to decode {s}: {s}", .{ kind, @errorName(err) }),
+    }
+}
+
+fn wrapNativeImage(native: anytype) ?*c.PyObject {
+    switch (native) {
+        inline else => |img| {
+            return @ptrCast(moveImageToPython(img) orelse return null);
+        },
+    }
+}
+
+fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
+    const codec = switch (format) {
+        .png => zignal.png,
+        .jpeg => zignal.jpeg,
+    };
+    const kind = switch (format) {
+        .png => "PNG data",
+        .jpeg => "JPEG data",
+    };
+
+    if (comptime format == .png) {
+        var decoded = codec.decode(allocator, data) catch |err| {
+            setDecodeError(kind, err);
+            return null;
+        };
+        defer decoded.deinit(allocator);
+
+        const native = codec.toNativeImage(allocator, decoded) catch |err| {
+            setDecodeError(kind, err);
+            return null;
+        };
+        return wrapNativeImage(native);
+    } else {
+        var decoded = codec.decode(allocator, data) catch |err| {
+            setDecodeError(kind, err);
+            return null;
+        };
+        defer decoded.deinit();
+
+        const native = codec.toNativeImage(allocator, &decoded) catch |err| {
+            setDecodeError(kind, err);
+            return null;
+        };
+        return wrapNativeImage(native);
+    }
+}
 
 // ============================================================================
 // IMAGE LOAD
@@ -127,6 +180,74 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     };
     return @ptrCast(moveImageToPython(image) orelse return null);
+}
+
+pub const image_load_from_bytes_doc =
+    \\Load an image from an in-memory bytes-like object (PNG or JPEG).
+    \\
+    \\Accepts any object that implements the Python buffer protocol, such as
+    \\`bytes`, `bytearray`, or `memoryview`. The image format is detected from
+    \\the data's file signature, so no file extension is required.
+    \\
+    \\## Parameters
+    \\- `data` (bytes-like): Raw PNG or JPEG bytes.
+    \\
+    \\## Returns
+    \\Image: A new Image with pixel storage matching the encoded file (Grayscale, Rgb, or Rgba).
+    \\
+    \\## Raises
+    \\- `ValueError`: If the buffer is empty or the format is unsupported
+    \\- `MemoryError`: If allocation fails during decoding
+    \\
+    \\## Examples
+    \\```python
+    \\payload = http_response.read()
+    \\img = Image.load_from_bytes(payload)
+    \\```
+;
+
+pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = type_obj;
+
+    const Params = struct {
+        data: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const data_obj = params.data orelse {
+        py_utils.setTypeError("bytes-like object", null);
+        return null;
+    };
+
+    if (c.PyObject_CheckBuffer(data_obj) == 0) {
+        py_utils.setTypeError("bytes-like object", data_obj);
+        return null;
+    }
+
+    var buffer: c.Py_buffer = std.mem.zeroes(c.Py_buffer);
+    if (c.PyObject_GetBuffer(data_obj, &buffer, c.PyBUF_CONTIG_RO) != 0) {
+        return null;
+    }
+    defer c.PyBuffer_Release(&buffer);
+
+    if (buffer.len == 0) {
+        py_utils.setValueError("Image data buffer cannot be empty", .{});
+        return null;
+    }
+
+    const byte_ptr = @as([*]const u8, @ptrCast(buffer.buf));
+    const data_slice = byte_ptr[0..@intCast(buffer.len)];
+
+    const detected = ImageFormat.detectFromBytes(data_slice) orelse {
+        py_utils.setValueError("Unsupported image data: expected PNG or JPEG signature", .{});
+        return null;
+    };
+
+    return switch (detected) {
+        .png => loadBytes(.png, data_slice),
+        .jpeg => loadBytes(.jpeg, data_slice),
+    };
 }
 
 // ============================================================================
