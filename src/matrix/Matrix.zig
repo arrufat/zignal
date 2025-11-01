@@ -147,7 +147,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Returns a matrix filled with random floating-point numbers.
         pub fn random(allocator: std.mem.Allocator, rows: usize, cols: usize, seed: ?u64) !Self {
-            const s: u64 = seed orelse @truncate(@as(u128, @bitCast(std.time.nanoTimestamp())));
+            const s: u64 = seed orelse std.crypto.random.int(u64);
             var prng: std.Random.DefaultPrng = .init(s);
             var rand = prng.random();
             var result = try init(allocator, rows, cols);
