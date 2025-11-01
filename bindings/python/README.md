@@ -86,7 +86,7 @@ uv run pytest -q                   # run tests
 
 ## Contributing Bindings
 
-Follow the [bindings guide](https://github.com/bfactory-ai/zignal/blob/main/BINDINGS_GUIDE.md) for argument parsing helpers, enum registration, image ownership, and stub generation.
+Follow the [bindings guide](BINDINGS_GUIDE.md) for argument parsing helpers, enum registration, image ownership, and stub generation.
 
 ## License
 
