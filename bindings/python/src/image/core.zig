@@ -40,39 +40,33 @@ fn wrapNativeImage(native: anytype) ?*c.PyObject {
 }
 
 fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
-    const codec = switch (format) {
-        .png => zignal.png,
-        .jpeg => zignal.jpeg,
-    };
-    const kind = switch (format) {
-        .png => "PNG data",
-        .jpeg => "JPEG data",
-    };
-
-    if (comptime format == .png) {
-        var decoded = codec.decode(allocator, data) catch |err| {
-            setDecodeError(kind, err);
-            return null;
-        };
-        defer decoded.deinit(allocator);
-
-        const native = codec.toNativeImage(allocator, decoded) catch |err| {
-            setDecodeError(kind, err);
-            return null;
-        };
-        return wrapNativeImage(native);
-    } else {
-        var decoded = codec.decode(allocator, data) catch |err| {
-            setDecodeError(kind, err);
-            return null;
-        };
-        defer decoded.deinit();
-
-        const native = codec.toNativeImage(allocator, &decoded) catch |err| {
-            setDecodeError(kind, err);
-            return null;
-        };
-        return wrapNativeImage(native);
+    switch (format) {
+        .png => {
+            const kind = "PNG data";
+            var decoded = zignal.png.decode(allocator, data) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            defer decoded.deinit(allocator);
+            const native = zignal.png.toNativeImage(allocator, decoded) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
+        .jpeg => {
+            const kind = "JPEG data";
+            var decoded = zignal.jpeg.decode(allocator, data) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            defer decoded.deinit();
+            const native = zignal.jpeg.toNativeImage(allocator, &decoded) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
     }
 }
 
