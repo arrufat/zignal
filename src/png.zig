@@ -725,10 +725,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, std.Io.Limit.limited(100 * 1024 * 1024));
-    defer allocator.free(png_data);
-
+pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8) !Image(T) {
     var png_state = try decode(allocator, png_data);
     defer png_state.deinit(allocator);
 
@@ -763,6 +760,13 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
             }
         },
     }
+}
+
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
+    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, std.Io.Limit.limited(100 * 1024 * 1024));
+    defer allocator.free(png_data);
+
+    return loadFromBytes(T, allocator, png_data);
 }
 
 // PNG Encoder functionality

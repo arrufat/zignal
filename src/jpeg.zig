@@ -2763,25 +2763,7 @@ pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidJpegFile, UnsupportedJpegFormat, OutOfMemory, and various JPEG parsing errors
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
-
-    // Early signature validation - check for JPEG SOI marker
-    var signature_buffer: [2]u8 = undefined;
-    const bytes_read = try file.read(&signature_buffer);
-    if (bytes_read < 2 or !std.mem.eql(u8, signature_buffer[0..2], &signature)) {
-        return error.InvalidJpegFile;
-    }
-
-    // Reset file position and read entire file
-    try file.seekTo(0);
-    const file_size = try file.getEndPos();
-    const data = try allocator.alloc(u8, file_size);
-    defer allocator.free(data);
-
-    _ = try file.read(data);
-
+pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8) !Image(T) {
     var state = try decode(allocator, data);
     defer state.deinit();
 
@@ -2807,6 +2789,28 @@ pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Imag
             }
         },
     }
+}
+
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
+    const file = try std.fs.cwd().openFile(file_path, .{});
+    defer file.close();
+
+    // Early signature validation - check for JPEG SOI marker
+    var signature_buffer: [2]u8 = undefined;
+    const bytes_read = try file.read(&signature_buffer);
+    if (bytes_read < 2 or !std.mem.eql(u8, signature_buffer[0..2], &signature)) {
+        return error.InvalidJpegFile;
+    }
+
+    // Reset file position and read entire file
+    try file.seekTo(0);
+    const file_size = try file.getEndPos();
+    const data = try allocator.alloc(u8, file_size);
+    defer allocator.free(data);
+
+    _ = try file.readAll(data);
+
+    return loadFromBytes(T, allocator, data);
 }
 
 test "JPEG encode -> decode RGB roundtrip" {

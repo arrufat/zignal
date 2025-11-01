@@ -889,6 +889,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "load_from_bytes",
+            .meth = @ptrCast(&core.image_load_from_bytes),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
+            .doc = core.image_load_from_bytes_doc,
+            .params = "cls, data: bytes | bytearray | memoryview",
+            .returns = "Image",
+        },
+        .{
             .name = "save",
             .meth = @ptrCast(&core.image_save),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,

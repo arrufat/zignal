@@ -12,6 +12,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
+const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
@@ -245,11 +246,29 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(allocator: Allocator, file_path: []const u8) !Self {
-            const image_format = try @import("image/format.zig").ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
+            const image_format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
                 .png => png.load(T, allocator, file_path),
                 .jpeg => jpeg.load(T, allocator, file_path),
+            };
+        }
+
+        /// Loads an image from an in-memory byte buffer with automatic format detection.
+        /// This is useful when image data comes from network streams or preloaded assets.
+        ///
+        /// Example usage:
+        /// ```zig
+        /// const bytes = try fetchNetworkImage();
+        /// var img: Image(Rgb) = try .loadFromBytes(allocator, bytes);
+        /// defer img.deinit(allocator);
+        /// ```
+        pub fn loadFromBytes(allocator: Allocator, data: []const u8) !Self {
+            const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
+
+            return switch (image_format) {
+                .png => png.loadFromBytes(T, allocator, data),
+                .jpeg => jpeg.loadFromBytes(T, allocator, data),
             };
         }
 
@@ -1168,8 +1187,6 @@ pub fn Image(comptime T: type) type {
         /// Supported types: u8, Rgb, Rgba
         /// Returns a Histogram struct with channel-specific bins.
         pub fn histogram(self: Self) Histogram(T) {
-            const Rgb = @import("color/Rgb.zig");
-
             var hist: Histogram(T) = .init();
 
             var iter = self.pixels();
