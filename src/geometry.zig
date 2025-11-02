@@ -19,10 +19,13 @@ pub const ProjectiveTransform = transforms.ProjectiveTransform;
 // Import ConvexHull
 pub const ConvexHull = @import("geometry/ConvexHull.zig").ConvexHull;
 
-// Import primitive functions
-const primitives = @import("geometry/primitives.zig");
-pub const pointInTriangle = primitives.pointInTriangle;
-pub const findBarycenter = primitives.findBarycenter;
+// Import utility functions
+const utils = @import("geometry/utils.zig");
+pub const pointInTriangle = utils.pointInTriangle;
+pub const findBarycenter = utils.findBarycenter;
+pub const hasNonCollinearTriplet = utils.hasNonCollinearTriplet;
+pub const orientation = utils.orientation;
+pub const Orientation = utils.Orientation;
 
 // Re-export tests to ensure everything compiles
 test {
@@ -30,5 +33,5 @@ test {
     _ = @import("geometry/Rectangle.zig");
     _ = transforms;
     _ = @import("geometry/ConvexHull.zig");
-    _ = primitives;
+    _ = utils;
 }
