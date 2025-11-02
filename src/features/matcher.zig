@@ -118,8 +118,9 @@ pub const BruteForceMatcher = struct {
         }
 
         var all_matches = try allocator.alloc([]Match, query_descriptors.len);
+        var filled: usize = 0;
         errdefer {
-            for (all_matches) |matches| {
+            for (all_matches[0..filled]) |matches| {
                 allocator.free(matches);
             }
             allocator.free(all_matches);
@@ -151,7 +152,9 @@ pub const BruteForceMatcher = struct {
                 }
             }
 
-            all_matches[q_idx] = try k_matches.toOwnedSlice(allocator);
+            const owned = try k_matches.toOwnedSlice(allocator);
+            all_matches[q_idx] = owned;
+            filled = q_idx + 1;
         }
 
         return all_matches;
@@ -171,8 +174,9 @@ pub const BruteForceMatcher = struct {
         }
 
         var all_matches = try allocator.alloc([]Match, query_descriptors.len);
+        var filled: usize = 0;
         errdefer {
-            for (all_matches) |matches| {
+            for (all_matches[0..filled]) |matches| {
                 allocator.free(matches);
             }
             allocator.free(all_matches);
@@ -200,6 +204,7 @@ pub const BruteForceMatcher = struct {
             const matches_slice = try radius_matches.toOwnedSlice(allocator);
             std.mem.sort(Match, matches_slice, {}, Match.compareDistance);
             all_matches[q_idx] = matches_slice;
+            filled = q_idx + 1;
         }
 
         return all_matches;
