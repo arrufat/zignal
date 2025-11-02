@@ -1,3 +1,4 @@
+import pytest
 import zignal
 
 
@@ -39,6 +40,21 @@ class TestTransforms:
         # Can project list
         results = transform.project([(2, 2), (8, 8)])
         assert results is not None
+
+    def test_similarity_transform_rank_deficient(self):
+        with pytest.raises(ValueError, match="rank deficient"):
+            zignal.SimilarityTransform([(0, 0), (0, 0)], [(1, 1), (1, 1)])
+
+    def test_affine_transform_rank_deficient(self):
+        with pytest.raises(ValueError, match="rank deficient"):
+            zignal.AffineTransform([(0, 0), (1, 0), (2, 0)], [(0, 0), (1, 0), (2, 0)])
+
+    def test_projective_transform_rank_deficient(self):
+        with pytest.raises(ValueError, match="rank deficient"):
+            zignal.ProjectiveTransform(
+                [(0, 0), (1, 0), (2, 0), (3, 0)],
+                [(0, 0), (1, 0), (2, 0), (3, 0)],
+            )
 
     def test_transform_with_warp(self):
         img = zignal.Image(10, 10)

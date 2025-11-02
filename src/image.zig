@@ -654,7 +654,7 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example usage:
         /// ```zig
-        /// const transform = SimilarityTransform(f32).init(from_points, to_points);
+        /// const transform = try SimilarityTransform(f32).init(from_points, to_points);
         /// var warped: Image(T) = .empty;
         /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
         /// defer warped.deinit(allocator);

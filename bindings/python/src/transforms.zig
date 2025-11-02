@@ -55,7 +55,19 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     defer pairs.deinit();
 
     // Create and fit the transform
-    const transform = SimilarityTransform(f64).init(pairs.from_points, pairs.to_points);
+    const transform = SimilarityTransform(f64).init(pairs.from_points, pairs.to_points) catch |err| {
+        switch (err) {
+            error.NotConverged => py_utils.setValueError(
+                "SVD failed to converge; cannot fit similarity transform",
+                .{},
+            ),
+            error.RankDeficient => py_utils.setValueError(
+                "Point correspondences are rank deficient; cannot fit similarity transform",
+                .{},
+            ),
+        }
+        return -1;
+    };
 
     // Store matrix components
     self.matrix[0][0] = transform.matrix.at(0, 0).*;
@@ -119,7 +131,10 @@ var similarity_getset = [_]c.PyGetSetDef{
 pub var SimilarityTransformType = py_utils.buildTypeObject(.{
     .name = "zignal.SimilarityTransform",
     .basicsize = @sizeOf(SimilarityTransformObject),
-    .doc = "Similarity transform (rotation + uniform scale + translation)",
+    .doc =
+    \\Similarity transform (rotation + uniform scale + translation).
+    \\Raises ValueError when the point correspondences are rank deficient or the fit fails to converge.
+    ,
     .methods = @ptrCast(&similarity_methods),
     .getset = @ptrCast(&similarity_getset),
     .new = similarity_new,
@@ -176,11 +191,12 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const transform = AffineTransform(f64).init(allocator, pairs.from_points, pairs.to_points) catch |err| {
         switch (err) {
             error.OutOfMemory => py_utils.setMemoryError("affine transform"),
-            error.DimensionMismatch => py_utils.setValueError(
-                "Point arrays must be 2D coordinates",
+            error.DimensionMismatch => py_utils.setValueError("Point arrays must be 2D coordinates", .{}),
+            error.NotConverged => py_utils.setValueError(
+                "SVD failed to converge; cannot fit affine transform",
                 .{},
             ),
-            error.Singular, error.NotConverged => py_utils.setValueError(
+            error.Singular, error.RankDeficient => py_utils.setValueError(
                 "Point correspondences are rank deficient; cannot fit affine transform",
                 .{},
             ),
@@ -244,7 +260,10 @@ var affine_getset = [_]c.PyGetSetDef{
 pub var AffineTransformType = py_utils.buildTypeObject(.{
     .name = "zignal.AffineTransform",
     .basicsize = @sizeOf(AffineTransformObject),
-    .doc = "Affine transform (general 2D linear transform)",
+    .doc =
+    \\Affine transform (general 2D linear transform).
+    \\Raises ValueError when correspondences are rank deficient or the fit fails to converge.
+    ,
     .methods = @ptrCast(&affine_methods),
     .getset = @ptrCast(&affine_getset),
     .new = affine_new,
@@ -299,7 +318,19 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     defer pairs.deinit();
 
     // Create and fit the transform
-    const transform = ProjectiveTransform(f64).init(pairs.from_points, pairs.to_points);
+    const transform = ProjectiveTransform(f64).init(pairs.from_points, pairs.to_points) catch |err| {
+        switch (err) {
+            error.NotConverged => py_utils.setValueError(
+                "SVD failed to converge; cannot fit projective transform",
+                .{},
+            ),
+            error.RankDeficient => py_utils.setValueError(
+                "Point correspondences are rank deficient; cannot fit projective transform",
+                .{},
+            ),
+        }
+        return -1;
+    };
 
     // Store matrix components
     for (0..3) |i| {
@@ -401,7 +432,10 @@ var projective_getset = [_]c.PyGetSetDef{
 pub var ProjectiveTransformType = py_utils.buildTypeObject(.{
     .name = "zignal.ProjectiveTransform",
     .basicsize = @sizeOf(ProjectiveTransformObject),
-    .doc = "Projective transform (homography/perspective transform)",
+    .doc =
+    \\Projective transform (homography/perspective transform).
+    \\Raises ValueError when correspondences are rank deficient or the fit fails to converge.
+    ,
     .methods = @ptrCast(&projective_methods),
     .getset = @ptrCast(&projective_getset),
     .new = projective_new,

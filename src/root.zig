@@ -91,9 +91,6 @@ pub const PerlinOptions = perlin_mod.PerlinOptions;
 const point = @import("geometry/Point.zig");
 pub const Point = point.Point;
 
-pub const pointInTriangle = geometry.pointInTriangle;
-pub const findBarycenter = geometry.findBarycenter;
-
 pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
 // Font system

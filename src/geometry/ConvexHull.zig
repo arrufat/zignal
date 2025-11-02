@@ -4,6 +4,8 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("Point.zig").Point;
+const computeOrientation = @import("utils.zig").computeOrientation;
+const Orientation = @import("utils.zig").Orientation;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
@@ -26,27 +28,9 @@ pub fn ConvexHull(comptime T: type) type {
             self.hull.deinit(self.gpa);
         }
 
-        const Orientation = enum {
-            collinear,
-            clockwise,
-            counter_clockwise,
-        };
-
-        /// Returns the orientation of the three points.
-        fn computeOrientation(a: Point(2, T), b: Point(2, T), c: Point(2, T)) Orientation {
-            const v: T = a.x() * (b.y() - c.y()) + b.x() * (c.y() - a.y()) + c.x() * (a.y() - b.y());
-            // Due to floating point precision errors, compute the reverse orientation, and
-            // if any of those is collinear, then return collinear.
-            const w: T = a.x() * (c.y() - b.y()) + c.x() * (b.y() - a.y()) + b.x() * (a.y() - c.y());
-            if (v * w == 0) return .collinear;
-            if (v < 0) return .clockwise;
-            if (v > 0) return .counter_clockwise;
-            return .collinear;
-        }
-
         /// Compares the points by polar angle in clockwise order.
         fn clockwiseOrder(p: Point(2, T), a: Point(2, T), b: Point(2, T)) bool {
-            return switch (computeOrientation(p, a, b)) {
+            return switch (computeOrientation(T, p, a, b)) {
                 .clockwise => true,
                 .counter_clockwise => false,
                 .collinear => p.distanceSquared(a) < p.distanceSquared(b),
@@ -88,6 +72,7 @@ pub fn ConvexHull(comptime T: type) type {
             for (self.points.items[1..]) |p| {
                 // Remove points that do NOT create a clockwise turn
                 while (self.hull.items.len > 1 and computeOrientation(
+                    T,
                     self.hull.items[self.hull.items.len - 2],
                     self.hull.items[self.hull.items.len - 1],
                     p,
@@ -138,15 +123,12 @@ test "convex hull" {
 }
 
 test "computeOrientation" {
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const computeOrientation = ConvexHull(f32).computeOrientation;
     // These three points can have different orientations due to floating point precision.
     const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
     const b: Point(2, f32) = .init(.{ 3.6271343e-1, 9.712454e-1 });
     const c: Point(2, f32) = .init(.{ 3.9276862e-1, 8.9579517e-1 });
-    const orientation_abc = computeOrientation(a, b, c);
-    const orientation_acb = computeOrientation(a, c, b);
+    const orientation_abc = computeOrientation(f32, a, b, c);
+    const orientation_acb = computeOrientation(f32, a, c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);
 }
 

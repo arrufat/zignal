@@ -69,7 +69,7 @@ pub fn extractAlignedFace(
 
     // Find the transforms that maps the points between the canonical landmarks and the
     // detected landmarks.
-    const transform: SimilarityTransform = .init(&from_points, &to_points);
+    const transform: SimilarityTransform = try .init(&from_points, &to_points);
 
     // For each pixel in the output, find its source using the transform
     for (0..out.rows) |r| {
