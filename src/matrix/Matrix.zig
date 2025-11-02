@@ -572,7 +572,6 @@ pub fn Matrix(comptime T: type) type {
         /// Both matrices must be arranged for row-major access
         fn simdGemmKernel(
             comptime VecType: type,
-            comptime vec_len: usize,
             result: *Matrix(T),
             matrix_a: Matrix(T),
             matrix_b: Matrix(T),
@@ -581,6 +580,8 @@ pub fn Matrix(comptime T: type) type {
             a_cols: usize,
             b_cols: usize,
         ) void {
+            comptime assert(@typeInfo(VecType) == .vector);
+            const vec_len = @typeInfo(VecType).vector.len;
             // Both matrices are now guaranteed to be accessed row-wise
             for (0..a_rows) |i| {
                 for (0..b_cols) |j| {
@@ -704,7 +705,7 @@ pub fn Matrix(comptime T: type) type {
                                     a_transposed.at(j, k).* = self.at(k, j).*;
                                 }
                             }
-                            simdGemmKernel(VecType, vec_len, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for cache-friendly row-major access
                             var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
@@ -717,7 +718,7 @@ pub fn Matrix(comptime T: type) type {
                                     b_transposed.at(j, k).* = other.at(k, j).*;
                                 }
                             }
-                            simdGemmKernel(VecType, vec_len, &result, self, b_transposed, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, self, b_transposed, alpha, a_rows, a_cols, b_cols);
                         }
                     } else if (trans_a and !trans_b) {
                         // Case 2: A^T * B - transpose A for cache-friendly row-major access
@@ -738,7 +739,7 @@ pub fn Matrix(comptime T: type) type {
                             std.mem.eql(T, self.items, other.items))
                         {
                             // For covariance (A^T * A), we need to also use transposed for B
-                            simdGemmKernel(VecType, vec_len, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for row-wise access
                             var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
@@ -751,7 +752,7 @@ pub fn Matrix(comptime T: type) type {
                                     b_transposed.at(j, k).* = other.at(k, j).*;
                                 }
                             }
-                            simdGemmKernel(VecType, vec_len, &result, a_transposed, b_transposed, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, a_transposed, b_transposed, alpha, a_rows, a_cols, b_cols);
                         }
                     } else if (!trans_a and trans_b) {
                         // Case 3: A * B^T - no transpose needed, B^T is naturally row-wise
@@ -772,10 +773,10 @@ pub fn Matrix(comptime T: type) type {
                                     a_transposed.at(j, k).* = self.at(j, k).*;
                                 }
                             }
-                            simdGemmKernel(VecType, vec_len, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: B^T is naturally row-wise
-                            simdGemmKernel(VecType, vec_len, &result, self, other, alpha, a_rows, a_cols, b_cols);
+                            simdGemmKernel(VecType, &result, self, other, alpha, a_rows, a_cols, b_cols);
                         }
                     } else if (trans_a and trans_b) {
                         // Case 4: A^T * B^T - transpose A so rows are contiguous, reuse B rows directly
@@ -792,7 +793,7 @@ pub fn Matrix(comptime T: type) type {
 
                         // op(B) = B^T. Each column j of B^T corresponds to row j of B, which is already
                         // contiguous in memory, so we can feed `other` directly to the SIMD kernel.
-                        simdGemmKernel(VecType, vec_len, &result, a_transposed, other, alpha, a_rows, a_cols, b_cols);
+                        simdGemmKernel(VecType, &result, a_transposed, other, alpha, a_rows, a_cols, b_cols);
                     }
                 } else {
                     // No SIMD support, use scalar implementation for all transpose combinations
