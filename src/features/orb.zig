@@ -379,14 +379,28 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
 
     // Exponential scale distribution for better coverage
     // Uses formula: n_features * (1 - factor) / (1 - factor^n_levels) * factor^level
+    const levels_usize = @as(usize, @intCast(self.n_levels));
+
+    // Handle degenerate scale factors by distributing features evenly
+    if (self.n_levels == 1 or self.scale_factor <= 1.0) {
+        const base = if (levels_usize == 0) 0 else self.n_features / levels_usize;
+        var remainder = if (levels_usize == 0) 0 else self.n_features % levels_usize;
+
+        for (0..levels_usize) |level| {
+            var count = base;
+            if (remainder > 0) {
+                count += 1;
+                remainder -= 1;
+            }
+            n_features_per_level[level] = count;
+        }
+
+        return n_features_per_level;
+    }
+
     const factor = 1.0 / self.scale_factor;
     const factor_to_n = std.math.pow(f32, factor, @as(f32, @floatFromInt(self.n_levels)));
 
-    // Special case for single level
-    if (self.n_levels == 1) {
-        n_features_per_level[0] = self.n_features;
-        return n_features_per_level;
-    }
 
     // Distribute features with exponential decay
     var assigned: usize = 0;
