@@ -349,28 +349,36 @@ pub fn Canvas(comptime T: type) type {
             const dy = y2 - y1;
             const gradient = if (dx == 0) 1.0 else dy / dx;
 
-            // Handle endpoints
-            const x_end = @round(x1);
-            const y_end = y1 + gradient * (x_end - x1);
+            var x_px1: f32 = undefined;
+            var x_px2: f32 = undefined;
+            var intery: f32 = undefined;
+            inline for ([_]struct { x: f32, y: f32, is_start: bool }{
+                .{ .x = x1, .y = y1, .is_start = true },
+                .{ .x = x2, .y = y2, .is_start = false },
+            }, 0..) |ep, idx| {
+                const x_end = @round(ep.x);
+                const y_end = ep.y + gradient * (x_end - ep.x);
+                const x_gap = if (ep.is_start) rfpart(ep.x + 0.5) else fpart(ep.x + 0.5);
+                const x_px = x_end;
+                const y_px = @floor(y_end);
 
-            // Draw the actual endpoint pixels at full intensity
-            if (steep) {
-                self.setPixel(.init(.{ @round(y1), @round(x1) }), c2);
-            } else {
-                self.setPixel(.init(.{ @round(x1), @round(y1) }), c2);
-            }
-            var intery = y_end + gradient;
+                if (steep) {
+                    self.setPixel(.init(.{ y_px, x_px }), c2.fade(rfpart(y_end) * x_gap));
+                    self.setPixel(.init(.{ y_px + 1, x_px }), c2.fade(fpart(y_end) * x_gap));
+                } else {
+                    self.setPixel(.init(.{ x_px, y_px }), c2.fade(rfpart(y_end) * x_gap));
+                    self.setPixel(.init(.{ x_px, y_px + 1 }), c2.fade(fpart(y_end) * x_gap));
+                }
 
-            // Draw the actual endpoint pixels at full intensity
-            if (steep) {
-                self.setPixel(.init(.{ @round(y2), @round(x2) }), c2);
-            } else {
-                self.setPixel(.init(.{ @round(x2), @round(y2) }), c2);
+                if (idx == 0) {
+                    x_px1 = x_px;
+                    intery = y_end + gradient;
+                } else {
+                    x_px2 = x_px;
+                }
             }
 
             // Main loop
-            const x_px1 = @round(x1);
-            const x_px2 = @round(x2);
             var x = x_px1 + 1;
             while (x < x_px2) : (x += 1) {
                 if (steep) {
