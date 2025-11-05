@@ -434,6 +434,7 @@ pub fn Canvas(comptime T: type) type {
             const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
             const c2 = convertColor(Rgba, color);
+            const needs_alpha_blend = c2.a != 255;
 
             // Calculate line direction vector
             const dx = p2.x() - p1.x();
@@ -458,10 +459,20 @@ pub fn Canvas(comptime T: type) type {
                 var y = y1;
                 while (y <= y2) : (y += 1) {
                     if (y < 0 or y >= frows) continue;
-                    // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
                     const x_start = x1 - half_width;
                     const x_end = x1 + half_width;
-                    self.setHorizontalSpan(x_start, x_end, y, pixel_color);
+                    if (needs_alpha_blend) {
+                        const px_start = @as(usize, @intFromFloat(@max(0, @floor(x_start))));
+                        const px_end = @as(usize, @intFromFloat(@min(fcols - 1, @ceil(x_end))));
+                        if (px_start > px_end) continue;
+                        var px = px_start;
+                        while (px <= px_end) : (px += 1) {
+                            self.setPixel(.init(.{ @as(f32, @floatFromInt(px)), y }), c2);
+                        }
+                    } else {
+                        // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
+                        self.setHorizontalSpan(x_start, x_end, y, pixel_color);
+                    }
                 }
                 // Add rounded caps
                 self.fillCircle(p1, half_width, color, .soft);
@@ -481,9 +492,9 @@ pub fn Canvas(comptime T: type) type {
                 while (i <= half_width) : (i += 1) {
                     const py = y1 + i;
                     if (py >= 0 and py < frows) {
-                        // For soft mode, we need to handle edge pixels with alpha blending
-                        if (i == -half_width or i == half_width) {
-                            // Edge rows - use setPixel for alpha blending
+                        const row_is_edge = i == -half_width or i == half_width;
+                        if (needs_alpha_blend or row_is_edge) {
+                            // Use per-pixel blending for translucent colors or edge rows
                             var x = x1;
                             while (x <= x2) : (x += 1) {
                                 if (x >= 0 and x < fcols) {
