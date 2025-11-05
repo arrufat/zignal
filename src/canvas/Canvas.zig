@@ -193,9 +193,10 @@ pub fn Canvas(comptime T: type) type {
         ///
         /// Parameters:
         /// - p1, p2: Line endpoints in floating-point coordinates
-        /// - color: Any color type (Rgba colors support alpha blending)
+        /// - color: Any color type (Rgba colors support alpha blending in `.soft` mode; `.fast` always overwrites destination pixels)
         /// - width: Line thickness in pixels (0 = no drawing)
         /// - mode: .fast (performance) or .soft (quality with antialiasing)
+        /// Note: `.fast` prioritizes raw throughput and never blends with existing pixels.
         pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: usize, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
