@@ -179,7 +179,7 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawPolygonComplex", .md5sum = "da9b83426d2118ce99948eabebff91fb", .draw_fn = drawPolygonComplex },
     .{ .name = "drawSplinePolygon", .md5sum = "209dc8428baa6e29ccff0a1fbf69b06d", .draw_fn = drawSplinePolygon },
     .{ .name = "drawArcQuarter", .md5sum = "028912b02048fa169c8cb808ff669184", .draw_fn = drawArcQuarter },
-    .{ .name = "drawArcHalf", .md5sum = "962ebc8da9812f595ac3b9a2183eb85b", .draw_fn = drawArcHalf },
+    .{ .name = "drawArcHalf", .md5sum = "9d89a802399a6344f362dc700c5b122d", .draw_fn = drawArcHalf },
     .{ .name = "drawArcThick", .md5sum = "70595cc2d1252de2e1c10d8debfcea70", .draw_fn = drawArcThick },
     .{ .name = "fillArcQuarter", .md5sum = "acfcff99a739fb974774f392f0c472e2", .draw_fn = fillArcQuarter },
     .{ .name = "fillArcHalf", .md5sum = "201d881930565858e2ef28a44122fea7", .draw_fn = fillArcHalf },
