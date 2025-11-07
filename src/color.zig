@@ -289,6 +289,48 @@ test "extended color space round trips" {
     }
 }
 
+test "color invert matches RGB inversion" {
+    const samples = [_]Rgb{
+        .{ .r = 0, .g = 0, .b = 0 },
+        .{ .r = 255, .g = 255, .b = 255 },
+        .{ .r = 12, .g = 34, .b = 56 },
+        .{ .r = 128, .g = 64, .b = 32 },
+        .{ .r = 5, .g = 200, .b = 150 },
+    };
+
+    inline for (color_types) |ColorType| {
+        for (samples) |rgb| {
+            const typed: ColorType = if (comptime ColorType == Rgb) rgb else convertColor(ColorType, rgb);
+            const inverted = typed.invert();
+            const recovered_rgb: Rgb = if (comptime ColorType == Rgb) inverted else inverted.toRgb();
+            const expected = rgb.invert();
+
+            if (comptime ColorType == Ycbcr) {
+                try expect(@abs(@as(i16, expected.r) - @as(i16, recovered_rgb.r)) <= 1);
+                try expect(@abs(@as(i16, expected.g) - @as(i16, recovered_rgb.g)) <= 1);
+                try expect(@abs(@as(i16, expected.b) - @as(i16, recovered_rgb.b)) <= 1);
+            } else {
+                try expectEqualDeep(expected, recovered_rgb);
+            }
+
+            if (comptime ColorType == Rgba) {
+                const original_rgba = convertColor(Rgba, rgb);
+                try expectEqual(original_rgba.a, inverted.a);
+            }
+        }
+    }
+}
+
+test "Xyz blend matches RGB blend" {
+    const base_rgb = Rgb{ .r = 120, .g = 100, .b = 80 };
+    const overlay = Rgba{ .r = 200, .g = 50, .b = 150, .a = 128 };
+
+    const blended_xyz = base_rgb.toXyz().blend(overlay, Blending.normal);
+    const blended_rgb = base_rgb.blend(overlay, Blending.normal);
+
+    try expectEqualDeep(blended_rgb, blended_xyz.toRgb());
+}
+
 /// List of color types to test. This is the only thing to update when adding a new color space.
 const color_types = .{ Rgb, Rgba, Hsl, Hsv, Lab, Lch, Xyz, Lms, Oklab, Oklch, Xyb, Ycbcr };
 

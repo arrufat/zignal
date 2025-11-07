@@ -7,6 +7,7 @@
 
 const std = @import("std");
 
+const Blending = @import("blending.zig").Blending;
 const conversions = @import("conversions.zig");
 const formatting = @import("formatting.zig");
 const Hsl = @import("Hsl.zig");
@@ -98,4 +99,14 @@ pub fn toXyb(self: Self) Xyb {
 /// Converts CIE XYZ to YCbCr via RGB.
 pub fn toYcbcr(self: Self) Ycbcr {
     return self.toRgb().toYcbcr();
+}
+
+/// Alpha blends the given RGBA color onto this XYZ color and returns the result.
+pub fn blend(self: Self, overlay: Rgba, mode: Blending) Self {
+    return self.toRgb().blend(overlay, mode).toXyz();
+}
+
+/// Returns the inverted XYZ color by inverting via RGB space.
+pub fn invert(self: Self) Self {
+    return self.toRgb().invert().toXyz();
 }

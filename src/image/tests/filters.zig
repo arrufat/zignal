@@ -43,6 +43,16 @@ test "invert" {
     rgba.at(0, 0).* = color.Rgba{ .r = 0, .g = 128, .b = 255, .a = 64 };
     rgba.invert();
     try expectEqualDeep(color.Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
+
+    // Test non-RGB color type (HSL) via conversion
+    var hsl: Image(color.Hsl) = try .init(std.testing.allocator, 1, 1);
+    defer hsl.deinit(std.testing.allocator);
+
+    const original_hsl = color.Hsl{ .h = 200, .s = 60, .l = 40 };
+    hsl.at(0, 0).* = original_hsl;
+    hsl.invert();
+    const inverted_rgb = original_hsl.toRgb().invert();
+    try expectEqualDeep(inverted_rgb, hsl.at(0, 0).*.toRgb());
 }
 
 test "boxBlur radius 0 with views" {

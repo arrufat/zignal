@@ -98,6 +98,11 @@ pub fn toGray(self: Ycbcr) u8 {
     return self.y;
 }
 
+/// Returns the inverted YCbCr color by inverting via RGB space.
+pub fn invert(self: Ycbcr) Ycbcr {
+    return self.toRgb().invert().toYcbcr();
+}
+
 /// Alpha blends this color with another RGBA color using the specified blend mode and returns the result.
 pub fn blend(self: Ycbcr, overlay: Rgba, mode: Blending) Ycbcr {
     return self.toRgb().blend(overlay, mode).toYcbcr();

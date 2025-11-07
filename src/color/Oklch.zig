@@ -100,6 +100,11 @@ pub fn toYcbcr(self: Oklch) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted Oklch color by inverting via RGB space.
+pub fn invert(self: Oklch) Oklch {
+    return self.toRgb().invert().toOklch();
+}
+
 /// Alpha blends the given RGBA color onto this Oklch color and returns the result.
 pub fn blend(self: Oklch, overlay: Rgba, mode: Blending) Oklch {
     return self.toRgb().blend(overlay, mode).toOklch();

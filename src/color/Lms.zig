@@ -99,6 +99,11 @@ pub fn toYcbcr(self: Lms) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted LMS color by inverting via RGB space.
+pub fn invert(self: Lms) Lms {
+    return self.toRgb().invert().toLms();
+}
+
 /// Alpha blends the given RGBA color onto this LMS color and returns the result.
 pub fn blend(self: Lms, overlay: Rgba, mode: Blending) Lms {
     return self.toRgb().blend(overlay, mode).toLms();

@@ -135,4 +135,14 @@ pub const Rgba = packed struct {
     pub fn blend(self: Rgba, overlay: Rgba, mode: Blending) Rgba {
         return blendColors(self, overlay, mode);
     }
+
+    /// Returns the inverted RGBA color (RGB inverted, alpha preserved).
+    pub fn invert(self: Rgba) Rgba {
+        return .{
+            .r = 255 - self.r,
+            .g = 255 - self.g,
+            .b = 255 - self.b,
+            .a = self.a,
+        };
+    }
 };

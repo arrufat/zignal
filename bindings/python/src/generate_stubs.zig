@@ -158,7 +158,6 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
         }
     }
 
-    // Add to_gray method (all color types have it)
     try stub.write(
         \\    def to_gray(self) -> int:
         \\        """Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255."""
@@ -166,11 +165,19 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
         \\
     );
 
-    // Add blend method if the type has it
-    if (@hasDecl(ColorType, "blend")) {
-        try stub.write("    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> ");
-        try stub.writef("{s}: ...\n", .{class_name});
-    }
+    try stub.writef(
+        \\    def invert(self) -> {s}:
+        \\        """Return a new color with inverted RGB channels while preserving alpha (if present)."""
+        \\    ...
+        \\
+    , .{class_name});
+
+    try stub.writef(
+        \\    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> {s}:
+        \\        """Blend with `overlay` (tuple interpreted as RGBA) using the specified `mode`."""
+        \\    ...
+        \\
+    , .{class_name});
 
     // Standard Python methods
     try stub.write("    def __repr__(self) -> str: ...\n");

@@ -179,9 +179,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.setter;
         }
 
-        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend + to_gray
-        pub fn generateMethods() [color_types.len + 3]c.PyMethodDef {
-            var methods: [color_types.len + 3]c.PyMethodDef = undefined;
+        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend + to_gray + invert
+        pub fn generateMethods() [color_types.len + 4]c.PyMethodDef {
+            var methods: [color_types.len + 4]c.PyMethodDef = undefined;
             var index: usize = 0;
 
             // Add __format__ method
@@ -241,6 +241,19 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 .ml_doc = "Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255.",
             };
             index += 1;
+
+            if (@hasDecl(ZigColorType, "invert")) {
+                methods[index] = c.PyMethodDef{
+                    .ml_name = "invert",
+                    .ml_meth = @ptrCast(&invertMethod),
+                    .ml_flags = c.METH_NOARGS,
+                    .ml_doc =
+                    \\Return a new color with inverted RGB channels while preserving alpha (if present).
+                    \\Values are converted through RGB space to ensure consistency across color models.
+                    ,
+                };
+                index += 1;
+            }
 
             // Generate conversion methods for each color type
             inline for (color_types) |TargetColorType| {
@@ -702,6 +715,14 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const self: *ObjectType = @ptrCast(self_obj);
             const zig_color = objectToZigColor(self);
             return @ptrCast(c.PyLong_FromLong(@intCast(zig_color.toGray())));
+        }
+
+        /// invert method implementation
+        pub fn invertMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self: *ObjectType = @ptrCast(self_obj);
+            const inverted = objectToZigColor(self).invert();
+            const result = createPyObject(inverted, c.Py_TYPE(self_obj)) orelse return null;
+            return @ptrCast(result);
         }
 
         /// Blend method implementation

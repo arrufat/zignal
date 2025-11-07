@@ -100,6 +100,11 @@ pub fn toLch(self: Lab) Lch {
     return conversions.labToLch(self);
 }
 
+/// Returns the inverted Lab color by inverting via RGB space.
+pub fn invert(self: Lab) Lab {
+    return self.toRgb().invert().toLab();
+}
+
 /// Alpha blends the given RGBA color onto this CIELAB color and returns the result.
 pub fn blend(self: Lab, overlay: Rgba, mode: Blending) Lab {
     return self.toRgb().blend(overlay, mode).toLab();

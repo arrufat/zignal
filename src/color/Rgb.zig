@@ -131,3 +131,12 @@ pub fn blend(self: Rgb, overlay: Rgba, mode: Blending) Rgb {
     const blended = blendColors(self.toRgba(255), overlay, mode);
     return .{ .r = blended.r, .g = blended.g, .b = blended.b };
 }
+
+/// Returns the inverted RGB color (component-wise 255 - value).
+pub fn invert(self: Rgb) Rgb {
+    return .{
+        .r = 255 - self.r,
+        .g = 255 - self.g,
+        .b = 255 - self.b,
+    };
+}

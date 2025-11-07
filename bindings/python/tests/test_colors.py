@@ -41,3 +41,50 @@ def test_blend_mode_and_blend():
     # Tuple overlay works
     res2 = base.blend((200, 50, 150, 128), zignal.Blending.MULTIPLY)
     assert isinstance(res2, zignal.Rgb)
+
+
+def test_color_invert_methods():
+    rgb = zignal.Rgb(0, 128, 255)
+    assert rgb.invert() == zignal.Rgb(255, 127, 0)
+
+    rgba = zignal.Rgba(10, 20, 30, 64)
+    inverted_rgba = rgba.invert()
+    assert inverted_rgba == zignal.Rgba(245, 235, 225, 64)
+    assert inverted_rgba.a == 64
+
+    hsl = zignal.Hsl(200.0, 60.0, 40.0)
+    expected_rgb = hsl.to_rgb().invert()
+    assert hsl.invert().to_rgb() == expected_rgb
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: zignal.Rgb(12, 34, 56),
+        lambda: zignal.Rgba(12, 34, 56, 78),
+        lambda: zignal.Hsl(200.0, 50.0, 40.0),
+        lambda: zignal.Hsv(200.0, 50.0, 40.0),
+        lambda: zignal.Lab(50.0, 10.0, -20.0),
+        lambda: zignal.Lch(60.0, 20.0, 120.0),
+        lambda: zignal.Lms(10.0, 20.0, 30.0),
+        lambda: zignal.Oklab(0.5, 0.1, -0.1),
+        lambda: zignal.Oklch(0.5, 0.2, 45.0),
+        lambda: zignal.Xyb(0.1, 0.2, 0.3),
+        lambda: zignal.Xyz(10.0, 20.0, 5.0),
+        lambda: zignal.Ycbcr(128, 140, 120),
+    ],
+)
+def test_color_invert_smoke(factory):
+    color = factory()
+    inverted = color.invert()
+    assert isinstance(inverted, type(color))
+    original_rgb = color if isinstance(color, zignal.Rgb) else color.to_rgb()
+    inverted_rgb = inverted if isinstance(inverted, zignal.Rgb) else inverted.to_rgb()
+    expected_rgb = original_rgb.invert()
+
+    if isinstance(color, zignal.Ycbcr):
+        assert abs(inverted_rgb.r - expected_rgb.r) <= 1
+        assert abs(inverted_rgb.g - expected_rgb.g) <= 1
+        assert abs(inverted_rgb.b - expected_rgb.b) <= 1
+    else:
+        assert inverted_rgb == expected_rgb
