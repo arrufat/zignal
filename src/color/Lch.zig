@@ -100,6 +100,11 @@ pub fn toYcbcr(self: Lch) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted LCh color by inverting via RGB space.
+pub fn invert(self: Lch) Lch {
+    return self.toRgb().invert().toLch();
+}
+
 /// Alpha blending: blends the given RGBA color onto this LCh color and returns the result.
 pub fn blend(self: Lch, overlay: Rgba, mode: Blending) Lch {
     return self.toRgb().blend(overlay, mode).toLch();

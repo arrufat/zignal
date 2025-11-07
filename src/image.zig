@@ -508,21 +508,22 @@ pub fn Image(comptime T: type) type {
         /// For RGB colors: inverts each channel as 255 - channel
         /// For RGBA colors: inverts RGB channels but preserves alpha
         pub fn invert(self: Self) void {
-            const color = @import("color.zig");
-
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const pixel = self.at(r, c);
-                    switch (T) {
-                        u8 => pixel.* = 255 - pixel.*,
-                        color.Rgb, color.Rgba => {
-                            pixel.r = 255 - pixel.r;
-                            pixel.g = 255 - pixel.g;
-                            pixel.b = 255 - pixel.b;
-                        },
-                        else => @compileError("invert() currently only supports u8, Rgb, and Rgba pixel types"),
+            if (T == u8) {
+                for (0..self.rows) |r| {
+                    for (0..self.cols) |c| {
+                        const pixel = self.at(r, c);
+                        pixel.* = 255 - pixel.*;
                     }
                 }
+            } else if (@hasDecl(T, "invert")) {
+                for (0..self.rows) |r| {
+                    for (0..self.cols) |c| {
+                        const pixel = self.at(r, c);
+                        pixel.* = pixel.*.invert();
+                    }
+                }
+            } else {
+                @compileError("invert() requires pixel types with an invert() method or u8 grayscale pixels");
             }
         }
 

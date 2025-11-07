@@ -99,6 +99,11 @@ pub fn toYcbcr(self: Hsl) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted HSL color by inverting via RGB space.
+pub fn invert(self: Hsl) Hsl {
+    return self.toRgb().invert().toHsl();
+}
+
 /// Alpha blends the given RGBA color onto this HSL color and returns the result.
 pub fn blend(self: Hsl, overlay: Rgba, mode: Blending) Hsl {
     return self.toRgb().blend(overlay, mode).toHsl();

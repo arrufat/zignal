@@ -100,6 +100,11 @@ pub fn toYcbcr(self: Oklab) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted Oklab color by inverting via RGB space.
+pub fn invert(self: Oklab) Oklab {
+    return self.toRgb().invert().toOklab();
+}
+
 /// Alpha blends the given RGBA color onto this Oklab color and returns the result.
 pub fn blend(self: Oklab, overlay: Rgba, mode: Blending) Oklab {
     return self.toRgb().blend(overlay, mode).toOklab();

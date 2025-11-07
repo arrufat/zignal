@@ -102,6 +102,11 @@ pub fn toYcbcr(self: Xyb) Ycbcr {
     return self.toRgb().toYcbcr();
 }
 
+/// Returns the inverted XYB color by inverting via RGB space.
+pub fn invert(self: Xyb) Xyb {
+    return self.toRgb().invert().toXyb();
+}
+
 /// Alpha blends the given RGBA color onto this XYB color and returns the result.
 pub fn blend(self: Xyb, overlay: Rgba, mode: Blending) Xyb {
     return self.toRgb().blend(overlay, mode).toXyb();
