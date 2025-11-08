@@ -3,8 +3,7 @@
 const std = @import("std");
 const zignal = @import("zignal");
 
-const Image = zignal.Image;
-const Rgb = zignal.Rgb;
+const Image = zignal.Image(u8);
 
 fn formatWidths(widths: []const usize, buffer: []u8) ![]const u8 {
     if (buffer.len == 0) return error.BufferTooSmall;
@@ -91,13 +90,13 @@ pub fn main() !void {
         return;
     }
 
-    var original: Image(Rgb) = try .load(allocator, args[1]);
+    var original: Image = try .load(allocator, args[1]);
     defer original.deinit(allocator);
     const sigma: f32 = if (args.len > 2) std.fmt.parseFloat(f32, args[2]) catch 1.0 else 1.0;
 
     try original.save(allocator, "blur_original.png");
 
-    var gaussian: Image(Rgb) = try .initLike(allocator, original);
+    var gaussian: Image = try .initLike(allocator, original);
     defer gaussian.deinit(allocator);
 
     var timer = try std.time.Timer.start();
@@ -118,9 +117,9 @@ pub fn main() !void {
     });
     std.debug.print("{s:-<6}-+-{s:-<20}-+-{s:-<13}-+-{s:-<9}-+-{s:-<9}-+-{s:-<7}-+-{s:-<10}\n", .{ "", "", "", "", "", "", "" });
 
-    var temp_a = try Image(Rgb).initLike(allocator, original);
+    var temp_a: Image = try .initLike(allocator, original);
     defer temp_a.deinit(allocator);
-    var temp_b = try Image(Rgb).initLike(allocator, original);
+    var temp_b: Image = try .initLike(allocator, original);
     defer temp_b.deinit(allocator);
 
     const pass_counts = [_]usize{ 1, 2, 3, 4, 5 };
@@ -131,10 +130,10 @@ pub fn main() !void {
 
         // Apply box blur passes
         var box_timer = try std.time.Timer.start();
-        var source: *const Image(Rgb) = &original;
-        var scratch = [_]*Image(Rgb){ &temp_a, &temp_b };
+        var source: *const Image = &original;
+        var scratch = [_]*Image{ &temp_a, &temp_b };
         var scratch_index: usize = 0;
-        var last_result: *Image(Rgb) = &temp_a;
+        var last_result: *Image = &temp_a;
 
         for (widths) |width| {
             std.debug.assert(width >= 1 and (width % 2 == 1));
