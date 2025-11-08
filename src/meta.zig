@@ -136,10 +136,7 @@ pub fn isRgb(comptime T: type) bool {
     // Check for RGB naming pattern
     const has_rgb_names = (std.mem.eql(u8, fields[0].name, "r") and
         std.mem.eql(u8, fields[1].name, "g") and
-        std.mem.eql(u8, fields[2].name, "b")) or
-        (std.mem.eql(u8, fields[0].name, "red") and
-            std.mem.eql(u8, fields[1].name, "green") and
-            std.mem.eql(u8, fields[2].name, "blue"));
+        std.mem.eql(u8, fields[2].name, "b"));
 
     if (!has_rgb_names) return false;
 

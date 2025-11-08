@@ -9,7 +9,7 @@
   <body>
     <div class="header">
       <h1>Metrics Analyzer</h1>
-      <p>Compare two images directly in your browser using PSNR and SSIM</p>
+      <p>Compare two images directly in your browser using PSNR, SSIM, and mean pixel error</p>
     </div>
 
     <div class="instructions">
@@ -35,6 +35,7 @@
     <div class="metrics-results">
       <div><code>PSNR</code>: <span id="psnr-value">--</span></div>
       <div><code>SSIM</code>: <span id="ssim-value">--</span></div>
+      <div><code>Mean Pixel Error (%)</code>: <span id="mpe-value">--</span></div>
     </div>
 
     <script src="utils.js"></script>

@@ -12,6 +12,7 @@
   const statusEl = document.getElementById("status");
   const psnrEl = document.getElementById("psnr-value");
   const ssimEl = document.getElementById("ssim-value");
+  const mpeEl = document.getElementById("mpe-value");
 
   let refImageLoaded = false;
   let distImageLoaded = false;
@@ -19,6 +20,7 @@
   function clearResults() {
     psnrEl.textContent = "--";
     ssimEl.textContent = "--";
+    mpeEl.textContent = "--";
     statusEl.textContent = "";
   }
 
@@ -134,10 +136,11 @@
 
     const refData = ctxRef.getImageData(0, 0, width, height);
     const distData = ctxDist.getImageData(0, 0, width, height);
+    const METRICS_COUNT = 3;
 
     const refPtr = wasm_exports.alloc(pixelBytes);
     const distPtr = wasm_exports.alloc(pixelBytes);
-    const resultPtr = wasm_exports.alloc(8 * 2);
+    const resultPtr = wasm_exports.alloc(8 * METRICS_COUNT);
 
     const refBuffer = new Uint8Array(wasm_exports.memory.buffer, refPtr, pixelBytes);
     const distBuffer = new Uint8Array(wasm_exports.memory.buffer, distPtr, pixelBytes);
@@ -148,13 +151,14 @@
     wasm_exports.compute_metrics(refPtr, height, width, distPtr, height, width, resultPtr);
     const elapsed = performance.now() - start;
 
-    const results = new Float64Array(wasm_exports.memory.buffer, resultPtr, 2);
+    const results = new Float64Array(wasm_exports.memory.buffer, resultPtr, METRICS_COUNT);
     psnrEl.textContent = Number.isFinite(results[0]) ? results[0].toFixed(3) + " dB" : "--";
     ssimEl.textContent = Number.isFinite(results[1]) ? results[1].toFixed(6) : "--";
+    mpeEl.textContent = Number.isFinite(results[2]) ? (results[2] * 100).toFixed(3) + "%" : "--";
     statusEl.textContent = `time: ${elapsed.toFixed(1)} ms`;
 
     wasm_exports.free(refPtr, pixelBytes);
     wasm_exports.free(distPtr, pixelBytes);
-    wasm_exports.free(resultPtr, 8 * 2);
+    wasm_exports.free(resultPtr, 8 * METRICS_COUNT);
   });
 })();
