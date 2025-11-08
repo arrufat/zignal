@@ -1,5 +1,23 @@
 # Python Bindings Changelog
 
+## [0.8.0] - 2025-11-08
+
+### Added
+- **Rectangle Conveniences**: New `center`, `top_left`, `bottom_right`, `translate`, `clip`, `diagonal`, and `covers` helpers mirror the Zig rectangle utilities for downstream geometry tooling and unit tests.
+- **Image.load_from_bytes**: Load PNG/JPEG data from any bytes-like object or `memoryview` without touching the filesystem while reusing the same validation paths as `load()`.
+- **Color.invert()**: All color classes (Rgb, Rgba, Lab, Oklab, Xyz, etc.) gain an `invert()` method that mirrors the Zig implementation and preserves alpha channels.
+- **Image.mean_pixel_error()**: Adds a third metric alongside SSIM/PSNR for quick structural comparisons; returns a normalized score in `[0, 1]`.
+- **Matrix Norm Helpers**: Dedicated methods (`frobenius_norm`, `l1_norm`, `max_norm`, `element_norm`, `schatten_norm`, `induced_norm`, `nuclear_norm`, `spectral_norm`) expose the richer core norm suite.
+
+### Changed
+- **Matrix.norm Removal**: The legacy `Matrix.norm(kind)` entry point is removed in favor of the specific helpers above; adjust callers accordingly. Invalid `p` values now raise `ValueError` instead of panicking.
+- **Metric Scaling**: `Image.mean_pixel_error()` now reports a normalized score (0–1) rather than a percentage. Multiply by 100 if you need the old presentation.
+- **Transform Errors**: Similarity, affine, and projective fit helpers now raise `ValueError` when the underlying solver fails to converge or the input point set is rank-deficient.
+
+### Fixed
+- **Rectangle Tests**: Coverage and overlap checks now treat thresholds as inclusive (`>=`), matching the Zig semantics and preventing false negatives for perfect coverage.
+- **Matrix Utilities**: Binary arithmetic helpers propagate existing matrix errors before performing new operations, so chained Python calls no longer hide upstream failures.
+
 ## [0.7.1] - 2025-10-24
 
 ### Added
