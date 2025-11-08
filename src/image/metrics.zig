@@ -7,7 +7,7 @@ const conversions = @import("../color/conversions.zig");
 const Image = @import("../image.zig").Image;
 const testing = std.testing;
 
-pub fn psnr(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
+pub fn psnr(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
         return error.DimensionMismatch;
     }
@@ -53,7 +53,7 @@ pub fn psnr(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
     return 20.0 * std.math.log10(max_val) - 10.0 * std.math.log10(mse);
 }
 
-pub fn ssim(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
+pub fn ssim(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
         return error.DimensionMismatch;
     }
@@ -111,7 +111,7 @@ pub fn ssim(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
     return ssim_sum / weight_sum;
 }
 
-pub fn meanPixelError(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
+pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
         return error.DimensionMismatch;
     }
@@ -162,7 +162,7 @@ pub fn meanPixelError(comptime T: type, image_a: anytype, image_b: anytype) !f64
     const max_val = componentMaxValue(T);
     if (max_val == 0) return 0.0;
 
-        return mean_abs / max_val;
+    return mean_abs / max_val;
 }
 
 inline fn componentType(comptime T: type) type {

@@ -1,6 +1,5 @@
 //! Geometric transformations for Image objects
 
-const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba;

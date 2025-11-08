@@ -40,7 +40,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-const simd = std.simd;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
