@@ -90,9 +90,10 @@ pub const Binary = struct {
             return;
         }
 
-        var sat: Image(f32) = .empty;
-        defer if (sat.data.len != 0) sat.deinit(allocator);
-        try Image(u8).Integral.compute(image, allocator, &sat);
+        var planes = Image(u8).Integral.Planes.init();
+        defer planes.deinit(allocator);
+        try Image(u8).Integral.compute(image, allocator, &planes);
+        const sat = planes.planes[0];
 
         const rows = image.rows;
         const cols = image.cols;

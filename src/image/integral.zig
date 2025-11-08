@@ -5,11 +5,36 @@ const Allocator = std.mem.Allocator;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
-const isScalar = meta.isScalar;
 
 /// Integral image operations for fast box filtering and region sums.
 pub fn Integral(comptime T: type) type {
     return struct {
+        const channel_count = Image(T).channels();
+
+        /// Holds one summed-area table (integral image) per channel. Scalar image types
+        /// only populate `planes[0]`, while struct-based pixels keep a dedicated plane
+        /// for each channel. Owning the planes separately lets us reuse the fast scalar
+        /// `plane`/`boxBlurPlane` implementations across all pixel types and defer any
+        /// channel interleaving until after the blur/sharpen operations finish.
+        pub const Planes = struct {
+            planes: [channel_count]Image(f32),
+
+            pub fn init() Planes {
+                var init_planes: [channel_count]Image(f32) = undefined;
+                inline for (0..channel_count) |i| {
+                    init_planes[i] = Image(f32).empty;
+                }
+                return .{ .planes = init_planes };
+            }
+
+            pub fn deinit(self: *Planes, allocator: Allocator) void {
+                inline for (0..channel_count) |i| {
+                    self.planes[i].deinit(allocator);
+                    self.planes[i] = Image(f32).empty;
+                }
+            }
+        };
+
         /// Computes the integral image (summed-area table) from a source image.
         /// The integral image allows O(1) computation of rectangular region sums.
         ///
@@ -69,108 +94,97 @@ pub fn Integral(comptime T: type) type {
                 (if (r1 > 0 and c1 > 0) sat.data[(r1 - 1) * sat.stride + (c1 - 1)] else 0);
         }
 
-        /// Computes the sum of pixels in a rectangular region for multi-channel images.
-        /// Similar to computeSum but operates on a specific channel of a multi-channel integral image.
-        pub fn sumChannel(sat: anytype, r1: usize, c1: usize, r2: usize, c2: usize, channel: usize) f32 {
-            return (if (r2 < sat.rows and c2 < sat.cols) sat.at(r2, c2)[channel] else 0) -
-                (if (r2 < sat.rows and c1 > 0) sat.at(r2, c1 - 1)[channel] else 0) -
-                (if (r1 > 0 and c2 < sat.cols) sat.at(r1 - 1, c2)[channel] else 0) +
-                (if (r1 > 0 and c1 > 0) sat.at(r1 - 1, c1 - 1)[channel] else 0);
-        }
-
-        /// Build integral image (summed area table) from the source image.
-        /// Uses channel separation and SIMD optimization for performance.
+        /// Build integral planes (summed-area tables) from the source image.
+        /// A single plane is produced for scalar images, while struct images receive
+        /// one plane per channel.
         pub fn compute(
             image: Image(T),
             allocator: Allocator,
-            sat: *Image(if (isScalar(T)) f32 else [Image(T).channels()]f32),
+            planes: *Planes,
         ) !void {
-            // Always reinitialize if not matching shape (handles undefined case safely)
-            if (!image.hasSameShape(sat.*)) {
-                sat.* = try Image(if (isScalar(T)) f32 else [Image(T).channels()]f32).init(allocator, image.rows, image.cols);
+            inline for (0..channel_count) |i| {
+                if (planes.planes[i].rows != image.rows or planes.planes[i].cols != image.cols) {
+                    planes.planes[i].deinit(allocator);
+                    planes.planes[i] = try Image(f32).init(allocator, image.rows, image.cols);
+                }
             }
 
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    // Use generic integral plane function for all scalar types
-                    plane(image, sat.*);
+                    plane(image, planes.planes[0]);
                 },
                 .@"struct" => {
-                    // Channel separation for struct types
                     const fields = std.meta.fields(T);
-
-                    // Create temporary buffers for each channel
-                    const src_plane = try allocator.alloc(f32, image.rows * image.cols);
+                    const plane_len = image.rows * image.cols;
+                    const src_plane = try allocator.alloc(f32, plane_len);
                     defer allocator.free(src_plane);
-                    const dst_plane = try allocator.alloc(f32, image.rows * image.cols);
-                    defer allocator.free(dst_plane);
 
-                    // Process each channel separately
+                    const src_img = Image(f32){
+                        .rows = image.rows,
+                        .cols = image.cols,
+                        .stride = image.cols,
+                        .data = src_plane,
+                    };
+
                     inline for (fields, 0..) |field, ch| {
-                        // Extract channel to packed src_plane respecting stride
                         for (0..image.rows) |r| {
                             for (0..image.cols) |c| {
                                 const pix = image.at(r, c).*;
-                                const val = @field(pix, field.name);
+                                const channel_val = @field(pix, field.name);
                                 src_plane[r * image.cols + c] = switch (@typeInfo(field.type)) {
-                                    .int => @floatFromInt(val),
-                                    .float => @floatCast(val),
+                                    .int => @floatFromInt(channel_val),
+                                    .float => @floatCast(channel_val),
                                     else => 0,
                                 };
                             }
                         }
 
-                        const src_img: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_plane };
-                        const dst_img: Image(f32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_plane };
-
-                        // Compute integral for this channel from packed src_plane into packed dst_plane
-                        Integral(f32).plane(src_img, dst_img);
-
-                        // Store result in output channel (packed to packed)
-                        for (0..image.rows * image.cols) |i| {
-                            sat.data[i][ch] = dst_plane[i];
-                        }
+                        Integral(f32).plane(src_img, planes.planes[ch]);
                     }
                 },
                 else => @compileError("Can't compute the integral image of " ++ @typeName(T) ++ "."),
             }
         }
 
-        /// Applies box blur using a pre-computed integral image.
-        /// This allows efficient reuse of the integral image for multiple blur operations.
+        /// Applies box blur using a pre-computed planar summed-area table (`Planes`).
+        /// Works for both scalar and multi-channel images; scalar types simply use the
+        /// first plane while structs reuse all planes and merge at the end.
         pub fn boxBlur(
-            sat: anytype,
+            sat: *const Planes,
+            allocator: Allocator,
             src: Image(T),
             dst: Image(T),
             radius: usize,
-        ) void {
+        ) !void {
             if (radius == 0) {
                 src.copy(dst);
                 return;
             }
 
+            if (sat.planes[0].rows != dst.rows or sat.planes[0].cols != dst.cols) {
+                @panic("planar integral dimensions must match destination image");
+            }
+
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    // Single channel blur
-                    boxBlurPlane(T, sat, dst, radius);
+                    boxBlurPlane(T, sat.planes[0], dst, radius);
                 },
                 .@"struct" => {
-                    // Multi-channel blur
-                    const fields = std.meta.fields(T);
-                    for (0..src.rows) |r| {
-                        for (0..src.cols) |c| {
-                            const r1 = r -| radius;
-                            const c1 = c -| radius;
-                            const r2 = @min(r + radius, src.rows - 1);
-                            const c2 = @min(c + radius, src.cols - 1);
-                            const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
+                    var scratch = try Image(f32).init(allocator, dst.rows, dst.cols);
+                    defer scratch.deinit(allocator);
 
-                            inline for (fields, 0..) |f, i| {
-                                const channel_sum = sumChannel(sat, r1, c1, r2, c2, i);
-                                @field(dst.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(channel_sum / area)))),
-                                    .float => as(f.type, channel_sum / area),
-                                    else => @compileError("Can't compute box blur with struct fields of type " ++ @typeName(f.type) ++ "."),
+                    const fields = std.meta.fields(T);
+                    inline for (fields, 0..) |field, ch| {
+                        boxBlurPlane(f32, sat.planes[ch], scratch, radius);
+
+                        for (0..dst.rows) |r| {
+                            for (0..dst.cols) |c| {
+                                const blurred_val = scratch.data[r * scratch.stride + c];
+                                const out_pixel = dst.at(r, c);
+                                @field(out_pixel.*, field.name) = switch (@typeInfo(field.type)) {
+                                    .int => meta.clamp(field.type, blurred_val),
+                                    .float => as(field.type, blurred_val),
+                                    else => @compileError("Unsupported channel type for struct box blur"),
                                 };
                             }
                         }
@@ -258,10 +272,10 @@ pub fn Integral(comptime T: type) type {
             }
         }
 
-        /// Applies sharpening using a pre-computed integral image.
+        /// Applies sharpening using pre-computed integral planes.
         /// Uses the formula: sharpened = 2 * original - blurred
         pub fn sharpen(
-            sat: anytype,
+            sat: *const Planes,
             src: Image(T),
             dst: Image(T),
             radius: usize,
@@ -274,7 +288,7 @@ pub fn Integral(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Single channel sharpen
-                    sharpenPlane(T, src, sat, dst, radius);
+                    sharpenPlane(T, src, sat.planes[0], dst, radius);
                 },
                 .@"struct" => {
                     // Multi-channel sharpen
@@ -288,7 +302,7 @@ pub fn Integral(comptime T: type) type {
                             const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
 
                             inline for (fields, 0..) |f, i| {
-                                const channel_sum = sumChannel(sat, r1, c1, r2, c2, i);
+                                const channel_sum = sum(sat.planes[i], r1, c1, r2, c2);
                                 const blurred = channel_sum / area;
                                 const original = @field(src.at(r, c).*, f.name);
                                 @field(dst.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {

@@ -671,9 +671,9 @@ pub fn Image(comptime T: type) type {
         pub fn integral(
             self: Self,
             allocator: Allocator,
-            sat: *Image(if (isScalar(T)) f32 else [Self.channels()]f32),
+            planes: *Self.Integral.Planes,
         ) !void {
-            return Self.Integral.compute(self, allocator, sat);
+            return Self.Integral.compute(self, allocator, planes);
         }
 
         /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
@@ -689,11 +689,10 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            // Compute integral image and apply box blur
-            var sat: Image(if (isScalar(T)) f32 else [Self.channels()]f32) = .empty;
-            try Self.Integral.compute(self, allocator, &sat);
-            defer sat.deinit(allocator);
-            Self.Integral.boxBlur(sat, self, out, radius);
+            var planes = Self.Integral.Planes.init();
+            defer planes.deinit(allocator);
+            try Self.Integral.compute(self, allocator, &planes);
+            try Self.Integral.boxBlur(&planes, allocator, self, out, radius);
         }
 
         /// Applies a median blur using a square window with the given radius.
@@ -842,11 +841,11 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            // Compute integral image and apply sharpening
-            var sat: Image(if (isScalar(T)) f32 else [Self.channels()]f32) = .empty;
-            try Self.Integral.compute(self, allocator, &sat);
-            defer sat.deinit(allocator);
-            Self.Integral.sharpen(sat, self, out, radius);
+            // Compute integral planes and apply sharpening
+            var planes = Self.Integral.Planes.init();
+            defer planes.deinit(allocator);
+            try Self.Integral.compute(self, allocator, &planes);
+            Self.Integral.sharpen(&planes, self, out, radius);
         }
 
         /// Automatically adjusts the contrast of an image by stretching the intensity range.
