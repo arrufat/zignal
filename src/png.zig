@@ -2142,11 +2142,11 @@ test "Adam7 palette deinterlace with transparency" {
     const transparency = [_]u8{ 255, 64 };
 
     const config = PixelExtractionConfig{
-        .palette = palette[0..],
-        .transparency = transparency[0..],
+        .palette = &palette,
+        .transparency = &transparency,
     };
 
-    var image = try deinterlaceAdam7(allocator, Rgba, decompressed[0..], header, config);
+    var image = try deinterlaceAdam7(allocator, Rgba, &decompressed, header, config);
     defer image.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 1), image.rows);
@@ -2171,8 +2171,8 @@ test "extractPalettePixel handles 4-bit indices" {
         .{ 40, 50, 60 },
     };
 
-    const pixel0 = extractPalettePixel(Rgb, src_row[0..], 0, header, palette[0..], null);
-    const pixel1 = extractPalettePixel(Rgb, src_row[0..], 1, header, palette[0..], null);
+    const pixel0 = extractPalettePixel(Rgb, &src_row, 0, header, &palette, null);
+    const pixel1 = extractPalettePixel(Rgb, &src_row, 1, header, &palette, null);
 
     try std.testing.expectEqual(Rgb{ .r = 10, .g = 20, .b = 30 }, pixel0);
     try std.testing.expectEqual(Rgb{ .r = 40, .g = 50, .b = 60 }, pixel1);

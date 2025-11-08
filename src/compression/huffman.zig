@@ -358,13 +358,13 @@ pub const Tree = struct {
         self.enforceMaxBitsGreedy(max_bits, frequencies);
 
         // Generate canonical codes
-        generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
+        generateCanonicalCodes(&self.lengths, &self.codes);
 
         // Validate the generated tree
         if (!self.validateTree()) {
             // If validation fails, ensure at least one symbol has a code
             self.lengths[0] = 1;
-            generateCanonicalCodes(self.lengths[0..], self.codes[0..]);
+            generateCanonicalCodes(&self.lengths, &self.codes);
         }
     }
 

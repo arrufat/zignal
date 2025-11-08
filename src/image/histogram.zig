@@ -90,14 +90,14 @@ pub fn Histogram(comptime T: type) type {
 
             /// Add counts from another histogram into this one.
             pub fn addCounts(self: *Self, other: Self) void {
-                inline for (self.values[0..], 0..) |*count, i| {
+                inline for (&self.values, 0..) |*count, i| {
                     count.* += other.values[i];
                 }
             }
 
             /// Subtract counts from another histogram out of this one.
             pub fn subtractCounts(self: *Self, other: Self) void {
-                inline for (self.values[0..], 0..) |*count, i| {
+                inline for (&self.values, 0..) |*count, i| {
                     std.debug.assert(count.* >= other.values[i]);
                     count.* -= other.values[i];
                 }

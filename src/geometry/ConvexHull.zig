@@ -143,7 +143,7 @@ test "convex hull square" {
     const result = (try convex_hull.find(points)).?;
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
-    try expectEqualDeep(result, expected[0..]);
+    try expectEqualDeep(result, &expected);
 }
 
 test "convex hull triangle" {
@@ -157,7 +157,7 @@ test "convex hull triangle" {
     const result = (try convex_hull.find(points)).?;
     try expectEqual(result.len, 3);
     const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
-    try expectEqualDeep(result, expected[0..]);
+    try expectEqualDeep(result, &expected);
 }
 
 test "convex hull with interior points" {
@@ -173,7 +173,7 @@ test "convex hull with interior points" {
     const hull = (try convex_hull.find(points)).?;
     try expectEqual(hull.len, 3);
     const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
-    try expectEqualDeep(hull, expected[0..]);
+    try expectEqualDeep(hull, &expected);
 }
 
 test "convex hull duplicate points" {
@@ -190,5 +190,5 @@ test "convex hull duplicate points" {
     const result = (try convex_hull.find(points)).?;
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
-    try expectEqualDeep(result, expected[0..]);
+    try expectEqualDeep(result, &expected);
 }
