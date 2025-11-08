@@ -34,7 +34,7 @@ fn ColorTypeInfo(comptime ColorType: type) type {
 }
 
 /// Generate all color type bindings at comptime
-const ColorBindings = blk: {
+const color_bindings = blk: {
     const num_types = color_registry.color_types.len;
     var bindings: [num_types]type = undefined;
 
@@ -43,32 +43,6 @@ const ColorBindings = blk: {
     }
 
     break :blk bindings;
-};
-
-/// Generate getset arrays for all color types
-var color_getsets = blk: {
-    const num_types = color_registry.color_types.len;
-    var getsets: [num_types][]c.PyGetSetDef = undefined;
-
-    for (ColorBindings, 0..) |Binding, i| {
-        var arr = Binding.generateGetSet();
-        getsets[i] = &arr;
-    }
-
-    break :blk getsets;
-};
-
-/// Generate methods arrays for all color types
-var color_methods = blk: {
-    const num_types = color_registry.color_types.len;
-    var methods: [num_types][]c.PyMethodDef = undefined;
-
-    for (ColorBindings, 0..) |Binding, i| {
-        var arr = Binding.generateMethods();
-        methods[i] = &arr;
-    }
-
-    break :blk methods;
 };
 
 /// Generate PyTypeObject for a specific color type
@@ -103,18 +77,18 @@ fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, get
 }
 
 // Generate individual bindings (exported for external use)
-pub const RgbBinding = ColorBindings[0];
-pub const RgbaBinding = ColorBindings[1];
-pub const HslBinding = ColorBindings[2];
-pub const HsvBinding = ColorBindings[3];
-pub const LabBinding = ColorBindings[4];
-pub const LchBinding = ColorBindings[5];
-pub const LmsBinding = ColorBindings[6];
-pub const OklabBinding = ColorBindings[7];
-pub const OklchBinding = ColorBindings[8];
-pub const XybBinding = ColorBindings[9];
-pub const XyzBinding = ColorBindings[10];
-pub const YcbcrBinding = ColorBindings[11];
+pub const RgbBinding = color_bindings[0];
+pub const RgbaBinding = color_bindings[1];
+pub const HslBinding = color_bindings[2];
+pub const HsvBinding = color_bindings[3];
+pub const LabBinding = color_bindings[4];
+pub const LchBinding = color_bindings[5];
+pub const LmsBinding = color_bindings[6];
+pub const OklabBinding = color_bindings[7];
+pub const OklchBinding = color_bindings[8];
+pub const XybBinding = color_bindings[9];
+pub const XyzBinding = color_bindings[10];
+pub const YcbcrBinding = color_bindings[11];
 
 // Generate getset arrays
 var rgb_getset = RgbBinding.generateGetSet();

@@ -18,7 +18,6 @@ const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
 const jpeg = @import("jpeg.zig");
-const isScalar = @import("meta.zig").isScalar;
 const png = @import("png.zig");
 const metrics = @import("image/metrics.zig");
 

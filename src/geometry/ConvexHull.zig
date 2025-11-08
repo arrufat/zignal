@@ -5,7 +5,6 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("Point.zig").Point;
 const computeOrientation = @import("utils.zig").computeOrientation;
-const Orientation = @import("utils.zig").Orientation;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {

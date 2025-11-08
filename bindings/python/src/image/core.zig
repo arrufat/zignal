@@ -950,7 +950,7 @@ pub const image_mean_pixel_error_doc =
     \\```python
     \\original = Image.load("photo.png")
     \\noisy = add_noise(original)
-    \\percent = original.mean_pixel_error(noisy)
+    \\percent = original.mean_pixel_error(noisy) * 100
     \\print(f"Mean pixel error: {percent:.3f}%")
     \\```
 ;

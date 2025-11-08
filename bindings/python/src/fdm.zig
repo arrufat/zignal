@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const zignal = @import("zignal");
 const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
 const Rgb = zignal.Rgb;
