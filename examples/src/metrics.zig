@@ -15,7 +15,7 @@ pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noretu
     @trap();
 }
 
-pub const MetricsResultCount = 2;
+pub const MetricsResultCount = 3;
 
 pub export fn compute_metrics(
     reference_ptr: [*]Rgba,
@@ -39,4 +39,5 @@ pub export fn compute_metrics(
 
     result_ptr[0] = Image(Rgba).psnr(reference_img, distorted_img) catch @panic("PSNR computation failed");
     result_ptr[1] = Image(Rgba).ssim(reference_img, distorted_img) catch @panic("SSIM computation failed");
+    result_ptr[2] = Image(Rgba).meanPixelError(reference_img, distorted_img) catch @panic("Mean pixel error computation failed");
 }

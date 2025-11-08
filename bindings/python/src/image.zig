@@ -984,6 +984,14 @@ pub const image_methods_metadata = blk: {
             .params = "self, other: Image",
             .returns = "float",
         },
+        .{
+            .name = "mean_pixel_error",
+            .meth = @ptrCast(&core.image_mean_pixel_error),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = core.image_mean_pixel_error_doc,
+            .params = "self, other: Image",
+            .returns = "float",
+        },
     };
 
     // ========================================================================

@@ -14,10 +14,10 @@ test "image format sgr" {
     defer image.deinit(std.testing.allocator);
 
     // Set up a pattern: red, green, blue, white
-    image.at(0, 0).* = Rgb.red;
-    image.at(0, 1).* = Rgb.green;
-    image.at(1, 0).* = Rgb.blue;
-    image.at(1, 1).* = Rgb.white;
+    image.at(0, 0).* = .red;
+    image.at(0, 1).* = .green;
+    image.at(1, 0).* = .blue;
+    image.at(1, 1).* = .white;
 
     // Test that format function works without error
     var buffer: [256]u8 = undefined;

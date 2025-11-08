@@ -931,6 +931,75 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 // ============================================================================
+// IMAGE MEAN PIXEL ERROR
+// ============================================================================
+
+pub const image_mean_pixel_error_doc =
+    \\Calculate mean absolute pixel error between two images, normalized to [0, 1].
+    \\
+    \\## Parameters
+    \\- `other` (Image): The image to compare against. Must have same dimensions and dtype.
+    \\
+    \\## Returns
+    \\float: Mean absolute pixel error in [0, 1] (0 = identical, higher = more different)
+    \\
+    \\## Raises
+    \\- `ValueError`: If images have different dimensions or dtypes
+    \\
+    \\## Examples
+    \\```python
+    \\original = Image.load("photo.png")
+    \\noisy = add_noise(original)
+    \\percent = original.mean_pixel_error(noisy)
+    \\print(f"Mean pixel error: {percent:.3f}%")
+    \\```
+;
+
+pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = py_utils.safeCast(ImageObject, self_obj);
+
+    const Params = struct { other: ?*c.PyObject };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    if (c.PyObject_IsInstance(params.other, @ptrCast(getImageType())) <= 0) {
+        py_utils.setTypeError("Image", params.other);
+        return null;
+    }
+
+    const other = py_utils.safeCast(ImageObject, params.other);
+    if (self.py_image == null or other.py_image == null) {
+        py_utils.setValueError("Both images must be initialized", .{});
+        return null;
+    }
+
+    const self_tag = std.meta.activeTag(self.py_image.?.data);
+    const other_tag = std.meta.activeTag(other.py_image.?.data);
+    if (self_tag != other_tag) {
+        py_utils.setValueError("Images must have the same dtype for mean pixel error", .{});
+        return null;
+    }
+
+    const other_variant = other.py_image.?.data;
+    const error_value = switch (self.py_image.?.data) {
+        inline else => |img1| blk: {
+            const img2 = switch (other_variant) {
+                inline else => |img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
+            };
+            const val = img1.meanPixelError(img2) catch |err| switch (err) {
+                error.DimensionMismatch => {
+                    py_utils.setValueError("Images must have the same dimensions", .{});
+                    return null;
+                },
+            };
+            break :blk val;
+        },
+    };
+
+    return c.PyFloat_FromDouble(error_value);
+}
+
+// ============================================================================
 // PROPERTY GETTERS
 // ============================================================================
 

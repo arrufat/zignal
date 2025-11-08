@@ -5,6 +5,7 @@ const meta = @import("../meta.zig");
 const conversions = @import("../color/conversions.zig");
 
 const Image = @import("../image.zig").Image;
+const testing = std.testing;
 
 pub fn psnr(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
@@ -47,14 +48,7 @@ pub fn psnr(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
     mse /= @as(f64, @floatFromInt(component_count));
     if (mse == 0.0) return std.math.inf(f64);
 
-    const max_val: f64 = switch (@typeInfo(componentType(T))) {
-        .int => |info| if (info.signedness == .unsigned)
-            @floatFromInt(std.math.maxInt(componentType(T)))
-        else
-            @compileError("Signed integers not supported for PSNR"),
-        .float => 1.0,
-        else => unreachable,
-    };
+    const max_val = componentMaxValue(T);
 
     return 20.0 * std.math.log10(max_val) - 10.0 * std.math.log10(mse);
 }
@@ -67,18 +61,11 @@ pub fn ssim(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
         return error.ImageTooSmall;
     }
 
-    const L: f64 = switch (@typeInfo(componentType(T))) {
-        .int => |info| if (info.signedness == .unsigned)
-            @floatFromInt(std.math.maxInt(componentType(T)))
-        else
-            @compileError("Signed integers not supported for SSIM"),
-        .float => 1.0,
-        else => unreachable,
-    };
+    const l = componentMaxValue(T);
     const k1: f64 = 0.01;
     const k2: f64 = 0.03;
-    const c1 = (k1 * L) * (k1 * L);
-    const c2 = (k2 * L) * (k2 * L);
+    const c1 = (k1 * l) * (k1 * l);
+    const c2 = (k2 * l) * (k2 * l);
 
     var ssim_sum: f64 = 0.0;
     var weight_sum: f64 = 0.0;
@@ -124,12 +111,77 @@ pub fn ssim(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
     return ssim_sum / weight_sum;
 }
 
+pub fn meanPixelError(comptime T: type, image_a: anytype, image_b: anytype) !f64 {
+    if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
+        return error.DimensionMismatch;
+    }
+
+    var total_abs: f64 = 0.0;
+    var component_count: usize = 0;
+
+    for (0..image_a.rows) |r| {
+        const row_offset_a = r * image_a.stride;
+        const row_offset_b = r * image_b.stride;
+        for (0..image_a.cols) |c| {
+            const idx_a = row_offset_a + c;
+            const idx_b = row_offset_b + c;
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    const diff = @abs(getScalarValue(T, image_a.data[idx_a]) - getScalarValue(T, image_b.data[idx_b]));
+                    total_abs += diff;
+                    component_count += 1;
+                },
+                .@"struct" => {
+                    inline for (std.meta.fields(T)) |field| {
+                        const diff = @abs(
+                            getScalarValue(field.type, @field(image_a.data[idx_a], field.name)) -
+                                getScalarValue(field.type, @field(image_b.data[idx_b], field.name)),
+                        );
+                        total_abs += diff;
+                        component_count += 1;
+                    }
+                },
+                .array => |arr_info| {
+                    for (0..arr_info.len) |i| {
+                        const diff = @abs(
+                            getScalarValue(arr_info.child, image_a.data[idx_a][i]) -
+                                getScalarValue(arr_info.child, image_b.data[idx_b][i]),
+                        );
+                        total_abs += diff;
+                        component_count += 1;
+                    }
+                },
+                else => @compileError("Unsupported pixel type for meanPixelError: " ++ @typeName(T)),
+            }
+        }
+    }
+
+    if (component_count == 0) return 0.0;
+    const mean_abs = total_abs / @as(f64, @floatFromInt(component_count));
+
+    const max_val = componentMaxValue(T);
+    if (max_val == 0) return 0.0;
+
+        return mean_abs / max_val;
+}
+
 inline fn componentType(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => T,
         .@"struct" => std.meta.fields(T)[0].type,
         .array => |info| info.child,
         else => T,
+    };
+}
+
+inline fn componentMaxValue(comptime T: type) f64 {
+    return switch (@typeInfo(componentType(T))) {
+        .int => |info| if (info.signedness == .unsigned)
+            @floatFromInt(std.math.maxInt(componentType(T)))
+        else
+            @compileError("Signed integers not supported for image metrics"),
+        .float => 1.0,
+        else => unreachable,
     };
 }
 
@@ -146,7 +198,8 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
         .int, .float => return getScalarValue(PixelType, pixel),
         .@"struct" => {
             if (comptime meta.isRgb(PixelType)) {
-                return pixel.luma();
+                const max_val = componentMaxValue(PixelType);
+                return conversions.rgbLuma(pixel.r, pixel.g, pixel.b) * max_val;
             }
             var sum: f64 = 0.0;
             var count: usize = 0;
@@ -161,7 +214,8 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
                 const r: u8 = convertChannelToU8(info.child, pixel[0]);
                 const g: u8 = convertChannelToU8(info.child, pixel[1]);
                 const b: u8 = convertChannelToU8(info.child, pixel[2]);
-                return conversions.rgbLuma(r, g, b);
+                const max_val = componentMaxValue(PixelType);
+                return conversions.rgbLuma(r, g, b) * max_val;
             }
             var sum: f64 = 0.0;
             inline for (0..info.len) |i| {
@@ -200,4 +254,48 @@ fn generateSsimWindow() [121]f64 {
     }
     for (&gaussian_window) |*w| w.* /= gaussian_sum;
     return gaussian_window;
+}
+
+test "meanPixelError RGB example" {
+    const Pixel = struct { r: u8, g: u8, b: u8 };
+
+    var data_a = [_]Pixel{.{ .r = 255, .g = 0, .b = 0 }};
+    var data_b = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }};
+
+    const image_a = .{
+        .rows = 1,
+        .cols = 1,
+        .stride = 1,
+        .data = data_a[0..],
+    };
+    const image_b = .{
+        .rows = 1,
+        .cols = 1,
+        .stride = 1,
+        .data = data_b[0..],
+    };
+
+    const percent = try meanPixelError(Pixel, image_a, image_b);
+    try testing.expectApproxEqAbs(1.0 / 3.0, percent, 1e-9);
+}
+
+test "ssim rgb scales with luminance" {
+    const Pixel = struct { r: u8, g: u8, b: u8 };
+    const width = 12;
+    const height = 12;
+    var a_data: [width * height]Pixel = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }} ** (width * height);
+    var b_data: [width * height]Pixel = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }} ** (width * height);
+
+    for (0..height) |r| {
+        for (0..width) |c| {
+            const idx = r * width + c;
+            a_data[idx] = if ((r + c) % 2 == 0) .{ .r = 255, .g = 0, .b = 0 } else .{ .r = 0, .g = 255, .b = 0 };
+        }
+    }
+
+    const img_a = .{ .rows = height, .cols = width, .stride = width, .data = a_data[0..] };
+    const img_b = .{ .rows = height, .cols = width, .stride = width, .data = b_data[0..] };
+
+    const result = try ssim(Pixel, img_a, img_b);
+    try testing.expect(result < 0.99);
 }

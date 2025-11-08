@@ -180,6 +180,19 @@ class TestImage:
         with pytest.raises(ValueError):
             small.ssim(small.copy())
 
+    def test_psnr_and_mean_pixel_error(self):
+        ref = zignal.Image(4, 4, (10, 20, 30), dtype=zignal.Rgb)
+        distorted = ref.copy()
+        arr = distorted.to_numpy()
+        arr[0, 0] = [12, 24, 36]
+
+        psnr_value = ref.psnr(distorted)
+        assert psnr_value > 30.0
+
+        mpe = ref.mean_pixel_error(distorted)
+        assert mpe > 0.0
+        assert ref.mean_pixel_error(ref.copy()) == pytest.approx(0.0)
+
     def test_filtering_methods(self):
         img = zignal.Image(5, 5, (0, 0, 0, 255), dtype=zignal.Rgba)
         out = img.box_blur(1)
