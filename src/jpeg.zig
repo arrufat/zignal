@@ -11,6 +11,8 @@ const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
 const Ycbcr = @import("color.zig").Ycbcr;
 
+const max_file_size: usize = 100 * 1024 * 1024;
+
 // JPEG signature: 2 bytes that identify a JPEG file (SOI marker)
 pub const signature = [_]u8{ 0xFF, 0xD8 };
 
@@ -2792,25 +2794,9 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8) !
 }
 
 pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
-
-    // Early signature validation - check for JPEG SOI marker
-    var signature_buffer: [2]u8 = undefined;
-    const bytes_read = try file.read(&signature_buffer);
-    if (bytes_read < 2 or !std.mem.eql(u8, signature_buffer[0..2], &signature)) {
-        return error.InvalidJpegFile;
-    }
-
-    // Reset file position and read entire file
-    try file.seekTo(0);
-    const file_size = try file.getEndPos();
-    const data = try allocator.alloc(u8, file_size);
-    defer allocator.free(data);
-
-    _ = try file.readAll(data);
-
-    return loadFromBytes(T, allocator, data);
+    const jpeg_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(max_file_size));
+    defer allocator.free(jpeg_data);
+    return loadFromBytes(T, allocator, jpeg_data);
 }
 
 test "JPEG encode -> decode RGB roundtrip" {
