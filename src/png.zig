@@ -13,6 +13,8 @@ const Image = @import("image.zig").Image;
 const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 
+const max_file_size: usize = 100 * 1024 * 1024;
+
 /// PNG signature: 8 bytes that identify a PNG file
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
@@ -763,9 +765,8 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
 }
 
 pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, std.Io.Limit.limited(100 * 1024 * 1024));
+    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(max_file_size));
     defer allocator.free(png_data);
-
     return loadFromBytes(T, allocator, png_data);
 }
 
