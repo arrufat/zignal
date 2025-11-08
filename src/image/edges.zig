@@ -9,7 +9,6 @@ const as = meta.as;
 const isScalar = meta.isScalar;
 const convertColor = @import("../color.zig").convertColor;
 const convolve = @import("convolution.zig").convolve;
-const Integral = @import("integral.zig").Integral;
 
 /// Sobel X gradient kernel (horizontal edges)
 const sobel_x = [3][3]f32{
@@ -447,17 +446,15 @@ fn computeAdaptiveGradients(
     // Build integral images for fast box sum computation
     const plane_size = rows * cols;
 
-    // Integral image for grayscale values
-    const integral_gray_buf = try allocator.alloc(f32, plane_size);
-    defer allocator.free(integral_gray_buf);
-    const integral_gray: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_gray_buf };
-    Integral(f32).plane(gray, integral_gray);
+    var gray_planes: Image(f32).Integral.Planes = .init();
+    defer gray_planes.deinit(allocator);
+    try Image(f32).Integral.compute(gray, allocator, &gray_planes);
+    const integral_gray = gray_planes.planes[0];
 
-    // Integral image for BLI mask (where BLI == 1)
-    const integral_mask_buf = try allocator.alloc(f32, plane_size);
-    defer allocator.free(integral_mask_buf);
-    const integral_mask: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_mask_buf };
-    Integral(u8).plane(bli, integral_mask);
+    var mask_planes: Image(u8).Integral.Planes = .init();
+    defer mask_planes.deinit(allocator);
+    try Image(u8).Integral.compute(bli, allocator, &mask_planes);
+    const integral_mask = mask_planes.planes[0];
 
     // Integral image for gray * mask (values where BLI == 1)
     const gray_masked_buf = try allocator.alloc(f32, plane_size);
@@ -465,22 +462,16 @@ fn computeAdaptiveGradients(
     for (0..plane_size) |i| {
         gray_masked_buf[i] = gray.data[i] * @as(f32, @floatFromInt(bli.data[i]));
     }
-    const gray_masked: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = gray_masked_buf };
-    const integral_gray_masked_buf = try allocator.alloc(f32, plane_size);
-    defer allocator.free(integral_gray_masked_buf);
-    const integral_gray_masked: Image(f32) = .{ .rows = rows, .cols = cols, .stride = cols, .data = integral_gray_masked_buf };
-    Integral(f32).plane(gray_masked, integral_gray_masked);
+    const gray_masked: Image(f32) = .initFromSlice(rows, cols, gray_masked_buf);
+    var masked_planes: Image(f32).Integral.Planes = .init();
+    defer masked_planes.deinit(allocator);
+    try Image(f32).Integral.compute(gray_masked, allocator, &masked_planes);
+    const integral_gray_masked = masked_planes.planes[0];
 
     // Helper function to compute box sum from integral image
     const boxSum = struct {
         fn compute(img: Image(f32), r1: usize, r2: usize, c1: usize, c2: usize) f32 {
-            // Box sum using integral image: sum = D - B - C + A
-            // where A=(r1-1,c1-1), B=(r1-1,c2), C=(r2,c1-1), D=(r2,c2)
-            var sum: f32 = img.at(r2, c2).*;
-            if (r1 > 0) sum -= img.at(r1 - 1, c2).*;
-            if (c1 > 0) sum -= img.at(r2, c1 - 1).*;
-            if (r1 > 0 and c1 > 0) sum += img.at(r1 - 1, c1 - 1).*;
-            return sum;
+            return Image(f32).Integral.sum(img, r1, c1, r2, c2);
         }
     }.compute;
 

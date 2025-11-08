@@ -10,9 +10,10 @@ test "integral image scalar" {
     var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
-    var integral: Image(f32) = .empty;
-    try image.integral(std.testing.allocator, &integral);
-    defer integral.deinit(std.testing.allocator);
+    var planes = Image(u8).Integral.Planes.init();
+    defer planes.deinit(std.testing.allocator);
+    try image.integral(std.testing.allocator, &planes);
+    const integral = planes.planes[0];
     try expectEqual(image.rows, integral.rows);
     try expectEqual(image.cols, integral.cols);
     try expectEqual(image.data.len, integral.data.len);
@@ -29,9 +30,10 @@ test "integral image view scalar" {
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
     const view = image.view(.{ .l = 2, .t = 3, .r = 8, .b = 10 });
-    var integral: Image(f32) = .empty;
-    try view.integral(std.testing.allocator, &integral);
-    defer integral.deinit(std.testing.allocator);
+    var planes = Image(u8).Integral.Planes.init();
+    defer planes.deinit(std.testing.allocator);
+    try view.integral(std.testing.allocator, &planes);
+    const integral = planes.planes[0];
     try expectEqual(view.rows, integral.rows);
     try expectEqual(view.cols, integral.cols);
     for (0..view.rows) |r| {
@@ -46,18 +48,18 @@ test "integral image struct" {
     var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
-    var integral: Image([4]f32) = .empty;
-    try image.integral(std.testing.allocator, &integral);
+    var planes = Image(color.Rgba).Integral.Planes.init();
+    defer planes.deinit(std.testing.allocator);
+    try image.integral(std.testing.allocator, &planes);
 
-    defer integral.deinit(std.testing.allocator);
-    try expectEqual(image.rows, integral.rows);
-    try expectEqual(image.cols, integral.cols);
-    try expectEqual(image.data.len, integral.data.len);
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
-            for (0..4) |i| {
-                try expectEqual(area_at_pos, integral.at(r, c)[i]);
+    for (0..4) |ch| {
+        const integral = planes.planes[ch];
+        try expectEqual(image.rows, integral.rows);
+        try expectEqual(image.cols, integral.cols);
+        for (0..image.rows) |r| {
+            for (0..image.cols) |c| {
+                const area_at_pos: f32 = @floatFromInt((r + 1) * (c + 1));
+                try expectEqual(area_at_pos, integral.at(r, c).*);
             }
         }
     }
@@ -90,23 +92,22 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     }
 
     // Apply integral to both
-    var rgb_integral: Image([3]f32) = .empty;
-    try rgb_img.integral(std.testing.allocator, &rgb_integral);
-    defer rgb_integral.deinit(std.testing.allocator);
+    var rgb_planes = Image(Rgb).Integral.Planes.init();
+    defer rgb_planes.deinit(std.testing.allocator);
+    try rgb_img.integral(std.testing.allocator, &rgb_planes);
 
-    var rgba_integral: Image([4]f32) = .empty;
-    try rgba_img.integral(std.testing.allocator, &rgba_integral);
-    defer rgba_integral.deinit(std.testing.allocator);
+    var rgba_planes = Image(color.Rgba).Integral.Planes.init();
+    defer rgba_planes.deinit(std.testing.allocator);
+    try rgba_img.integral(std.testing.allocator, &rgba_planes);
 
     // Compare RGB channels - they should be identical
     for (0..test_size) |r| {
         for (0..test_size) |c| {
-            const rgb = rgb_integral.at(r, c).*;
-            const rgba = rgba_integral.at(r, c).*;
-
-            try expectEqual(rgb[0], rgba[0]);
-            try expectEqual(rgb[1], rgba[1]);
-            try expectEqual(rgb[2], rgba[2]);
+            for (0..3) |ch| {
+                const rgb = rgb_planes.planes[ch].at(r, c).*;
+                const rgba = rgba_planes.planes[ch].at(r, c).*;
+                try expectEqual(rgb, rgba);
+            }
         }
     }
 }
