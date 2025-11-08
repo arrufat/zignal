@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.8.0] - 2025-11-08
+
+### Breaking Changes
+- **Matrix Norm APIs**: Replaced the single `Matrix.norm(kind)` entry point with explicit helpers (`frobenius_norm`, `l1_norm`, `max_norm`, `element_norm`, `schatten_norm`, `induced_norm`, `nuclear_norm`, `spectral_norm`) across the Zig core and Python bindings. Update callers to the specific method that matches the desired metric.
+- **Mean Pixel Error Scaling**: `Image.meanPixelError` (and the Python `Image.mean_pixel_error`) now returns a normalized value in `[0, 1]` instead of a percentage. Multiply by 100 if you still need percent output.
+
+### Features
+- **Geometry Rectangles**: Added center/corner accessors, translation & clipping helpers, and coverage utilities to `Rectangle`, with parity in the Python bindings. Overlaps now treat threshold checks as inclusive so `1.0` truly means “fully covered”.
+- **Matrix Norm Suite**: Introduced element-wise, Schatten, induced, nuclear, and spectral norm implementations backed by the improved SVD helpers, plus error reporting when invalid exponents are supplied.
+- **Image Loading**: `Image.loadFromBytes` (and Python’s `load_from_bytes`) can decode PNG/JPEG images directly from any byte buffer or buffer-protocol object without hitting the filesystem, sharing the same validation as file-based loads.
+- **Color & Canvas Enhancements**: All color structs gain a generic `invert()` method (exposed to Python) and the canvas line renderer now applies fractional endpoint fading for smoother anti-aliased strokes.
+- **Image Metrics**: Added `meanPixelError` for structural comparisons alongside PSNR/SSIM, updated examples that visualize the metric suite, and exposed the API to Python.
+- **Examples**: New “Contrast Enhancement” WASM demo showcases autocontrast and histogram equalization controls with cleaner web UI wiring.
+
+### Performance
+- **Planar Integral Images**: Box-blur and summed-area table routines now use a unified planar integral representation, reusing the optimized kernels per channel to speed up large RGB/RGBA blurs while simplifying the API surface.
+
+### Fixes
+- **Matrix Ops**: Binary operations (`add`, `sub`, `times`, `gemm`) now short-circuit when the second operand already carries an error, preventing misleading results.
+- **Transforms**: Similarity, affine, and projective fits explicitly return `error.NotConverged`/`error.RankDeficient` when SVD solvers fail, with Python raising `ValueError` for degenerate point sets instead of silently emitting bad matrices.
+- **ORB & Feature Matching**: Brute-force matchers only free successfully allocated slices and ORB scale handling no longer panics on `scale_factor <= 1.0`.
+- **Canvas**: Thick transparent lines switch to per-pixel blending so alpha is preserved, and docs clarify how `drawLine` blends colors.
+- **Fonts**: PCF format flags use the correct masks and bounds checks, while the BDF parser now handles glyph rows wider than 32 bits by decoding hex data byte-by-byte.
+
+### Tooling & Docs
+- Updated Python README structure/quickstart, added a download badge, and refreshed example instructions to reflect the new metrics/contrast demos.
+
 ## [0.7.1] - 2025-10-24
 
 ### Performance
