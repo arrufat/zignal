@@ -33,7 +33,7 @@ pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *s
             // Create a temporary buffer to measure the width of this element
             var temp_buf: [64]u8 = undefined;
             const value = if (is_smatrix) matrix.items[r][c] else matrix.at(r, c).*;
-            const formatted = formatNumber(@TypeOf(value), temp_buf[0..], number_fmt, value);
+            const formatted = formatNumber(@TypeOf(value), &temp_buf, number_fmt, value);
             col_widths[c] = @max(col_widths[c], formatted.len);
         }
     }
@@ -45,7 +45,7 @@ pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *s
             // Format the number
             var temp_buf: [64]u8 = undefined;
             const value = if (is_smatrix) matrix.items[r][c] else matrix.at(r, c).*;
-            const formatted = formatNumber(@TypeOf(value), temp_buf[0..], number_fmt, value);
+            const formatted = formatNumber(@TypeOf(value), &temp_buf, number_fmt, value);
 
             // Right-align the number within the column width
             const padding = col_widths[c] -| formatted.len;

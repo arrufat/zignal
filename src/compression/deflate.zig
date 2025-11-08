@@ -524,7 +524,7 @@ pub const DeflateEncoder = struct {
         }
         if (!has_dist) {
             distance_tree.lengths[0] = 1;
-            huffman.generateCanonicalCodes(distance_tree.lengths[0..], distance_tree.codes[0..]);
+            huffman.generateCanonicalCodes(&distance_tree.lengths, &distance_tree.codes);
         }
 
         var num_lit_codes: usize = 257;
@@ -669,7 +669,7 @@ pub const DeflateEncoder = struct {
             var codes: [288]Codes = undefined;
             var lens = huffman.FIXED_LITERAL_LENGTHS;
             var codes_raw: [288]u16 = undefined;
-            huffman.generateCanonicalCodes(lens[0..], codes_raw[0..]);
+            huffman.generateCanonicalCodes(&lens, &codes_raw);
             for (codes_raw, 0..) |c, i| {
                 codes[i] = .{ .code = huffman.reverseBits(c, lens[i]), .bits = lens[i] };
             }
@@ -679,7 +679,7 @@ pub const DeflateEncoder = struct {
             var codes: [32]Codes = undefined;
             var lens = huffman.FIXED_DISTANCE_LENGTHS;
             var codes_raw: [32]u16 = undefined;
-            huffman.generateCanonicalCodes(lens[0..], codes_raw[0..]);
+            huffman.generateCanonicalCodes(&lens, &codes_raw);
             for (codes_raw, 0..) |c, i| {
                 codes[i] = .{ .code = huffman.reverseBits(c, lens[i]), .bits = lens[i] };
             }

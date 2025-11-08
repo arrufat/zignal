@@ -262,17 +262,17 @@ test "meanPixelError RGB example" {
     var data_a = [_]Pixel{.{ .r = 255, .g = 0, .b = 0 }};
     var data_b = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }};
 
-    const image_a = .{
+    const image_a: Image(Pixel) = .{
         .rows = 1,
         .cols = 1,
         .stride = 1,
-        .data = data_a[0..],
+        .data = &data_a,
     };
-    const image_b = .{
+    const image_b: Image(Pixel) = .{
         .rows = 1,
         .cols = 1,
         .stride = 1,
-        .data = data_b[0..],
+        .data = &data_b,
     };
 
     const percent = try meanPixelError(Pixel, image_a, image_b);
@@ -293,8 +293,8 @@ test "ssim rgb scales with luminance" {
         }
     }
 
-    const img_a = .{ .rows = height, .cols = width, .stride = width, .data = a_data[0..] };
-    const img_b = .{ .rows = height, .cols = width, .stride = width, .data = b_data[0..] };
+    const img_a: Image(Pixel) = .initFromSlice(height, width, &a_data);
+    const img_b: Image(Pixel) = .initFromSlice(height, width, &b_data);
 
     const result = try ssim(Pixel, img_a, img_b);
     try testing.expect(result < 0.99);

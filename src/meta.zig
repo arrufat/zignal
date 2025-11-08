@@ -65,7 +65,7 @@ pub inline fn comptimeLowercase(comptime input: []const u8) []const u8 {
     inline for (input, 0..) |char, i| {
         result[i] = std.ascii.toLower(char);
     }
-    return result[0..];
+    return &result;
 }
 
 /// Returns true if and only if all fields of T are of type u8

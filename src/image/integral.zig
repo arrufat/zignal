@@ -115,7 +115,7 @@ pub fn Integral(comptime T: type) type {
                 },
                 .@"struct" => {
                     const fields = std.meta.fields(T);
-                    const plane_len = image.rows * image.cols;
+                    const plane_len = try std.math.mul(usize, image.rows, image.cols);
                     const src_plane = try allocator.alloc(f32, plane_len);
                     defer allocator.free(src_plane);
 
@@ -134,7 +134,7 @@ pub fn Integral(comptime T: type) type {
                                 src_plane[r * image.cols + c] = switch (@typeInfo(field.type)) {
                                     .int => @floatFromInt(channel_val),
                                     .float => @floatCast(channel_val),
-                                    else => 0,
+                                    else => @compileError("Unsupported channel type in Integral.compute: " ++ @typeName(field.type)),
                                 };
                             }
                         }
@@ -283,6 +283,10 @@ pub fn Integral(comptime T: type) type {
             if (radius == 0) {
                 src.copy(dst);
                 return;
+            }
+
+            if (!sat.planes[0].hasSameShape(src) or !sat.planes[0].hasSameShape(dst)) {
+                @panic("planar integral dimensions must match source and destination images for sharpen");
             }
 
             switch (@typeInfo(T)) {

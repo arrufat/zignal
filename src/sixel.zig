@@ -359,7 +359,7 @@ pub fn fromImageProfiled(
     var color_generation_counter: u32 = 1;
 
     var column_stamp: [256]u32 = undefined;
-    @memset(column_stamp[0..], 0);
+    @memset(&column_stamp, 0);
     var column_index: [256]u16 = undefined;
     var column_colors: [256]u8 = undefined;
     var column_bits: [256]u8 = undefined;
@@ -377,7 +377,7 @@ pub fn fromImageProfiled(
         const row_generation = color_generation_counter;
         color_generation_counter += 1;
         if (color_generation_counter == 0) {
-            @memset(color_map_generation[0..], 0);
+            @memset(color_map_generation, 0);
             color_generation_counter = 1;
         }
 
@@ -385,7 +385,7 @@ pub fn fromImageProfiled(
             const column_generation = column_generation_counter;
             column_generation_counter += 1;
             if (column_generation_counter == 0) {
-                @memset(column_stamp[0..], 0);
+                @memset(&column_stamp, 0);
                 column_generation_counter = 1;
             }
 

@@ -41,7 +41,7 @@ pub fn ImagePyramid(comptime T: type) type {
 
             var levels = try allocator.alloc(Image(T), n_levels);
             errdefer {
-                for (levels[0..], 0..) |*level, i| {
+                for (levels, 0..) |*level, i| {
                     if (i > 0 and level.rows > 0) {
                         level.deinit(allocator);
                     }

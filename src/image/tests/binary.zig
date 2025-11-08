@@ -5,7 +5,7 @@ const BinaryKernel = @import("../../image.zig").BinaryKernel;
 
 test "threshold otsu binarizes bimodal image" {
     var data = [_]u8{ 10, 10, 10, 10, 200, 200, 200, 200 };
-    const image = Image(u8).initFromSlice(2, 4, data[0..]);
+    const image = Image(u8).initFromSlice(2, 4, &data);
 
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
@@ -28,7 +28,7 @@ test "adaptive mean threshold isolates bright center" {
         50, 200, 50,
         50, 50,  50,
     };
-    const image = Image(u8).initFromSlice(3, 3, data[0..]);
+    const image = Image(u8).initFromSlice(3, 3, &data);
 
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
@@ -48,7 +48,7 @@ test "adaptive mean threshold rejects zero radius" {
         10, 20,
         30, 40,
     };
-    const image = Image(u8).initFromSlice(2, 2, data[0..]);
+    const image = Image(u8).initFromSlice(2, 2, &data);
 
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
@@ -64,7 +64,7 @@ test "binary dilation expands single pixel" {
         0, 0, 0,   0, 0,
         0, 0, 0,   0, 0,
     };
-    const image = Image(u8).initFromSlice(5, 5, data[0..]);
+    const image = Image(u8).initFromSlice(5, 5, &data);
 
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
@@ -95,7 +95,7 @@ test "binary open removes isolated noise" {
         0, 255, 255, 255, 0,
         0, 0,   0,   0,   0,
     };
-    var image = Image(u8).initFromSlice(5, 5, data[0..]);
+    var image = Image(u8).initFromSlice(5, 5, &data);
 
     const kernel = BinaryKernel.init(3, 3, &[_]u8{
         1, 1, 1,
@@ -121,7 +121,7 @@ test "binary close fills holes" {
         0, 255, 255, 255, 0,
         0, 0,   0,   0,   0,
     };
-    var image = Image(u8).initFromSlice(5, 5, data[0..]);
+    var image = Image(u8).initFromSlice(5, 5, &data);
 
     const kernel = BinaryKernel.init(3, 3, &[_]u8{
         1, 1, 1,
@@ -147,7 +147,7 @@ test "binary erosion shrinks block across iterations" {
         255, 255, 255, 255, 255,
         255, 255, 255, 255, 255,
     };
-    const image = Image(u8).initFromSlice(5, 5, data[0..]);
+    const image = Image(u8).initFromSlice(5, 5, &data);
 
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
