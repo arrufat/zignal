@@ -1,6 +1,7 @@
 const zignal = @import("zignal");
 const ConvexHull = zignal.ConvexHull;
 const Point2F = zignal.Point(2, f32);
+const rectangle = @import("rectangle.zig");
 
 const py_utils = @import("py_utils.zig");
 pub const registerType = py_utils.registerType;
@@ -118,6 +119,38 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return result_list;
 }
 
+const convex_hull_get_rectangle_doc =
+    \\Return the tightest axis-aligned rectangle enclosing the last hull.
+    \\
+    \\The rectangle is expressed in image-style coordinates `(left, top, right, bottom)`
+    \\and matches the bounds of the currently cached convex hull. If no hull has
+    \\been computed yet or the last call was degenerate (e.g., all points were
+    \\collinear), this method returns `None`.
+    \\
+    \\## Returns
+    \\- `Rectangle | None`: Bounding rectangle instance or `None` when unavailable.
+;
+
+fn convex_hull_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = py_utils.safeCast(ConvexHullObject, self_obj);
+    const hull = py_utils.validateNonNull(*ConvexHull(f32), self.hull, "ConvexHull") catch return null;
+
+    if (hull.getRectangle()) |rect| {
+        const args_tuple = c.Py_BuildValue(
+            "(dddd)",
+            @as(f64, rect.l),
+            @as(f64, rect.t),
+            @as(f64, rect.r),
+            @as(f64, rect.b),
+        ) orelse return null;
+        defer c.Py_DECREF(args_tuple);
+        return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
+    }
+
+    return py_utils.getPyNone();
+}
+
 pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     .{
         .name = "find",
@@ -126,6 +159,14 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = convex_hull_find_doc,
         .params = "self, points: list[tuple[float, float]]",
         .returns = "list[tuple[float, float]] | None",
+    },
+    .{
+        .name = "get_rectangle",
+        .meth = @ptrCast(&convex_hull_get_rectangle),
+        .flags = c.METH_NOARGS,
+        .doc = convex_hull_get_rectangle_doc,
+        .params = "self",
+        .returns = "Rectangle | None",
     },
 };
 
