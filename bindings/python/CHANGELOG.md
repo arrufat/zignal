@@ -4,6 +4,7 @@
 
 ### Added
 - **Rectangle Conveniences**: New `center`, `top_left`, `bottom_right`, `translate`, `clip`, `diagonal`, and `covers` helpers mirror the Zig rectangle utilities for downstream geometry tooling and unit tests.
+- **ConvexHull.get_rectangle()**: Fetch the tightest axis-aligned bounds of the most recent hull as a `Rectangle`, or `None` for degenerate inputs—ideal for cropping or ROI extraction workflows.
 - **Image.load_from_bytes**: Load PNG/JPEG data from any bytes-like object or `memoryview` without touching the filesystem while reusing the same validation paths as `load()`.
 - **Color.invert()**: All color classes (Rgb, Rgba, Lab, Oklab, Xyz, etc.) gain an `invert()` method that mirrors the Zig implementation and preserves alpha channels.
 - **Image.mean_pixel_error()**: Adds a third metric alongside SSIM/PSNR for quick structural comparisons; returns a normalized score in `[0, 1]`.

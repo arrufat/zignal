@@ -4,6 +4,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("Point.zig").Point;
+const Rectangle = @import("Rectangle.zig").Rectangle;
 const computeOrientation = @import("utils.zig").computeOrientation;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
@@ -38,6 +39,7 @@ pub fn ConvexHull(comptime T: type) type {
 
         /// Returns the convex hull of a set of points using the Graham's scan algorithm.
         pub fn find(self: *Self, points: []const Point(2, T)) !?[]Point(2, T) {
+            self.hull.clearRetainingCapacity();
             // We need at least 3 points to compute a hull.
             if (points.len < 3) {
                 return null;
@@ -64,7 +66,6 @@ pub fn ConvexHull(comptime T: type) type {
             // Sort remaining points by polar angle in clockwise order
             std.mem.sort(Point(2, T), self.points.items[1..], lowest, clockwiseOrder);
 
-            self.hull.clearRetainingCapacity();
             try self.hull.append(self.gpa, lowest); // Add pivot first
 
             // Process remaining points
@@ -82,11 +83,31 @@ pub fn ConvexHull(comptime T: type) type {
             }
 
             // Handle the case where all input points were collinear.
-            if (self.hull.items.len < 3) {
+            if (!self.isValid()) {
+                self.hull.clearRetainingCapacity();
                 return null;
             }
 
             return self.hull.items;
+        }
+
+        /// Returns true when the current hull contains at least three vertices.
+        pub fn isValid(self: *const Self) bool {
+            return self.hull.items.len >= 3;
+        }
+
+        /// Returns the tightest axis-aligned rectangle containing the current hull.
+        pub fn getRectangle(self: *const Self) ?Rectangle(T) {
+            if (!self.isValid()) {
+                return null;
+            }
+            var min = self.hull.items[0].items;
+            var max = self.hull.items[0].items;
+            for (self.hull.items[1..]) |point| {
+                min = @min(point.items, min);
+                max = @max(point.items, max);
+            }
+            return .init(min[0], min[1], max[0], max[1]);
         }
     };
 }
@@ -144,6 +165,9 @@ test "convex hull square" {
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
     try expectEqualDeep(result, &expected);
+    try expectEqual(convex_hull.isValid(), true);
+    const rect = convex_hull.getRectangle().?;
+    try expectEqualDeep(rect, Rectangle(f32).init(0.0, 0.0, 1.0, 1.0));
 }
 
 test "convex hull triangle" {
@@ -191,4 +215,34 @@ test "convex hull duplicate points" {
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
     try expectEqualDeep(result, &expected);
+}
+
+test "convex hull bounding rectangle requires valid hull" {
+    const collinear: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 1.0, 1.0 }),
+        .init(.{ 2.0, 2.0 }),
+        .init(.{ 3.0, 3.0 }),
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+
+    try expectEqual(convex_hull.isValid(), false);
+    try expectEqual(convex_hull.getRectangle(), null);
+    const degenerate = try convex_hull.find(collinear);
+    try expectEqual(degenerate, null);
+    try expectEqual(convex_hull.isValid(), false);
+    try expectEqual(convex_hull.getRectangle(), null);
+
+    const points: []const Point(2, f32) = &.{
+        .init(.{ -1.0, -2.0 }),
+        .init(.{ 3.0, 0.0 }),
+        .init(.{ 1.0, 4.0 }),
+        .init(.{ -2.0, 1.5 }),
+    };
+
+    _ = (try convex_hull.find(points)).?;
+    try expectEqual(convex_hull.isValid(), true);
+    const rect = convex_hull.getRectangle().?;
+    try expectEqualDeep(rect, Rectangle(f32).init(-2.0, -2.0, 3.0, 4.0));
 }
