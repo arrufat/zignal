@@ -15,6 +15,16 @@ const Rgba = @import("color.zig").Rgba;
 
 const max_file_size: usize = 100 * 1024 * 1024;
 
+const ChunkOrderState = struct {
+    seen_plte: bool = false,
+    seen_trns: bool = false,
+    seen_idat: bool = false,
+    seen_iend: bool = false,
+    seen_iccp: bool = false,
+    seen_srgb: bool = false,
+    idat_stream_finished: bool = false,
+};
+
 /// PNG signature: 8 bytes that identify a PNG file
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
@@ -351,13 +361,28 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
     errdefer png_state.deinit(gpa);
 
     var header_found = false;
+    var chunk_state: ChunkOrderState = .{};
 
     while (try reader.nextChunk()) |chunk| {
+        if (!header_found and !std.mem.eql(u8, &chunk.type, "IHDR")) {
+            return error.ChunkBeforeHeader;
+        }
+
+        if (chunk_state.seen_idat and !std.mem.eql(u8, &chunk.type, "IDAT")) {
+            chunk_state.idat_stream_finished = true;
+        }
+
         if (std.mem.eql(u8, &chunk.type, "IHDR")) {
             if (header_found) return error.MultipleHeaders;
             png_state.header = try parseHeader(chunk);
             header_found = true;
         } else if (std.mem.eql(u8, &chunk.type, "PLTE")) {
+            if (png_state.header.color_type == .grayscale or png_state.header.color_type == .grayscale_alpha) {
+                return error.PaletteForbiddenForColorType;
+            }
+            if (chunk_state.seen_idat) return error.PaletteAfterImageData;
+            if (png_state.palette != null) return error.DuplicatePalette;
+
             if (chunk.length % 3 != 0) return error.InvalidPaletteLength;
             const palette_size = chunk.length / 3;
             if (palette_size > 256) return error.PaletteTooLarge;
@@ -370,7 +395,11 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
                 palette[i] = [3]u8{ chunk.data[offset], chunk.data[offset + 1], chunk.data[offset + 2] };
             }
             png_state.palette = palette;
+            chunk_state.seen_plte = true;
         } else if (std.mem.eql(u8, &chunk.type, "tRNS")) {
+            if (chunk_state.seen_trns) return error.MultipleTransparencyChunks;
+            if (chunk_state.seen_idat) return error.TransparencyAfterImageData;
+
             // Validate tRNS chunk size based on color type
             switch (png_state.header.color_type) {
                 .grayscale => {
@@ -380,8 +409,10 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
                     if (chunk.length != 6) return error.InvalidTransparencyLength;
                 },
                 .palette => {
-                    // Palette transparency: chunk.length should be <= palette size
-                    // We'll validate this after PLTE chunk is processed
+                    if (!chunk_state.seen_plte) return error.TransparencyBeforePalette;
+                    if (chunk.length > (png_state.palette orelse return error.MissingPalette).len) {
+                        return error.InvalidTransparencyLength;
+                    }
                 },
                 .grayscale_alpha, .rgba => {
                     // These color types cannot have tRNS chunks
@@ -392,15 +423,21 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
             const transparency = try gpa.alloc(u8, chunk.length);
             @memcpy(transparency, chunk.data);
             png_state.transparency = transparency;
+            chunk_state.seen_trns = true;
         } else if (std.mem.eql(u8, &chunk.type, "gAMA")) {
+            if (chunk_state.seen_plte) return error.GammaAfterPalette;
+            if (chunk_state.seen_idat) return error.GammaAfterImageData;
             // gAMA chunk: 4 bytes containing gamma value * 100,000
             if (chunk.length != 4) return error.InvalidGammaLength;
             const gamma_int = std.mem.readInt(u32, chunk.data[0..4][0..4], .big);
             png_state.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
         } else if (std.mem.eql(u8, &chunk.type, "sRGB")) {
+            if (chunk_state.seen_plte) return error.SrgbAfterPalette;
+            if (chunk_state.seen_idat) return error.SrgbAfterImageData;
             // sRGB chunk: 1 byte containing rendering intent
             // NOTE: sRGB and iCCP chunks are mutually exclusive according to PNG spec
             if (chunk.length != 1) return error.InvalidSrgbLength;
+            if (chunk_state.seen_iccp) return error.ColorProfileConflict;
             const intent_raw = chunk.data[0];
             png_state.srgb_intent = switch (intent_raw) {
                 0 => .perceptual,
@@ -409,9 +446,23 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
                 3 => .absolute_colorimetric,
                 else => return error.InvalidSrgbIntent,
             };
+            chunk_state.seen_srgb = true;
+        } else if (std.mem.eql(u8, &chunk.type, "iCCP")) {
+            if (chunk_state.seen_plte) return error.IccpAfterPalette;
+            if (chunk_state.seen_idat) return error.IccpAfterImageData;
+            if (chunk_state.seen_srgb) return error.ColorProfileConflict;
+            chunk_state.seen_iccp = true;
         } else if (std.mem.eql(u8, &chunk.type, "IDAT")) {
+            if (chunk_state.idat_stream_finished) {
+                return error.NonConsecutiveIdatChunks;
+            }
+            if (png_state.header.color_type == .palette and png_state.palette == null) {
+                return error.MissingPalette;
+            }
             try png_state.idat_data.appendSlice(gpa, chunk.data);
+            chunk_state.seen_idat = true;
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
+            chunk_state.seen_iend = true;
             break;
         }
         // Ignore other chunks (ancillary chunks like tEXt, etc.)
@@ -1576,11 +1627,199 @@ fn extractPalettePixel(
     };
 }
 
+fn appendTestChunk(list: *ArrayList(u8), allocator: Allocator, chunk_type: [4]u8, chunk_data: []const u8) !void {
+    var length_be = std.mem.nativeTo(u32, @intCast(chunk_data.len), .big);
+    try list.appendSlice(allocator, std.mem.asBytes(&length_be));
+    try list.appendSlice(allocator, &chunk_type);
+    if (chunk_data.len != 0) {
+        try list.appendSlice(allocator, chunk_data);
+    }
+
+    var crc_val = updateCrc(0xffffffff, &chunk_type);
+    if (chunk_data.len != 0) {
+        crc_val = updateCrc(crc_val, chunk_data);
+    }
+    const chunk_crc = crc_val ^ 0xffffffff;
+    var crc_be = std.mem.nativeTo(u32, chunk_crc, .big);
+    try list.appendSlice(allocator, std.mem.asBytes(&crc_be));
+}
+
 // Simple test for the PNG structure
 test "PNG signature validation" {
     const invalid_sig = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     const result = decode(std.testing.allocator, &invalid_sig);
     try std.testing.expectError(error.InvalidPngSignature, result);
+}
+
+test "PNG rejects chunks before IHDR" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+    const plte_payload = [_]u8{ 0, 0, 0 };
+    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data.items));
+}
+
+test "PNG palette images require PLTE before IDAT" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.palette);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.MissingPalette, decode(gpa, data.items));
+}
+
+test "PNG palette transparency requires PLTE first" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.palette);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const trns_payload = [_]u8{0x00};
+    try appendTestChunk(&data, gpa, "tRNS".*, &trns_payload);
+
+    const plte_payload = [_]u8{ 0, 0, 0 };
+    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
+    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data.items));
+}
+
+test "PNG rejects PLTE for grayscale" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.grayscale);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const plte_payload = [_]u8{ 0, 0, 0 };
+    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data.items));
+}
+
+test "PNG IDAT chunks must be consecutive" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+
+    const text_payload = [_]u8{ 'k', 'e', 'y', 0, 'v', 'a', 'l' };
+    try appendTestChunk(&data, gpa, "tEXt".*, &text_payload);
+
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data.items));
+}
+
+test "PNG gamma chunk must precede PLTE" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const plte_payload = [_]u8{ 0, 0, 0 };
+    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
+
+    const gama_payload = [_]u8{ 0, 0, 0, 1 };
+    try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data.items));
+}
+
+test "PNG sRGB chunk must precede IDAT" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+
+    const srgb_payload = [_]u8{0};
+    try appendTestChunk(&data, gpa, "sRGB".*, &srgb_payload);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items));
 }
 
 test "CRC calculation" {
