@@ -476,6 +476,10 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
         return error.MissingImageData;
     }
 
+    if (!chunk_state.seen_iend) {
+        return error.MissingEndChunk;
+    }
+
     return png_state;
 }
 
@@ -1820,6 +1824,29 @@ test "PNG sRGB chunk must precede IDAT" {
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
     try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items));
+}
+
+test "PNG requires IEND chunk" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+
+    try std.testing.expectError(error.MissingEndChunk, decode(gpa, data.items));
 }
 
 test "CRC calculation" {
