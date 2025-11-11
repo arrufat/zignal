@@ -75,7 +75,7 @@ pub fn compress(gpa: Allocator, data: []const u8, level: def.CompressionLevel, s
     return result.toOwnedSlice(gpa);
 }
 
-pub fn decompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
+pub fn decompress(gpa: Allocator, zlib_data: []const u8, max_output_bytes: usize) ![]u8 {
     if (zlib_data.len < 6) return error.InvalidZlibData;
     const cmf = zlib_data[0];
     const flg = zlib_data[1];
@@ -84,7 +84,7 @@ pub fn decompress(gpa: Allocator, zlib_data: []const u8) ![]u8 {
     if ((header_check % 31) != 0) return error.InvalidZlibHeader;
     if ((flg & 0x20) != 0) return error.PresetDictionaryNotSupported;
     const deflate_data = zlib_data[2 .. zlib_data.len - 4];
-    const decompressed = try def.inflate(gpa, deflate_data);
+    const decompressed = try def.inflate(gpa, deflate_data, max_output_bytes);
     const expected_checksum = std.mem.readInt(u32, zlib_data[zlib_data.len - 4 ..][0..4], .big);
     const actual_checksum = adler32(decompressed);
     if (actual_checksum != expected_checksum) {
@@ -99,7 +99,7 @@ test "zlib round trip" {
     const original_data = "Hello, zlib compression test for PNG!";
     const compressed = try compress(allocator, original_data, .level_0, .default);
     defer allocator.free(compressed);
-    const decompressed = try decompress(allocator, compressed);
+    const decompressed = try decompress(allocator, compressed, original_data.len);
     defer allocator.free(decompressed);
     try std.testing.expectEqualSlices(u8, original_data, decompressed);
 }
@@ -134,7 +134,7 @@ test "zlib compression levels" {
         const compressed = try compress(allocator, test_data, level, .default);
         defer allocator.free(compressed);
         sizes[i] = compressed.len;
-        const decomp = try decompress(allocator, compressed);
+        const decomp = try decompress(allocator, compressed, test_data.len);
         defer allocator.free(decomp);
         try std.testing.expectEqualSlices(u8, test_data, decomp);
     }

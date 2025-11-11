@@ -6,7 +6,9 @@ const Rgb = zignal.Rgb;
 const Rgba = zignal.Rgba;
 const Hsl = zignal.Hsl;
 const savePng = zignal.png.save;
-const loadPng = zignal.png.load;
+fn loadPng(comptime T: type, allocator: std.mem.Allocator, path: []const u8) !Image(T) {
+    return zignal.png.load(T, allocator, path, .{});
+}
 
 pub const std_options = std.Options{
     .log_level = .info,

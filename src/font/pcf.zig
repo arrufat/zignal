@@ -202,8 +202,12 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        decompressed_data = gzip.decompress(allocator, raw_file_contents) catch |err| switch (err) {
-            error.InvalidGzipData, error.InvalidGzipHeader => return PcfError.InvalidCompression,
+        decompressed_data = gzip.decompress(allocator, raw_file_contents, max_file_size) catch |err| switch (err) {
+            error.InvalidGzipData,
+            error.InvalidGzipHeader,
+            error.OutputLimitExceeded,
+            error.InvalidOutputLimit,
+            => return PcfError.InvalidCompression,
             else => return err,
         };
         file_contents = decompressed_data.?;

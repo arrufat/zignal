@@ -78,8 +78,12 @@ pub fn load(gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !Bitma
     defer if (decompressed_data) |data| gpa.free(data);
 
     if (is_compressed) {
-        decompressed_data = gzip.decompress(gpa, raw_file_contents) catch |err| switch (err) {
-            error.InvalidGzipData, error.InvalidGzipHeader => return BdfError.InvalidCompression,
+        decompressed_data = gzip.decompress(gpa, raw_file_contents, max_file_size) catch |err| switch (err) {
+            error.InvalidGzipData,
+            error.InvalidGzipHeader,
+            error.OutputLimitExceeded,
+            error.InvalidOutputLimit,
+            => return BdfError.InvalidCompression,
             else => return err,
         };
         file_contents = decompressed_data.?;
