@@ -13,6 +13,41 @@ const Ycbcr = @import("color.zig").Ycbcr;
 
 const max_file_size: usize = 100 * 1024 * 1024;
 
+/// User-configurable resource limits for JPEG decoding. Zero disables a limit.
+pub const DecodeLimits = struct {
+    /// Maximum number of bytes accepted for the original JPEG buffer.
+    max_jpeg_bytes: usize = max_file_size,
+    /// Cap on total marker payload bytes (length-prefixed segments plus entropy data).
+    max_marker_bytes: usize = max_file_size,
+    /// Maximum declared image width/height in pixels.
+    max_width: u32 = 8192,
+    max_height: u32 = 8192,
+    /// Maximum width * height before allocations.
+    max_pixels: u64 = 67_108_864, // 8K square
+    /// Maximum number of 8x8 blocks allocated across all components.
+    max_blocks: usize = 1_048_576,
+    /// Maximum number of scans (progressive JPEGs may have dozens).
+    max_scans: usize = 64,
+};
+
+inline fn exceedsU32(limit: u32, value: u32) bool {
+    return limit != 0 and value > limit;
+}
+
+inline fn exceedsU64(limit: u64, value: u64) bool {
+    return limit != 0 and value > limit;
+}
+
+inline fn exceedsUsize(limit: usize, value: usize) bool {
+    return limit != 0 and value > limit;
+}
+
+fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
+    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
+    if (limit != 0 and new_total > limit) return limit_error;
+    current.* = new_total;
+}
+
 // JPEG signature: 2 bytes that identify a JPEG file (SOI marker)
 pub const signature = [_]u8{ 0xFF, 0xD8 };
 
@@ -1062,14 +1097,11 @@ pub const JpegState = struct {
     }
 
     // Parse Start of Frame (SOF0/SOF2) marker
-    pub fn parseSOF(self: *JpegState, data: []const u8, frame_type: FrameType) !void {
+    pub fn parseSOF(self: *JpegState, data: []const u8, frame_type: FrameType, limits: DecodeLimits) !void {
         self.frame_type = frame_type;
-        if (data.len < 8) return error.InvalidSOF;
+        if (data.len < 6) return error.InvalidSOF;
 
-        const length = (@as(u16, data[0]) << 8) | data[1];
-        if (data.len < length) return error.InvalidSOF;
-
-        const precision = data[2];
+        const precision = data[0];
         // Provide specific error messages for different precision values
         switch (precision) {
             8 => {}, // Supported
@@ -1078,9 +1110,17 @@ pub const JpegState = struct {
             else => return error.UnsupportedPrecision,
         }
 
-        self.height = (@as(u16, data[3]) << 8) | data[4];
-        self.width = (@as(u16, data[5]) << 8) | data[6];
-        self.num_components = data[7];
+        self.height = (@as(u16, data[1]) << 8) | data[2];
+        self.width = (@as(u16, data[3]) << 8) | data[4];
+        self.num_components = data[5];
+
+        if (self.width == 0 or self.height == 0) {
+            return error.InvalidSOF;
+        }
+
+        if (exceedsU32(limits.max_width, self.width) or exceedsU32(limits.max_height, self.height)) {
+            return error.ImageTooLarge;
+        }
 
         // Distinguish between invalid and unsupported component counts
         switch (self.num_components) {
@@ -1091,7 +1131,7 @@ pub const JpegState = struct {
         }
 
         // Parse component information
-        var pos: usize = 8;
+        var pos: usize = 6;
         var max_h_sampling: u4 = 0;
         var max_v_sampling: u4 = 0;
 
@@ -1156,7 +1196,17 @@ pub const JpegState = struct {
         self.block_height_actual = @intCast((height_actual + 7) / 8);
 
         // Allocate block storage
-        const total_blocks = @as(usize, width_actual) * height_actual / 64;
+        const width_actual_u64 = @as(u64, width_actual);
+        const height_actual_u64 = @as(u64, height_actual);
+        const total_pixels_actual = std.math.mul(u64, width_actual_u64, height_actual_u64) catch return error.ImageTooLarge;
+        if (exceedsU64(limits.max_pixels, total_pixels_actual)) {
+            return error.ImageTooLarge;
+        }
+        const total_blocks_u64 = total_pixels_actual / 64;
+        const total_blocks = std.math.cast(usize, total_blocks_u64) orelse return error.BlockMemoryLimitExceeded;
+        if (exceedsUsize(limits.max_blocks, total_blocks)) {
+            return error.BlockMemoryLimitExceeded;
+        }
         self.block_storage = try self.allocator.alloc([4][64]i32, total_blocks);
 
         // Allocate separate RGB storage
@@ -1179,12 +1229,9 @@ pub const JpegState = struct {
 
     // Parse Define Huffman Table (DHT) marker
     pub fn parseDHT(self: *JpegState, data: []const u8) !void {
-        if (data.len < 2) return error.InvalidDHT;
-
-        const length = (@as(u16, data[0]) << 8) | data[1];
-        if (data.len < length) return error.InvalidDHT;
-
-        var pos: usize = 2;
+        if (data.len == 0) return error.InvalidDHT;
+        var pos: usize = 0;
+        const length = data.len;
 
         while (pos < length) {
             if (pos + 17 > length) return error.InvalidDHT;
@@ -1284,12 +1331,9 @@ pub const JpegState = struct {
 
     // Parse Define Quantization Table (DQT) marker
     pub fn parseDQT(self: *JpegState, data: []const u8) !void {
-        if (data.len < 2) return error.InvalidDQT;
-
-        const length = (@as(u16, data[0]) << 8) | data[1];
-        if (data.len < length) return error.InvalidDQT;
-
-        var pos: usize = 2;
+        if (data.len == 0) return error.InvalidDQT;
+        var pos: usize = 0;
+        const length = data.len;
 
         while (pos < length) {
             if (pos + 1 > length) return error.InvalidDQT;
@@ -1330,10 +1374,7 @@ pub const JpegState = struct {
     pub fn parseSOS(self: *JpegState, data: []const u8) !ScanInfo {
         if (data.len < 6) return error.InvalidSOS;
 
-        const length = (@as(u16, data[0]) << 8) | data[1];
-        if (data.len < length) return error.InvalidSOS;
-
-        const num_components = data[2];
+        const num_components = data[0];
         // For progressive JPEG, individual scans can have fewer components
         if (self.frame_type == .baseline and num_components != self.num_components) return error.InvalidSOS;
         if (self.frame_type == .progressive and (num_components == 0 or num_components > self.num_components)) return error.InvalidSOS;
@@ -1341,9 +1382,9 @@ pub const JpegState = struct {
         const scan_components = try self.allocator.alloc(ScanComponent, num_components);
         errdefer self.allocator.free(scan_components);
 
-        var pos: usize = 3;
+        var pos: usize = 1;
         for (0..num_components) |i| {
-            if (pos + 2 > length) return error.InvalidSOS;
+            if (pos + 2 > data.len) return error.InvalidSOS;
 
             scan_components[i] = .{
                 .component_id = data[pos],
@@ -1355,7 +1396,7 @@ pub const JpegState = struct {
         }
 
         // Read spectral selection and successive approximation
-        if (pos + 3 > length) return error.InvalidSOS;
+        if (pos + 3 > data.len) return error.InvalidSOS;
 
         const start_of_spectral = data[pos];
         const end_of_spectral = data[pos + 1];
@@ -1389,12 +1430,9 @@ pub const JpegState = struct {
 
     // Parse Define Restart Interval (DRI) marker
     pub fn parseDRI(self: *JpegState, data: []const u8) !void {
-        if (data.len < 4) return error.InvalidDRI;
+        if (data.len != 2) return error.InvalidDRI;
 
-        const length = (@as(u16, data[0]) << 8) | data[1];
-        if (length != 4) return error.InvalidDRI;
-
-        self.restart_interval = (@as(u16, data[2]) << 8) | data[3];
+        self.restart_interval = (@as(u16, data[0]) << 8) | data[1];
     }
 };
 
@@ -1876,9 +1914,15 @@ fn readMarkerLength(data: []const u8, pos: usize) !u16 {
 
 // Helper function to process a Start of Scan marker
 fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
-    const scan_info = try state.parseSOS(data[pos + 2 ..]);
     const header_len = try readMarkerLength(data, pos + 2);
-    const scan_start = pos + 2 + header_len;
+    if (header_len < 2) return error.InvalidMarker;
+    const marker_end = pos + 2 + header_len;
+    if (marker_end > data.len) return error.InvalidMarker;
+
+    const payload_start = pos + 4;
+    if (payload_start > marker_end) return error.InvalidMarker;
+    const scan_info = try state.parseSOS(data[payload_start .. marker_end]);
+    const scan_start = marker_end;
 
     const scan_end = findScanEnd(data, scan_start);
     state.bit_reader = BitReader.init(data[scan_start..scan_end]);
@@ -1902,7 +1946,22 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
     return scan_end;
 }
 
-pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
+fn readMarkerPayload(data: []const u8, pos: *usize, total_marker_bytes: *usize, limits: DecodeLimits) ![]const u8 {
+    const length = try readMarkerLength(data, pos.* + 2);
+    if (length < 2) return error.InvalidMarker;
+    const marker_end = pos.* + 2 + length;
+    if (marker_end > data.len) return error.InvalidMarker;
+    try accumulateWithLimit(total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
+
+    const payload_start = pos.* + 4;
+    if (payload_start > marker_end) return error.InvalidMarker;
+
+    const payload = data[payload_start..marker_end];
+    pos.* = marker_end;
+    return payload;
+}
+
+pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !JpegState {
     var state = JpegState.init(allocator);
     errdefer state.deinit();
 
@@ -1910,8 +1969,13 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
     if (data.len < 2 or !std.mem.eql(u8, data[0..2], &signature)) {
         return error.InvalidJpegFile;
     }
+    if (exceedsUsize(limits.max_jpeg_bytes, data.len)) {
+        return error.JpegDataTooLarge;
+    }
 
     var pos: usize = 2;
+    var total_marker_bytes: usize = 0;
+    var scan_count: usize = 0;
 
     // Parse JPEG markers
     while (pos < data.len - 1) {
@@ -1939,9 +2003,8 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
 
             .SOF0, .SOF2 => {
                 const frame_type: FrameType = if (marker == .SOF0) .baseline else .progressive;
-                try state.parseSOF(data[pos + 2 ..], frame_type);
-                const length = try readMarkerLength(data, pos + 2);
-                pos += 2 + length;
+                const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
+                try state.parseSOF(payload, frame_type, limits);
             },
 
             // Specific unsupported SOF markers
@@ -1949,19 +2012,23 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
             .SOF3 => return error.UnsupportedLosslessJpeg,
 
             .DHT => {
-                try state.parseDHT(data[pos + 2 ..]);
-                const length = try readMarkerLength(data, pos + 2);
-                pos += 2 + length;
+                const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
+                try state.parseDHT(payload);
             },
 
             .DQT => {
-                try state.parseDQT(data[pos + 2 ..]);
-                const length = try readMarkerLength(data, pos + 2);
-                pos += 2 + length;
+                const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
+                try state.parseDQT(payload);
             },
 
             .SOS => {
+                scan_count += 1;
+                if (exceedsUsize(limits.max_scans, scan_count)) {
+                    return error.TooManyScans;
+                }
                 const scan_end = try processScanMarker(&state, data, pos);
+                const scan_consumed = scan_end - pos;
+                try accumulateWithLimit(&total_marker_bytes, scan_consumed, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
                 // For baseline JPEG, return immediately after first scan
                 if (state.frame_type == .baseline) {
                     return state;
@@ -1971,9 +2038,8 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
             },
 
             .DRI => {
-                try state.parseDRI(data[pos + 2 ..]);
-                const length = try readMarkerLength(data, pos + 2);
-                pos += 2 + length;
+                const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
+                try state.parseDRI(payload);
             },
 
             // Detect arithmetic coding
@@ -1989,6 +2055,7 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
                 // Skip application and comment markers
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
+                try accumulateWithLimit(&total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
                 pos += 2 + length;
             },
 
@@ -2002,6 +2069,7 @@ pub fn decode(allocator: Allocator, data: []const u8) !JpegState {
                 // Skip other unknown markers with length
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
+                try accumulateWithLimit(&total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
                 pos += 2 + length;
             },
         }
@@ -2052,6 +2120,11 @@ pub const JpegError = error{
     InvalidACValue,
     BlockStorageNotAllocated,
     RgbStorageNotAllocated,
+    // Resource limit errors
+    JpegDataTooLarge,
+    MarkerDataLimitExceeded,
+    BlockMemoryLimitExceeded,
+    TooManyScans,
 };
 
 // IDCT implementation based on stb_image
@@ -2765,8 +2838,8 @@ pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidJpegFile, UnsupportedJpegFormat, OutOfMemory, and various JPEG parsing errors
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8) !Image(T) {
-    var state = try decode(allocator, data);
+pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
+    var state = try decode(allocator, data, limits);
     defer state.deinit();
 
     // Load the JPEG in its native format first, then convert to requested type
@@ -2793,10 +2866,11 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8) !
     }
 }
 
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const jpeg_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(max_file_size));
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+    const read_limit = if (limits.max_jpeg_bytes == 0) std.math.maxInt(usize) else limits.max_jpeg_bytes;
+    const jpeg_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(read_limit));
     defer allocator.free(jpeg_data);
-    return loadFromBytes(T, allocator, jpeg_data);
+    return loadFromBytes(T, allocator, jpeg_data, limits);
 }
 
 test "JPEG encode -> decode RGB roundtrip" {
@@ -2816,7 +2890,7 @@ test "JPEG encode -> decode RGB roundtrip" {
     const bytes = try encode(Rgb, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
-    var state = try decode(gpa, bytes);
+    var state = try decode(gpa, bytes, .{});
     defer state.deinit();
     if (state.frame_type == .baseline) try performBlockScan(&state);
     try dequantizeAllBlocks(&state);
@@ -2842,7 +2916,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
     const bytes = try encode(u8, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
-    var state = try decode(gpa, bytes);
+    var state = try decode(gpa, bytes, .{});
     defer state.deinit();
     if (state.frame_type == .baseline) try performBlockScan(&state);
     try dequantizeAllBlocks(&state);
@@ -2880,7 +2954,7 @@ test "JPEG subsampling 4:2:2 roundtrip" {
     const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
     defer gpa.free(bytes);
 
-    var state = try decode(gpa, bytes);
+    var state = try decode(gpa, bytes, .{});
     defer state.deinit();
     if (state.frame_type == .baseline) try performBlockScan(&state);
     try dequantizeAllBlocks(&state);
@@ -2915,7 +2989,7 @@ test "JPEG subsampling 4:2:0 roundtrip" {
     const bytes = try encode(Rgb, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
     defer gpa.free(bytes);
 
-    var state = try decode(gpa, bytes);
+    var state = try decode(gpa, bytes, .{});
     defer state.deinit();
     if (state.frame_type == .baseline) try performBlockScan(&state);
     try dequantizeAllBlocks(&state);
@@ -2952,7 +3026,7 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv420 });
     defer gpa.free(bytes);
 
-    var state = try decode(gpa, bytes);
+    var state = try decode(gpa, bytes, .{});
     defer state.deinit();
     if (state.frame_type == .baseline) try performBlockScan(&state);
     try dequantizeAllBlocks(&state);
@@ -2965,6 +3039,30 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     // We expect a decent reconstruction quality even with 4:2:0 on odd dimensions.
     const ps = try img.psnr(out);
     try std.testing.expect(ps > 35.0);
+}
+
+test "JPEG max_jpeg_bytes limit" {
+    const data = [_]u8{ 0xFF, 0xD8 };
+    const limits: DecodeLimits = .{ .max_jpeg_bytes = 1 };
+    const result = decode(std.testing.allocator, &data, limits);
+    try std.testing.expectError(error.JpegDataTooLarge, result);
+}
+
+test "JPEG marker byte limit" {
+    const jpeg = [_]u8{ 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xD9 };
+    const limits: DecodeLimits = .{ .max_jpeg_bytes = 0, .max_marker_bytes = 2 };
+    const result = decode(std.testing.allocator, &jpeg, limits);
+    try std.testing.expectError(error.MarkerDataLimitExceeded, result);
+}
+
+test "JPEG block limit prevents excessive allocation" {
+    var state = JpegState.init(std.testing.allocator);
+    defer state.deinit();
+
+    const sof_data = [_]u8{ 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00 };
+    const limits: DecodeLimits = .{ .max_blocks = 1 };
+    const result = state.parseSOF(&sof_data, .baseline, limits);
+    try std.testing.expectError(error.BlockMemoryLimitExceeded, result);
 }
 
 // Basic tests

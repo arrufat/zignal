@@ -6,6 +6,13 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba;
 const Rgb = zignal.Rgb;
 const ImageFormat = zignal.ImageFormat;
+const default_png_limits: zignal.png.DecodeLimits = .{};
+const file_png_limits: zignal.png.DecodeLimits = .{ .max_png_bytes = 100 * 1024 * 1024 };
+const default_jpeg_limits: zignal.jpeg.DecodeLimits = .{};
+const file_jpeg_limits: zignal.jpeg.DecodeLimits = .{
+    .max_jpeg_bytes = 200 * 1024 * 1024,
+    .max_marker_bytes = 16 * 1024 * 1024,
+};
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;
@@ -23,6 +30,10 @@ const moveImageToPython = @import("../image.zig").moveImageToPython;
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
+
+inline fn readLimit(max_bytes: usize) usize {
+    return if (max_bytes == 0) std.math.maxInt(usize) else max_bytes;
+}
 
 fn setDecodeError(kind: []const u8, err: anyerror) void {
     switch (err) {
@@ -43,7 +54,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
     switch (format) {
         .png => {
             const kind = "PNG data";
-            var decoded = zignal.png.decode(allocator, data) catch |err| {
+            var decoded = zignal.png.decode(allocator, data, default_png_limits) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
@@ -56,7 +67,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
         },
         .jpeg => {
             const kind = "JPEG data";
-            var decoded = zignal.jpeg.decode(allocator, data) catch |err| {
+            var decoded = zignal.jpeg.decode(allocator, data, default_jpeg_limits) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
@@ -122,13 +133,13 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     if (is_jpeg) {
         // Read file and decode JPEG
-        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(200 * 1024 * 1024)) catch |err| {
+        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(readLimit(file_jpeg_limits.max_jpeg_bytes))) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
         defer allocator.free(data);
 
-        var decoded = zignal.jpeg.decode(allocator, data) catch |err| {
+        var decoded = zignal.jpeg.decode(allocator, data, file_jpeg_limits) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
@@ -147,12 +158,12 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // PNG: load native dtype (Grayscale, RGB, RGBA)
     if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
-        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(100 * 1024 * 1024)) catch |err| {
+        const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(readLimit(file_png_limits.max_png_bytes))) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };
         defer allocator.free(data);
-        var decoded = zignal.png.decode(allocator, data) catch |err| {
+        var decoded = zignal.png.decode(allocator, data, file_png_limits) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
             return null;
         };

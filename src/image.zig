@@ -248,8 +248,8 @@ pub fn Image(comptime T: type) type {
             const image_format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
-                .png => png.load(T, allocator, file_path),
-                .jpeg => jpeg.load(T, allocator, file_path),
+                .png => png.load(T, allocator, file_path, .{}),
+                .jpeg => jpeg.load(T, allocator, file_path, .{}),
             };
         }
 
@@ -266,8 +266,8 @@ pub fn Image(comptime T: type) type {
             const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
-                .png => png.loadFromBytes(T, allocator, data),
-                .jpeg => jpeg.loadFromBytes(T, allocator, data),
+                .png => png.loadFromBytes(T, allocator, data, .{}),
+                .jpeg => jpeg.loadFromBytes(T, allocator, data, .{}),
             };
         }
 

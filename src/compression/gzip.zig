@@ -86,8 +86,14 @@ pub fn compress(gpa: Allocator, data: []const u8, level: deflate.CompressionLeve
     return result.toOwnedSlice(gpa);
 }
 
-/// Decompress gzip data
-pub fn decompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
+/// Decompress gzip data.
+/// Caller must provide `max_output_bytes`, representing the trusted upper bound for the
+/// decompressed payload. This bound is combined with the ISIZE trailer to ensure inflate
+/// never allocates more than either value.
+pub fn decompress(allocator: Allocator, gzip_data: []const u8, max_output_bytes: usize) ![]u8 {
+    if (max_output_bytes == 0) {
+        return error.InvalidOutputLimit;
+    }
     if (gzip_data.len < 18) { // Minimum gzip file size
         return error.InvalidGzipData;
     }
@@ -129,12 +135,19 @@ pub fn decompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
         return error.InvalidGzipData;
     }
 
+    const trailer = gzip_data[gzip_data.len - 8 ..];
+    const expected_crc = std.mem.readInt(u32, trailer[0..4], .little);
+    const expected_size_u32 = std.mem.readInt(u32, trailer[4..8], .little);
+    const max_from_trailer = @as(usize, expected_size_u32);
+    const max_output = if (max_from_trailer < max_output_bytes)
+        max_from_trailer
+    else
+        max_output_bytes;
     const compressed_data = gzip_data[offset .. gzip_data.len - 8];
-    const decompressed = try deflate.inflate(allocator, compressed_data);
+    const decompressed = try deflate.inflate(allocator, compressed_data, max_output);
     errdefer allocator.free(decompressed);
 
     // Verify CRC32
-    const expected_crc = std.mem.readInt(u32, gzip_data[gzip_data.len - 8 ..][0..4], .little);
     const actual_crc = crc32(decompressed);
     if (actual_crc != expected_crc) {
         allocator.free(decompressed);
@@ -142,7 +155,7 @@ pub fn decompress(allocator: Allocator, gzip_data: []const u8) ![]u8 {
     }
 
     // Verify uncompressed size
-    const expected_size = std.mem.readInt(u32, gzip_data[gzip_data.len - 4 ..][0..4], .little);
+    const expected_size = expected_size_u32;
     const actual_size: u32 = @intCast(decompressed.len & 0xFFFFFFFF);
     if (actual_size != expected_size) {
         allocator.free(decompressed);
@@ -168,7 +181,7 @@ test "gzip compression and decompression round-trip" {
     try std.testing.expectEqual(@as(u8, 0x08), compressed[2]);
 
     // Decompress
-    const decompressed = try decompress(allocator, compressed);
+    const decompressed = try decompress(allocator, compressed, original_data.len);
     defer allocator.free(decompressed);
 
     // Verify round-trip
@@ -194,11 +207,31 @@ test "gzip with different compression levels" {
         const compressed = try compress(allocator, test_data, level, .default);
         defer allocator.free(compressed);
 
-        const decompressed = try decompress(allocator, compressed);
+        const decompressed = try decompress(allocator, compressed, test_data.len);
         defer allocator.free(decompressed);
 
         try std.testing.expectEqualSlices(u8, test_data, decompressed);
     }
+}
+
+test "gzip decompress enforces caller limit" {
+    const allocator = std.testing.allocator;
+    const original = "limit me";
+    const compressed = try compress(allocator, original, .level_1, .default);
+    defer allocator.free(compressed);
+
+    const result = decompress(allocator, compressed, 2);
+    try std.testing.expectError(error.OutputLimitExceeded, result);
+}
+
+test "gzip decompress rejects zero limit" {
+    const allocator = std.testing.allocator;
+    const original = "limit me";
+    const compressed = try compress(allocator, original, .level_1, .default);
+    defer allocator.free(compressed);
+
+    const result = decompress(allocator, compressed, 0);
+    try std.testing.expectError(error.InvalidOutputLimit, result);
 }
 
 test "gzip error handling" {
@@ -206,9 +239,9 @@ test "gzip error handling" {
 
     // Test invalid magic number
     const bad_magic = [_]u8{ 0x00, 0x00 } ++ @as([16]u8, @splat(0));
-    try std.testing.expectError(error.InvalidGzipHeader, decompress(allocator, &bad_magic));
+    try std.testing.expectError(error.InvalidGzipHeader, decompress(allocator, &bad_magic, 1));
 
     // Test too short data
     const too_short = [_]u8{ 0x1f, 0x8b };
-    try std.testing.expectError(error.InvalidGzipData, decompress(allocator, &too_short));
+    try std.testing.expectError(error.InvalidGzipData, decompress(allocator, &too_short, 1));
 }

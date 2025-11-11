@@ -14,6 +14,32 @@ const Rgb = @import("color.zig").Rgb;
 const Rgba = @import("color.zig").Rgba;
 
 const max_file_size: usize = 100 * 1024 * 1024;
+const max_dimensions_default: u32 = 8192;
+const max_pixels_default: u64 = 67_108_864; // 8K square
+const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
+
+/// User-configurable resource limits applied while decoding PNG data.
+/// A zero value disables the corresponding limit.
+pub const DecodeLimits = struct {
+    /// Maximum number of bytes accepted in the original PNG buffer (signature + chunks).
+    max_png_bytes: usize = max_file_size,
+    /// Maximum cumulative size (in bytes) across all chunk payloads.
+    max_chunk_bytes: usize = max_file_size,
+    /// Maximum cumulative size of IDAT chunk payloads (compressed image stream).
+    max_idat_bytes: usize = max_file_size,
+    /// Maximum number of chunks accepted in a single PNG. Helps prevent zip bombs
+    /// that add thousands of tiny ancillary entries.
+    max_chunks: usize = 8192,
+    /// Maximum allowed width in pixels.
+    max_width: u32 = max_dimensions_default,
+    /// Maximum allowed height in pixels.
+    max_height: u32 = max_dimensions_default,
+    /// Maximum allowed pixel count (width * height). Default ~8K square.
+    max_pixels: u64 = max_pixels_default,
+    /// Maximum number of bytes produced by zlib inflate (including filter bytes,
+    /// across all Adam7 passes when applicable).
+    max_decompressed_bytes: usize = max_decompressed_default,
+};
 
 const ChunkOrderState = struct {
     seen_plte: bool = false,
@@ -24,6 +50,38 @@ const ChunkOrderState = struct {
     seen_srgb: bool = false,
     idat_stream_finished: bool = false,
 };
+
+inline fn exceedsU32(limit: u32, value: u32) bool {
+    return limit != 0 and value > limit;
+}
+
+inline fn exceedsU64(limit: u64, value: u64) bool {
+    return limit != 0 and value > limit;
+}
+
+inline fn exceedsUsize(limit: usize, value: usize) bool {
+    return limit != 0 and value > limit;
+}
+
+fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
+    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
+    if (limit != 0 and new_total > limit) return limit_error;
+    current.* = new_total;
+}
+
+fn ensureArrayCapacityWithinLimit(list: *ArrayList(u8), allocator: Allocator, required_len: usize, limit: usize) !void {
+    if (required_len <= list.capacity) return;
+
+    var target = required_len;
+    if (list.capacity > 0) {
+        const doubled = std.math.mul(usize, list.capacity, 2) catch std.math.maxInt(usize);
+        if (doubled > target) target = doubled;
+    }
+    if (limit != 0 and target > limit) {
+        target = limit;
+    }
+    try list.ensureTotalCapacityPrecise(allocator, target);
+}
 
 /// PNG signature: 8 bytes that identify a PNG file
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -153,19 +211,42 @@ fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, h
 }
 
 /// Calculate total scanline data size for interlaced image
-fn adam7TotalSize(header: Header) usize {
+fn adam7TotalSize(header: Header) !usize {
     var total_size: usize = 0;
     const channels = header.channels();
 
     for (0..7) |pass| {
         const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
         if (dims.width > 0 and dims.height > 0) {
-            const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
-            total_size += dims.height * (pass_scanline_bytes + 1); // +1 for filter byte
+            const pass_bits = @as(u64, dims.width) * @as(u64, channels) * @as(u64, header.bit_depth);
+            const pass_scanline_bytes_u64 = (pass_bits + 7) / 8;
+            const pass_scanline_bytes = std.math.cast(usize, pass_scanline_bytes_u64) orelse return error.ImageTooLarge;
+            const stride = std.math.add(usize, pass_scanline_bytes, 1) catch return error.ImageTooLarge;
+            const pass_total = std.math.mul(usize, stride, @as(usize, @intCast(dims.height))) catch return error.ImageTooLarge;
+            total_size = std.math.add(usize, total_size, pass_total) catch return error.ImageTooLarge;
         }
     }
 
     return total_size;
+}
+
+fn scanDataLength(header: Header) !usize {
+    if (header.interlace_method == 1) {
+        return try adam7TotalSize(header);
+    }
+    const scanline_bytes = header.scanlineBytes();
+    const stride = std.math.add(usize, scanline_bytes, 1) catch return error.ImageTooLarge;
+    return std.math.mul(usize, stride, @as(usize, @intCast(header.height))) catch return error.ImageTooLarge;
+}
+
+fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
+    if (exceedsU32(limits.max_width, header.width) or exceedsU32(limits.max_height, header.height)) {
+        return error.ImageTooLarge;
+    }
+    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
+    if (exceedsU64(limits.max_pixels, total_pixels)) {
+        return error.ImageTooLarge;
+    }
 }
 
 /// PNG decoder/encoder state
@@ -174,6 +255,7 @@ pub const PngState = struct {
     palette: ?[][3]u8 = null,
     transparency: ?[]u8 = null, // For palette transparency or single transparent color
     idat_data: ArrayList(u8),
+    scan_data_bytes: usize = 0,
 
     // Color management metadata
     gamma: ?f32 = null, // Gamma value from gAMA chunk
@@ -348,9 +430,12 @@ fn parseHeader(chunk: Chunk) !Header {
 }
 
 // PNG decoder entry point
-pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
+pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngState {
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
+    }
+    if (exceedsUsize(limits.max_png_bytes, png_data.len)) {
+        return error.PngDataTooLarge;
     }
 
     var reader: ChunkReader = .init(png_data[8..]);
@@ -362,8 +447,19 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
 
     var header_found = false;
     var chunk_state: ChunkOrderState = .{};
+    var total_chunk_bytes: usize = 0;
+    var total_idat_bytes: usize = 0;
+    var chunk_count: usize = 0;
 
     while (try reader.nextChunk()) |chunk| {
+        chunk_count += 1;
+        if (exceedsUsize(limits.max_chunks, chunk_count)) {
+            return error.TooManyChunks;
+        }
+
+        const chunk_len = chunk.data.len;
+        try accumulateWithLimit(&total_chunk_bytes, chunk_len, limits.max_chunk_bytes, error.ChunkDataLimitExceeded);
+
         if (!header_found and !std.mem.eql(u8, &chunk.type, "IHDR")) {
             return error.ChunkBeforeHeader;
         }
@@ -376,6 +472,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
             if (header_found) return error.MultipleHeaders;
             png_state.header = try parseHeader(chunk);
             header_found = true;
+            try enforceHeaderLimits(png_state.header, limits);
         } else if (std.mem.eql(u8, &chunk.type, "PLTE")) {
             if (png_state.header.color_type == .grayscale or png_state.header.color_type == .grayscale_alpha) {
                 return error.PaletteForbiddenForColorType;
@@ -459,7 +556,10 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
             if (png_state.header.color_type == .palette and png_state.palette == null) {
                 return error.MissingPalette;
             }
-            try png_state.idat_data.appendSlice(gpa, chunk.data);
+            try accumulateWithLimit(&total_idat_bytes, chunk_len, limits.max_idat_bytes, error.ImageDataLimitExceeded);
+            const new_len = std.math.add(usize, png_state.idat_data.items.len, chunk.data.len) catch return error.ImageTooLarge;
+            try ensureArrayCapacityWithinLimit(&png_state.idat_data, gpa, new_len, limits.max_idat_bytes);
+            png_state.idat_data.appendSliceAssumeCapacity(chunk.data);
             chunk_state.seen_idat = true;
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             chunk_state.seen_iend = true;
@@ -480,6 +580,11 @@ pub fn decode(gpa: Allocator, png_data: []const u8) !PngState {
         return error.MissingEndChunk;
     }
 
+    png_state.scan_data_bytes = try scanDataLength(png_state.header);
+    if (exceedsUsize(limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
+        return error.ImageTooLarge;
+    }
+
     return png_state;
 }
 
@@ -490,7 +595,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     rgba: Image(Rgba),
 } {
     // Decompress IDAT data
-    const decompressed = try zlib.decompress(allocator, png_state.idat_data.items);
+    const decompressed = try zlib.decompress(allocator, png_state.idat_data.items, png_state.scan_data_bytes);
     defer allocator.free(decompressed);
 
     // Apply row defiltering
@@ -782,8 +887,8 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
 /// Returns: Decoded Image(T) with automatic color space conversion from source format
 ///
 /// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8) !Image(T) {
-    var png_state = try decode(allocator, png_data);
+pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
+    var png_state = try decode(allocator, png_data, limits);
     defer png_state.deinit(allocator);
 
     // Load the PNG in its native format first, then convert to requested type
@@ -819,10 +924,11 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
     }
 }
 
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8) !Image(T) {
-    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(max_file_size));
+pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+    const read_limit = if (limits.max_png_bytes == 0) std.math.maxInt(usize) else limits.max_png_bytes;
+    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(read_limit));
     defer allocator.free(png_data);
-    return loadFromBytes(T, allocator, png_data);
+    return loadFromBytes(T, allocator, png_data, limits);
 }
 
 // PNG Encoder functionality
@@ -1323,7 +1429,7 @@ fn defilterStandardScanlines(data: []u8, header: Header) !void {
 
 /// Apply defiltering to Adam7 interlaced scanlines
 fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
-    const expected_size = adam7TotalSize(header);
+    const expected_size = try adam7TotalSize(header);
 
     if (data.len != expected_size) {
         return error.InvalidScanlineData;
@@ -1651,7 +1757,7 @@ fn appendTestChunk(list: *ArrayList(u8), allocator: Allocator, chunk_type: [4]u8
 // Simple test for the PNG structure
 test "PNG signature validation" {
     const invalid_sig = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    const result = decode(std.testing.allocator, &invalid_sig);
+    const result = decode(std.testing.allocator, &invalid_sig, .{});
     try std.testing.expectError(error.InvalidPngSignature, result);
 }
 
@@ -1665,7 +1771,7 @@ test "PNG rejects chunks before IHDR" {
     try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data.items));
+    try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data.items, .{}));
 }
 
 test "PNG palette images require PLTE before IDAT" {
@@ -1688,7 +1794,7 @@ test "PNG palette images require PLTE before IDAT" {
     try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.MissingPalette, decode(gpa, data.items));
+    try std.testing.expectError(error.MissingPalette, decode(gpa, data.items, .{}));
 }
 
 test "PNG palette transparency requires PLTE first" {
@@ -1716,7 +1822,7 @@ test "PNG palette transparency requires PLTE first" {
     try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data.items));
+    try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data.items, .{}));
 }
 
 test "PNG rejects PLTE for grayscale" {
@@ -1740,7 +1846,7 @@ test "PNG rejects PLTE for grayscale" {
     try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data.items));
+    try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data.items, .{}));
 }
 
 test "PNG IDAT chunks must be consecutive" {
@@ -1769,7 +1875,7 @@ test "PNG IDAT chunks must be consecutive" {
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data.items));
+    try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data.items, .{}));
 }
 
 test "PNG gamma chunk must precede PLTE" {
@@ -1796,7 +1902,7 @@ test "PNG gamma chunk must precede PLTE" {
     try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data.items));
+    try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data.items, .{}));
 }
 
 test "PNG sRGB chunk must precede IDAT" {
@@ -1823,7 +1929,7 @@ test "PNG sRGB chunk must precede IDAT" {
     try appendTestChunk(&data, gpa, "sRGB".*, &srgb_payload);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items));
+    try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items, .{}));
 }
 
 test "PNG requires IEND chunk" {
@@ -1846,7 +1952,139 @@ test "PNG requires IEND chunk" {
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
 
-    try std.testing.expectError(error.MissingEndChunk, decode(gpa, data.items));
+    try std.testing.expectError(error.MissingEndChunk, decode(gpa, data.items, .{}));
+}
+
+test "PNG enforces max_png_bytes limit" {
+    var buffer: [9]u8 = undefined;
+    @memcpy(buffer[0..8], &signature);
+    buffer[8] = 0;
+    const result = decode(std.testing.allocator, &buffer, .{ .max_png_bytes = 8 });
+    try std.testing.expectError(error.PngDataTooLarge, result);
+}
+
+test "PNG enforces chunk byte limit" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const limits: DecodeLimits = .{
+        .max_png_bytes = 1024,
+        .max_chunk_bytes = 8,
+        .max_idat_bytes = 1024,
+        .max_chunks = 16,
+    };
+    try std.testing.expectError(error.ChunkDataLimitExceeded, decode(gpa, data.items, limits));
+}
+
+test "PNG enforces IDAT byte limit" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    const limits: DecodeLimits = .{
+        .max_png_bytes = 1024,
+        .max_chunk_bytes = 1024,
+        .max_idat_bytes = 4,
+        .max_chunks = 16,
+    };
+    try std.testing.expectError(error.ImageDataLimitExceeded, decode(gpa, data.items, limits));
+}
+
+test "PNG enforces chunk count limit" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    const limits: DecodeLimits = .{
+        .max_png_bytes = 1024,
+        .max_chunk_bytes = 1024,
+        .max_chunks = 1,
+    };
+    try std.testing.expectError(error.TooManyChunks, decode(gpa, data.items, limits));
+}
+
+test "PNG enforces decompressed byte limit" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.grayscale);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
+    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    const limits: DecodeLimits = .{
+        .max_png_bytes = 1024,
+        .max_chunk_bytes = 1024,
+        .max_idat_bytes = 1024,
+        .max_chunks = 16,
+        .max_decompressed_bytes = 1,
+    };
+    try std.testing.expectError(error.ImageTooLarge, decode(gpa, data.items, limits));
+}
+
+test "PNG default decompressed limit covers 8K RGBA 16-bit" {
+    const header = Header{
+        .width = max_dimensions_default,
+        .height = max_dimensions_default,
+        .bit_depth = 16,
+        .color_type = .rgba,
+        .compression_method = 0,
+        .filter_method = 0,
+        .interlace_method = 1,
+    };
+    const inflated = try adam7TotalSize(header);
+    const limits = DecodeLimits{};
+    try std.testing.expect(inflated <= limits.max_decompressed_bytes);
 }
 
 test "CRC calculation" {
@@ -1893,7 +2131,7 @@ test "PNG round-trip encoding/decoding" {
     try std.testing.expectEqualSlices(u8, &signature, png_data[0..8]);
 
     // Decode back from PNG
-    var decoded_png = try decode(allocator, png_data);
+    var decoded_png = try decode(allocator, png_data, .{});
     defer decoded_png.deinit(allocator);
 
     // Verify header
@@ -1987,7 +2225,7 @@ test "PNG fixed filters round-trip" {
         const png_data = try encode(Rgb, allocator, img, .{ .filter_mode = .{ .fixed = ft }, .compression_level = .level_1, .compression_strategy = .filtered });
         defer allocator.free(png_data);
 
-        var state = try decode(allocator, png_data);
+        var state = try decode(allocator, png_data, .{});
         defer state.deinit(allocator);
         const native = try toNativeImage(allocator, state);
         var round = switch (native) {
@@ -2265,7 +2503,7 @@ test "PNG bounds checking - large image dimensions" {
     try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_crc, .big)));
 
     // Try to decode - should fail with ImageTooLarge
-    const result = decode(gpa, png_data.items);
+    const result = decode(gpa, png_data.items, .{});
     try std.testing.expectError(error.ImageTooLarge, result);
 }
 
@@ -2364,7 +2602,7 @@ test "Adam7 interlaced PNG support" {
     try std.testing.expectEqual(@as(u8, 3), interlaced_header.channels());
 
     // Test that Adam7 total size calculation works
-    const total_size = adam7TotalSize(interlaced_header);
+    const total_size = try adam7TotalSize(interlaced_header);
     try std.testing.expect(total_size > 0);
 
     // Test pixel extraction functions work correctly
