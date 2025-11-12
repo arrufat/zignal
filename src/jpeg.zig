@@ -1921,7 +1921,7 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
 
     const payload_start = pos + 4;
     if (payload_start > marker_end) return error.InvalidMarker;
-    const scan_info = try state.parseSOS(data[payload_start .. marker_end]);
+    const scan_info = try state.parseSOS(data[payload_start..marker_end]);
     const scan_start = marker_end;
 
     const scan_end = findScanEnd(data, scan_start);

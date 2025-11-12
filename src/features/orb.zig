@@ -401,7 +401,6 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
     const factor = 1.0 / self.scale_factor;
     const factor_to_n = std.math.pow(f32, factor, @as(f32, @floatFromInt(self.n_levels)));
 
-
     // Distribute features with exponential decay
     var assigned: usize = 0;
     const n_features_f = @as(f32, @floatFromInt(self.n_features));
