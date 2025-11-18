@@ -61,7 +61,7 @@ Requires Python 3.10+, no external dependencies
 - **Color spaces** - RGB, HSL, HSV, Lab, XYZ, Oklab, Oklch conversions
 - **Matrix operations** - Linear algebra functions and SVD
 - **Geometry** - Points, rectangles, transforms, convex hull
-- **Image I/O** - Load and save PNG/JPEG images without in-house codecs
+- **Image I/O** - Load and save PNG/JPEG images with in-house codecs
 - **Image processing** - Resize, rotate, crop, blur, sharpen, threshold, morphology
 - **Canvas API** - Lines, circles, polygons, Bézier curves with antialiasing
 - **Fonts** - Bitmap font rendering, BDF/PCF loading, and Unicode range filters
