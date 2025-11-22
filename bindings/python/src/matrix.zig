@@ -8,18 +8,6 @@ const allocator = py_utils.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-fn fallbackSeed() u64 {
-    const nano_ts = std.time.nanoTimestamp();
-    const micro_ts = std.time.microTimestamp();
-    const nano_folded: i64 = @truncate(nano_ts);
-
-    var mix: u64 = @bitCast(nano_folded);
-    mix ^= @bitCast(micro_ts);
-    mix ^= @intFromPtr(&mix);
-    if (mix == 0) mix = 0x9e3779b97f4a7c15;
-    return std.hash.Wyhash.hash(0, std.mem.asBytes(&mix));
-}
-
 fn matrixErrorToPython(err: anytype, context: []const u8) void {
     switch (err) {
         error.DimensionMismatch => py_utils.setValueError("Matrix dimension mismatch", .{}),
@@ -1633,14 +1621,13 @@ fn matrix_random(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 
     const rows_pos = py_utils.validatePositive(usize, params.rows, "rows") catch return null;
     const cols_pos = py_utils.validatePositive(usize, params.cols, "cols") catch return null;
-    const seed_value: ?u64 = if (params.seed) |s| s else fallbackSeed();
 
     const allocation = allocOwnedMatrix(type_obj) orelse return null;
     var cleanup_needed = true;
     var matrix_initialized = false;
     defer if (cleanup_needed) cleanupOwnedMatrix(allocation, matrix_initialized);
 
-    allocation.matrix_ptr.* = Matrix(f64).random(allocator, rows_pos, cols_pos, seed_value) catch {
+    allocation.matrix_ptr.* = Matrix(f64).random(allocator, rows_pos, cols_pos, params.seed) catch {
         py_utils.setMemoryError("matrix data");
         return null;
     };

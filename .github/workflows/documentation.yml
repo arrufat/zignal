@@ -24,7 +24,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0-dev.393+dd4be26f5
+          version: master
 
       - name: Build Zig docs
         run: zig build docs
@@ -57,7 +57,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0-dev.393+dd4be26f5
+          version: master
 
       - name: Install uv
         uses: astral-sh/setup-uv@v2
