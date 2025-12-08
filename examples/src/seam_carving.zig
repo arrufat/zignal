@@ -2,10 +2,12 @@ const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
-const Image = @import("zignal").Image;
-const isColor = @import("zignal").color.isColor;
-const Rgb = @import("zignal").Rgb;
-const Rgba = @import("zignal").Rgba;
+const zignal = @import("zignal");
+const Image = zignal.Image;
+const isColor = zignal.color.isColor;
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Gray = zignal.Gray(u8);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,

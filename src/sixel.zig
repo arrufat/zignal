@@ -11,7 +11,7 @@ const clamp = std.math.clamp;
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Interpolation = @import("image/interpolation.zig").Interpolation;
-const Rgb = @import("color.zig").Rgb;
+const Rgb = @import("color.zig").Rgb(u8);
 const terminal = @import("terminal.zig");
 
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters

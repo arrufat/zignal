@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Image = @import("zignal").Image;
-const Rgba = @import("zignal").Rgba;
+const Rgba = @import("zignal").Rgba(u8);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,

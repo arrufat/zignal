@@ -3,8 +3,9 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgba = zignal.Rgba;
-const Rgb = zignal.Rgb;
+const Rgba = zignal.Rgba(u8);
+const Rgb = zignal.Rgb(u8);
+const Gray = zignal.Gray(u8);
 const ImageFormat = zignal.ImageFormat;
 const default_png_limits: zignal.png.DecodeLimits = .{};
 const file_png_limits: zignal.png.DecodeLimits = .{ .max_png_bytes = 100 * 1024 * 1024 };

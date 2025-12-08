@@ -5,11 +5,14 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
+const Rgb = color.Rgb(u8);
+const Rgba = color.Rgba(u8);
+const Gray = color.Gray;
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Interpolation = @import("../../root.zig").Interpolation;
 
 test "getRectangle" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect = image.getRectangle();
     try expectEqual(rect.width(), image.cols);
@@ -102,7 +105,7 @@ test "copy function in-place behavior" {
     }
 }
 test "view" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
@@ -380,14 +383,14 @@ test "insert and extract inverse relationship" {
 test "insert applies blending when requested" {
     const allocator = std.testing.allocator;
 
-    var dest = try Image(color.Rgba).init(allocator, 1, 1);
+    var dest = try Image(Rgba).init(allocator, 1, 1);
     defer dest.deinit(allocator);
-    const base = color.Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+    const base = Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
     dest.at(0, 0).* = base;
 
-    var source = try Image(color.Rgba).init(allocator, 1, 1);
+    var source = try Image(Rgba).init(allocator, 1, 1);
     defer source.deinit(allocator);
-    const overlay = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    const overlay = Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
     source.at(0, 0).* = overlay;
 
     const rect = Rectangle(f32).init(0, 0, 1, 1);

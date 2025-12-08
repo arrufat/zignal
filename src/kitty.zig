@@ -12,7 +12,8 @@ const Allocator = std.mem.Allocator;
 const Image = @import("image.zig").Image;
 const Interpolation = @import("image/interpolation.zig").Interpolation;
 const png = @import("png.zig");
-const Rgb = @import("color.zig").Rgb;
+const Rgb = @import("color.zig").Rgb(u8);
+const Gray = @import("color.zig").Gray;
 const terminal = @import("terminal.zig");
 
 // Kitty protocol constants

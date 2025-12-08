@@ -2,8 +2,9 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb;
-const Rgba = zignal.Rgba;
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Gray = zignal.Gray(u8);
 
 /// PyImage is a Python-facing dynamic image wrapper used only by the Python bindings.
 /// Internally it stores one of Image(u8), Image(Rgb), or Image(Rgba) and centralizes
@@ -80,7 +81,7 @@ pub const PyImage = struct {
     /// Set a pixel from an Rgba value, converting as needed.
     pub fn setPixelRgba(self: *PyImage, row: usize, col: usize, px: Rgba) void {
         switch (self.data) {
-            .grayscale => |*img| img.at(row, col).* = px.toGray(),
+            .grayscale => |*img| img.at(row, col).* = px.to(.gray).as(u8).y,
             .rgb => |*img| img.at(row, col).* = Rgb{ .r = px.r, .g = px.g, .b = px.b },
             .rgba => |*img| img.at(row, col).* = px,
         }

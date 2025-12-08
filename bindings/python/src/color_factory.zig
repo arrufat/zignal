@@ -1,6 +1,19 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Gray = zignal.Gray(u8);
+const Hsl = zignal.Hsl(f64);
+const Hsv = zignal.Hsv(f64);
+const Lab = zignal.Lab(f64);
+const Lch = zignal.Lch(f64);
+const Lms = zignal.Lms(f64);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
+const Xyb = zignal.Xyb(f64);
+const Xyz = zignal.Xyz(f64);
+const Ycbcr = zignal.Ycbcr(u8);
 const isPacked = zignal.meta.isPacked;
 const getSimpleTypeName = zignal.meta.getSimpleTypeName;
 const comptimeLowercase = zignal.meta.comptimeLowercase;
@@ -11,7 +24,8 @@ const ConversionError = @import("py_utils.zig").ConversionError;
 const convertFromPython = @import("py_utils.zig").convertFromPython;
 const convertToPython = @import("py_utils.zig").convertToPython;
 const convertWithValidation = @import("py_utils.zig").convertWithValidation;
-const createColorPyObject = @import("color.zig").createColorPyObject;
+const color_bindings = @import("color.zig");
+const createColorPyObject = color_bindings.createColorPyObject;
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 const enum_utils = @import("enum_utils.zig");
@@ -179,9 +193,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.setter;
         }
 
-        /// Generate methods array - automatically create conversion methods for all color types + __format__ + blend + to_gray + invert
-        pub fn generateMethods() [color_types.len + 4]c.PyMethodDef {
-            var methods: [color_types.len + 4]c.PyMethodDef = undefined;
+        /// Generate methods array - __format__, blend, to, invert
+        pub fn generateMethods() [5]c.PyMethodDef {
+            var methods: [5]c.PyMethodDef = undefined;
             var index: usize = 0;
 
             // Add __format__ method
@@ -233,12 +247,12 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 index += 1;
             }
 
-            // Add to_gray method (all color types have toGray in Zig)
+            // Add generic to(space) conversion
             methods[index] = c.PyMethodDef{
-                .ml_name = "to_gray",
-                .ml_meth = @ptrCast(&toGrayMethod),
-                .ml_flags = c.METH_NOARGS,
-                .ml_doc = "Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255.",
+                .ml_name = "to",
+                .ml_meth = @ptrCast(&toMethod),
+                .ml_flags = c.METH_VARARGS,
+                .ml_doc = "Convert to the given color type (pass the class, e.g. zignal.Rgb).",
             };
             index += 1;
 
@@ -255,92 +269,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 index += 1;
             }
 
-            // Generate conversion methods for each color type
-            inline for (color_types) |TargetColorType| {
-                const method_name = getConversionMethodName(TargetColorType);
-                const zig_method_name = getZigConversionMethodName(TargetColorType);
-
-                // Skip self-conversion (e.g., Rgb.toRgb doesn't exist)
-                if (TargetColorType == ZigColorType) continue;
-
-                // Check if the Zig type has this conversion method
-                if (@hasDecl(ZigColorType, zig_method_name)) {
-                    methods[index] = c.PyMethodDef{
-                        .ml_name = method_name.ptr,
-                        .ml_meth = generateConversionMethod(TargetColorType),
-                        // Special case: to_rgba accepts optional alpha parameter
-                        .ml_flags = if (TargetColorType == zignal.Rgba) c.METH_VARARGS else c.METH_NOARGS,
-                        .ml_doc = if (TargetColorType == zignal.Rgba)
-                            \\Convert to RGBA color space with the given alpha value
-                        else
-                            getConversionMethodDoc(TargetColorType).ptr,
-                    };
-                    index += 1;
-                } else {
-                    @compileError("Missing conversion method: " ++ @typeName(ZigColorType) ++ "." ++ zig_method_name ++ " - expected for color type in registry");
-                }
-            }
             methods[index] = c.PyMethodDef{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null };
             return methods;
-        }
-
-        /// Automatically generate Python method name from type name
-        /// e.g., zignal.Rgb -> "to_rgb", zignal.Oklab -> "to_oklab"
-        fn getConversionMethodName(comptime TargetColorType: type) []const u8 {
-            const type_name = @typeName(TargetColorType);
-            if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
-                const base_name = type_name[dot_index + 1 ..];
-                return "to_" ++ comptimeLowercase(base_name);
-            } else {
-                @compileError("Expected zignal.ColorName format, got: " ++ type_name);
-            }
-        }
-
-        /// Automatically generate method name from type name
-        /// e.g., zignal.Rgb -> "toRgb", zignal.Oklab -> "toOklab"
-        fn getZigConversionMethodName(comptime TargetColorType: type) []const u8 {
-            const type_name = @typeName(TargetColorType);
-            if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
-                const base_name = type_name[dot_index + 1 ..];
-                return "to" ++ base_name;
-            } else {
-                @compileError("Expected zignal.ColorName format, got: " ++ type_name);
-            }
-        }
-
-        /// Generic conversion method generator - creates specific methods for each target type
-        fn generateConversionMethod(comptime TargetColorType: type) fn ([*c]c.PyObject, ?*c.PyObject) callconv(.c) [*c]c.PyObject {
-            return switch (TargetColorType) {
-                // Special case for Rgba due to default alpha parameter
-                zignal.Rgba => struct {
-                    fn method(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
-                        const self: *ObjectType = @ptrCast(self_obj);
-
-                        // Parse optional alpha parameter (default to 255)
-                        var alpha: c_int = 255;
-                        if (args == null or c.PyArg_ParseTuple(args.?, "|i", &alpha) == 0) {
-                            return null;
-                        }
-
-                        // Validate alpha range
-                        const py_utils = @import("py_utils.zig");
-                        const alpha_val = py_utils.validateRange(u8, alpha, 0, 255, "alpha") catch return null;
-
-                        const zig_color = objectToZigColor(self);
-                        const result = zig_color.toRgba(alpha_val);
-                        return @ptrCast(createColorPyObject(result));
-                    }
-                }.method,
-                else => struct {
-                    fn method(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
-                        const self: *ObjectType = @ptrCast(self_obj);
-                        const zig_color = objectToZigColor(self);
-                        const method_name = comptime getZigConversionMethodName(TargetColorType);
-                        const result = @field(ZigColorType, method_name)(zig_color);
-                        return @ptrCast(createColorPyObject(result));
-                    }
-                }.method,
-            };
         }
 
         /// Convert Python object to Zig color
@@ -600,7 +530,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
 
             // Convert self to RGBA
-            const self_rgba = color_utils.parseColor(zignal.Rgba, self_obj) catch {
+            const self_rgba = color_utils.parseColor(Rgba, self_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();
@@ -609,7 +539,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             };
 
             // Convert other to RGBA
-            const other_rgba = color_utils.parseColor(zignal.Rgba, other_obj) catch {
+            const other_rgba = color_utils.parseColor(Rgba, other_obj) catch {
                 // If conversion fails, clear error and return NotImplemented
                 c.PyErr_Clear();
                 const not_impl = c.Py_NotImplemented();
@@ -637,19 +567,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             // Convert C string to Zig slice
             const format_str = std.mem.span(format_spec);
             if (std.mem.eql(u8, format_str, "sgr")) {
-                // Convert to Zig color
                 const zig_color = objectToZigColor(self);
-
-                // Use zignal's public API
-                const convertColor = zignal.convertColor;
-                const Rgb = zignal.Rgb;
-                const Oklab = zignal.Oklab;
-
-                // Convert to RGB for SGR display
-                const rgb = convertColor(Rgb, zig_color);
-
-                // Determine text color based on background darkness
-                const fg: u8 = if (convertColor(Oklab, rgb).l < 0.5) 255 else 0;
+                const rgb = zig_color.to(.rgb).as(u8);
+                const fg: u8 = if (rgb.as(f32).to(.oklab).l < 0.5) 255 else 0;
 
                 // Build SGR formatted string with Python-style repr
                 var buffer: [512]u8 = undefined;
@@ -710,13 +630,6 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
         }
 
-        /// to_gray method implementation
-        pub fn toGrayMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
-            const self: *ObjectType = @ptrCast(self_obj);
-            const zig_color = objectToZigColor(self);
-            return @ptrCast(c.PyLong_FromLong(@intCast(zig_color.toGray())));
-        }
-
         /// invert method implementation
         pub fn invertMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
@@ -745,7 +658,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const rgba_module = @import("color.zig");
 
             // Convert overlay to Zig Rgba
-            var overlay: zignal.Rgba = undefined;
+            var overlay: Rgba = undefined;
 
             // Check if overlay is an Rgba instance
             if (c.PyObject_IsInstance(overlay_obj, @ptrCast(&rgba_module.RgbaType)) == 1) {
@@ -799,6 +712,68 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             // Create and return new Python object with the blended result
             const type_obj: *c.PyTypeObject = @ptrCast(self_obj.*.ob_type);
             return createPyObject(blended, type_obj);
+        }
+
+        /// Map a Python color class object to the underlying ColorSpace
+        fn colorSpaceFromPyType(type_obj: *c.PyTypeObject) ?zignal.ColorSpace {
+            if (type_obj == &color_bindings.GrayType) return .gray;
+            if (type_obj == &color_bindings.RgbType) return .rgb;
+            if (type_obj == &color_bindings.RgbaType) return .rgba;
+            if (type_obj == &color_bindings.HslType) return .hsl;
+            if (type_obj == &color_bindings.HsvType) return .hsv;
+            if (type_obj == &color_bindings.LabType) return .lab;
+            if (type_obj == &color_bindings.LchType) return .lch;
+            if (type_obj == &color_bindings.LmsType) return .lms;
+            if (type_obj == &color_bindings.OklabType) return .oklab;
+            if (type_obj == &color_bindings.OklchType) return .oklch;
+            if (type_obj == &color_bindings.XybType) return .xyb;
+            if (type_obj == &color_bindings.XyzType) return .xyz;
+            if (type_obj == &color_bindings.YcbcrType) return .ycbcr;
+            return null;
+        }
+
+        /// to(space) method implementation using Python color classes
+        pub fn toMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self: *ObjectType = @ptrCast(self_obj);
+            var target_type_obj: ?*c.PyObject = null;
+            if (args == null or c.PyArg_ParseTuple(args.?, "O", &target_type_obj) == 0) return null;
+
+            if (c.PyType_Check(target_type_obj) == 0) {
+                c.PyErr_SetString(c.PyExc_TypeError, "Expected a zignal color type (e.g., zignal.Rgb)");
+                return null;
+            }
+
+            const target_space = colorSpaceFromPyType(@ptrCast(target_type_obj.?)) orelse {
+                c.PyErr_SetString(c.PyExc_TypeError, "Unsupported target color type");
+                return null;
+            };
+
+            const zig_color = objectToZigColor(self);
+
+            const ColorType = @TypeOf(zig_color);
+            const is_u8_backed = switch (@typeInfo(ColorType)) {
+                .@"struct" => |info| info.fields[0].type == u8,
+                else => false,
+            };
+            const float_color = if (is_u8_backed) zig_color.as(f64) else zig_color;
+
+            const result_obj = switch (target_space) {
+                .gray => createColorPyObject(float_color.to(.gray).as(u8)),
+                .rgb => createColorPyObject(float_color.to(.rgb).as(u8)),
+                .rgba => createColorPyObject(float_color.to(.rgba).as(u8)),
+                .hsl => createColorPyObject(float_color.to(.hsl)),
+                .hsv => createColorPyObject(float_color.to(.hsv)),
+                .lab => createColorPyObject(float_color.to(.lab)),
+                .lch => createColorPyObject(float_color.to(.lch)),
+                .lms => createColorPyObject(float_color.to(.lms)),
+                .oklab => createColorPyObject(float_color.to(.oklab)),
+                .oklch => createColorPyObject(float_color.to(.oklch)),
+                .xyb => createColorPyObject(float_color.to(.xyb)),
+                .xyz => createColorPyObject(float_color.to(.xyz)),
+                .ycbcr => createColorPyObject(float_color.to(.ycbcr)),
+            };
+
+            return @ptrCast(result_obj);
         }
     };
 }

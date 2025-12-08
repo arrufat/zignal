@@ -1,4 +1,5 @@
 const std = @import("std");
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 
 /// Structuring element used by binary morphology operations.

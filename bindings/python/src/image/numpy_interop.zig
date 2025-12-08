@@ -3,8 +3,8 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgba = zignal.Rgba;
-const Rgb = zignal.Rgb;
+const Rgba = zignal.Rgba(u8);
+const Rgb = zignal.Rgb(u8);
 
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.allocator;

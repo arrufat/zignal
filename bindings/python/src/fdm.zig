@@ -1,6 +1,6 @@
 const zignal = @import("zignal");
 const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
-const Rgb = zignal.Rgb;
+const Rgb = zignal.Rgb(u8);
 
 const image = @import("image.zig");
 const py_utils = @import("py_utils.zig");
@@ -94,7 +94,7 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         py_utils.setTypeError("Image object", target_obj);
         return null;
     }
-    const target_rgb: zignal.Image(zignal.Rgb) = switch (target_img_obj.py_image.?.data) {
+    const target_rgb: zignal.Image(Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
             py_utils.setTypeError("RGB image", target_obj);
@@ -160,7 +160,7 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         py_utils.setTypeError("Image object", source_obj);
         return null;
     }
-    const src_rgb: zignal.Image(zignal.Rgb) = switch (source_img_obj.py_image.?.data) {
+    const src_rgb: zignal.Image(Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
             py_utils.setTypeError("RGB image", source_obj);
@@ -235,14 +235,14 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         c.PyErr_SetString(c.PyExc_TypeError, "Source and target must be Image objects");
         return null;
     }
-    const src_rgb2: zignal.Image(zignal.Rgb) = switch (source_img_obj.py_image.?.data) {
+    const src_rgb2: zignal.Image(Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
             py_utils.setTypeError("RGB image", source_obj);
             return null;
         },
     };
-    const dst_rgb2: zignal.Image(zignal.Rgb) = switch (target_img_obj.py_image.?.data) {
+    const dst_rgb2: zignal.Image(Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
             py_utils.setTypeError("RGB image", target_obj);

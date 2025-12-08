@@ -1,7 +1,7 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb;
+const Rgb = zignal.Rgb(u8);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

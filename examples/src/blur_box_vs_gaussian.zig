@@ -3,6 +3,7 @@
 const std = @import("std");
 const zignal = @import("zignal");
 
+const Gray = zignal.Gray(u8);
 const Image = zignal.Image(u8);
 
 fn formatWidths(widths: []const usize, buffer: []u8) ![]const u8 {

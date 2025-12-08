@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const zignal = @import("zignal");
 
 const Image = zignal.Image;
-const Rgba = zignal.Rgba;
+const Rgba = zignal.Rgba(u8);
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{

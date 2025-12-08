@@ -7,7 +7,7 @@ const Canvas = zignal.Canvas;
 const Image = zignal.Image;
 const Orb = zignal.Orb;
 const Point = zignal.Point;
-const Rgba = zignal.Rgba;
+const Rgba = zignal.Rgba(u8);
 
 // WASM-specific imports
 const js = @import("js.zig");

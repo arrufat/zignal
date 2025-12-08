@@ -5,21 +5,36 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 
+const Gray = zignal.Gray(u8);
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Hsl = zignal.Hsl(f64);
+const Hsv = zignal.Hsv(f64);
+const Lab = zignal.Lab(f64);
+const Lch = zignal.Lch(f64);
+const Lms = zignal.Lms(f64);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
+const Xyb = zignal.Xyb(f64);
+const Xyz = zignal.Xyz(f64);
+const Ycbcr = zignal.Ycbcr(u8);
+
 /// Complete list of all color types available in the system
 /// This serves as the single source of truth for auto-generation
 pub const color_types = .{
-    zignal.Rgb,
-    zignal.Rgba,
-    zignal.Hsl,
-    zignal.Hsv,
-    zignal.Lab,
-    zignal.Lch,
-    zignal.Lms,
-    zignal.Oklab,
-    zignal.Oklch,
-    zignal.Xyb,
-    zignal.Xyz,
-    zignal.Ycbcr,
+    Gray,
+    Rgb,
+    Rgba,
+    Hsl,
+    Hsv,
+    Lab,
+    Lch,
+    Lms,
+    Oklab,
+    Oklch,
+    Xyb,
+    Xyz,
+    Ycbcr,
 };
 
 /// Generic color component validation using type introspection
@@ -28,7 +43,8 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
     // Apply validation rules grouped by color type families
     return switch (ColorType) {
         // RGB family: integer components 0-255
-        zignal.Rgb, zignal.Rgba => {
+        Gray => std.mem.eql(u8, field_name, "y") and value >= 0 and value <= 255,
+        Rgb, Rgba => {
             if (std.mem.eql(u8, field_name, "r") or
                 std.mem.eql(u8, field_name, "g") or
                 std.mem.eql(u8, field_name, "b") or
@@ -40,7 +56,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // HSV/HSL family: same validation rules (h: 0-360, s/v/l: 0-100)
-        zignal.Hsv, zignal.Hsl => {
+        Hsv, Hsl => {
             if (std.mem.eql(u8, field_name, "h")) {
                 return value >= 0.0 and value <= 360.0;
             } else if (std.mem.eql(u8, field_name, "s") or
@@ -53,7 +69,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // Lab: L: 0-100, a/b: -128 to 127
-        zignal.Lab => {
+        Lab => {
             if (std.mem.eql(u8, field_name, "l")) {
                 return value >= 0.0 and value <= 100.0;
             } else if (std.mem.eql(u8, field_name, "a") or std.mem.eql(u8, field_name, "b")) {
@@ -63,7 +79,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // Oklab: L: 0-1, a/b: -0.5 to 0.5
-        zignal.Oklab => {
+        Oklab => {
             if (std.mem.eql(u8, field_name, "l")) {
                 return value >= 0.0 and value <= 1.0;
             } else if (std.mem.eql(u8, field_name, "a") or std.mem.eql(u8, field_name, "b")) {
@@ -73,7 +89,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // Oklch: L: 0-1, c: 0-0.5, h: 0-360
-        zignal.Oklch => {
+        Oklch => {
             if (std.mem.eql(u8, field_name, "l")) {
                 return value >= 0.0 and value <= 1.0;
             } else if (std.mem.eql(u8, field_name, "c")) {
@@ -85,7 +101,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // Lch: L: 0-100, c: >=0, h: 0-360
-        zignal.Lch => {
+        Lch => {
             if (std.mem.eql(u8, field_name, "l")) {
                 return value >= 0.0 and value <= 100.0;
             } else if (std.mem.eql(u8, field_name, "c")) {
@@ -97,7 +113,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // XYZ: 0-150 (can exceed 100)
-        zignal.Xyz => {
+        Xyz => {
             if (std.mem.eql(u8, field_name, "x") or
                 std.mem.eql(u8, field_name, "y") or
                 std.mem.eql(u8, field_name, "z"))
@@ -108,7 +124,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // YCbCr: 0-255
-        zignal.Ycbcr => {
+        Ycbcr => {
             if (std.mem.eql(u8, field_name, "y") or
                 std.mem.eql(u8, field_name, "cb") or
                 std.mem.eql(u8, field_name, "cr"))
@@ -119,7 +135,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // LMS: L/M/S cone responses
-        zignal.Lms => {
+        Lms => {
             if (std.mem.eql(u8, field_name, "l") or
                 std.mem.eql(u8, field_name, "m") or
                 std.mem.eql(u8, field_name, "s"))
@@ -130,7 +146,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
         },
 
         // XYB: JPEG XL color space
-        zignal.Xyb => {
+        Xyb => {
             if (std.mem.eql(u8, field_name, "x") or
                 std.mem.eql(u8, field_name, "y") or
                 std.mem.eql(u8, field_name, "b"))
@@ -148,17 +164,18 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
 pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
     // Return appropriate error message based on color type
     return switch (ColorType) {
-        zignal.Rgb, zignal.Rgba => "RGB values must be in range 0-255",
-        zignal.Hsv => "HSV values must be in valid ranges (h: 0-360, s: 0-100, v: 0-100)",
-        zignal.Hsl => "HSL values must be in valid ranges (h: 0-360, s: 0-100, l: 0-100)",
-        zignal.Lab => "Lab values must be in valid ranges (L: 0-100, a/b: -128 to 127)",
-        zignal.Xyz => "XYZ values must be in range 0-150",
-        zignal.Oklab => "Oklab values must be in valid ranges (l: 0-1, a/b: -0.5 to 0.5)",
-        zignal.Oklch => "Oklch values must be in valid ranges (l: 0-1, c: 0-0.5, h: 0-360)",
-        zignal.Lch => "Lch values must be in valid ranges (l: 0-100, c: >=0, h: 0-360)",
-        zignal.Lms => "LMS values must be in range 0-1000",
-        zignal.Xyb => "XYB values must be in range -1000 to 1000",
-        zignal.Ycbcr => "YCbCr values must be in range 0-255",
+        Gray => "Grayscale values must be in range 0-255",
+        Rgb, Rgba => "RGB values must be in range 0-255",
+        Hsv => "HSV values must be in valid ranges (h: 0-360, s: 0-100, v: 0-100)",
+        Hsl => "HSL values must be in valid ranges (h: 0-360, s: 0-100, l: 0-100)",
+        Lab => "Lab values must be in valid ranges (L: 0-100, a/b: -128 to 127)",
+        Xyz => "XYZ values must be in range 0-150",
+        Oklab => "Oklab values must be in valid ranges (l: 0-1, a/b: -0.5 to 0.5)",
+        Oklch => "Oklch values must be in valid ranges (l: 0-1, c: 0-0.5, h: 0-360)",
+        Lch => "Lch values must be in valid ranges (l: 0-100, c: >=0, h: 0-360)",
+        Lms => "LMS values must be in range 0-1000",
+        Xyb => "XYB values must be in range -1000 to 1000",
+        Ycbcr => "YCbCr values must be in range 0-255",
         else => @compileError("Missing validation error message for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
 }
@@ -167,18 +184,19 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
 pub fn getDocumentationString(comptime ColorType: type) []const u8 {
     // Return appropriate documentation based on color type
     return switch (ColorType) {
-        zignal.Rgb => "RGB color in sRGB colorspace with components in range 0-255",
-        zignal.Rgba => "RGBA color with alpha channel, components in range 0-255",
-        zignal.Hsv => "HSV (Hue-Saturation-Value) color representation",
-        zignal.Hsl => "HSL (Hue-Saturation-Lightness) color representation",
-        zignal.Lab => "CIELAB color space representation",
-        zignal.Xyz => "CIE 1931 XYZ color space representation",
-        zignal.Oklab => "Oklab perceptual color space representation",
-        zignal.Oklch => "Oklch perceptual color space in cylindrical coordinates",
-        zignal.Lch => "CIE LCH color space representation (cylindrical Lab)",
-        zignal.Lms => "LMS color space representing Long, Medium, Short wavelength cone responses",
-        zignal.Xyb => "XYB color space used in JPEG XL image compression",
-        zignal.Ycbcr => "YCbCr color space used in JPEG and video encoding",
+        Gray => "Grayscale color with intensity in range 0-255",
+        Rgb => "RGB color in sRGB colorspace with components in range 0-255",
+        Rgba => "RGBA color with alpha channel, components in range 0-255",
+        Hsv => "HSV (Hue-Saturation-Value) color representation",
+        Hsl => "HSL (Hue-Saturation-Lightness) color representation",
+        Lab => "CIELAB color space representation",
+        Xyz => "CIE 1931 XYZ color space representation",
+        Oklab => "Oklab perceptual color space representation",
+        Oklch => "Oklch perceptual color space in cylindrical coordinates",
+        Lch => "CIE LCH color space representation (cylindrical Lab)",
+        Lms => "LMS color space representing Long, Medium, Short wavelength cone responses",
+        Xyb => "XYB color space used in JPEG XL image compression",
+        Ycbcr => "YCbCr color space used in JPEG and video encoding",
         else => @compileError("Missing documentation for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
 }

@@ -3,7 +3,7 @@ const testing = std.testing;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
 
-const Rgba = @import("../../color.zig").Rgba;
+const Rgba = @import("../../color.zig").Rgba(u8);
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Point = @import("../../geometry/Point.zig").Point;
 const Image = @import("../../image.zig").Image;

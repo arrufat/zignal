@@ -10,8 +10,9 @@ const convertColor = @import("color.zig").convertColor;
 const zlib = @import("compression/zlib.zig");
 const deflate = @import("compression/deflate.zig");
 const Image = @import("image.zig").Image;
-const Rgb = @import("color.zig").Rgb;
-const Rgba = @import("color.zig").Rgba;
+const Rgb = @import("color.zig").Rgb(u8);
+const Rgba = @import("color.zig").Rgba(u8);
+const Gray = @import("color.zig").Gray;
 
 const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;

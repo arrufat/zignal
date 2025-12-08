@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb;
+const Rgb = zignal.Rgb(u8);
 const Canvas = zignal.Canvas;
 const Pca = zignal.Pca;
 const Point = zignal.Point;

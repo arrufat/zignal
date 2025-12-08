@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const meta = @import("../meta.zig");
-const conversions = @import("../color/conversions.zig");
+const color = @import("../color.zig");
 
 const Image = @import("../image.zig").Image;
 const testing = std.testing;
@@ -199,7 +199,7 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
         .@"struct" => {
             if (comptime meta.isRgb(PixelType)) {
                 const max_val = componentMaxValue(PixelType);
-                return conversions.rgbLuma(pixel.r, pixel.g, pixel.b) * max_val;
+                return color.rgbLuma(pixel.r, pixel.g, pixel.b) * max_val;
             }
             var sum: f64 = 0.0;
             var count: usize = 0;
@@ -215,7 +215,7 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
                 const g: u8 = convertChannelToU8(info.child, pixel[1]);
                 const b: u8 = convertChannelToU8(info.child, pixel[2]);
                 const max_val = componentMaxValue(PixelType);
-                return conversions.rgbLuma(r, g, b) * max_val;
+                return color.rgbLuma(r, g, b) * max_val;
             }
             var sum: f64 = 0.0;
             inline for (0..info.len) |i| {

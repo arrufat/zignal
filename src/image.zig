@@ -12,8 +12,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
-const Rgb = @import("color.zig").Rgb;
-const Rgba = @import("color.zig").Rgba;
+const Rgb = @import("color.zig").Rgb(u8);
+const Rgba = @import("color.zig").Rgba(u8);
+const Gray = @import("color.zig").Gray;
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
@@ -41,7 +42,7 @@ const convolution = @import("image/convolution.zig");
 pub const BorderMode = convolution.BorderMode;
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
-const Blending = @import("color/blending.zig").Blending;
+const Blending = @import("blending.zig").Blending;
 
 /// Assigns `sample` into `dest`, applying blending when requested and converting
 /// between color spaces as needed. `dest` must be a pointer to the pixel to

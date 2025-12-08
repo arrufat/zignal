@@ -112,12 +112,17 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
 fn getClassNameFromType(comptime T: type) []const u8 {
     const type_name = @typeName(T);
 
-    if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
-        return type_name[dot_index + 1 ..];
-    } else {
-        // For types without dots, return the full name
-        return type_name;
+    // Strip module path
+    const base = if (std.mem.lastIndexOf(u8, type_name, ".")) |dot_index|
+        type_name[dot_index + 1 ..]
+    else
+        type_name;
+
+    // Drop generic instantiation suffix like "Hsl(f64)"
+    if (std.mem.indexOfScalar(u8, base, '(')) |paren| {
+        return base[0..paren];
     }
+    return base;
 }
 
 /// Generate complete color class stub
@@ -143,41 +148,44 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
         try generatePropertySetter(stub, field.name, field.type);
     }
 
-    // Auto-discover conversion methods by checking which methods exist
+    // to(self, space) accepting a color class
+    try stub.write("    def to(self, ColorSpace: ");
+    var first_space = true;
     inline for (color_registry.color_types) |TargetType| {
-        if (TargetType != ColorType) {
-            // Use the same method checking logic as the color factory
-            const method_name = comptime blk: {
-                const target_name = getClassNameFromType(TargetType);
-                break :blk "to" ++ target_name;
-            };
+        const target_class_name = getClassNameFromType(TargetType);
+        if (!first_space) try stub.write(" | ");
+        try stub.writef("{s}", .{target_class_name});
+        first_space = false;
+    }
+    try stub.write(") -> ");
+    var first_ret = true;
+    inline for (color_registry.color_types) |TargetType| {
+        const target_class_name = getClassNameFromType(TargetType);
+        if (!first_ret) try stub.write(" | ");
+        try stub.writef("{s}", .{target_class_name});
+        first_ret = false;
+    }
+    try stub.write(":\n");
+    try stub.write("        \"\"\"Convert to the given color type (pass the class, e.g., zignal.Rgb).\"\"\"\n");
+    try stub.write("        ...\n\n");
 
-            if (@hasDecl(ColorType, method_name)) {
-                try generateConversionMethod(stub, ColorType, TargetType);
-            }
-        }
+    if (@hasDecl(ColorType, "invert")) {
+        try stub.writef(
+            \\    def invert(self) -> {s}:
+            \\        """Return a new color with inverted RGB channels while preserving alpha (if present)."""
+            \\    ...
+            \\
+        , .{class_name});
     }
 
-    try stub.write(
-        \\    def to_gray(self) -> int:
-        \\        """Convert to a grayscale value representing the luminance/lightness as an integer between 0 and 255."""
-        \\    ...
-        \\
-    );
-
-    try stub.writef(
-        \\    def invert(self) -> {s}:
-        \\        """Return a new color with inverted RGB channels while preserving alpha (if present)."""
-        \\    ...
-        \\
-    , .{class_name});
-
-    try stub.writef(
-        \\    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> {s}:
-        \\        """Blend with `overlay` (tuple interpreted as RGBA) using the specified `mode`."""
-        \\    ...
-        \\
-    , .{class_name});
+    if (@hasDecl(ColorType, "blend")) {
+        try stub.writef(
+            \\    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> {s}:
+            \\        """Blend with `overlay` (tuple interpreted as RGBA) using the specified `mode`."""
+            \\    ...
+            \\
+        , .{class_name});
+    }
 
     // Standard Python methods
     try stub.write("    def __repr__(self) -> str: ...\n");

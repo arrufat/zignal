@@ -6,7 +6,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Blending = @import("../color/blending.zig").Blending;
+const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
 const interpolate = @import("interpolation.zig").interpolate;

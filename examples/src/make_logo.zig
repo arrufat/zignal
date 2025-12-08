@@ -8,9 +8,9 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Canvas = zignal.Canvas;
-const Rgb = zignal.Rgb;
-const Oklab = zignal.Oklab;
-const Oklch = zignal.Oklch;
+const Rgb = zignal.Rgb(u8);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -120,9 +120,9 @@ fn drawZignalText(canvas: *Canvas(Rgb)) void {
     // Use classic Zig orange for all letters
     const text_color = Rgb{ .r = 247, .g = 164, .b = 29 };
     const shadow_color = blk: {
-        var oklab = text_color.toOklab();
+        var oklab = text_color.as(f64).to(.oklab);
         oklab.l = @max(0, oklab.l - 0.3);
-        break :blk oklab.toRgb();
+        break :blk oklab.to(.rgb).as(u8);
     };
 
     // First pass: calculate total width using tight bounds
@@ -219,9 +219,8 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
                     // Create an Oklab color with this lightness (a=0, b=0 for neutral gray)
                     const oklab_color = Oklab{ .l = l_value, .a = 0, .b = 0 };
 
-                    // Convert to grayscale using Oklab's toGray method
-                    // This gives us perceptually uniform grayscale values
-                    const gray_value = @as(f32, @floatFromInt(oklab_color.toGray())) / 255.0;
+                    // Convert to grayscale using Oklab then to u8
+                    const gray_value = @as(f32, @floatFromInt(oklab_color.to(.gray).as(u8).y)) / 255.0;
 
                     break :blk gray_value;
                 },
@@ -243,7 +242,7 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
             const y = start_y + fj * pixel_size;
 
             // Convert base color to Oklab for perceptually uniform intensity adjustment
-            const base_oklab = base_color.toOklab();
+            const base_oklab = base_color.as(f64).to(.oklab);
 
             // Create new Oklab color with adjusted lightness based on intensity
             // Keep the original a and b components to preserve hue/chroma
@@ -254,9 +253,9 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
             };
 
             // Convert back to RGB then to RGBA with alpha
-            const adjusted_rgb = adjusted_oklab.toRgb();
+            const adjusted_rgb = adjusted_oklab.to(.rgb).as(u8);
             const alpha = @as(u8, @intFromFloat(@min(255, intensity * 255)));
-            const color_with_alpha = adjusted_rgb.toRgba(alpha);
+            const color_with_alpha = adjusted_rgb.withAlpha(alpha);
 
             const rect: zignal.Rectangle(f32) = .init(x, y, x + pixel_size - 1, y + pixel_size - 1);
             // Now fillRectangle with .soft mode properly supports alpha blending
@@ -307,7 +306,7 @@ fn drawFrequencySpectrum(canvas: *Canvas(Rgb)) void {
         };
 
         // Convert to RGB for rendering
-        const color = oklch_color.toRgb();
+        const color = oklch_color.to(.rgb).as(u8);
 
         // Draw bar
         const rect: zignal.Rectangle(f32) = .init(x, spectrum_y - height, x + bar_width, spectrum_y);
@@ -315,6 +314,6 @@ fn drawFrequencySpectrum(canvas: *Canvas(Rgb)) void {
 
         // Add a faint reflection with reduced lightness
         const reflection_rect: zignal.Rectangle(f32) = .init(x, spectrum_y + 2, x + bar_width, spectrum_y + height * 0.3);
-        canvas.fillRectangle(reflection_rect, color.toRgba(64), .soft);
+        canvas.fillRectangle(reflection_rect, color.withAlpha(64), .soft);
     }
 }

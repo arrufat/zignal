@@ -4,8 +4,8 @@ const expect = testing.expect;
 
 const Canvas = @import("../Canvas.zig").Canvas;
 const Image = @import("../../image.zig").Image;
-const Rgb = @import("../../color.zig").Rgb;
-const Rgba = @import("../../color.zig").Rgba;
+const Rgb = @import("../../color.zig").Rgb(u8);
+const Rgba = @import("../../color.zig").Rgba(u8);
 const Point = @import("../../geometry/Point.zig").Point;
 
 test "arc drawing - basic angles" {

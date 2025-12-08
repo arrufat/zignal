@@ -147,14 +147,33 @@ pub fn Matrix(comptime T: type) type {
 
         /// Returns a matrix filled with random floating-point numbers.
         pub fn random(allocator: std.mem.Allocator, rows: usize, cols: usize, seed: ?u64) !Self {
-            const s: u64 = seed orelse std.crypto.random.int(u64);
+            // Avoid relying on the TLS CSPRNG used by std.crypto.random, which can be
+            // uninitialised in some embedding scenarios (e.g. Python extension module),
+            // and seed a local PRNG instead.
+            const s: u64 = seed orelse clockSeed();
             var prng: std.Random.DefaultPrng = .init(s);
             var rand = prng.random();
+
             var result = try init(allocator, rows, cols);
             for (0..rows * cols) |i| {
                 result.items[i] = rand.float(T);
             }
             return result;
+        }
+
+        inline fn clockSeed() u64 {
+            // Use a coarse time-based seed that is always available.
+            // std.time.Instant works across platforms without relying on TLS CSPRNG.
+            const now = std.time.Instant.now() catch return 0;
+            const ts = now.timestamp;
+            return switch (@TypeOf(ts)) {
+                std.posix.timespec => blk: {
+                    // Combine seconds and nanoseconds; truncate to 64 bits.
+                    const mixed: u128 = (@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec));
+                    break :blk @truncate(mixed);
+                },
+                else => @truncate(ts),
+            };
         }
 
         /// Cast matrix elements to a different type (rounds when converting float to int)

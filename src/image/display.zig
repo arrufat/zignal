@@ -3,7 +3,7 @@
 const std = @import("std");
 
 const color = @import("../color.zig");
-const Rgb = @import("../color.zig").Rgb;
+const Rgb = @import("../color.zig").Rgb(u8);
 const Image = @import("../image.zig").Image;
 const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");

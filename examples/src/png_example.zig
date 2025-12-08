@@ -2,9 +2,10 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb;
-const Rgba = zignal.Rgba;
-const Hsl = zignal.Hsl;
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Gray = zignal.Gray(u8);
+const Hsl = zignal.Hsl(f64);
 const savePng = zignal.png.save;
 fn loadPng(comptime T: type, allocator: std.mem.Allocator, path: []const u8) !Image(T) {
     return zignal.png.load(T, allocator, path, .{});
