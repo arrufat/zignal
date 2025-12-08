@@ -43,7 +43,7 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const Rgb = @import("color.zig").Rgb;
+const Rgb = @import("color.zig").Rgb(u8);
 
 /// Principal Component Analysis
 ///

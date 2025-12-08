@@ -5,6 +5,9 @@ const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
+const Rgb = color.Rgb(u8);
+const Rgba = color.Rgba(u8);
+const Gray = color.Gray;
 const Image = @import("../../image.zig").Image;
 
 test "letterbox maintains aspect ratio with padding" {
@@ -50,13 +53,13 @@ test "letterbox maintains aspect ratio with padding" {
     // Test 2: Tall image to wide - should add horizontal padding
     {
         // Create 3x9 image (1:3 aspect ratio)
-        var src: Image(color.Rgb) = try .init(allocator, 9, 3);
+        var src: Image(Rgb) = try .init(allocator, 9, 3);
         defer src.deinit(allocator);
 
         // Fill with distinct colors
-        const red: color.Rgb = .{ .r = 255, .g = 0, .b = 0 };
-        const green: color.Rgb = .{ .r = 0, .g = 255, .b = 0 };
-        const blue: color.Rgb = .{ .r = 0, .g = 0, .b = 255 };
+        const red: Rgb = .{ .r = 255, .g = 0, .b = 0 };
+        const green: Rgb = .{ .r = 0, .g = 255, .b = 0 };
+        const blue: Rgb = .{ .r = 0, .g = 0, .b = 255 };
 
         // Create vertical stripes
         for (0..src.rows) |r| {
@@ -66,7 +69,7 @@ test "letterbox maintains aspect ratio with padding" {
         }
 
         // Letterbox to 12x4 (3:1 aspect ratio)
-        var output: Image(color.Rgb) = try .init(allocator, 4, 12);
+        var output: Image(Rgb) = try .init(allocator, 4, 12);
         defer output.deinit(allocator);
 
         const rect = try src.letterbox(allocator, &output, .nearest_neighbor);
@@ -79,7 +82,7 @@ test "letterbox maintains aspect ratio with padding" {
         try expectEqual(@as(usize, expected_left), rect.l);
 
         // Verify horizontal padding is black
-        const black: color.Rgb = .{ .r = 0, .g = 0, .b = 0 };
+        const black: Rgb = .{ .r = 0, .g = 0, .b = 0 };
         for (0..output.rows) |r| {
             for (0..rect.l) |c| {
                 try expectEqual(black, output.at(r, c).*);

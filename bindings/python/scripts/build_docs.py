@@ -73,11 +73,13 @@ def main():
             "'''An empty placeholder module used to enable pdoc's search functionality.'''"
         )
 
-        # Create the PEP-561 stub package for zignal
+        # Create a PEP-561 stub package and a pure-Python shim so pdoc can load annotations
+        pyi_source_path = bindings_dir / "zignal" / "_zignal.pyi"
+
+        # Stub package (for completeness)
         stub_pkg_dir = temp_path / "zignal-stubs"
         stub_pkg_dir.mkdir()
         (stub_pkg_dir / "py.typed").touch()
-        pyi_source_path = bindings_dir / "zignal" / "_zignal.pyi"
         shutil.copy2(pyi_source_path, stub_pkg_dir / "__init__.pyi")
 
         # Set PYTHONPATH to include the directory containing stubs and the dummy module

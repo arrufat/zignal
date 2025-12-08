@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;

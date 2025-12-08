@@ -1,5 +1,19 @@
 const std = @import("std");
-pub const allocator = std.heap.c_allocator;
+const builtin = @import("builtin");
+
+// Python embeds long-lived objects (module singletons, pytest fixtures), so
+// running the DebugAllocator at shutdown produces noisy "leaks". Use c_allocator
+// for the Python bindings to keep teardown clean.
+const use_debug_allocator = false;
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+pub const allocator = if (use_debug_allocator) debug_allocator.allocator() else std.heap.c_allocator;
+
+pub fn deinitAllocator() void {
+    if (use_debug_allocator) {
+        // Ignore LeakSummary; we just want to surface problems during shutdown.
+        _ = debug_allocator.deinit();
+    }
+}
 
 const zignal = @import("zignal");
 const Point = zignal.Point;

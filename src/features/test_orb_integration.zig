@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
 
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 const BruteForceMatcher = @import("matcher.zig").BruteForceMatcher;
 const MatchStats = @import("matcher.zig").MatchStats;

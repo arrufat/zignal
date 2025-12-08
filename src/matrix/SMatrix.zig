@@ -70,7 +70,9 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
         /// Returns a matrix filled with random floating-point numbers.
         pub fn random(seed: ?u64) Self {
-            const s: u64 = seed orelse std.crypto.random.int(u64);
+            // Use a local PRNG seeded from a timestamp to avoid TLS CSPRNG issues
+            // when called from embedded runtimes (e.g. Python extension).
+            const s: u64 = seed orelse clockSeed();
             var prng: std.Random.DefaultPrng = .init(s);
             var rand = prng.random();
             var result: Self = .{};
@@ -80,6 +82,18 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
                 }
             }
             return result;
+        }
+
+        inline fn clockSeed() u64 {
+            const now = std.time.Instant.now() catch return 0;
+            const ts = now.timestamp;
+            return switch (@TypeOf(ts)) {
+                std.posix.timespec => blk: {
+                    const mixed: u128 = (@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec));
+                    break :blk @truncate(mixed);
+                },
+                else => @truncate(ts),
+            };
         }
 
         /// Sums all the elements in a matrix.

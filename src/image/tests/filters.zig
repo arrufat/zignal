@@ -6,7 +6,10 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
-const Rgb = color.Rgb;
+const Rgb = color.Rgb(u8);
+const Rgba = color.Rgba(u8);
+const Hsl = color.Hsl(f64);
+const Gray = color.Gray;
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 const BorderMode = @import("../../image.zig").BorderMode;
@@ -37,22 +40,12 @@ test "invert" {
     try expectEqualDeep(Rgb{ .r = 255, .g = 127, .b = 0 }, rgb.at(0, 0).*);
 
     // Test RGBA preserves alpha
-    var rgba: Image(color.Rgba) = try .init(std.testing.allocator, 1, 1);
+    var rgba: Image(Rgba) = try .init(std.testing.allocator, 1, 1);
     defer rgba.deinit(std.testing.allocator);
 
-    rgba.at(0, 0).* = color.Rgba{ .r = 0, .g = 128, .b = 255, .a = 64 };
+    rgba.at(0, 0).* = Rgba{ .r = 0, .g = 128, .b = 255, .a = 64 };
     rgba.invert();
-    try expectEqualDeep(color.Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
-
-    // Test non-RGB color type (HSL) via conversion
-    var hsl: Image(color.Hsl) = try .init(std.testing.allocator, 1, 1);
-    defer hsl.deinit(std.testing.allocator);
-
-    const original_hsl = color.Hsl{ .h = 200, .s = 60, .l = 40 };
-    hsl.at(0, 0).* = original_hsl;
-    hsl.invert();
-    const inverted_rgb = original_hsl.toRgb().invert();
-    try expectEqualDeep(inverted_rgb, hsl.at(0, 0).*.toRgb());
+    try expectEqualDeep(Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
 }
 
 test "boxBlur radius 0 with views" {
@@ -83,7 +76,7 @@ test "boxBlur radius 0 with views" {
 }
 
 test "view" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
@@ -162,7 +155,7 @@ test "boxBlur border effects" {
 }
 
 test "boxBlur struct type" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 3, 3);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Initialize with different colors
@@ -176,7 +169,7 @@ test "boxBlur struct type" {
     image.at(2, 1).* = .{ .r = 128, .g = 128, .b = 128, .a = 255 }; // Gray
     image.at(2, 2).* = .{ .r = 0, .g = 0, .b = 0, .a = 255 }; // Black
 
-    var blurred = try Image(color.Rgba).initLike(std.testing.allocator, image);
+    var blurred = try Image(Rgba).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
     try image.boxBlur(std.testing.allocator, 1, blurred);
 
@@ -243,7 +236,7 @@ test "boxBlur struct type comprehensive" {
     // Test RGBA with both large images (SIMD) and small images (scalar)
     for ([_]usize{ 8, 32 }) |test_size| { // Small and large
         for ([_]usize{ 1, 3 }) |radius| {
-            var image: Image(color.Rgba) = try .init(std.testing.allocator, test_size, test_size);
+            var image: Image(Rgba) = try .init(std.testing.allocator, test_size, test_size);
             defer image.deinit(std.testing.allocator);
 
             // Create a red-to-blue gradient
@@ -260,7 +253,7 @@ test "boxBlur struct type comprehensive" {
                 }
             }
 
-            var blurred = try Image(color.Rgba).initLike(std.testing.allocator, image);
+            var blurred = try Image(Rgba).initLike(std.testing.allocator, image);
             defer blurred.deinit(std.testing.allocator);
             try image.boxBlur(std.testing.allocator, radius, blurred);
 
@@ -351,14 +344,14 @@ test "sharpen uniform image" {
 }
 
 test "sharpen struct type" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 3, 3);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
     // Create a simple pattern with a bright center
     for (image.data) |*pixel| pixel.* = .{ .r = 64, .g = 64, .b = 64, .a = 255 };
     image.at(1, 1).* = .{ .r = 192, .g = 192, .b = 192, .a = 255 }; // Bright center
 
-    var sharpened = try Image(color.Rgba).initLike(std.testing.allocator, image);
+    var sharpened = try Image(Rgba).initLike(std.testing.allocator, image);
     defer sharpened.deinit(std.testing.allocator);
     try image.sharpen(std.testing.allocator, 1, sharpened);
 

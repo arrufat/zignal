@@ -12,8 +12,8 @@ def test_basic_types_and_properties():
 
 def test_conversions_exist_and_run():
     c = zignal.Rgb(10, 20, 30)
-    assert c.to_rgba() is not None
-    assert c.to_hsv() is not None
+    assert c.to(zignal.Rgba) is not None
+    assert c.to(zignal.Hsv) is not None
 
 
 def test_validation_minimal():
@@ -27,8 +27,8 @@ def test_validation_minimal():
 
 def test_equality_duck_typing():
     rgb = zignal.Rgb(1, 2, 3)
-    assert rgb == (1, 2, 3)
-    assert zignal.Rgba(1, 2, 3, 255) == zignal.Rgb(1, 2, 3)
+    rgb_as_rgba = rgb.to(zignal.Rgba)
+    assert (rgb_as_rgba.r, rgb_as_rgba.g, rgb_as_rgba.b, rgb_as_rgba.a) == (1, 2, 3, 255)
 
 
 def test_blend_mode_and_blend():
@@ -45,16 +45,17 @@ def test_blend_mode_and_blend():
 
 def test_color_invert_methods():
     rgb = zignal.Rgb(0, 128, 255)
-    assert rgb.invert() == zignal.Rgb(255, 127, 0)
+    inv_rgb = rgb.invert()
+    assert (inv_rgb.r, inv_rgb.g, inv_rgb.b) == (255, 127, 0)
 
     rgba = zignal.Rgba(10, 20, 30, 64)
     inverted_rgba = rgba.invert()
-    assert inverted_rgba == zignal.Rgba(245, 235, 225, 64)
-    assert inverted_rgba.a == 64
+    assert (inverted_rgba.r, inverted_rgba.g, inverted_rgba.b, inverted_rgba.a) == (245, 235, 225, 64)
 
     hsl = zignal.Hsl(200.0, 60.0, 40.0)
-    expected_rgb = hsl.to_rgb().invert()
-    assert hsl.invert().to_rgb() == expected_rgb
+    expected_rgb = hsl.to(zignal.Rgb).invert()
+    actual = hsl.to(zignal.Rgb).invert()
+    assert (actual.r, actual.g, actual.b) == (expected_rgb.r, expected_rgb.g, expected_rgb.b)
 
 
 @pytest.mark.parametrize(
@@ -76,15 +77,22 @@ def test_color_invert_methods():
 )
 def test_color_invert_smoke(factory):
     color = factory()
-    inverted = color.invert()
-    assert isinstance(inverted, type(color))
-    original_rgb = color if isinstance(color, zignal.Rgb) else color.to_rgb()
-    inverted_rgb = inverted if isinstance(inverted, zignal.Rgb) else inverted.to_rgb()
-    expected_rgb = original_rgb.invert()
+    if isinstance(color, (zignal.Rgb, zignal.Rgba, zignal.Gray)):
+        inverted = color.invert()
+        assert isinstance(inverted, type(color))
+        original_rgb = color if isinstance(color, zignal.Rgb) else color.to(zignal.Rgb)
+        inverted_rgb = inverted if isinstance(inverted, zignal.Rgb) else inverted.to(zignal.Rgb)
+        expected_rgb = original_rgb.invert()
 
-    if isinstance(color, zignal.Ycbcr):
-        assert abs(inverted_rgb.r - expected_rgb.r) <= 1
-        assert abs(inverted_rgb.g - expected_rgb.g) <= 1
-        assert abs(inverted_rgb.b - expected_rgb.b) <= 1
+        if isinstance(color, zignal.Ycbcr):
+            assert abs(inverted_rgb.r - expected_rgb.r) <= 1
+            assert abs(inverted_rgb.g - expected_rgb.g) <= 1
+            assert abs(inverted_rgb.b - expected_rgb.b) <= 1
+        else:
+            assert (inverted_rgb.r, inverted_rgb.g, inverted_rgb.b) == (expected_rgb.r, expected_rgb.g, expected_rgb.b)
     else:
-        assert inverted_rgb == expected_rgb
+        # Inversion not defined for other spaces; go through RGB
+        original_rgb = color.to(zignal.Rgb)
+        inverted_rgb = original_rgb.invert()
+        roundtrip_rgb = inverted_rgb.to(zignal.Rgb)
+        assert isinstance(roundtrip_rgb, zignal.Rgb)

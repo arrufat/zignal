@@ -40,7 +40,7 @@ class TestImage:
         for r in range(2):
             for c in range(2):
                 rgb_pixel = zignal.Rgb(*map(int, pattern[r, c]))
-                expected_gray[r, c] = rgb_pixel.to_gray()
+                expected_gray[r, c] = rgb_pixel.to(zignal.Gray).y
 
         converted_gray = gray.to_numpy()[..., 0]
         assert np.array_equal(converted_gray, expected_gray)
@@ -68,7 +68,7 @@ class TestImage:
         for r in range(left_values.shape[0]):
             for c in range(left_values.shape[1]):
                 value = int(left_values[r, c])
-                expected_left[r, c] = zignal.Rgb(value, value, value).to_gray()
+                expected_left[r, c] = zignal.Rgb(value, value, value).to(zignal.Gray).y
 
         gray_after = base_gray.to_numpy()[..., 0]
         assert np.array_equal(gray_after[:, :2], expected_left)
@@ -91,7 +91,7 @@ class TestImage:
         assert img[0, 0].g == 99
         # Equality against tuple and color objects
         assert img[0, 0] == (10, 99, 30)
-        assert img[0, 0] == zignal.Rgb(10, 99, 30)
+        assert (img[0, 0].item().r, img[0, 0].item().g, img[0, 0].item().b) == (10, 99, 30)
 
     def test_view_and_memory_sharing(self):
         img = zignal.Image(4, 4, (0, 0, 0, 0), dtype=zignal.Rgba)
@@ -293,16 +293,15 @@ class TestImage:
         pixel = img[0, 0]
         assert isinstance(pixel.item(), zignal.Rgb)
 
-        # Test to_gray
-        gray = pixel.to_gray()
-        assert isinstance(gray, int)
-        assert 0 <= gray <= 255
+        # Test to_gray via class-based API
+        gray = pixel.to(zignal.Gray)
+        assert gray.y >= 0 and gray.y <= 255
 
         # Test color conversion
-        hsl = pixel.to_hsl()
+        hsl = pixel.to(zignal.Hsl)
         assert isinstance(hsl, zignal.Hsl)
 
-        lab = pixel.to_lab()
+        lab = pixel.to(zignal.Lab)
         assert isinstance(lab, zignal.Lab)
 
         # Test blend - modifies pixel in place and returns new color
@@ -328,14 +327,14 @@ class TestImage:
         assert pixel.a == 200
 
         # Methods
-        gray = pixel.to_gray()
-        assert isinstance(gray, int)
+        gray = pixel.to(zignal.Gray)
+        assert isinstance(gray, zignal.Gray)
 
-        hsl = pixel.to_hsl()
+        hsl = pixel.to(zignal.Hsl)
         assert isinstance(hsl, zignal.Hsl)
 
-        # to_rgb conversion
-        rgb = pixel.to_rgb()
+        # to_rgb conversion via class-based API
+        rgb = pixel.to(zignal.Rgb)
         assert isinstance(rgb, zignal.Rgb)
         assert rgb.r == 255
 
@@ -380,12 +379,14 @@ class TestImage:
         # Test RGB
         rgb = zignal.Image(1, 1, (0, 128, 255), dtype=zignal.Rgb)
         inverted = rgb.invert()
-        assert inverted[0, 0].item() == zignal.Rgb(255, 127, 0)
+        inv = inverted[0, 0].item()
+        assert (inv.r, inv.g, inv.b) == (255, 127, 0)
 
         # Test RGBA (alpha should be preserved)
         rgba = zignal.Image(1, 1, (0, 128, 255, 64), dtype=zignal.Rgba)
         inverted = rgba.invert()
-        assert inverted[0, 0].item() == zignal.Rgba(255, 127, 0, 64)
+        inv = inverted[0, 0].item()
+        assert (inv.r, inv.g, inv.b, inv.a) == (255, 127, 0, 64)
 
     def test_motion_blur(self):
         # Create test image
@@ -540,10 +541,12 @@ class TestImage:
         # Test conversions to RGB
         dst_rgb = zignal.Image(10, 10, dtype=zignal.Rgb)
         dst_rgb[:] = src_gray
-        assert dst_rgb[0, 0].item() == zignal.Rgb(128, 128, 128)
+        rgb_item = dst_rgb[0, 0].item()
+        assert (rgb_item.r, rgb_item.g, rgb_item.b) == (128, 128, 128)
 
         dst_rgb[:] = src_rgba
-        assert dst_rgb[0, 0].item() == zignal.Rgb(40, 50, 60)
+        rgb_item = dst_rgb[0, 0].item()
+        assert (rgb_item.r, rgb_item.g, rgb_item.b) == (40, 50, 60)
 
         # Test conversions to RGBA
         dst_rgba = zignal.Image(10, 10, dtype=zignal.Rgba)
@@ -556,12 +559,12 @@ class TestImage:
         # Test conversions to Grayscale
         dst_gray = zignal.Image(10, 10, dtype=zignal.Grayscale)
         dst_gray[:] = src_rgb  # luma of (10, 20, 30)
-        expected_rgb_gray = zignal.Rgb(10, 20, 30).to_gray()
-        assert dst_gray[0, 0] == expected_rgb_gray
+        expected_rgb_gray = zignal.Rgb(10, 20, 30).to(zignal.Gray)
+        assert dst_gray[0, 0] == expected_rgb_gray.y
 
         dst_gray[:] = src_rgba  # luma of (40, 50, 60) with alpha ignored
-        expected_rgba_gray = zignal.Rgb(40, 50, 60).to_gray()
-        assert dst_gray[0, 0] == expected_rgba_gray
+        expected_rgba_gray = zignal.Rgb(40, 50, 60).to(zignal.Gray)
+        assert dst_gray[0, 0] == expected_rgba_gray.y
 
         # Test with a strided view as destination
         dst_view_img = zignal.Image(20, 20, dtype=zignal.Rgb)
@@ -570,8 +573,11 @@ class TestImage:
 
         dst_view[:] = src_rgba
         # Check a pixel in the view
-        assert dst_view[0, 0].item() == zignal.Rgb(40, 50, 60)
+        view_item = dst_view[0, 0].item()
+        assert (view_item.r, view_item.g, view_item.b) == (40, 50, 60)
         # Check the corresponding pixel in the original image
-        assert dst_view_img[5, 5].item() == zignal.Rgb(40, 50, 60)
+        img_item = dst_view_img[5, 5].item()
+        assert (img_item.r, img_item.g, img_item.b) == (40, 50, 60)
         # Check a pixel outside the view to make sure it's untouched
-        assert dst_view_img[0, 0].item() == zignal.Rgb(0, 0, 0)
+        outside_item = dst_view_img[0, 0].item()
+        assert (outside_item.r, outside_item.g, outside_item.b) == (0, 0, 0)

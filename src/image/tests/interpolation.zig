@@ -7,6 +7,7 @@ const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const Image = @import("../../image.zig").Image;
 const Interpolation = @import("../interpolation.zig").Interpolation;
 const color = @import("../../color.zig");
+const Gray = color.Gray;
 
 // Helper function to create a simple gradient test image
 fn createGradientImage(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(u8) {
@@ -238,7 +239,7 @@ test "boundary conditions - lanczos" {
 
 test "RGB image interpolation" {
     const allocator = std.testing.allocator;
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
@@ -610,7 +611,7 @@ test "single pixel image handling" {
 
 test "RGB clamping stress test" {
     const allocator = std.testing.allocator;
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
     var img = try Image(Rgb).init(allocator, 4, 4);
     defer img.deinit(allocator);
 

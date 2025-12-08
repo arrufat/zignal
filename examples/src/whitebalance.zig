@@ -2,9 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Image = @import("zignal").Image;
-const Rgba = @import("zignal").Rgba;
-const Rgb = @import("zignal").Rgb;
-const Xyz = @import("zignal").Xyz;
+const Rgba = @import("zignal").Rgba(u8);
+const Rgb = @import("zignal").Rgb(u8);
+const Xyz = @import("zignal").Xyz(f64);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -73,11 +73,11 @@ fn estimateIlluminant(image: Image(Rgba), color: Rgb, fraction: f64) RgbGains {
 
 fn chromaticAdaptation(xyz: Xyz, w: RgbGains) Xyz {
     // Target illuminant (D65): LMS = (0.9642, 1.0000, 0.8252) (approx.)
-    var lms = xyz.toLms();
+    var lms = xyz.to(.lms);
     lms.l *= 0.9642 / w.r;
     lms.m *= 1.0000 / w.g;
     lms.s *= 0.8252 / w.b;
-    return lms.toXyz();
+    return lms.to(.xyz);
 }
 
 fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
@@ -145,7 +145,10 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
 
     // Handle remaining pixels
     while (i < pixels.len) : (i += 1) {
-        pixels[i] = chromaticAdaptation(pixels[i].toXyz(), w).toRgba(pixels[i].a);
+        pixels[i] = chromaticAdaptation(pixels[i].as(f64).to(.xyz), w)
+            .to(.rgb)
+            .as(u8)
+            .withAlpha(pixels[i].a);
     }
 }
 

@@ -1,6 +1,8 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
 
 const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
@@ -68,11 +70,11 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
             var equal = false;
             const other: ?*c.PyObject = @ptrCast(other_obj);
-            const parsed = color_utils.parseColor(zignal.Rgba, other) catch null;
+            const parsed = color_utils.parseColor(Rgba, other) catch null;
             if (parsed) |rgba| {
-                if (std.meta.eql(ColorType, zignal.Rgb)) {
+                if (std.meta.eql(ColorType, Rgb)) {
                     equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and rgba.a == 255);
-                } else if (std.meta.eql(ColorType, zignal.Rgba)) {
+                } else if (std.meta.eql(ColorType, Rgba)) {
                     equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and px.a == rgba.a);
                 } else {
                     equal = (px == rgba);
@@ -127,7 +129,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                                 return -1;
                             },
                             py_utils.ConversionError.integer_out_of_range, py_utils.ConversionError.float_out_of_range => {
-                                if (std.meta.eql(ColorType, zignal.Rgb) or std.meta.eql(ColorType, zignal.Rgba)) {
+                                if (std.meta.eql(ColorType, Rgb) or std.meta.eql(ColorType, Rgba)) {
                                     c.PyErr_SetString(c.PyExc_ValueError, "Value must be between 0 and 255");
                                 } else {
                                     const msg = color_registry.getValidationErrorMessage(ColorType);
@@ -142,7 +144,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                         }
                     };
                     if (!color_registry.validateColorComponent(ColorType, field_name, parsed)) {
-                        if (std.meta.eql(ColorType, zignal.Rgb) or std.meta.eql(ColorType, zignal.Rgba)) {
+                        if (std.meta.eql(ColorType, Rgb) or std.meta.eql(ColorType, Rgba)) {
                             c.PyErr_SetString(c.PyExc_ValueError, "Value must be between 0 and 255");
                         } else {
                             const msg = color_registry.getValidationErrorMessage(ColorType);
@@ -187,9 +189,9 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return delegateToColorMethod(self_obj, "__format__", args);
         }
 
-        // to_gray method implementation - delegate to color object
-        fn toGrayMethod(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-            return delegateToColorMethod(self_obj, "to_gray", null);
+        // to(space) method implementation - delegate to color object
+        fn toMethod(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+            return delegateToColorMethod(self_obj, "to", args);
         }
 
         // item method implementation - extract the pixel value as a color object
@@ -204,7 +206,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
 
                 // Return the color as the appropriate type
-                if (ColorType == zignal.Rgb) {
+                if (ColorType == Rgb) {
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbType), null, null);
                     if (obj == null) return null;
@@ -255,7 +257,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
 
                 // Parse overlay color
-                const overlay = color_utils.parseColor(zignal.Rgba, overlay_obj) catch {
+                const overlay = color_utils.parseColor(Rgba, overlay_obj) catch {
                     // Error already set by parseColorTo
                     return null;
                 };
@@ -276,7 +278,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 pimg.setPixelRgba(@intCast(proxy.row), @intCast(proxy.col), blended);
 
                 // Return the new blended color as an Rgb or Rgba object
-                if (ColorType == zignal.Rgb) {
+                if (ColorType == Rgb) {
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbType), null, null);
                     if (obj == null) return null;
@@ -302,27 +304,10 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return null;
         }
 
-        // Generate conversion method for a specific target color type - delegate to color object
-        fn generateConversionMethod(comptime TargetColorType: type) c.PyCFunction {
-            const method_name = comptime getConversionMethodName(TargetColorType);
-            return struct {
-                fn method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-                    // Delegate to the color object's conversion method
-                    return delegateToColorMethod(self_obj, method_name.ptr, args);
-                }
-            }.method;
-        }
-
-        // Helper to get conversion method name as a comptime string
-        fn getConversionMethodName(comptime TargetType: type) []const u8 {
-            const type_name = zignal.meta.getSimpleTypeName(TargetType);
-            return "to_" ++ zignal.meta.comptimeLowercase(type_name);
-        }
-
         // Generate methods array
-        // Note: +4 for __format__, blend, to_gray, item, +1 for null terminator, -1 because we skip self-conversion
-        pub fn generateMethods() [color_registry.color_types.len + 4]c.PyMethodDef {
-            var methods: [color_registry.color_types.len + 4]c.PyMethodDef = undefined;
+        // __format__, blend, item, to, plus null terminator
+        pub fn generateMethods() [5]c.PyMethodDef {
+            var methods: [5]c.PyMethodDef = undefined;
             var index: usize = 0;
 
             // Add __format__ method
@@ -343,15 +328,6 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             };
             index += 1;
 
-            // Add to_gray method
-            methods[index] = c.PyMethodDef{
-                .ml_name = "to_gray",
-                .ml_meth = @ptrCast(&toGrayMethod),
-                .ml_flags = c.METH_NOARGS,
-                .ml_doc = "Convert to grayscale value (0-255)",
-            };
-            index += 1;
-
             // Add item method
             methods[index] = c.PyMethodDef{
                 .ml_name = "item",
@@ -361,21 +337,14 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             };
             index += 1;
 
-            // Generate conversion methods for each color type
-            inline for (color_registry.color_types) |TargetColorType| {
-                // Skip self-conversion - use .item() instead
-                if (TargetColorType == ColorType) continue;
-
-                const method_name = comptime getConversionMethodName(TargetColorType);
-
-                methods[index] = c.PyMethodDef{
-                    .ml_name = method_name.ptr,
-                    .ml_meth = generateConversionMethod(TargetColorType),
-                    .ml_flags = if (TargetColorType == zignal.Rgba) c.METH_VARARGS else c.METH_NOARGS,
-                    .ml_doc = "Convert to " ++ @typeName(TargetColorType),
-                };
-                index += 1;
-            }
+            // Generic to(space) conversion
+            methods[index] = c.PyMethodDef{
+                .ml_name = "to",
+                .ml_meth = @ptrCast(&toMethod),
+                .ml_flags = c.METH_VARARGS,
+                .ml_doc = "Convert to the given color type (pass the class, e.g. zignal.Rgb)",
+            };
+            index += 1;
 
             // Null terminator
             methods[index] = c.PyMethodDef{
@@ -390,8 +359,8 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
     };
 }
 
-const RgbProxyBinding = PixelProxyBinding(zignal.Rgb, RgbPixelProxy);
-const RgbaProxyBinding = PixelProxyBinding(zignal.Rgba, RgbaPixelProxy);
+const RgbProxyBinding = PixelProxyBinding(Rgb, RgbPixelProxy);
+const RgbaProxyBinding = PixelProxyBinding(Rgba, RgbaPixelProxy);
 
 var rgb_proxy_getset = RgbProxyBinding.generateGetSet();
 var rgba_proxy_getset = RgbaProxyBinding.generateGetSet();

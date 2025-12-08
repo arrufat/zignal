@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 
 /// A multi-scale image pyramid for scale-invariant feature detection.

@@ -1,6 +1,21 @@
 //! Color bindings using the automated registry-based approach
 
+const std = @import("std");
 const zignal = @import("zignal");
+
+const Gray = zignal.Gray(u8);
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Hsl = zignal.Hsl(f64);
+const Hsv = zignal.Hsv(f64);
+const Lab = zignal.Lab(f64);
+const Lch = zignal.Lch(f64);
+const Lms = zignal.Lms(f64);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
+const Xyb = zignal.Xyb(f64);
+const Xyz = zignal.Xyz(f64);
+const Ycbcr = zignal.Ycbcr(u8);
 
 const color_factory = @import("color_factory.zig");
 const color_registry = @import("color_registry.zig");
@@ -54,7 +69,11 @@ fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, get
         while (i > 0) : (i -= 1) {
             if (full_name[i - 1] == '.') break;
         }
-        break :blk full_name[i..];
+        const sliced = full_name[i..];
+        if (std.mem.indexOfScalar(u8, sliced, '(')) |paren| {
+            break :blk sliced[0..paren];
+        }
+        break :blk sliced;
     };
 
     const module_name = comptime "zignal." ++ type_name;
@@ -77,20 +96,22 @@ fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, get
 }
 
 // Generate individual bindings (exported for external use)
-pub const RgbBinding = color_bindings[0];
-pub const RgbaBinding = color_bindings[1];
-pub const HslBinding = color_bindings[2];
-pub const HsvBinding = color_bindings[3];
-pub const LabBinding = color_bindings[4];
-pub const LchBinding = color_bindings[5];
-pub const LmsBinding = color_bindings[6];
-pub const OklabBinding = color_bindings[7];
-pub const OklchBinding = color_bindings[8];
-pub const XybBinding = color_bindings[9];
-pub const XyzBinding = color_bindings[10];
-pub const YcbcrBinding = color_bindings[11];
+pub const GrayBinding = color_bindings[0];
+pub const RgbBinding = color_bindings[1];
+pub const RgbaBinding = color_bindings[2];
+pub const HslBinding = color_bindings[3];
+pub const HsvBinding = color_bindings[4];
+pub const LabBinding = color_bindings[5];
+pub const LchBinding = color_bindings[6];
+pub const LmsBinding = color_bindings[7];
+pub const OklabBinding = color_bindings[8];
+pub const OklchBinding = color_bindings[9];
+pub const XybBinding = color_bindings[10];
+pub const XyzBinding = color_bindings[11];
+pub const YcbcrBinding = color_bindings[12];
 
 // Generate getset arrays
+var gray_getset = GrayBinding.generateGetSet();
 var rgb_getset = RgbBinding.generateGetSet();
 var rgba_getset = RgbaBinding.generateGetSet();
 var hsl_getset = HslBinding.generateGetSet();
@@ -105,6 +126,7 @@ var xyz_getset = XyzBinding.generateGetSet();
 var ycbcr_getset = YcbcrBinding.generateGetSet();
 
 // Generate methods arrays
+var gray_methods = GrayBinding.generateMethods();
 var rgb_methods = RgbBinding.generateMethods();
 var rgba_methods = RgbaBinding.generateMethods();
 var hsl_methods = HslBinding.generateMethods();
@@ -119,18 +141,19 @@ var xyz_methods = XyzBinding.generateMethods();
 var ycbcr_methods = YcbcrBinding.generateMethods();
 
 // Generate type objects
-pub var RgbType = generateColorTypeObject(zignal.Rgb, RgbBinding, @ptrCast(&rgb_getset), @ptrCast(&rgb_methods));
-pub var RgbaType = generateColorTypeObject(zignal.Rgba, RgbaBinding, @ptrCast(&rgba_getset), @ptrCast(&rgba_methods));
-pub var HslType = generateColorTypeObject(zignal.Hsl, HslBinding, @ptrCast(&hsl_getset), @ptrCast(&hsl_methods));
-pub var HsvType = generateColorTypeObject(zignal.Hsv, HsvBinding, @ptrCast(&hsv_getset), @ptrCast(&hsv_methods));
-pub var LabType = generateColorTypeObject(zignal.Lab, LabBinding, @ptrCast(&lab_getset), @ptrCast(&lab_methods));
-pub var LchType = generateColorTypeObject(zignal.Lch, LchBinding, @ptrCast(&lch_getset), @ptrCast(&lch_methods));
-pub var LmsType = generateColorTypeObject(zignal.Lms, LmsBinding, @ptrCast(&lms_getset), @ptrCast(&lms_methods));
-pub var OklabType = generateColorTypeObject(zignal.Oklab, OklabBinding, @ptrCast(&oklab_getset), @ptrCast(&oklab_methods));
-pub var OklchType = generateColorTypeObject(zignal.Oklch, OklchBinding, @ptrCast(&oklch_getset), @ptrCast(&oklch_methods));
-pub var XybType = generateColorTypeObject(zignal.Xyb, XybBinding, @ptrCast(&xyb_getset), @ptrCast(&xyb_methods));
-pub var XyzType = generateColorTypeObject(zignal.Xyz, XyzBinding, @ptrCast(&xyz_getset), @ptrCast(&xyz_methods));
-pub var YcbcrType = generateColorTypeObject(zignal.Ycbcr, YcbcrBinding, @ptrCast(&ycbcr_getset), @ptrCast(&ycbcr_methods));
+pub var GrayType = generateColorTypeObject(Gray, GrayBinding, @ptrCast(&gray_getset), @ptrCast(&gray_methods));
+pub var RgbType = generateColorTypeObject(Rgb, RgbBinding, @ptrCast(&rgb_getset), @ptrCast(&rgb_methods));
+pub var RgbaType = generateColorTypeObject(Rgba, RgbaBinding, @ptrCast(&rgba_getset), @ptrCast(&rgba_methods));
+pub var HslType = generateColorTypeObject(Hsl, HslBinding, @ptrCast(&hsl_getset), @ptrCast(&hsl_methods));
+pub var HsvType = generateColorTypeObject(Hsv, HsvBinding, @ptrCast(&hsv_getset), @ptrCast(&hsv_methods));
+pub var LabType = generateColorTypeObject(Lab, LabBinding, @ptrCast(&lab_getset), @ptrCast(&lab_methods));
+pub var LchType = generateColorTypeObject(Lch, LchBinding, @ptrCast(&lch_getset), @ptrCast(&lch_methods));
+pub var LmsType = generateColorTypeObject(Lms, LmsBinding, @ptrCast(&lms_getset), @ptrCast(&lms_methods));
+pub var OklabType = generateColorTypeObject(Oklab, OklabBinding, @ptrCast(&oklab_getset), @ptrCast(&oklab_methods));
+pub var OklchType = generateColorTypeObject(Oklch, OklchBinding, @ptrCast(&oklch_getset), @ptrCast(&oklch_methods));
+pub var XybType = generateColorTypeObject(Xyb, XybBinding, @ptrCast(&xyb_getset), @ptrCast(&xyb_methods));
+pub var XyzType = generateColorTypeObject(Xyz, XyzBinding, @ptrCast(&xyz_getset), @ptrCast(&xyz_methods));
+pub var YcbcrType = generateColorTypeObject(Ycbcr, YcbcrBinding, @ptrCast(&ycbcr_getset), @ptrCast(&ycbcr_methods));
 
 // ============================================================================
 // REGISTRATION HELPER
@@ -139,6 +162,7 @@ pub var YcbcrType = generateColorTypeObject(zignal.Ycbcr, YcbcrBinding, @ptrCast
 /// Register all color types from the registry in one go
 pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
     // Register each type - order matches color_registry.color_types
+    try registerType(@ptrCast(module), "Gray", @ptrCast(&GrayType));
     try registerType(@ptrCast(module), "Rgb", @ptrCast(&RgbType));
     try registerType(@ptrCast(module), "Rgba", @ptrCast(&RgbaType));
     try registerType(@ptrCast(module), "Hsl", @ptrCast(&HslType));
@@ -162,18 +186,19 @@ pub fn createColorPyObject(color: anytype) ?*c.PyObject {
     const ColorType = @TypeOf(color);
 
     return switch (ColorType) {
-        zignal.Rgb => RgbBinding.createPyObject(color, &RgbType),
-        zignal.Rgba => RgbaBinding.createPyObject(color, &RgbaType),
-        zignal.Hsl => HslBinding.createPyObject(color, &HslType),
-        zignal.Hsv => HsvBinding.createPyObject(color, &HsvType),
-        zignal.Lab => LabBinding.createPyObject(color, &LabType),
-        zignal.Lch => LchBinding.createPyObject(color, &LchType),
-        zignal.Lms => LmsBinding.createPyObject(color, &LmsType),
-        zignal.Oklab => OklabBinding.createPyObject(color, &OklabType),
-        zignal.Oklch => OklchBinding.createPyObject(color, &OklchType),
-        zignal.Xyb => XybBinding.createPyObject(color, &XybType),
-        zignal.Xyz => XyzBinding.createPyObject(color, &XyzType),
-        zignal.Ycbcr => YcbcrBinding.createPyObject(color, &YcbcrType),
+        Gray => GrayBinding.createPyObject(color, &GrayType),
+        Rgb => RgbBinding.createPyObject(color, &RgbType),
+        Rgba => RgbaBinding.createPyObject(color, &RgbaType),
+        Hsl => HslBinding.createPyObject(color, &HslType),
+        Hsv => HsvBinding.createPyObject(color, &HsvType),
+        Lab => LabBinding.createPyObject(color, &LabType),
+        Lch => LchBinding.createPyObject(color, &LchType),
+        Lms => LmsBinding.createPyObject(color, &LmsType),
+        Oklab => OklabBinding.createPyObject(color, &OklabType),
+        Oklch => OklchBinding.createPyObject(color, &OklchType),
+        Xyb => XybBinding.createPyObject(color, &XybType),
+        Xyz => XyzBinding.createPyObject(color, &XyzType),
+        Ycbcr => YcbcrBinding.createPyObject(color, &YcbcrType),
         else => null,
     };
 }

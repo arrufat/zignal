@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const FeatureDistributionMatching = @import("zignal").FeatureDistributionMatching;
 const Image = @import("zignal").Image;
 const loadPng = @import("zignal").loadPng;
-const Rgba = @import("zignal").Rgba;
+const Rgba = @import("zignal").Rgba(u8);
 const savePng = @import("zignal").savePng;
 
 pub const std_options: std.Options = .{

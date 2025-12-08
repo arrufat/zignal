@@ -1,5 +1,5 @@
-const Rgb = @import("../color.zig").Rgb;
-const Rgba = @import("../color.zig").Rgba;
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
 const Image = @import("../image.zig").Image;
 
 /// Histogram-based image enhancement operations.

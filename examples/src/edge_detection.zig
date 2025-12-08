@@ -3,7 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 
 const Image = zignal.Image;
-const Rgb = zignal.Rgb;
+const Rgb = zignal.Rgb(u8);
 const Canvas = zignal.Canvas;
 const p = zignal.Point(2, f32).init;
 

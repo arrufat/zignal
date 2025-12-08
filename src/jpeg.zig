@@ -8,8 +8,9 @@ const Allocator = std.mem.Allocator;
 
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
-const Rgb = @import("color.zig").Rgb;
-const Ycbcr = @import("color.zig").Ycbcr;
+const Rgb = @import("color.zig").Rgb(u8);
+const Gray = @import("color.zig").Gray;
+const Ycbcr = @import("color.zig").Ycbcr(u8);
 
 const max_file_size: usize = 100 * 1024 * 1024;
 
@@ -2558,7 +2559,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                     .cb = @intCast(@min(255, @max(0, Cb + 128))),
                     .cr = @intCast(@min(255, @max(0, Cr + 128))),
                 };
-                const rgb = ycbcr.toRgb();
+                const rgb = ycbcr.to(.rgb);
 
                 state.rgb_storage.?[idx][0][i] = rgb.r;
                 state.rgb_storage.?[idx][1][i] = rgb.g;
@@ -2611,7 +2612,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                             .cb = @intCast(@min(255, @max(0, Cb + 128))),
                             .cr = @intCast(@min(255, @max(0, Cr + 128))),
                         };
-                        const rgb = ycbcr.toRgb();
+                        const rgb = ycbcr.to(.rgb);
 
                         state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
                         state.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
@@ -2666,7 +2667,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                             .cb = @intCast(@min(255, @max(0, Cb + 128))),
                             .cr = @intCast(@min(255, @max(0, Cr + 128))),
                         };
-                        const rgb = ycbcr.toRgb();
+                        const rgb = ycbcr.to(.rgb);
 
                         state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
                         state.rgb_storage.?[y_block_index][1][pixel_idx] = rgb.g;
@@ -2742,7 +2743,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                             .cb = @intCast(@min(255, @max(0, Cb + 128))),
                             .cr = @intCast(@min(255, @max(0, Cr + 128))),
                         };
-                        const rgb = ycbcr.toRgb();
+                        const rgb = ycbcr.to(.rgb);
 
                         // Store RGB in separate storage to avoid overwriting chroma data
                         state.rgb_storage.?[y_block_index][0][pixel_idx] = rgb.r;
@@ -3103,21 +3104,21 @@ test "Ycbcr to RGB conversion" {
 
     // Test grayscale - standard Y=128
     const gray_ycbcr: Ycbcr = .{ .y = 128, .cb = 128, .cr = 128 };
-    const gray = gray_ycbcr.toRgb();
+    const gray = gray_ycbcr.to(.rgb);
     try testing.expectEqual(@as(u8, 128), gray.r);
     try testing.expectEqual(@as(u8, 128), gray.g);
     try testing.expectEqual(@as(u8, 128), gray.b);
 
     // Test white - standard Y=255
     const white_ycbcr: Ycbcr = .{ .y = 255, .cb = 128, .cr = 128 };
-    const white = white_ycbcr.toRgb();
+    const white = white_ycbcr.to(.rgb);
     try testing.expectEqual(@as(u8, 255), white.r);
     try testing.expectEqual(@as(u8, 255), white.g);
     try testing.expectEqual(@as(u8, 255), white.b);
 
     // Test black - standard Y=0
     const black_ycbcr: Ycbcr = .{ .y = 0, .cb = 128, .cr = 128 };
-    const black = black_ycbcr.toRgb();
+    const black = black_ycbcr.to(.rgb);
     try testing.expectEqual(@as(u8, 0), black.r);
     try testing.expectEqual(@as(u8, 0), black.g);
     try testing.expectEqual(@as(u8, 0), black.b);

@@ -4,6 +4,9 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
+const Rgb = color.Rgb(u8);
+const Rgba = color.Rgba(u8);
+const Gray = color.Gray;
 const Integral = @import("../integral.zig").Integral;
 
 test "integral image scalar" {
@@ -45,10 +48,10 @@ test "integral image view scalar" {
 }
 
 test "integral image struct" {
-    var image: Image(color.Rgba) = try .init(std.testing.allocator, 21, 13);
+    var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
-    var planes = Image(color.Rgba).Integral.Planes.init();
+    var planes = Image(Rgba).Integral.Planes.init();
     defer planes.deinit(std.testing.allocator);
     try image.integral(std.testing.allocator, &planes);
 
@@ -66,7 +69,6 @@ test "integral image struct" {
 }
 
 test "integral image RGB vs RGBA with full alpha produces same RGB values" {
-    const Rgb = color.Rgb;
     const test_size = 10;
 
     // Create RGB image
@@ -74,7 +76,7 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     defer rgb_img.deinit(std.testing.allocator);
 
     // Create RGBA image
-    var rgba_img = try Image(color.Rgba).init(std.testing.allocator, test_size, test_size);
+    var rgba_img = try Image(Rgba).init(std.testing.allocator, test_size, test_size);
     defer rgba_img.deinit(std.testing.allocator);
 
     // Fill both with identical RGB values
@@ -96,7 +98,7 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     defer rgb_planes.deinit(std.testing.allocator);
     try rgb_img.integral(std.testing.allocator, &rgb_planes);
 
-    var rgba_planes = Image(color.Rgba).Integral.Planes.init();
+    var rgba_planes = Image(Rgba).Integral.Planes.init();
     defer rgba_planes.deinit(std.testing.allocator);
     try rgba_img.integral(std.testing.allocator, &rgba_planes);
 

@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 const convertColor = @import("../color.zig").convertColor;
 const isColor = @import("../color.zig").isColor;
-const Rgba = @import("../color.zig").Rgba;
+const Rgba = @import("../color.zig").Rgba(u8);
 const Blending = @import("../color.zig").Blending;
 const BitmapFont = @import("../font.zig").BitmapFont;
 const Rectangle = @import("../geometry.zig").Rectangle;

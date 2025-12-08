@@ -7,8 +7,9 @@ const expectApproxEqAbs = testing.expectApproxEqAbs;
 
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const Rgb = @import("color.zig").Rgb;
-const Rgba = @import("color.zig").Rgba;
+const Rgb = @import("color.zig").Rgb(u8);
+const Rgba = @import("color.zig").Rgba(u8);
+const Gray = @import("color.zig").Gray;
 const convertColor = @import("color.zig").convertColor;
 const RunningStats = @import("stats.zig").RunningStats;
 

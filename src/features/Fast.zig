@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expectEqual = std.testing.expectEqual;
 
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 const KeyPoint = @import("KeyPoint.zig");
 

@@ -1,18 +1,19 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const convertColor = @import("zignal").convertColor;
-const Hsl = @import("zignal").Hsl;
-const Hsv = @import("zignal").Hsv;
-const Lab = @import("zignal").Lab;
-const Lch = @import("zignal").Lch;
-const Lms = @import("zignal").Lms;
-const Oklab = @import("zignal").Oklab;
-const Oklch = @import("zignal").Oklch;
-const Rgb = @import("zignal").Rgb;
-const Xyb = @import("zignal").Xyb;
-const Xyz = @import("zignal").Xyz;
-const Ycbcr = @import("zignal").Ycbcr;
+const zignal = @import("zignal");
+const convertColor = zignal.convertColor;
+const Rgb = zignal.Rgb(u8);
+const Hsl = zignal.Hsl(f64);
+const Hsv = zignal.Hsv(f64);
+const Lab = zignal.Lab(f64);
+const Lch = zignal.Lch(f64);
+const Lms = zignal.Lms(f64);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
+const Xyb = zignal.Xyb(f64);
+const Xyz = zignal.Xyz(f64);
+const Ycbcr = zignal.Ycbcr(u8);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,

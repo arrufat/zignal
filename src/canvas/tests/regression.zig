@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const expectEqualStrings = testing.expectEqualStrings;
 
-const Rgba = @import("../../color.zig").Rgba;
+const Rgba = @import("../../color.zig").Rgba(u8);
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Point = @import("../../geometry/Point.zig").Point;
 const Image = @import("../../image.zig").Image;
@@ -167,22 +167,22 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawLineHorizontal", .md5sum = "96fc75d0d893373c0050e5fe76f5d7ea", .draw_fn = drawLineHorizontal },
     .{ .name = "drawLineVertical", .md5sum = "f7d52e274636af2b20b62172a408b446", .draw_fn = drawLineVertical },
     .{ .name = "drawLineDiagonal", .md5sum = "1aee6bf80fd2e6a849e5520937566478", .draw_fn = drawLineDiagonal },
-    .{ .name = "drawLineThick", .md5sum = "d8323d8d6580a34e724873701245f117", .draw_fn = drawLineThick },
+    .{ .name = "drawLineThick", .md5sum = "6adde03c10662d65adc6b3c2d71d03aa", .draw_fn = drawLineThick },
     .{ .name = "drawCircleFilledSolid", .md5sum = "7c07494bef879ea27a68b73808d785a7", .draw_fn = drawCircleFilledSolid },
-    .{ .name = "drawCircleFilledSmooth", .md5sum = "960112dcf230f7c947dae441470bdc48", .draw_fn = drawCircleFilledSmooth },
-    .{ .name = "drawCircleOutline", .md5sum = "d706b07e4fd5e80156e4351903cc3843", .draw_fn = drawCircleOutline },
+    .{ .name = "drawCircleFilledSmooth", .md5sum = "595154c90d76861894a5c4e9f822e8c0", .draw_fn = drawCircleFilledSmooth },
+    .{ .name = "drawCircleOutline", .md5sum = "89eb018d614857888c0dbcc10d4641a0", .draw_fn = drawCircleOutline },
     .{ .name = "drawRectangleFilled", .md5sum = "1112ffbda92473effbd4d44c9722f563", .draw_fn = drawRectangleFilled },
     .{ .name = "drawRectangleOutline", .md5sum = "e8a00365f1d9ba67220af043363c3f0d", .draw_fn = drawRectangleOutline },
-    .{ .name = "drawTriangleFilled", .md5sum = "e17bdf311200fe1deb625377d413a064", .draw_fn = drawTriangleFilled },
-    .{ .name = "drawBezierCubic", .md5sum = "ff450f05c1d61b71b8ad6aa3dbdeee67", .draw_fn = drawBezierCubic },
-    .{ .name = "drawBezierQuadratic", .md5sum = "0cf97bd11abc6222eda1f2fb71bb066a", .draw_fn = drawBezierQuadratic },
-    .{ .name = "drawPolygonComplex", .md5sum = "da9b83426d2118ce99948eabebff91fb", .draw_fn = drawPolygonComplex },
-    .{ .name = "drawSplinePolygon", .md5sum = "209dc8428baa6e29ccff0a1fbf69b06d", .draw_fn = drawSplinePolygon },
+    .{ .name = "drawTriangleFilled", .md5sum = "42377f2ec0a954be5bd1cba5458429f6", .draw_fn = drawTriangleFilled },
+    .{ .name = "drawBezierCubic", .md5sum = "312f09be1721dd95a4a9fc10dc1ec28e", .draw_fn = drawBezierCubic },
+    .{ .name = "drawBezierQuadratic", .md5sum = "139da685433b44b81f5417f8b045d3f4", .draw_fn = drawBezierQuadratic },
+    .{ .name = "drawPolygonComplex", .md5sum = "00b8f03a23fa31332eef549318fe7c6e", .draw_fn = drawPolygonComplex },
+    .{ .name = "drawSplinePolygon", .md5sum = "02503d0eca878b8a2b1c13fafb0fd445", .draw_fn = drawSplinePolygon },
     .{ .name = "drawArcQuarter", .md5sum = "028912b02048fa169c8cb808ff669184", .draw_fn = drawArcQuarter },
-    .{ .name = "drawArcHalf", .md5sum = "9d89a802399a6344f362dc700c5b122d", .draw_fn = drawArcHalf },
+    .{ .name = "drawArcHalf", .md5sum = "648732ebb62c3929816c2743a199dff5", .draw_fn = drawArcHalf },
     .{ .name = "drawArcThick", .md5sum = "70595cc2d1252de2e1c10d8debfcea70", .draw_fn = drawArcThick },
     .{ .name = "fillArcQuarter", .md5sum = "acfcff99a739fb974774f392f0c472e2", .draw_fn = fillArcQuarter },
-    .{ .name = "fillArcHalf", .md5sum = "201d881930565858e2ef28a44122fea7", .draw_fn = fillArcHalf },
+    .{ .name = "fillArcHalf", .md5sum = "560df9fb69b25f57670ff5e45c8855e2", .draw_fn = fillArcHalf },
     .{ .name = "fillArcFull", .md5sum = "3c6832b07c09de096e8ba85712419332", .draw_fn = fillArcFull },
 };
 

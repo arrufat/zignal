@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgba = zignal.Rgba;
+const Rgba = zignal.Rgba(u8);
 const Hsv = zignal.Hsv;
 const Canvas = zignal.Canvas;
 

@@ -7,7 +7,7 @@ const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
 
 test "image format sgr" {
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     // Create a small 2x2 RGB image
     var image = try Image(Rgb).init(std.testing.allocator, 2, 2);
@@ -36,7 +36,7 @@ test "image format sgr" {
 }
 
 test "image format sgr odd rows" {
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     // Create a 3x2 RGB image (odd number of rows)
     var image = try Image(Rgb).init(std.testing.allocator, 3, 2);
@@ -67,7 +67,7 @@ test "image format sgr odd rows" {
 }
 
 test "image format braille" {
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     // Create a 4x4 RGB image (perfect for one Braille character)
     var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
@@ -104,7 +104,7 @@ test "image format braille" {
 }
 
 test "image format braille custom threshold" {
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     // Create a 4x2 grayscale gradient image
     var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
@@ -138,7 +138,7 @@ test "image format braille custom threshold" {
 }
 
 test "image format braille large image" {
-    const Rgb = color.Rgb;
+    const Rgb = color.Rgb(u8);
 
     // Create an 8x4 image (2x2 Braille characters)
     var image = try Image(Rgb).init(std.testing.allocator, 8, 4);

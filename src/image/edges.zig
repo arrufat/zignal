@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
+const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 const ShenCastan = @import("ShenCastan.zig");
 const meta = @import("../meta.zig");

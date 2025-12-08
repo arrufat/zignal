@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const zignal = @import("zignal");
 const perlin = zignal.perlin;
 const PerlinOptions = zignal.PerlinOptions;
-const Rgba = zignal.Rgba;
+const Rgba = zignal.Rgba(u8);
 const Image = zignal.Image;
 
 pub const std_options: std.Options = .{
@@ -55,7 +55,7 @@ pub export fn generate(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
                     255 * (opts.amplitude / 2 * (perlin(f32, x, y, 0, opts) + opts.amplitude)),
                 ))),
             );
-            image.at(r, c).* = Rgba.fromGray(val, 255);
+            image.at(r, c).* = (zignal.Gray(u8){ .y = val }).withAlpha(255);
         }
     }
 }
