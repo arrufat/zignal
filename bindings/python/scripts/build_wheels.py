@@ -11,17 +11,25 @@ from typing import Iterable, List, Tuple
 
 
 def get_native_platform():
-    """Get the platform configuration for the current system."""
+    """Get the platform configuration for the current system.
+
+    We return an explicit Zig target triple that uses the baseline CPU for the
+    architecture instead of the implicit "native" CPU. This avoids emitting
+    binaries tied to the build machine's micro-architecture (e.g. -mcpu=native),
+    which can break wheels when run on older CPUs.
+    """
 
     system = platform.system().lower()
     machine = platform.machine().lower()
 
     if system == "linux":
         if machine in ["x86_64", "amd64"]:
-            return ("native", "manylinux1_x86_64", ".so")
+            return ("x86_64-linux-gnu", "manylinux1_x86_64", ".so")
         elif machine in ["aarch64", "arm64"]:
-            return ("native", "manylinux1_aarch64", ".so")
+            return ("aarch64-linux-gnu", "manylinux1_aarch64", ".so")
     elif system == "windows":
+        # Use native on Windows to avoid header parsing issues with explicit triples,
+        # while relying on a baseline CPU to keep binaries portable.
         if machine in ["x86_64", "amd64"]:
             return ("native", "win_amd64", ".pyd")
         elif machine in ["aarch64", "arm64"]:
@@ -29,9 +37,9 @@ def get_native_platform():
     elif system == "darwin":
         # Python extension modules are packaged as .so files even on macOS wheels
         if machine in ["x86_64", "amd64"]:
-            return ("native", "macosx_10_9_x86_64", ".so")
+            return ("x86_64-macos-none", "macosx_10_9_x86_64", ".so")
         elif machine in ["aarch64", "arm64"]:
-            return ("native", "macosx_11_0_arm64", ".so")
+            return ("aarch64-macos-none", "macosx_11_0_arm64", ".so")
 
     # Fallback - let setuptools determine the platform
     return ("native", "", ".so")
@@ -162,6 +170,8 @@ def create_wheel(
     env = os.environ.copy()
     env["PLAT_NAME"] = platform_tag
     env["ZIG_TARGET"] = zig_target
+    # Enforce baseline CPU for portability (avoids -mcpu=native).
+    env["ZIG_CPU"] = env.get("ZIG_CPU", "baseline")
     env["ZIG_OPTIMIZE"] = env.get("ZIG_OPTIMIZE", "ReleaseFast")  # Default to ReleaseFast
 
     # Use python setup.py directly to build and create wheel
