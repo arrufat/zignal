@@ -14,11 +14,18 @@ from setuptools.dist import Distribution
 class ZigExtension(Extension):
     """Extension that will be built with Zig."""
 
-    def __init__(self, name: str, zig_target: str = "native", zig_optimize: str = "ReleaseFast"):
+    def __init__(
+        self,
+        name: str,
+        zig_target: str = "native",
+        zig_optimize: str = "ReleaseFast",
+        zig_cpu: str | None = None,
+    ):
         # Initialize with dummy source to satisfy setuptools
         super().__init__(name, sources=[])
         self.zig_target = zig_target
         self.zig_optimize = zig_optimize
+        self.zig_cpu = zig_cpu
 
 
 class ZigBuildExt(build_ext):
@@ -105,6 +112,8 @@ class ZigBuildExt(build_ext):
 
         # Build the Zig library with optimizations
         cmd = ["zig", "build", "python-bindings", f"-Doptimize={ext.zig_optimize}"]
+        if ext.zig_cpu:
+            cmd.append(f"-Dcpu={ext.zig_cpu}")
         if ext.zig_target != "native":
             cmd.extend([f"-Dtarget={ext.zig_target}"])
 
@@ -180,10 +189,17 @@ def get_zig_optimize():
     return os.environ.get("ZIG_OPTIMIZE", "ReleaseFast")
 
 
+def get_zig_cpu():
+    """Get Zig CPU baseline from environment variable, if provided."""
+    return os.environ.get("ZIG_CPU")
+
+
 if __name__ == "__main__":
     setup(
         packages=find_packages(exclude=["tests", "tests.*"]),
-        ext_modules=[ZigExtension("zignal._zignal", get_zig_target(), get_zig_optimize())],
+        ext_modules=[
+            ZigExtension("zignal._zignal", get_zig_target(), get_zig_optimize(), get_zig_cpu())
+        ],
         cmdclass={"build_ext": ZigBuildExt},
         distclass=BinaryDistribution,
         zip_safe=False,
