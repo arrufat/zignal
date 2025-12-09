@@ -14,6 +14,8 @@ pub fn SimilarityTransform(comptime T: type) type {
         const Self = @This();
         matrix: SMatrix(T, 2, 2),
         bias: SMatrix(T, 2, 1),
+
+        /// Returns a `SimilarityTransform` that performs the identity transformation.
         pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best similarity transform that maps between the two given sets of points.
@@ -124,24 +126,17 @@ pub fn AffineTransform(comptime T: type) type {
         const Self = @This();
         matrix: SMatrix(T, 2, 2),
         bias: SMatrix(T, 2, 1),
-        allocator: std.mem.Allocator,
+
+        /// Returns an `AffineTransform` that performs the identity transformation.
+        pub const identity: Self = .{ .matrix = .identity(), .bias = .initAll(0) };
 
         /// Finds the best affine transform that maps between the two given sets of points.
         /// Returns `error.NotConverged` when the pseudo-inverse SVD fails to converge or
         /// `error.RankDeficient` when the correspondences do not span a full-rank affine mapping.
         pub fn init(allocator: std.mem.Allocator, from_points: []const Point(2, T), to_points: []const Point(2, T)) !Self {
-            var transform: Self = .identity(allocator);
-            try transform.find(from_points, to_points);
+            var transform: Self = .identity;
+            try transform.find(allocator, from_points, to_points);
             return transform;
-        }
-
-        /// Returns an AffineTransform that performs the identity transformation.
-        pub fn identity(allocator: std.mem.Allocator) Self {
-            return .{
-                .matrix = .identity(),
-                .bias = .initAll(0),
-                .allocator = allocator,
-            };
         }
 
         /// Returns a new `AffineTransform` with its internal components (matrix and bias)
@@ -150,7 +145,6 @@ pub fn AffineTransform(comptime T: type) type {
             return .{
                 .matrix = self.matrix.as(U),
                 .bias = self.bias.as(U),
-                .allocator = self.allocator,
             };
         }
 
@@ -163,12 +157,12 @@ pub fn AffineTransform(comptime T: type) type {
         /// Finds the best affine transform that maps between the two given sets of points.
         /// Returns `error.NotConverged` when the SVD inside the pseudo-inverse fails to converge or
         /// `error.RankDeficient` if the input points are degenerate.
-        pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
+        pub fn find(self: *Self, allocator: std.mem.Allocator, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len == to_points.len);
             assert(from_points.len >= 3);
-            var p: Matrix(T) = try .init(self.allocator, 3, from_points.len);
+            var p: Matrix(T) = try .init(allocator, 3, from_points.len);
             defer p.deinit();
-            var q: Matrix(T) = try .init(self.allocator, 2, to_points.len);
+            var q: Matrix(T) = try .init(allocator, 2, to_points.len);
             defer q.deinit();
             for (0..from_points.len) |i| {
                 p.at(0, i).* = from_points[i].x();
@@ -212,6 +206,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
     return struct {
         const Self = @This();
         matrix: SMatrix(T, 3, 3),
+
+        /// Returns a `ProjectiveTransform` that performs the identity transformation.
         pub const identity: Self = .{ .matrix = .identity() };
 
         /// Finds the best projective transform that maps between the two given sets of points.
