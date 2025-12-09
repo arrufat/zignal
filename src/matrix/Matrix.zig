@@ -47,6 +47,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
+const meta = @import("../meta.zig");
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_module = @import("svd.zig");
@@ -98,6 +99,18 @@ pub fn Matrix(comptime T: type) type {
             if (self.items.len > 0) {
                 self.allocator.free(self.items);
             }
+        }
+
+        /// Cast the underlying items of the matrix from T to U.
+        pub fn as(self: Self, allocator: std.mem.Allocator, comptime U: type) !Matrix(U) {
+            var result: Matrix(U) = try .init(allocator, self.rows, self.cols);
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const pos = r * self.cols + c;
+                    result.items[pos] = meta.as(U, self.items[pos]);
+                }
+            }
+            return result;
         }
 
         /// Create a duplicate of this matrix with the specified allocator.
@@ -1573,6 +1586,19 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
     };
+}
+
+test "Matrix as" {
+    const allocator = std.testing.allocator;
+    var a: Matrix(f32) = try .random(allocator, 3, 4, 1234);
+    defer a.deinit();
+    var b = try a.as(allocator, f64);
+    defer b.deinit();
+    for (0..a.rows) |r| {
+        for (0..a.cols) |c| {
+            try expectEqual(@as(f64, @floatCast(a.at(r, c).*)), b.at(r, c).*);
+        }
+    }
 }
 
 // Tests for dynamic Matrix functionality
