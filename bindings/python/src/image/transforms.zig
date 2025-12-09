@@ -437,7 +437,6 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[0])},
                         .{@floatCast(transform.bias[1])},
                     }),
-                    .allocator = allocator,
                 };
                 img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
