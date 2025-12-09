@@ -9,6 +9,7 @@ const geom_utils = @import("utils.zig");
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
 pub fn SimilarityTransform(comptime T: type) type {
+    comptime assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
         matrix: SMatrix(T, 2, 2),
@@ -22,6 +23,15 @@ pub fn SimilarityTransform(comptime T: type) type {
             var transform: SimilarityTransform(T) = .identity;
             try transform.find(from_points, to_points);
             return transform;
+        }
+
+        /// Returns a new `SimilarityTransform` with its internal components (matrix and bias)
+        /// converted to the specified scalar type `U`.
+        pub fn as(self: Self, comptime U: type) SimilarityTransform(U) {
+            return .{
+                .matrix = self.matrix.as(U),
+                .bias = self.bias.as(U),
+            };
         }
 
         /// Projects the given point using the similarity transform.
@@ -109,6 +119,7 @@ pub fn SimilarityTransform(comptime T: type) type {
 /// Applies an affine transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
 pub fn AffineTransform(comptime T: type) type {
+    comptime assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
         matrix: SMatrix(T, 2, 2),
@@ -126,6 +137,16 @@ pub fn AffineTransform(comptime T: type) type {
             };
             try transform.find(from_points, to_points);
             return transform;
+        }
+
+        /// Returns a new `AffineTransform` with its internal components (matrix and bias)
+        /// converted to the specified scalar type `U`.
+        pub fn as(self: Self, comptime U: type) AffineTransform(U) {
+            return .{
+                .matrix = self.matrix.as(U),
+                .bias = self.bias.as(U),
+                .allocator = self.allocator,
+            };
         }
 
         /// Projects the given point using the affine transform.
@@ -182,6 +203,7 @@ pub fn AffineTransform(comptime T: type) type {
 /// Applies a projective transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
 pub fn ProjectiveTransform(comptime T: type) type {
+    comptime assert(@typeInfo(T) == .float);
     return struct {
         const Self = @This();
         matrix: SMatrix(T, 3, 3),
@@ -194,6 +216,14 @@ pub fn ProjectiveTransform(comptime T: type) type {
             var transform: ProjectiveTransform(T) = .identity;
             try transform.find(from_points, to_points);
             return transform;
+        }
+
+        /// Returns a new `ProjectiveTransform` with its internal matrix converted to the
+        /// specified scalar type `U`.
+        pub fn as(self: Self, comptime U: type) ProjectiveTransform(U) {
+            return .{
+                .matrix = self.matrix.as(U),
+            };
         }
 
         /// Projects the given point using the projective transform
