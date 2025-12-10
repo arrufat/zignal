@@ -102,6 +102,7 @@ pub fn Integral(comptime T: type) type {
             allocator: Allocator,
             planes: *Planes,
         ) !void {
+            if (image.rows * image.cols == 0) return;
             inline for (0..channel_count) |i| {
                 if (planes.planes[i].rows != image.rows or planes.planes[i].cols != image.cols) {
                     planes.planes[i].deinit(allocator);
