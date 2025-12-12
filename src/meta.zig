@@ -52,10 +52,20 @@ pub inline fn isPacked(comptime T: type) bool {
 /// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
 pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
     const full_name = @typeName(T);
-    if (std.mem.lastIndexOf(u8, full_name, ".")) |dot_index| {
+    if (std.mem.findLast(u8, full_name, ".")) |dot_index| {
         return full_name[dot_index + 1 ..];
     }
     return full_name;
+}
+
+/// Strips generic type parameters from a simple type name.
+/// e.g., "Rgb(u8)" -> "Rgb"
+pub inline fn getGenericBaseName(comptime T: type) []const u8 {
+    const name = getSimpleTypeName(T);
+    if (std.mem.findScalar(u8, name, '(')) |idx| {
+        return name[0..idx];
+    }
+    return name;
 }
 
 /// Converts a comptime string to lowercase.
