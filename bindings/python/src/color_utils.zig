@@ -1,4 +1,5 @@
-const c = @import("py_utils.zig").c;
+const py_utils = @import("py_utils.zig");
+const c = py_utils.c;
 const zignal = @import("zignal");
 
 const Rgb = zignal.Rgb(u8);
@@ -25,16 +26,20 @@ fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
 /// This is a helper function used internally.
 /// Returns error.InvalidColor if the object doesn't have the required attributes
 /// or if the attribute values cannot be converted to integers.
-/// Note: This function does NOT set Python exceptions.
+/// Returns error.OutOfRange if values are not in 0-255 range.
 fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
-    const r = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
-    const g = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
-    const b = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
+    const r_val = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
+    const g_val = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
+    const b_val = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
+
+    const r = py_utils.validateRange(u8, r_val, 0, 255, "r") catch return error.OutOfRange;
+    const g = py_utils.validateRange(u8, g_val, 0, 255, "g") catch return error.OutOfRange;
+    const b = py_utils.validateRange(u8, b_val, 0, 255, "b") catch return error.OutOfRange;
 
     return Rgb{
-        .r = @intCast(r),
-        .g = @intCast(g),
-        .b = @intCast(b),
+        .r = r,
+        .g = g,
+        .b = b,
     };
 }
 
@@ -42,18 +47,17 @@ fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
 /// This is a helper function used internally.
 /// Returns error.InvalidColor if the object doesn't have the required attributes
 /// or if the attribute values cannot be converted to integers.
-/// Note: This function does NOT set Python exceptions.
+/// Returns error.OutOfRange if values are not in 0-255 range.
 fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
-    const r = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
-    const g = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
-    const b = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
-    const a = extractColorAttribute(obj, "a") orelse return error.InvalidColor;
+    const rgb = try extractRgbFromObject(obj);
+    const a_val = extractColorAttribute(obj, "a") orelse return error.InvalidColor;
+    const a = try py_utils.validateRange(u8, a_val, 0, 255, "a");
 
     return .{
-        .r = @intCast(r),
-        .g = @intCast(g),
-        .b = @intCast(b),
-        .a = @intCast(a),
+        .r = rgb.r,
+        .g = rgb.g,
+        .b = rgb.b,
+        .a = a,
     };
 }
 
@@ -124,19 +128,30 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
             // For grayscale, try to extract RGB and convert to gray
             if (extractRgbFromObject(color_obj.?)) |rgb| {
                 break :blk rgb.to(.gray).as(u8).y;
-            } else |_| {
+            } else |err| {
+                if (err == error.OutOfRange) return err;
                 c.PyErr_Clear();
                 break :blk error.InvalidColor;
             }
         },
-        Rgb => extractRgbFromObject(color_obj.?),
+        Rgb => blk: {
+            if (extractRgbFromObject(color_obj.?)) |rgb| {
+                break :blk rgb;
+            } else |err| {
+                if (err == error.OutOfRange) return err;
+                c.PyErr_Clear();
+                break :blk error.InvalidColor;
+            }
+        },
         Rgba => blk: {
             if (extractRgbaFromObject(color_obj.?)) |rgba| {
                 break :blk rgba;
-            } else |_| {
+            } else |err| {
+                if (err == error.OutOfRange) return err;
                 c.PyErr_Clear();
                 // Accept RGB-like objects by adding full alpha
-                const rgb = extractRgbFromObject(color_obj.?) catch {
+                const rgb = extractRgbFromObject(color_obj.?) catch |err2| {
+                    if (err2 == error.OutOfRange) return err2;
                     c.PyErr_Clear();
                     break :blk error.InvalidColor;
                 };
@@ -148,9 +163,11 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
 
     if (extract_result) |result| {
         return result;
-    } else |_| {
+    } else |err| {
         // Clear any Python error that might have been set by failed attribute access
-        c.PyErr_Clear();
+        // Only if no specific error was propagated
+        if (err == error.OutOfRange) return err;
+        if (c.PyErr_Occurred() != null) c.PyErr_Clear();
     }
 
     // Set appropriate error message based on target type
