@@ -2,8 +2,132 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const zignal = @import("zignal");
 
+const color_bindings = @import("color.zig");
+
+const Gray = zignal.Gray(u8);
 const Rgb = zignal.Rgb(u8);
 const Rgba = zignal.Rgba(u8);
+const Hsl = zignal.Hsl(f64);
+const Hsv = zignal.Hsv(f64);
+const Lab = zignal.Lab(f64);
+const Lch = zignal.Lch(f64);
+const Lms = zignal.Lms(f64);
+const Oklab = zignal.Oklab(f64);
+const Oklch = zignal.Oklch(f64);
+const Xyb = zignal.Xyb(f64);
+const Xyz = zignal.Xyz(f64);
+const Ycbcr = zignal.Ycbcr(u8);
+
+const zignalColorTypes = .{
+    .{ .py_type = &color_bindings.GrayType, .zig_type = Gray, .binding = color_bindings.GrayBinding },
+    .{ .py_type = &color_bindings.RgbType, .zig_type = Rgb, .binding = color_bindings.RgbBinding },
+    .{ .py_type = &color_bindings.RgbaType, .zig_type = Rgba, .binding = color_bindings.RgbaBinding },
+    .{ .py_type = &color_bindings.HslType, .zig_type = Hsl, .binding = color_bindings.HslBinding },
+    .{ .py_type = &color_bindings.HsvType, .zig_type = Hsv, .binding = color_bindings.HsvBinding },
+    .{ .py_type = &color_bindings.LabType, .zig_type = Lab, .binding = color_bindings.LabBinding },
+    .{ .py_type = &color_bindings.LchType, .zig_type = Lch, .binding = color_bindings.LchBinding },
+    .{ .py_type = &color_bindings.LmsType, .zig_type = Lms, .binding = color_bindings.LmsBinding },
+    .{ .py_type = &color_bindings.OklabType, .zig_type = Oklab, .binding = color_bindings.OklabBinding },
+    .{ .py_type = &color_bindings.OklchType, .zig_type = Oklch, .binding = color_bindings.OklchBinding },
+    .{ .py_type = &color_bindings.XybType, .zig_type = Xyb, .binding = color_bindings.XybBinding },
+    .{ .py_type = &color_bindings.XyzType, .zig_type = Xyz, .binding = color_bindings.XyzBinding },
+    .{ .py_type = &color_bindings.YcbcrType, .zig_type = Ycbcr, .binding = color_bindings.YcbcrBinding },
+};
+
+fn objectToZigColor(comptime ColorType: type, comptime Binding: type, obj: *c.PyObject) ColorType {
+    const py_obj: *Binding.PyObjectType = @ptrCast(@alignCast(obj));
+    const fields = @typeInfo(ColorType).@"struct".fields;
+
+    if (comptime zignal.meta.isPacked(ColorType)) {
+        comptime {
+            for (fields) |field| {
+                if (field.type != u8) @compileError("Packed color components must be u8");
+            }
+        }
+
+        const bytes = switch (fields.len) {
+            4 => [4]u8{ py_obj.field0, py_obj.field1, py_obj.field2, py_obj.field3 },
+            3 => [3]u8{ py_obj.field0, py_obj.field1, py_obj.field2 },
+            2 => [2]u8{ py_obj.field0, py_obj.field1 },
+            1 => [1]u8{py_obj.field0},
+            else => @compileError("Color types with more than 4 fields not supported"),
+        };
+        return @bitCast(bytes);
+    }
+
+    var zig_color: ColorType = undefined;
+    inline for (fields, 0..) |field, i| {
+        const field_value = switch (i) {
+            0 => py_obj.field0,
+            1 => py_obj.field1,
+            2 => py_obj.field2,
+            3 => py_obj.field3,
+            else => unreachable,
+        };
+        @field(zig_color, field.name) = field_value;
+    }
+    return zig_color;
+}
+
+fn parseFromZignalColorTypes(comptime T: type, color_obj: *c.PyObject) ?T {
+    const obj_c = @as([*c]c.PyObject, @ptrCast(color_obj));
+
+    inline for (zignalColorTypes) |color_info| {
+        const type_ptr = @as([*c]c.PyTypeObject, @ptrCast(color_info.py_type));
+        if (c.PyObject_TypeCheck(obj_c, type_ptr) != 0) {
+            const zig_color = objectToZigColor(color_info.zig_type, color_info.binding, color_obj);
+            return zignal.convertColor(T, zig_color);
+        }
+    }
+
+    return null;
+}
+
+fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
+    const method = c.PyObject_GetAttrString(color_obj, "to");
+    if (method == null) {
+        if (c.PyErr_Occurred() != null) c.PyErr_Clear();
+        return null;
+    }
+    defer c.Py_DECREF(method);
+
+    const target_type_obj: *c.PyTypeObject = switch (T) {
+        u8 => &color_bindings.GrayType,
+        Rgb => &color_bindings.RgbType,
+        Rgba => &color_bindings.RgbaType,
+        else => unreachable,
+    };
+
+    const args = c.PyTuple_New(1);
+    if (args == null) return error.InvalidColor;
+    defer c.Py_DECREF(args);
+
+    // PyTuple_SetItem steals a reference, so INCREF first.
+    c.Py_INCREF(@as(?*c.PyObject, @ptrCast(target_type_obj)));
+    if (c.PyTuple_SetItem(args, 0, @as(?*c.PyObject, @ptrCast(target_type_obj))) < 0) {
+        return error.InvalidColor;
+    }
+
+    const converted = c.PyObject_CallObject(method, args);
+    if (converted == null) {
+        // Leave the Python exception set by the conversion method.
+        return error.InvalidColor;
+    }
+    defer c.Py_DECREF(converted);
+
+    return switch (T) {
+        u8 => blk: {
+            const y_val = extractColorAttribute(converted, "y") orelse {
+                c.PyErr_SetString(c.PyExc_TypeError, "Converted Gray color is missing 'y' attribute");
+                return error.InvalidColor;
+            };
+            break :blk try py_utils.validateRange(u8, y_val, 0, 255, "y");
+        },
+        Rgb => try extractRgbFromObject(converted),
+        Rgba => try extractRgbaFromObject(converted),
+        else => unreachable,
+    };
+}
 
 /// Extract color component attribute from a Python object.
 /// This is a helper function used internally.
@@ -79,6 +203,11 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
         return error.InvalidColor;
     }
 
+    // If this is one of our bound color types, accept any colorspace and convert.
+    if (parseFromZignalColorTypes(T, color_obj.?)) |converted| {
+        return converted;
+    }
+
     // Check if it's an integer (grayscale)
     if (c.PyLong_Check(color_obj) != 0) {
         const gray_value = c.PyLong_AsLong(color_obj);
@@ -120,6 +249,11 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
             Rgba => rgba,
             else => unreachable,
         };
+    }
+
+    // Fall back to calling `.to(zignal.<Target>)` when available (supports all colorspaces).
+    if (try tryParseViaToMethod(T, color_obj.?)) |via_to| {
+        return via_to;
     }
 
     // Try to extract RGB/RGBA values directly from the object
