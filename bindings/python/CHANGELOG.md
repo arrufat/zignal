@@ -1,5 +1,22 @@
 # Python Bindings Changelog
 
+## [0.9.0] - 2025-12-15
+
+### Added
+- **Sequence Conversion**: Improved sequence conversion and memory error handling in Python bindings (#244).
+- **Matrix Element Conversion**: Added method to convert matrix element types (#238).
+- **Scalar Type Conversion**: Added scalar type conversion methods for transforms (#239).
+
+### Changed
+- **Renamed Grayscale**: `Grayscale` dtype has been renamed to `Gray` for consistency (#246).
+- **Color Validation**: Enforced strict 0-255 range validation for color components (#243).
+- **Resource Limits**: Enforced resource limits in image loading to prevent DoS (#234).
+
+### Fixed
+- **PNG Loading**: Enforced requirement for mandatory IEND chunk and validated critical chunk ordering (#233).
+- **Empty Images**: Prevented initialization of empty images in integral image calculation.
+- **Wheels**: Used explicit Zig targets instead of native for wheel builds (#241).
+
 ## [0.8.0] - 2025-11-08
 
 ### Added
