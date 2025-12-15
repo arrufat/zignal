@@ -388,6 +388,53 @@ pub const ConversionError = error{
     unsupported_type,
 };
 
+/// Convert a Python sequence (list/tuple) to a Zig ArrayList(T).
+///
+/// Arguments:
+/// - T: The target element type.
+/// - seq_obj: A Python object implementing the sequence protocol (list, tuple).
+///
+/// Returns:
+/// - A std.ArrayList(T) containing the converted elements.
+/// - The caller owns the memory and is responsible for calling `deinit()` on the returned list.
+///
+/// Errors:
+/// - error.InvalidType: If `seq_obj` is null or not a sequence.
+/// - error.PythonError: If a Python C-API call fails (e.g., getting an item).
+/// - error.OutOfMemory: If memory allocation fails.
+/// - ConversionError: If an element cannot be converted to type T.
+pub fn listFromPython(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
+    if (seq_obj == null) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Expected a sequence, got None");
+        return error.InvalidType;
+    }
+
+    if (c.PySequence_Check(seq_obj) == 0) {
+        c.PyErr_SetString(c.PyExc_TypeError, "Expected a sequence (list or tuple)");
+        return error.InvalidType;
+    }
+
+    const size = c.PySequence_Size(seq_obj);
+    if (size < 0) return error.PythonError;
+
+    var list = std.ArrayList(T).init(allocator);
+    errdefer list.deinit();
+    try list.ensureTotalCapacity(@intCast(size));
+
+    var i: usize = 0;
+    while (i < size) : (i += 1) {
+        const val = blk: {
+            const item = c.PySequence_GetItem(seq_obj, @intCast(i)); // New reference
+            if (item == null) return error.PythonError;
+            defer c.Py_DECREF(item);
+            break :blk try convertFromPython(T, item);
+        };
+        list.appendAssumeCapacity(val);
+    }
+
+    return list;
+}
+
 /// Convert Python value to Zig type using idiomatic error union
 pub fn convertFromPython(comptime T: type, py_obj: ?*c.PyObject) ConversionError!T {
     if (py_obj == null) {
@@ -1111,6 +1158,15 @@ pub fn setZigError(err: anyerror) void {
 /// Use when you're certain the object is not null (e.g., in methods where self is guaranteed)
 pub fn safeCast(comptime T: type, obj: ?*c.PyObject) *T {
     return @as(*T, @ptrCast(@alignCast(obj.?)));
+}
+
+/// Safely cast a Python object to a specific type with null checking.
+/// Returns error.NullPointer if the object is null.
+pub fn safeCastChecked(comptime T: type, obj: ?*c.PyObject) !*T {
+    if (obj) |o| {
+        return @as(*T, @ptrCast(@alignCast(o)));
+    }
+    return error.NullPointer;
 }
 
 // ============================================================================
