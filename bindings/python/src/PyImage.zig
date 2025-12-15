@@ -1,4 +1,9 @@
+//! PyImage is a Python-facing dynamic image wrapper used only by the Python bindings.
+//! It abstracts over different image types (Grayscale, RGB, RGBA) to provide a uniform API to Python.
+//! Memory ownership can be either owned (managed by this struct) or borrowed (view into existing image).
+
 const std = @import("std");
+const py_utils = @import("py_utils.zig");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
@@ -38,7 +43,10 @@ pub const PyImage = struct {
     /// Factory: allocate a PyImage from a concrete Image(T).
     /// Use Ownership.borrowed for views to avoid double-free.
     pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Ownership) ?*PyImage {
-        const p = allocator.create(PyImage) catch return null;
+        const p = allocator.create(PyImage) catch {
+            py_utils.setMemoryError("PyImage");
+            return null;
+        };
         switch (@TypeOf(image)) {
             Image(u8) => p.* = .{ .data = .{ .grayscale = image }, .ownership = ownership },
             Image(Rgb) => p.* = .{ .data = .{ .rgb = image }, .ownership = ownership },

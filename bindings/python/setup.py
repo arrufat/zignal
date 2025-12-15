@@ -135,10 +135,8 @@ class ZigBuildExt(build_ext):
 
         for extension in extensions:
             candidate = lib_dir / f"_zignal{extension}"
-            print(f"DEBUG: Checking for library at: {candidate}", file=sys.stderr)
             if candidate.exists():
                 library_path = candidate
-                print(f"DEBUG: Found library: {library_path}", file=sys.stderr)
                 break
 
         if not library_path:
@@ -152,12 +150,7 @@ class ZigBuildExt(build_ext):
 
         # Copy to the correct location with correct name
         dest_path = Path(self.get_ext_fullpath(ext.name))
-        print(f"DEBUG: Copying {library_path} -> {dest_path}", file=sys.stderr)
         shutil.copy2(library_path, dest_path)
-        print(
-            f"DEBUG: Copy completed. File exists at destination: {dest_path.exists()}",
-            file=sys.stderr,
-        )
 
         # Copy stub files if they exist in the source directory
         source_package_dir = Path(__file__).parent / "zignal"
@@ -168,7 +161,6 @@ class ZigBuildExt(build_ext):
             source_stub = source_package_dir / stub_file
             if source_stub.exists():
                 dest_stub = dest_package_dir / stub_file
-                print(f"DEBUG: Copying stub {source_stub} -> {dest_stub}", file=sys.stderr)
                 shutil.copy2(source_stub, dest_stub)
 
 
