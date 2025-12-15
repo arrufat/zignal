@@ -1,9 +1,31 @@
 # Changelog
 
-## Unreleased
+## [0.9.0] - 2025-12-15
 
 ### Features
-- **Convex Hull Bounds**: `ConvexHull.getRectangle()` (and Python's `get_rectangle()`) returns the tightest axis-aligned rectangle for the cached hull, simplifying ROI extraction from arbitrary point clouds.
+- **Convex Hull Bounds**: `ConvexHull.getRectangle()` (and Python's `get_rectangle()`) returns the tightest axis-aligned rectangle for the cached hull, simplifying ROI extraction from arbitrary point clouds. (#232)
+- **Resource Limits in Image Loading**: Enforce resource limits during image loading to prevent excessive memory usage. (#234)
+- **Scalar Type Conversion for Transforms**: Added scalar type conversion methods to geometry transforms. (#239)
+- **Matrix Element Type Conversion**: Added method to convert matrix element types. (#238)
+- **Python Sequence Conversion**: Added sequence conversion and improved memory error handling in Python bindings. (#244)
+
+### Breaking Changes
+- **Python Grayscale Dtype Rename**: Renamed `Grayscale` dtype to `Gray` in Python bindings. (#246)
+- **Color Scalar Handling**: Generalized scalar color handling to all floats, potentially changing behavior for non-f32 scalars. (#245)
+- **Python Color Validation**: Added validation for color component range (0-255), now raising errors for invalid values. (#243)
+- **Geometry Transform Allocators**: Removed allocator field from transform structs. (#240)
+
+### Fixes
+- **Integral Images**: Prevent initialization of empty images in integral image operations.
+- **Python Wheels**: Use explicit Zig targets instead of native for better cross-platform compatibility. (#241)
+- **PNG IEND Chunk**: Enforce requirement for mandatory IEND chunk in PNG decoding.
+- **PNG Critical Chunk Ordering**: Validate critical chunk ordering in PNG files. (#233)
+
+### Tooling & Docs
+- Updated Image I/O description in README.
+- Updated CI to use Zig master version. (#236)
+- Updated macOS runners in CI matrix. (#231)
+- Bumped minimum required Zig version.
 
 ## [0.8.0] - 2025-11-08
 
