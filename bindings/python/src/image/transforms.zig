@@ -772,7 +772,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     // Variant-aware in-place insert
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .grayscale => |*dst| {
+            .gray => |*dst| {
                 var src_u8: Image(u8) = undefined;
                 if (source.py_image == null) {
                     py_utils.setTypeError("initialized Image", source_obj);
@@ -780,7 +780,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 }
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
-                    .grayscale => |img| src_u8 = img,
+                    .gray => |img| src_u8 = img,
                     .rgb => |img| src_u8 = img.convert(u8, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
@@ -802,7 +802,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgb => |img| src_rgb = img,
-                    .grayscale => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                    .gray => |img| src_rgb = img.convert(Rgb, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
                     },
@@ -823,7 +823,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 const src_pimg = source.py_image.?;
                 switch (src_pimg.data) {
                     .rgba => |img| src_rgba = img,
-                    .grayscale => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                    .gray => |img| src_rgba = img.convert(Rgba, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
                     },

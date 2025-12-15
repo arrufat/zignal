@@ -1,5 +1,5 @@
 //! PyImage is a Python-facing dynamic image wrapper used only by the Python bindings.
-//! It abstracts over different image types (Grayscale, RGB, RGBA) to provide a uniform API to Python.
+//! It abstracts over different image types (Gray, RGB, RGBA) to provide a uniform API to Python.
 //! Memory ownership can be either owned (managed by this struct) or borrowed (view into existing image).
 
 const std = @import("std");
@@ -16,10 +16,10 @@ const Gray = zignal.Gray(u8);
 /// format dispatch behind a single type. Start with RGBA-only; add Gray/RGB incrementally.
 pub const PyImage = struct {
     /// Data type enum with u8 backing for extern compatibility
-    pub const DType = enum(u8) { grayscale, rgb, rgba };
+    pub const DType = enum(u8) { gray, rgb, rgba };
 
     pub const Variant = union(DType) {
-        grayscale: Image(u8),
+        gray: Image(u8),
         rgb: Image(Rgb),
         rgba: Image(Rgba),
     };
@@ -48,7 +48,7 @@ pub const PyImage = struct {
             return null;
         };
         switch (@TypeOf(image)) {
-            Image(u8) => p.* = .{ .data = .{ .grayscale = image }, .ownership = ownership },
+            Image(u8) => p.* = .{ .data = .{ .gray = image }, .ownership = ownership },
             Image(Rgb) => p.* = .{ .data = .{ .rgb = image }, .ownership = ownership },
             Image(Rgba) => p.* = .{ .data = .{ .rgba = image }, .ownership = ownership },
             else => {
@@ -74,7 +74,7 @@ pub const PyImage = struct {
     /// Return the pixel as Rgba regardless of underlying storage, for uniform Python API.
     pub fn getPixelRgba(self: *const PyImage, row: usize, col: usize) Rgba {
         return switch (self.data) {
-            .grayscale => |img| blk: {
+            .gray => |img| blk: {
                 const v = img.at(row, col).*;
                 break :blk Rgba{ .r = v, .g = v, .b = v, .a = 255 };
             },
@@ -89,7 +89,7 @@ pub const PyImage = struct {
     /// Set a pixel from an Rgba value, converting as needed.
     pub fn setPixelRgba(self: *PyImage, row: usize, col: usize, px: Rgba) void {
         switch (self.data) {
-            .grayscale => |*img| img.at(row, col).* = px.to(.gray).as(u8).y,
+            .gray => |*img| img.at(row, col).* = px.to(.gray).y,
             .rgb => |*img| img.at(row, col).* = Rgb{ .r = px.r, .g = px.g, .b = px.b },
             .rgba => |*img| img.at(row, col).* = px,
         }
@@ -99,18 +99,18 @@ pub const PyImage = struct {
     /// Both images must have the same dimensions.
     pub fn copyFrom(self: *PyImage, src: PyImage) void {
         switch (self.data) {
-            .grayscale => |*dst_img| switch (src.data) {
-                .grayscale => |src_img| src_img.copy(dst_img.*),
+            .gray => |*dst_img| switch (src.data) {
+                .gray => |src_img| src_img.copy(dst_img.*),
                 .rgb => |src_img| src_img.convertInto(u8, dst_img.*),
                 .rgba => |src_img| src_img.convertInto(u8, dst_img.*),
             },
             .rgb => |*dst_img| switch (src.data) {
-                .grayscale => |src_img| src_img.convertInto(Rgb, dst_img.*),
+                .gray => |src_img| src_img.convertInto(Rgb, dst_img.*),
                 .rgb => |src_img| src_img.copy(dst_img.*),
                 .rgba => |src_img| src_img.convertInto(Rgb, dst_img.*),
             },
             .rgba => |*dst_img| switch (src.data) {
-                .grayscale => |src_img| src_img.convertInto(Rgba, dst_img.*),
+                .gray => |src_img| src_img.convertInto(Rgba, dst_img.*),
                 .rgb => |src_img| src_img.convertInto(Rgba, dst_img.*),
                 .rgba => |src_img| src_img.copy(dst_img.*),
             },

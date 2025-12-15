@@ -6,7 +6,6 @@ const bitmap_font = @import("bitmap_font.zig");
 const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
-const grayscale_format = @import("grayscale_format.zig");
 const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
@@ -81,7 +80,6 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .name = "ProjectiveTransform", .ty = @ptrCast(&transforms.ProjectiveTransformType) },
         .{ .name = "Canvas", .ty = @ptrCast(&canvas.CanvasType) },
         .{ .name = "BitmapFont", .ty = @ptrCast(&bitmap_font.BitmapFontType) },
-        .{ .name = "Grayscale", .ty = @ptrCast(&grayscale_format.GrayscaleType) },
         .{ .name = "PCA", .ty = @ptrCast(&pca.PCAType) },
         .{ .name = "FeatureDistributionMatching", .ty = @ptrCast(&fdm.FeatureDistributionMatchingType) },
         .{ .name = "Assignment", .ty = @ptrCast(&optimization.AssignmentType) },

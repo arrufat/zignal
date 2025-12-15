@@ -99,7 +99,7 @@ pub const image_to_numpy_doc =
     \\Convert the image to a NumPy array (zero-copy when possible).
     \\
     \\Returns an array in the image's native dtype:\n
-    \\- Grayscale → shape (rows, cols, 1)\n
+    \\- Gray → shape (rows, cols, 1)\n
     \\- Rgb → shape (rows, cols, 3)\n
     \\- Rgba → shape (rows, cols, 4)
     \\
@@ -174,7 +174,7 @@ pub const image_from_numpy_doc =
     \\Create Image from a NumPy array with dtype uint8.
     \\
     \\Zero-copy is used for arrays with these shapes:
-    \\- Grayscale: (rows, cols, 1) → Image(Grayscale)
+    \\- Gray: (rows, cols, 1) → Image(Gray)
     \\- RGB: (rows, cols, 3) → Image(Rgb)
     \\- RGBA: (rows, cols, 4) → Image(Rgba)
     \\

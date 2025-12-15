@@ -25,7 +25,7 @@ class TestImage:
         )
         rgb_np[:] = pattern
 
-        gray = zignal.Image(2, 2, dtype=zignal.Grayscale)
+        gray = zignal.Image(2, 2, dtype=zignal.Gray)
         gray_np = gray.to_numpy()
         gray_np.fill(0)
 
@@ -51,7 +51,7 @@ class TestImage:
 
     def test_slice_assignment_handles_strided_views(self):
         base_rgb = zignal.Image(4, 4, dtype=zignal.Rgb)
-        base_gray = zignal.Image(4, 4, dtype=zignal.Grayscale)
+        base_gray = zignal.Image(4, 4, dtype=zignal.Gray)
 
         rgb_np = base_rgb.to_numpy()
         gray_np = base_gray.to_numpy()
@@ -176,7 +176,7 @@ class TestImage:
         assert img.ssim(identical) == pytest.approx(1.0)
 
     def test_ssim_requires_minimum_size(self):
-        small = zignal.Image(8, 8, dtype=zignal.Grayscale)
+        small = zignal.Image(8, 8, dtype=zignal.Gray)
         with pytest.raises(ValueError):
             small.ssim(small.copy())
 
@@ -224,7 +224,7 @@ class TestImage:
             img.alpha_trimmed_mean_blur(1, 0.6)
 
     def test_threshold_otsu_and_rgb_autoconvert(self):
-        img = zignal.Image(4, 4, dtype=zignal.Grayscale)
+        img = zignal.Image(4, 4, dtype=zignal.Gray)
         arr = img.to_numpy()
         arr[:2, :] = 20
         arr[2:, :] = 200
@@ -243,7 +243,7 @@ class TestImage:
         assert set(np.unique(rgb_binary.to_numpy())) <= {0, 255}
 
     def test_adaptive_threshold_and_morphology(self):
-        base = zignal.Image(10, 10, dtype=zignal.Grayscale)
+        base = zignal.Image(10, 10, dtype=zignal.Gray)
         arr = base.to_numpy()
         arr[:] = np.linspace(10, 200, arr.size, dtype=np.uint8).reshape(arr.shape)
 
@@ -278,11 +278,11 @@ class TestImage:
         assert pixel.b > 0  # Blue added
 
         # Test grayscale base blending
-        gray_base = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        gray_base = zignal.Image(5, 5, 128, dtype=zignal.Gray)
         overlay = zignal.Image(5, 5, (255, 0, 0, 128), dtype=zignal.Rgba)
         gray_base.blend(overlay)
         gray_pixel = gray_base[2, 2]
-        # Grayscale value should have changed from pure 128
+        # Gray value should have changed from pure 128
         assert gray_pixel != 128
         # Should still be grayscale (single value)
         assert isinstance(gray_pixel, int)
@@ -366,13 +366,13 @@ class TestImage:
         assert warped is not None
 
         # Works with different image types
-        gray = img.convert(zignal.Grayscale)
+        gray = img.convert(zignal.Gray)
         warped = gray.warp(sim)
         assert warped is not None
 
     def test_invert(self):
         # Test grayscale
-        gray = zignal.Image(2, 2, 100, dtype=zignal.Grayscale)
+        gray = zignal.Image(2, 2, 100, dtype=zignal.Gray)
         inverted = gray.invert()
         assert inverted[0, 0] == 155  # 255 - 100
 
@@ -415,7 +415,7 @@ class TestImage:
         edges = img.shen_castan()
         assert edges.rows == 20 and edges.cols == 20
         # Result should be grayscale
-        assert edges.dtype == zignal.Grayscale
+        assert edges.dtype == zignal.Gray
 
         # Test with custom parameters - equivalent to old presets
         # Low noise preset equivalent
@@ -453,8 +453,8 @@ class TestImage:
             img.shen_castan(high_ratio=0.0)  # Must be in (0, 1)
 
     def test_autocontrast(self):
-        # Grayscale
-        gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        # Gray
+        gray = zignal.Image(5, 5, 128, dtype=zignal.Gray)
         enhanced = gray.autocontrast()
         assert enhanced.rows == 5 and enhanced.cols == 5
 
@@ -469,8 +469,8 @@ class TestImage:
         assert enhanced_rgba.rows == 5 and enhanced_rgba.cols == 5
 
     def test_equalize(self):
-        # Grayscale
-        gray = zignal.Image(5, 5, 128, dtype=zignal.Grayscale)
+        # Gray
+        gray = zignal.Image(5, 5, 128, dtype=zignal.Gray)
         equalized = gray.equalize()
         assert equalized.rows == 5 and equalized.cols == 5
 
@@ -486,12 +486,12 @@ class TestImage:
 
     def test_canny(self):
         # Create simple test image
-        img = zignal.Image(20, 20, dtype=zignal.Grayscale)
+        img = zignal.Image(20, 20, dtype=zignal.Gray)
 
         # Test with defaults
         edges = img.canny()
         assert edges.rows == 20 and edges.cols == 20
-        assert edges.dtype == zignal.Grayscale
+        assert edges.dtype == zignal.Gray
 
         # Test with custom parameters
         edges = img.canny(sigma=1.0, low=30, high=90)
@@ -506,7 +506,7 @@ class TestImage:
             img.canny(sigma=-1)
 
     def test_canny_rejects_non_finite(self):
-        img = zignal.Image(20, 20, dtype=zignal.Grayscale)
+        img = zignal.Image(20, 20, dtype=zignal.Gray)
 
         # Test NaN
         with pytest.raises(ValueError):
@@ -534,7 +534,7 @@ class TestImage:
 
     def test_image_copy_from_conversion(self):
         # Create source images
-        src_gray = zignal.Image(10, 10, 128, dtype=zignal.Grayscale)
+        src_gray = zignal.Image(10, 10, 128, dtype=zignal.Gray)
         src_rgb = zignal.Image(10, 10, (10, 20, 30), dtype=zignal.Rgb)
         src_rgba = zignal.Image(10, 10, (40, 50, 60, 128), dtype=zignal.Rgba)
 
@@ -556,8 +556,8 @@ class TestImage:
         dst_rgba[:] = src_rgb
         assert dst_rgba[0, 0].item() == zignal.Rgba(10, 20, 30, 255)
 
-        # Test conversions to Grayscale
-        dst_gray = zignal.Image(10, 10, dtype=zignal.Grayscale)
+        # Test conversions to Gray
+        dst_gray = zignal.Image(10, 10, dtype=zignal.Gray)
         dst_gray[:] = src_rgb  # luma of (10, 20, 30)
         expected_rgb_gray = zignal.Rgb(10, 20, 30).to(zignal.Gray)
         assert dst_gray[0, 0] == expected_rgb_gray.y

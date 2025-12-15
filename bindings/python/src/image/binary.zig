@@ -21,7 +21,7 @@ const GrayscaleHandle = struct {
 fn prepareGrayscale(pimg: *PyImage) ?GrayscaleHandle {
     var handle = GrayscaleHandle{ .view = undefined };
     switch (pimg.data) {
-        .grayscale => |*img| {
+        .gray => |*img| {
             handle.view = img;
         },
         .rgb => |*img| {

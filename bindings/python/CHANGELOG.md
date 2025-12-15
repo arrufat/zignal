@@ -112,7 +112,7 @@ Fix `image.__format__`: it was broken due to a bad refactor
   - With multiple interpolation methods
 
 #### Enhanced Image API
-- **Image**: Generic storage (Rgba, Rgb, Grayscale)
+- **Image**: Generic storage (Rgba, Rgb, Gray)
 - **Pixel-Level Access**: Direct pixel component assignment
   - `image[y, x].r = 255` syntax support
   - Color conversion on pixel proxies

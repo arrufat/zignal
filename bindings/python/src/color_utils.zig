@@ -83,12 +83,12 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
     if (c.PyLong_Check(color_obj) != 0) {
         const gray_value = c.PyLong_AsLong(color_obj);
         if (gray_value == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Grayscale value must be an integer");
+            c.PyErr_SetString(c.PyExc_TypeError, "Gray value must be an integer");
             return error.InvalidColor;
         }
 
         if (gray_value < 0 or gray_value > 255) {
-            c.PyErr_SetString(c.PyExc_ValueError, "Grayscale value must be in range 0-255");
+            c.PyErr_SetString(c.PyExc_ValueError, "Gray value must be in range 0-255");
             return error.InvalidColor;
         }
 
@@ -115,8 +115,8 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
         const rgba = try parseColorTuple(color_obj);
         // Convert RGBA to target type
         return switch (T) {
-            u8 => rgba.to(.gray).as(u8).y,
-            Rgb => rgba.to(.rgb).as(u8),
+            u8 => rgba.to(.gray).y,
+            Rgb => rgba.to(.rgb),
             Rgba => rgba,
             else => unreachable,
         };
@@ -127,7 +127,7 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
         u8 => blk: {
             // For grayscale, try to extract RGB and convert to gray
             if (extractRgbFromObject(color_obj.?)) |rgb| {
-                break :blk rgb.to(.gray).as(u8).y;
+                break :blk rgb.to(.gray).y;
             } else |err| {
                 if (err == error.OutOfRange) return err;
                 c.PyErr_Clear();

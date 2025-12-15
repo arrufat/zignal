@@ -164,7 +164,7 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
 pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
     // Return appropriate error message based on color type
     return switch (ColorType) {
-        Gray => "Grayscale values must be in range 0-255",
+        Gray => "Gray values must be in range 0-255",
         Rgb, Rgba => "RGB values must be in range 0-255",
         Hsv => "HSV values must be in valid ranges (h: 0-360, s: 0-100, v: 0-100)",
         Hsl => "HSL values must be in valid ranges (h: 0-360, s: 0-100, l: 0-100)",
@@ -184,7 +184,7 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
 pub fn getDocumentationString(comptime ColorType: type) []const u8 {
     // Return appropriate documentation based on color type
     return switch (ColorType) {
-        Gray => "Grayscale color with intensity in range 0-255",
+        Gray => "Gray color with intensity in range 0-255",
         Rgb => "RGB color in sRGB colorspace with components in range 0-255",
         Rgba => "RGBA color with alpha channel, components in range 0-255",
         Hsv => "HSV (Hue-Saturation-Value) color representation",
