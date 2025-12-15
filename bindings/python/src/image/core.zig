@@ -22,7 +22,6 @@ const c = py_utils.c;
 const canvas = @import("../canvas.zig");
 const color_bindings = @import("../color.zig");
 const parseColorTo = @import("../color_utils.zig").parseColor;
-const grayscale_format = @import("../grayscale_format.zig");
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const rectangle = @import("../rectangle.zig");
@@ -89,9 +88,9 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
 pub const image_load_doc =
     \\Load an image from file (PNG or JPEG).
     \\
-    \\The pixel format (Grayscale, Rgb, or Rgba) is automatically determined from the
+    \\The pixel format (Gray, Rgb, or Rgba) is automatically determined from the
     \\file metadata. For PNGs, the format matches the file's color type. For JPEGs,
-    \\grayscale images load as Grayscale, color images as Rgb.
+    \\grayscale images load as Gray, color images as Rgb.
     \\
     \\## Parameters
     \\- `path` (str): Path to the PNG or JPEG file to load
@@ -109,11 +108,11 @@ pub const image_load_doc =
     \\```python
     \\# Load images with automatic format detection
     \\img = Image.load("photo.png")     # May be Rgba
-    \\img2 = Image.load("grayscale.jpg") # Will be Grayscale
+    \\img2 = Image.load("grayscale.jpg") # Will be Gray
     \\img3 = Image.load("rgb.png")       # Will be Rgb
     \\
     \\# Check format after loading
-    \\print(img.dtype)  # e.g., Rgba, Rgb, or Grayscale
+    \\print(img.dtype)  # e.g., Rgba, Rgb, or Gray
     \\```
 ;
 
@@ -157,7 +156,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         }
     }
 
-    // PNG: load native dtype (Grayscale, RGB, RGBA)
+    // PNG: load native dtype (Gray, RGB, RGBA)
     if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
         const data = std.fs.cwd().readFileAlloc(path_slice, allocator, .limited(readLimit(file_png_limits.max_png_bytes))) catch |err| {
             py_utils.setErrorWithPath(err, path_slice);
@@ -199,7 +198,7 @@ pub const image_load_from_bytes_doc =
     \\- `data` (bytes-like): Raw PNG or JPEG bytes.
     \\
     \\## Returns
-    \\Image: A new Image with pixel storage matching the encoded file (Grayscale, Rgb, or Rgba).
+    \\Image: A new Image with pixel storage matching the encoded file (Gray, Rgb, or Rgba).
     \\
     \\## Raises
     \\- `ValueError`: If the buffer is empty or the format is unsupported
@@ -546,7 +545,7 @@ pub const image_convert_doc =
     \\
     \\Convert the image to a different pixel data type.
     \\
-    \\Supported targets: Grayscale, Rgb, Rgba.
+    \\Supported targets: Gray, Rgb, Rgba.
     \\
     \\Returns a new Image with the requested format.
 ;
@@ -561,7 +560,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const dtype_obj = params.dtype;
 
     if (dtype_obj == null) {
-        py_utils.setTypeError("target dtype (zignal.Grayscale, zignal.Rgb, or zignal.Rgba)", null);
+        py_utils.setTypeError("target dtype (zignal.Gray, zignal.Rgb, or zignal.Rgba)", null);
         return null;
     }
 
@@ -573,23 +572,25 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // TODO: Remove explicit cast after Python 3.10 is dropped
     const is_type_obj = c.PyObject_TypeCheck(dtype_obj.?, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
     if (is_type_obj) {
-        if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType))) {
+        if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.GrayType))) {
             target_gray = true;
         } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
             target_rgb = true;
         } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
             target_rgba = true;
         } else {
-            py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", dtype_obj);
+            py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", dtype_obj);
             return null;
         }
     } else {
-        if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbType)) == 1) {
+        if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.GrayType)) == 1) {
+            target_gray = true;
+        } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbType)) == 1) {
             target_rgb = true;
         } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbaType)) == 1) {
             target_rgba = true;
         } else {
-            py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", dtype_obj);
+            py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", dtype_obj);
             return null;
         }
     }
@@ -597,7 +598,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // Execute conversion using underlying Image(T).convert
     if (self.py_image) |pimg| {
         switch (pimg.data) {
-            .grayscale => |*img| {
+            .gray => |*img| {
                 if (target_gray) {
                     // Same dtype: copy
                     const out = Image(u8).init(allocator, img.rows, img.cols) catch {
@@ -751,12 +752,12 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // Check that images have compatible types
     const self_type = switch (self.py_image.?.data) {
-        .grayscale => "grayscale",
+        .gray => "gray",
         .rgb => "rgb",
         .rgba => "rgba",
     };
     const other_type = switch (other.py_image.?.data) {
-        .grayscale => "grayscale",
+        .gray => "gray",
         .rgb => "rgb",
         .rgba => "rgba",
     };
@@ -768,8 +769,8 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // Calculate PSNR based on image type
     const psnr_value = switch (self.py_image.?.data) {
-        .grayscale => |img1| blk: {
-            const img2 = other.py_image.?.data.grayscale;
+        .gray => |img1| blk: {
+            const img2 = other.py_image.?.data.gray;
             if (img1.rows != img2.rows or img1.cols != img2.cols) {
                 py_utils.setValueError("Images must have the same dimensions", .{});
                 return null;
@@ -1046,7 +1047,7 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
     const self = py_utils.safeCast(ImageObject, self_obj);
     if (self.py_image) |pimg| {
         const dtype_obj = switch (pimg.data) {
-            .grayscale => @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType)),
+            .gray => @as(*c.PyObject, @ptrCast(&color_bindings.GrayType)),
             .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.RgbType)),
             .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType)),
         };

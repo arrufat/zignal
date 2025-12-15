@@ -68,7 +68,7 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     row = self.index / pimg.cols();
     col = self.index % pimg.cols();
     switch (pimg.data) {
-        .grayscale => |img| {
+        .gray => |img| {
             const v = img.at(row, col).*;
             pixel_obj = c.PyLong_FromLong(@intCast(v));
         },

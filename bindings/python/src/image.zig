@@ -12,7 +12,6 @@ const DisplayFormat = zignal.DisplayFormat;
 
 const color_bindings = @import("color.zig");
 const color_utils = @import("color_utils.zig");
-const grayscale_format = @import("grayscale_format.zig");
 const core = @import("image/core.zig");
 const filtering = @import("image/filtering.zig");
 const binary = @import("image/binary.zig");
@@ -86,7 +85,7 @@ const image_init_doc =
     \\  - Any color object (Rgb, Hsl, Hsv, etc.)
     \\  - Defaults to transparent (0, 0, 0, 0)
     \\- `dtype` (type, optional): Pixel data type specifying storage type.
-    \\  - `zignal.Grayscale` → single-channel u8 (NumPy shape (H, W, 1))
+    \\  - `zignal.Gray` → single-channel u8 (NumPy shape (H, W, 1))
     \\  - `zignal.Rgb` (default) → 3-channel RGB (NumPy shape (H, W, 3))
     \\  - `zignal.Rgba` → 4-channel RGBA (NumPy shape (H, W, 4))
     \\
@@ -99,7 +98,7 @@ const image_init_doc =
     \\img = Image(100, 200, (255, 0, 0, 255))
     \\
     \\# Create a 100x200 grayscale image with mid-gray fill
-    \\img = Image(100, 200, 128, dtype=zignal.Grayscale)
+    \\img = Image(100, 200, 128, dtype=zignal.Gray)
     \\
     \\# Create a 100x200 RGB image (dtype overrides the color value)
     \\img = Image(100, 200, (0, 255, 0, 255), dtype=zignal.Rgb)
@@ -174,7 +173,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     }
 
     // Determine target dtype based on color type and explicit dtype parameter
-    const ImageFormat = enum { grayscale, rgb, rgba };
+    const ImageFormat = enum { gray, rgb, rgba };
     var target_format: ImageFormat = undefined;
 
     if (params.dtype) |fmt_obj| {
@@ -182,26 +181,26 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         // TODO: Remove explicit cast after Python 3.10 is dropped
         const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
         if (is_type_obj) {
-            if (fmt_obj == @as(*c.PyObject, @ptrCast(&grayscale_format.GrayscaleType))) {
-                target_format = .grayscale;
+            if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.GrayType))) {
+                target_format = .gray;
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
                 target_format = .rgb;
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
                 target_format = .rgba;
             } else {
-                py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", fmt_obj);
+                py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
                 return -1;
             }
         } else {
             // Instances: allow Rgb/Rgba instances for convenience
-            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&grayscale_format.GrayscaleType)) == 1) {
-                target_format = .grayscale;
+            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.GrayType)) == 1) {
+                target_format = .gray;
             } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
                 target_format = .rgb;
             } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
                 target_format = .rgba;
             } else {
-                py_utils.setTypeError("zignal.Grayscale, zignal.Rgb, or zignal.Rgba", fmt_obj);
+                py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
                 return -1;
             }
         }
@@ -209,7 +208,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         // Auto-detect dtype based on color type
         target_format = switch (color_type) {
             .none => .rgb, // Default to RGB for no color
-            .grayscale => .grayscale,
+            .grayscale => .gray,
             .rgb_tuple => .rgb,
             .rgba_tuple => .rgba,
             .rgb_object => .rgb,
@@ -220,7 +219,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
     // Create image with appropriate dtype and fill with color
     switch (target_format) {
-        .grayscale => {
+        .gray => {
             var gimg = Image(u8).init(allocator, validated_rows, validated_cols) catch {
                 py_utils.setMemoryError("image data");
                 return -1;
@@ -337,7 +336,7 @@ fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.py_image) |pimg| {
         var buffer: [96]u8 = undefined;
         const fmt_name = switch (pimg.data) {
-            .grayscale => "Grayscale",
+            .gray => "Gray",
             .rgb => "Rgb",
             .rgba => "Rgba",
         };
@@ -398,7 +397,7 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
     // Variant-specific pixel return
     if (pimg_opt) |pimg| {
         return switch (pimg.data) {
-            .grayscale => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
+            .gray => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
             .rgb => return makeRgbProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
             .rgba => return makeRgbaProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
         };
@@ -834,7 +833,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         defer buffer.deinit(allocator);
 
         switch (pimg.data) {
-            .grayscale => |*img| {
+            .gray => |*img| {
                 const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(display_format)}) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
@@ -958,7 +957,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&core.image_convert),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_convert_doc,
-            .params = "self, dtype: Grayscale | Rgb | Rgba",
+            .params = "self, dtype: Gray | Rgb | Rgba",
             .returns = "Image",
         },
         .{
@@ -1324,8 +1323,8 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
         .name = "dtype",
         .get = @ptrCast(&core.image_get_dtype),
         .set = null,
-        .doc = "Pixel data type (Grayscale, Rgb, or Rgba)",
-        .type = "Grayscale | Rgb | Rgba",
+        .doc = "Pixel data type (Gray, Rgb, or Rgba)",
+        .type = "Gray | Rgb | Rgba",
     },
 };
 
@@ -1335,7 +1334,7 @@ var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self, rows: int, cols: int, color: Color | None = None, dtype = Grayscale | Rgb | Rgba",
+        .params = "self, rows: int, cols: int, color: Color | None = None, dtype = Gray | Rgb | Rgba",
         .returns = "None",
         .doc = image_init_doc,
     },

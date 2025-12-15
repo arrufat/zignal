@@ -487,7 +487,7 @@ pub const image_invert_doc =
     \\Invert the colors of the image.
     \\
     \\Creates a negative/inverted version of the image where:
-    \\- Grayscale pixels: 255 - value
+    \\- Gray pixels: 255 - value
     \\- RGB pixels: inverts each channel (255 - r, 255 - g, 255 - b)
     \\- RGBA pixels: inverts RGB channels while preserving alpha
     \\
@@ -497,7 +497,7 @@ pub const image_invert_doc =
     \\inverted = img.invert()
     \\
     \\# Works with all image types
-    \\gray = Image(100, 100, 128, dtype=zignal.Grayscale)
+    \\gray = Image(100, 100, 128, dtype=zignal.Gray)
     \\gray_inv = gray.invert()  # pixels become 127
     \\```
 ;
@@ -788,7 +788,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
 pub const image_sobel_doc =
     \\Apply Sobel edge detection and return the gradient magnitude.
     \\
-    \\The result is a new grayscale image (`dtype=zignal.Grayscale`) where
+    \\The result is a new grayscale image (`dtype=zignal.Gray`) where
     \\each pixel encodes the edge strength at that location.
     \\
     \\## Examples
@@ -839,7 +839,7 @@ pub const image_shen_castan_doc =
     \\- `use_nms` (bool, optional): Use non-maximum suppression for single-pixel edges. When True, produces thinner edges. Default: False
     \\
     \\## Returns
-    \\- `Image`: Binary edge map (Grayscale image with values 0 or 255)
+    \\- `Image`: Binary edge map (Gray image with values 0 or 255)
     \\
     \\## Examples
     \\```python
@@ -980,7 +980,7 @@ pub const image_canny_doc =
     \\                            Should be 2-3x larger than `low`.
     \\
     \\## Returns
-    \\A new grayscale image (`dtype=zignal.Grayscale`) with binary edge map.
+    \\A new grayscale image (`dtype=zignal.Gray`) with binary edge map.
     \\
     \\## Raises
     \\- `ValueError`: If sigma < 0, thresholds are negative, or low >= high
@@ -1147,12 +1147,12 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     // Perform the blend operation based on base image type
     switch (self_pimg.data) {
-        .grayscale => |base_img| {
+        .gray => |base_img| {
             for (0..self_rows) |row| {
                 for (0..self_cols) |col| {
                     const base_pixel = base_img.at(row, col).*;
                     const base_rgb: Rgb = .{ .r = base_pixel, .g = base_pixel, .b = base_pixel };
-                    base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).to(.gray).as(u8).y;
+                    base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).to(.gray).y;
                 }
             }
         },

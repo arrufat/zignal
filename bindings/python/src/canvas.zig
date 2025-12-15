@@ -21,7 +21,7 @@ const enum_utils = @import("enum_utils.zig");
 /// A variant canvas type that mirrors PyImage structure
 pub const PyCanvas = struct {
     pub const Variant = union(PyImage.DType) {
-        grayscale: Canvas(u8),
+        gray: Canvas(u8),
         rgb: Canvas(Rgb),
         rgba: Canvas(Rgba),
     };
@@ -35,7 +35,7 @@ pub const PyCanvas = struct {
     pub fn initFromPyImage(alloc: std.mem.Allocator, py_image: *PyImage) Self {
         return .{
             .data = switch (py_image.data) {
-                .grayscale => |img| .{ .grayscale = Canvas(u8).init(alloc, img) },
+                .gray => |img| .{ .gray = Canvas(u8).init(alloc, img) },
                 .rgb => |img| .{ .rgb = Canvas(Rgb).init(alloc, img) },
                 .rgba => |img| .{ .rgba = Canvas(Rgba).init(alloc, img) },
             },
@@ -292,7 +292,7 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.py_canvas) |canvas| {
         var buffer: [64]u8 = undefined;
         const dtype_str = switch (canvas.dtype()) {
-            .grayscale => "Grayscale",
+            .gray => "Gray",
             .rgb => "Rgb",
             .rgba => "Rgba",
         };

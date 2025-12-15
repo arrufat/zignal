@@ -476,11 +476,6 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     }
     try stub.write("\n");
 
-    // Add Grayscale sentinel type (format selector for images)
-    try stub.write("\nclass Grayscale:\n");
-    try stub.write("    \"\"\"Grayscale image format (single channel, u8)\"\"\"\n");
-    try stub.write("    ...\n");
-
     // Generate Assignment class from metadata
     const assignment_properties = stub_metadata.extractPropertyInfo(&optimization_module.assignment_properties_metadata);
     const assignment_doc = std.mem.span(optimization_module.AssignmentType.tp_doc);
