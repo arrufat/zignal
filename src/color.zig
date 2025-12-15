@@ -316,7 +316,7 @@ pub fn Rgba(comptime T: type) type {
         r: T,
         g: T,
         b: T,
-        a: T,
+        a: T = 0,
         pub const transparent = Rgba(T).initHex(0x00000000);
         pub const white = Rgba(T).initHex(0xffffffff);
         pub const black = Rgba(T).initHex(0x000000ff);
