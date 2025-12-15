@@ -22,7 +22,6 @@ pub fn build(b: *std.Build) void {
 
     // List of additional examples to build as executables
     const exec_examples = [_][]const u8{
-        "png_example",
         "pca_example",
         "make_logo",
         "image_demo",
