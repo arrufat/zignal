@@ -30,8 +30,14 @@ const Y_R: i32 = 19595;
 const Y_G: i32 = 38470;
 const Y_B: i32 = 7471;
 
+/// Returns true if `T` can be interpreted as a color by Zignal APIs.
+///
+/// This includes:
+/// - Color structs that declare `pub const space: ColorSpace`
+/// - Scalar grayscale values (`u8` in [0,255] and any float in [0,1])
 pub fn isColor(comptime T: type) bool {
     if (T == u8) return true;
+    if (@typeInfo(T) == .float) return true;
     if (@typeInfo(T) != .@"struct") return false;
     if (!@hasDecl(T, "space")) return false;
     return @TypeOf(T.space) == ColorSpace;
@@ -42,11 +48,16 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     if (DestType == SrcType) return source;
 
     // Scalar <-> Scalar
-    if (SrcType == u8 and DestType == f32) return @as(f32, @floatFromInt(source)) / 255.0;
-    if (SrcType == f32 and DestType == u8) return @intFromFloat(@round(clamp(source, 0.0, 1.0) * 255.0));
+    if (SrcType == u8 and @typeInfo(DestType) == .float) return @as(DestType, @floatFromInt(source)) / @as(DestType, 255.0);
+    if (@typeInfo(SrcType) == .float and DestType == u8) {
+        // Use f64 for precision with smaller floats, but SrcType if it's larger.
+        const P = if (@typeInfo(SrcType).float.bits < 64) f64 else SrcType;
+        return @intFromFloat(@round(clamp(@as(P, source), 0.0, 1.0) * @as(P, 255.0)));
+    }
+    if (@typeInfo(SrcType) == .float and @typeInfo(DestType) == .float) return @floatCast(source);
 
     // Scalar -> Color
-    if (SrcType == u8 or SrcType == f32) {
+    if (SrcType == u8 or @typeInfo(SrcType) == .float) {
         const DestT = switch (@typeInfo(DestType)) {
             .@"struct" => |info| info.fields[0].type,
             else => @compileError("Destination type must be a color struct"),
@@ -57,7 +68,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     }
 
     // Color -> Scalar (Luminance)
-    if (DestType == u8 or DestType == f32) {
+    if (DestType == u8 or @typeInfo(DestType) == .float) {
         return source.to(.gray).as(DestType).y;
     }
 
@@ -1525,6 +1536,20 @@ test "convert grayscale" {
     try expectEqual((Hsl(f64){ .h = 0, .s = 100, .l = 50 }).to(.gray).as(u8), Gray(u8){ .y = 54 });
     try expectEqual((Hsv(f64){ .h = 0, .s = 100, .v = 50 }).to(.gray).as(u8), Gray(u8){ .y = 27 });
     try expectEqual((Lab(f64){ .l = 50, .a = 0, .b = 0 }).to(.gray).as(u8), Gray(u8){ .y = 119 });
+}
+
+test "scalar colors" {
+    try expect(isColor(u8));
+    try expect(isColor(f32));
+    try expect(isColor(f64));
+    try expect(!isColor(u16));
+
+    try expectEqualDeep(convertColor(Rgb(u8), @as(u8, 128)), Rgb(u8){ .r = 128, .g = 128, .b = 128 });
+    try expectEqualDeep(convertColor(Rgb(u8), @as(f64, 0.5)), Rgb(u8){ .r = 128, .g = 128, .b = 128 });
+
+    try expectApproxEqAbs(convertColor(f64, @as(u8, 128)), 128.0 / 255.0, 0.0000001);
+    try expectEqual(convertColor(u8, @as(f64, 0.5)), @as(u8, 128));
+    try expectApproxEqAbs(convertColor(f64, @as(f32, 0.25)), 0.25, 0.0000001);
 }
 
 test "Rgb fromHex and toHex" {
