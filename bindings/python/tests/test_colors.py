@@ -50,7 +50,12 @@ def test_color_invert_methods():
 
     rgba = zignal.Rgba(10, 20, 30, 64)
     inverted_rgba = rgba.invert()
-    assert (inverted_rgba.r, inverted_rgba.g, inverted_rgba.b, inverted_rgba.a) == (245, 235, 225, 64)
+    assert (inverted_rgba.r, inverted_rgba.g, inverted_rgba.b, inverted_rgba.a) == (
+        245,
+        235,
+        225,
+        64,
+    )
 
     hsl = zignal.Hsl(200.0, 60.0, 40.0)
     expected_rgb = hsl.to(zignal.Rgb).invert()
@@ -89,7 +94,11 @@ def test_color_invert_smoke(factory):
             assert abs(inverted_rgb.g - expected_rgb.g) <= 1
             assert abs(inverted_rgb.b - expected_rgb.b) <= 1
         else:
-            assert (inverted_rgb.r, inverted_rgb.g, inverted_rgb.b) == (expected_rgb.r, expected_rgb.g, expected_rgb.b)
+            assert (inverted_rgb.r, inverted_rgb.g, inverted_rgb.b) == (
+                expected_rgb.r,
+                expected_rgb.g,
+                expected_rgb.b,
+            )
     else:
         # Inversion not defined for other spaces; go through RGB
         original_rgb = color.to(zignal.Rgb)
