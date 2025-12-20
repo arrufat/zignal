@@ -1118,6 +1118,15 @@ pub fn setValueError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_ValueError, "Value error", fmt, args);
 }
 
+/// Helper to ensure a Python-wrapped object is initialized.
+/// Checks if the specified field is non-null. If null, sets a Python ValueError and returns error.NotInitialized.
+pub fn ensureInitialized(obj: anytype, comptime field_name: []const u8, comptime error_msg: []const u8) !void {
+    if (@field(obj, field_name) == null) {
+        setValueError(error_msg, .{});
+        return error.NotInitialized;
+    }
+}
+
 /// Set a runtime error with a custom message
 pub fn setRuntimeError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_RuntimeError, "Runtime error", fmt, args);

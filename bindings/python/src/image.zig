@@ -1425,6 +1425,25 @@ pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
     return result;
 }
 
+/// Wrap an existing PyImage into a Python Image object.
+/// If parent is provided, the new object will hold a reference to it to keep it alive.
+pub fn wrapPyImage(pimg: *PyImage, parent: ?*c.PyObject) ?*c.PyObject {
+    const new_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse {
+        // Note: we don't deinit pimg here as it might be borrowed
+        return null;
+    };
+    const new_self = py_utils.safeCast(ImageObject, new_obj);
+    new_self.py_image = pimg;
+    new_self.numpy_ref = null;
+    if (parent) |p| {
+        c.Py_INCREF(p);
+        new_self.parent_ref = p;
+    } else {
+        new_self.parent_ref = null;
+    }
+    return new_obj;
+}
+
 pub var ImageType = py_utils.buildTypeObject(.{
     .name = "zignal.Image",
     .basicsize = @sizeOf(ImageObject),

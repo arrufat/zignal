@@ -115,14 +115,13 @@ pub const image_to_numpy_doc =
 pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        return switch (pimg.data) {
-            inline else => |img| imageToNumpyHelper(self_obj, img),
-        };
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    return self.py_image.?.dispatch(.{self_obj}, struct {
+        fn apply(img: anytype, s_obj: ?*c.PyObject) ?*c.PyObject {
+            return imageToNumpyHelper(s_obj, img);
+        }
+    }.apply);
 }
 
 // ============================================================================
