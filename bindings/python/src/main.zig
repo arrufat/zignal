@@ -42,18 +42,7 @@ var zignal_module = c.PyModuleDef{
 };
 
 // Module function metadata - combines functions from various modules
-pub const module_functions_metadata = blk: {
-    const opt_funcs = optimization.module_functions_metadata;
-    const perlin_funcs = perlin.perlin_functions_metadata;
-    var combined: [opt_funcs.len + perlin_funcs.len]stub_metadata.FunctionWithMetadata = undefined;
-    for (opt_funcs, 0..) |func, idx| {
-        combined[idx] = func;
-    }
-    for (perlin_funcs, 0..) |func, idx| {
-        combined[opt_funcs.len + idx] = func;
-    }
-    break :blk combined;
-};
+pub const module_functions_metadata = optimization.module_functions_metadata ++ perlin.perlin_functions_metadata;
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);

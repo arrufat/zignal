@@ -1,5 +1,6 @@
 //! Geometric transformations for Image objects
 
+const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba(u8);
@@ -15,6 +16,8 @@ const enum_utils = @import("../enum_utils.zig");
 
 const transforms = @import("../transforms.zig");
 const moveImageToPython = @import("../image.zig").moveImageToPython;
+const PyImageMod = @import("../PyImage.zig");
+const PyImage = PyImageMod.PyImage;
 
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;
@@ -41,67 +44,42 @@ fn mapScaleError(err: anyerror) anyerror {
 }
 
 fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObject {
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |*img| {
-                const out = img.scale(allocator, scale, method) catch |err| return mapScaleError(err);
-                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
-                return wrapped;
-            },
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    return self.py_image.?.dispatch(.{ scale, method }, struct {
+        fn apply(img: anytype, s: f32, m: Interpolation) !*ImageObject {
+            const out = img.scale(allocator, s, m) catch |err| return mapScaleError(err);
+            return moveImageToPython(out) orelse error.OutOfMemory;
         }
-    }
-    return error.ImageNotInitialized;
+    }.apply);
 }
 
 fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |*img| {
-                const out = @TypeOf(img.*).init(allocator, rows, cols) catch return error.OutOfMemory;
-                img.resize(allocator, out, method) catch return error.OutOfMemory;
-                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
-                return wrapped;
-            },
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
+        fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
+            const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
+            img.resize(allocator, out, m) catch return error.OutOfMemory;
+            return moveImageToPython(out) orelse error.OutOfMemory;
         }
-    }
-    return error.ImageNotInitialized;
+    }.apply);
 }
 
 fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                var out = @TypeOf(img).init(allocator, rows, cols) catch return error.OutOfMemory;
-                _ = img.letterbox(allocator, &out, method) catch {
-                    out.deinit(allocator);
-                    return error.OutOfMemory;
-                };
-                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
-                return wrapped;
-            },
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
+        fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
+            var out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
+            _ = img.letterbox(allocator, &out, m) catch {
+                out.deinit(allocator);
+                return error.OutOfMemory;
+            };
+            return moveImageToPython(out) orelse error.OutOfMemory;
         }
-        // Unreachable: switch returns in both cases
-        return error.OutOfMemory;
-    }
-    return error.ImageNotInitialized;
+    }.apply);
 }
 
 fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation) !*ImageObject {
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                var out = @TypeOf(img).init(allocator, size, size) catch return error.OutOfMemory;
-                _ = img.letterbox(allocator, &out, method) catch {
-                    out.deinit(allocator);
-                    return error.OutOfMemory;
-                };
-                const wrapped = moveImageToPython(out) orelse return error.OutOfMemory;
-                return wrapped;
-            },
-        }
-        return error.OutOfMemory;
-    }
-    return error.ImageNotInitialized;
+    return image_letterbox_shape(self, size, size, method);
 }
 
 // Transform functions
@@ -292,6 +270,7 @@ pub const image_rotate_doc =
 
 pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -310,19 +289,15 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     };
     const method = tagToInterpolation(tag_rotate);
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = img.rotate(allocator, @floatCast(angle), method) catch {
-                    py_utils.setMemoryError("image rotate");
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ angle, method }, struct {
+        fn apply(img: anytype, a: f64, m: Interpolation) ?*c.PyObject {
+            const out = img.rotate(allocator, @floatCast(a), m) catch {
+                py_utils.setMemoryError("image rotate");
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    }.apply);
 }
 
 pub const image_warp_doc =
@@ -352,6 +327,7 @@ pub const image_warp_doc =
 
 pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -365,12 +341,6 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const transform_obj = params.transform;
     const shape_obj = params.shape;
     const method_value = params.method;
-
-    // Check if image is initialized
-    if (self.py_image == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-        return null;
-    }
 
     const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch {
         py_utils.setValueError("Invalid interpolation method", .{});
@@ -404,14 +374,13 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         out_cols = py_utils.validatePositive(usize, cols_val, "cols") catch return null;
     }
 
-    // Apply warp using inline else to handle all image formats generically
-    switch (self.py_image.?.data) {
-        inline else => |img| {
-            var warped_img: @TypeOf(img) = .empty;
+    return self.py_image.?.dispatch(.{ transform_obj, method, out_rows, out_cols }, struct {
+        fn apply(img: anytype, t_obj: ?*c.PyObject, m: Interpolation, orows: usize, ocols: usize) ?*c.PyObject {
+            var warped_img: @TypeOf(img.*) = .empty;
 
             // Determine transform type and apply warp
-            if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
-                const transform = @as(*transforms.SimilarityTransformObject, @ptrCast(transform_obj));
+            if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
+                const transform = @as(*transforms.SimilarityTransformObject, @ptrCast(t_obj));
                 const zignal_transform: zignal.SimilarityTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
@@ -422,12 +391,12 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
-            } else if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
-                const transform = @as(*transforms.AffineTransformObject, @ptrCast(transform_obj));
+            } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
+                const transform = @as(*transforms.AffineTransformObject, @ptrCast(t_obj));
                 const zignal_transform: zignal.AffineTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
@@ -438,12 +407,12 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
-            } else if (c.PyObject_IsInstance(transform_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
-                const transform = @as(*transforms.ProjectiveTransformObject, @ptrCast(transform_obj));
+            } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
+                const transform = @as(*transforms.ProjectiveTransformObject, @ptrCast(t_obj));
                 const zignal_transform: zignal.ProjectiveTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]), @floatCast(transform.matrix[0][2]) },
@@ -451,7 +420,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{ @floatCast(transform.matrix[2][0]), @floatCast(transform.matrix[2][1]), @floatCast(transform.matrix[2][2]) },
                     }),
                 };
-                img.warp(allocator, zignal_transform, method, &warped_img, out_rows, out_cols) catch {
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
                     return null;
                 };
@@ -461,10 +430,8 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             }
 
             return @ptrCast(moveImageToPython(warped_img) orelse return null);
-        },
-    }
-    // Should not reach here because switch returns
-    return null;
+        }
+    }.apply);
 }
 
 pub const image_flip_left_right_doc =
@@ -479,22 +446,18 @@ pub const image_flip_left_right_doc =
 pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                var out = img.dupe(allocator) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-                    return null;
-                };
-                out.flipLeftRight();
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            var out = img.dupe(allocator) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return null;
+            };
+            out.flipLeftRight();
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    }.apply);
 }
 
 pub const image_flip_top_bottom_doc =
@@ -509,22 +472,18 @@ pub const image_flip_top_bottom_doc =
 pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                var out = img.dupe(allocator) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-                    return null;
-                };
-                out.flipTopBottom();
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            var out = img.dupe(allocator) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return null;
+            };
+            out.flipTopBottom();
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    }.apply);
 }
 
 pub const image_crop_doc =
@@ -547,6 +506,7 @@ pub const image_crop_doc =
 
 pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse Rectangle argument
     const Params = struct {
@@ -558,21 +518,15 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     // Parse the Rectangle object
     const rect = py_utils.parseRectangle(f32, params.rect) catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = img.crop(allocator, rect) catch {
-                    py_utils.setMemoryError("cropped image");
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{rect}, struct {
+        fn apply(img: anytype, r: zignal.Rectangle(f32)) ?*c.PyObject {
+            const out = img.crop(allocator, r) catch {
+                py_utils.setMemoryError("cropped image");
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    }.apply);
 }
 
 pub const image_extract_doc =
@@ -610,6 +564,7 @@ pub const image_extract_doc =
 
 pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -678,20 +633,16 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).init(allocator, out_rows, out_cols) catch {
-                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
-                    return null;
-                };
-                img.extract(rect, @floatCast(angle), out, method);
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method }, struct {
+        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: usize, ocols: usize, m: Interpolation) ?*c.PyObject {
+            const out = @TypeOf(img.*).init(allocator, orows, ocols) catch {
+                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+                return null;
+            };
+            img.extract(r, @floatCast(a), out, m);
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    }.apply);
 }
 
 pub const image_insert_doc =
@@ -724,6 +675,7 @@ pub const image_insert_doc =
 
 pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -770,75 +722,84 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     }
 
     // Variant-aware in-place insert
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            .gray => |*dst| {
-                var src_u8: Image(u8) = undefined;
-                if (source.py_image == null) {
-                    py_utils.setTypeError("initialized Image", source_obj);
-                    return null;
-                }
-                const src_pimg = source.py_image.?;
-                switch (src_pimg.data) {
-                    .gray => |img| src_u8 = img,
-                    .rgb => |img| src_u8 = img.convert(u8, allocator) catch {
+    switch (self.py_image.?.data) {
+        .gray => |*dst| {
+            const src_pimg = source.py_image orelse {
+                py_utils.setTypeError("initialized Image", source_obj);
+                return null;
+            };
+            switch (src_pimg.data) {
+                .gray => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+                .rgb => |img| {
+                    var src_converted = img.convert(u8, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                    .rgba => |img| src_u8 = img.convert(u8, allocator) catch {
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+                .rgba => |img| {
+                    var src_converted = img.convert(u8, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                }
-                defer src_u8.deinit(allocator);
-                dst.insert(src_u8, rect, @floatCast(angle), method, blend_mode);
-            },
-            .rgb => |*dst| {
-                var src_rgb: Image(Rgb) = undefined;
-                if (source.py_image == null) {
-                    py_utils.setTypeError("initialized Image", source_obj);
-                    return null;
-                }
-                const src_pimg = source.py_image.?;
-                switch (src_pimg.data) {
-                    .rgb => |img| src_rgb = img,
-                    .gray => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+            }
+        },
+        .rgb => |*dst| {
+            const src_pimg = source.py_image orelse {
+                py_utils.setTypeError("initialized Image", source_obj);
+                return null;
+            };
+            switch (src_pimg.data) {
+                .gray => |img| {
+                    var src_converted = img.convert(Rgb, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                    .rgba => |img| src_rgb = img.convert(Rgb, allocator) catch {
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+                .rgb => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+                .rgba => |img| {
+                    var src_converted = img.convert(Rgb, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                }
-                defer src_rgb.deinit(allocator);
-                dst.insert(src_rgb, rect, @floatCast(angle), method, blend_mode);
-            },
-            .rgba => |*dst| {
-                var src_rgba: Image(Rgba) = undefined;
-                if (source.py_image == null) {
-                    py_utils.setTypeError("initialized Image", source_obj);
-                    return null;
-                }
-                const src_pimg = source.py_image.?;
-                switch (src_pimg.data) {
-                    .rgba => |img| src_rgba = img,
-                    .gray => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+            }
+        },
+        .rgba => |*dst| {
+            const src_pimg = source.py_image orelse {
+                py_utils.setTypeError("initialized Image", source_obj);
+                return null;
+            };
+            switch (src_pimg.data) {
+                .gray => |img| {
+                    var src_converted = img.convert(Rgba, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                    .rgb => |img| src_rgba = img.convert(Rgba, allocator) catch {
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+                .rgb => |img| {
+                    var src_converted = img.convert(Rgba, allocator) catch {
                         py_utils.setMemoryError("source image conversion");
                         return null;
-                    },
-                }
-                dst.insert(src_rgba, rect, @floatCast(angle), method, blend_mode);
-            },
-        }
-        const none = c.Py_None();
-        c.Py_INCREF(none);
-        return none;
+                    };
+                    defer src_converted.deinit(allocator);
+                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                },
+                .rgba => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+            }
+        },
     }
-    c.PyErr_SetString(c.PyExc_ValueError, "Image not initialized");
-    return null;
+    const none = c.Py_None();
+    c.Py_INCREF(none);
+    return none;
 }

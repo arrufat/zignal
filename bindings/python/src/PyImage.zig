@@ -116,4 +116,15 @@ pub const PyImage = struct {
             },
         }
     }
+
+    /// Dispatch an operation to the underlying image variant.
+    /// func is a generic function that takes the underlying image pointer as its first argument,
+    /// followed by any arguments in ctx.
+    pub fn dispatch(self: *PyImage, ctx: anytype, comptime func: anytype) @TypeOf(@call(.auto, func, .{@as(*Image(u8), undefined)} ++ ctx)) {
+        return switch (self.data) {
+            .gray => |*img| @call(.auto, func, .{img} ++ ctx),
+            .rgb => |*img| @call(.auto, func, .{img} ++ ctx),
+            .rgba => |*img| @call(.auto, func, .{img} ++ ctx),
+        };
+    }
 };

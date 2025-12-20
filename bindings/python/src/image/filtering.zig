@@ -5,6 +5,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
 const Gray = zignal.Gray(u8);
 const MotionBlur = zignal.MotionBlur;
 
@@ -33,6 +34,7 @@ pub const image_box_blur_doc =
 
 pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { radius: c_long };
     var params: Params = undefined;
@@ -40,24 +42,19 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
     const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.boxBlur(allocator, @intCast(radius), out) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{radius}, struct {
+        fn apply(img: anytype, r: u32) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.boxBlur(allocator, @intCast(r), out) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_median_blur_doc =
@@ -78,6 +75,7 @@ pub const image_median_blur_doc =
 
 pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { radius: c_long };
     var params: Params = undefined;
@@ -85,28 +83,23 @@ pub fn image_median_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
 
     const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.medianBlur(allocator, @intCast(radius), out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
-                        error.UnsupportedPixelType => py_utils.setValueError("median blur requires u8, RGB, or RGBA images", .{}),
-                        else => py_utils.setMemoryError("image operation"),
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{radius}, struct {
+        fn apply(img: anytype, r: u32) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.medianBlur(allocator, @intCast(r), out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("median blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_min_blur_doc =
@@ -122,6 +115,7 @@ pub const image_min_blur_doc =
 
 pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         radius: c_long,
@@ -140,34 +134,23 @@ pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.minBlur(allocator, @intCast(radius), border, out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => {
-                            py_utils.setValueError("radius must be > 0", .{});
-                        },
-                        error.UnsupportedPixelType => {
-                            py_utils.setValueError("min blur requires u8, RGB, or RGBA images", .{});
-                        },
-                        else => {
-                            py_utils.setMemoryError("image operation");
-                        },
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ radius, border }, struct {
+        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.minBlur(allocator, @intCast(r), b, out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("min blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_max_blur_doc =
@@ -183,6 +166,7 @@ pub const image_max_blur_doc =
 
 pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         radius: c_long,
@@ -201,34 +185,23 @@ pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.maxBlur(allocator, @intCast(radius), border, out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => {
-                            py_utils.setValueError("radius must be > 0", .{});
-                        },
-                        error.UnsupportedPixelType => {
-                            py_utils.setValueError("max blur requires u8, RGB, or RGBA images", .{});
-                        },
-                        else => {
-                            py_utils.setMemoryError("image operation");
-                        },
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ radius, border }, struct {
+        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.maxBlur(allocator, @intCast(r), b, out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("max blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_midpoint_blur_doc =
@@ -244,6 +217,7 @@ pub const image_midpoint_blur_doc =
 
 pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         radius: c_long,
@@ -262,34 +236,23 @@ pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
         border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.midpointBlur(allocator, @intCast(radius), border, out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => {
-                            py_utils.setValueError("radius must be > 0", .{});
-                        },
-                        error.UnsupportedPixelType => {
-                            py_utils.setValueError("midpoint blur requires u8, RGB, or RGBA images", .{});
-                        },
-                        else => {
-                            py_utils.setMemoryError("image operation");
-                        },
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ radius, border }, struct {
+        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.midpointBlur(allocator, @intCast(r), b, out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("midpoint blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_percentile_blur_doc =
@@ -313,6 +276,7 @@ pub const image_percentile_blur_doc =
 
 pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         radius: c_long,
@@ -333,29 +297,24 @@ pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
         border_mode = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.percentileBlur(allocator, @intCast(radius), percentile_value, border_mode, out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
-                        error.InvalidPercentile => py_utils.setValueError("percentile must be between 0 and 1", .{}),
-                        error.UnsupportedPixelType => py_utils.setValueError("percentile blur requires u8, RGB, or RGBA images", .{}),
-                        else => py_utils.setMemoryError("image operation"),
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ radius, percentile_value, border_mode }, struct {
+        fn apply(img: anytype, r: u32, p: f64, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.percentileBlur(allocator, @intCast(r), p, b, out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.InvalidPercentile => py_utils.setValueError("percentile must be between 0 and 1", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("percentile blur requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_alpha_trimmed_mean_blur_doc =
@@ -372,6 +331,7 @@ pub const image_alpha_trimmed_mean_blur_doc =
 
 pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         radius: c_long,
@@ -396,39 +356,24 @@ pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject,
         border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
     }
 
-    const trim_fraction = params.trim_fraction;
-
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.alphaTrimmedMeanBlur(allocator, @intCast(radius), trim_fraction, border, out) catch |err| {
-                    switch (err) {
-                        error.InvalidRadius => {
-                            py_utils.setValueError("radius must be > 0", .{});
-                        },
-                        error.InvalidTrim => {
-                            py_utils.setValueError("trim_fraction must be in [0, 0.5)", .{});
-                        },
-                        error.UnsupportedPixelType => {
-                            py_utils.setValueError("alpha trimmed mean requires u8, RGB, or RGBA images", .{});
-                        },
-                        else => {
-                            py_utils.setMemoryError("image operation");
-                        },
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{ radius, params.trim_fraction, border }, struct {
+        fn apply(img: anytype, r: u32, tf: f64, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.alphaTrimmedMeanBlur(allocator, @intCast(r), tf, b, out) catch |err| {
+                switch (err) {
+                    error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
+                    error.InvalidTrim => py_utils.setValueError("trim_fraction must be in [0, 0.5)", .{}),
+                    error.UnsupportedPixelType => py_utils.setValueError("alpha trimmed mean requires u8, RGB, or RGBA images", .{}),
+                    else => py_utils.setMemoryError("image operation"),
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_gaussian_blur_doc =
@@ -447,6 +392,7 @@ pub const image_gaussian_blur_doc =
 
 pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { sigma: f64 };
     var params: Params = undefined;
@@ -459,28 +405,23 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     }
     const sigma_pos = py_utils.validatePositive(f64, params.sigma, "sigma") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
+    return self.py_image.?.dispatch(.{sigma_pos}, struct {
+        fn apply(img: anytype, s: f64) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.gaussianBlur(allocator, @floatCast(s), out) catch |err| {
+                if (err == error.InvalidSigma) {
+                    py_utils.setValueError("Invalid sigma value", .{});
+                } else {
                     py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.gaussianBlur(allocator, @floatCast(sigma_pos), out) catch |err| {
-                    if (err == error.InvalidSigma) {
-                        py_utils.setValueError("Invalid sigma value", .{});
-                    } else {
-                        py_utils.setMemoryError("image operation");
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_invert_doc =
@@ -505,23 +446,18 @@ pub const image_invert_doc =
 pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                var out = img.dupe(allocator) catch {
-                    py_utils.setMemoryError("image data");
-                    return null;
-                };
-                out.invert();
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            var out = img.dupe(allocator) catch {
+                py_utils.setMemoryError("image data");
+                return null;
+            };
+            out.invert();
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_sharpen_doc =
@@ -540,6 +476,7 @@ pub const image_sharpen_doc =
 
 pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { radius: c_long };
     var params: Params = undefined;
@@ -547,24 +484,19 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     const radius = py_utils.validateNonNegative(u32, params.radius, "radius") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.sharpen(allocator, @intCast(radius), out) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{radius}, struct {
+        fn apply(img: anytype, r: u32) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.sharpen(allocator, @intCast(r), out) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_autocontrast_doc =
@@ -595,6 +527,7 @@ pub const image_autocontrast_doc =
 
 pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { cutoff: f64 = 0.0 };
     var params: Params = undefined;
@@ -608,22 +541,18 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
 
     const cutoff: f32 = @floatCast(params.cutoff);
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                // Make a copy since autocontrast now works in-place
-                var out = img.dupe(allocator) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                // we already checked for the cutoff value
-                out.autocontrast(cutoff) catch unreachable;
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{cutoff}, struct {
+        fn apply(img: anytype, c_off: f32) ?*c.PyObject {
+            // Make a copy since autocontrast now works in-place
+            var out = img.dupe(allocator) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            // we already checked for the cutoff value
+            out.autocontrast(c_off) catch unreachable;
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_equalize_doc =
@@ -660,23 +589,20 @@ pub const image_equalize_doc =
 
 pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Apply equalization
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                // Make a copy since equalize now works in-place
-                var out = img.dupe(allocator) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                out.equalize();
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            // Make a copy since equalize now works in-place
+            var out = img.dupe(allocator) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            out.equalize();
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_motion_blur_doc =
@@ -719,6 +645,8 @@ pub const image_motion_blur_doc =
 
 pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
     const motion_blur = @import("../motion_blur.zig");
 
     const Params = struct { config: ?*c.PyObject };
@@ -739,50 +667,45 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     // Cast to MotionBlurObject to access the blur_type discriminator
     const blur_obj = @as(*motion_blur.MotionBlurObject, @ptrCast(config_obj));
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = @TypeOf(img).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
+    return self.py_image.?.dispatch(.{blur_obj}, struct {
+        fn apply(img: anytype, bo: *motion_blur.MotionBlurObject) ?*c.PyObject {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
 
-                // Create the appropriate MotionBlur config based on the type
-                const blur_config: MotionBlur = switch (blur_obj.blur_type) {
-                    .linear => .{
-                        .linear = .{
-                            .angle = @floatCast(blur_obj.angle),
-                            .distance = @intCast(blur_obj.distance),
-                        },
+            // Create the appropriate MotionBlur config based on the type
+            const blur_config: MotionBlur = switch (bo.blur_type) {
+                .linear => .{
+                    .linear = .{
+                        .angle = @floatCast(bo.angle),
+                        .distance = @intCast(bo.distance),
                     },
-                    .radial_zoom => .{
-                        .radial_zoom = .{
-                            .center_x = @floatCast(blur_obj.center_x),
-                            .center_y = @floatCast(blur_obj.center_y),
-                            .strength = @floatCast(blur_obj.strength),
-                        },
+                },
+                .radial_zoom => .{
+                    .radial_zoom = .{
+                        .center_x = @floatCast(bo.center_x),
+                        .center_y = @floatCast(bo.center_y),
+                        .strength = @floatCast(bo.strength),
                     },
-                    .radial_spin => .{
-                        .radial_spin = .{
-                            .center_x = @floatCast(blur_obj.center_x),
-                            .center_y = @floatCast(blur_obj.center_y),
-                            .strength = @floatCast(blur_obj.strength),
-                        },
+                },
+                .radial_spin => .{
+                    .radial_spin = .{
+                        .center_x = @floatCast(bo.center_x),
+                        .center_y = @floatCast(bo.center_y),
+                        .strength = @floatCast(bo.strength),
                     },
-                };
+                },
+            };
 
-                img.motionBlur(allocator, blur_config, out) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
+            img.motionBlur(allocator, blur_config, out) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
 
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_sobel_doc =
@@ -801,26 +724,21 @@ pub const image_sobel_doc =
 pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = Image(u8).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.sobel(allocator, out) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            const out = Image(u8).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.sobel(allocator, out) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-        return null;
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_shen_castan_doc =
@@ -863,6 +781,7 @@ pub const image_shen_castan_doc =
 
 pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         smooth: f64 = 0.9,
@@ -897,66 +816,53 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         return null;
     }
 
-    const smooth = params.smooth;
-    const window_size = params.window_size;
-    const high_ratio = params.high_ratio;
-    const low_rel = params.low_rel;
-    const hysteresis = params.hysteresis;
-    const use_nms = params.use_nms;
-
-    if (self.py_image) |pimg| {
-        // Additional validation: window_size should not exceed image dimensions
-        const rows = pimg.rows();
-        const cols = pimg.cols();
-        const max_window = @min(rows, cols);
-        if (window_size > max_window) {
-            const msg = std.fmt.allocPrint(allocator, "window_size ({d}) cannot exceed minimum image dimension ({d})\x00", .{ window_size, max_window }) catch {
-                c.PyErr_SetString(c.PyExc_ValueError, "window_size too large for image dimensions");
-                return null;
-            };
-            defer allocator.free(msg);
-            c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+    // Additional validation: window_size should not exceed image dimensions
+    const rows = self.py_image.?.rows();
+    const cols = self.py_image.?.cols();
+    const max_window = @min(rows, cols);
+    if (params.window_size > max_window) {
+        const msg = std.fmt.allocPrint(allocator, "window_size ({d}) cannot exceed minimum image dimension ({d})\x00", .{ params.window_size, max_window }) catch {
+            c.PyErr_SetString(c.PyExc_ValueError, "window_size too large for image dimensions");
             return null;
-        }
-
-        // Create the simplified ShenCastan configuration
-        const opts = zignal.ShenCastan{
-            .smooth = @floatCast(smooth),
-            .window_size = @intCast(window_size),
-            .high_ratio = @floatCast(high_ratio),
-            .low_rel = @floatCast(low_rel),
-            .hysteresis = hysteresis != 0,
-            .use_nms = use_nms != 0,
         };
-
-        // Apply Shen-Castan edge detection
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = Image(u8).initLike(allocator, img) catch {
-                    py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.shenCastan(allocator, opts, out) catch |err| {
-                    if (err == error.InvalidBParameter) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
-                    } else if (err == error.WindowSizeMustBeOdd) {
-                        py_utils.setValueError("window_size must be odd", .{});
-                    } else if (err == error.WindowSizeTooSmall) {
-                        py_utils.setValueError("window_size must be >= 3", .{});
-                    } else if (err == error.InvalidThreshold) {
-                        c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold parameters (high_ratio or low_rel out of range)");
-                    } else {
-                        c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for edge detection");
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
-        }
+        defer allocator.free(msg);
+        c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+        return null;
     }
 
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    // Create the simplified ShenCastan configuration
+    const opts = zignal.ShenCastan{
+        .smooth = @floatCast(params.smooth),
+        .window_size = @intCast(params.window_size),
+        .high_ratio = @floatCast(params.high_ratio),
+        .low_rel = @floatCast(params.low_rel),
+        .hysteresis = params.hysteresis != 0,
+        .use_nms = params.use_nms != 0,
+    };
+
+    return self.py_image.?.dispatch(.{opts}, struct {
+        fn apply(img: anytype, o: zignal.ShenCastan) ?*c.PyObject {
+            const out = Image(u8).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.shenCastan(allocator, o, out) catch |err| {
+                if (err == error.InvalidBParameter) {
+                    c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
+                } else if (err == error.WindowSizeMustBeOdd) {
+                    py_utils.setValueError("window_size must be odd", .{});
+                } else if (err == error.WindowSizeTooSmall) {
+                    py_utils.setValueError("window_size must be >= 3", .{});
+                } else if (err == error.InvalidThreshold) {
+                    c.PyErr_SetString(c.PyExc_ValueError, "Invalid threshold parameters (high_ratio or low_rel out of range)");
+                } else {
+                    c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for edge detection");
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
+        }
+    }.apply);
 }
 
 pub const image_canny_doc =
@@ -1002,6 +908,7 @@ pub const image_canny_doc =
 
 pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         sigma: f64 = 1.4,
@@ -1030,33 +937,27 @@ pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         return null;
     }
 
-    if (self.py_image) |pimg| {
-        // Apply Canny edge detection
-        switch (pimg.data) {
-            inline else => |img| {
-                const out = Image(u8).initLike(allocator, img) catch {
+    return self.py_image.?.dispatch(.{ sigma, low, high }, struct {
+        fn apply(img: anytype, s: f32, l: f32, h: f32) ?*c.PyObject {
+            const out = Image(u8).initLike(allocator, img.*) catch {
+                py_utils.setMemoryError("image operation");
+                return null;
+            };
+            img.canny(allocator, s, l, h, out) catch |err| {
+                if (err == error.InvalidParameter) {
+                    py_utils.setValueError("parameters must be finite numbers", .{});
+                } else if (err == error.InvalidSigma) {
+                    py_utils.setValueError("sigma must be non-negative", .{});
+                } else if (err == error.InvalidThreshold) {
+                    py_utils.setValueError("thresholds are invalid", .{});
+                } else {
                     py_utils.setMemoryError("image operation");
-                    return null;
-                };
-                img.canny(allocator, sigma, low, high, out) catch |err| {
-                    if (err == error.InvalidParameter) {
-                        py_utils.setValueError("parameters must be finite numbers", .{});
-                    } else if (err == error.InvalidSigma) {
-                        py_utils.setValueError("sigma must be non-negative", .{});
-                    } else if (err == error.InvalidThreshold) {
-                        py_utils.setValueError("thresholds are invalid", .{});
-                    } else {
-                        py_utils.setMemoryError("image operation");
-                    }
-                    return null;
-                };
-                return @ptrCast(moveImageToPython(out) orelse return null);
-            },
+                }
+                return null;
+            };
+            return @ptrCast(moveImageToPython(out) orelse return null);
         }
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 pub const image_blend_doc =
@@ -1089,6 +990,7 @@ pub const image_blend_doc =
 
 pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         overlay: ?*c.PyObject,
@@ -1116,9 +1018,9 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         };
     }
 
-    // Both images must be initialized
-    if (self.py_image == null or overlay.py_image == null) {
-        c.PyErr_SetString(c.PyExc_ValueError, "Both images must be initialized");
+    // Overlay must be initialized
+    if (overlay.py_image == null) {
+        c.PyErr_SetString(c.PyExc_ValueError, "Overlay image must be initialized");
         return null;
     }
 
@@ -1126,12 +1028,7 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const overlay_pimg = overlay.py_image.?;
 
     // Check dimensions match
-    const self_rows = self_pimg.rows();
-    const self_cols = self_pimg.cols();
-    const overlay_rows = overlay_pimg.rows();
-    const overlay_cols = overlay_pimg.cols();
-
-    if (self_rows != overlay_rows or self_cols != overlay_cols) {
+    if (self_pimg.rows() != overlay_pimg.rows() or self_pimg.cols() != overlay_pimg.cols()) {
         c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
         return null;
     }
@@ -1148,8 +1045,8 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Perform the blend operation based on base image type
     switch (self_pimg.data) {
         .gray => |base_img| {
-            for (0..self_rows) |row| {
-                for (0..self_cols) |col| {
+            for (0..self_pimg.rows()) |row| {
+                for (0..self_pimg.cols()) |col| {
                     const base_pixel = base_img.at(row, col).*;
                     const base_rgb: Rgb = .{ .r = base_pixel, .g = base_pixel, .b = base_pixel };
                     base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).to(.gray).y;
@@ -1157,8 +1054,8 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
             }
         },
         inline .rgb, .rgba => |*base_img| {
-            for (0..self_rows) |row| {
-                for (0..self_cols) |col| {
+            for (0..self_pimg.rows()) |row| {
+                for (0..self_pimg.cols()) |col| {
                     base_img.at(row, col).* = base_img.at(row, col).blend(overlay_img.at(row, col).*, blend_mode);
                 }
             }

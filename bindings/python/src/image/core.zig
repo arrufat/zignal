@@ -284,6 +284,7 @@ pub const image_save_doc =
 
 pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { path: [*c]const u8 };
     var params: Params = undefined;
@@ -291,24 +292,19 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const path_slice = std.mem.span(params.path);
 
-    // Save image using the core library's save method which handles format detection
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| img.save(allocator, path_slice) catch |err| {
+    return self.py_image.?.dispatch(.{path_slice}, struct {
+        fn apply(img: anytype, path: []const u8) ?*c.PyObject {
+            img.save(allocator, path) catch |err| {
                 if (err == error.UnsupportedImageFormat) {
                     py_utils.setValueError("Unsupported image format. File must have a valid PNG or JPEG extension.", .{});
                     return null;
                 }
-                py_utils.setErrorWithPath(err, path_slice);
+                py_utils.setErrorWithPath(err, path);
                 return null;
-            },
+            };
+            return py_utils.getPyNone();
         }
-    } else {
-        py_utils.setValueError("Image not initialized", .{});
-        return null;
-    }
-
-    return py_utils.getPyNone();
+    }.apply);
 }
 
 // ============================================================================
@@ -333,22 +329,19 @@ pub const image_copy_doc =
 pub fn image_copy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| {
-                const copy = Image(@TypeOf(img.data[0])).init(allocator, img.rows, img.cols) catch {
-                    py_utils.setMemoryError("image data");
-                    return null;
-                };
-                img.copy(copy);
-                return @ptrCast(moveImageToPython(copy) orelse return null);
-            },
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            const T = @TypeOf(img.data[0]);
+            const copy = Image(T).init(allocator, img.rows, img.cols) catch {
+                py_utils.setMemoryError("image data");
+                return null;
+            };
+            img.copy(copy);
+            return @ptrCast(moveImageToPython(copy) orelse return null);
         }
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 // ============================================================================
@@ -374,23 +367,19 @@ pub const image_fill_doc =
 
 pub fn image_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { color: ?*c.PyObject };
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const color_obj = params.color;
-
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            inline else => |img| img.fill(parseColorTo(@TypeOf(img.data[0]), color_obj) catch return null),
+    return self.py_image.?.dispatch(.{params.color}, struct {
+        fn apply(img: anytype, color_obj: ?*c.PyObject) ?*c.PyObject {
+            const T = @TypeOf(img.data[0]);
+            img.fill(parseColorTo(T, color_obj) catch return null);
+            return py_utils.getPyNone();
         }
-    } else {
-        py_utils.setValueError("Image not initialized", .{});
-        return null;
-    }
-
-    return py_utils.getPyNone();
+    }.apply);
 }
 
 // ============================================================================
@@ -426,49 +415,28 @@ pub const image_view_doc =
 
 pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { rect: ?*c.PyObject = null };
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const rect_obj = params.rect;
+    const pimg_view = self.py_image.?.dispatch(.{params.rect}, struct {
+        fn apply(img: anytype, rect_obj: ?*c.PyObject) ?*PyImage {
+            if (rect_obj) |ro| {
+                const rect = py_utils.parseRectangle(usize, ro) catch return null;
+                return PyImage.createFrom(allocator, img.view(rect), .borrowed);
+            } else {
+                const full_rect = zignal.Rectangle(usize).init(0, 0, img.cols, img.rows);
+                return PyImage.createFrom(allocator, img.view(full_rect), .borrowed);
+            }
+        }
+    }.apply) orelse {
+        py_utils.setMemoryError("image view");
+        return null;
+    };
 
-    if (self.py_image) |pimg| {
-        // Create view based on current image type
-        const view_result = switch (pimg.data) {
-            inline else => |img| blk: {
-                if (rect_obj) |ro| {
-                    const rect = py_utils.parseRectangle(usize, ro) catch return null;
-                    break :blk PyImage.createFrom(allocator, img.view(rect), .borrowed);
-                } else {
-                    const full_rect = zignal.Rectangle(usize).init(0, 0, img.cols, img.rows);
-                    break :blk PyImage.createFrom(allocator, img.view(full_rect), .borrowed);
-                }
-            },
-        };
-
-        const pimg_view = view_result orelse {
-            py_utils.setMemoryError("image view");
-            return null;
-        };
-
-        // Create new Image object to wrap the view
-        const new_obj = c.PyType_GenericAlloc(@ptrCast(getImageType()), 0) orelse {
-            pimg_view.deinit(allocator);
-            return null;
-        };
-        const new_self = py_utils.safeCast(ImageObject, new_obj);
-        new_self.py_image = pimg_view;
-        new_self.numpy_ref = null;
-        // Keep reference to parent to prevent deallocation
-        c.Py_INCREF(self_obj);
-        new_self.parent_ref = self_obj;
-
-        return new_obj;
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    return @import("../image.zig").wrapPyImage(pimg_view, self_obj);
 }
 
 // ============================================================================
@@ -493,17 +461,15 @@ pub const image_is_contiguous_doc =
 pub fn image_is_contiguous(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    if (self.py_image) |pimg| {
-        const is_contig = switch (pimg.data) {
-            inline else => |img| img.isContiguous(),
-        };
+    const is_contig = self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) bool {
+            return img.isContiguous();
+        }
+    }.apply);
 
-        return @ptrCast(py_utils.getPyBool(is_contig));
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    return @ptrCast(py_utils.getPyBool(is_contig));
 }
 
 // ============================================================================
@@ -517,24 +483,19 @@ pub const image_get_rectangle_doc =
 pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ImageObject, self_obj);
-    if (self.py_image) |pimg| {
-        const rows = switch (pimg.data) {
-            inline else => |img| img.rows,
-        };
-        const cols = switch (pimg.data) {
-            inline else => |img| img.cols,
-        };
-        const left: f64 = 0.0;
-        const top: f64 = 0.0;
-        const right: f64 = @floatFromInt(cols);
-        const bottom: f64 = @floatFromInt(rows);
-        const args_tuple = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
-        defer c.Py_DECREF(args_tuple);
-        const rect_obj = c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
-        return rect_obj;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
+    return self.py_image.?.dispatch(.{}, struct {
+        fn apply(img: anytype) ?*c.PyObject {
+            const left: f64 = 0.0;
+            const top: f64 = 0.0;
+            const right: f64 = @floatFromInt(img.cols);
+            const bottom: f64 = @floatFromInt(img.rows);
+            const args_tuple = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
+            defer c.Py_DECREF(args_tuple);
+            return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
+        }
+    }.apply);
 }
 
 // ============================================================================
@@ -552,6 +513,7 @@ pub const image_convert_doc =
 
 pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { dtype: ?*c.PyObject };
     var params: Params = undefined;
@@ -595,83 +557,58 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    // Execute conversion using underlying Image(T).convert
-    if (self.py_image) |pimg| {
-        switch (pimg.data) {
-            .gray => |*img| {
-                if (target_gray) {
-                    // Same dtype: copy
+    return self.py_image.?.dispatch(.{ target_gray, target_rgb, target_rgba }, struct {
+        fn apply(img: anytype, t_gray: bool, t_rgb: bool, t_rgba: bool) ?*c.PyObject {
+            const T = @TypeOf(img.data[0]);
+            if (t_gray) {
+                if (T == u8) {
                     const out = Image(u8).init(allocator, img.rows, img.cols) catch {
                         py_utils.setMemoryError("image data");
                         return null;
                     };
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
-                } else if (target_rgb) {
-                    const out = img.convert(Rgb, allocator) catch {
-                        py_utils.setMemoryError("image conversion");
-                        return null;
-                    };
-                    return @ptrCast(moveImageToPython(out) orelse return null);
-                } else if (target_rgba) {
-                    const out = img.convert(Rgba, allocator) catch {
-                        py_utils.setMemoryError("image conversion");
-                        return null;
-                    };
-                    return @ptrCast(moveImageToPython(out) orelse return null);
-                }
-            },
-            .rgb => |*img| {
-                if (target_gray) {
+                } else {
                     const out = img.convert(u8, allocator) catch {
                         py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
-                } else if (target_rgb) {
+                }
+            } else if (t_rgb) {
+                if (T == Rgb) {
                     const out = Image(Rgb).init(allocator, img.rows, img.cols) catch {
                         py_utils.setMemoryError("image data");
                         return null;
                     };
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
-                } else if (target_rgba) {
+                } else {
+                    const out = img.convert(Rgb, allocator) catch {
+                        py_utils.setMemoryError("image conversion");
+                        return null;
+                    };
+                    return @ptrCast(moveImageToPython(out) orelse return null);
+                }
+            } else if (t_rgba) {
+                if (T == Rgba) {
+                    const out = Image(Rgba).init(allocator, img.rows, img.cols) catch {
+                        py_utils.setMemoryError("image data");
+                        return null;
+                    };
+                    img.copy(out);
+                    return @ptrCast(moveImageToPython(out) orelse return null);
+                } else {
                     const out = img.convert(Rgba, allocator) catch {
                         py_utils.setMemoryError("image conversion");
                         return null;
                     };
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 }
-            },
-            .rgba => |*img| {
-                if (target_gray) {
-                    const out = img.convert(u8, allocator) catch {
-                        py_utils.setMemoryError("image conversion");
-                        return null;
-                    };
-                    return @ptrCast(moveImageToPython(out) orelse return null);
-                } else if (target_rgb) {
-                    const out = img.convert(Rgb, allocator) catch {
-                        py_utils.setMemoryError("image conversion");
-                        return null;
-                    };
-                    const wrapped = moveImageToPython(out) orelse return null;
-                    return @ptrCast(wrapped);
-                } else if (target_rgba) {
-                    const out = Image(Rgba).init(allocator, img.rows, img.cols) catch {
-                        py_utils.setMemoryError("image data");
-                        return null;
-                    };
-                    img.copy(out);
-                    const wrapped = moveImageToPython(out) orelse return null;
-                    return @ptrCast(wrapped);
-                }
-            },
+            }
+            return null;
         }
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
 
 // ============================================================================
@@ -732,6 +669,7 @@ pub const image_psnr_doc =
 
 pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { other: ?*c.PyObject };
     var params: Params = undefined;
@@ -744,37 +682,29 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     }
 
     const other = py_utils.safeCast(ImageObject, params.other);
+    py_utils.ensureInitialized(other, "py_image", "Other image not initialized") catch return null;
 
-    if (self.py_image == null or other.py_image == null) {
-        py_utils.setValueError("Both images must be initialized", .{});
-        return null;
-    }
+    const self_pimg = self.py_image.?;
+    const other_pimg = other.py_image.?;
 
-    // Check that images have compatible types
-    const self_type = switch (self.py_image.?.data) {
-        .gray => "gray",
-        .rgb => "rgb",
-        .rgba => "rgba",
-    };
-    const other_type = switch (other.py_image.?.data) {
-        .gray => "gray",
-        .rgb => "rgb",
-        .rgba => "rgba",
-    };
-
-    if (!std.mem.eql(u8, self_type, other_type)) {
+    if (std.meta.activeTag(self_pimg.data) != std.meta.activeTag(other_pimg.data)) {
         py_utils.setValueError("Images must have the same dtype for PSNR calculation", .{});
         return null;
     }
 
-    // Calculate PSNR based on image type
-    const psnr_value = switch (self.py_image.?.data) {
-        .gray => |img1| blk: {
-            const img2 = other.py_image.?.data.gray;
-            if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                py_utils.setValueError("Images must have the same dimensions", .{});
-                return null;
-            }
+    if (self_pimg.rows() != other_pimg.rows() or self_pimg.cols() != other_pimg.cols()) {
+        py_utils.setValueError("Images must have the same dimensions", .{});
+        return null;
+    }
+
+    const psnr_value = self_pimg.dispatch(.{other_pimg}, struct {
+        fn apply(img1: anytype, img2_p: *PyImage) f64 {
+            const T = @TypeOf(img1.data[0]);
+            const img2 = switch (img2_p.data) {
+                inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
+            };
+
+            const channels: f64 = comptime if (T == u8) 1.0 else if (T == Rgb) 3.0 else 4.0;
 
             // Calculate MSE
             var sum: f64 = 0.0;
@@ -782,71 +712,31 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 for (0..img1.cols) |col| {
                     const p1 = img1.at(r, col);
                     const p2 = img2.at(r, col);
-                    const diff = @as(f64, @floatFromInt(@as(i32, @intCast(p1.*)) - @as(i32, @intCast(p2.*))));
-                    sum += diff * diff;
+                    if (T == u8) {
+                        const diff = @as(f64, @floatFromInt(@as(i32, @intCast(p1.*)) - @as(i32, @intCast(p2.*))));
+                        sum += diff * diff;
+                    } else if (T == Rgb) {
+                        const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
+                        const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
+                        const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
+                        sum += dr * dr + dg * dg + db * db;
+                    } else { // Rgba
+                        const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
+                        const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
+                        const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
+                        const da = @as(f64, @floatFromInt(@as(i32, p1.a) - @as(i32, p2.a)));
+                        sum += dr * dr + dg * dg + db * db + da * da;
+                    }
                 }
             }
-            const mse = sum / @as(f64, @floatFromInt(img1.rows * img1.cols));
+            const mse = sum / (@as(f64, @floatFromInt(img1.rows * img1.cols)) * channels);
             if (mse == 0.0) {
-                break :blk std.math.inf(f64);
+                return std.math.inf(f64);
             }
             const max_pixel_value = 255.0;
-            break :blk 20.0 * std.math.log10(max_pixel_value / @sqrt(mse));
-        },
-        .rgb => |img1| blk: {
-            const img2 = other.py_image.?.data.rgb;
-            if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                py_utils.setValueError("Images must have the same dimensions", .{});
-                return null;
-            }
-
-            // Calculate MSE across all channels
-            var sum: f64 = 0.0;
-            for (0..img1.rows) |r| {
-                for (0..img1.cols) |col| {
-                    const p1 = img1.at(r, col);
-                    const p2 = img2.at(r, col);
-                    const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
-                    const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
-                    const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
-                    sum += dr * dr + dg * dg + db * db;
-                }
-            }
-            const mse = sum / @as(f64, @floatFromInt(img1.rows * img1.cols * 3));
-            if (mse == 0.0) {
-                break :blk std.math.inf(f64);
-            }
-            const max_pixel_value = 255.0;
-            break :blk 20.0 * std.math.log10(max_pixel_value / @sqrt(mse));
-        },
-        .rgba => |img1| blk: {
-            const img2 = other.py_image.?.data.rgba;
-            if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                py_utils.setValueError("Images must have the same dimensions", .{});
-                return null;
-            }
-
-            // Calculate MSE across all channels including alpha
-            var sum: f64 = 0.0;
-            for (0..img1.rows) |r| {
-                for (0..img1.cols) |col| {
-                    const p1 = img1.at(r, col);
-                    const p2 = img2.at(r, col);
-                    const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
-                    const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
-                    const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
-                    const da = @as(f64, @floatFromInt(@as(i32, p1.a) - @as(i32, p2.a)));
-                    sum += dr * dr + dg * dg + db * db + da * da;
-                }
-            }
-            const mse = sum / @as(f64, @floatFromInt(img1.rows * img1.cols * 4));
-            if (mse == 0.0) {
-                break :blk std.math.inf(f64);
-            }
-            const max_pixel_value = 255.0;
-            break :blk 20.0 * std.math.log10(max_pixel_value / @sqrt(mse));
-        },
-    };
+            return 20.0 * std.math.log10(max_pixel_value / @sqrt(mse));
+        }
+    }.apply);
 
     return c.PyFloat_FromDouble(psnr_value);
 }
@@ -881,6 +771,7 @@ pub const image_ssim_doc =
 
 pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { other: ?*c.PyObject };
     var params: Params = undefined;
@@ -892,55 +783,39 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     }
 
     const other = py_utils.safeCast(ImageObject, params.other);
+    py_utils.ensureInitialized(other, "py_image", "Other image not initialized") catch return null;
 
-    if (self.py_image == null or other.py_image == null) {
-        py_utils.setValueError("Both images must be initialized", .{});
-        return null;
-    }
-
-    const self_tag = std.meta.activeTag(self.py_image.?.data);
-    const other_tag = std.meta.activeTag(other.py_image.?.data);
-    if (self_tag != other_tag) {
+    if (std.meta.activeTag(self.py_image.?.data) != std.meta.activeTag(other.py_image.?.data)) {
         py_utils.setValueError("Images must have the same dtype for SSIM calculation", .{});
         return null;
     }
 
-    const min_size_error = "Images must be at least 11x11 for SSIM";
+    const other_pimg = other.py_image.?;
 
-    const other_variant = other.py_image.?.data;
-    const ssim_value = switch (self.py_image.?.data) {
-        inline else => |img1| blk: {
-            const img2 = switch (other_variant) {
-                inline else => |img| variant_blk: {
-                    if (@TypeOf(img) != @TypeOf(img1)) unreachable;
-                    break :variant_blk img;
-                },
+    if (self.py_image.?.rows() != other_pimg.rows() or self.py_image.?.cols() != other_pimg.cols()) {
+        py_utils.setValueError("Images must have the same dimensions", .{});
+        return null;
+    }
+
+    const ssim_value = self.py_image.?.dispatch(.{other_pimg}, struct {
+        fn apply(img1: anytype, img2_p: *PyImage) ?f64 {
+            const img2 = switch (img2_p.data) {
+                inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
 
-            if (img1.rows != img2.rows or img1.cols != img2.cols) {
-                py_utils.setValueError("Images must have the same dimensions", .{});
-                return null;
-            }
             if (img1.rows < 11 or img1.cols < 11) {
-                py_utils.setValueError(min_size_error, .{});
+                py_utils.setValueError("Images must be at least 11x11 for SSIM", .{});
                 return null;
             }
 
-            const result = img1.ssim(img2) catch |err| switch (err) {
-                error.ImageTooSmall => {
-                    py_utils.setValueError(min_size_error, .{});
-                    return null;
-                },
-                else => {
-                    py_utils.setZigError(err);
-                    return null;
-                },
+            return img1.ssim(img2.*) catch |err| {
+                py_utils.setZigError(err);
+                return null;
             };
-            break :blk result;
-        },
-    };
+        }
+    }.apply);
 
-    return c.PyFloat_FromDouble(ssim_value);
+    return if (ssim_value) |val| c.PyFloat_FromDouble(val) else null;
 }
 
 // ============================================================================
@@ -970,6 +845,7 @@ pub const image_mean_pixel_error_doc =
 
 pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct { other: ?*c.PyObject };
     var params: Params = undefined;
@@ -981,35 +857,37 @@ pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     }
 
     const other = py_utils.safeCast(ImageObject, params.other);
-    if (self.py_image == null or other.py_image == null) {
-        py_utils.setValueError("Both images must be initialized", .{});
-        return null;
-    }
+    py_utils.ensureInitialized(other, "py_image", "Other image not initialized") catch return null;
 
-    const self_tag = std.meta.activeTag(self.py_image.?.data);
-    const other_tag = std.meta.activeTag(other.py_image.?.data);
-    if (self_tag != other_tag) {
+    if (std.meta.activeTag(self.py_image.?.data) != std.meta.activeTag(other.py_image.?.data)) {
         py_utils.setValueError("Images must have the same dtype for mean pixel error", .{});
         return null;
     }
 
-    const other_variant = other.py_image.?.data;
-    const error_value = switch (self.py_image.?.data) {
-        inline else => |img1| blk: {
-            const img2 = switch (other_variant) {
-                inline else => |img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
-            };
-            const val = img1.meanPixelError(img2) catch |err| switch (err) {
-                error.DimensionMismatch => {
-                    py_utils.setValueError("Images must have the same dimensions", .{});
-                    return null;
-                },
-            };
-            break :blk val;
-        },
-    };
+    const other_pimg = other.py_image.?;
 
-    return c.PyFloat_FromDouble(error_value);
+    if (self.py_image.?.rows() != other_pimg.rows() or self.py_image.?.cols() != other_pimg.cols()) {
+        py_utils.setValueError("Images must have the same dimensions", .{});
+        return null;
+    }
+
+    const error_value = self.py_image.?.dispatch(.{other_pimg}, struct {
+        fn apply(img1: anytype, img2_p: *PyImage) ?f64 {
+            const img2 = switch (img2_p.data) {
+                inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
+            };
+            return img1.meanPixelError(img2.*) catch |err| {
+                if (err == error.DimensionMismatch) {
+                    py_utils.setValueError("Images must have the same dimensions", .{});
+                } else {
+                    py_utils.setZigError(err);
+                }
+                return null;
+            };
+        }
+    }.apply);
+
+    return if (error_value) |val| c.PyFloat_FromDouble(val) else null;
 }
 
 // ============================================================================
@@ -1019,44 +897,31 @@ pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 pub fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = py_utils.safeCast(ImageObject, self_obj);
-    if (self.py_image) |pimg| {
-        const rows = switch (pimg.data) {
-            inline else => |img| img.rows,
-        };
-        return c.PyLong_FromSize_t(rows);
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    return c.PyLong_FromSize_t(self.py_image.?.rows());
 }
 
 pub fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = py_utils.safeCast(ImageObject, self_obj);
-    if (self.py_image) |pimg| {
-        const cols = switch (pimg.data) {
-            inline else => |img| img.cols,
-        };
-        return c.PyLong_FromSize_t(cols);
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    return c.PyLong_FromSize_t(self.py_image.?.cols());
 }
 
 pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = py_utils.safeCast(ImageObject, self_obj);
-    if (self.py_image) |pimg| {
-        const dtype_obj = switch (pimg.data) {
-            .gray => @as(*c.PyObject, @ptrCast(&color_bindings.GrayType)),
-            .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.RgbType)),
-            .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType)),
-        };
-        c.Py_INCREF(dtype_obj);
-        return dtype_obj;
-    }
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
+    const dtype_obj = switch (self.py_image.?.data) {
+        .gray => @as(*c.PyObject, @ptrCast(&color_bindings.GrayType)),
+        .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.RgbType)),
+        .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType)),
+    };
+    c.Py_INCREF(dtype_obj);
+    return dtype_obj;
 }
+
 // ============================================================================
 // IMAGE SET_BORDER
 // ============================================================================
@@ -1088,6 +953,7 @@ pub const image_set_border_doc =
 
 pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = py_utils.safeCast(ImageObject, self_obj);
+    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const Params = struct {
         rect: ?*c.PyObject,
@@ -1097,24 +963,16 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
     const rect = py_utils.parseRectangle(usize, params.rect) catch return null;
-    const color_obj = params.color;
 
-    if (self.py_image) |pimg| {
-        if (color_obj) |cobj| {
-            switch (pimg.data) {
-                inline else => |img| img.setBorder(rect, parseColorTo(@TypeOf(img.data[0]), cobj) catch return null),
+    return self.py_image.?.dispatch(.{ rect, params.color }, struct {
+        fn apply(img: anytype, r: zignal.Rectangle(usize), color_obj: ?*c.PyObject) ?*c.PyObject {
+            const T = @TypeOf(img.data[0]);
+            if (color_obj) |cobj| {
+                img.setBorder(r, parseColorTo(T, cobj) catch return null);
+            } else {
+                img.setBorder(r, std.mem.zeroes(T));
             }
-        } else {
-            switch (pimg.data) {
-                inline else => |img| img.setBorder(rect, std.mem.zeroes(@TypeOf(img.data[0]))),
-            }
+            return py_utils.getPyNone();
         }
-
-        const none = c.Py_None();
-        c.Py_INCREF(none);
-        return none;
-    }
-
-    py_utils.setValueError("Image not initialized", .{});
-    return null;
+    }.apply);
 }
