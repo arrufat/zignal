@@ -2,7 +2,7 @@
     .name = .zignal,
     .version = "0.10.0-dev",
     .fingerprint = 0x5303c43db377b63a,
-    .minimum_zig_version = "0.16.0-dev.1412+8a73fc8d8",
+    .minimum_zig_version = "0.16.0-dev.1634+b27bdd5af",
     .dependencies = .{},
     .paths = .{
         "build.zig",

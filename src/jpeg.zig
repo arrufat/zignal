@@ -893,7 +893,9 @@ pub const Marker = enum(u16) {
 
     pub fn fromBytes(bytes: [2]u8) ?Marker {
         const value = (@as(u16, bytes[0]) << 8) | bytes[1];
-        return std.meta.intToEnum(Marker, value) catch null;
+        return inline for (std.meta.fields(Marker)) |f| {
+            if (value == f.value) break @enumFromInt(value);
+        } else null;
     }
 };
 

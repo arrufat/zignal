@@ -285,7 +285,7 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
 
     // Add Python include directory if provided via environment variable
     if (std.process.getEnvVarOwned(b.allocator, "PYTHON_INCLUDE_DIR")) |python_include| {
-        artifact.addIncludePath(.{ .cwd_relative = python_include });
+        artifact.root_module.addIncludePath(.{ .cwd_relative = python_include });
     } else |_| {
         // No Python include directory specified - will rely on system default paths
     }
@@ -295,7 +295,7 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
         .windows => {
             // On Windows, link against the Python library
             if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
-                artifact.addLibraryPath(.{ .cwd_relative = libs_dir });
+                artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
 
                 if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
                     // Remove the .lib extension for linkSystemLibrary
@@ -303,14 +303,14 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
                         lib_name[0 .. lib_name.len - 4]
                     else
                         lib_name;
-                    artifact.linkSystemLibrary(lib_name_no_ext);
+                    artifact.root_module.linkSystemLibrary(lib_name_no_ext, .{});
                 } else |_| {
                     // Fallback - try to link against a common Python library name
-                    artifact.linkSystemLibrary(python_lib);
+                    artifact.root_module.linkSystemLibrary(python_lib, .{});
                 }
             } else |_| {
                 // No Python library path provided - try system default
-                artifact.linkSystemLibrary(python_lib);
+                artifact.root_module.linkSystemLibrary(python_lib, .{});
             }
         },
         .macos => {
@@ -320,16 +320,16 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
 
             // Add library path if provided (needed during build)
             if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
-                artifact.addLibraryPath(.{ .cwd_relative = libs_dir });
+                artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
             } else |_| {
                 // No specific library path provided
             }
 
             // Link against Python library
             if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
-                artifact.linkSystemLibrary(lib_name);
+                artifact.root_module.linkSystemLibrary(lib_name, .{});
             } else |_| {
-                artifact.linkSystemLibrary(python_lib);
+                artifact.root_module.linkSystemLibrary(python_lib, .{});
             }
 
             // Add rpath for runtime library resolution
@@ -340,11 +340,11 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
             // delocate to fix the library dependencies after building
         },
         .linux => {
-            artifact.linkSystemLibrary(python_lib);
+            artifact.root_module.linkSystemLibrary(python_lib, .{});
         },
         else => {
             // Try the default for other platforms
-            artifact.linkSystemLibrary(python_lib);
+            artifact.root_module.linkSystemLibrary(python_lib, .{});
         },
     }
 }
