@@ -219,7 +219,7 @@ def test_lu_decomposition():
     assert set(result.keys()) == {"l", "u", "p", "sign"}
     assert isinstance(result["l"], zignal.Matrix)
     assert isinstance(result["u"], zignal.Matrix)
-    assert isinstance(result["p"], zignal.Matrix)
+    assert isinstance(result["p"], list)
     assert isinstance(result["sign"], float)
 
 
