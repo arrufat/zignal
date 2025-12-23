@@ -264,8 +264,8 @@ test "RGB image interpolation" {
     const val_bl = img.interpolate(0.5, 0.5, .bilinear);
     try std.testing.expect(val_bl != null);
     // Should be average of four corner pixels
-    try expectEqual(@as(u8, 42), val_bl.?.r); // Average of 0, 85, 0, 85
-    try expectEqual(@as(u8, 42), val_bl.?.g); // Average of 0, 0, 85, 85
+    try expectEqual(@as(u8, 43), val_bl.?.r); // Average of 0, 85, 0, 85
+    try expectEqual(@as(u8, 43), val_bl.?.g); // Average of 0, 0, 85, 85
     try expectEqual(@as(u8, 128), val_bl.?.b); // All are 128
 
     // Test Mitchell with RGB

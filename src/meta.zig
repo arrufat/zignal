@@ -20,7 +20,7 @@ pub inline fn as(comptime T: type, from: anytype) T {
         .float => {
             switch (@typeInfo(T)) {
                 .float => return @floatCast(from),
-                .int => return @intFromFloat(from),
+                .int => return @intFromFloat(@round(from)),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const meta = @import("../meta.zig");
 
 /// A unified point type supporting arbitrary dimensions with SIMD acceleration.
 /// Common dimensions 2D, 3D, 4D have convenient x(), y(), z(), w() accessors.
@@ -247,18 +248,9 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         // Type conversion
         /// Convert to point with different scalar type
         pub fn as(self: Self, comptime U: type) Point(dim, U) {
-            const source_info = @typeInfo(T);
-            const dest_info = @typeInfo(U);
             var result: @Vector(dim, U) = undefined;
             inline for (0..dim) |i| {
-                result[i] = if (source_info == .float and dest_info == .float)
-                    @floatCast(self.items[i])
-                else if (source_info == .int and dest_info == .int)
-                    @intCast(self.items[i])
-                else if (source_info == .float and dest_info == .int)
-                    @intFromFloat(self.items[i])
-                else // int to float
-                    @floatFromInt(self.items[i]);
+                result[i] = meta.as(U, self.items[i]);
             }
             return Point(dim, U){ .items = result };
         }

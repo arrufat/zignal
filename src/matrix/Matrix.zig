@@ -189,27 +189,6 @@ pub fn Matrix(comptime T: type) type {
             };
         }
 
-        /// Cast matrix elements to a different type (rounds when converting float to int)
-        pub fn cast(self: Self, comptime TargetType: type, allocator: std.mem.Allocator) !Matrix(TargetType) {
-            var result = try Matrix(TargetType).init(allocator, self.rows, self.cols);
-            for (self.items, 0..) |val, i| {
-                result.items[i] = switch (@typeInfo(TargetType)) {
-                    .int => switch (@typeInfo(T)) {
-                        .float => @intFromFloat(@round(val)),
-                        .int => @intCast(val),
-                        else => @compileError("Unsupported cast from " ++ @typeName(T) ++ " to " ++ @typeName(TargetType)),
-                    },
-                    .float => switch (@typeInfo(T)) {
-                        .float => @floatCast(val),
-                        .int => @floatFromInt(val),
-                        else => @compileError("Unsupported cast from " ++ @typeName(T) ++ " to " ++ @typeName(TargetType)),
-                    },
-                    else => @compileError("Target type must be numeric"),
-                };
-            }
-            return result;
-        }
-
         // ===== Chainable operations (return Self) =====
 
         /// Add another matrix element-wise

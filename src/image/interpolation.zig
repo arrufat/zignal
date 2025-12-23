@@ -33,6 +33,7 @@ const Allocator = std.mem.Allocator;
 
 const meta = @import("../meta.zig");
 const as = meta.as;
+const clamp = meta.clamp;
 const channel_ops = @import("channel_ops.zig");
 const Image = @import("../image.zig").Image;
 
@@ -306,14 +307,14 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     var temp: T = undefined;
     switch (@typeInfo(T)) {
         .int, .float => {
-            temp = as(T, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) +
+            temp = clamp(T, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) +
                 lr_frac * as(f32, tr)) +
                 tb_frac * ((1 - lr_frac) * as(f32, bl) +
                     lr_frac * as(f32, br)));
         },
         .@"struct" => {
             inline for (std.meta.fields(T)) |f| {
-                @field(temp, f.name) = as(
+                @field(temp, f.name) = clamp(
                     f.type,
                     (1 - tb_frac) * ((1 - lr_frac) * as(f32, @field(tl, f.name)) +
                         lr_frac * as(f32, @field(tr, f.name))) +
@@ -411,13 +412,7 @@ fn interpolateWithKernel(
             }
 
             const val = if (weight_sum != 0) sum / weight_sum else 0;
-            result = switch (@typeInfo(T)) {
-                .int => |int_info| if (int_info.signedness == .unsigned)
-                    @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(T))), val)))
-                else
-                    as(T, val),
-                else => as(T, val),
-            };
+            result = clamp(T, val);
         },
         .@"struct" => {
             inline for (std.meta.fields(T)) |f| {
@@ -436,13 +431,7 @@ fn interpolateWithKernel(
                 }
 
                 const val = if (weight_sum != 0) sum / weight_sum else 0;
-                @field(result, f.name) = switch (@typeInfo(f.type)) {
-                    .int => |int_info| if (int_info.signedness == .unsigned)
-                        @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(f.type))), val)))
-                    else
-                        as(f.type, val),
-                    else => as(f.type, val),
-                };
+                @field(result, f.name) = clamp(f.type, val);
             }
         },
         else => @compileError("Unsupported type for kernel interpolation: " ++ @typeName(T)),
