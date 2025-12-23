@@ -63,6 +63,9 @@ pub const MatrixError = error{
     InvalidArgument,
 };
 
+/// Recommended alignment for SIMD operations (64 bytes covers AVX-512)
+const simd_alignment = 64;
+
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
     return struct {
@@ -105,7 +108,7 @@ pub fn Matrix(comptime T: type) type {
 
         const Self = @This();
 
-        items: []T,
+        items: []align(simd_alignment) T,
         rows: usize,
         cols: usize,
         allocator: std.mem.Allocator,
@@ -120,7 +123,11 @@ pub fn Matrix(comptime T: type) type {
         };
 
         pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Self {
-            const data = try allocator.alloc(T, rows * cols);
+            const alignment = comptime blk: {
+                const log2_align = std.math.log2_int(usize, simd_alignment);
+                break :blk @as(std.mem.Alignment, @enumFromInt(log2_align));
+            };
+            const data = try allocator.alignedAlloc(T, alignment, rows * cols);
             return Self{
                 .items = data,
                 .rows = rows,
@@ -137,6 +144,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Cast the underlying items of the matrix from T to U.
         pub fn as(self: Self, allocator: std.mem.Allocator, comptime U: type) !Matrix(U) {
+            if (self.err) |e| return Matrix(U).errorMatrix(allocator, e);
             var result: Matrix(U) = try .init(allocator, self.rows, self.cols);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
@@ -627,26 +635,42 @@ pub fn Matrix(comptime T: type) type {
         ) void {
             comptime assert(@typeInfo(VecType) == .vector);
             const vec_len = @typeInfo(VecType).vector.len;
+            const alignment = @alignOf(VecType);
+
+            // Determine if we can use aligned loads for all rows.
+            // This requires:
+            // 1. Both base pointers are aligned to VecType.
+            // 2. The row stride (a_cols) is a multiple of the alignment (in elements).
+            const row_stride_aligned = (a_cols * @sizeOf(T)) % alignment == 0;
+            const all_aligned = row_stride_aligned;
+
             // Both matrices are now guaranteed to be accessed row-wise
             for (0..a_rows) |i| {
+                const a_row_offset = i * a_cols;
                 for (0..b_cols) |j| {
+                    const b_row_offset = j * a_cols;
                     var accumulator: T = 0;
 
                     // Process vec_len elements at once
                     var k: usize = 0;
-                    while (k + vec_len <= a_cols) : (k += vec_len) {
-                        // Load vectors from both matrices (both are row-major access)
-                        const a_vec: VecType = matrix_a.items[i * a_cols + k .. i * a_cols + k + vec_len][0..vec_len].*;
-                        const b_vec: VecType = matrix_b.items[j * a_cols + k .. j * a_cols + k + vec_len][0..vec_len].*;
-
-                        // Vectorized multiply-accumulate
-                        const prod_vec = a_vec * b_vec;
-                        accumulator += @reduce(.Add, prod_vec);
+                    if (all_aligned) {
+                        while (k + vec_len <= a_cols) : (k += vec_len) {
+                            const a_ptr: *const VecType = @ptrCast(@alignCast(&matrix_a.items[a_row_offset + k]));
+                            const b_ptr: *const VecType = @ptrCast(@alignCast(&matrix_b.items[b_row_offset + k]));
+                            accumulator += @reduce(.Add, a_ptr.* * b_ptr.*);
+                        }
+                    } else {
+                        while (k + vec_len <= a_cols) : (k += vec_len) {
+                            // Use unaligned loads (Zig's slice-to-vector dereference)
+                            const a_vec: VecType = matrix_a.items[a_row_offset + k .. a_row_offset + k + vec_len][0..vec_len].*;
+                            const b_vec: VecType = matrix_b.items[b_row_offset + k .. b_row_offset + k + vec_len][0..vec_len].*;
+                            accumulator += @reduce(.Add, a_vec * b_vec);
+                        }
                     }
 
                     // Handle remainder elements
                     while (k < a_cols) : (k += 1) {
-                        accumulator += matrix_a.at(i, k).* * matrix_b.at(j, k).*;
+                        accumulator += matrix_a.items[a_row_offset + k] * matrix_b.items[b_row_offset + k];
                     }
 
                     result.at(i, j).* += alpha * accumulator;
@@ -929,7 +953,7 @@ pub fn Matrix(comptime T: type) type {
         /// Helper to create an error matrix
         fn errorMatrix(allocator: std.mem.Allocator, err: MatrixError) Self {
             return Self{
-                .items = &.{},
+                .items = @as([*]align(simd_alignment) T, undefined)[0..0],
                 .rows = 0,
                 .cols = 0,
                 .allocator = allocator,
