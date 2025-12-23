@@ -48,7 +48,7 @@ test "Matrix LU decomposition" {
     // Apply permutation: PA[i,j] = A[p[i],j]
     for (0..3) |i| {
         for (0..3) |j| {
-            pa.at(i, j).* = mat.at(@intFromFloat(lu_result.p.items[i]), j).*;
+            pa.at(i, j).* = mat.at(lu_result.p.indices[i], j).*;
         }
     }
 
@@ -71,6 +71,21 @@ test "Matrix LU decomposition" {
         for (0..3) |j| {
             const diff = @abs(pa.at(i, j).* - lu_product.at(i, j).*);
             try std.testing.expect(diff < eps);
+        }
+    }
+
+    // Verify permutationMatrix() returns correct P such that PA = LU
+    var p_mat = try lu_result.permutationMatrix();
+    defer p_mat.deinit();
+
+    // Compute P * A
+    var pa_from_mat = try p_mat.dot(mat).eval();
+    defer pa_from_mat.deinit();
+
+    // Re-verify that rows of PA match rows of L*U (or permuted rows of A)
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(pa.at(i, j).*, pa_from_mat.at(i, j).*, eps);
         }
     }
 }
@@ -97,7 +112,7 @@ test "Matrix QR decomposition simple" {
     // Remove debug print
 
     // The largest column (column 2) should be first
-    try expectEqual(@as(usize, 2), qr_result.perm[0]);
+    try expectEqual(@as(usize, 2), qr_result.perm.indices[0]);
 }
 
 test "Matrix QR decomposition" {
@@ -176,7 +191,7 @@ test "Matrix QR decomposition" {
     // So we directly copy column perm[j] of A to position j of AP
     for (0..3) |i| {
         for (0..3) |j| {
-            ap.at(i, j).* = mat.at(i, qr_result.perm[j]).*;
+            ap.at(i, j).* = mat.at(i, qr_result.perm.indices[j]).*;
         }
     }
 
@@ -203,7 +218,7 @@ test "Matrix QR decomposition" {
     const relative_error = frobenius_error / a_norm;
     if (relative_error >= 1e-8) {
         std.debug.print("\nQR test failing with relative error: {}\n", .{relative_error});
-        std.debug.print("Permutation: {} {} {}\n", .{ qr_result.perm[0], qr_result.perm[1], qr_result.perm[2] });
+        std.debug.print("Permutation: {} {} {}\n", .{ qr_result.perm.indices[0], qr_result.perm.indices[1], qr_result.perm.indices[2] });
 
         // Let's check if it's an issue with our test by computing Q*R directly
         std.debug.print("\nDirect check - Q*R:\n", .{});
@@ -226,6 +241,21 @@ test "Matrix QR decomposition" {
 
     // Verify rank is computed correctly (should be 3 for this full-rank matrix)
     try expectEqual(@as(usize, 3), qr_result.rank);
+
+    // Verify permutationMatrix() returns correct P such that AP = QR
+    var p_mat = try qr_result.permutationMatrix();
+    defer p_mat.deinit();
+
+    // Compute A * P
+    var ap_from_mat = try mat.dot(p_mat).eval();
+    defer ap_from_mat.deinit();
+
+    // Re-verify that columns of AP match permuted columns of A
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(ap.at(i, j).*, ap_from_mat.at(i, j).*, 1e-10);
+        }
+    }
 
     // Verify columns are ordered by decreasing diagonal values in R (skip for now due to permutation complexity)
     // try std.testing.expect(@abs(qr_result.r.at(0, 0).*) >= @abs(qr_result.r.at(1, 1).*));
@@ -274,7 +304,7 @@ test "Matrix QR decomposition" {
 
     for (0..4) |i| {
         for (0..3) |j| {
-            rect_ap.at(i, j).* = rect_mat.at(i, rect_qr.perm[j]).*;
+            rect_ap.at(i, j).* = rect_mat.at(i, rect_qr.perm.indices[j]).*;
         }
     }
 
@@ -345,7 +375,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
 
     for (0..4) |i| {
         for (0..3) |j| {
-            ap.at(i, j).* = mat.at(i, qr_result.perm[j]).*;
+            ap.at(i, j).* = mat.at(i, qr_result.perm.indices[j]).*;
         }
     }
 

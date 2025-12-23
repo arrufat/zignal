@@ -1707,7 +1707,7 @@ const matrix_lu_doc =
     \\dict: Dictionary with keys:
     \\  - 'l': Lower triangular matrix
     \\  - 'u': Upper triangular matrix
-    \\  - 'p': Permutation vector (as Matrix)
+    \\  - 'p': Permutation vector (list of int)
     \\  - 'sign': Determinant sign (+1.0 or -1.0)
     \\
     \\## Raises
@@ -1737,31 +1737,35 @@ fn matrix_lu_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         c.Py_DECREF(result_dict);
         py_utils.setMemoryError("Matrix copy");
         return null;
-    });
+    }) orelse {
+        c.Py_DECREF(result_dict);
+        return null;
+    };
     const u_obj = matrixToObject(lu_result.u.dupe(allocator) catch {
+        c.Py_DECREF(l_obj);
         c.Py_DECREF(result_dict);
         py_utils.setMemoryError("Matrix copy");
         return null;
-    });
-    const p_obj = matrixToObject(lu_result.p.dupe(allocator) catch {
-        c.Py_DECREF(result_dict);
-        py_utils.setMemoryError("Matrix copy");
-        return null;
-    });
-
-    if (l_obj == null or u_obj == null or p_obj == null) {
+    }) orelse {
+        c.Py_DECREF(l_obj);
         c.Py_DECREF(result_dict);
         return null;
-    }
+    };
+    const p_list = py_utils.listFromSlice(usize, lu_result.p.indices) orelse {
+        c.Py_DECREF(l_obj);
+        c.Py_DECREF(u_obj);
+        c.Py_DECREF(result_dict);
+        return null;
+    };
 
     _ = c.PyDict_SetItemString(result_dict, "l", l_obj);
     _ = c.PyDict_SetItemString(result_dict, "u", u_obj);
-    _ = c.PyDict_SetItemString(result_dict, "p", p_obj);
+    _ = c.PyDict_SetItemString(result_dict, "p", p_list);
 
     const sign_obj = py_utils.convertToPython(lu_result.sign) orelse {
         c.Py_DECREF(l_obj);
         c.Py_DECREF(u_obj);
-        c.Py_DECREF(p_obj);
+        c.Py_DECREF(p_list);
         c.Py_DECREF(result_dict);
         return null;
     };
@@ -1770,7 +1774,7 @@ fn matrix_lu_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 
     c.Py_DECREF(l_obj);
     c.Py_DECREF(u_obj);
-    c.Py_DECREF(p_obj);
+    c.Py_DECREF(p_list);
 
     return result_dict;
 }
@@ -1807,17 +1811,20 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
         c.Py_DECREF(result_dict);
         py_utils.setMemoryError("Matrix copy");
         return null;
-    });
+    }) orelse {
+        c.Py_DECREF(result_dict);
+        return null;
+    };
     const r_obj = matrixToObject(qr_result.r.dupe(allocator) catch {
+        c.Py_DECREF(q_obj);
         c.Py_DECREF(result_dict);
         py_utils.setMemoryError("Matrix copy");
         return null;
-    });
-
-    if (q_obj == null or r_obj == null) {
+    }) orelse {
+        c.Py_DECREF(q_obj);
         c.Py_DECREF(result_dict);
         return null;
-    }
+    };
 
     _ = c.PyDict_SetItemString(result_dict, "q", q_obj);
     _ = c.PyDict_SetItemString(result_dict, "r", r_obj);
@@ -1832,7 +1839,7 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     c.Py_DECREF(rank_obj);
 
     // Convert permutation to Python list
-    const perm_list = py_utils.listFromSlice(usize, qr_result.perm) orelse {
+    const perm_list = py_utils.listFromSlice(usize, qr_result.perm.indices) orelse {
         c.Py_DECREF(q_obj);
         c.Py_DECREF(r_obj);
         c.Py_DECREF(result_dict);

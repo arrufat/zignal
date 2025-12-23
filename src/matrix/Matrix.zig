@@ -69,6 +69,40 @@ pub fn Matrix(comptime T: type) type {
         pub const SvdMode = svd_module.SvdMode;
         pub const SvdOptions = svd_module.SvdOptions;
         pub const SvdResult = svd_module.SvdResult;
+
+        pub const Permutation = struct {
+            pub const Mode = enum { row, column };
+
+            indices: []usize,
+            allocator: std.mem.Allocator,
+
+            pub fn deinit(self: *@This()) void {
+                self.allocator.free(self.indices);
+            }
+
+            /// Returns the permutation as a square matrix P.
+            /// For LU, PA = LU (use .row). For QR, AP = QR (use .column).
+            pub fn toMatrix(self: *const @This(), mode: Mode) !Matrix(T) {
+                const n = self.indices.len;
+                var p_mat = try Matrix(T).initAll(self.allocator, n, n, 0);
+                switch (mode) {
+                    .row => {
+                        // For PA = LU
+                        for (0..n) |i| {
+                            p_mat.at(i, self.indices[i]).* = 1;
+                        }
+                    },
+                    .column => {
+                        // For AP = QR
+                        for (0..n) |j| {
+                            p_mat.at(self.indices[j], j).* = 1;
+                        }
+                    },
+                }
+                return p_mat;
+            }
+        };
+
         const Self = @This();
 
         items: []T,
@@ -1169,7 +1203,7 @@ pub fn Matrix(comptime T: type) type {
         pub const LuResult = struct {
             l: Matrix(T), // Lower triangular matrix
             u: Matrix(T), // Upper triangular matrix
-            p: Matrix(T), // Permutation vector (nx1 matrix)
+            p: Permutation, // Permutation P such that PA = LU
             sign: T, // Determinant sign (+1 or -1)
 
             pub fn deinit(self: *@This()) void {
@@ -1177,14 +1211,20 @@ pub fn Matrix(comptime T: type) type {
                 self.u.deinit();
                 self.p.deinit();
             }
+
+            /// Returns the permutation as a matrix P such that PA = LU.
+            pub fn permutationMatrix(self: *const @This()) !Matrix(T) {
+                return self.p.toMatrix(.row);
+            }
         };
 
         /// Compute LU decomposition with partial pivoting
         /// Returns L, U matrices and permutation vector such that PA = LU
         pub fn lu(self: Self) !LuResult {
+            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             const n = self.rows;
-            assert(n == self.cols); // Must be square
+            if (n != self.cols) return error.NotSquare;
 
             // Create working copy
             var work: Matrix(T) = try .init(self.allocator, n, n);
@@ -1197,12 +1237,13 @@ pub fn Matrix(comptime T: type) type {
             var u: Matrix(T) = try .init(self.allocator, n, n);
             errdefer u.deinit();
 
-            // Initialize permutation vector
-            var p: Matrix(T) = try .init(self.allocator, n, 1);
-            errdefer p.deinit();
+            // Initialize permutation
+            const p_indices = try self.allocator.alloc(usize, n);
+            errdefer self.allocator.free(p_indices);
             for (0..n) |i| {
-                p.items[i] = @floatFromInt(i);
+                p_indices[i] = i;
             }
+            const p = Permutation{ .indices = p_indices, .allocator = self.allocator };
 
             // Initialize matrices
             @memset(l.items, 0);
@@ -1237,9 +1278,9 @@ pub fn Matrix(comptime T: type) type {
                 if (max_row != pivot_col) {
                     sign = -sign;
                     // Swap in permutation vector
-                    const temp_p = p.items[pivot_col];
-                    p.items[pivot_col] = p.items[max_row];
-                    p.items[max_row] = temp_p;
+                    const temp_p = p.indices[pivot_col];
+                    p.indices[pivot_col] = p.indices[max_row];
+                    p.indices[max_row] = temp_p;
 
                     // Swap rows in work matrix
                     for (0..n) |j| {
@@ -1285,9 +1326,10 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the determinant of the matrix using analytical formulas for small matrices
         /// and LU decomposition for larger matrices
         pub fn determinant(self: Self) !T {
+            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
-            assert(self.rows == self.cols);
-            assert(self.rows > 0);
+            if (self.rows != self.cols) return error.NotSquare;
+            if (self.rows == 0) return error.DimensionMismatch;
 
             const n = self.rows;
 
@@ -1318,7 +1360,7 @@ pub fn Matrix(comptime T: type) type {
         pub const QrResult = struct {
             q: Matrix(T), // Orthogonal matrix (m×n)
             r: Matrix(T), // Upper triangular matrix (n×n)
-            perm: []usize, // Column permutation indices (length n)
+            perm: Permutation, // Permutation P such that AP = QR
             rank: usize, // Numerical rank of the matrix
             col_norms: []T, // Final column norms after pivoting (diagnostic)
             allocator: std.mem.Allocator,
@@ -1326,22 +1368,13 @@ pub fn Matrix(comptime T: type) type {
             pub fn deinit(self: *@This()) void {
                 self.q.deinit();
                 self.r.deinit();
-                self.allocator.free(self.perm);
+                self.perm.deinit();
                 self.allocator.free(self.col_norms);
             }
 
-            /// Get the permutation as a matrix if needed
-            /// Since perm[j] tells us which original column is at position j,
-            /// the permutation matrix P should satisfy: A*P has column perm[j] of A at position j
+            /// Get the permutation as a matrix P such that AP = QR.
             pub fn permutationMatrix(self: *const @This()) !Matrix(T) {
-                const n = self.perm.len;
-                var p: Matrix(T) = try .initAll(self.allocator, n, n, 0);
-                // P[i,j] = 1 if original column i is at position j
-                // Since perm[j] = i means original column i is at position j
-                for (0..n) |j| {
-                    p.at(self.perm[j], j).* = 1;
-                }
-                return p;
+                return self.perm.toMatrix(.column);
             }
         };
 
@@ -1349,6 +1382,7 @@ pub fn Matrix(comptime T: type) type {
         /// Returns Q, R matrices and permutation such that A*P = Q*R where Q is orthogonal and R is upper triangular
         /// Also computes the numerical rank of the matrix
         pub fn qr(self: Self) !QrResult {
+            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             const m = self.rows;
             const n = self.cols;
@@ -1360,15 +1394,16 @@ pub fn Matrix(comptime T: type) type {
             errdefer r.deinit();
 
             // Initialize permutation and column norms
-            const perm = try self.allocator.alloc(usize, n);
-            errdefer self.allocator.free(perm);
+            const perm_indices = try self.allocator.alloc(usize, n);
+            errdefer self.allocator.free(perm_indices);
             const col_norms = try self.allocator.alloc(T, n);
             errdefer self.allocator.free(col_norms);
 
             // Initialize permutation as identity
             for (0..n) |i| {
-                perm[i] = i;
+                perm_indices[i] = i;
             }
+            const perm = Permutation{ .indices = perm_indices, .allocator = self.allocator };
 
             // Copy A to Q (will be modified in-place)
             @memcpy(q.items, self.items);
@@ -1428,9 +1463,9 @@ pub fn Matrix(comptime T: type) type {
                         r.at(i, max_col).* = temp;
                     }
                     // Swap in permutation
-                    const temp_perm = perm[k];
-                    perm[k] = perm[max_col];
-                    perm[max_col] = temp_perm;
+                    const temp_perm = perm.indices[k];
+                    perm.indices[k] = perm.indices[max_col];
+                    perm.indices[max_col] = temp_perm;
                     // Swap column norms
                     const temp_norm = col_norms[k];
                     col_norms[k] = col_norms[max_col];
@@ -1503,6 +1538,7 @@ pub fn Matrix(comptime T: type) type {
         /// The rank is determined by counting non-zero diagonal elements in R
         /// above a tolerance based on machine precision and matrix norm
         pub fn rank(self: Self) !usize {
+            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             // Compute QR decomposition with column pivoting
             var qr_result = try self.qr();
@@ -1530,8 +1566,9 @@ pub fn Matrix(comptime T: type) type {
         ///
         /// Requires rows >= cols. See `SvdOptions` for configuration details.
         pub fn svd(self: Self, allocator: std.mem.Allocator, options: SvdOptions) !SvdResult(T) {
+            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
-            std.debug.assert(self.rows >= self.cols);
+            if (self.rows < self.cols) return error.DimensionMismatch;
             return svd_module.svd(T, allocator, self, options);
         }
 
