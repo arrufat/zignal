@@ -36,7 +36,7 @@ fn getTypeName(comptime ColorType: type) []const u8 {
         if (full_name[i - 1] == '.') break;
     }
     const sliced = full_name[i..];
-    if (std.mem.indexOfScalar(u8, sliced, '(')) |paren| {
+    if (std.mem.findScalar(u8, sliced, '(')) |paren| {
         return sliced[0..paren];
     }
     return sliced;

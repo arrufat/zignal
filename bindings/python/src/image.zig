@@ -599,7 +599,7 @@ fn parseDimensions(dims_str: []const u8) !struct { width: ?u32, height: ?u32 } {
     }
 
     // Find the 'x' separator
-    const x_pos = std.mem.indexOf(u8, dims_str, "x") orelse return error.InvalidFormat;
+    const x_pos = std.mem.find(u8, dims_str, "x") orelse return error.InvalidFormat;
 
     // Parse width (before 'x')
     const width: ?u32 = if (x_pos == 0) null else blk: {

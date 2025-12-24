@@ -1177,7 +1177,7 @@ test "basic sixel encoding - 2x2 image" {
     try expect(std.mem.endsWith(u8, sixel_data, "\x1b\\"));
 
     // Verify it contains raster attributes (width;height)
-    try expect(std.mem.indexOf(u8, sixel_data, "\"") != null);
+    try expect(std.mem.find(u8, sixel_data, "\"") != null);
 }
 
 test "basic sixel encoding - verify palette format" {
@@ -1203,7 +1203,7 @@ test "basic sixel encoding - verify palette format" {
     defer allocator.free(sixel_data);
 
     // Verify palette entry format #P;R;G;B
-    try expect(std.mem.indexOf(u8, sixel_data, "#") != null);
+    try expect(std.mem.find(u8, sixel_data, "#") != null);
 }
 
 test "palette mode - fixed 6x7x6 color mapping" {
@@ -1228,7 +1228,7 @@ test "palette mode - fixed 6x7x6 color mapping" {
 
     // Basic validation - should have palette entries
     try expect(sixel_data.len > 0);
-    try expect(std.mem.indexOf(u8, sixel_data, "#0;2;0;0;0") != null); // Black
+    try expect(std.mem.find(u8, sixel_data, "#0;2;0;0;0") != null); // Black
 }
 
 test "palette mode - adaptive with color reduction" {
@@ -1270,9 +1270,9 @@ test "palette mode - adaptive with color reduction" {
     defer allocator.free(sixel_data);
 
     // Should have at most 4 colors in palette (0-3)
-    try expect(std.mem.indexOf(u8, sixel_data, "#0;") != null);
+    try expect(std.mem.find(u8, sixel_data, "#0;") != null);
     // Should not have color index 4 or higher
-    try expect(std.mem.indexOf(u8, sixel_data, "#4;") == null);
+    try expect(std.mem.find(u8, sixel_data, "#4;") == null);
 }
 
 test "edge case - single pixel image" {
@@ -1294,7 +1294,7 @@ test "edge case - single pixel image" {
     // Should produce valid sixel with proper structure
     try expect(std.mem.startsWith(u8, sixel_data, "\x1bP"));
     try expect(std.mem.endsWith(u8, sixel_data, "\x1b\\"));
-    try expect(std.mem.indexOf(u8, sixel_data, "\"1;1;") != null);
+    try expect(std.mem.find(u8, sixel_data, "\"1;1;") != null);
 }
 
 test "edge case - uniform color image" {
@@ -1320,6 +1320,6 @@ test "edge case - uniform color image" {
     defer allocator.free(sixel_data);
 
     // Should have only one color in adaptive palette
-    try expect(std.mem.indexOf(u8, sixel_data, "#0;") != null);
-    try expect(std.mem.indexOf(u8, sixel_data, "#1;") == null);
+    try expect(std.mem.find(u8, sixel_data, "#0;") != null);
+    try expect(std.mem.find(u8, sixel_data, "#1;") == null);
 }

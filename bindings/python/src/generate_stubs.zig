@@ -119,7 +119,7 @@ fn getClassNameFromType(comptime T: type) []const u8 {
         type_name;
 
     // Drop generic instantiation suffix like "Hsl(f64)"
-    if (std.mem.indexOfScalar(u8, base, '(')) |paren| {
+    if (std.mem.findScalar(u8, base, '(')) |paren| {
         return base[0..paren];
     }
     return base;
