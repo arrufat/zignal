@@ -235,10 +235,10 @@ test "imageToKitty basic functionality" {
     try testing.expect(std.mem.endsWith(u8, kitty_data, "\x1b\\"));
 
     // Should contain PNG format specifier
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "f=100") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "f=100") != null);
 
     // Should contain action=transmit
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "a=T") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "a=T") != null);
 }
 
 test "imageToKitty with options" {
@@ -262,10 +262,10 @@ test "imageToKitty with options" {
     defer allocator.free(kitty_data);
 
     // Check that options are included
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "q=2") != null);
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "i=42") != null);
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "p=7") != null);
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "d=1") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "q=2") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "i=42") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "p=7") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "d=1") != null);
 }
 
 test "imageToKitty with scaling" {
@@ -333,7 +333,7 @@ test "imageToKitty with chunking enabled" {
     // Expect multiple escape sequences when chunking is active
     try testing.expect(std.mem.count(u8, kitty_data, "\x1b_G") >= 2);
     // Continuation flag should be present for non-final chunks
-    try testing.expect(std.mem.indexOf(u8, kitty_data, "m=1") != null);
+    try testing.expect(std.mem.find(u8, kitty_data, "m=1") != null);
     // Ensure the final terminator is present
     try testing.expect(std.mem.endsWith(u8, kitty_data, "\x1b\\"));
 }

@@ -80,7 +80,7 @@ pub fn isKittySupported() !bool {
 
     // If we get a graphics query response, Kitty is supported
     // The response will contain "\x1b_G" if Kitty processed the graphics query
-    return std.mem.indexOf(u8, response, "\x1b_G") != null;
+    return std.mem.find(u8, response, "\x1b_G") != null;
 }
 
 /// Compute aspect-preserving scale factor given optional target width/height.
@@ -344,7 +344,7 @@ const State = struct {
 
                 // Look for positive response indicating sixel support
                 // Expected format: ESC P 1 $ r <params> ESC \
-                return response.len >= 4 and std.mem.indexOf(u8, response, "\x1bP") != null;
+                return response.len >= 4 and std.mem.find(u8, response, "\x1bP") != null;
             },
             .device_attributes => {
                 // Send Primary Device Attributes query

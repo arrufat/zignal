@@ -872,7 +872,7 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
     const font_name = if (font.name.len > 0) font.name else "Unknown";
 
     // If the font name looks like an XLFD name (contains dashes), use it directly
-    if (std.mem.indexOf(u8, font_name, "-") != null) {
+    if (std.mem.find(u8, font_name, "-") != null) {
         try list.appendSlice(allocator, "FONT ");
         try list.appendSlice(allocator, font_name);
         try list.appendSlice(allocator, "\n");
