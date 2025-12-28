@@ -1,19 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// Python embeds long-lived objects (module singletons, pytest fixtures), so
-// running the DebugAllocator at shutdown produces noisy "leaks". Use c_allocator
-// for the Python bindings to keep teardown clean.
-const use_debug_allocator = false;
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-pub const allocator = if (use_debug_allocator) debug_allocator.allocator() else std.heap.c_allocator;
-
-pub fn deinitAllocator() void {
-    if (use_debug_allocator) {
-        // Ignore LeakSummary; we just want to surface problems during shutdown.
-        _ = debug_allocator.deinit();
-    }
-}
+pub const ctx = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+}{
+    .io = std.Io.Threaded.global_single_threaded.ioBasic(),
+    .allocator = std.heap.c_allocator,
+};
 
 const zignal = @import("zignal");
 const Point = zignal.Point;
@@ -411,7 +405,7 @@ pub fn listFromPython(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T)
     const size = c.PySequence_Size(seq_obj);
     if (size < 0) return error.PythonError;
 
-    var list = std.ArrayList(T).init(allocator);
+    var list = std.ArrayList(T).init(ctx.allocator);
     errdefer list.deinit();
     try list.ensureTotalCapacity(@intCast(size));
 
@@ -674,11 +668,11 @@ pub fn parsePointList(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     }
 
     // Allocate memory for points
-    const points = allocator.alloc(Point(2, T), @intCast(size)) catch {
+    const points = ctx.allocator.alloc(Point(2, T), @intCast(size)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for points");
         return error.OutOfMemory;
     };
-    errdefer allocator.free(points);
+    errdefer ctx.allocator.free(points);
 
     // Parse each point
     for (0..@intCast(size)) |i| {
@@ -701,8 +695,8 @@ pub fn PointPairs(comptime T: type) type {
         to_points: []Point(2, T),
 
         pub fn deinit(self: *@This()) void {
-            allocator.free(self.from_points);
-            allocator.free(self.to_points);
+            ctx.allocator.free(self.from_points);
+            ctx.allocator.free(self.to_points);
         }
     };
 }
@@ -715,10 +709,10 @@ pub fn parsePointPairs(
     comptime min_points_message: []const u8,
 ) !PointPairs(T) {
     const from_points = parsePointList(T, from_obj) catch |err| return err;
-    errdefer allocator.free(from_points);
+    errdefer ctx.allocator.free(from_points);
 
     const to_points = parsePointList(T, to_obj) catch |err| return err;
-    errdefer allocator.free(to_points);
+    errdefer ctx.allocator.free(to_points);
 
     if (from_points.len != to_points.len) {
         setValueError("from_points and to_points must have the same length", .{});
@@ -736,7 +730,7 @@ pub fn parsePointPairs(
     };
 }
 
-pub fn projectPoints2D(points_obj: ?*c.PyObject, ctx: anytype, comptime apply: anytype) ?*c.PyObject {
+pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime apply: anytype) ?*c.PyObject {
     if (points_obj == null) {
         setTypeError("(x, y) tuple or list of tuples", null);
         return null;
@@ -744,7 +738,7 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, ctx: anytype, comptime apply: a
 
     if (c.PyTuple_Check(points_obj) != 0 and c.PyTuple_Size(points_obj) == 2) {
         const point = parsePointTuple(f64, points_obj) catch return null;
-        const result = @call(.auto, apply, .{ ctx, point.x(), point.y() });
+        const result = @call(.auto, apply, .{ point_ctx, point.x(), point.y() });
         const x_obj = c.PyFloat_FromDouble(result[0]) orelse return null;
         const y_obj = c.PyFloat_FromDouble(result[1]) orelse {
             c.Py_DECREF(x_obj);
@@ -755,12 +749,12 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, ctx: anytype, comptime apply: a
 
     if (c.PySequence_Check(points_obj) != 0) {
         const points = parsePointList(f64, points_obj) catch return null;
-        defer allocator.free(points);
+        defer ctx.allocator.free(points);
 
         const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
 
         for (points, 0..) |point, i| {
-            const result = @call(.auto, apply, .{ ctx, point.x(), point.y() });
+            const result = @call(.auto, apply, .{ point_ctx, point.x(), point.y() });
             const x_obj = c.PyFloat_FromDouble(result[0]) orelse {
                 c.Py_DECREF(result_list);
                 return null;
@@ -1275,7 +1269,7 @@ pub fn buildTypeObject(comptime config: TypeObjectConfig) c.PyTypeObject {
 
 /// Create a heap-allocated object with automatic memory management
 pub fn createHeapObject(comptime T: type, args: anytype) !*T {
-    const obj = allocator.create(T) catch {
+    const obj = ctx.allocator.create(T) catch {
         setMemoryError(@typeName(T));
         return error.OutOfMemory;
     };
@@ -1287,7 +1281,7 @@ pub fn createHeapObject(comptime T: type, args: anytype) !*T {
 pub fn destroyHeapObject(comptime T: type, ptr: ?*T) void {
     if (ptr) |p| {
         p.deinit();
-        allocator.destroy(p);
+        ctx.allocator.destroy(p);
     }
 }
 

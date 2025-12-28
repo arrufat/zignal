@@ -16,11 +16,12 @@ const DrawTestCase = struct {
 
 fn saveDebugImage(allocator: std.mem.Allocator, image: Image(Rgba), name: []const u8) !void {
     const output_dir = "zig-out/test-images";
-    const cwd = std.fs.cwd();
-    try cwd.makePath(output_dir);
+    const io = std.Io.Threaded.global_single_threaded.ioBasic();
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, output_dir);
     const path = try std.fmt.allocPrint(allocator, "{s}/{s}.png", .{ output_dir, name });
     defer allocator.free(path);
-    try image.save(allocator, path);
+    try image.save(io, allocator, path);
 }
 
 // Test drawing helper functions

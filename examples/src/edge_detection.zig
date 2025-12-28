@@ -11,14 +11,15 @@ pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
+    const io = std.Io.Threaded.global_single_threaded.ioBasic();
 
-    var image: Image(Rgb) = try .load(gpa, "../assets/liza.jpg");
+    var image: Image(Rgb) = try .load(io, gpa, "../assets/liza.jpg");
     defer image.deinit(gpa);
     var canvas: Canvas(u8) = undefined;
 
     var scaled = try image.scale(gpa, 0.5, .bilinear);
     defer scaled.deinit(gpa);
-    std.debug.print("{f}\n", .{scaled.display(.{ .auto = .{} })});
+    std.debug.print("{f}\n", .{scaled.display(io, .{ .auto = .{} })});
 
     var edges: Image(u8) = try .init(gpa, scaled.rows, scaled.cols * 3);
     defer edges.deinit(gpa);
@@ -39,6 +40,6 @@ pub fn main() !void {
     canvas = .init(gpa, canny);
     canvas.drawText("Canny", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
-    std.debug.print("{f}\n", .{edges.display(.{ .auto = .{} })});
-    try edges.save(gpa, "edges.png");
+    std.debug.print("{f}\n", .{edges.display(io, .{ .auto = .{} })});
+    try edges.save(io, gpa, "edges.png");
 }

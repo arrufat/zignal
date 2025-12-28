@@ -34,7 +34,7 @@ pub const FontFormat = enum {
     }
 
     /// Detect font format from file path by reading the first few bytes
-    pub fn detectFromPath(_: Allocator, file_path: []const u8) !?FontFormat {
+    pub fn detectFromPath(io: std.Io, _: Allocator, file_path: []const u8) !?FontFormat {
         // Check if file is gzip compressed based on extension
         if (std.mem.endsWith(u8, file_path, ".pcf.gz")) {
             return .pcf;
@@ -43,11 +43,12 @@ pub const FontFormat = enum {
             return .bdf;
         }
 
-        const file = try std.fs.cwd().openFile(file_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+        defer file.close(io);
 
         var header: [16]u8 = undefined;
-        const bytes_read = try file.read(&header);
+        var iov = [_][]u8{header[0..]};
+        const bytes_read = try file.readStreaming(io, &iov);
 
         return detectFromBytes(header[0..bytes_read]);
     }

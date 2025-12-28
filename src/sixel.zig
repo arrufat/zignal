@@ -1139,15 +1139,15 @@ fn generateAdaptivePalette(
 }
 
 /// Checks if the terminal supports sixel graphics
-pub fn isSupported() bool {
+pub fn isSupported(io: std.Io) bool {
     // Check if we're connected to a terminal
-    if (!terminal.isStdoutTty()) {
+    if (!terminal.isStdoutTty(io)) {
         // Not a TTY, allow sixel for file output
         return true;
     }
 
     // We're in a terminal, so perform actual detection
-    return terminal.isSixelSupported() catch false;
+    return terminal.isSixelSupported(io) catch false;
 }
 
 test "basic sixel encoding - 2x2 image" {

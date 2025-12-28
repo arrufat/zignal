@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const zignal = @import("zignal");
+const py_utils = @import("py_utils.zig");
 const color_registry = @import("color_registry.zig");
 const stub_metadata = @import("stub_metadata.zig");
 const color_factory = @import("color_factory.zig");
@@ -722,7 +723,9 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const ctx = py_utils.ctx;
+    const allocator = ctx.allocator;
+    const io = ctx.io;
 
     // Generate main comprehensive stub file
     const main_stub_content = try generateStubFile(allocator);
@@ -734,16 +737,16 @@ pub fn main() !void {
 
     // Write _zignal.pyi (stub file for C extension)
     {
-        const file = try std.fs.cwd().createFile("_zignal.pyi", .{});
-        defer file.close();
-        try file.writeAll(main_stub_content);
+        const file = try std.Io.Dir.cwd().createFile(io, "_zignal.pyi", .{});
+        defer file.close(io);
+        try file.writeStreamingAll(io, main_stub_content);
     }
 
     // Write __init__.pyi (package-level stub file)
     {
-        const file = try std.fs.cwd().createFile("__init__.pyi", .{});
-        defer file.close();
-        try file.writeAll(init_stub_content);
+        const file = try std.Io.Dir.cwd().createFile(io, "__init__.pyi", .{});
+        defer file.close(io);
+        try file.writeStreamingAll(io, init_stub_content);
     }
 
     std.debug.print("Generated stub files:\n", .{});

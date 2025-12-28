@@ -4,7 +4,7 @@ const zignal = @import("zignal");
 const RunningStats = zignal.RunningStats;
 
 const py_utils = @import("py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");

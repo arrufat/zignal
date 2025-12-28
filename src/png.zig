@@ -925,9 +925,9 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
     }
 }
 
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn load(comptime T: type, io: std.Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     const read_limit = if (limits.max_png_bytes == 0) std.math.maxInt(usize) else limits.max_png_bytes;
-    const png_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(read_limit));
+    const png_data = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(png_data);
     return loadFromBytes(T, allocator, png_data, limits);
 }
@@ -1156,14 +1156,17 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 /// - file_path: Output PNG file path
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
-pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+pub fn save(comptime T: type, io: std.Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
 
-    const file = try std.fs.cwd().createFile(file_path, .{});
-    defer file.close();
+    const file = if (std.fs.path.isAbsolute(file_path))
+        try std.Io.Dir.createFileAbsolute(io, file_path, .{})
+    else
+        try std.Io.Dir.cwd().createFile(io, file_path, .{});
+    defer file.close(io);
 
-    try file.writeAll(png_data);
+    try file.writeStreamingAll(io, png_data);
 }
 
 /// PNG row filtering and defiltering functions

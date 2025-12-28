@@ -6,7 +6,7 @@ const Matrix = zignal.Matrix;
 
 const matrix = @import("matrix.zig");
 const py_utils = @import("py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 

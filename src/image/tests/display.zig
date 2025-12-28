@@ -24,7 +24,7 @@ test "image format sgr" {
     var stream = std.Io.Writer.fixed(&buffer);
 
     // Force SGR format for testing
-    try stream.print("{f}", .{image.display(.{ .sgr = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .sgr = .default })});
     const result = buffer[0..stream.end];
 
     // The expected output should combine two rows into one using half-block character
@@ -54,7 +54,7 @@ test "image format sgr odd rows" {
     var buffer: [512]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(.{ .sgr = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .sgr = .default })});
     const result = buffer[0..stream.end];
 
     // Expected: 2 lines (3 rows compressed to 2 using half-blocks)
@@ -91,7 +91,7 @@ test "image format braille" {
     var buffer: [256]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(.{ .braille = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
     const result = buffer[0..stream.end];
 
     // Expected pattern: dots 2, 4, 6, 8 are on (white pixels)
@@ -124,7 +124,7 @@ test "image format braille custom threshold" {
     var buffer: [256]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(.{ .braille = .{ .threshold = 0.3 } })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .threshold = 0.3 } })});
     const result = buffer[0..stream.end];
 
     // Expected: pixels with >30% brightness are on
@@ -159,7 +159,7 @@ test "image format braille large image" {
     var buffer: [256]u8 = undefined;
     var stream = std.Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(.{ .braille = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
     const result = buffer[0..stream.end];
 
     // Expected: checkerboard pattern creates same pattern in all blocks

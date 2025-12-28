@@ -242,15 +242,15 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example usage:
         /// ```zig
-        /// var img = try Image(Rgb).load(allocator, "photo.jpg");
+        /// var img = try Image(Rgb).load(io, allocator, "photo.jpg");
         /// defer img.deinit(allocator);
         /// ```
-        pub fn load(allocator: Allocator, file_path: []const u8) !Self {
-            const image_format = try ImageFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedImageFormat;
+        pub fn load(io: std.Io, allocator: Allocator, file_path: []const u8) !Self {
+            const image_format = try ImageFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
-                .png => png.load(T, allocator, file_path, .{}),
-                .jpeg => jpeg.load(T, allocator, file_path, .{}),
+                .png => png.load(T, io, allocator, file_path, .{}),
+                .jpeg => jpeg.load(T, io, allocator, file_path, .{}),
             };
         }
 
@@ -274,11 +274,11 @@ pub fn Image(comptime T: type) type {
 
         /// Saves the image to a file in PNG format.
         /// Returns an error if the file path doesn't end in `.png` or `.PNG`.
-        pub fn save(self: Self, allocator: Allocator, file_path: []const u8) !void {
+        pub fn save(self: Self, io: std.Io, allocator: Allocator, file_path: []const u8) !void {
             if (std.ascii.endsWithIgnoreCase(file_path, ".png")) {
-                try png.save(T, allocator, self, file_path);
+                try png.save(T, io, allocator, self, file_path);
             } else if (std.ascii.endsWithIgnoreCase(file_path, ".jpg") or std.ascii.endsWithIgnoreCase(file_path, ".jpeg")) {
-                try jpeg.save(T, allocator, self, file_path);
+                try jpeg.save(T, io, allocator, self, file_path);
             } else {
                 return error.UnsupportedImageFormat;
             }
@@ -470,16 +470,17 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const img = try Image(Rgb).load(allocator, "test.png");
-        /// std.debug.print("{f}", .{img.display(.sgr)});           // SGR with unicode half blocks
-        /// std.debug.print("{f}", .{img.display(.{ .braille = .{ .threshold = 0.5 } })}); // 2x4 monochrome
-        /// std.debug.print("{f}", .{img.display(.{ .sixel = .{ .palette_mode = .adaptive } })});
-        /// std.debug.print("{f}", .{img.display(.{ .kitty = .default })});  // Kitty graphics protocol
+        /// const img = try Image(Rgb).load(io, allocator, "test.png");
+        /// std.debug.print("{f}", .{img.display(io, .sgr)});           // SGR with unicode half blocks
+        /// std.debug.print("{f}", .{img.display(io, .{ .braille = .{ .threshold = 0.5 } })}); // 2x4 monochrome
+        /// std.debug.print("{f}", .{img.display(io, .{ .sixel = .{ .palette_mode = .adaptive } })});
+        /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});  // Kitty graphics protocol
         /// ```
-        pub fn display(self: *const Self, display_format: DisplayFormat) DisplayFormatter(T) {
+        pub fn display(self: *const Self, io: std.Io, display_format: DisplayFormat) DisplayFormatter(T) {
             return DisplayFormatter(T){
                 .image = self,
                 .display_format = display_format,
+                .io = io,
             };
         }
 
@@ -883,7 +884,7 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example usage:
         /// ```zig
-        /// var img = try Image(u8).load(allocator, "low_contrast.png");
+        /// var img = try Image(u8).load(io, allocator, "low_contrast.png");
         /// var equalized = try img.equalize(allocator);
         /// defer equalized.deinit(allocator);
         /// ```

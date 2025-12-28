@@ -7,7 +7,7 @@ const enum_utils = @import("enum_utils.zig");
 const matrix_module = @import("matrix.zig");
 const MatrixObject = matrix_module.MatrixObject;
 const py_utils = @import("py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 

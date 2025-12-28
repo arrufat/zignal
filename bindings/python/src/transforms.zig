@@ -7,7 +7,7 @@ const ProjectiveTransform = zignal.ProjectiveTransform;
 
 const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 const stub_metadata = @import("stub_metadata.zig");
 
 // ============================================================================
