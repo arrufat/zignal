@@ -495,11 +495,6 @@ pub fn Gray(comptime T: type) type {
             const max = if (T == u8) 255 else 1.0;
             return .{ .y = max - self.y };
         }
-
-        /// Returns the color with an added alpha channel.
-        pub fn withAlpha(self: Gray(T), alpha: T) Rgba(T) {
-            return .{ .r = self.y, .g = self.y, .b = self.y, .a = alpha };
-        }
     };
 }
 
@@ -706,6 +701,7 @@ pub fn Lch(comptime T: type) type {
         l: T,
         c: T,
         h: T,
+
         /// Formats the color for terminal output.
         pub fn format(self: Lch(T), writer: *std.Io.Writer) !void {
             return formatColor(Lch(T), self, writer);

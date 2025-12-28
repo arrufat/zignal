@@ -172,17 +172,54 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     if (@hasDecl(ColorType, "invert")) {
         try stub.writef(
             \\    def invert(self) -> {s}:
-            \\        """Return a new color with inverted RGB channels while preserving alpha (if present)."""
-            \\    ...
+            \\        """Return a new color with inverted components while preserving alpha (if present)."""
+            \\        ...
             \\
         , .{class_name});
+    }
+
+    if (@hasDecl(ColorType, "luma")) {
+        try stub.write(
+            \\    def luma(self) -> float:
+            \\        """Calculate the perceptual luminance (0.0 to 1.0) using ITU-R BT.709 coefficients."""
+            \\        ...
+            \\
+        );
+    }
+
+    if (@hasDecl(ColorType, "hex")) {
+        try stub.write(
+            \\    def hex(self) -> int:
+            \\        """Return the hexadecimal representation of the color (e.g., 0xRRGGBB or 0xRRGGBBAA)."""
+            \\        ...
+            \\
+        );
+    }
+
+    if (@hasDecl(ColorType, "initHex")) {
+        try stub.writef(
+            \\    @staticmethod
+            \\    def from_hex(hex_code: int) -> {s}:
+            \\        """Create a color from a hexadecimal value (e.g., 0xRRGGBB or 0xRRGGBBAA)."""
+            \\        ...
+            \\
+        , .{class_name});
+    }
+
+    if (@hasDecl(ColorType, "withAlpha")) {
+        try stub.write(
+            \\    def with_alpha(self, alpha: int | float) -> Rgba:
+            \\        """Return a new Rgba color with the specified alpha channel value."""
+            \\        ...
+            \\
+        );
     }
 
     if (@hasDecl(ColorType, "blend")) {
         try stub.writef(
             \\    def blend(self, overlay: Rgba | tuple[int, int, int, int], mode: Blending = Blending.NORMAL) -> {s}:
             \\        """Blend with `overlay` (tuple interpreted as RGBA) using the specified `mode`."""
-            \\    ...
+            \\        ...
             \\
         , .{class_name});
     }

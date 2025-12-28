@@ -2,7 +2,7 @@ const py_utils = @import("py_utils.zig");
 const c = py_utils.c;
 const zignal = @import("zignal");
 
-const color_bindings = @import("color.zig");
+const color = @import("color.zig");
 
 const Gray = zignal.Gray(u8);
 const Rgb = zignal.Rgb(u8);
@@ -19,19 +19,19 @@ const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
 
 const zignalColorTypes = .{
-    .{ .py_type = &color_bindings.GrayType, .zig_type = Gray, .binding = color_bindings.GrayBinding },
-    .{ .py_type = &color_bindings.RgbType, .zig_type = Rgb, .binding = color_bindings.RgbBinding },
-    .{ .py_type = &color_bindings.RgbaType, .zig_type = Rgba, .binding = color_bindings.RgbaBinding },
-    .{ .py_type = &color_bindings.HslType, .zig_type = Hsl, .binding = color_bindings.HslBinding },
-    .{ .py_type = &color_bindings.HsvType, .zig_type = Hsv, .binding = color_bindings.HsvBinding },
-    .{ .py_type = &color_bindings.LabType, .zig_type = Lab, .binding = color_bindings.LabBinding },
-    .{ .py_type = &color_bindings.LchType, .zig_type = Lch, .binding = color_bindings.LchBinding },
-    .{ .py_type = &color_bindings.LmsType, .zig_type = Lms, .binding = color_bindings.LmsBinding },
-    .{ .py_type = &color_bindings.OklabType, .zig_type = Oklab, .binding = color_bindings.OklabBinding },
-    .{ .py_type = &color_bindings.OklchType, .zig_type = Oklch, .binding = color_bindings.OklchBinding },
-    .{ .py_type = &color_bindings.XybType, .zig_type = Xyb, .binding = color_bindings.XybBinding },
-    .{ .py_type = &color_bindings.XyzType, .zig_type = Xyz, .binding = color_bindings.XyzBinding },
-    .{ .py_type = &color_bindings.YcbcrType, .zig_type = Ycbcr, .binding = color_bindings.YcbcrBinding },
+    .{ .py_type = &color.gray, .zig_type = Gray, .binding = color.GrayBinding },
+    .{ .py_type = &color.rgb, .zig_type = Rgb, .binding = color.RgbBinding },
+    .{ .py_type = &color.rgba, .zig_type = Rgba, .binding = color.RgbaBinding },
+    .{ .py_type = &color.hsl, .zig_type = Hsl, .binding = color.HslBinding },
+    .{ .py_type = &color.hsv, .zig_type = Hsv, .binding = color.HsvBinding },
+    .{ .py_type = &color.lab, .zig_type = Lab, .binding = color.LabBinding },
+    .{ .py_type = &color.lch, .zig_type = Lch, .binding = color.LchBinding },
+    .{ .py_type = &color.lms, .zig_type = Lms, .binding = color.LmsBinding },
+    .{ .py_type = &color.oklab, .zig_type = Oklab, .binding = color.OklabBinding },
+    .{ .py_type = &color.oklch, .zig_type = Oklch, .binding = color.OklchBinding },
+    .{ .py_type = &color.xyb, .zig_type = Xyb, .binding = color.XybBinding },
+    .{ .py_type = &color.xyz, .zig_type = Xyz, .binding = color.XyzBinding },
+    .{ .py_type = &color.ycbcr, .zig_type = Ycbcr, .binding = color.YcbcrBinding },
 };
 
 fn objectToZigColor(comptime ColorType: type, comptime Binding: type, obj: *c.PyObject) ColorType {
@@ -92,9 +92,9 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
     defer c.Py_DECREF(method);
 
     const target_type_obj: *c.PyTypeObject = switch (T) {
-        u8 => &color_bindings.GrayType,
-        Rgb => &color_bindings.RgbType,
-        Rgba => &color_bindings.RgbaType,
+        u8 => &color.gray,
+        Rgb => &color.rgb,
+        Rgba => &color.rgba,
         else => unreachable,
     };
 

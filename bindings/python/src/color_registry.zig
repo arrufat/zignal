@@ -184,19 +184,56 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
 pub fn getDocumentationString(comptime ColorType: type) []const u8 {
     // Return appropriate documentation based on color type
     return switch (ColorType) {
-        Gray => "Gray color with intensity in range 0-255",
-        Rgb => "RGB color in sRGB colorspace with components in range 0-255",
-        Rgba => "RGBA color with alpha channel, components in range 0-255",
-        Hsv => "HSV (Hue-Saturation-Value) color representation",
-        Hsl => "HSL (Hue-Saturation-Lightness) color representation",
-        Lab => "CIELAB color space representation",
-        Xyz => "CIE 1931 XYZ color space representation",
-        Oklab => "Oklab perceptual color space representation",
-        Oklch => "Oklch perceptual color space in cylindrical coordinates",
-        Lch => "CIE LCH color space representation (cylindrical Lab)",
-        Lms => "LMS color space representing Long, Medium, Short wavelength cone responses",
-        Xyb => "XYB color space used in JPEG XL image compression",
-        Ycbcr => "YCbCr color space used in JPEG and video encoding",
+        Gray => "A grayscale color using sRGB Luminance (BT.709): Y = 0.2126 R + 0.7152 G + 0.0722 B.",
+        Rgb => "A color in the sRGB colorspace, with all components within the range 0-255.",
+        Rgba => "A color in the sRGB colorspace with an alpha channel, with all components within the range 0-255.",
+        Hsv =>
+        \\A color in the HSV colorspace.
+        \\- h: Hue, in degrees (0-360).
+        \\- s: Saturation, as a percentage (0-100).
+        \\- v: Value, as a percentage (0-100).
+        ,
+        Hsl =>
+        \\A color in the HSL colorspace.
+        \\- h: Hue, in degrees (0-360).
+        \\- s: Saturation, as a percentage (0-100).
+        \\- l: Lightness, as a percentage (0-100).
+        ,
+        Lab =>
+        \\A color in the CIELAB color space (also known as L*a*b*).
+        \\- l: Lightness (0 for black to 100 for white).
+        \\- a: Green-red axis (-128 for green to +127 for red).
+        \\- b: Blue-yellow axis (-128 for blue to +127 for yellow).
+        ,
+        Xyz =>
+        \\A color in the CIE 1931 XYZ color space.
+        \\This is a device-independent space that covers the full gamut of human-perceptible colors
+        \\visible to the CIE 2° standard observer.
+        \\- x, y, z: Tristimulus values. Y represents luminance.
+        ,
+        Oklab =>
+        \\A color in the Oklab color space.
+        \\Oklab is designed to be a perceptually uniform color space.
+        \\- l: Perceived lightness (0 for black to approximately 1 for white).
+        \\- a: Green-red axis.
+        \\- b: Blue-yellow axis.
+        ,
+        Oklch =>
+        \\A color in the Oklch color space.
+        \\Oklch is the cylindrical representation of the Oklab color space.
+        \\- l: Perceived lightness.
+        \\- c: Chroma (chromatic intensity).
+        \\- h: Hue angle in degrees (0-360).
+        ,
+        Lch =>
+        \\A color in the CIELCh color space (cylindrical representation of CIELAB).
+        \\- l: Lightness (0 for black to 100 for white).
+        \\- c: Chroma (chromatic intensity).
+        \\- h: Hue angle in degrees (0-360).
+        ,
+        Lms => "A color in the LMS color space, representing the response of the three types of cones in the human eye.",
+        Xyb => "A color in the XYB color space used in JPEG XL, designed for efficient image compression.",
+        Ycbcr => "Ycbcr (Y'CbCr) colorspace used in JPEG and video encoding (BT.601).",
         else => @compileError("Missing documentation for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
 }

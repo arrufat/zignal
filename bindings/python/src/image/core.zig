@@ -534,22 +534,22 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // TODO: Remove explicit cast after Python 3.10 is dropped
     const is_type_obj = c.PyObject_TypeCheck(dtype_obj.?, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
     if (is_type_obj) {
-        if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.GrayType))) {
+        if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.gray))) {
             target_gray = true;
-        } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
+        } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.rgb))) {
             target_rgb = true;
-        } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
+        } else if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.rgba))) {
             target_rgba = true;
         } else {
             py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", dtype_obj);
             return null;
         }
     } else {
-        if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.GrayType)) == 1) {
+        if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.gray)) == 1) {
             target_gray = true;
-        } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbType)) == 1) {
+        } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.rgb)) == 1) {
             target_rgb = true;
-        } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.RgbaType)) == 1) {
+        } else if (c.PyObject_IsInstance(dtype_obj.?, @ptrCast(&color_bindings.rgba)) == 1) {
             target_rgba = true;
         } else {
             py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", dtype_obj);
@@ -914,9 +914,9 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
     py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     const dtype_obj = switch (self.py_image.?.data) {
-        .gray => @as(*c.PyObject, @ptrCast(&color_bindings.GrayType)),
-        .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.RgbType)),
-        .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType)),
+        .gray => @as(*c.PyObject, @ptrCast(&color_bindings.gray)),
+        .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.rgb)),
+        .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.rgba)),
     };
     c.Py_INCREF(dtype_obj);
     return dtype_obj;

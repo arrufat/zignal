@@ -163,9 +163,9 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
                 py_utils.setValueError("Color tuple must have 3 or 4 elements", .{});
                 return -1;
             }
-        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.RgbaType)) == 1) {
+        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.rgba)) == 1) {
             color_type = .rgba_object;
-        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.RgbType)) == 1) {
+        } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.rgb)) == 1) {
             color_type = .rgb_object;
         } else {
             color_type = .other;
@@ -181,11 +181,11 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         // TODO: Remove explicit cast after Python 3.10 is dropped
         const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
         if (is_type_obj) {
-            if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.GrayType))) {
+            if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.gray))) {
                 target_format = .gray;
-            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbType))) {
+            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.rgb))) {
                 target_format = .rgb;
-            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.RgbaType))) {
+            } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.rgba))) {
                 target_format = .rgba;
             } else {
                 py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
@@ -193,11 +193,11 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             }
         } else {
             // Instances: allow Rgb/Rgba instances for convenience
-            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.GrayType)) == 1) {
+            if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.gray)) == 1) {
                 target_format = .gray;
-            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbType)) == 1) {
+            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.rgb)) == 1) {
                 target_format = .rgb;
-            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.RgbaType)) == 1) {
+            } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.rgba)) == 1) {
                 target_format = .rgba;
             } else {
                 py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
