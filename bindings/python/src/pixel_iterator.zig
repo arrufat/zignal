@@ -75,7 +75,7 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
         .rgb => |img| {
             const p = img.at(row, col).*;
             const color_module = @import("color.zig");
-            const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbType), 0) orelse return null;
+            const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgb), 0) orelse return null;
             const rgb = @as(*color_module.RgbBinding.PyObjectType, @ptrCast(rgb_obj));
             rgb.field0 = p.r;
             rgb.field1 = p.g;
@@ -85,7 +85,7 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
         .rgba => |img| {
             const p = img.at(row, col).*;
             const color_module = @import("color.zig");
-            const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.RgbaType), 0) orelse return null;
+            const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgba), 0) orelse return null;
             const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
             rgba.field0 = p.r;
             rgba.field1 = p.g;

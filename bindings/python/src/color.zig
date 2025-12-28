@@ -90,43 +90,43 @@ fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, get
 // Other modules (like pixel_proxy.zig) rely on these names (e.g. RgbType).
 
 pub const GrayBinding = color_factory.ColorBinding(Gray);
-pub var GrayType = ColorState(Gray).createTypeObject();
+pub var gray = ColorState(Gray).createTypeObject();
 
 pub const RgbBinding = color_factory.ColorBinding(Rgb);
-pub var RgbType = ColorState(Rgb).createTypeObject();
+pub var rgb = ColorState(Rgb).createTypeObject();
 
 pub const RgbaBinding = color_factory.ColorBinding(Rgba);
-pub var RgbaType = ColorState(Rgba).createTypeObject();
+pub var rgba = ColorState(Rgba).createTypeObject();
 
 pub const HslBinding = color_factory.ColorBinding(Hsl);
-pub var HslType = ColorState(Hsl).createTypeObject();
+pub var hsl = ColorState(Hsl).createTypeObject();
 
 pub const HsvBinding = color_factory.ColorBinding(Hsv);
-pub var HsvType = ColorState(Hsv).createTypeObject();
+pub var hsv = ColorState(Hsv).createTypeObject();
 
 pub const LabBinding = color_factory.ColorBinding(Lab);
-pub var LabType = ColorState(Lab).createTypeObject();
+pub var lab = ColorState(Lab).createTypeObject();
 
 pub const LchBinding = color_factory.ColorBinding(Lch);
-pub var LchType = ColorState(Lch).createTypeObject();
+pub var lch = ColorState(Lch).createTypeObject();
 
 pub const LmsBinding = color_factory.ColorBinding(Lms);
-pub var LmsType = ColorState(Lms).createTypeObject();
+pub var lms = ColorState(Lms).createTypeObject();
 
 pub const OklabBinding = color_factory.ColorBinding(Oklab);
-pub var OklabType = ColorState(Oklab).createTypeObject();
+pub var oklab = ColorState(Oklab).createTypeObject();
 
 pub const OklchBinding = color_factory.ColorBinding(Oklch);
-pub var OklchType = ColorState(Oklch).createTypeObject();
+pub var oklch = ColorState(Oklch).createTypeObject();
 
 pub const XybBinding = color_factory.ColorBinding(Xyb);
-pub var XybType = ColorState(Xyb).createTypeObject();
+pub var xyb = ColorState(Xyb).createTypeObject();
 
 pub const XyzBinding = color_factory.ColorBinding(Xyz);
-pub var XyzType = ColorState(Xyz).createTypeObject();
+pub var xyz = ColorState(Xyz).createTypeObject();
 
 pub const YcbcrBinding = color_factory.ColorBinding(Ycbcr);
-pub var YcbcrType = ColorState(Ycbcr).createTypeObject();
+pub var ycbcr = ColorState(Ycbcr).createTypeObject();
 
 // ============================================================================
 // REGISTRATION HELPER
@@ -134,43 +134,42 @@ pub var YcbcrType = ColorState(Ycbcr).createTypeObject();
 
 /// Register all color types from the registry in one go
 pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
-    try registerType(@ptrCast(module), "Gray", @ptrCast(&GrayType));
-    try registerType(@ptrCast(module), "Rgb", @ptrCast(&RgbType));
-    try registerType(@ptrCast(module), "Rgba", @ptrCast(&RgbaType));
-    try registerType(@ptrCast(module), "Hsl", @ptrCast(&HslType));
-    try registerType(@ptrCast(module), "Hsv", @ptrCast(&HsvType));
-    try registerType(@ptrCast(module), "Lab", @ptrCast(&LabType));
-    try registerType(@ptrCast(module), "Lch", @ptrCast(&LchType));
-    try registerType(@ptrCast(module), "Lms", @ptrCast(&LmsType));
-    try registerType(@ptrCast(module), "Oklab", @ptrCast(&OklabType));
-    try registerType(@ptrCast(module), "Oklch", @ptrCast(&OklchType));
-    try registerType(@ptrCast(module), "Xyb", @ptrCast(&XybType));
-    try registerType(@ptrCast(module), "Xyz", @ptrCast(&XyzType));
-    try registerType(@ptrCast(module), "Ycbcr", @ptrCast(&YcbcrType));
+    try registerType(@ptrCast(module), "Gray", @ptrCast(&gray));
+    try registerType(@ptrCast(module), "Rgb", @ptrCast(&rgb));
+    try registerType(@ptrCast(module), "Rgba", @ptrCast(&rgba));
+    try registerType(@ptrCast(module), "Hsl", @ptrCast(&hsl));
+    try registerType(@ptrCast(module), "Hsv", @ptrCast(&hsv));
+    try registerType(@ptrCast(module), "Lab", @ptrCast(&lab));
+    try registerType(@ptrCast(module), "Lch", @ptrCast(&lch));
+    try registerType(@ptrCast(module), "Lms", @ptrCast(&lms));
+    try registerType(@ptrCast(module), "Oklab", @ptrCast(&oklab));
+    try registerType(@ptrCast(module), "Oklch", @ptrCast(&oklch));
+    try registerType(@ptrCast(module), "Xyb", @ptrCast(&xyb));
+    try registerType(@ptrCast(module), "Xyz", @ptrCast(&xyz));
+    try registerType(@ptrCast(module), "Ycbcr", @ptrCast(&ycbcr));
 }
 
 // ============================================================================
 // CONVERSION HELPERS BETWEEN COLOR TYPES
 // ============================================================================
 
-/// Create a Python object from any zignal color type
 pub fn createColorPyObject(color: anytype) ?*c.PyObject {
     const ColorType = @TypeOf(color);
 
     return switch (ColorType) {
-        Gray => GrayBinding.createPyObject(color, &GrayType),
-        Rgb => RgbBinding.createPyObject(color, &RgbType),
-        Rgba => RgbaBinding.createPyObject(color, &RgbaType),
-        Hsl => HslBinding.createPyObject(color, &HslType),
-        Hsv => HsvBinding.createPyObject(color, &HsvType),
-        Lab => LabBinding.createPyObject(color, &LabType),
-        Lch => LchBinding.createPyObject(color, &LchType),
-        Lms => LmsBinding.createPyObject(color, &LmsType),
-        Oklab => OklabBinding.createPyObject(color, &OklabType),
-        Oklch => OklchBinding.createPyObject(color, &OklchType),
-        Xyb => XybBinding.createPyObject(color, &XybType),
-        Xyz => XyzBinding.createPyObject(color, &XyzType),
-        Ycbcr => YcbcrBinding.createPyObject(color, &YcbcrType),
+        Gray => GrayBinding.createPyObject(color, &gray),
+        Rgb => RgbBinding.createPyObject(color, &rgb),
+        Rgba => RgbaBinding.createPyObject(color, &rgba),
+        Hsl => HslBinding.createPyObject(color, &hsl),
+        Hsv => HsvBinding.createPyObject(color, &hsv),
+        Lab => LabBinding.createPyObject(color, &lab),
+        Lch => LchBinding.createPyObject(color, &lch),
+        Lms => LmsBinding.createPyObject(color, &lms),
+        Oklab => OklabBinding.createPyObject(color, &oklab),
+        Oklch => OklchBinding.createPyObject(color, &oklch),
+        Xyb => XybBinding.createPyObject(color, &xyb),
+        Xyz => XyzBinding.createPyObject(color, &xyz),
+        Ycbcr => YcbcrBinding.createPyObject(color, &ycbcr),
         else => null,
     };
 }

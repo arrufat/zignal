@@ -208,7 +208,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 // Return the color as the appropriate type
                 if (ColorType == Rgb) {
                     const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbType), null, null);
+                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
                     if (obj == null) return null;
                     const py_obj = @as(*color_mod.RgbBinding.PyObjectType, @ptrCast(obj));
                     py_obj.field0 = rgba.r;
@@ -217,7 +217,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     return obj;
                 } else {
                     const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbaType), null, null);
+                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
                     if (obj == null) return null;
                     const py_obj = @as(*color_mod.RgbaBinding.PyObjectType, @ptrCast(obj));
                     py_obj.field0 = rgba.r;
@@ -280,7 +280,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 // Return the new blended color as an Rgb or Rgba object
                 if (ColorType == Rgb) {
                     const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbType), null, null);
+                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
                     if (obj == null) return null;
                     const py_obj = @as(*color_mod.RgbBinding.PyObjectType, @ptrCast(obj));
                     py_obj.field0 = blended.r;
@@ -289,7 +289,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     return obj;
                 } else {
                     const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.RgbaType), null, null);
+                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
                     if (obj == null) return null;
                     const py_obj = @as(*color_mod.RgbaBinding.PyObjectType, @ptrCast(obj));
                     py_obj.field0 = blended.r;
