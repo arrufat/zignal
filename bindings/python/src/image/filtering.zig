@@ -14,7 +14,7 @@ const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
 const enum_utils = @import("../enum_utils.zig");
 const py_utils = @import("../py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 
 // Filtering functions

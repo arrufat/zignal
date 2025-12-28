@@ -47,13 +47,18 @@ pub const DetectionOptions = struct {
 };
 
 /// Check if stdout is connected to a TTY
-pub fn isStdoutTty() bool {
-    return std.fs.File.stdout().isTty();
+pub fn isStdoutTty(io: std.Io) bool {
+    return std.Io.File.stdout().isTty(io) catch |err| switch (err) {
+        error.Canceled => {
+            io.recancel();
+            return false;
+        },
+    };
 }
 
 /// Detect if the terminal supports sixel graphics protocol
-pub fn isSixelSupported() !bool {
-    var state: State = try .init();
+pub fn isSixelSupported(io: std.Io) !bool {
+    var state: State = try .init(io);
     defer state.deinit();
 
     // Try DECRQSS - Request Status String (no visible output)
@@ -66,8 +71,8 @@ pub fn isSixelSupported() !bool {
 }
 
 /// Detect if the terminal supports Kitty graphics protocol
-pub fn isKittySupported() !bool {
-    var state: State = try .init();
+pub fn isKittySupported(io: std.Io) !bool {
+    var state: State = try .init(io);
     defer state.deinit();
 
     var response_buf: [response_buffer_size]u8 = undefined;
@@ -116,12 +121,13 @@ pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) 
 /// const supported = state.checkSixelSupport(.device_attributes);
 /// ```
 const State = struct {
+    io: std.Io,
     /// Standard input file handle
-    stdin: std.fs.File,
+    stdin: std.Io.File,
     /// Standard output file handle
-    stdout: std.fs.File,
+    stdout: std.Io.File,
     /// Standard error file handle
-    stderr: std.fs.File,
+    stderr: std.Io.File,
     /// Original terminal state to restore on cleanup
     original_state: TerminalState,
 
@@ -132,10 +138,10 @@ const State = struct {
     /// On POSIX systems, saves the current termios settings.
     ///
     /// Returns an error if terminal initialization fails.
-    fn init() !State {
-        const stdin = std.fs.File.stdin();
-        const stdout = std.fs.File.stdout();
-        const stderr = std.fs.File.stderr();
+    fn init(io: std.Io) !State {
+        const stdin = std.Io.File.stdin();
+        const stdout = std.Io.File.stdout();
+        const stderr = std.Io.File.stderr();
 
         if (builtin.os.tag == .windows) {
             // Windows-specific initialization
@@ -164,6 +170,7 @@ const State = struct {
             _ = win_api.SetConsoleMode(stdin_handle, raw_input_mode);
 
             return State{
+                .io = io,
                 .stdin = stdin,
                 .stdout = stdout,
                 .stderr = stderr,
@@ -177,6 +184,7 @@ const State = struct {
             const original = try std.posix.tcgetattr(stdin.handle);
 
             return State{
+                .io = io,
                 .stdin = stdin,
                 .stdout = stdout,
                 .stderr = stderr,
@@ -277,7 +285,11 @@ const State = struct {
             return total_read;
         } else {
             // POSIX: Use the existing termios timeout mechanism
-            return try self.stdin.read(buffer);
+            var iov = [_][]u8{buffer};
+            return self.stdin.readStreaming(self.io, &iov) catch |err| {
+                if (err == error.Canceled) self.io.recancel();
+                return err;
+            };
         }
     }
 
@@ -311,11 +323,18 @@ const State = struct {
             }
         } else {
             var discard_buf: [response_buffer_size]u8 = undefined;
-            _ = self.stdin.read(&discard_buf) catch 0;
+            var iov = [_][]u8{discard_buf[0..]};
+            _ = self.stdin.readStreaming(self.io, &iov) catch |err| {
+                if (err == error.Canceled) self.io.recancel();
+                return err;
+            };
         }
 
         // Send query sequence
-        _ = try self.stdout.write(sequence);
+        self.stdout.writeStreamingAll(self.io, sequence) catch |err| {
+            if (err == error.Canceled) self.io.recancel();
+            return err;
+        };
 
         // Read response with timeout
         const n = try self.readWithTimeout(buffer, timeout_ms);

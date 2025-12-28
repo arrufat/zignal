@@ -81,6 +81,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+    const io = std.Io.Threaded.global_single_threaded.ioBasic();
 
     // const default_size: usize = 512;
 
@@ -91,11 +92,11 @@ pub fn main() !void {
         return;
     }
 
-    var original: Image = try .load(allocator, args[1]);
+    var original: Image = try .load(io, allocator, args[1]);
     defer original.deinit(allocator);
     const sigma: f32 = if (args.len > 2) std.fmt.parseFloat(f32, args[2]) catch 1.0 else 1.0;
 
-    try original.save(allocator, "blur_original.png");
+    try original.save(io, allocator, "blur_original.png");
 
     var gaussian: Image = try .initLike(allocator, original);
     defer gaussian.deinit(allocator);
@@ -103,7 +104,7 @@ pub fn main() !void {
     var timer = try std.time.Timer.start();
     try original.gaussianBlur(allocator, sigma, gaussian);
     const gaussian_ns = timer.read();
-    try gaussian.save(allocator, "blur_gaussian.png");
+    try gaussian.save(io, allocator, "blur_gaussian.png");
 
     std.debug.print("Gaussian blur sigma={d:.1} took {d:.3} ms\n\n", .{ sigma, @as(f64, @floatFromInt(gaussian_ns)) / std.time.ns_per_ms });
     std.debug.print("Box blur approximations using formula: w_ideal = sqrt((12*σ²/n) + 1)\n", .{});
@@ -158,7 +159,7 @@ pub fn main() !void {
 
         var name_buf: [48]u8 = undefined;
         const output_name = try std.fmt.bufPrint(&name_buf, "blur_box_pass_{d}.png", .{passes});
-        try last_result.save(allocator, output_name);
+        try last_result.save(io, allocator, output_name);
 
         std.debug.print(
             "{d:>6} | {s:>20} | {d:>13.3} | {d:>8.2}x | {d:>9.2} | {d:>7.4} | {d:>8.2}%\n",

@@ -83,13 +83,16 @@ pub const EncodeOptions = struct {
 };
 
 /// Save Image to JPEG file with baseline encoding.
-pub fn save(comptime T: type, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+pub fn save(comptime T: type, io: std.Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const bytes = try encode(T, allocator, image, .{ .subsampling = .yuv420 });
     defer allocator.free(bytes);
 
-    const file = try std.fs.cwd().createFile(file_path, .{});
-    defer file.close();
-    try file.writeAll(bytes);
+    const file = if (std.fs.path.isAbsolute(file_path))
+        try std.Io.Dir.createFileAbsolute(io, file_path, .{})
+    else
+        try std.Io.Dir.cwd().createFile(io, file_path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, bytes);
 }
 
 /// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman).
@@ -2869,9 +2872,9 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
     }
 }
 
-pub fn load(comptime T: type, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn load(comptime T: type, io: std.Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     const read_limit = if (limits.max_jpeg_bytes == 0) std.math.maxInt(usize) else limits.max_jpeg_bytes;
-    const jpeg_data = try std.fs.cwd().readFileAlloc(file_path, allocator, .limited(read_limit));
+    const jpeg_data = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, allocator, jpeg_data, limits);
 }

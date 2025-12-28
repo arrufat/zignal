@@ -52,6 +52,7 @@ pub fn DisplayFormatter(comptime T: type) type {
     return struct {
         image: *const Image(T),
         display_format: DisplayFormat,
+        io: std.Io,
 
         const Self = @This();
 
@@ -184,7 +185,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .auto => |options| {
-                    if (kitty.isSupported()) {
+                    if (kitty.isSupported(self.io)) {
                         continue :fmt .{ .kitty = .{
                             .quiet = 1,
                             .image_id = null,
@@ -195,7 +196,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .height = options.height,
                             .interpolation = .bilinear,
                         } };
-                    } else if (sixel.isSupported()) {
+                    } else if (sixel.isSupported(self.io)) {
                         continue :fmt .{ .sixel = .{
                             .palette = .{ .adaptive = .{ .max_colors = 256 } },
                             .dither = .auto,

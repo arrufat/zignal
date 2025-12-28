@@ -47,17 +47,17 @@ font_ascent: ?i16 = null,
 /// Example:
 /// ```zig
 /// // Load entire font:
-/// const font = try BitmapFont.load(allocator, "unifont.bdf", .all);
+/// const font = try BitmapFont.load(io, allocator, "unifont.bdf", .all);
 /// defer font.deinit(allocator);
 ///
 /// // Load specific ranges:
-/// const font = try BitmapFont.load(allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
+/// const font = try BitmapFont.load(io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
 /// ```
-pub fn load(allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
-    const font_format = try FontFormat.detectFromPath(allocator, file_path) orelse return error.UnsupportedFontFormat;
+pub fn load(io: std.Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
+    const font_format = try FontFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
-        .bdf => @import("bdf.zig").load(allocator, file_path, filter),
-        .pcf => @import("pcf.zig").load(allocator, file_path, filter),
+        .bdf => @import("bdf.zig").load(io, allocator, file_path, filter),
+        .pcf => @import("pcf.zig").load(io, allocator, file_path, filter),
     };
 }
 
@@ -296,14 +296,14 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
 
 /// Saves the font to a file in BDF format.
 /// Returns an error if the file path doesn't end in `.bdf` or `.bdf.gz` (case-insensitive).
-pub fn save(self: BitmapFont, allocator: Allocator, file_path: []const u8) !void {
+pub fn save(self: BitmapFont, io: std.Io, allocator: Allocator, file_path: []const u8) !void {
     const valid_extension = std.ascii.endsWithIgnoreCase(file_path, ".bdf") or
         std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz");
 
     if (!valid_extension) {
         return error.UnsupportedFontFormat;
     }
-    try @import("bdf.zig").save(allocator, self, file_path);
+    try @import("bdf.zig").save(io, allocator, self, file_path);
 }
 
 /// Displays the font information: name, dimensions, and character range.

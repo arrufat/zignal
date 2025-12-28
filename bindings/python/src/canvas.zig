@@ -11,7 +11,7 @@ const Rectangle = zignal.Rectangle;
 
 const color_utils = @import("color_utils.zig");
 const py_utils = @import("py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const PyImage = @import("PyImage.zig").PyImage;

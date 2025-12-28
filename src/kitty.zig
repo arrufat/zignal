@@ -198,15 +198,15 @@ pub fn fromImage(
 }
 
 /// Detects if the terminal supports Kitty graphics protocol
-pub fn isSupported() bool {
+pub fn isSupported(io: std.Io) bool {
     // Check if we're connected to a terminal
-    if (!terminal.isStdoutTty()) {
+    if (!terminal.isStdoutTty(io)) {
         // Not a TTY, don't support Kitty for file output
         return false;
     }
 
     // Try terminal detection first
-    return terminal.isKittySupported() catch false;
+    return terminal.isKittySupported(io) catch false;
 }
 
 // Tests

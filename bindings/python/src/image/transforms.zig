@@ -10,7 +10,7 @@ const Interpolation = zignal.Interpolation;
 const Blending = zignal.Blending;
 
 const py_utils = @import("../py_utils.zig");
-const allocator = py_utils.allocator;
+const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 const enum_utils = @import("../enum_utils.zig");
 

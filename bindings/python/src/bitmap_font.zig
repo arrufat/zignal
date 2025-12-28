@@ -4,7 +4,8 @@ const zignal = @import("zignal");
 const BitmapFont = zignal.BitmapFont;
 
 const py_utils = @import("py_utils.zig");
-const allocator = py_utils.allocator;
+const ctx = py_utils.ctx;
+const allocator = ctx.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
@@ -94,7 +95,7 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     self.font = font_ptr;
 
     // Load font from file (loading all characters)
-    font_ptr.* = BitmapFont.load(allocator, path_slice, .all) catch |err| {
+    font_ptr.* = BitmapFont.load(ctx.io, allocator, path_slice, .all) catch |err| {
         // Clean up on error
         allocator.destroy(font_ptr);
         self.font = null; // Clear the pointer

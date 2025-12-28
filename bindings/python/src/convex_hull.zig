@@ -22,7 +22,7 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ConvexHullObject, self_obj);
 
     // Using createHeapObject helper for allocation with error handling
-    self.hull = py_utils.createHeapObject(ConvexHull(f32), .{py_utils.allocator}) catch return -1;
+    self.hull = py_utils.createHeapObject(ConvexHull(f32), .{py_utils.ctx.allocator}) catch return -1;
     return 0;
 }
 
@@ -79,7 +79,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         // Error already set by parsePointList
         return null;
     };
-    defer py_utils.allocator.free(points);
+    defer py_utils.ctx.allocator.free(points);
 
     // Find convex hull with improved error handling
     const hull_points = hull.find(points) catch |err| {

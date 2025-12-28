@@ -16,6 +16,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+    const io = std.Io.Threaded.global_single_threaded.ioBasic();
 
     // Create a 512x512 image for the logo
     var image: Image(Rgb) = try .init(allocator, 512, 512);
@@ -40,10 +41,10 @@ pub fn main() !void {
     // Add decorative elements
     drawDecorativeElements(&canvas);
 
-    std.debug.print("{f}\n", .{image.display(.{ .auto = .{} })});
+    std.debug.print("{f}\n", .{image.display(io, .{ .auto = .{} })});
 
     // Save the logo
-    try image.save(allocator, "zignal_logo.png");
+    try image.save(io, allocator, "zignal_logo.png");
     std.debug.print("Logo saved as zignal_logo.png\n", .{});
 }
 
