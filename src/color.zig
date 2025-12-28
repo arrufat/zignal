@@ -43,6 +43,7 @@ pub fn isColor(comptime T: type) bool {
     return @TypeOf(T.space) == ColorSpace;
 }
 
+/// Converts a color from one type and/or space to another.
 pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     const SrcType = @TypeOf(source);
     if (DestType == SrcType) return source;
@@ -87,6 +88,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     return source.to(DestType.space).as(DestT);
 }
 
+/// Internal helper to format color structs with ANSI colors for terminal output.
 fn formatColor(comptime T: type, self: T, writer: *std.Io.Writer) !void {
     // Get the short type name
     const type_name = comptime getSimpleTypeName(T);
@@ -140,11 +142,13 @@ pub const ColorSpace = enum {
     xyz,
     ycbcr,
 
+    /// Returns the ColorSpace tag for a given color type.
     pub fn tag(comptime S: type) ColorSpace {
         if (@hasDecl(S, "space")) return S.space;
         @compileError("Type " ++ @typeName(S) ++ " is not a ColorSpace type");
     }
 
+    /// Returns the color type for a given space and component type.
     pub fn Type(self: ColorSpace, comptime T: type) type {
         return switch (self) {
             .gray => Gray(T),
@@ -235,10 +239,12 @@ pub fn Rgb(comptime T: type) type {
             return (@as(u24, r) << 16) | (@as(u24, g) << 8) | @as(u24, b);
         }
 
+        /// Returns the color with an added alpha channel.
         pub fn withAlpha(self: Rgb(T), alpha: T) Rgba(T) {
             return .{ .r = self.r, .g = self.g, .b = self.b, .a = alpha };
         }
 
+        /// Inverts the color.
         pub fn invert(self: Rgb(T)) Rgb(T) {
             const max = if (T == u8) 255 else 1.0;
             return .{ .r = max - self.r, .g = max - self.g, .b = max - self.b };
@@ -249,15 +255,18 @@ pub fn Rgb(comptime T: type) type {
             return rgbLuma(self.r, self.g, self.b);
         }
 
+        /// Blends the color with an overlay.
         pub fn blend(self: Rgb(T), overlay: Rgba(T), mode: Blending) Rgb(T) {
             const blended = blendColors(T, self.withAlpha(if (T == u8) 255 else 1.0), overlay, mode);
             return .{ .r = blended.r, .g = blended.g, .b = blended.b };
         }
 
+        /// Formats the color for terminal output.
         pub fn format(self: Rgb(T), writer: *std.Io.Writer) !void {
             return formatColor(Rgb(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Rgb(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self),
@@ -276,6 +285,7 @@ pub fn Rgb(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Rgb(T), comptime U: type) Rgb(U) {
             return switch (T) {
                 u8 => switch (U) {
@@ -351,6 +361,7 @@ pub fn Rgba(comptime T: type) type {
             return (@as(u32, r) << 24) | (@as(u32, g) << 16) | (@as(u32, b) << 8) | @as(u32, a);
         }
 
+        /// Inverts the color (alpha is preserved).
         pub fn invert(self: Rgba(T)) Rgba(T) {
             const max = if (T == u8) 255 else 1.0;
             return .{ .r = max - self.r, .g = max - self.g, .b = max - self.b, .a = self.a };
@@ -373,14 +384,17 @@ pub fn Rgba(comptime T: type) type {
             return rgbLuma(self.r, self.g, self.b);
         }
 
+        /// Blends the color with an overlay.
         pub fn blend(self: Rgba(T), overlay: Rgba(T), mode: Blending) Rgba(T) {
             return blendColors(T, self, overlay, mode);
         }
 
+        /// Formats the color for terminal output.
         pub fn format(self: Rgba(T), writer: *std.Io.Writer) !void {
             return formatColor(Rgba(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Rgba(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -399,6 +413,7 @@ pub fn Rgba(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Rgba(T), comptime U: type) Rgba(U) {
             return switch (T) {
                 u8 => switch (U) {
@@ -442,10 +457,12 @@ pub fn Gray(comptime T: type) type {
         pub const space = ColorSpace.gray;
         y: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Gray(T), writer: *std.Io.Writer) !void {
             return formatColor(Gray(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Gray(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => self,
@@ -453,6 +470,7 @@ pub fn Gray(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Gray(T), comptime U: type) Gray(U) {
             switch (@typeInfo(U)) {
                 .float => {},
@@ -472,6 +490,13 @@ pub fn Gray(comptime T: type) type {
             };
         }
 
+        /// Inverts the color.
+        pub fn invert(self: Gray(T)) Gray(T) {
+            const max = if (T == u8) 255 else 1.0;
+            return .{ .y = max - self.y };
+        }
+
+        /// Returns the color with an added alpha channel.
         pub fn withAlpha(self: Gray(T), alpha: T) Rgba(T) {
             return .{ .r = self.y, .g = self.y, .b = self.y, .a = alpha };
         }
@@ -490,10 +515,12 @@ pub fn Hsv(comptime T: type) type {
         s: T,
         v: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Hsv(T), writer: *std.Io.Writer) !void {
             return formatColor(Hsv(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Hsv(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -512,6 +539,7 @@ pub fn Hsv(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Hsv(T), comptime U: type) Hsv(U) {
             return .{
                 .h = @floatCast(self.h),
@@ -534,10 +562,12 @@ pub fn Hsl(comptime T: type) type {
         s: T,
         l: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Hsl(T), writer: *std.Io.Writer) !void {
             return formatColor(Hsl(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Hsl(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -556,6 +586,7 @@ pub fn Hsl(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Hsl(T), comptime U: type) Hsl(U) {
             return .{
                 .h = @floatCast(self.h),
@@ -580,10 +611,12 @@ pub fn Xyz(comptime T: type) type {
         y: T,
         z: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Xyz(T), writer: *std.Io.Writer) !void {
             return formatColor(Xyz(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Xyz(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -602,6 +635,7 @@ pub fn Xyz(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Xyz(T), comptime U: type) Xyz(U) {
             return .{
                 .x = @floatCast(self.x),
@@ -625,10 +659,12 @@ pub fn Lab(comptime T: type) type {
         a: T,
         b: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Lab(T), writer: *std.Io.Writer) !void {
             return formatColor(Lab(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Lab(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -647,6 +683,7 @@ pub fn Lab(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Lab(T), comptime U: type) Lab(U) {
             return .{
                 .l = @floatCast(self.l),
@@ -669,10 +706,12 @@ pub fn Lch(comptime T: type) type {
         l: T,
         c: T,
         h: T,
+        /// Formats the color for terminal output.
         pub fn format(self: Lch(T), writer: *std.Io.Writer) !void {
             return formatColor(Lch(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Lch(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -691,6 +730,7 @@ pub fn Lch(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Lch(T), comptime U: type) Lch(U) {
             return .{
                 .l = @floatCast(self.l),
@@ -712,10 +752,12 @@ pub fn Lms(comptime T: type) type {
         m: T,
         s: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Lms(T), writer: *std.Io.Writer) !void {
             return formatColor(Lms(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Lms(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -734,6 +776,7 @@ pub fn Lms(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Lms(T), comptime U: type) Lms(U) {
             return .{
                 .l = @floatCast(self.l),
@@ -757,10 +800,12 @@ pub fn Oklab(comptime T: type) type {
         a: T,
         b: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Oklab(T), writer: *std.Io.Writer) !void {
             return formatColor(Oklab(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Oklab(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -779,6 +824,7 @@ pub fn Oklab(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Oklab(T), comptime U: type) Oklab(U) {
             return .{
                 .l = @floatCast(self.l),
@@ -802,10 +848,12 @@ pub fn Oklch(comptime T: type) type {
         c: T,
         h: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Oklch(T), writer: *std.Io.Writer) !void {
             return formatColor(Oklch(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Oklch(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -824,6 +872,7 @@ pub fn Oklch(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Oklch(T), comptime U: type) Oklch(U) {
             return .{
                 .l = @floatCast(self.l),
@@ -848,10 +897,12 @@ pub fn Xyb(comptime T: type) type {
         y: T,
         b: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Xyb(T), writer: *std.Io.Writer) !void {
             return formatColor(Xyb(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Xyb(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -870,6 +921,7 @@ pub fn Xyb(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Xyb(T), comptime U: type) Xyb(U) {
             return .{
                 .x = @floatCast(self.x),
@@ -895,10 +947,12 @@ pub fn Ycbcr(comptime T: type) type {
         cb: T,
         cr: T,
 
+        /// Formats the color for terminal output.
         pub fn format(self: Ycbcr(T), writer: *std.Io.Writer) !void {
             return formatColor(Ycbcr(T), self, writer);
         }
 
+        /// Converts the color to another color space.
         pub fn to(self: Ycbcr(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .gray => rgbToGray(T, self.to(.rgb)),
@@ -917,6 +971,7 @@ pub fn Ycbcr(comptime T: type) type {
             };
         }
 
+        /// Converts the backing component type.
         pub fn as(self: Ycbcr(T), comptime U: type) Ycbcr(U) {
             switch (@typeInfo(U)) {
                 .float => {},
@@ -991,6 +1046,7 @@ pub fn rgbLuma(r: anytype, g: anytype, b: anytype) f64 {
     return 0.2126 * r_f + 0.7152 * g_f + 0.0722 * b_f;
 }
 
+/// Converts RGB to grayscale using BT.709 luminance coefficients.
 fn rgbToGray(comptime T: type, rgb: Rgb(T)) Gray(T) {
     if (T == u8) {
         const r: i32 = rgb.r;
@@ -1007,6 +1063,7 @@ fn rgbToGray(comptime T: type, rgb: Rgb(T)) Gray(T) {
 }
 
 /// Converts grayscale to RGB by replicating the Y component across channels.
+/// Converts grayscale to RGB.
 fn grayToRgb(comptime T: type, gray: Gray(T)) Rgb(T) {
     return .{ .r = gray.y, .g = gray.y, .b = gray.y };
 }
@@ -1046,6 +1103,7 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
     }
 }
 
+/// Converts RGB to HSV.
 fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
     comptime assert(@typeInfo(T) == .float);
     const min = @min(rgb.r, @min(rgb.g, rgb.b));
@@ -1067,6 +1125,7 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
     };
 }
 
+/// Converts HSL to RGB.
 fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const h = @max(0, @min(360, hsl.h));
@@ -1105,6 +1164,7 @@ fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
         };
 }
 
+/// Converts RGB to HSL.
 fn rgbToHsl(comptime T: type, rgb: Rgb(T)) Hsl(T) {
     comptime assert(@typeInfo(T) == .float);
     const min = @min(rgb.r, @min(rgb.g, rgb.b));
@@ -1131,6 +1191,7 @@ fn rgbToHsl(comptime T: type, rgb: Rgb(T)) Hsl(T) {
     };
 }
 
+/// Converts HSV to RGB.
 fn hsvToRgb(comptime T: type, hsv: Hsv(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const hue = @max(0, @min(1, hsv.h / 360));
@@ -1164,6 +1225,7 @@ fn hsvToRgb(comptime T: type, hsv: Hsv(T)) Rgb(T) {
     };
 }
 
+/// Converts HSV to HSL.
 fn hsvToHsl(comptime T: type, hsv: Hsv(T)) Hsl(T) {
     comptime assert(@typeInfo(T) == .float);
     const s_v = hsv.s / 100.0;
@@ -1179,6 +1241,7 @@ fn hsvToHsl(comptime T: type, hsv: Hsv(T)) Hsl(T) {
     };
 }
 
+/// Converts HSL to HSV.
 fn hslToHsv(comptime T: type, hsl: Hsl(T)) Hsv(T) {
     comptime assert(@typeInfo(T) == .float);
     const s_l = hsl.s / 100.0;
@@ -1194,16 +1257,19 @@ fn hslToHsv(comptime T: type, hsl: Hsl(T)) Hsv(T) {
     };
 }
 
+/// Converts linear RGB component to sRGB gamma.
 fn linearToGamma(comptime T: type, c: T) T {
     comptime assert(@typeInfo(T) == .float);
     return if (c > 0.0031308) 1.055 * pow(T, c, (1.0 / 2.4)) - 0.055 else c * 12.92;
 }
 
+/// Converts sRGB gamma component to linear RGB.
 fn gammaToLinear(comptime T: type, c: T) T {
     comptime assert(@typeInfo(T) == .float);
     return if (c > 0.04045) pow(T, (c + 0.055) / 1.055, 2.4) else c / 12.92;
 }
 
+/// Converts RGB to XYZ.
 fn rgbToXyz(comptime T: type, rgb: Rgb(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
     const r = gammaToLinear(T, rgb.r);
@@ -1217,6 +1283,7 @@ fn rgbToXyz(comptime T: type, rgb: Rgb(T)) Xyz(T) {
     };
 }
 
+/// Converts XYZ to RGB.
 fn xyzToRgb(comptime T: type, xyz: Xyz(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const r = (xyz.x * 3.2406 + xyz.y * -1.5372 + xyz.z * -0.4986) / 100;
@@ -1230,6 +1297,7 @@ fn xyzToRgb(comptime T: type, xyz: Xyz(T)) Rgb(T) {
     };
 }
 
+/// Converts XYZ to Lab.
 fn xyzToLab(comptime T: type, xyz: Xyz(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
     var xn = xyz.x / 95.047;
@@ -1261,6 +1329,7 @@ fn xyzToLab(comptime T: type, xyz: Xyz(T)) Lab(T) {
     };
 }
 
+/// Converts Lab to XYZ.
 fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
     var y: f64 = (@max(0, @min(100, lab.l)) + 16.0) / 116.0;
@@ -1292,6 +1361,7 @@ fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
     };
 }
 
+/// Converts Lab to LCh.
 fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(lab.a * lab.a + lab.b * lab.b);
@@ -1307,6 +1377,7 @@ fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     };
 }
 
+/// Converts LCh to Lab.
 fn lchToLab(comptime T: type, lch: Lch(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
     const h_rad = lch.h * std.math.pi / 180.0;
@@ -1317,6 +1388,7 @@ fn lchToLab(comptime T: type, lch: Lch(T)) Lab(T) {
     };
 }
 
+/// Converts XYZ to LMS.
 fn xyzToLms(comptime T: type, xyz: Xyz(T)) Lms(T) {
     comptime assert(@typeInfo(T) == .float);
     return .{
@@ -1326,6 +1398,7 @@ fn xyzToLms(comptime T: type, xyz: Xyz(T)) Lms(T) {
     };
 }
 
+/// Converts LMS to XYZ.
 fn lmsToXyz(comptime T: type, lms: Lms(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
     return .{
@@ -1335,6 +1408,7 @@ fn lmsToXyz(comptime T: type, lms: Lms(T)) Xyz(T) {
     };
 }
 
+/// Converts XYZ to Oklab.
 fn xyzToOklab(comptime T: type, xyz: Xyz(T)) Oklab(T) {
     comptime assert(@typeInfo(T) == .float);
     const x = xyz.x / 100.0;
@@ -1356,6 +1430,7 @@ fn xyzToOklab(comptime T: type, xyz: Xyz(T)) Oklab(T) {
     };
 }
 
+/// Converts Oklab to XYZ.
 fn oklabToXyz(comptime T: type, oklab: Oklab(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
     const l_dash = oklab.l + 0.3963377774 * oklab.a + 0.2158037573 * oklab.b;
@@ -1373,6 +1448,7 @@ fn oklabToXyz(comptime T: type, oklab: Oklab(T)) Xyz(T) {
     };
 }
 
+/// Converts Oklab to Oklch.
 fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
@@ -1390,6 +1466,7 @@ fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     };
 }
 
+/// Converts Oklch to Oklab.
 fn oklchToOklab(comptime T: type, oklch: Oklch(T)) Oklab(T) {
     comptime assert(@typeInfo(T) == .float);
     const h_rad = oklch.h * std.math.pi / 180.0;
@@ -1401,6 +1478,7 @@ fn oklchToOklab(comptime T: type, oklch: Oklch(T)) Oklab(T) {
     };
 }
 
+/// Converts XYZ to XYB.
 fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
     comptime assert(@typeInfo(T) == .float);
     const r = (xyz.x * 3.2406 + xyz.y * -1.5372 + xyz.z * -0.4986) / 100;
@@ -1425,6 +1503,7 @@ fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
     };
 }
 
+/// Converts XYB to XYZ.
 fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
     const cbrt_bias = 0.988945892534436;
@@ -1453,6 +1532,7 @@ fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     };
 }
 
+/// Converts RGB to XYB.
 fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     comptime assert(@typeInfo(T) == .float);
     const r = gammaToLinear(T, rgb.r);
@@ -1477,6 +1557,7 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     };
 }
 
+/// Converts XYB to RGB.
 fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const cbrt_bias = 0.988945892534436;
@@ -1509,6 +1590,7 @@ fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
 // TESTS
 // ============================================================================
 
+/// Internal test helper for round-trip color conversion.
 fn testRoundTripConversion(from: Rgb(u8), to: anytype) !void {
     const Dest = @TypeOf(to);
     const T = switch (@typeInfo(Dest)) {
@@ -1536,6 +1618,13 @@ test "convert grayscale" {
     try expectEqual((Hsl(f64){ .h = 0, .s = 100, .l = 50 }).to(.gray).as(u8), Gray(u8){ .y = 54 });
     try expectEqual((Hsv(f64){ .h = 0, .s = 100, .v = 50 }).to(.gray).as(u8), Gray(u8){ .y = 27 });
     try expectEqual((Lab(f64){ .l = 50, .a = 0, .b = 0 }).to(.gray).as(u8), Gray(u8){ .y = 119 });
+}
+
+test "Gray invert" {
+    const gray = Gray(u8){ .y = 100 };
+    try expectEqual(gray.invert(), Gray(u8){ .y = 155 });
+    const gray_f = Gray(f32){ .y = 0.2 };
+    try expectApproxEqAbs(gray_f.invert().y, 0.8, 0.00001);
 }
 
 test "scalar colors" {
