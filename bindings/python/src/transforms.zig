@@ -26,13 +26,13 @@ fn similarity_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     _ = args;
     _ = kwds;
 
-    const self = @as(?*SimilarityTransformObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self: ?*SimilarityTransformObject = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
     if (self) |obj| {
         // Initialize as identity transform
         obj.matrix = .{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } };
         obj.bias = .{ 0.0, 0.0 };
     }
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -159,13 +159,13 @@ fn affine_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     _ = args;
     _ = kwds;
 
-    const self = @as(?*AffineTransformObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self: ?*AffineTransformObject = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
     if (self) |obj| {
         // Initialize as identity transform
         obj.matrix = .{ .{ 1.0, 0.0 }, .{ 0.0, 1.0 } };
         obj.bias = .{ 0.0, 0.0 };
     }
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -286,7 +286,7 @@ fn projective_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     _ = args;
     _ = kwds;
 
-    const self = @as(?*ProjectiveTransformObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self: ?*ProjectiveTransformObject = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
     if (self) |obj| {
         // Initialize as identity transform
         obj.matrix = .{
@@ -295,7 +295,7 @@ fn projective_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
             .{ 0.0, 0.0, 1.0 },
         };
     }
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {

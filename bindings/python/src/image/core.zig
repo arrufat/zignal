@@ -132,7 +132,6 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         std.mem.endsWith(u8, path_slice, ".JPG") or
         std.mem.endsWith(u8, path_slice, ".JPEG");
 
-
     if (is_jpeg) {
         // Read file and decode JPEG
         const data = std.Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_jpeg_limits.max_jpeg_bytes))) catch |err| {
@@ -535,6 +534,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     // TODO: Remove explicit cast after Python 3.10 is dropped
     const is_type_obj = c.PyObject_TypeCheck(dtype_obj.?, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
+    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     if (is_type_obj) {
         if (dtype_obj.? == @as(*c.PyObject, @ptrCast(&color_bindings.gray))) {
             target_gray = true;
@@ -715,19 +715,17 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     const p1 = img1.at(r, col);
                     const p2 = img2.at(r, col);
                     if (T == u8) {
-                        const diff = @as(f64, @floatFromInt(@as(i32, @intCast(p1.*)) - @as(i32, @intCast(p2.*))));
+                        const diff: f64 = @floatFromInt(@as(i32, p1.*) - p2.*);
                         sum += diff * diff;
-                    } else if (T == Rgb) {
-                        const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
-                        const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
-                        const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
+                    } else { // Rgb or Rgba
+                        const dr: f64 = @floatFromInt(@as(i32, p1.r) - p2.r);
+                        const dg: f64 = @floatFromInt(@as(i32, p1.g) - p2.g);
+                        const db: f64 = @floatFromInt(@as(i32, p1.b) - p2.b);
                         sum += dr * dr + dg * dg + db * db;
-                    } else { // Rgba
-                        const dr = @as(f64, @floatFromInt(@as(i32, p1.r) - @as(i32, p2.r)));
-                        const dg = @as(f64, @floatFromInt(@as(i32, p1.g) - @as(i32, p2.g)));
-                        const db = @as(f64, @floatFromInt(@as(i32, p1.b) - @as(i32, p2.b)));
-                        const da = @as(f64, @floatFromInt(@as(i32, p1.a) - @as(i32, p2.a)));
-                        sum += dr * dr + dg * dg + db * db + da * da;
+                        if (T == Rgba) {
+                            const da: f64 = @floatFromInt(@as(i32, p1.a) - p2.a);
+                            sum += da * da;
+                        }
                     }
                 }
             }
@@ -915,10 +913,10 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
     const self = py_utils.safeCast(ImageObject, self_obj);
     py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    const dtype_obj = switch (self.py_image.?.data) {
-        .gray => @as(*c.PyObject, @ptrCast(&color_bindings.gray)),
-        .rgb => @as(*c.PyObject, @ptrCast(&color_bindings.rgb)),
-        .rgba => @as(*c.PyObject, @ptrCast(&color_bindings.rgba)),
+    const dtype_obj: *c.PyObject = switch (self.py_image.?.data) {
+        .gray => @ptrCast(&color_bindings.gray),
+        .rgb => @ptrCast(&color_bindings.rgb),
+        .rgba => @ptrCast(&color_bindings.rgba),
     };
     c.Py_INCREF(dtype_obj);
     return dtype_obj;

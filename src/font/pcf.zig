@@ -515,11 +515,11 @@ fn readMetric(reader: *std.Io.Reader, byte_order: std.builtin.Endian, compressed
         const desc = try reader.takeVarInt(u8, .little, 1);
 
         return Metric{
-            .left_sided_bearing = @as(i16, @intCast(@as(i16, lsb) - 0x80)),
-            .right_sided_bearing = @as(i16, @intCast(@as(i16, rsb) - 0x80)),
-            .character_width = @as(i16, @intCast(@as(i16, cw) - 0x80)),
-            .ascent = @as(i16, @intCast(@as(i16, asc) - 0x80)),
-            .descent = @as(i16, @intCast(@as(i16, desc) - 0x80)),
+            .left_sided_bearing = @intCast(@as(i16, lsb) - 0x80),
+            .right_sided_bearing = @intCast(@as(i16, rsb) - 0x80),
+            .character_width = @intCast(@as(i16, cw) - 0x80),
+            .ascent = @intCast(@as(i16, asc) - 0x80),
+            .descent = @intCast(@as(i16, desc) - 0x80),
             .attributes = 0,
         };
     } else {
@@ -775,7 +775,7 @@ fn convertToBitmapFont(
         const chars_per_row = encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1;
         const row = encoding_index / chars_per_row;
         const col = encoding_index % chars_per_row;
-        const codepoint = @as(u32, @intCast(((encoding.min_byte1 + row) << 8) | (encoding.min_char_or_byte2 + col)));
+        const codepoint: u32 = @intCast(((encoding.min_byte1 + row) << 8) | (encoding.min_char_or_byte2 + col));
 
         if (!shouldIncludeGlyph(codepoint, filter)) continue;
 
@@ -867,8 +867,8 @@ fn convertToBitmapFont(
 
     return BitmapFont{
         .name = name,
-        .char_width = @as(u8, @intCast(@min(max_width, 255))),
-        .char_height = @as(u8, @intCast(@min(max_height, 255))),
+        .char_width = @intCast(@min(max_width, 255)),
+        .char_height = @intCast(@min(max_height, 255)),
         .first_char = if (all_ascii) min_char else 0,
         .last_char = if (all_ascii) max_char else 0,
         .data = bitmap_data,

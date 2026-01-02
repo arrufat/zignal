@@ -1,6 +1,6 @@
 const zignal = @import("zignal");
-const ConvexHull = zignal.ConvexHull;
-const Point2F = zignal.Point(2, f32);
+const ConvexHull = zignal.ConvexHull(f64);
+const Point2F = zignal.Point(2, f64);
 const rectangle = @import("rectangle.zig");
 
 const py_utils = @import("py_utils.zig");
@@ -10,7 +10,7 @@ const stub_metadata = @import("stub_metadata.zig");
 
 pub const ConvexHullObject = extern struct {
     ob_base: c.PyObject,
-    hull: ?*ConvexHull(f32),
+    hull: ?*ConvexHull,
 };
 
 // Using genericNew helper for standard object creation
@@ -22,13 +22,13 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ConvexHullObject, self_obj);
 
     // Using createHeapObject helper for allocation with error handling
-    self.hull = py_utils.createHeapObject(ConvexHull(f32), .{py_utils.ctx.allocator}) catch return -1;
+    self.hull = py_utils.createHeapObject(ConvexHull, .{py_utils.ctx.allocator}) catch return -1;
     return 0;
 }
 
 // Helper function for custom cleanup
 fn convexHullDeinit(self: *ConvexHullObject) void {
-    py_utils.destroyHeapObject(ConvexHull(f32), self.hull);
+    py_utils.destroyHeapObject(ConvexHull, self.hull);
 }
 
 // Using genericDealloc helper
@@ -64,7 +64,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const self = py_utils.safeCast(ConvexHullObject, self_obj);
 
     // Using validateNonNull helper for null check with error message
-    const hull = py_utils.validateNonNull(*ConvexHull(f32), self.hull, "ConvexHull") catch return null;
+    const hull = py_utils.validateNonNull(*ConvexHull, self.hull, "ConvexHull") catch return null;
 
     // Parse points argument
     const Params = struct {
@@ -75,7 +75,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const points_obj = params.points;
 
     // Parse the point list
-    const points = py_utils.parsePointList(f32, points_obj) catch {
+    const points = py_utils.parsePointList(f64, points_obj) catch {
         // Error already set by parsePointList
         return null;
     };
@@ -97,13 +97,13 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             const tuple = c.PyTuple_New(2);
             if (tuple == null) return null;
 
-            const x_obj = c.PyFloat_FromDouble(@as(f64, point.x()));
+            const x_obj = c.PyFloat_FromDouble(point.x());
             if (x_obj == null) {
                 c.Py_DECREF(tuple);
                 return null;
             }
 
-            const y_obj = c.PyFloat_FromDouble(@as(f64, point.y()));
+            const y_obj = c.PyFloat_FromDouble(point.y());
             if (y_obj == null) {
                 c.Py_DECREF(x_obj);
                 c.Py_DECREF(tuple);
@@ -134,15 +134,15 @@ const convex_hull_get_rectangle_doc =
 fn convex_hull_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = py_utils.safeCast(ConvexHullObject, self_obj);
-    const hull = py_utils.validateNonNull(*ConvexHull(f32), self.hull, "ConvexHull") catch return null;
+    const hull = py_utils.validateNonNull(*ConvexHull, self.hull, "ConvexHull") catch return null;
 
     if (hull.getRectangle()) |rect| {
         const args_tuple = c.Py_BuildValue(
             "(dddd)",
-            @as(f64, rect.l),
-            @as(f64, rect.t),
-            @as(f64, rect.r),
-            @as(f64, rect.b),
+            rect.l,
+            rect.t,
+            rect.r,
+            rect.b,
         ) orelse return null;
         defer c.Py_DECREF(args_tuple);
         return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);

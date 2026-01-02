@@ -203,9 +203,12 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
         return -1;
     };
 
+    const n_rows_usize: usize = @intCast(n_rows);
+    const n_cols_usize: usize = @intCast(n_cols);
+
     // Fill matrix with data from list
     var row_idx: usize = 0;
-    while (row_idx < @as(usize, @intCast(n_rows))) : (row_idx += 1) {
+    while (row_idx < n_rows_usize) : (row_idx += 1) {
         const row_obj = c.PyList_GetItem(list_obj, @intCast(row_idx));
 
         // Check that this is a list
@@ -227,7 +230,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
 
         // Extract values from row
         var col_idx: usize = 0;
-        while (col_idx < @as(usize, @intCast(n_cols))) : (col_idx += 1) {
+        while (col_idx < n_cols_usize) : (col_idx += 1) {
             const item = c.PyList_GetItem(row_obj, @intCast(col_idx));
 
             // Convert to float
@@ -473,12 +476,12 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     // Create new Matrix object
-    const self = @as(?*MatrixObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0)));
+    const self: ?*MatrixObject = @ptrCast(c.PyType_GenericAlloc(@ptrCast(type_obj), 0));
     if (self == null) return null;
 
     // Create Matrix that references the numpy data
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        // TODO: remove explicit cast when we don't use Python < 3.13
+        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
         py_utils.setMemoryError("Matrix");
         return null;
@@ -509,6 +512,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         // Fallback: copy unaligned data to an aligned buffer
         matrix_ptr.* = Matrix(f64).init(allocator, rows, cols) catch {
             allocator.destroy(matrix_ptr);
+            // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
             c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
             py_utils.setMemoryError("Matrix");
             return null;
@@ -770,10 +774,11 @@ fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
         return null;
     }
 
-    const self = @as(?*MatrixObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(&MatrixType), 0)));
+    const self: ?*MatrixObject = @ptrCast(c.PyType_GenericAlloc(@ptrCast(&MatrixType), 0));
     if (self == null) return null;
 
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
+        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
         py_utils.setMemoryError("Matrix");
         return null;
@@ -819,7 +824,7 @@ fn allocOwnedMatrix(type_obj: ?*c.PyObject) ?OwnedMatrixAlloc {
     const raw_self = c.PyType_GenericAlloc(@ptrCast(type_obj), 0);
     if (raw_self == null) return null;
 
-    const matrix_obj = @as(*MatrixObject, @ptrCast(raw_self.?));
+    const matrix_obj: *MatrixObject = @ptrCast(raw_self.?);
     matrix_obj.matrix_ptr = null;
     matrix_obj.numpy_ref = null;
     matrix_obj.owns_memory = false;

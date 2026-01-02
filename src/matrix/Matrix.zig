@@ -224,7 +224,9 @@ pub fn Matrix(comptime T: type) type {
             return switch (@TypeOf(ts)) {
                 std.posix.timespec => blk: {
                     // Combine seconds and nanoseconds; truncate to 64 bits.
-                    const mixed: u128 = (@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec));
+                    const sec: u128 = @intCast(ts.sec);
+                    const nsec: u128 = @intCast(ts.nsec);
+                    const mixed = (sec << 32) ^ nsec;
                     break :blk @truncate(mixed);
                 },
                 else => @truncate(ts),

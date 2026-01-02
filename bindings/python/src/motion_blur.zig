@@ -417,7 +417,7 @@ pub fn registerMotionBlur(module: *c.PyObject) !void {
     }
 
     // Add to module
-    // TODO: Remove explicit cast after Python 3.10 is dropped
+    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     c.Py_INCREF(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
     if (c.PyModule_AddObject(module, "MotionBlur", @as(?*c.PyObject, @ptrCast(&MotionBlurType))) < 0) {
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));

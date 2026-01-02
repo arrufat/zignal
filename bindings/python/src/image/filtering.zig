@@ -665,7 +665,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     }
 
     // Cast to MotionBlurObject to access the blur_type discriminator
-    const blur_obj = @as(*motion_blur.MotionBlurObject, @ptrCast(config_obj));
+    const blur_obj: *motion_blur.MotionBlurObject = @ptrCast(config_obj);
 
     return self.py_image.?.dispatch(.{blur_obj}, struct {
         fn apply(img: anytype, bo: *motion_blur.MotionBlurObject) ?*c.PyObject {
@@ -1008,7 +1008,7 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         return null;
     }
 
-    const overlay = @as(*ImageObject, @ptrCast(overlay_obj.?));
+    const overlay: *ImageObject = @ptrCast(overlay_obj.?);
 
     // Get blend mode (default to normal if not specified)
     var blend_mode = zignal.Blending.normal;

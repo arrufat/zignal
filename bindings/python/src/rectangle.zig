@@ -150,7 +150,7 @@ fn rectangle_area(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     const height = self.bottom - self.top;
     const area = if (width < 0 or height < 0) 0 else width * height;
 
-    return c.PyFloat_FromDouble(@as(f64, area));
+    return c.PyFloat_FromDouble(area);
 }
 
 const rectangle_contains_doc =
@@ -182,8 +182,8 @@ fn rectangle_contains(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const x_f32 = @as(f32, @floatCast(params.x));
-    const y_f32 = @as(f32, @floatCast(params.y));
+    const x_f32: f32 = @floatCast(params.x);
+    const y_f32: f32 = @floatCast(params.y);
 
     const contains = x_f32 >= self.left and x_f32 < self.right and
         y_f32 >= self.top and y_f32 < self.bottom;
@@ -259,10 +259,14 @@ fn rectangle_grow(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const amount_f32 = @as(f32, @floatCast(params.amount));
-
     // Create new rectangle with grown bounds
-    const new_args = c.Py_BuildValue("(dddd)", @as(f64, self.left - amount_f32), @as(f64, self.top - amount_f32), @as(f64, self.right + amount_f32), @as(f64, self.bottom + amount_f32)) orelse return null;
+    const new_args = c.Py_BuildValue(
+        "(dddd)",
+        self.left - params.amount,
+        self.top - params.amount,
+        self.right + params.amount,
+        self.bottom + params.amount,
+    ) orelse return null;
     defer c.Py_DECREF(new_args);
 
     const new_rect = c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
@@ -292,10 +296,14 @@ fn rectangle_shrink(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const amount_f32 = @as(f32, @floatCast(params.amount));
-
     // Create new rectangle with shrunk bounds
-    const new_args = c.Py_BuildValue("(dddd)", @as(f64, self.left + amount_f32), @as(f64, self.top + amount_f32), @as(f64, self.right - amount_f32), @as(f64, self.bottom - amount_f32)) orelse return null;
+    const new_args = c.Py_BuildValue(
+        "(dddd)",
+        self.left + params.amount,
+        self.top + params.amount,
+        self.right - params.amount,
+        self.bottom - params.amount,
+    ) orelse return null;
     defer c.Py_DECREF(new_args);
 
     const new_rect = c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
@@ -416,14 +424,13 @@ fn rectangle_intersect(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
 
     // Check if the intersection is empty (for floats, use >=)
     if (left >= right or top >= bottom) {
-        // Return None
         const none = c.Py_None();
         c.Py_INCREF(none);
         return none;
     }
 
     // Create intersection rectangle
-    const new_args = c.Py_BuildValue("(dddd)", @as(f64, left), @as(f64, top), @as(f64, right), @as(f64, bottom)) orelse return null;
+    const new_args = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
     defer c.Py_DECREF(new_args);
 
     const new_rect = c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
@@ -600,14 +607,14 @@ fn rectangle_get_width(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
     _ = closure;
     const self = py_utils.safeCast(RectangleObject, self_obj);
     const width = self.right - self.left;
-    return c.PyFloat_FromDouble(@as(f64, width));
+    return c.PyFloat_FromDouble(width);
 }
 
 fn rectangle_get_height(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = py_utils.safeCast(RectangleObject, self_obj);
     const height = self.bottom - self.top;
-    return c.PyFloat_FromDouble(@as(f64, height));
+    return c.PyFloat_FromDouble(height);
 }
 
 pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{

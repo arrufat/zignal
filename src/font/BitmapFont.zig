@@ -71,7 +71,7 @@ pub fn bytesPerRow(self: BitmapFont) usize {
 pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
     // For ASCII fonts WITHOUT glyph_map, use the standard fixed-size layout
     if (self.glyph_map == null and codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
-        const index = @as(usize, @as(u8, @intCast(codepoint)) - self.first_char);
+        const index: usize = @as(u8, @intCast(codepoint)) - self.first_char;
         const bytes_per_row = self.bytesPerRow();
         const bytes_per_char = @as(usize, self.char_height) * bytes_per_row;
         const offset = index * bytes_per_char;
