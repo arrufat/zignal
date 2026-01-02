@@ -547,8 +547,8 @@ pub fn Image(comptime T: type) type {
         pub fn scale(self: Self, allocator: Allocator, factor: f32, method: Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
-            const new_rows = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor)));
-            const new_cols = @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor)));
+            const new_rows: usize = @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor));
+            const new_cols: usize = @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor));
 
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 

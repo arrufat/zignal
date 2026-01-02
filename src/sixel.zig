@@ -113,8 +113,8 @@ inline fn monotonicNs() u64 {
     }
 
     const ts = instant.timestamp;
-    const seconds = @as(u128, @intCast(ts.sec));
-    const nanoseconds = @as(u128, @intCast(ts.nsec));
+    const seconds: u128 = @intCast(ts.sec);
+    const nanoseconds: u128 = @intCast(ts.nsec);
     const total = seconds * @as(u128, std.time.ns_per_s) + nanoseconds;
     return @truncate(total);
 }
@@ -232,12 +232,12 @@ pub fn fromImageProfiled(
                         }
 
                         // Fallback to clamped nearest-neighbor sample to avoid leaving pixels uninitialized.
-                        const clamped_col = clamp(
+                        const clamped_col: isize = clamp(
                             @as(isize, @intFromFloat(@round(src_x))),
                             0,
                             @as(isize, @intCast(image.cols - 1)),
                         );
-                        const clamped_row = clamp(
+                        const clamped_row: isize = clamp(
                             @as(isize, @intFromFloat(@round(src_y))),
                             0,
                             @as(isize, @intCast(image.rows - 1)),
@@ -767,8 +767,10 @@ fn applyErrorDiffusion(
             row_slice[c] = quantized;
 
             for (config.distributions) |dist| {
-                const nc_signed = @as(isize, @intCast(c)) + dist.dx;
-                const nr_signed = @as(isize, @intCast(r)) + dist.dy;
+                const c_isize: isize = @intCast(c);
+                const r_isize: isize = @intCast(r);
+                const nc_signed = c_isize + dist.dx;
+                const nr_signed = r_isize + dist.dy;
                 if (nr_signed < 0 or nr_signed >= rows_isize or nc_signed < 0 or nc_signed >= cols_isize) continue;
 
                 const nr: usize = @intCast(nr_signed);
@@ -891,9 +893,9 @@ fn generateAdaptivePalette(
             const count = hist_handle.counts[key];
             if (count == 0) continue;
 
-            const r5 = @as(u8, @intCast((key >> (2 * color_quantize_bits)) & 0x1F));
-            const g5 = @as(u8, @intCast((key >> color_quantize_bits) & 0x1F));
-            const b5 = @as(u8, @intCast(key & 0x1F));
+            const r5: u8 = @intCast((key >> (2 * color_quantize_bits)) & 0x1F);
+            const g5: u8 = @intCast((key >> color_quantize_bits) & 0x1F);
+            const b5: u8 = @intCast(key & 0x1F);
 
             const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
             const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
@@ -930,9 +932,9 @@ fn generateAdaptivePalette(
             if (count == 0) continue;
 
             const key: u32 = @intCast(key_idx);
-            const r5 = @as(u8, @intCast((key >> (2 * color_quantize_bits)) & 0x1F));
-            const g5 = @as(u8, @intCast((key >> color_quantize_bits) & 0x1F));
-            const b5 = @as(u8, @intCast(key & 0x1F));
+            const r5: u8 = @intCast((key >> (2 * color_quantize_bits)) & 0x1F);
+            const g5: u8 = @intCast((key >> color_quantize_bits) & 0x1F);
+            const b5: u8 = @intCast(key & 0x1F);
 
             const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
             const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));

@@ -223,7 +223,7 @@ fn adam7TotalSize(header: Header) !usize {
             const pass_scanline_bytes_u64 = (pass_bits + 7) / 8;
             const pass_scanline_bytes = std.math.cast(usize, pass_scanline_bytes_u64) orelse return error.ImageTooLarge;
             const stride = std.math.add(usize, pass_scanline_bytes, 1) catch return error.ImageTooLarge;
-            const pass_total = std.math.mul(usize, stride, @as(usize, @intCast(dims.height))) catch return error.ImageTooLarge;
+            const pass_total = std.math.mul(usize, stride, @intCast(dims.height)) catch return error.ImageTooLarge;
             total_size = std.math.add(usize, total_size, pass_total) catch return error.ImageTooLarge;
         }
     }
@@ -237,7 +237,7 @@ fn scanDataLength(header: Header) !usize {
     }
     const scanline_bytes = header.scanlineBytes();
     const stride = std.math.add(usize, scanline_bytes, 1) catch return error.ImageTooLarge;
-    return std.math.mul(usize, stride, @as(usize, @intCast(header.height))) catch return error.ImageTooLarge;
+    return std.math.mul(usize, stride, @intCast(header.height)) catch return error.ImageTooLarge;
 }
 
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
@@ -812,7 +812,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                             1, 2, 4 => blk: {
                                 const bits_per_pixel = png_state.header.bit_depth;
                                 const pixels_per_byte = 8 / bits_per_pixel;
-                                const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+                                const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
                                 const byte_idx = i / pixels_per_byte;
                                 if (byte_idx >= src_row.len) return error.InvalidScanlineData;
                                 const pixel_idx = i % pixels_per_byte;
@@ -852,7 +852,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                             1, 2, 4 => blk: {
                                 const bits_per_pixel = png_state.header.bit_depth;
                                 const pixels_per_byte = 8 / bits_per_pixel;
-                                const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+                                const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
                                 const byte_idx = i / pixels_per_byte;
                                 if (byte_idx >= src_row.len) return error.InvalidScanlineData;
                                 const pixel_idx = i % pixels_per_byte;
@@ -1296,7 +1296,7 @@ fn calculateFilterCost(filtered_data: []const u8) u32 {
     for (filtered_data) |b| {
         const sb: i8 = @bitCast(b);
         const wide: i16 = sb;
-        cost += @as(u32, @intCast(@abs(wide)));
+        cost += @intCast(@abs(wide));
     }
     return cost;
 }
@@ -1541,17 +1541,17 @@ inline fn applyGammaCorrection(value: u8, config: PixelExtractionConfig) u8 {
 
 /// Extract grayscale pixel from Adam7 pass data with optional transparency
 fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
-    const pixel_value = switch (header.bit_depth) {
+    const pixel_value: u8 = switch (header.bit_depth) {
         8 => if (header.color_type == .grayscale_alpha) src_row[pass_x * 2] else src_row[pass_x],
         16 => blk: {
             const offset = if (header.color_type == .grayscale_alpha) pass_x * 4 else pass_x * 2;
             if (offset + 1 >= src_row.len) break :blk 0;
-            break :blk @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8));
+            break :blk @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8);
         },
         1, 2, 4 => blk: {
             const bits_per_pixel = header.bit_depth;
             const pixels_per_byte = 8 / bits_per_pixel;
-            const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
+            const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
             const byte_idx = pass_x / pixels_per_byte;
             if (byte_idx >= src_row.len) break :blk 0;
             const pixel_idx = pass_x % pixels_per_byte;
@@ -1600,32 +1600,32 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
         };
     }
 
-    const r = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8))
+    const r: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8)
     else
         src_row[offset];
-    const g = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8))
+    const g: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride];
-    const b = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8))
+    const b: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 2];
 
     // Check for transparency
     const is_transparent = if (config.transparency) |trans_data| blk: {
         if (header.color_type == .rgb and trans_data.len >= 6) {
-            const trans_r = if (header.bit_depth == 16)
-                @as(u8, @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8))
+            const trans_r: u8 = if (header.bit_depth == 16)
+                @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8)
             else
                 trans_data[1]; // Use lower byte for 8-bit
-            const trans_g = if (header.bit_depth == 16)
-                @as(u8, @intCast(std.mem.readInt(u16, trans_data[2..4], .big) >> 8))
+            const trans_g: u8 = if (header.bit_depth == 16)
+                @intCast(std.mem.readInt(u16, trans_data[2..4], .big) >> 8)
             else
                 trans_data[3];
-            const trans_b = if (header.bit_depth == 16)
-                @as(u8, @intCast(std.mem.readInt(u16, trans_data[4..6], .big) >> 8))
+            const trans_b: u8 = if (header.bit_depth == 16)
+                @intCast(std.mem.readInt(u16, trans_data[4..6], .big) >> 8)
             else
                 trans_data[5];
             break :blk r == trans_r and g == trans_g and b == trans_b;
@@ -1660,20 +1660,20 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
         };
     }
 
-    const r = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8))
+    const r: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8)
     else
         src_row[offset];
-    const g = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8))
+    const g: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride];
-    const b = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8))
+    const b: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 2];
-    const a = if (header.bit_depth == 16)
-        @as(u8, @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 3 .. offset + channel_stride * 3 + 2][0..2], .big) >> 8))
+    const a: u8 = if (header.bit_depth == 16)
+        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 3 .. offset + channel_stride * 3 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 3];
 

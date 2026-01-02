@@ -380,7 +380,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
             // Determine transform type and apply warp
             if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
-                const transform = @as(*transforms.SimilarityTransformObject, @ptrCast(t_obj));
+                const transform: *transforms.SimilarityTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.SimilarityTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
@@ -396,7 +396,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     return null;
                 };
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
-                const transform = @as(*transforms.AffineTransformObject, @ptrCast(t_obj));
+                const transform: *transforms.AffineTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.AffineTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
@@ -412,7 +412,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     return null;
                 };
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
-                const transform = @as(*transforms.ProjectiveTransformObject, @ptrCast(t_obj));
+                const transform: *transforms.ProjectiveTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.ProjectiveTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]), @floatCast(transform.matrix[0][2]) },

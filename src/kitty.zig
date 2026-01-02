@@ -279,7 +279,7 @@ test "imageToKitty with scaling" {
     // Fill with a pattern
     for (0..4) |y| {
         for (0..4) |x| {
-            const val = @as(u8, @intCast((x + y) * 32));
+            const val: u8 = @intCast((x + y) * 32);
             img.at(y, x).* = Rgb{ .r = val, .g = val, .b = val };
         }
     }
@@ -314,9 +314,9 @@ test "imageToKitty with chunking enabled" {
 
     for (0..img.rows) |y| {
         for (0..img.cols) |x| {
-            const r = @as(u8, @intCast((x * 17 + y * 31) & 0xff));
-            const g = @as(u8, @intCast((x * 43 + y * 7) & 0xff));
-            const b = @as(u8, @intCast((x * 11 + y * 19) & 0xff));
+            const r: u8 = @intCast((x * 17 + y * 31) & 0xff);
+            const g: u8 = @intCast((x * 43 + y * 7) & 0xff);
+            const b: u8 = @intCast((x * 11 + y * 19) & 0xff);
             img.at(y, x).* = Rgb{ .r = r, .g = g, .b = b };
         }
     }

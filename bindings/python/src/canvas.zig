@@ -228,12 +228,12 @@ fn canvas_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     _ = args;
     _ = kwds;
 
-    const self = @as(?*CanvasObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self: ?*CanvasObject = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
     if (self) |obj| {
         obj.image_ref = null;
         obj.py_canvas = null;
     }
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -255,7 +255,7 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
         return -1;
     }
 
-    const image = @as(*image_module.ImageObject, @ptrCast(params.image.?));
+    const image: *image_module.ImageObject = @ptrCast(params.image.?);
 
     // Keep reference to parent Image to prevent garbage collection
     c.Py_INCREF(params.image.?);

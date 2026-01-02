@@ -287,8 +287,7 @@ fn running_stats_count_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
     _ = closure;
     const self = py_utils.safeCast(RunningStatsObject, self_obj);
     const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
-    const ParamType = @typeInfo(@TypeOf(c.PyLong_FromUnsignedLongLong)).@"fn".params[0].type.?;
-    return c.PyLong_FromUnsignedLongLong(@as(ParamType, @intCast(stats_ptr.currentN())));
+    return c.PyLong_FromUnsignedLongLong(@intCast(stats_ptr.currentN()));
 }
 
 fn running_stats_sum_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
