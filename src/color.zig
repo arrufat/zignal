@@ -1481,12 +1481,12 @@ fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
     const g = (xyz.x * -0.9689 + xyz.y * 1.8758 + xyz.z * 0.0415) / 100;
     const b = (xyz.x * 0.0557 + xyz.y * -0.2040 + xyz.z * 1.0570) / 100;
 
-    const bias = 0.96723368009523958;
-    const cbrt_bias = 0.988945892534436;
+    const bias = 0.00379307325527544933;
+    const cbrt_bias = 0.15595420054924863;
 
-    const l = 0.30 * r + 0.622 * g + 0.078 * b + bias;
-    const m = 0.23 * r + 0.692 * g + 0.078 * b + bias;
-    const s = 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias;
+    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + bias);
+    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + bias);
+    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias);
 
     const l_dash = std.math.cbrt(l) - cbrt_bias;
     const m_dash = std.math.cbrt(m) - cbrt_bias;
@@ -1502,8 +1502,8 @@ fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
 /// Converts XYB to XYZ.
 fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
-    const cbrt_bias = 0.988945892534436;
-    const bias = 0.96723368009523958;
+    const cbrt_bias = 0.15594113236791331;
+    const bias = 0.00379307325527544933;
 
     const l_dash = xyb.y + xyb.x;
     const m_dash = xyb.y - xyb.x;
@@ -1517,9 +1517,9 @@ fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     const m = (m_cbrt * m_cbrt * m_cbrt) - bias;
     const s = (s_cbrt * s_cbrt * s_cbrt) - bias;
 
-    const r = 11.03156690196 * l - 9.86694392157 * m - 0.16462300039 * s;
-    const g = -3.25414738039 * l + 4.41877039216 * m - 0.16462300039 * s;
-    const b = -3.65885128627 * l + 2.71292304706 * m + 1.94592823922 * s;
+    const r = 11.031566901960783 * l - 9.866943921568629 * m - 0.16462299647058826 * s;
+    const g = -3.254147380392157 * l + 4.418770392156863 * m - 0.16462299647058826 * s;
+    const b = -3.6588512862745097 * l + 2.7129230470588235 * m + 1.9459282392156863 * s;
 
     return .{
         .x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100,
@@ -1535,12 +1535,12 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     const g = gammaToLinear(T, rgb.g);
     const b = gammaToLinear(T, rgb.b);
 
-    const bias = 0.96723368009523958;
-    const cbrt_bias = 0.988945892534436;
+    const bias = 0.00379307325527544933;
+    const cbrt_bias = 0.15595420054924863;
 
-    const l = 0.30 * r + 0.622 * g + 0.078 * b + bias;
-    const m = 0.23 * r + 0.692 * g + 0.078 * b + bias;
-    const s = 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias;
+    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + bias);
+    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + bias);
+    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias);
 
     const l_dash = std.math.cbrt(l) - cbrt_bias;
     const m_dash = std.math.cbrt(m) - cbrt_bias;
@@ -1556,8 +1556,8 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
 /// Converts XYB to RGB.
 fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
-    const cbrt_bias = 0.988945892534436;
-    const bias = 0.96723368009523958;
+    const cbrt_bias = 0.15594113236791331;
+    const bias = 0.00379307325527544933;
 
     const l_dash = xyb.y + xyb.x;
     const m_dash = xyb.y - xyb.x;
@@ -1571,9 +1571,9 @@ fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
     const m = (m_cbrt * m_cbrt * m_cbrt) - bias;
     const s = (s_cbrt * s_cbrt * s_cbrt) - bias;
 
-    const r = 11.03156690196 * l - 9.86694392157 * m - 0.16462300039 * s;
-    const g = -3.25414738039 * l + 4.41877039216 * m - 0.16462300039 * s;
-    const b = -3.65885128627 * l + 2.71292304706 * m + 1.94592823922 * s;
+    const r = 11.031566901960783 * l - 9.866943921568629 * m - 0.16462299647058826 * s;
+    const g = -3.254147380392157 * l + 4.418770392156863 * m - 0.16462299647058826 * s;
+    const b = -3.6588512862745097 * l + 2.7129230470588235 * m + 1.9459282392156863 * s;
 
     return .{
         .r = clamp(linearToGamma(T, r), 0, 1),
