@@ -4,8 +4,8 @@ import os
 
 # Import the native extension placed by `zig build python-bindings` or `uv pip install .`
 try:
-    from ._zignal import *  # type: ignore
-    from ._zignal import __version__  # type: ignore
+    from ._zignal import *  # noqa: F403
+    from ._zignal import __version__  # noqa: F401
 except Exception as e:  # pragma: no cover - clearer error for missing build
     pkg_dir = os.path.dirname(__file__)
     raise ImportError(
