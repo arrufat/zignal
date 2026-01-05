@@ -52,15 +52,7 @@ const ChunkOrderState = struct {
     idat_stream_finished: bool = false,
 };
 
-inline fn exceedsU32(limit: u32, value: u32) bool {
-    return limit != 0 and value > limit;
-}
-
-inline fn exceedsU64(limit: u64, value: u64) bool {
-    return limit != 0 and value > limit;
-}
-
-inline fn exceedsUsize(limit: usize, value: usize) bool {
+inline fn exceeds(T: type, limit: T, value: T) bool {
     return limit != 0 and value > limit;
 }
 
@@ -241,11 +233,11 @@ fn scanDataLength(header: Header) !usize {
 }
 
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
-    if (exceedsU32(limits.max_width, header.width) or exceedsU32(limits.max_height, header.height)) {
+    if (exceeds(u32, limits.max_width, header.width) or exceeds(u32, limits.max_height, header.height)) {
         return error.ImageTooLarge;
     }
     const total_pixels = @as(u64, header.width) * @as(u64, header.height);
-    if (exceedsU64(limits.max_pixels, total_pixels)) {
+    if (exceeds(u64, limits.max_pixels, total_pixels)) {
         return error.ImageTooLarge;
     }
 }
@@ -435,7 +427,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
     }
-    if (exceedsUsize(limits.max_png_bytes, png_data.len)) {
+    if (exceeds(usize, limits.max_png_bytes, png_data.len)) {
         return error.PngDataTooLarge;
     }
 
@@ -454,7 +446,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
 
     while (try reader.nextChunk()) |chunk| {
         chunk_count += 1;
-        if (exceedsUsize(limits.max_chunks, chunk_count)) {
+        if (exceeds(usize, limits.max_chunks, chunk_count)) {
             return error.TooManyChunks;
         }
 
@@ -582,7 +574,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     }
 
     png_state.scan_data_bytes = try scanDataLength(png_state.header);
-    if (exceedsUsize(limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
+    if (exceeds(usize, limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
         return error.ImageTooLarge;
     }
 
