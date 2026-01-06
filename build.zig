@@ -224,13 +224,13 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     _ = b.runAllowFail(
         &.{ "git", "-C", zignal_dir, "describe", "--tags", "--exact-match" },
         &code,
-        .Ignore,
+        .ignore,
     ) catch {
         // Not on a tag, need to create a dev version
         const git_hash_raw = b.runAllowFail(
             &.{ "git", "-C", zignal_dir, "rev-parse", "--short", "HEAD" },
             &code,
-            .Ignore,
+            .ignore,
         ) catch return zignal_version;
         const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
 
@@ -240,13 +240,13 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
             const base_tag_raw = b.runAllowFail(
                 &.{ "git", "-C", zignal_dir, "describe", "--tags", "--match=*.0", "--abbrev=0" },
                 &code,
-                .Ignore,
+                .ignore,
             ) catch {
                 // No .0 tags found, fall back to total commit count
                 const git_count_raw = b.runAllowFail(
                     &.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" },
                     &code,
-                    .Ignore,
+                    .ignore,
                 ) catch return zignal_version;
                 break :blk std.mem.trim(u8, git_count_raw, " \n\r");
             };
@@ -257,7 +257,7 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
             const git_count_raw = b.runAllowFail(
                 &.{ "git", "-C", zignal_dir, "rev-list", "--count", count_cmd },
                 &code,
-                .Ignore,
+                .ignore,
             ) catch return zignal_version;
             break :blk std.mem.trim(u8, git_count_raw, " \n\r");
         };
@@ -284,9 +284,9 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
     artifact.root_module.link_libc = true;
 
     // Add Python include directory if provided via environment variable
-    if (std.process.getEnvVarOwned(b.allocator, "PYTHON_INCLUDE_DIR")) |python_include| {
+    if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         artifact.root_module.addIncludePath(.{ .cwd_relative = python_include });
-    } else |_| {
+    } else {
         // No Python include directory specified - will rely on system default paths
     }
 
@@ -294,21 +294,21 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
     switch (target_info.os.tag) {
         .windows => {
             // On Windows, link against the Python library
-            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+            if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
                 artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
 
-                if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+                if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| {
                     // Remove the .lib extension for linkSystemLibrary
                     const lib_name_no_ext = if (std.mem.endsWith(u8, lib_name, ".lib"))
                         lib_name[0 .. lib_name.len - 4]
                     else
                         lib_name;
                     artifact.root_module.linkSystemLibrary(lib_name_no_ext, .{});
-                } else |_| {
+                } else {
                     // Fallback - try to link against a common Python library name
                     artifact.root_module.linkSystemLibrary(python_lib, .{});
                 }
-            } else |_| {
+            } else {
                 // No Python library path provided - try system default
                 artifact.root_module.linkSystemLibrary(python_lib, .{});
             }
@@ -319,16 +319,16 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
             // we'll use delocate to make the wheel portable
 
             // Add library path if provided (needed during build)
-            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIBS_DIR")) |libs_dir| {
+            if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
                 artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
-            } else |_| {
+            } else {
                 // No specific library path provided
             }
 
             // Link against Python library
-            if (std.process.getEnvVarOwned(b.allocator, "PYTHON_LIB_NAME")) |lib_name| {
+            if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| {
                 artifact.root_module.linkSystemLibrary(lib_name, .{});
-            } else |_| {
+            } else {
                 artifact.root_module.linkSystemLibrary(python_lib, .{});
             }
 

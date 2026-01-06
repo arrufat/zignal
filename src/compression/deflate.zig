@@ -616,28 +616,7 @@ pub const DeflateEncoder = struct {
             if (cl.extra_bits > 0) try writer.writeBits(self.gpa, cl.extra_value, cl.extra_bits);
         }
 
-        // Optional header dump for debugging: set env var ZIGNAL_DUMP_DEFLATE_HEADER
-        var dump = false;
-        if (std.process.getEnvVarOwned(self.gpa, "ZIGNAL_DUMP_DEFLATE_HEADER")) |val| {
-            dump = val.len > 0;
-            self.gpa.free(val);
-        } else |_| {}
-        if (dump) {
-            std.debug.print("[deflate] HLIT={} HDIST={} HCLEN={}\n", .{ HLIT, HDIST, HCLEN });
-            std.debug.print("[deflate] CL lens (order):", .{});
-            for (0..num_cl_codes) |i| {
-                const sym = huffman.code_length_order[i];
-                std.debug.print(" {}", .{cl_tree.lengths[sym]});
-            }
-            std.debug.print("\n", .{});
-            std.debug.print("[deflate] L+D lengths ({}):", .{all_lengths.items.len});
-            const max_show = @min(all_lengths.items.len, 64);
-            for (all_lengths.items[0..max_show]) |v| std.debug.print(" {}", .{v});
-            if (all_lengths.items.len > max_show) std.debug.print(" ...", .{});
-            std.debug.print("\n", .{});
-        }
-
-        self.hash_table = lz77.HashTable.init();
+        self.hash_table = .init();
         pos = 0;
         while (pos < data.len) {
             // Query match before inserting current pos to avoid self-hit in the chain
@@ -678,7 +657,7 @@ pub const DeflateEncoder = struct {
 
     fn encodeStaticHuffman(self: *DeflateEncoder, data: []const u8) !ArrayList(u8) {
         var writer = BitWriter.init(&self.output);
-        self.hash_table = lz77.HashTable.init();
+        self.hash_table = .init();
         try writer.writeBits(self.gpa, 0x3, 3); // final block + static (BFINAL=1, BTYPE=01)
 
         // Build static literal and distance codes at comptime via canonical generator
