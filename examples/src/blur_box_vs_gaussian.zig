@@ -77,16 +77,13 @@ fn boxesForGaussian(sigma: f32, passes: usize, buffer: []usize) ![]usize {
     return buffer[0..passes];
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     const io = std.Io.Threaded.global_single_threaded.ioBasic();
-
-    // const default_size: usize = 512;
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.args.toSlice(allocator);
+    defer allocator.free(args);
     if (args.len < 2) {
         std.debug.print("Provide an image path and an optional sigma (default: 1.0)\n", .{});
         return;
