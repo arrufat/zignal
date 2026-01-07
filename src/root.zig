@@ -29,6 +29,9 @@
 //!
 //! Available on [GitHub](https://github.com/bfactory-ai/zignal).
 
+/// The zignal version
+pub const version = @import("build_options").version;
+
 pub const Canvas = @import("canvas.zig").Canvas;
 pub const DrawMode = @import("canvas.zig").DrawMode;
 
