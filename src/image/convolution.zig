@@ -101,6 +101,21 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             return result;
         }
 
+        fn convolvePixelWithBorder(src: Image(T), dst: Image(T), r: usize, c: usize, kernel: [size]Scalar, border_mode: BorderMode) void {
+            const ir = @as(isize, @intCast(r));
+            const ic = @as(isize, @intCast(c));
+            var result: Scalar = 0;
+            inline for (0..rows) |ky| {
+                inline for (0..cols) |kx| {
+                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
+                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                    const pixel_val = getPixel(T, src, iry, icx, border_mode);
+                    result += pixel_val * kernel[ky * cols + kx];
+                }
+            }
+            dst.data[r * dst.stride + c] = Pixels.store(result);
+        }
+
         fn convolve(src: Image(T), dst: Image(T), kernel: [size]Scalar, border_mode: BorderMode) void {
             // Pre-create kernel vectors for SIMD (for f32)
             var kernel_vecs: [size]@Vector(vec_len, Scalar) = undefined;
@@ -115,7 +130,11 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
                 // SIMD path for interior pixels
                 if (r >= half_h and r + half_h < src.rows and src.cols >= vec_len + 2 * half_w) {
-                    c = half_w;
+                    // Process leading border pixels of this row
+                    while (c < half_w) : (c += 1) {
+                        convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
+                    }
+
                     const safe_end = src.cols - half_w;
 
                     while (c + vec_len <= safe_end) : (c += vec_len) {
@@ -159,18 +178,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                         dst.data[r * dst.stride + c] = Pixels.store(result);
                     } else {
                         // Border pixel - needs border handling
-                        const ir = @as(isize, @intCast(r));
-                        const ic = @as(isize, @intCast(c));
-                        var result: Scalar = 0;
-                        inline for (0..rows) |ky| {
-                            inline for (0..cols) |kx| {
-                                const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                                const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                                const pixel_val = getPixel(T, src, iry, icx, border_mode);
-                                result += pixel_val * kernel[ky * cols + kx];
-                            }
-                        }
-                        dst.data[r * dst.stride + c] = Pixels.store(result);
+                        convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
                     }
                 }
             }
