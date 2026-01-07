@@ -1236,3 +1236,46 @@ test "canny edge detection on RGB" {
     }
     try expectEqual(true, edge_detected);
 }
+
+test "convolve regression issue #255 (missing pixels)" {
+    // This test ensures that convolution writes all pixels, even when SIMD is used.
+    // Specifically targets the case where leading border columns were skipped.
+    const width = 20;
+    const height = 10;
+    var image: Image(u8) = try .init(std.testing.allocator, height, width);
+    defer image.deinit(std.testing.allocator);
+    image.fill(1);
+
+    var result: Image(u8) = try .initLike(std.testing.allocator, image);
+    defer result.deinit(std.testing.allocator);
+    result.fill(0xAA);
+
+    const kernel = [3][3]u8{
+        .{ 1, 1, 1 },
+        .{ 1, 0, 1 },
+        .{ 1, 1, 1 },
+    };
+
+    try image.convolve(std.testing.allocator, kernel, .zero, result);
+
+    // For interior pixels with all 1s and zero padding, 3x3 kernel with 0 at center
+    // should result in 8 if all neighbors are 1.
+    // For leading column 0, row 1, neighbors (with zero padding) are:
+    // (0,-1)=0, (0,0)=1, (0,1)=1
+    // (1,-1)=0, (1,0)=1, (1,1)=1 (center is (1,0))
+    // (2,-1)=0, (2,0)=1, (2,1)=1
+    // Sum = (0*1 + 1*1 + 1*1) + (0*1 + 1*0 + 1*1) + (0*1 + 1*1 + 1*1) = 2 + 1 + 2 = 5.
+
+    // Check first column for interior rows
+    for (1..height - 1) |r| {
+        try std.testing.expectEqual(@as(u8, 5), result.at(r, 0).*);
+    }
+
+    // Check second column (interior)
+    for (1..height - 1) |r| {
+        // Neighbors: all 1s except center
+        // Sum = 8
+        try std.testing.expectEqual(@as(u8, 8), result.at(r, 1).*);
+    }
+}
+
