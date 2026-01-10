@@ -762,7 +762,9 @@ test "SMatrix as" {
 }
 
 test "SMatrix scale" {
-    const seed: u64 = std.crypto.random.int(u64);
+    const io = std.testing.io;
+    const rng_impl: std.Random.IoSource = .{ .io = io };
+    const seed = rng_impl.interface().int(u64);
     const a: SMatrix(f32, 4, 3) = .random(seed);
     const b = SMatrix(f32, 4, 3).random(seed).scale(std.math.pi);
     try expectEqualDeep(a.shape(), b.shape());
