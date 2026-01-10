@@ -1278,4 +1278,3 @@ test "convolve regression issue #255 (missing pixels)" {
         try std.testing.expectEqual(@as(u8, 8), result.at(r, 1).*);
     }
 }
-

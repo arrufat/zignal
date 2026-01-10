@@ -1791,7 +1791,9 @@ test "Color formatting" {
 }
 
 test "100 random colors" {
-    const seed: u64 = std.crypto.random.int(u64);
+    const io = std.testing.io;
+    const rng_impl: std.Random.IoSource = .{ .io = io };
+    const seed = rng_impl.interface().int(u64);
     var prng: std.Random.DefaultPrng = .init(seed);
     var random = prng.random();
     for (0..100) |_| {
