@@ -127,6 +127,24 @@ fn formatColor(comptime T: type, self: T, writer: *std.Io.Writer) !void {
     try writer.print(" }}\x1b[0m", .{});
 }
 
+/// Defines the available color spaces and their conversion relationships.
+///
+/// # Conversion Graph
+/// The system uses a "Hub & Spoke" architecture for conversions to ensure consistency
+/// and maintainability.
+///
+/// **Display Hub (RGB)**             **Scientific Hub (XYZ)**
+///        Gray                             Lms
+///         |                                |
+///        Rgb <-------------------------> Xyz <----> Xyb
+///     / / | \ \                         /   \
+/// Rgba Hsl Hsv Ycbcr                 Oklab  Lab
+///                                      |     |
+///                                    Oklch  Lch
+///
+/// - **Direct conversions** exist between a space and its parent hub.
+/// - **Cross-conversions** (e.g., Hsl -> Lab) travel through the bridge:
+///   `Hsl -> Rgb -> Xyz -> Lab`
 pub const ColorSpace = enum {
     gray,
     hsl,
@@ -272,16 +290,11 @@ pub fn Rgb(comptime T: type) type {
                 .gray => rgbToGray(T, self),
                 .hsl => rgbToHsl(T, self),
                 .hsv => rgbToHsv(T, self),
-                .lab => xyzToLab(T, rgbToXyz(T, self)),
-                .lch => labToLch(T, xyzToLab(T, rgbToXyz(T, self))),
-                .lms => xyzToLms(T, rgbToXyz(T, self)),
-                .oklab => xyzToOklab(T, rgbToXyz(T, self)),
-                .oklch => oklabToOklch(T, xyzToOklab(T, rgbToXyz(T, self))),
-                .rgba => .{ .r = self.r, .g = self.g, .b = self.b, .a = if (T == u8) 255 else 1.0 },
                 .rgb => self,
-                .xyb => rgbToXyb(T, self),
+                .rgba => .{ .r = self.r, .g = self.g, .b = self.b, .a = if (T == u8) 255 else 1.0 },
                 .xyz => rgbToXyz(T, self),
                 .ycbcr => rgbToYcbcr(T, self),
+                else => self.to(.xyz).to(color_space),
             };
         }
 
@@ -397,19 +410,9 @@ pub fn Rgba(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Rgba(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, rgbToXyz(T, self.to(.rgb))),
-                .lch => labToLch(T, xyzToLab(T, rgbToXyz(T, self.to(.rgb)))),
-                .lms => xyzToLms(T, rgbToXyz(T, self.to(.rgb))),
-                .oklab => xyzToOklab(T, rgbToXyz(T, self.to(.rgb))),
-                .oklch => oklabToOklch(T, xyzToOklab(T, rgbToXyz(T, self.to(.rgb)))),
                 .rgba => self,
                 .rgb => .{ .r = self.r, .g = self.g, .b = self.b },
-                .xyb => rgbToXyb(T, self.to(.rgb)),
-                .xyz => rgbToXyz(T, self.to(.rgb)),
-                .ycbcr => rgbToYcbcr(T, self.to(.rgb)),
+                else => self.to(.rgb).to(color_space),
             };
         }
 
@@ -518,19 +521,10 @@ pub fn Hsv(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Hsv(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => hsvToHsl(T, self),
                 .hsv => self,
-                .lab => xyzToLab(T, rgbToXyz(T, self.to(.rgb))),
-                .lch => labToLch(T, xyzToLab(T, rgbToXyz(T, self.to(.rgb)))),
-                .lms => xyzToLms(T, rgbToXyz(T, self.to(.rgb))),
-                .oklab => xyzToOklab(T, rgbToXyz(T, self.to(.rgb))),
-                .oklch => oklabToOklch(T, xyzToOklab(T, rgbToXyz(T, self.to(.rgb)))),
-                .rgba => self.to(.rgb).to(.rgba),
+                .hsl => hsvToHsl(T, self),
                 .rgb => hsvToRgb(T, self),
-                .xyb => rgbToXyb(T, self.to(.rgb)),
-                .xyz => rgbToXyz(T, self.to(.rgb)),
-                .ycbcr => rgbToYcbcr(T, self.to(.rgb)),
+                else => self.to(.rgb).to(color_space),
             };
         }
 
@@ -565,19 +559,10 @@ pub fn Hsl(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Hsl(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
                 .hsl => self,
                 .hsv => hslToHsv(T, self),
-                .lab => xyzToLab(T, rgbToXyz(T, self.to(.rgb))),
-                .lch => labToLch(T, xyzToLab(T, rgbToXyz(T, self.to(.rgb)))),
-                .lms => xyzToLms(T, rgbToXyz(T, self.to(.rgb))),
-                .oklab => xyzToOklab(T, rgbToXyz(T, self.to(.rgb))),
-                .oklch => oklabToOklch(T, xyzToOklab(T, rgbToXyz(T, self.to(.rgb)))),
-                .rgba => self.to(.rgb).to(.rgba),
                 .rgb => hslToRgb(T, self),
-                .xyb => rgbToXyb(T, self.to(.rgb)),
-                .xyz => rgbToXyz(T, self.to(.rgb)),
-                .ycbcr => rgbToYcbcr(T, self.to(.rgb)),
+                else => self.to(.rgb).to(color_space),
             };
         }
 
@@ -614,19 +599,15 @@ pub fn Xyz(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Xyz(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
                 .lab => xyzToLab(T, self),
-                .lch => labToLch(T, xyzToLab(T, self)),
+                .lch => self.to(.lab).to(.lch),
                 .lms => xyzToLms(T, self),
                 .oklab => xyzToOklab(T, self),
-                .oklch => oklabToOklch(T, xyzToOklab(T, self)),
-                .rgba => self.to(.rgb).to(.rgba),
+                .oklch => self.to(.oklab).to(.oklch),
                 .rgb => xyzToRgb(T, self),
                 .xyb => xyzToXyb(T, self),
                 .xyz => self,
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, self)),
+                else => self.to(.rgb).to(color_space),
             };
         }
 
@@ -662,19 +643,10 @@ pub fn Lab(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Lab(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
                 .lab => self,
                 .lch => labToLch(T, self),
-                .lms => xyzToLms(T, labToXyz(T, self)),
-                .oklab => xyzToOklab(T, labToXyz(T, self)),
-                .oklch => oklabToOklch(T, xyzToOklab(T, labToXyz(T, self))),
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xyzToRgb(T, labToXyz(T, self)),
-                .xyb => xyzToXyb(T, labToXyz(T, self)),
                 .xyz => labToXyz(T, self),
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, labToXyz(T, self))),
+                else => self.to(.xyz).to(color_space),
             };
         }
 
@@ -710,19 +682,9 @@ pub fn Lch(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Lch(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => lchToLab(T, self),
                 .lch => self,
-                .lms => xyzToLms(T, labToXyz(T, lchToLab(T, self))),
-                .oklab => xyzToOklab(T, labToXyz(T, lchToLab(T, self))),
-                .oklch => oklabToOklch(T, xyzToOklab(T, labToXyz(T, lchToLab(T, self)))),
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xyzToRgb(T, labToXyz(T, lchToLab(T, self))),
-                .xyb => xyzToXyb(T, labToXyz(T, lchToLab(T, self))),
-                .xyz => labToXyz(T, lchToLab(T, self)),
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, labToXyz(T, lchToLab(T, self)))),
+                .lab => lchToLab(T, self),
+                else => self.to(.lab).to(color_space),
             };
         }
 
@@ -756,19 +718,9 @@ pub fn Lms(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Lms(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, lmsToXyz(T, self)),
-                .lch => labToLch(T, xyzToLab(T, lmsToXyz(T, self))),
                 .lms => self,
-                .oklab => xyzToOklab(T, lmsToXyz(T, self)),
-                .oklch => oklabToOklch(T, xyzToOklab(T, lmsToXyz(T, self))),
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xyzToRgb(T, lmsToXyz(T, self)),
-                .xyb => xyzToXyb(T, lmsToXyz(T, self)),
                 .xyz => lmsToXyz(T, self),
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, lmsToXyz(T, self))),
+                else => self.to(.xyz).to(color_space),
             };
         }
 
@@ -804,19 +756,10 @@ pub fn Oklab(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Oklab(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, oklabToXyz(T, self)),
-                .lch => labToLch(T, xyzToLab(T, oklabToXyz(T, self))),
-                .lms => xyzToLms(T, oklabToXyz(T, self)),
                 .oklab => self,
                 .oklch => oklabToOklch(T, self),
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xyzToRgb(T, oklabToXyz(T, self)),
-                .xyb => xyzToXyb(T, oklabToXyz(T, self)),
                 .xyz => oklabToXyz(T, self),
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, oklabToXyz(T, self))),
+                else => self.to(.xyz).to(color_space),
             };
         }
 
@@ -852,19 +795,9 @@ pub fn Oklch(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Oklch(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, oklabToXyz(T, oklchToOklab(T, self))),
-                .lch => labToLch(T, xyzToLab(T, oklabToXyz(T, oklchToOklab(T, self)))),
-                .lms => xyzToLms(T, oklabToXyz(T, oklchToOklab(T, self))),
-                .oklab => oklchToOklab(T, self),
                 .oklch => self,
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xyzToRgb(T, oklabToXyz(T, oklchToOklab(T, self))),
-                .xyb => xyzToXyb(T, oklabToXyz(T, oklchToOklab(T, self))),
-                .xyz => oklabToXyz(T, oklchToOklab(T, self)),
-                .ycbcr => rgbToYcbcr(T, xyzToRgb(T, oklabToXyz(T, oklchToOklab(T, self)))),
+                .oklab => oklchToOklab(T, self),
+                else => self.to(.oklab).to(color_space),
             };
         }
 
@@ -901,19 +834,9 @@ pub fn Xyb(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Xyb(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, xybToXyz(T, self)),
-                .lch => labToLch(T, xyzToLab(T, xybToXyz(T, self))),
-                .lms => xyzToLms(T, xybToXyz(T, self)),
-                .oklab => xyzToOklab(T, xybToXyz(T, self)),
-                .oklch => oklabToOklch(T, xyzToOklab(T, xybToXyz(T, self))),
-                .rgba => self.to(.rgb).to(.rgba),
-                .rgb => xybToRgb(T, self),
                 .xyb => self,
                 .xyz => xybToXyz(T, self),
-                .ycbcr => rgbToYcbcr(T, xybToRgb(T, self)),
+                else => self.to(.xyz).to(color_space),
             };
         }
 
@@ -951,19 +874,9 @@ pub fn Ycbcr(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Ycbcr(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
-                .gray => rgbToGray(T, self.to(.rgb)),
-                .hsl => rgbToHsl(T, self.to(.rgb)),
-                .hsv => rgbToHsv(T, self.to(.rgb)),
-                .lab => xyzToLab(T, rgbToXyz(T, self.to(.rgb))),
-                .lch => labToLch(T, xyzToLab(T, rgbToXyz(T, self.to(.rgb)))),
-                .lms => xyzToLms(T, rgbToXyz(T, self.to(.rgb))),
-                .oklab => xyzToOklab(T, rgbToXyz(T, self.to(.rgb))),
-                .oklch => oklabToOklch(T, xyzToOklab(T, rgbToXyz(T, self.to(.rgb)))),
-                .rgb => ycbcrToRgb(T, self),
-                .rgba => self.to(.rgb).to(.rgba),
-                .xyb => rgbToXyb(T, self.to(.rgb)),
-                .xyz => rgbToXyz(T, self.to(.rgb)),
                 .ycbcr => self,
+                .rgb => ycbcrToRgb(T, self),
+                else => self.to(.rgb).to(color_space),
             };
         }
 
