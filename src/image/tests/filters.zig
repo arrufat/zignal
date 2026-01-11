@@ -569,6 +569,69 @@ test "sobel with new convolution" {
     try expectEqual(non_edge < 50, true); // Weak or no edge
 }
 
+test "repro: uniform channel bug in struct convolution with .zero borders" {
+    const allocator = std.testing.allocator;
+    var image = try Image(Rgb).init(allocator, 5, 5);
+    defer image.deinit(allocator);
+
+    // Fill with constant white
+    image.fill(.{ .r = 255, .g = 255, .b = 255 });
+
+    var out = try Image(Rgb).init(allocator, 5, 5);
+    defer out.deinit(allocator);
+    out.fill(.{ .r = 0, .g = 0, .b = 0 });
+
+    const blur_kernel = [3][3]f32{
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+        .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
+    };
+
+    try image.convolve(allocator, blur_kernel, .zero, out);
+
+    // At (0,0), only 4 of 9 taps are inside the image.
+    // Sum should be 255 * (4/9) = 113.33 -> 113.
+    // If the bug exists (optimization for uniform applied incorrectly), it will be 255.
+    const corner = out.at(0, 0).*;
+    try std.testing.expect(corner.r != 255);
+    // 113 is expected value. Allow some tolerance.
+    const expected = 113;
+    const diff = if (corner.r > expected) corner.r - expected else expected - corner.r;
+    try std.testing.expect(diff <= 1);
+}
+
+test "repro: stride bug in f32 separable convolution" {
+    const allocator = std.testing.allocator;
+    // Create a 5x5 image
+    var base = try Image(f32).init(allocator, 5, 5);
+    defer base.deinit(allocator);
+
+    // Fill with pattern
+    for (0..5) |r| {
+        for (0..5) |c| {
+            base.at(r, c).* = @floatFromInt(r * 10 + c);
+        }
+    }
+
+    // Create a 3x3 view in the middle
+    const rect = Rectangle(usize){ .l = 1, .t = 1, .r = 4, .b = 4 };
+    const view = base.view(rect);
+    // view.stride is 5, view.cols is 3.
+
+    var out = try Image(f32).init(allocator, 3, 3);
+    defer out.deinit(allocator);
+
+    const k1 = [_]f32{1.0};
+    try view.convolveSeparable(allocator, &k1, &k1, .zero, out);
+
+    // out should match view exactly if identity.
+    for (0..3) |r| {
+        for (0..3) |c| {
+            try expectEqual(view.at(r, c).*, out.at(r, c).*);
+        }
+    }
+}
+
 test "convolve3x3 optimization" {
     // This test verifies that 3x3 convolution uses the optimized path
     var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
