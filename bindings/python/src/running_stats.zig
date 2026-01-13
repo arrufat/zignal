@@ -218,7 +218,7 @@ fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         return null;
     };
 
-    if (c.Py_TYPE(other_obj) != @as(*c.PyTypeObject, @ptrCast(&RunningStatsType))) {
+    if (py_utils.getPyType(other_obj) != @as(*c.PyTypeObject, @ptrCast(&RunningStatsType))) {
         py_utils.setTypeError("RunningStats instance", other_obj);
         return null;
     }

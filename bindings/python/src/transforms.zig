@@ -81,7 +81,7 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn similarity_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
 }
 
 fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -217,7 +217,7 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 }
 
 fn affine_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
 }
 
 fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -343,7 +343,7 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn projective_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
 }
 
 fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
