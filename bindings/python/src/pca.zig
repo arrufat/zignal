@@ -144,7 +144,7 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     const num_components = params.num_components;
 
     // Check if matrix_obj is a Matrix
-    if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
+    if (py_utils.getPyType(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
         py_utils.setTypeError("Matrix object", matrix_obj);
         return null;
     }
@@ -306,7 +306,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const matrix_obj = params.data;
 
     // Check if matrix_obj is a Matrix
-    if (c.Py_TYPE(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
+    if (py_utils.getPyType(matrix_obj) != @as(*c.PyTypeObject, @ptrCast(&matrix.MatrixType))) {
         py_utils.setTypeError("Matrix object", matrix_obj);
         return null;
     }

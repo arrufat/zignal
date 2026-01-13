@@ -656,7 +656,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const config_obj = params.config;
 
     // Check that it's a MotionBlur object
-    const type_obj = c.Py_TYPE(config_obj);
+    const type_obj = py_utils.getPyType(config_obj);
     const type_name = type_obj.*.tp_name;
 
     if (!std.mem.eql(u8, std.mem.span(type_name), "zignal.MotionBlur")) {

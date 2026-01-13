@@ -29,6 +29,11 @@ pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj:
     }
 }
 
+/// Get the Python type object for a Python object.
+pub fn getPyType(obj: ?*c.PyObject) callconv(.c) *c.PyTypeObject {
+    return @ptrCast(obj.?.ob_type);
+}
+
 /// Get Python boolean singletons using the stable Python C API
 pub fn getPyBool(value: bool) [*c]c.PyObject {
     return c.PyBool_FromLong(@intFromBool(value));
@@ -1080,7 +1085,7 @@ pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
     var buffer: [256]u8 = undefined;
 
     const type_name = if (got != null) blk: {
-        const tp = c.Py_TYPE(got);
+        const tp = getPyType(got);
         const tp_name = tp.*.tp_name;
         // Extract just the type name (after the last dot)
         var i: usize = 0;
@@ -1206,7 +1211,7 @@ pub fn genericDealloc(comptime T: type, comptime deinit_fn: ?fn (*T) void) fn (?
             }
 
             // Free the Python object
-            const tp: *c.PyTypeObject = @ptrCast(c.Py_TYPE(self_obj));
+            const tp: *c.PyTypeObject = getPyType(self_obj);
             tp.*.tp_free.?(self_obj);
         }
     }.dealloc;

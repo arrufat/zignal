@@ -32,7 +32,7 @@ const pixel_iterator_doc =
 fn pixel_iterator_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self = @as(*PixelIteratorObject, @ptrCast(self_obj.?));
     if (self.image_ref) |ref| c.Py_XDECREF(ref);
-    c.Py_TYPE(self_obj).*.tp_free.?(self_obj);
+    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
 }
 
 fn pixel_iterator_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
