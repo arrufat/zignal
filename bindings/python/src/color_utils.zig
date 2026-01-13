@@ -70,10 +70,10 @@ fn objectToZigColor(comptime ColorType: type, comptime Binding: type, obj: *c.Py
 }
 
 fn parseFromZignalColorTypes(comptime T: type, color_obj: *c.PyObject) ?T {
-    const obj_c = @as([*c]c.PyObject, @ptrCast(color_obj));
+    const obj_c: [*c]c.PyObject = @ptrCast(color_obj);
 
     inline for (zignalColorTypes) |color_info| {
-        const type_ptr = @as([*c]c.PyTypeObject, @ptrCast(color_info.py_type));
+        const type_ptr: [*c]c.PyTypeObject = @ptrCast(color_info.py_type);
         if (c.PyObject_TypeCheck(obj_c, type_ptr) != 0) {
             const zig_color = objectToZigColor(color_info.zig_type, color_info.binding, color_obj);
             return zignal.convertColor(T, zig_color);
@@ -105,7 +105,7 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
     // PyTuple_SetItem steals a reference, so INCREF first.
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     c.Py_INCREF(@as(?*c.PyObject, @ptrCast(target_type_obj)));
-    if (c.PyTuple_SetItem(args, 0, @as(?*c.PyObject, @ptrCast(target_type_obj))) < 0) {
+    if (c.PyTuple_SetItem(args, 0, @ptrCast(target_type_obj)) < 0) {
         return error.InvalidColor;
     }
 

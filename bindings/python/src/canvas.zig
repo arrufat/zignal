@@ -878,7 +878,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             return null;
         }
 
-        const font_wrapper = @as(*bitmap_font_module.BitmapFontObject, @ptrCast(font));
+        const font_wrapper: *bitmap_font_module.BitmapFontObject = @ptrCast(font);
         const font_ptr = py_utils.validateNonNull(*BitmapFont, font_wrapper.font, "BitmapFont") catch return null;
         self.py_canvas.?.drawText(text, position, rgba, font_ptr.*, @floatCast(params.scale), draw_mode);
     } else {

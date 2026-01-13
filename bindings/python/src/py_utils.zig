@@ -23,7 +23,7 @@ pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj:
 
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     c.Py_INCREF(@as(?*c.PyObject, @ptrCast(type_obj)));
-    if (c.PyModule_AddObject(module, name.ptr, @as(?*c.PyObject, @ptrCast(type_obj))) < 0) {
+    if (c.PyModule_AddObject(module, name.ptr, @ptrCast(type_obj)) < 0) {
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(type_obj)));
         return error.TypeAddFailed;
     }
@@ -137,7 +137,7 @@ pub fn getterForField(comptime Obj: type, comptime field_name: []const u8) *cons
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
             _ = closure;
-            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const self: *Obj = @ptrCast(self_obj.?);
             const val = @field(self, field_name);
             return convertToPython(val);
         }
@@ -223,7 +223,7 @@ pub fn getterOptionalFieldWhere(
 ) *const anyopaque {
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
-            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const self: *Obj = @ptrCast(self_obj.?);
             if (!Predicate(self)) return getPyNone();
             const val = @field(self, field_name);
             return convertToPython(val);
@@ -273,7 +273,7 @@ pub fn getterTuple2FieldsWhere(
 ) *const anyopaque {
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
-            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const self: *Obj = @ptrCast(self_obj.?);
             if (!Predicate(self)) return getPyNone();
             const a = convertToPython(@field(self, field0)) orelse return null;
             const b = convertToPython(@field(self, field1)) orelse {
@@ -297,7 +297,7 @@ pub fn getterTuple2FromArrayField(
 ) *const anyopaque {
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
-            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const self: *Obj = @ptrCast(self_obj.?);
             const arr = @field(self, array_field);
             const a = convertToPython(arr[idx0]) orelse return null;
             const b = convertToPython(arr[idx1]) orelse {
@@ -320,7 +320,7 @@ pub fn getterMatrixNested(
 ) *const anyopaque {
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
-            const self = @as(*Obj, @ptrCast(self_obj.?));
+            const self: *Obj = @ptrCast(self_obj.?);
             const mat = @field(self, field_name);
 
             const outer = c.PyList_New(@intCast(rows));
@@ -633,7 +633,7 @@ pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangl
         return error.InvalidRectangle;
     }
 
-    const rect = @as(*rectangle.RectangleObject, @ptrCast(rect_obj.?));
+    const rect: *rectangle.RectangleObject = @ptrCast(rect_obj.?);
     // Handle integer vs float types
     const info = @typeInfo(T);
     return switch (info) {
@@ -1161,14 +1161,14 @@ pub fn setZigError(err: anyerror) void {
 /// Safely cast a Python object to a specific type without null checking
 /// Use when you're certain the object is not null (e.g., in methods where self is guaranteed)
 pub fn safeCast(comptime T: type, obj: ?*c.PyObject) *T {
-    return @as(*T, @ptrCast(@alignCast(obj.?)));
+    return @ptrCast(@alignCast(obj.?));
 }
 
 /// Safely cast a Python object to a specific type with null checking.
 /// Returns error.NullPointer if the object is null.
 pub fn safeCastChecked(comptime T: type, obj: ?*c.PyObject) !*T {
     if (obj) |o| {
-        return @as(*T, @ptrCast(@alignCast(o)));
+        return @ptrCast(@alignCast(o));
     }
     return error.NullPointer;
 }
@@ -1184,7 +1184,7 @@ pub fn genericNew(comptime T: type) fn (?*c.PyTypeObject, ?*c.PyObject, ?*c.PyOb
             _ = args;
             _ = kwds;
 
-            const self = @as(?*T, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+            const self: ?*T = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
             if (self) |obj| {
                 // Initialize all pointer fields to null
                 inline for (@typeInfo(T).@"struct".fields) |field| {
@@ -1193,8 +1193,7 @@ pub fn genericNew(comptime T: type) fn (?*c.PyTypeObject, ?*c.PyObject, ?*c.PyOb
                     }
                 }
             }
-            // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-            return @as(?*c.PyObject, @ptrCast(self));
+            return @ptrCast(self);
         }
     }.new;
 }

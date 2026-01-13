@@ -43,7 +43,7 @@ fn motion_blur_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyO
     _ = args;
     _ = kwds;
 
-    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(type_obj, 0)));
+    const self: ?*MotionBlurObject = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
     if (self) |obj| {
         // Initialize with defaults
         obj.blur_type = .linear;
@@ -53,7 +53,7 @@ fn motion_blur_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyO
         obj.center_y = 0.5;
         obj.strength = 0.5;
     }
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn motion_blur_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -109,7 +109,7 @@ fn motion_blur_linear(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     const dist = py_utils.validateNonNegative(u32, distance, "distance") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
+    const self: ?*MotionBlurObject = @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0));
     if (self) |obj| {
         obj.blur_type = .linear;
         obj.angle = angle;
@@ -120,7 +120,7 @@ fn motion_blur_linear(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         obj.strength = 0.5;
     }
 
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn motion_blur_radial_zoom(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -152,7 +152,7 @@ fn motion_blur_radial_zoom(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
+    const self: ?*MotionBlurObject = @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0));
     if (self) |obj| {
         obj.blur_type = .radial_zoom;
         obj.center_x = center_x;
@@ -163,7 +163,7 @@ fn motion_blur_radial_zoom(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
         obj.distance = 0;
     }
 
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 fn motion_blur_radial_spin(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -195,7 +195,7 @@ fn motion_blur_radial_spin(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     const strength_val = py_utils.validateRange(f64, strength, 0.0, 1.0, "strength") catch return null;
 
     // Create new instance
-    const self = @as(?*MotionBlurObject, @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0)));
+    const self: ?*MotionBlurObject = @ptrCast(c.PyType_GenericAlloc(&MotionBlurType, 0));
     if (self) |obj| {
         obj.blur_type = .radial_spin;
         obj.center_x = center_x;
@@ -206,7 +206,7 @@ fn motion_blur_radial_spin(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
         obj.distance = 0;
     }
 
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 // ============================================================================
@@ -419,7 +419,7 @@ pub fn registerMotionBlur(module: *c.PyObject) !void {
     // Add to module
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     c.Py_INCREF(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
-    if (c.PyModule_AddObject(module, "MotionBlur", @as(?*c.PyObject, @ptrCast(&MotionBlurType))) < 0) {
+    if (c.PyModule_AddObject(module, "MotionBlur", @ptrCast(&MotionBlurType)) < 0) {
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
         return error.ModuleAddFailed;
     }
