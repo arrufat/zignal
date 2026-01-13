@@ -73,8 +73,7 @@ const running_stats_add_doc =
 ;
 
 fn running_stats_add(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         value: f64,
@@ -100,8 +99,7 @@ const running_stats_extend_doc =
 ;
 
 fn running_stats_extend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         values: ?*c.PyObject,
@@ -158,8 +156,7 @@ const running_stats_clear_doc =
 
 fn running_stats_clear(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     stats_ptr.clear();
     return py_utils.getPyNone();
 }
@@ -178,8 +175,7 @@ const running_stats_scale_doc =
 ;
 
 fn running_stats_scale(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         value: f64,
@@ -204,8 +200,7 @@ const running_stats_combine_doc =
 ;
 
 fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         other: ?*c.PyObject,
@@ -223,14 +218,12 @@ fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         return null;
     }
 
-    const other = py_utils.safeCast(RunningStatsObject, other_obj);
-    const other_ptr = py_utils.validateNonNull(*RunningStatsF64, other.stats_ptr, "RunningStats") catch return null;
+    const other_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", other_obj, "RunningStats") orelse return null;
 
     const combined = stats_ptr.combine(other_ptr.*);
 
     const result = c.PyObject_CallObject(@ptrCast(&RunningStatsType), null) orelse return null;
-    const result_struct = py_utils.safeCast(RunningStatsObject, result);
-    const result_ptr = py_utils.validateNonNull(*RunningStatsF64, result_struct.stats_ptr, "RunningStats") catch {
+    const result_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", result, "RunningStats") orelse {
         c.Py_DECREF(result);
         return null;
     };
@@ -285,64 +278,55 @@ var running_stats_methods = stub_metadata.toPyMethodDefArray(&running_stats_meth
 
 fn running_stats_count_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyLong_FromUnsignedLongLong(@intCast(stats_ptr.currentN()));
 }
 
 fn running_stats_sum_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.getSum());
 }
 
 fn running_stats_mean_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.mean());
 }
 
 fn running_stats_variance_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.variance());
 }
 
 fn running_stats_stddev_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.stdDev());
 }
 
 fn running_stats_skewness_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.skewness());
 }
 
 fn running_stats_kurtosis_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.exKurtosis());
 }
 
 fn running_stats_min_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.min());
 }
 
 fn running_stats_max_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
-    const stats_ptr = py_utils.validateNonNull(*RunningStatsF64, self.stats_ptr, "RunningStats") catch return null;
+    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.max());
 }
 

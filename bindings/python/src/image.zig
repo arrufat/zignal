@@ -5,16 +5,13 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgba = zignal.Rgba(u8);
-const Rgb = zignal.Rgb(u8);
-const Gray = zignal.Gray(u8);
 const DisplayFormat = zignal.DisplayFormat;
 
 const color_bindings = @import("color.zig");
 const color_utils = @import("color_utils.zig");
+const binary = @import("image/binary.zig");
 const core = @import("image/core.zig");
 const filtering = @import("image/filtering.zig");
-const binary = @import("image/binary.zig");
 const numpy_interop = @import("image/numpy_interop.zig");
 const transforms = @import("image/transforms.zig");
 const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
@@ -25,11 +22,12 @@ const ctx = py_utils.ctx;
 const allocator = ctx.allocator;
 pub const registerType = py_utils.registerType;
 const c = py_utils.c;
-const PyImageMod = @import("PyImage.zig");
-const PyImage = PyImageMod.PyImage;
+const PyImage = @import("PyImage.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
-// Import sub-modules
+const Rgba = zignal.Rgba(u8);
+const Rgb = zignal.Rgb(u8);
+
 pub const ImageVariant = union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),

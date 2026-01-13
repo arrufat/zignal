@@ -10,8 +10,7 @@ const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 
-const PyImageMod = @import("../PyImage.zig");
-const PyImage = PyImageMod.PyImage;
+const PyImage = @import("../PyImage.zig");
 
 // Import the ImageObject type from parent
 const ImageObject = @import("../image.zig").ImageObject;

@@ -1,29 +1,21 @@
 //! Geometric transformations for Image objects
 
-const std = @import("std");
 const zignal = @import("zignal");
-const Image = zignal.Image;
-const Rgba = zignal.Rgba(u8);
-const Rgb = zignal.Rgb(u8);
-const Gray = zignal.Gray(u8);
 const Interpolation = zignal.Interpolation;
 const Blending = zignal.Blending;
 
+const enum_utils = @import("../enum_utils.zig");
+const moveImageToPython = @import("../image.zig").moveImageToPython;
+const ImageObject = @import("../image.zig").ImageObject;
+const getImageType = @import("../image.zig").getImageType;
 const py_utils = @import("../py_utils.zig");
 const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
-const enum_utils = @import("../enum_utils.zig");
-
 const transforms = @import("../transforms.zig");
-const moveImageToPython = @import("../image.zig").moveImageToPython;
-const PyImageMod = @import("../PyImage.zig");
-const PyImage = PyImageMod.PyImage;
 
-// Import the ImageObject type from parent
-const ImageObject = @import("../image.zig").ImageObject;
-const getImageType = @import("../image.zig").getImageType;
+const Rgba = zignal.Rgba(u8);
+const Rgb = zignal.Rgb(u8);
 
-// Helper: map Interpolation tag to union value (defaults for parameterized variants)
 const InterpTag = @typeInfo(Interpolation).@"union".tag_type.?;
 fn tagToInterpolation(tag: InterpTag) Interpolation {
     return switch (tag) {
