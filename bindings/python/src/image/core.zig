@@ -242,7 +242,7 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
         return null;
     }
 
-    const byte_ptr = @as([*]const u8, @ptrCast(buffer.buf));
+    const byte_ptr: [*]const u8 = @ptrCast(buffer.buf);
     const data_slice = byte_ptr[0..@intCast(buffer.len)];
 
     const detected = ImageFormat.detectFromBytes(data_slice) orelse {

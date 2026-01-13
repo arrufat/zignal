@@ -551,8 +551,8 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     }
 
     // Cast to ImageObject
-    const self = @as(*ImageObject, @ptrCast(self_obj));
-    const other = @as(*ImageObject, @ptrCast(other_obj));
+    const self: *ImageObject = @ptrCast(self_obj);
+    const other: *ImageObject = @ptrCast(other_obj);
 
     // Variant-aware equality: compare size and per-pixel RGBA values
     if (self.py_image == null or other.py_image == null) {

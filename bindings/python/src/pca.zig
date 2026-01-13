@@ -343,7 +343,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     };
 
     // Create a new Matrix object to return
-    const result = @as(?*matrix.MatrixObject, @ptrCast(c.PyType_GenericAlloc(&matrix.MatrixType, 0)));
+    const result: ?*matrix.MatrixObject = @ptrCast(c.PyType_GenericAlloc(&matrix.MatrixType, 0));
     if (result == null) {
         transformed.deinit();
         return null;
@@ -502,7 +502,7 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
     }
 
     // Create a new Matrix object to return
-    const result = @as(?*matrix.MatrixObject, @ptrCast(c.PyType_GenericAlloc(&matrix.MatrixType, 0)));
+    const result: ?*matrix.MatrixObject = @ptrCast(c.PyType_GenericAlloc(&matrix.MatrixType, 0));
     if (result == null) {
         components_copy.deinit();
         return null;

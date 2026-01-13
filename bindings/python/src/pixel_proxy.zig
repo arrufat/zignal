@@ -32,8 +32,8 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
         const Self = @This();
 
         fn parentFromObj(self_obj: ?*c.PyObject) ?*ImageObject {
-            const self = @as(*ProxyObjectType, @ptrCast(self_obj.?));
-            if (self.parent) |p| return @as(*ImageObject, @ptrCast(p));
+            const self: *ProxyObjectType = @ptrCast(self_obj.?);
+            if (self.parent) |p| return @ptrCast(p);
             return null;
         }
 
@@ -50,7 +50,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
         }
 
         fn dealloc(self_obj: [*c]c.PyObject) callconv(.c) void {
-            const self = @as(*ProxyObjectType, @ptrCast(self_obj));
+            const self: *ProxyObjectType = @ptrCast(self_obj);
             if (self.parent) |parent| c.Py_DECREF(parent);
             c.PyObject_Free(@ptrCast(self));
         }
@@ -65,7 +65,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             if (parent == null or parent.?.py_image == null) {
                 return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
             }
-            const proxy = @as(*ProxyObjectType, @ptrCast(self_obj));
+            const proxy: *ProxyObjectType = @ptrCast(self_obj);
             const px = parent.?.py_image.?.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
 
             var equal = false;
@@ -97,7 +97,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                         return null;
                     };
                     if (parent.py_image) |pimg| {
-                        const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
+                        const proxy: *ProxyObjectType = @ptrCast(self_obj.?);
                         const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
                         const value = @field(rgba, fields[index].name);
                         return py_utils.convertToPython(value);
@@ -157,7 +157,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                         return -1;
                     };
                     if (parent.py_image) |pimg| {
-                        const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
+                        const proxy: *ProxyObjectType = @ptrCast(self_obj.?);
                         var px = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
                         @field(px, field_name) = parsed;
                         pimg.setPixelRgba(@intCast(proxy.row), @intCast(proxy.col), px);
@@ -202,7 +202,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             };
 
             if (parent.py_image) |pimg| {
-                const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
+                const proxy: *ProxyObjectType = @ptrCast(self_obj.?);
                 const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
 
                 // Return the color as the appropriate type
@@ -210,7 +210,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
                     if (obj == null) return null;
-                    const py_obj = @as(*color_mod.RgbBinding.PyObjectType, @ptrCast(obj));
+                    const py_obj: *color_mod.RgbBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = rgba.r;
                     py_obj.field1 = rgba.g;
                     py_obj.field2 = rgba.b;
@@ -219,7 +219,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
                     if (obj == null) return null;
-                    const py_obj = @as(*color_mod.RgbaBinding.PyObjectType, @ptrCast(obj));
+                    const py_obj: *color_mod.RgbaBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = rgba.r;
                     py_obj.field1 = rgba.g;
                     py_obj.field2 = rgba.b;
@@ -254,7 +254,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             };
 
             if (parent.py_image) |pimg| {
-                const proxy = @as(*ProxyObjectType, @ptrCast(self_obj.?));
+                const proxy: *ProxyObjectType = @ptrCast(self_obj.?);
 
                 // Parse overlay color
                 const overlay = color_utils.parseColor(Rgba, overlay_obj) catch {
@@ -282,7 +282,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
                     if (obj == null) return null;
-                    const py_obj = @as(*color_mod.RgbBinding.PyObjectType, @ptrCast(obj));
+                    const py_obj: *color_mod.RgbBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = blended.r;
                     py_obj.field1 = blended.g;
                     py_obj.field2 = blended.b;
@@ -291,7 +291,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     const color_mod = @import("color.zig");
                     const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
                     if (obj == null) return null;
-                    const py_obj = @as(*color_mod.RgbaBinding.PyObjectType, @ptrCast(obj));
+                    const py_obj: *color_mod.RgbaBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = blended.r;
                     py_obj.field1 = blended.g;
                     py_obj.field2 = blended.b;
@@ -392,7 +392,7 @@ pub var RgbaPixelProxyType = py_utils.buildTypeObject(.{
 pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) ?*c.PyObject {
     const proxy_obj = c.PyType_GenericAlloc(@ptrCast(&RgbPixelProxyType), 0);
     if (proxy_obj == null) return null;
-    const proxy = @as(*RgbPixelProxy, @ptrCast(proxy_obj));
+    const proxy: *RgbPixelProxy = @ptrCast(proxy_obj);
     proxy.parent = parent;
     proxy.row = row;
     proxy.col = col;
@@ -403,7 +403,7 @@ pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) 
 pub fn makeRgbaProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) ?*c.PyObject {
     const proxy_obj = c.PyType_GenericAlloc(@ptrCast(&RgbaPixelProxyType), 0);
     if (proxy_obj == null) return null;
-    const proxy = @as(*RgbaPixelProxy, @ptrCast(proxy_obj));
+    const proxy: *RgbaPixelProxy = @ptrCast(proxy_obj);
     proxy.parent = parent;
     proxy.row = row;
     proxy.col = col;

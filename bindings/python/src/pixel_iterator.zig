@@ -30,7 +30,7 @@ const pixel_iterator_doc =
 ;
 
 fn pixel_iterator_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = @as(*PixelIteratorObject, @ptrCast(self_obj.?));
+    const self: *PixelIteratorObject = @ptrCast(self_obj.?);
     if (self.image_ref) |ref| c.Py_XDECREF(ref);
     py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
 }
@@ -42,13 +42,13 @@ fn pixel_iterator_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*PixelIteratorObject, @ptrCast(self_obj.?));
+    const self: *PixelIteratorObject = @ptrCast(self_obj.?);
     if (self.image_ref == null) {
         c.PyErr_SetNone(c.PyExc_StopIteration);
         return null;
     }
 
-    const img_py = @as(*ImageObject, @ptrCast(self.image_ref.?));
+    const img_py: *ImageObject = @ptrCast(self.image_ref.?);
     const total = if (img_py.py_image) |pimg| pimg.rows() * pimg.cols() else 0;
     if (self.index >= total) {
         c.PyErr_SetNone(c.PyExc_StopIteration);
@@ -76,7 +76,7 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             const p = img.at(row, col).*;
             const color_module = @import("color.zig");
             const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgb), 0) orelse return null;
-            const rgb = @as(*color_module.RgbBinding.PyObjectType, @ptrCast(rgb_obj));
+            const rgb: *color_module.RgbBinding.PyObjectType = @ptrCast(rgb_obj);
             rgb.field0 = p.r;
             rgb.field1 = p.g;
             rgb.field2 = p.b;
@@ -86,7 +86,7 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             const p = img.at(row, col).*;
             const color_module = @import("color.zig");
             const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgba), 0) orelse return null;
-            const rgba = @as(*color_module.RgbaBinding.PyObjectType, @ptrCast(rgba_obj));
+            const rgba: *color_module.RgbaBinding.PyObjectType = @ptrCast(rgba_obj);
             rgba.field0 = p.r;
             rgba.field1 = p.g;
             rgba.field2 = p.b;
@@ -116,7 +116,7 @@ pub var PixelIteratorType = py_utils.buildTypeObject(.{
 /// Create a new iterator bound to the given Image PyObject
 pub fn new(image_obj: ?*c.PyObject) ?*c.PyObject {
     if (c.PyType_Ready(&PixelIteratorType) < 0) return null;
-    const it_obj = @as(?*PixelIteratorObject, @ptrCast(c.PyType_GenericAlloc(&PixelIteratorType, 0)));
+    const it_obj: ?*PixelIteratorObject = @ptrCast(c.PyType_GenericAlloc(&PixelIteratorType, 0));
     if (it_obj == null) return null;
     if (image_obj) |img| c.Py_INCREF(img);
     it_obj.?.image_ref = image_obj;

@@ -133,7 +133,7 @@ const set_source_doc =
 ;
 
 fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self: *FeatureDistributionMatchingObject = @ptrCast(self_obj.?);
 
     const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgb), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
@@ -202,7 +202,7 @@ const match_doc =
 ;
 
 fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self: *FeatureDistributionMatchingObject = @ptrCast(self_obj.?);
 
     const fdm_ptr = py_utils.validateNonNull(*FeatureDistributionMatching(Rgb), self.fdm_ptr, "FeatureDistributionMatching") catch return null;
 
@@ -227,8 +227,8 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     }
 
     // Cast to ImageObject
-    const source_img_obj = @as(*image.ImageObject, @ptrCast(source_obj.?));
-    const target_img_obj = @as(*image.ImageObject, @ptrCast(target_obj.?));
+    const source_img_obj: *image.ImageObject = @ptrCast(source_obj.?);
+    const target_img_obj: *image.ImageObject = @ptrCast(target_obj.?);
 
     // Accept only RGB format
     if (source_img_obj.py_image == null or target_img_obj.py_image == null) {
@@ -295,7 +295,7 @@ const update_doc =
 
 fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = @as(*FeatureDistributionMatchingObject, @ptrCast(self_obj.?));
+    const self: *FeatureDistributionMatchingObject = @ptrCast(self_obj.?);
 
     if (self.fdm_ptr == null) {
         c.PyErr_SetString(c.PyExc_ValueError, "FeatureDistributionMatching not initialized");

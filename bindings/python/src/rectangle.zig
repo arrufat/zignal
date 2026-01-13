@@ -905,5 +905,5 @@ pub fn toZignalRectangle(rect_obj: ?*c.PyObject) !Rectangle(f32) {
         return error.InvalidRectangle;
     }
     const rect = py_utils.safeCast(RectangleObject, rect_obj);
-    return Rectangle(f32).init(rect.left, rect.top, rect.right, rect.bottom);
+    return .init(rect.left, rect.top, rect.right, rect.bottom);
 }

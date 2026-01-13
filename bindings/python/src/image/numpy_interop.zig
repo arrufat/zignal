@@ -37,7 +37,7 @@ fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
         py_utils.setMemoryError("buffer metadata");
         return null;
     };
-    const extra = @as(*BufferExtra, @ptrCast(@alignCast(extra_raw)));
+    const extra: *BufferExtra = @ptrCast(@alignCast(extra_raw));
     var cleanup_extra = true;
     defer if (cleanup_extra) c.PyMem_Free(extra_raw);
 
@@ -144,8 +144,8 @@ fn imageFromNumpyHelper(
         return null;
     };
 
-    const data_ptr = @as([*]u8, @ptrCast(buffer.buf));
-    const pixel_ptr = @as([*]T, @ptrCast(@alignCast(data_ptr)));
+    const data_ptr: [*]u8 = @ptrCast(buffer.buf);
+    const pixel_ptr: [*]T = @ptrCast(@alignCast(data_ptr));
     const data_slice = pixel_ptr[0..@divExact(@as(usize, @intCast(buffer.len)), @sizeOf(T))];
 
     const img = Image(T){
@@ -167,8 +167,7 @@ fn imageFromNumpyHelper(
     self.py_image = pimg;
     self.parent_ref = null;
 
-    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    return @as(?*c.PyObject, @ptrCast(self));
+    return @ptrCast(self);
 }
 
 pub const image_from_numpy_doc =
@@ -243,7 +242,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         return null;
     }
 
-    const shape = @as([*]c.Py_ssize_t, @ptrCast(buffer.shape));
+    const shape: [*]c.Py_ssize_t = @ptrCast(buffer.shape);
     const rows: usize = @intCast(shape[0]);
     const cols: usize = @intCast(shape[1]);
     const channels: usize = @intCast(shape[2]);
@@ -253,7 +252,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         return null;
     }
 
-    const strides = @as([*]c.Py_ssize_t, @ptrCast(buffer.strides));
+    const strides: [*]c.Py_ssize_t = @ptrCast(buffer.strides);
     const item_size = buffer.itemsize;
 
     const expected_pixel_stride = item_size * @as(c.Py_ssize_t, @intCast(channels));
