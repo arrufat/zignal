@@ -8,18 +8,6 @@ const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-fn matrixErrorToPython(err: anytype, context: []const u8) void {
-    switch (err) {
-        error.DimensionMismatch => py_utils.setValueError("Matrix dimension mismatch", .{}),
-        error.NotSquare => py_utils.setValueError("Matrix must be square", .{}),
-        error.Singular => py_utils.setValueError("Matrix is singular", .{}),
-        error.OutOfBounds => py_utils.setIndexError("Matrix index out of bounds", .{}),
-        error.OutOfMemory => py_utils.setMemoryError(context),
-        error.NotConverged => py_utils.setValueError("Matrix operation did not converge", .{}),
-        error.InvalidArgument => py_utils.setValueError("Invalid argument", .{}),
-    }
-}
-
 fn parsePNormParam(p_obj_opt: ?*c.PyObject) ?f64 {
     if (p_obj_opt) |p_obj| {
         if (p_obj == c.Py_None()) return 2.0;
@@ -331,7 +319,7 @@ fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Properties
 fn matrix_shape_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     return c.PyTuple_Pack(2, c.PyLong_FromLong(@intCast(ptr.rows)), c.PyLong_FromLong(@intCast(ptr.cols)));
 }
 
@@ -353,7 +341,7 @@ const matrix_to_numpy_doc =
 
 fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     // Import numpy
     const np_module = c.PyImport_ImportModule("numpy") orelse {
@@ -533,7 +521,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
 // Indexing support
 fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     // Parse the key - expecting (row, col) tuple or two integers
     if (c.PyTuple_Check(key) == 1) {
@@ -579,7 +567,7 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
 }
 
 fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject) callconv(.c) c_int {
-    const ptr = requireMatrixPtr(self_obj) orelse return -1;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return -1;
 
     // Parse the key - expecting (row, col) tuple
     if (c.PyTuple_Check(key) == 1) {
@@ -651,15 +639,15 @@ fn dispatchMatrixOp(
     const right_is_mat = c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1;
 
     if (left_is_mat and right_is_mat) {
-        const left_ptr = requireMatrixPtr(left) orelse return null;
-        const right_ptr = requireMatrixPtr(right) orelse return null;
+        const left_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
+        const right_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", right, "Matrix") orelse return null;
         return matrixToObject(mat_mat_op(left_ptr, right_ptr));
     }
 
     if (left_is_mat) {
         const scalar = c.PyFloat_AsDouble(right);
         if (c.PyErr_Occurred() == null) {
-            const left_ptr = requireMatrixPtr(left) orelse return null;
+            const left_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
             return matrixToObject(mat_scalar_op(left_ptr, scalar));
         }
         c.PyErr_Clear();
@@ -669,7 +657,7 @@ fn dispatchMatrixOp(
         if (scalar_mat_op) |op| {
             const scalar = c.PyFloat_AsDouble(left);
             if (c.PyErr_Occurred() == null) {
-                const right_ptr = requireMatrixPtr(right) orelse return null;
+                const right_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", right, "Matrix") orelse return null;
                 return matrixToObject(op(scalar, right_ptr));
             }
             c.PyErr_Clear();
@@ -730,8 +718,8 @@ fn matrix_matmul(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObj
         return c.Py_NotImplemented();
     }
 
-    const self_ptr = requireMatrixPtr(left) orelse return null;
-    const other_ptr = requireMatrixPtr(right) orelse return null;
+    const self_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
+    const other_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", right, "Matrix") orelse return null;
 
     const result_matrix = self_ptr.dot(other_ptr.*);
     return matrixToObject(result_matrix);
@@ -754,14 +742,14 @@ fn matrix_truediv(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyOb
         return null;
     }
 
-    const self_ptr = requireMatrixPtr(left) orelse return null;
+    const self_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
 
     const result_matrix = self_ptr.scale(1.0 / scalar);
     return matrixToObject(result_matrix);
 }
 
 fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self_ptr = requireMatrixPtr(obj) orelse return null;
+    const self_ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", obj, "Matrix") orelse return null;
 
     const result_matrix = self_ptr.scale(-1.0);
     return matrixToObject(result_matrix);
@@ -770,7 +758,7 @@ fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Helper function to convert Zig Matrix to Python MatrixObject
 fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
     if (matrix.err) |e| {
-        matrixErrorToPython(e, "Matrix");
+        py_utils.mapZigError(e, "Matrix");
         return null;
     }
 
@@ -790,28 +778,6 @@ fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
     self.?.numpy_ref = null;
 
     return @ptrCast(self);
-}
-
-const MatrixHandle = struct {
-    obj: *MatrixObject,
-    ptr: *Matrix(f64),
-};
-
-inline fn requireMatrixHandle(obj: ?*c.PyObject) ?MatrixHandle {
-    const matrix_obj = py_utils.safeCast(MatrixObject, obj);
-    const matrix_ptr = matrix_obj.matrix_ptr orelse {
-        py_utils.setValueError("Matrix not initialized", .{});
-        return null;
-    };
-
-    return .{ .obj = matrix_obj, .ptr = matrix_ptr };
-}
-
-inline fn requireMatrixPtr(obj: ?*c.PyObject) ?*Matrix(f64) {
-    if (requireMatrixHandle(obj)) |handle| {
-        return handle.ptr;
-    }
-    return null;
 }
 
 const OwnedMatrixAlloc = struct {
@@ -858,7 +824,7 @@ fn matrixDimensionGetter(comptime dim: enum { rows, cols }) *const anyopaque {
     const dimension = dim;
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
-            const ptr = requireMatrixPtr(self_obj) orelse return null;
+            const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
             const value: usize = switch (dimension) {
                 .rows => ptr.rows,
                 .cols => ptr.cols,
@@ -929,7 +895,7 @@ const matrix_transpose_doc =
 
 fn matrix_transpose(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.transpose();
     return matrixToObject(result_matrix);
@@ -953,7 +919,7 @@ const matrix_inverse_doc =
 
 fn matrix_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.inverse();
     return matrixToObject(result_matrix);
@@ -1006,7 +972,7 @@ const matrix_sum_doc =
 
 fn matrix_sum_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.sum();
     return c.PyFloat_FromDouble(result);
@@ -1021,7 +987,7 @@ const matrix_mean_doc =
 
 fn matrix_mean_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.mean();
     return c.PyFloat_FromDouble(result);
@@ -1036,7 +1002,7 @@ const matrix_min_doc =
 
 fn matrix_min_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.min();
     return c.PyFloat_FromDouble(result);
@@ -1051,7 +1017,7 @@ const matrix_max_doc =
 
 fn matrix_max_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.max();
     return c.PyFloat_FromDouble(result);
@@ -1069,7 +1035,7 @@ const matrix_trace_doc =
 
 fn matrix_trace_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     if (ptr.rows != ptr.cols) {
         py_utils.setValueError("Matrix must be square to compute trace", .{});
@@ -1205,7 +1171,7 @@ const matrix_copy_doc =
 
 fn matrix_copy_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.dupe(allocator) catch {
         py_utils.setMemoryError("Matrix copy");
@@ -1227,7 +1193,7 @@ const matrix_determinant_doc =
 
 fn matrix_determinant_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     if (ptr.rows != ptr.cols) {
         py_utils.setValueError("Matrix must be square to compute determinant", .{});
@@ -1251,7 +1217,7 @@ const matrix_gram_doc =
 
 fn matrix_gram_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.gram();
     return matrixToObject(result_matrix);
@@ -1266,7 +1232,7 @@ const matrix_covariance_doc =
 
 fn matrix_covariance_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.covariance();
     return matrixToObject(result_matrix);
@@ -1281,7 +1247,7 @@ const matrix_frobenius_norm_doc =
 
 fn matrix_frobenius_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     return c.PyFloat_FromDouble(ptr.frobeniusNorm());
 }
 
@@ -1294,7 +1260,7 @@ const matrix_l1_norm_doc =
 
 fn matrix_l1_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     return c.PyFloat_FromDouble(ptr.l1Norm());
 }
 
@@ -1307,7 +1273,7 @@ const matrix_max_norm_doc =
 
 fn matrix_max_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     return c.PyFloat_FromDouble(ptr.maxNorm());
 }
 
@@ -1328,7 +1294,7 @@ fn matrix_element_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     const p = parsePNormParam(params.p) orelse return null;
     if (!std.math.isFinite(p)) {
         if (!std.math.isInf(p)) {
@@ -1341,7 +1307,7 @@ fn matrix_element_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     }
 
     const result = ptr.elementNorm(p) catch |err| {
-        matrixErrorToPython(err, "element norm");
+        py_utils.mapZigError(err, "element norm");
         return null;
     };
 
@@ -1365,7 +1331,7 @@ fn matrix_schatten_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds:
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     const p = parsePNormParam(params.p) orelse return null;
     if (!std.math.isFinite(p)) {
         if (!(std.math.isInf(p) and p > 0)) {
@@ -1378,7 +1344,7 @@ fn matrix_schatten_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds:
     }
 
     const result = ptr.schattenNorm(allocator, p) catch |err| {
-        matrixErrorToPython(err, "schatten norm");
+        py_utils.mapZigError(err, "schatten norm");
         return null;
     };
 
@@ -1402,7 +1368,7 @@ fn matrix_induced_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
     const p = parsePNormParam(params.p) orelse return null;
     const valid = (p == 1) or (p == 2) or (std.math.isInf(p) and p > 0);
     if (!valid) {
@@ -1411,7 +1377,7 @@ fn matrix_induced_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     }
 
     const result = ptr.inducedNorm(allocator, p) catch |err| {
-        matrixErrorToPython(err, "induced norm");
+        py_utils.mapZigError(err, "induced norm");
         return null;
     };
 
@@ -1427,10 +1393,10 @@ const matrix_nuclear_norm_doc =
 
 fn matrix_nuclear_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.nuclearNorm(allocator) catch |err| {
-        matrixErrorToPython(err, "nuclear norm");
+        py_utils.mapZigError(err, "nuclear norm");
         return null;
     };
 
@@ -1446,10 +1412,10 @@ const matrix_spectral_norm_doc =
 
 fn matrix_spectral_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.spectralNorm(allocator) catch |err| {
-        matrixErrorToPython(err, "spectral norm");
+        py_utils.mapZigError(err, "spectral norm");
         return null;
     };
 
@@ -1465,7 +1431,7 @@ const matrix_variance_doc =
 
 fn matrix_variance_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.variance();
     return c.PyFloat_FromDouble(result);
@@ -1480,7 +1446,7 @@ const matrix_std_doc =
 
 fn matrix_std_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.stdDev();
     return c.PyFloat_FromDouble(result);
@@ -1503,7 +1469,7 @@ fn matrix_pow_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result_matrix = ptr.pow(params.n);
     return matrixToObject(result_matrix);
@@ -1526,7 +1492,7 @@ fn matrix_row_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const idx: usize = if (params.idx < 0)
         @intCast(@as(i64, @intCast(ptr.rows)) + params.idx)
@@ -1559,7 +1525,7 @@ fn matrix_col_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const idx: usize = if (params.idx < 0)
         @intCast(@as(i64, @intCast(ptr.cols)) + params.idx)
@@ -1598,7 +1564,7 @@ fn matrix_submatrix_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     // Starting indices can be zero, but counts must be positive
     if (params.row_start < 0) {
@@ -1677,7 +1643,7 @@ const matrix_rank_doc =
 
 fn matrix_rank_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.rank() catch {
         py_utils.setMemoryError("rank computation");
@@ -1716,7 +1682,7 @@ fn matrix_pinv_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const options = Matrix(f64).PseudoInverseOptions{
         .tolerance = params.tolerance,
@@ -1745,7 +1711,7 @@ const matrix_lu_doc =
 
 fn matrix_lu_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     if (ptr.rows != ptr.cols) {
         py_utils.setValueError("Matrix must be square for LU decomposition", .{});
@@ -1824,7 +1790,7 @@ const matrix_qr_doc =
 
 fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     var qr_result = ptr.qr() catch {
         py_utils.setMemoryError("QR decomposition");
@@ -1923,7 +1889,7 @@ fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var params: Params = undefined;
     py_utils.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const ptr = requireMatrixPtr(self_obj) orelse return null;
+    const ptr = py_utils.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     if (ptr.rows < ptr.cols) {
         py_utils.setValueError("Matrix must have rows >= cols for SVD", .{});

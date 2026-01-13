@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 pub const ctx = struct {
     io: std.Io,
@@ -899,17 +898,6 @@ pub fn validateNonNegative(comptime T: type, value: anytype, name: []const u8) !
     return validateRange(T, value, 0, max, name);
 }
 
-/// Validate that a pointer is not null, with a custom error message
-pub fn validateNonNull(comptime T: type, ptr: ?T, name: []const u8) !T {
-    if (ptr == null) {
-        var buffer: [256]u8 = undefined;
-        const msg = std.fmt.bufPrintZ(&buffer, "{s} not initialized", .{name}) catch "Value is null";
-        c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
-        return error.NullPointer;
-    }
-    return ptr.?;
-}
-
 /// Convenience function for strictly positive values (> 0)
 pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
     const info = @typeInfo(T);
@@ -1152,6 +1140,40 @@ pub fn setZigError(err: anyerror) void {
     var buffer: [256]u8 = undefined;
     const msg = std.fmt.bufPrintZ(&buffer, "Operation failed: {s}", .{@errorName(err)}) catch "Operation failed";
     c.PyErr_SetString(exc_type, msg.ptr);
+}
+
+/// Map Zig errors to Python exceptions with context
+pub fn mapZigError(err: anyerror, context: []const u8) void {
+    switch (err) {
+        error.OutOfMemory => setMemoryError(context),
+        error.FileNotFound => c.PyErr_SetString(c.PyExc_FileNotFoundError, "File not found"),
+        error.AccessDenied, error.PermissionDenied => c.PyErr_SetString(c.PyExc_PermissionError, "Permission denied"),
+
+        // Common domain errors
+        error.DimensionMismatch => setValueError("Dimension mismatch in {s}", .{context}),
+        error.NotSquare => setValueError("{s} must be square", .{context}),
+        error.Singular => setValueError("{s} is singular", .{context}),
+        error.OutOfBounds => setIndexError("{s} index out of bounds", .{context}),
+        error.NotConverged => setValueError("{s} did not converge", .{context}),
+        error.InvalidArgument, error.InvalidParameter => setValueError("Invalid argument in {s}", .{context}),
+        error.RankDeficient => setValueError("{s} is rank deficient", .{context}),
+        error.InvalidRadius => setValueError("Invalid radius in {s}", .{context}),
+
+        else => setRuntimeError("Operation failed in {s}: {s}", .{ context, @errorName(err) }),
+    }
+}
+
+/// Unwrap an initialized object, setting a ValueError if it's not initialized.
+/// Checks if the specified optional pointer field is non-null.
+pub fn unwrap(comptime ObjectType: type, comptime field_name: []const u8, self_obj: ?*c.PyObject, name: []const u8) ?std.meta.Child(@TypeOf(@field(@as(ObjectType, undefined), field_name))) {
+    const self = safeCast(ObjectType, self_obj);
+    if (@field(self, field_name)) |ptr| return ptr;
+
+    var buffer: [256]u8 = undefined;
+    const msg = std.fmt.bufPrintZ(&buffer, "{s} not initialized", .{name}) catch "Object not initialized";
+    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+
+    return null;
 }
 
 // ============================================================================

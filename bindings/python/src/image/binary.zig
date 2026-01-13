@@ -10,7 +10,7 @@ const allocator = py_utils.ctx.allocator;
 const c = py_utils.c;
 
 const ImageObject = @import("../image.zig").ImageObject;
-const PyImage = @import("../PyImage.zig").PyImage;
+const PyImage = @import("../PyImage.zig");
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 
 const GrayscaleHandle = struct {

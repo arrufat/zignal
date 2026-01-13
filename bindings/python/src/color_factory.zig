@@ -3,7 +3,6 @@ const std = @import("std");
 const zignal = @import("zignal");
 const isPacked = zignal.meta.isPacked;
 const getSimpleTypeName = zignal.meta.getSimpleTypeName;
-const comptimeLowercase = zignal.meta.comptimeLowercase;
 
 const c = @import("py_utils.zig").c;
 const color = @import("color.zig");
@@ -17,19 +16,7 @@ const enum_utils = @import("enum_utils.zig");
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 
-const Rgb = zignal.Rgb(u8);
 const Rgba = zignal.Rgba(u8);
-const Gray = zignal.Gray(u8);
-const Hsl = zignal.Hsl(f64);
-const Hsv = zignal.Hsv(f64);
-const Lab = zignal.Lab(f64);
-const Lch = zignal.Lch(f64);
-const Lms = zignal.Lms(f64);
-const Oklab = zignal.Oklab(f64);
-const Oklch = zignal.Oklch(f64);
-const Xyb = zignal.Xyb(f64);
-const Xyz = zignal.Xyz(f64);
-const Ycbcr = zignal.Ycbcr(u8);
 
 /// Automatically generate documentation from type name for color conversion methods
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {

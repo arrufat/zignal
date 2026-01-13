@@ -1,12 +1,27 @@
 //! Core image operations: I/O, memory management, type conversion
 
 const std = @import("std");
+
 const zignal = @import("zignal");
 const Image = zignal.Image;
+const ImageFormat = zignal.ImageFormat;
+
+const canvas = @import("../canvas.zig");
+const color_bindings = @import("../color.zig");
+const parseColorTo = @import("../color_utils.zig").parseColor;
+const moveImageToPython = @import("../image.zig").moveImageToPython;
+const ImageObject = @import("../image.zig").ImageObject;
+const getImageType = @import("../image.zig").getImageType;
+const py_utils = @import("../py_utils.zig");
+const ctx = py_utils.ctx;
+const allocator = ctx.allocator;
+const c = py_utils.c;
+const PyImageMod = @import("../PyImage.zig");
+const PyImage = PyImageMod.PyImage;
+const rectangle = @import("../rectangle.zig");
+
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
-const Gray = zignal.Gray(u8);
-const ImageFormat = zignal.ImageFormat;
 const default_png_limits: zignal.png.DecodeLimits = .{};
 const file_png_limits: zignal.png.DecodeLimits = .{ .max_png_bytes = 100 * 1024 * 1024 };
 const default_jpeg_limits: zignal.jpeg.DecodeLimits = .{};
@@ -15,23 +30,7 @@ const file_jpeg_limits: zignal.jpeg.DecodeLimits = .{
     .max_marker_bytes = 16 * 1024 * 1024,
 };
 
-const py_utils = @import("../py_utils.zig");
-const ctx = py_utils.ctx;
-const allocator = ctx.allocator;
-const c = py_utils.c;
-
-const canvas = @import("../canvas.zig");
-const color_bindings = @import("../color.zig");
-const parseColorTo = @import("../color_utils.zig").parseColor;
-const PyImageMod = @import("../PyImage.zig");
-const PyImage = PyImageMod.PyImage;
-const rectangle = @import("../rectangle.zig");
-const moveImageToPython = @import("../image.zig").moveImageToPython;
-
 // Import the ImageObject type from parent
-const ImageObject = @import("../image.zig").ImageObject;
-const getImageType = @import("../image.zig").getImageType;
-
 inline fn readLimit(max_bytes: usize) usize {
     return if (max_bytes == 0) std.math.maxInt(usize) else max_bytes;
 }

@@ -61,10 +61,9 @@ const convex_hull_find_doc =
 ;
 
 fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ConvexHullObject, self_obj);
 
     // Using validateNonNull helper for null check with error message
-    const hull = py_utils.validateNonNull(*ConvexHull, self.hull, "ConvexHull") catch return null;
+    const hull = py_utils.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
 
     // Parse points argument
     const Params = struct {
@@ -133,8 +132,7 @@ const convex_hull_get_rectangle_doc =
 
 fn convex_hull_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(ConvexHullObject, self_obj);
-    const hull = py_utils.validateNonNull(*ConvexHull, self.hull, "ConvexHull") catch return null;
+    const hull = py_utils.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
 
     if (hull.getRectangle()) |rect| {
         const args_tuple = c.Py_BuildValue(
