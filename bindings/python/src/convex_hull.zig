@@ -17,12 +17,30 @@ pub const ConvexHullObject = extern struct {
 const convex_hull_new = py_utils.genericNew(ConvexHullObject);
 
 fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    _ = args;
-    _ = kwds;
     const self = py_utils.safeCast(ConvexHullObject, self_obj);
 
     // Using createHeapObject helper for allocation with error handling
     self.hull = py_utils.createHeapObject(ConvexHull, .{py_utils.ctx.allocator}) catch return -1;
+
+    // Parse optional points argument
+    const Params = struct {
+        points: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
+
+    const points_obj = params.points orelse return 0;
+
+    // Parse the point list
+    const points = py_utils.parsePointList(f64, points_obj) catch return -1;
+    defer py_utils.ctx.allocator.free(points);
+
+    // Find convex hull
+    _ = self.hull.?.find(points) catch |err| {
+        py_utils.mapZigError(err, "ConvexHull");
+        return -1;
+    };
+
     return 0;
 }
 
@@ -37,6 +55,33 @@ const convex_hull_dealloc = py_utils.genericDealloc(ConvexHullObject, convexHull
 fn convex_hull_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = self_obj;
     return c.PyUnicode_FromString("ConvexHull()");
+}
+
+/// Helper to convert a slice of Point2F to a Python list of tuples.
+fn convertHullToPython(points: []const Point2F) ?*c.PyObject {
+    return py_utils.listFromSliceCustom(Point2F, points, struct {
+        fn toPythonTuple(point: Point2F, _: usize) ?*c.PyObject {
+            const tuple = c.PyTuple_New(2);
+            if (tuple == null) return null;
+
+            const x_obj = c.PyFloat_FromDouble(point.x());
+            if (x_obj == null) {
+                c.Py_DECREF(tuple);
+                return null;
+            }
+
+            const y_obj = c.PyFloat_FromDouble(point.y());
+            if (y_obj == null) {
+                c.Py_DECREF(x_obj);
+                c.Py_DECREF(tuple);
+                return null;
+            }
+
+            _ = c.PyTuple_SetItem(tuple, 0, x_obj);
+            _ = c.PyTuple_SetItem(tuple, 1, y_obj);
+            return tuple;
+        }
+    }.toPythonTuple);
 }
 
 // Instance methods
@@ -91,31 +136,19 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return py_utils.getPyNone();
     }
 
-    const result_list = py_utils.listFromSliceCustom(Point2F, hull_points.?, struct {
-        fn toPythonTuple(point: Point2F, _: usize) ?*c.PyObject {
-            const tuple = c.PyTuple_New(2);
-            if (tuple == null) return null;
+    return convertHullToPython(hull_points.?);
+}
 
-            const x_obj = c.PyFloat_FromDouble(point.x());
-            if (x_obj == null) {
-                c.Py_DECREF(tuple);
-                return null;
-            }
+// Property getters
+fn convex_hull_get_points(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
+    _ = closure;
+    const hull = py_utils.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
 
-            const y_obj = c.PyFloat_FromDouble(point.y());
-            if (y_obj == null) {
-                c.Py_DECREF(x_obj);
-                c.Py_DECREF(tuple);
-                return null;
-            }
+    if (!hull.isValid()) {
+        return py_utils.getPyNone();
+    }
 
-            _ = c.PyTuple_SetItem(tuple, 0, x_obj);
-            _ = c.PyTuple_SetItem(tuple, 1, y_obj);
-            return tuple;
-        }
-    }.toPythonTuple) orelse return null;
-
-    return result_list;
+    return convertHullToPython(hull.hull.items);
 }
 
 const convex_hull_contains_doc =
@@ -204,6 +237,18 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
 
 var convex_hull_methods = stub_metadata.toPyMethodDefArray(&convex_hull_methods_metadata);
 
+pub const convex_hull_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+    .{
+        .name = "points",
+        .get = @ptrCast(&convex_hull_get_points),
+        .set = null,
+        .doc = "Vertices of the computed convex hull in clockwise order. Returns `None` if the hull is invalid or hasn't been computed. When not `None`, the list is guaranteed to contain at least 3 points.",
+        .type = "list[tuple[float, float]] | None",
+    },
+};
+
+var convex_hull_getset = stub_metadata.toPyGetSetDefArray(&convex_hull_properties_metadata);
+
 // Class documentation - keep it simple
 const convex_hull_class_doc = "Convex hull computation using Graham's scan algorithm.";
 
@@ -212,23 +257,29 @@ pub const convex_hull_init_doc =
     \\Initialize a new ConvexHull instance.
     \\
     \\Creates a new ConvexHull instance that can compute the convex hull of
-    \\2D point sets using Graham's scan algorithm. The algorithm has O(n log n)
-    \\time complexity where n is the number of input points.
+    \\2D point sets using Graham's scan algorithm. If points are provided,
+    \\the hull is computed immediately.
+    \\
+    \\## Parameters
+    \\- `points` (list[tuple[float, float]], optional): List of (x, y) coordinate pairs.
     \\
     \\## Examples
     \\```python
-    \\# Create a ConvexHull instance
-    \\hull = ConvexHull()
-    \\
-    \\# Find convex hull of points
+    \\# Create and compute hull in one step
     \\points = [(0, 0), (1, 1), (2, 2), (3, 1), (4, 0), (2, 4), (1, 3)]
+    \\hull = ConvexHull(points)
+    \\# The computed vertices are available in .points (None if degenerate)
+    \\if hull.points:
+    \\    print(hull.points)
+    \\
+    \\# Or create empty and compute later
+    \\hull = ConvexHull()
     \\result = hull.find(points)
-    \\# Returns: [(0.0, 0.0), (1.0, 3.0), (2.0, 4.0), (4.0, 0.0)]
     \\```
     \\
     \\## Notes
-    \\- Returns vertices in clockwise order
-    \\- Returns None for degenerate cases (e.g., all points collinear)
+    \\- Returns vertices in clockwise order via the .points property
+    \\- The .points property returns None for degenerate cases (e.g., all points collinear)
     \\- Requires at least 3 points for a valid hull
 ;
 
@@ -236,7 +287,7 @@ pub const convex_hull_init_doc =
 pub const convex_hull_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
-        .params = "self",
+        .params = "self, points: list[tuple[float, float]] = None",
         .returns = "None",
         .doc = convex_hull_init_doc,
     },
@@ -248,6 +299,7 @@ pub var ConvexHullType = py_utils.buildTypeObject(.{
     .basicsize = @sizeOf(ConvexHullObject),
     .doc = convex_hull_class_doc,
     .methods = @ptrCast(&convex_hull_methods),
+    .getset = @ptrCast(&convex_hull_getset),
     .new = convex_hull_new,
     .init = convex_hull_init,
     .dealloc = convex_hull_dealloc,
