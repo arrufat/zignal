@@ -4,6 +4,7 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
 const meta = @import("../meta.zig");
+const Point = @import("Point.zig").Point;
 
 /// A generic rectangle object with some convenience functionality.
 pub fn Rectangle(comptime T: type) type {
@@ -58,38 +59,56 @@ pub fn Rectangle(comptime T: type) type {
 
         /// Checks if a rectangle is ill-formed.
         pub fn isEmpty(self: Self) bool {
-            return switch (@typeInfo(T)) {
-                .int => self.t >= self.b or self.l >= self.r,
-                .float => self.t >= self.b or self.l >= self.r,
-                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+            return self.t >= self.b or self.l >= self.r;
+        }
+
+        /// Returns a new rectangle with coordinates re-ordered such that l <= r and t <= b.
+        pub fn reorder(self: Self) Self {
+            return .{
+                .l = @min(self.l, self.r),
+                .t = @min(self.t, self.b),
+                .r = @max(self.l, self.r),
+                .b = @max(self.t, self.b),
             };
         }
 
         /// Returns the width of the rectangle.
         pub fn width(self: Self) if (@typeInfo(T) == .int) usize else T {
-            return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
+            if (self.l >= self.r) return 0;
+            return switch (@typeInfo(T)) {
                 .int => @intCast(self.r - self.l),
                 .float => self.r - self.l,
-                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+                else => unreachable,
             };
         }
 
         /// Returns the height of the rectangle.
         pub fn height(self: Self) if (@typeInfo(T) == .int) usize else T {
-            return if (self.isEmpty()) 0 else switch (@typeInfo(T)) {
+            if (self.t >= self.b) return 0;
+            return switch (@typeInfo(T)) {
                 .int => @intCast(self.b - self.t),
                 .float => self.b - self.t,
-                else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
+                else => unreachable,
             };
         }
 
         /// Returns the area of the rectangle
         pub fn area(self: Self) if (@typeInfo(T) == .int) usize else T {
+            if (self.isEmpty()) return 0;
             return self.height() * self.width();
         }
 
-        /// Returns true if the point at x, y is inside the rectangle.
-        pub fn contains(self: Self, x: T, y: T) bool {
+        /// Returns true if the point is inside the rectangle.
+        /// Can be called with a Point(2, T) or with x and y coordinates.
+        pub fn contains(self: Self, args: anytype) bool {
+            const ArgsType = @TypeOf(args);
+            const coords = switch (@typeInfo(ArgsType)) {
+                .@"struct" => |s| if (s.is_tuple) .{ args[0], args[1] } else .{ args.x(), args.y() },
+                else => @compileError("contains expects a Point(2, T) or a tuple .{x, y}"),
+            };
+            const x = meta.as(T, coords[0]);
+            const y = meta.as(T, coords[1]);
+
             switch (@typeInfo(T)) {
                 .float => {
                     if (std.math.isNan(x) or std.math.isNan(y)) return false;
@@ -316,6 +335,42 @@ pub fn Rectangle(comptime T: type) type {
 
             return false;
         }
+
+        /// Returns the bounding box containing both rectangles.
+        /// Note: "union" is a reserved keyword in Zig, so we use "merge".
+        pub fn merge(self: Self, other: Self) Self {
+            if (self.isEmpty()) return other;
+            if (other.isEmpty()) return self;
+            return .{
+                .l = @min(self.l, other.l),
+                .t = @min(self.t, other.t),
+                .r = @max(self.r, other.r),
+                .b = @max(self.b, other.b),
+            };
+        }
+
+        /// Returns the aspect ratio (width / height).
+        /// Returns `inf` if height is 0 and width is non-zero.
+        /// Returns `NaN` if both width and height are 0.
+        pub fn aspectRatio(self: Self) f64 {
+            const w = self.width();
+            const h = self.height();
+            if (h == 0) {
+                if (w == 0) return std.math.nan(f64);
+                return std.math.inf(f64);
+            }
+
+            return switch (@typeInfo(T)) {
+                .int => @as(f64, @floatFromInt(w)) / @as(f64, @floatFromInt(h)),
+                .float => @as(f64, w) / @as(f64, h),
+                else => unreachable,
+            };
+        }
+
+        /// Returns the perimeter of the rectangle.
+        pub fn perimeter(self: Self) if (@typeInfo(T) == .int) usize else T {
+            return (self.width() + self.height()) * 2;
+        }
     };
 }
 
@@ -326,8 +381,8 @@ test "Rectangle" {
     const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 640, .b = 480 };
     try expectEqual(frect.width(), 640);
     try expectEqual(frect.height(), 480);
-    try expectEqual(frect.contains(320, 240), true);
-    try expectEqual(irect.contains(640, 480), false);
+    try expectEqual(frect.contains(.{ 320, 240 }), true);
+    try expectEqual(irect.contains(.{ 640, 480 }), false);
     try expectEqualDeep(frect.as(isize), irect);
 }
 
@@ -428,8 +483,8 @@ test "Rectangle iou and overlaps" {
 test "Rectangle contains rejects NaN" {
     const rect = Rectangle(f32){ .l = -10.0, .t = -10.0, .r = 10.0, .b = 10.0 };
     const nan = std.math.nan(f32);
-    try expectEqual(false, rect.contains(nan, 0.0));
-    try expectEqual(false, rect.contains(0.0, nan));
+    try expectEqual(false, rect.contains(.{ nan, 0.0 }));
+    try expectEqual(false, rect.contains(.{ 0.0, nan }));
 }
 
 test "Rectangle helpers" {
@@ -471,4 +526,51 @@ test "Rectangle helpers" {
     const float_bounds = Rectangle(f32){ .l = -1.0, .t = -1.0, .r = 4.0, .b = 4.0 };
     try expectEqual(false, frect.clip(float_bounds).isEmpty());
     try expectEqual(frect.covers(Rectangle(f32){ .l = 0.5, .t = 0.5, .r = 1.5, .b = 1.5 }), true);
+}
+
+test "Rectangle merge" {
+    const rect1 = Rectangle(i32){ .l = 0, .t = 0, .r = 10, .b = 10 };
+    const rect2 = Rectangle(i32){ .l = 20, .t = 20, .r = 30, .b = 30 };
+    const merged = rect1.merge(rect2);
+    try expectEqualDeep(merged, Rectangle(i32){ .l = 0, .t = 0, .r = 30, .b = 30 });
+
+    const empty = Rectangle(i32){ .l = 0, .t = 0, .r = 0, .b = 0 };
+    try expectEqualDeep(rect1.merge(empty), rect1);
+    try expectEqualDeep(empty.merge(rect1), rect1);
+}
+
+test "Rectangle perimeter and aspect ratio" {
+    const rect = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 50 };
+    try expectEqual(rect.perimeter(), 300);
+    try std.testing.expectApproxEqAbs(rect.aspectRatio(), 2.0, 1e-9);
+
+    const square = Rectangle(f32){ .l = 0, .t = 0, .r = 10.0, .b = 10.0 };
+    try expectEqual(square.perimeter(), 40.0);
+    try std.testing.expectApproxEqAbs(square.aspectRatio(), 1.0, 1e-9);
+
+    const line = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 0 };
+    try std.testing.expect(line.aspectRatio() == std.math.inf(f64));
+
+    const point = Rectangle(i32){ .l = 0, .t = 0, .r = 0, .b = 0 };
+    try std.testing.expect(std.math.isNan(point.aspectRatio()));
+}
+
+test "Rectangle reorder" {
+    const flipped = Rectangle(i32){ .l = 100, .t = 100, .r = 0, .b = 0 };
+    try expectEqual(flipped.isEmpty(), true);
+    try expectEqual(flipped.width(), 0);
+    
+    const fixed = flipped.reorder();
+    try expectEqual(fixed.isEmpty(), false);
+    try expectEqualDeep(fixed, Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 });
+    try expectEqual(fixed.width(), 100);
+}
+
+test "Rectangle contains with Point" {
+    const rect = Rectangle(f32){ .l = 0, .t = 0, .r = 10, .b = 10 };
+    const p_in = Point(2, f32).init(.{ 5.0, 5.0 });
+    const p_out = Point(2, f32).init(.{ 15.0, 5.0 });
+
+    try expectEqual(rect.contains(p_in), true);
+    try expectEqual(rect.contains(p_out), false);
 }
