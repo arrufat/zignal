@@ -9,7 +9,7 @@ pub inline fn as(comptime T: type, from: anytype) T {
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
-        .int => {
+        .int, .comptime_int => {
             switch (@typeInfo(T)) {
                 .@"enum" => return @enumFromInt(from),
                 .int => return @intCast(from),
@@ -17,7 +17,7 @@ pub inline fn as(comptime T: type, from: anytype) T {
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
-        .float => {
+        .float, .comptime_float => {
             switch (@typeInfo(T)) {
                 .float => return @floatCast(from),
                 .int => return @intFromFloat(@round(from)),
