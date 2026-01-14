@@ -126,12 +126,13 @@ pub const BruteForceMatcher = struct {
             allocator.free(all_matches);
         }
 
+        // Allocate distances buffer once
+        var distances = try allocator.alloc(Match, train_descriptors.len);
+        defer allocator.free(distances);
+
         // For each query descriptor
         for (query_descriptors, 0..) |q_desc, q_idx| {
             // Calculate distances to all train descriptors
-            var distances = try allocator.alloc(Match, train_descriptors.len);
-            defer allocator.free(distances);
-
             for (train_descriptors, 0..) |t_desc, t_idx| {
                 distances[t_idx] = .{
                     .query_idx = q_idx,
