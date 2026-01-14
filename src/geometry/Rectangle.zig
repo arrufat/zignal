@@ -559,7 +559,7 @@ test "Rectangle reorder" {
     const flipped = Rectangle(i32){ .l = 100, .t = 100, .r = 0, .b = 0 };
     try expectEqual(flipped.isEmpty(), true);
     try expectEqual(flipped.width(), 0);
-    
+
     const fixed = flipped.reorder();
     try expectEqual(fixed.isEmpty(), false);
     try expectEqualDeep(fixed, Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 });
