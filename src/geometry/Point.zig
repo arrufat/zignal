@@ -153,7 +153,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Clamp each component to the range [min_point, max_point]
         pub fn clamp(self: Self, min_point: Self, max_point: Self) Self {
-            return self.max(min_point).min(max_point);
+            return .{ .items = std.math.clamp(self.items, min_point.items, max_point.items) };
         }
 
         /// Compute Euclidean distance to another point
