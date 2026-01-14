@@ -118,6 +118,32 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return result_list;
 }
 
+const convex_hull_contains_doc =
+    \\Check if a point is inside the convex hull.
+    \\
+    \\## Parameters
+    \\- `point` (tuple[float, float]): (x, y) coordinates of the point to check.
+    \\
+    \\## Returns
+    \\- `bool`: True if the point is inside or on the boundary, False otherwise.
+    \\- Returns `False` if no valid hull has been computed yet.
+;
+
+fn convex_hull_contains(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const hull = py_utils.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
+
+    const Params = struct {
+        point: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const p = py_utils.parsePointTuple(f64, params.point) catch return null;
+    const result = hull.contains(p);
+
+    return @ptrCast(py_utils.getPyBool(result));
+}
+
 const convex_hull_get_rectangle_doc =
     \\Return the tightest axis-aligned rectangle enclosing the last hull.
     \\
@@ -165,6 +191,14 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .doc = convex_hull_get_rectangle_doc,
         .params = "self",
         .returns = "Rectangle | None",
+    },
+    .{
+        .name = "contains",
+        .meth = @ptrCast(&convex_hull_contains),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = convex_hull_contains_doc,
+        .params = "self, point: tuple[float, float]",
+        .returns = "bool",
     },
 };
 

@@ -109,7 +109,62 @@ pub fn ConvexHull(comptime T: type) type {
             }
             return .init(min[0], min[1], max[0], max[1]);
         }
+
+                /// Returns true if the point p is inside the convex hull.
+                pub fn contains(self: *const Self, p: Point(2, T)) bool {
+                    if (@typeInfo(T) == .float) {
+                        if (std.math.isNan(p.x()) or std.math.isNan(p.y())) {
+                            return false;
+                        }
+                    }
+                    if (!self.isValid()) return false;
+                    
+                    // Check orientation of point relative to all edges.            // Since vertices are in clockwise order, the point must be to the right (clockwise)
+            // or collinear with every edge to be inside.
+            for (0..self.hull.items.len) |i| {
+                const p1 = self.hull.items[i];
+                const p2 = self.hull.items[(i + 1) % self.hull.items.len];
+                const orientation = computeOrientation(T, p1, p2, p);
+
+                // If point is to the left (counter-clockwise) of any edge, it's outside
+                if (orientation == .counter_clockwise) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     };
+}
+
+test "convex hull contains" {
+    const points: []const Point(2, f32) = &.{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 2.0, 0.0 }),
+        .init(.{ 2.0, 2.0 }),
+        .init(.{ 0.0, 2.0 }),
+    };
+    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
+    defer convex_hull.deinit();
+    _ = (try convex_hull.find(points)).?;
+
+    // Points inside
+    try expectEqual(convex_hull.contains(.init(.{ 1.0, 1.0 })), true);
+    try expectEqual(convex_hull.contains(.init(.{ 0.5, 0.5 })), true);
+
+    // Points on edges (inclusive)
+    try expectEqual(convex_hull.contains(.init(.{ 0.0, 1.0 })), true);
+    try expectEqual(convex_hull.contains(.init(.{ 1.0, 0.0 })), true);
+
+    // Points outside
+    try expectEqual(convex_hull.contains(.init(.{ -0.1, 1.0 })), false);
+    try expectEqual(convex_hull.contains(.init(.{ 3.0, 3.0 })), false);
+    try expectEqual(convex_hull.contains(.init(.{ 1.0, 2.1 })), false);
+
+    // NaN coordinates
+    const nan = std.math.nan(f32);
+    try expectEqual(convex_hull.contains(.init(.{ nan, 1.0 })), false);
+    try expectEqual(convex_hull.contains(.init(.{ 1.0, nan })), false);
 }
 
 test "convex hull" {
