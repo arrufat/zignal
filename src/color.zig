@@ -222,7 +222,7 @@ pub fn Rgb(comptime T: type) type {
         else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
     }
     return struct {
-        pub const space = ColorSpace.rgb;
+        pub const space: ColorSpace = .rgb;
         r: T,
         g: T,
         b: T,
@@ -335,7 +335,7 @@ pub fn Rgba(comptime T: type) type {
         else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
     }
     return packed struct {
-        pub const space = ColorSpace.rgba;
+        pub const space: ColorSpace = .rgba;
         r: T,
         g: T,
         b: T,
@@ -457,7 +457,7 @@ pub fn Gray(comptime T: type) type {
     }
 
     return struct {
-        pub const space = ColorSpace.gray;
+        pub const space: ColorSpace = .gray;
         y: T,
 
         /// Formats the color for terminal output.
@@ -508,7 +508,7 @@ pub fn Gray(comptime T: type) type {
 pub fn Hsv(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.hsv;
+        pub const space: ColorSpace = .hsv;
         h: T,
         s: T,
         v: T,
@@ -546,7 +546,7 @@ pub fn Hsv(comptime T: type) type {
 pub fn Hsl(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.hsl;
+        pub const space: ColorSpace = .hsl;
         h: T,
         s: T,
         l: T,
@@ -586,7 +586,7 @@ pub fn Hsl(comptime T: type) type {
 pub fn Xyz(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.xyz;
+        pub const space: ColorSpace = .xyz;
         x: T,
         y: T,
         z: T,
@@ -630,7 +630,7 @@ pub fn Xyz(comptime T: type) type {
 pub fn Lab(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.lab;
+        pub const space: ColorSpace = .lab;
         l: T,
         a: T,
         b: T,
@@ -669,7 +669,7 @@ pub fn Lab(comptime T: type) type {
 pub fn Lch(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.lch;
+        pub const space: ColorSpace = .lch;
         l: T,
         c: T,
         h: T,
@@ -705,7 +705,7 @@ pub fn Lch(comptime T: type) type {
 pub fn Lms(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.lms;
+        pub const space: ColorSpace = .lms;
         l: T,
         m: T,
         s: T,
@@ -743,7 +743,7 @@ pub fn Lms(comptime T: type) type {
 pub fn Oklab(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.oklab;
+        pub const space: ColorSpace = .oklab;
         l: T,
         a: T,
         b: T,
@@ -782,7 +782,7 @@ pub fn Oklab(comptime T: type) type {
 pub fn Oklch(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.oklch;
+        pub const space: ColorSpace = .oklch;
         l: T,
         c: T,
         h: T,
@@ -821,7 +821,7 @@ pub fn Oklch(comptime T: type) type {
 pub fn Xyb(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
-        pub const space = ColorSpace.xyb;
+        pub const space: ColorSpace = .xyb;
         x: T,
         y: T,
         b: T,
@@ -861,7 +861,7 @@ pub fn Ycbcr(comptime T: type) type {
         else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
     }
     return struct {
-        pub const space = ColorSpace.ycbcr;
+        pub const space: ColorSpace = .ycbcr;
         y: T,
         cb: T,
         cr: T,
