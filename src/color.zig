@@ -1,7 +1,26 @@
-//! Color module - All color types and utilities
+//! # Color Module
 //!
-//! This module provides a unified interface to all color types in the system.
-//! Each color type is implemented as a separate file using Zig's file-as-struct pattern.
+//! This module provides a unified and comprehensive interface for color manipulation, conversion,
+//! and management within the Zignal library. It supports a wide range of color spaces, from standard
+//! display formats to perceptually uniform and scientific models.
+//!
+//! ## Key Features
+//!
+//! - **Generic Component Types**: All color structures are generic over their component type `T`
+//!   (e.g., `Rgb(u8)`, `Lab(f32)`), handling value scaling automatically (0-255 for `u8`, 0-1 for floats).
+//! - **Unified Conversion Architecture**: A "Hub & Spoke" system ensures accurate conversion between
+//!   any two color spaces, using CIE XYZ and sRGB as central hubs.
+//! - **Extensive Color Space Support**:
+//!   - **Display**: sRGB (`Rgb`), sRGB with Alpha (`Rgba`), Grayscale (`Gray`)
+//!   - **Cylindrical**: Hue-Saturation-Value (`Hsv`), Hue-Saturation-Lightness (`Hsl`)
+//!   - **Scientific (CIE)**: CIE 1931 XYZ (`Xyz`), CIELAB (`Lab`), CIELCh (`Lch`)
+//!   - **Perceptual (Next-Gen)**: Oklab (`Oklab`), Oklch (`Oklch`)
+//!   - **Specialized**: LMS Cone Response (`Lms`), JPEG XL XYB (`Xyb`), YCbCr BT.601 (`Ycbcr`)
+//! - **Utilities**:
+//!   - Hexadecimal parsing and formatting (`initHex`, `hex`).
+//!   - Color blending operations (`blendColors`).
+//!   - Terminal output formatting for easy debugging.
+//!   - Runtime dynamic color handling via the `Color(T)` union.
 
 const std = @import("std");
 const assert = std.debug.assert;
