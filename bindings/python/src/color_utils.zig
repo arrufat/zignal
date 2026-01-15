@@ -1,5 +1,5 @@
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
+const python = @import("python.zig");
+const c = python.c;
 const zignal = @import("zignal");
 
 const color = @import("color.zig");
@@ -122,7 +122,7 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
                 c.PyErr_SetString(c.PyExc_TypeError, "Converted Gray color is missing 'y' attribute");
                 return error.InvalidColor;
             };
-            break :blk try py_utils.validateRange(u8, y_val, 0, 255, "y");
+            break :blk try python.validateRange(u8, y_val, 0, 255, "y");
         },
         Rgb => try extractRgbFromObject(converted),
         Rgba => try extractRgbaFromObject(converted),
@@ -157,9 +157,9 @@ fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
     const g_val = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
     const b_val = extractColorAttribute(obj, "b") orelse return error.InvalidColor;
 
-    const r = py_utils.validateRange(u8, r_val, 0, 255, "r") catch return error.OutOfRange;
-    const g = py_utils.validateRange(u8, g_val, 0, 255, "g") catch return error.OutOfRange;
-    const b = py_utils.validateRange(u8, b_val, 0, 255, "b") catch return error.OutOfRange;
+    const r = python.validateRange(u8, r_val, 0, 255, "r") catch return error.OutOfRange;
+    const g = python.validateRange(u8, g_val, 0, 255, "g") catch return error.OutOfRange;
+    const b = python.validateRange(u8, b_val, 0, 255, "b") catch return error.OutOfRange;
 
     return Rgb{
         .r = r,
@@ -176,7 +176,7 @@ fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
 fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
     const rgb = try extractRgbFromObject(obj);
     const a_val = extractColorAttribute(obj, "a") orelse return error.InvalidColor;
-    const a = try py_utils.validateRange(u8, a_val, 0, 255, "a");
+    const a = try python.validateRange(u8, a_val, 0, 255, "a");
 
     return .{
         .r = rgb.r,

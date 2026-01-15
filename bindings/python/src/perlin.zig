@@ -2,8 +2,8 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
+const python = @import("python.zig");
+const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 const max_octaves: c_long = 32;
@@ -46,14 +46,14 @@ fn perlin_function(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     };
 
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const options = zignal.PerlinOptions(f64){
-        .amplitude = py_utils.validatePositive(f64, params.amplitude, "amplitude") catch return null,
-        .frequency = py_utils.validatePositive(f64, params.frequency, "frequency") catch return null,
-        .octaves = @intCast(py_utils.validateRange(c_long, params.octaves, 1, max_octaves, "octaves") catch return null),
-        .persistence = py_utils.validateRange(f64, params.persistence, 0.0, 1.0, "persistence") catch return null,
-        .lacunarity = py_utils.validateRange(f64, params.lacunarity, 1.0, max_lacunarity, "lacunarity") catch return null,
+        .amplitude = python.validatePositive(f64, params.amplitude, "amplitude") catch return null,
+        .frequency = python.validatePositive(f64, params.frequency, "frequency") catch return null,
+        .octaves = @intCast(python.validateRange(c_long, params.octaves, 1, max_octaves, "octaves") catch return null),
+        .persistence = python.validateRange(f64, params.persistence, 0.0, 1.0, "persistence") catch return null,
+        .lacunarity = python.validateRange(f64, params.lacunarity, 1.0, max_lacunarity, "lacunarity") catch return null,
     };
 
     const value = zignal.perlin(f64, params.x, params.y, params.z, options);

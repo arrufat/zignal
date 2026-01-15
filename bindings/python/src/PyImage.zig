@@ -3,7 +3,7 @@
 //! Memory ownership can be either owned (managed by this struct) or borrowed (view into existing image).
 
 const std = @import("std");
-const py_utils = @import("py_utils.zig");
+const python = @import("python.zig");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
@@ -41,7 +41,7 @@ pub fn deinit(self: *PyImage, allocator: std.mem.Allocator) void {
 /// Use Ownership.borrowed for views to avoid double-free.
 pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Ownership) ?*PyImage {
     const p = allocator.create(PyImage) catch {
-        py_utils.setMemoryError("PyImage");
+        python.setMemoryError("PyImage");
         return null;
     };
     switch (@TypeOf(image)) {

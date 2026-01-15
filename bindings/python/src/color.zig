@@ -1,7 +1,13 @@
 //! Color bindings using the automated registry-based approach
 
 const std = @import("std");
+
 const zignal = @import("zignal");
+
+const color_factory = @import("color_factory.zig");
+const color_registry = @import("color_registry.zig");
+const python = @import("python.zig");
+const c = python.c;
 
 // Explicit imports for types used in public exports
 const Gray = zignal.Gray(u8);
@@ -17,12 +23,6 @@ const Oklch = zignal.Oklch(f64);
 const Xyb = zignal.Xyb(f64);
 const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
-
-const color_factory = @import("color_factory.zig");
-const color_registry = @import("color_registry.zig");
-const py_utils = @import("py_utils.zig");
-pub const registerType = py_utils.registerType;
-const c = py_utils.c;
 
 // ============================================================================
 // GENERIC COLOR TYPE GENERATION
@@ -134,19 +134,19 @@ pub var ycbcr = ColorState(Ycbcr).createTypeObject();
 
 /// Register all color types from the registry in one go
 pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
-    try registerType(@ptrCast(module), "Gray", @ptrCast(&gray));
-    try registerType(@ptrCast(module), "Rgb", @ptrCast(&rgb));
-    try registerType(@ptrCast(module), "Rgba", @ptrCast(&rgba));
-    try registerType(@ptrCast(module), "Hsl", @ptrCast(&hsl));
-    try registerType(@ptrCast(module), "Hsv", @ptrCast(&hsv));
-    try registerType(@ptrCast(module), "Lab", @ptrCast(&lab));
-    try registerType(@ptrCast(module), "Lch", @ptrCast(&lch));
-    try registerType(@ptrCast(module), "Lms", @ptrCast(&lms));
-    try registerType(@ptrCast(module), "Oklab", @ptrCast(&oklab));
-    try registerType(@ptrCast(module), "Oklch", @ptrCast(&oklch));
-    try registerType(@ptrCast(module), "Xyb", @ptrCast(&xyb));
-    try registerType(@ptrCast(module), "Xyz", @ptrCast(&xyz));
-    try registerType(@ptrCast(module), "Ycbcr", @ptrCast(&ycbcr));
+    try python.register(@ptrCast(module), "Gray", @ptrCast(&gray));
+    try python.register(@ptrCast(module), "Rgb", @ptrCast(&rgb));
+    try python.register(@ptrCast(module), "Rgba", @ptrCast(&rgba));
+    try python.register(@ptrCast(module), "Hsl", @ptrCast(&hsl));
+    try python.register(@ptrCast(module), "Hsv", @ptrCast(&hsv));
+    try python.register(@ptrCast(module), "Lab", @ptrCast(&lab));
+    try python.register(@ptrCast(module), "Lch", @ptrCast(&lch));
+    try python.register(@ptrCast(module), "Lms", @ptrCast(&lms));
+    try python.register(@ptrCast(module), "Oklab", @ptrCast(&oklab));
+    try python.register(@ptrCast(module), "Oklch", @ptrCast(&oklch));
+    try python.register(@ptrCast(module), "Xyb", @ptrCast(&xyb));
+    try python.register(@ptrCast(module), "Xyz", @ptrCast(&xyz));
+    try python.register(@ptrCast(module), "Ycbcr", @ptrCast(&ycbcr));
 }
 
 // ============================================================================

@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("py_utils.zig").c;
+const c = @import("python.zig").c;
 const zignal = @import("zignal");
 const BuiltinEnum = std.builtin.Type.Enum;
 

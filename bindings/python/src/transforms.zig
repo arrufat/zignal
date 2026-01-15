@@ -5,9 +5,9 @@ const SimilarityTransform = zignal.SimilarityTransform;
 const AffineTransform = zignal.AffineTransform;
 const ProjectiveTransform = zignal.ProjectiveTransform;
 
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
-const allocator = py_utils.ctx.allocator;
+const python = @import("python.zig");
+const c = python.c;
+const allocator = python.ctx.allocator;
 const stub_metadata = @import("stub_metadata.zig");
 
 // ============================================================================
@@ -36,16 +36,16 @@ fn similarity_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 }
 
 fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
+    const self = python.safeCast(SimilarityTransformObject, self_obj);
 
     const Params = struct {
         from_points: ?*c.PyObject,
         to_points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
+    python.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    var pairs = py_utils.parsePointPairs(
+    var pairs = python.parsePointPairs(
         f64,
         params.from_points,
         params.to_points,
@@ -57,11 +57,11 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Create and fit the transform
     const transform = SimilarityTransform(f64).init(pairs.from_points, pairs.to_points) catch |err| {
         switch (err) {
-            error.NotConverged => py_utils.setValueError(
+            error.NotConverged => python.setValueError(
                 "SVD failed to converge; cannot fit similarity transform",
                 .{},
             ),
-            error.RankDeficient => py_utils.setValueError(
+            error.RankDeficient => python.setValueError(
                 "Point correspondences are rank deficient; cannot fit similarity transform",
                 .{},
             ),
@@ -81,19 +81,19 @@ fn similarity_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn similarity_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
+    python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn similarity_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
+    const self = python.safeCast(SimilarityTransformObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    return py_utils.projectPoints2D(params.points, self, applyLinear2D);
+    return python.projectPoints2D(params.points, self, applyLinear2D);
 }
 
 inline fn applyLinear2D(self: anytype, x: f64, y: f64) [2]f64 {
@@ -104,7 +104,7 @@ inline fn applyLinear2D(self: anytype, x: f64, y: f64) [2]f64 {
 }
 
 fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(SimilarityTransformObject, self_obj);
+    const self = python.safeCast(SimilarityTransformObject, self_obj);
 
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "SimilarityTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
@@ -123,12 +123,12 @@ var similarity_methods = [_]c.PyMethodDef{
 };
 
 var similarity_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(SimilarityTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = @ptrCast(@alignCast(py_utils.getterTuple2FromArrayField(SimilarityTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(SimilarityTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
+    .{ .name = "bias", .get = @ptrCast(@alignCast(python.getterTuple2FromArrayField(SimilarityTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var SimilarityTransformType = py_utils.buildTypeObject(.{
+pub var SimilarityTransformType = python.buildTypeObject(.{
     .name = "zignal.SimilarityTransform",
     .basicsize = @sizeOf(SimilarityTransformObject),
     .doc =
@@ -169,16 +169,16 @@ fn affine_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 }
 
 fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = py_utils.safeCast(AffineTransformObject, self_obj);
+    const self = python.safeCast(AffineTransformObject, self_obj);
 
     const Params = struct {
         from_points: ?*c.PyObject,
         to_points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
+    python.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    var pairs = py_utils.parsePointPairs(
+    var pairs = python.parsePointPairs(
         f64,
         params.from_points,
         params.to_points,
@@ -190,17 +190,17 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     // Create and fit the transform
     const transform = AffineTransform(f64).init(allocator, pairs.from_points, pairs.to_points) catch |err| {
         switch (err) {
-            error.OutOfMemory => py_utils.setMemoryError("affine transform"),
-            error.DimensionMismatch => py_utils.setValueError("Point arrays must be 2D coordinates", .{}),
-            error.NotConverged => py_utils.setValueError(
+            error.OutOfMemory => python.setMemoryError("affine transform"),
+            error.DimensionMismatch => python.setValueError("Point arrays must be 2D coordinates", .{}),
+            error.NotConverged => python.setValueError(
                 "SVD failed to converge; cannot fit affine transform",
                 .{},
             ),
-            error.Singular, error.RankDeficient => py_utils.setValueError(
+            error.Singular, error.RankDeficient => python.setValueError(
                 "Point correspondences are rank deficient; cannot fit affine transform",
                 .{},
             ),
-            else => py_utils.setRuntimeError("Failed to compute affine transform: {s}", .{@errorName(err)}),
+            else => python.setRuntimeError("Failed to compute affine transform: {s}", .{@errorName(err)}),
         }
         return -1;
     };
@@ -217,23 +217,23 @@ fn affine_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
 }
 
 fn affine_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
+    python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn affine_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(AffineTransformObject, self_obj);
+    const self = python.safeCast(AffineTransformObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    return py_utils.projectPoints2D(params.points, self, applyLinear2D);
+    return python.projectPoints2D(params.points, self, applyLinear2D);
 }
 
 fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(AffineTransformObject, self_obj);
+    const self = python.safeCast(AffineTransformObject, self_obj);
 
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "AffineTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
@@ -252,12 +252,12 @@ var affine_methods = [_]c.PyMethodDef{
 };
 
 var affine_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(AffineTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = @ptrCast(@alignCast(py_utils.getterTuple2FromArrayField(AffineTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(AffineTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
+    .{ .name = "bias", .get = @ptrCast(@alignCast(python.getterTuple2FromArrayField(AffineTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var AffineTransformType = py_utils.buildTypeObject(.{
+pub var AffineTransformType = python.buildTypeObject(.{
     .name = "zignal.AffineTransform",
     .basicsize = @sizeOf(AffineTransformObject),
     .doc =
@@ -299,16 +299,16 @@ fn projective_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 }
 
 fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
+    const self = python.safeCast(ProjectiveTransformObject, self_obj);
 
     const Params = struct {
         from_points: ?*c.PyObject,
         to_points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return -1;
+    python.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    var pairs = py_utils.parsePointPairs(
+    var pairs = python.parsePointPairs(
         f64,
         params.from_points,
         params.to_points,
@@ -320,11 +320,11 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Create and fit the transform
     const transform = ProjectiveTransform(f64).init(pairs.from_points, pairs.to_points) catch |err| {
         switch (err) {
-            error.NotConverged => py_utils.setValueError(
+            error.NotConverged => python.setValueError(
                 "SVD failed to converge; cannot fit projective transform",
                 .{},
             ),
-            error.RankDeficient => py_utils.setValueError(
+            error.RankDeficient => python.setValueError(
                 "Point correspondences are rank deficient; cannot fit projective transform",
                 .{},
             ),
@@ -343,19 +343,19 @@ fn projective_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 }
 
 fn projective_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
+    python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn projective_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
+    const self = python.safeCast(ProjectiveTransformObject, self_obj);
 
     const Params = struct {
         points: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    return py_utils.projectPoints2D(params.points, self, applyProjective);
+    return python.projectPoints2D(params.points, self, applyProjective);
 }
 
 fn applyProjective(self: *ProjectiveTransformObject, x: f64, y: f64) [2]f64 {
@@ -375,7 +375,7 @@ fn applyProjective(self: *ProjectiveTransformObject, x: f64, y: f64) [2]f64 {
 
 fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
+    const self = python.safeCast(ProjectiveTransformObject, self_obj);
 
     // Reconstruct the matrix from components
     const matrix = zignal.SMatrix(f64, 3, 3).init(.{
@@ -394,7 +394,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 
     // Create new ProjectiveTransform object
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&ProjectiveTransformType), 0) orelse return null;
-    const result = py_utils.safeCast(ProjectiveTransformObject, py_obj);
+    const result = python.safeCast(ProjectiveTransformObject, py_obj);
 
     // Copy inverse matrix components
     for (0..3) |i| {
@@ -407,7 +407,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 }
 
 fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ProjectiveTransformObject, self_obj);
+    const self = python.safeCast(ProjectiveTransformObject, self_obj);
 
     var buffer: [1024]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "ProjectiveTransform(matrix=[[{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}]])", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[0][2], self.matrix[1][0], self.matrix[1][1], self.matrix[1][2], self.matrix[2][0], self.matrix[2][1], self.matrix[2][2] }) catch return null;
@@ -425,11 +425,11 @@ var projective_methods = [_]c.PyMethodDef{
 };
 
 var projective_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(py_utils.getterMatrixNested(ProjectiveTransformObject, "matrix", 3, 3))), .set = null, .doc = "3x3 homogeneous transformation matrix", .closure = null },
+    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(ProjectiveTransformObject, "matrix", 3, 3))), .set = null, .doc = "3x3 homogeneous transformation matrix", .closure = null },
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var ProjectiveTransformType = py_utils.buildTypeObject(.{
+pub var ProjectiveTransformType = python.buildTypeObject(.{
     .name = "zignal.ProjectiveTransform",
     .basicsize = @sizeOf(ProjectiveTransformObject),
     .doc =

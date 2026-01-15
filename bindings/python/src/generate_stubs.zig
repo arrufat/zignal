@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const zignal = @import("zignal");
-const py_utils = @import("py_utils.zig");
+const python = @import("python.zig");
 const color_registry = @import("color_registry.zig");
 const stub_metadata = @import("stub_metadata.zig");
 const color_factory = @import("color_factory.zig");
@@ -723,7 +723,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
-    const ctx = py_utils.ctx;
+    const ctx = python.ctx;
     const allocator = ctx.allocator;
     const io = ctx.io;
 

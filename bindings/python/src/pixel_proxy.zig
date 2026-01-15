@@ -7,8 +7,8 @@ const Rgba = zignal.Rgba(u8);
 const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const ImageObject = @import("image.zig").ImageObject;
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
+const python = @import("python.zig");
+const c = python.c;
 
 // Proxy object layouts
 const RgbPixelProxy = extern struct {
@@ -41,7 +41,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
         fn delegateToColorMethod(self_obj: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
             const color_raw = itemMethodImpl(self_obj) orelse return null;
             defer c.Py_DECREF(color_raw);
-            return py_utils.callMethod(color_raw, method_name, args);
+            return python.callMethod(color_raw, method_name, args);
         }
 
         fn repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -63,7 +63,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             }
             const parent = Self.parentFromObj(@ptrCast(self_obj));
             if (parent == null or parent.?.py_image == null) {
-                return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
+                return @ptrCast(python.create(op != c.Py_EQ));
             }
             const proxy: *ProxyObjectType = @ptrCast(self_obj);
             const px = parent.?.py_image.?.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
@@ -85,7 +85,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 c.Py_INCREF(not_impl);
                 return not_impl;
             }
-            return if (op == c.Py_EQ) @ptrCast(py_utils.getPyBool(equal)) else @ptrCast(py_utils.getPyBool(!equal));
+            return if (op == c.Py_EQ) @ptrCast(python.create(equal)) else @ptrCast(python.create(!equal));
         }
 
         fn getField(comptime index: usize) fn (?*c.PyObject, ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -100,7 +100,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                         const proxy: *ProxyObjectType = @ptrCast(self_obj.?);
                         const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
                         const value = @field(rgba, fields[index].name);
-                        return py_utils.convertToPython(value);
+                        return python.create(value);
                     }
                     c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
                     return null;
@@ -118,17 +118,17 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     }
                     const T = fields[index].type;
                     const field_name = fields[index].name;
-                    const parsed = py_utils.convertFromPython(T, value) catch |err| {
+                    const parsed = python.parse(T, value) catch |err| {
                         switch (err) {
-                            py_utils.ConversionError.not_integer => {
+                            python.ConversionError.not_integer => {
                                 c.PyErr_SetString(c.PyExc_TypeError, "Expected integer value");
                                 return -1;
                             },
-                            py_utils.ConversionError.not_float => {
+                            python.ConversionError.not_float => {
                                 c.PyErr_SetString(c.PyExc_TypeError, "Expected float value");
                                 return -1;
                             },
-                            py_utils.ConversionError.integer_out_of_range, py_utils.ConversionError.float_out_of_range => {
+                            python.ConversionError.integer_out_of_range, python.ConversionError.float_out_of_range => {
                                 if (std.meta.eql(ColorType, Rgb) or std.meta.eql(ColorType, Rgba)) {
                                     c.PyErr_SetString(c.PyExc_ValueError, "Value must be between 0 and 255");
                                 } else {
@@ -243,7 +243,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 mode: ?*c.PyObject = null,
             };
             var params: Params = undefined;
-            py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+            python.parseArgs(Params, args, kwds, &params) catch return null;
 
             const overlay_obj = params.overlay;
             const mode_obj = params.mode;
@@ -367,7 +367,7 @@ var rgba_proxy_getset = RgbaProxyBinding.generateGetSet();
 var rgb_proxy_methods = RgbProxyBinding.generateMethods();
 var rgba_proxy_methods = RgbaProxyBinding.generateMethods();
 
-pub var RgbPixelProxyType = py_utils.buildTypeObject(.{
+pub var RgbPixelProxyType = python.buildTypeObject(.{
     .name = "zignal.RgbPixelProxy",
     .basicsize = @sizeOf(RgbPixelProxy),
     .doc = "Proxy object for RGB pixel access",
@@ -378,7 +378,7 @@ pub var RgbPixelProxyType = py_utils.buildTypeObject(.{
     .richcompare = RgbProxyBinding.richcompare,
 });
 
-pub var RgbaPixelProxyType = py_utils.buildTypeObject(.{
+pub var RgbaPixelProxyType = python.buildTypeObject(.{
     .name = "zignal.RgbaPixelProxy",
     .basicsize = @sizeOf(RgbaPixelProxy),
     .doc = "Proxy object for RGBA pixel access",

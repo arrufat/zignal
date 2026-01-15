@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const zignal = @import("zignal");
+const Point = zignal.Point;
+
 pub const ctx = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -8,16 +11,13 @@ pub const ctx = struct {
     .allocator = std.heap.c_allocator,
 };
 
-const zignal = @import("zignal");
-const Point = zignal.Point;
-
 pub const c = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
     @cInclude("Python.h");
 });
 
 /// Helper to register a type with a module
-pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.PyTypeObject) !void {
+pub fn register(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.PyTypeObject) !void {
     if (c.PyType_Ready(type_obj) < 0) return error.TypeInitFailed;
 
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
@@ -29,24 +29,19 @@ pub fn registerType(module: [*c]c.PyObject, comptime name: []const u8, type_obj:
 }
 
 /// Get the Python type object for a Python object.
-pub fn getPyType(obj: ?*c.PyObject) callconv(.c) *c.PyTypeObject {
+pub fn typeOf(obj: ?*c.PyObject) callconv(.c) *c.PyTypeObject {
     return @ptrCast(obj.?.ob_type);
 }
 
-/// Get Python boolean singletons using the stable Python C API
-pub fn getPyBool(value: bool) [*c]c.PyObject {
-    return c.PyBool_FromLong(@intFromBool(value));
-}
-
 /// Helper to return Python None
-pub fn getPyNone() ?*c.PyObject {
-    const none = c.Py_None();
-    c.Py_INCREF(none);
-    return none;
+pub fn none() ?*c.PyObject {
+    const val = c.Py_None();
+    c.Py_INCREF(val);
+    return val;
 }
 
-/// Convert a Zig value to Python object
-pub fn convertToPython(value: anytype) ?*c.PyObject {
+/// Creates a Python object from a Zig value.
+pub fn create(value: anytype) ?*c.PyObject {
     const T = @TypeOf(value);
 
     return switch (@typeInfo(T)) {
@@ -55,7 +50,7 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
         else
             c.PyLong_FromLongLong(@intCast(value)),
         .float => c.PyFloat_FromDouble(value),
-        .bool => @ptrCast(getPyBool(value)),
+        .bool => c.PyBool_FromLong(@intFromBool(value)),
         .pointer => |ptr| blk: {
             if (ptr.size == .Slice and ptr.child == u8) {
                 break :blk c.PyUnicode_FromStringAndSize(value.ptr, @intCast(value.len));
@@ -70,7 +65,7 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
         },
         .optional => blk: {
             if (value) |v| {
-                break :blk convertToPython(v);
+                break :blk create(v);
             } else {
                 // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
                 c.Py_INCREF(@as(?*c.PyObject, @ptrCast(c.Py_None)));
@@ -81,8 +76,72 @@ pub fn convertToPython(value: anytype) ?*c.PyObject {
     };
 }
 
+/// Parses a Python object into a Zig value of type T.
+pub fn parse(comptime T: type, py_obj: ?*c.PyObject) !T {
+    if (py_obj == null) {
+        return ConversionError.not_python_object;
+    }
+
+    const info = @typeInfo(T);
+    switch (info) {
+        .int => {
+            // Always use PyLong_AsLong for better negative value handling
+            const val = c.PyLong_AsLong(py_obj);
+            if (val == -1 and c.PyErr_Occurred() != null) {
+                c.PyErr_Clear(); // Clear the Python error since we're handling it
+                return ConversionError.not_integer;
+            }
+
+            // Check if value fits in target type
+            const min_val = std.math.minInt(T);
+            const max_val = std.math.maxInt(T);
+            if (val < min_val or val > max_val) {
+                return ConversionError.integer_out_of_range;
+            }
+            return @intCast(val);
+        },
+        .float => {
+            const val = c.PyFloat_AsDouble(py_obj);
+            if (val == -1.0 and c.PyErr_Occurred() != null) {
+                c.PyErr_Clear(); // Clear the Python error since we're handling it
+                return ConversionError.not_float;
+            }
+            return @floatCast(val);
+        },
+        .@"struct" => {
+            // Point(2, T)
+            if (T == Point(2, f32)) return parsePointTuple(f32, py_obj);
+            if (T == Point(2, f64)) return parsePointTuple(f64, py_obj);
+
+            // Rectangle(T)
+            if (T == zignal.Rectangle(f32)) return parseRectangle(f32, py_obj);
+            if (T == zignal.Rectangle(f64)) return parseRectangle(f64, py_obj);
+            if (T == zignal.Rectangle(i32)) return parseRectangle(i32, py_obj);
+            if (T == zignal.Rectangle(u32)) return parseRectangle(u32, py_obj);
+            if (T == zignal.Rectangle(usize)) return parseRectangle(usize, py_obj);
+
+            // ArrayList(T)
+            if (@hasField(T, "items") and @hasField(T, "capacity") and @hasField(T, "allocator")) {
+                const Slice = std.meta.FieldType(T, .items);
+                const Child = @typeInfo(Slice).pointer.child;
+                return toArrayList(Child, py_obj);
+            }
+        },
+        .pointer => |ptr| {
+            if (ptr.size == .slice) {
+                const Child = ptr.child;
+                if (Child == Point(2, f32)) return parsePointSlice(f32, py_obj);
+                if (Child == Point(2, f64)) return parsePointSlice(f64, py_obj);
+            }
+        },
+        else => {},
+    }
+
+    return ConversionError.unsupported_type;
+}
+
 /// Wrapper for arguments tuple ownership. If `owned` is true, `tuple` must be decref'd.
-pub const ArgsTupleHandle = struct {
+const ArgsTupleHandle = struct {
     tuple: ?*c.PyObject,
     owned: bool,
 
@@ -95,7 +154,7 @@ pub const ArgsTupleHandle = struct {
 
 /// Ensure we always have a tuple for varargs-style APIs.
 /// Returns a handle describing whether the tuple is newly allocated (thus owned).
-pub fn ensureArgsTuple(args: ?*c.PyObject) ?ArgsTupleHandle {
+fn ensureArgs(args: ?*c.PyObject) ?ArgsTupleHandle {
     if (args) |existing| {
         return ArgsTupleHandle{ .tuple = existing, .owned = false };
     }
@@ -118,7 +177,7 @@ pub fn callMethodBorrowingArgs(target: ?*c.PyObject, method_name: [*c]const u8, 
 
 /// Call an object's method, automatically creating an empty args tuple when needed.
 pub fn callMethod(target: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
-    const handle = ensureArgsTuple(args) orelse return null;
+    const handle = ensureArgs(args) orelse return null;
     defer handle.deinit();
     return callMethodBorrowingArgs(target, method_name, handle.tuple);
 }
@@ -138,7 +197,7 @@ pub fn getterForField(comptime Obj: type, comptime field_name: []const u8) *cons
             _ = closure;
             const self: *Obj = @ptrCast(self_obj.?);
             const val = @field(self, field_name);
-            return convertToPython(val);
+            return create(val);
         }
     };
     return @ptrCast(&Gen.get);
@@ -177,7 +236,7 @@ pub fn autoGetSet(
 ///
 /// Example usage:
 /// ```zig
-/// const getset = py_utils.autoGetSetCustom(RectangleObject, &.{"left", "top", "right", "bottom"}, &[_]c.PyGetSetDef{
+/// const getset = python.autoGetSetCustom(RectangleObject, &.{"left", "top", "right", "bottom"}, &[_]c.PyGetSetDef{
 ///     .{ .name = "width", .get = @ptrCast(&rectangle_get_width), .set = null, .doc = "Width", .closure = null },
 ///     .{ .name = "height", .get = @ptrCast(&rectangle_get_height), .set = null, .doc = "Height", .closure = null },
 /// });
@@ -223,9 +282,9 @@ pub fn getterOptionalFieldWhere(
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
             const self: *Obj = @ptrCast(self_obj.?);
-            if (!Predicate(self)) return getPyNone();
+            if (!Predicate(self)) return none();
             const val = @field(self, field_name);
-            return convertToPython(val);
+            return create(val);
         }
     };
     return @ptrCast(&Gen.get);
@@ -255,7 +314,7 @@ pub fn getterOptionalPtr(
             if (@field(self, field_name)) |ptr| {
                 return converter(ptr);
             }
-            return getPyNone();
+            return none();
         }
     };
     return @ptrCast(&Gen.get);
@@ -273,9 +332,9 @@ pub fn getterTuple2FieldsWhere(
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
             const self: *Obj = @ptrCast(self_obj.?);
-            if (!Predicate(self)) return getPyNone();
-            const a = convertToPython(@field(self, field0)) orelse return null;
-            const b = convertToPython(@field(self, field1)) orelse {
+            if (!Predicate(self)) return none();
+            const a = create(@field(self, field0)) orelse return null;
+            const b = create(@field(self, field1)) orelse {
                 c.Py_DECREF(a);
                 return null;
             };
@@ -298,8 +357,8 @@ pub fn getterTuple2FromArrayField(
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
             const self: *Obj = @ptrCast(self_obj.?);
             const arr = @field(self, array_field);
-            const a = convertToPython(arr[idx0]) orelse return null;
-            const b = convertToPython(arr[idx1]) orelse {
+            const a = create(arr[idx0]) orelse return null;
+            const b = create(arr[idx1]) orelse {
                 c.Py_DECREF(a);
                 return null;
             };
@@ -335,7 +394,7 @@ pub fn getterMatrixNested(
 
                 var j: usize = 0;
                 while (j < cols) : (j += 1) {
-                    const val_obj = convertToPython(mat[i][j]);
+                    const val_obj = create(mat[i][j]);
                     if (val_obj == null) {
                         c.Py_DECREF(row_list);
                         c.Py_DECREF(outer);
@@ -391,7 +450,7 @@ pub const ConversionError = error{
 /// - error.PythonError: If a Python C-API call fails (e.g., getting an item).
 /// - error.OutOfMemory: If memory allocation fails.
 /// - ConversionError: If an element cannot be converted to type T.
-pub fn listFromPython(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
+fn toArrayList(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
     if (seq_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Expected a sequence, got None");
         return error.InvalidType;
@@ -415,47 +474,12 @@ pub fn listFromPython(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T)
             const item = c.PySequence_GetItem(seq_obj, @intCast(i)); // New reference
             if (item == null) return error.PythonError;
             defer c.Py_DECREF(item);
-            break :blk try convertFromPython(T, item);
+            break :blk try parse(T, item);
         };
         list.appendAssumeCapacity(val);
     }
 
     return list;
-}
-
-/// Convert Python value to Zig type using idiomatic error union
-pub fn convertFromPython(comptime T: type, py_obj: ?*c.PyObject) ConversionError!T {
-    if (py_obj == null) {
-        return ConversionError.not_python_object;
-    }
-
-    return switch (@typeInfo(T)) {
-        .int => blk: {
-            // Always use PyLong_AsLong for better negative value handling
-            const val = c.PyLong_AsLong(py_obj);
-            if (val == -1 and c.PyErr_Occurred() != null) {
-                c.PyErr_Clear(); // Clear the Python error since we're handling it
-                break :blk ConversionError.not_integer;
-            }
-
-            // Check if value fits in target type
-            const min_val = std.math.minInt(T);
-            const max_val = std.math.maxInt(T);
-            if (val < min_val or val > max_val) {
-                break :blk ConversionError.integer_out_of_range;
-            }
-            break :blk @intCast(val);
-        },
-        .float => blk: {
-            const val = c.PyFloat_AsDouble(py_obj);
-            if (val == -1.0 and c.PyErr_Occurred() != null) {
-                c.PyErr_Clear(); // Clear the Python error since we're handling it
-                break :blk ConversionError.not_float;
-            }
-            break :blk @floatCast(val);
-        },
-        else => ConversionError.unsupported_type,
-    };
 }
 
 /// Convert Python object to Zig type with optional custom validation
@@ -466,9 +490,12 @@ pub fn convertWithValidation(
     field_name: []const u8,
     comptime validator: ?*const fn (field_name: []const u8, value: anytype) bool,
     error_message: ?[]const u8,
-) ConversionError!T {
+) !T {
     // First do the basic type conversion
-    const converted = convertFromPython(T, py_obj) catch |err| {
+    const converted = parse(T, py_obj) catch |err| {
+        // If an exception is already set (e.g. MemoryError, specific ValueError), propagate it
+        if (c.PyErr_Occurred() != null) return err;
+
         switch (err) {
             ConversionError.not_integer => {
                 c.PyErr_SetString(c.PyExc_TypeError, "Expected integer value");
@@ -511,7 +538,7 @@ pub fn convertWithValidation(
 
 /// Parse a Python tuple representing a 2D point (x, y)
 /// Returns a Point(2, T) where T can be f32 or f64
-pub fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
+fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
     if (point_obj == null) {
         return error.InvalidPoint;
     }
@@ -548,7 +575,7 @@ pub fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
 
 /// Parse a Python tuple representing a rectangle (left, top, right, bottom)
 /// Returns a Rectangle(T) where T can be any numeric type
-pub fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectangle(T) {
+fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     if (tuple_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple is null");
         return error.InvalidRectangle;
@@ -613,7 +640,7 @@ pub fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Re
 
 /// Parse a Rectangle object or tuple to Zignal Rectangle(T)
 /// Accepts either a Rectangle instance or a tuple of (left, top, right, bottom)
-pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T) {
+fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     const rectangle = @import("rectangle.zig");
 
     if (rect_obj == null) {
@@ -653,7 +680,7 @@ pub fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangl
 }
 
 /// Parse a Python list of point tuples to an allocated slice of Point(2, T)
-pub fn parsePointList(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
+fn parsePointSlice(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     if (list_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Points list is null");
         return error.InvalidPointList;
@@ -714,10 +741,10 @@ pub fn parsePointPairs(
     min_points: usize,
     comptime min_points_message: []const u8,
 ) !PointPairs(T) {
-    const from_points = parsePointList(T, from_obj) catch |err| return err;
+    const from_points = parsePointSlice(T, from_obj) catch |err| return err;
     errdefer ctx.allocator.free(from_points);
 
-    const to_points = parsePointList(T, to_obj) catch |err| return err;
+    const to_points = parsePointSlice(T, to_obj) catch |err| return err;
     errdefer ctx.allocator.free(to_points);
 
     if (from_points.len != to_points.len) {
@@ -754,7 +781,7 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime ap
     }
 
     if (c.PySequence_Check(points_obj) != 0) {
-        const points = parsePointList(f64, points_obj) catch return null;
+        const points = parsePointSlice(f64, points_obj) catch return null;
         defer ctx.allocator.free(points);
 
         const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
@@ -908,7 +935,7 @@ pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
 }
 
 /// Build a Python kwlist for PyArg_ParseTupleAndKeywords from a comptime list of names.
-/// Usage: `const kw = py_utils.kw(&.{ "size", "method" });`
+/// Usage: `const kw = python.kw(&.{ "size", "method" });`
 /// Pass to CPython with: `@ptrCast(@constCast(&kw))`.
 ///
 /// Notes on Python versions:
@@ -940,7 +967,7 @@ pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
 ///     height: ?f64 = null,       // Optional with default
 /// };
 /// var params: Params = undefined;
-/// py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+/// python.parseArgs(Params, args, kwds, &params) catch return null;
 /// ```
 pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: *T) !void {
     const type_info = @typeInfo(T);
@@ -1073,7 +1100,7 @@ pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
     var buffer: [256]u8 = undefined;
 
     const type_name = if (got != null) blk: {
-        const tp = getPyType(got);
+        const tp = typeOf(got);
         const tp_name = tp.*.tp_name;
         // Extract just the type name (after the last dot)
         var i: usize = 0;
@@ -1232,7 +1259,7 @@ pub fn genericDealloc(comptime T: type, comptime deinit_fn: ?fn (*T) void) fn (?
             }
 
             // Free the Python object
-            const tp: *c.PyTypeObject = getPyType(self_obj);
+            const tp: *c.PyTypeObject = typeOf(self_obj);
             tp.*.tp_free.?(self_obj);
         }
     }.dealloc;

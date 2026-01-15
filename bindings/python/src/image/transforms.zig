@@ -8,9 +8,9 @@ const enum_utils = @import("../enum_utils.zig");
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
-const py_utils = @import("../py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-const c = py_utils.c;
+const python = @import("../python.zig");
+const allocator = python.ctx.allocator;
+const c = python.c;
 const transforms = @import("../transforms.zig");
 
 const Rgba = zignal.Rgba(u8);
@@ -36,7 +36,7 @@ fn mapScaleError(err: anyerror) anyerror {
 }
 
 fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObject {
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ scale, method }, struct {
         fn apply(img: anytype, s: f32, m: Interpolation) !*ImageObject {
             const out = img.scale(allocator, s, m) catch |err| return mapScaleError(err);
@@ -46,7 +46,7 @@ fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObj
 }
 
 fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
@@ -57,7 +57,7 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
 }
 
 fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
             var out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
@@ -86,7 +86,7 @@ pub const image_resize_doc =
 ;
 
 pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     const Params = struct {
@@ -94,18 +94,18 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         method: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const shape_or_scale = params.size;
     const method_value = params.method;
 
     if (shape_or_scale == null) {
-        py_utils.setTypeError("size argument", null);
+        python.setTypeError("size argument", null);
         return null;
     }
 
     const tag_resize = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_resize);
@@ -117,14 +117,14 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         if (scale == -1.0 and c.PyErr_Occurred() != null) {
             return null;
         }
-        const scale_pos = py_utils.validatePositive(f64, scale, "Scale factor") catch return null;
+        const scale_pos = python.validatePositive(f64, scale, "Scale factor") catch return null;
 
         const result = image_scale(self, @floatCast(scale_pos), method) catch return null;
         return @ptrCast(result);
     } else if (c.PyTuple_Check(shape_or_scale) != 0) {
         // It's a tuple of dimensions
         if (c.PyTuple_Size(shape_or_scale) != 2) {
-            py_utils.setValueError("Size must be a 2-tuple of (rows, cols)", .{});
+            python.setValueError("Size must be a 2-tuple of (rows, cols)", .{});
             return null;
         }
 
@@ -133,23 +133,23 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
         const rows = c.PyLong_AsLong(rows_obj);
         if (rows == -1 and c.PyErr_Occurred() != null) {
-            py_utils.setTypeError("integer", rows_obj);
+            python.setTypeError("integer", rows_obj);
             return null;
         }
 
         const cols = c.PyLong_AsLong(cols_obj);
         if (cols == -1 and c.PyErr_Occurred() != null) {
-            py_utils.setTypeError("integer", cols_obj);
+            python.setTypeError("integer", cols_obj);
             return null;
         }
 
-        const rows_pos = py_utils.validatePositive(usize, rows, "Rows") catch return null;
-        const cols_pos = py_utils.validatePositive(usize, cols, "Cols") catch return null;
+        const rows_pos = python.validatePositive(usize, rows, "Rows") catch return null;
+        const cols_pos = python.validatePositive(usize, cols, "Cols") catch return null;
 
         const result = image_reshape(self, rows_pos, cols_pos, method) catch return null;
         return @ptrCast(result);
     } else {
-        py_utils.setTypeError("number or tuple", shape_or_scale);
+        python.setTypeError("number or tuple", shape_or_scale);
         return null;
     }
 }
@@ -168,7 +168,7 @@ pub const image_letterbox_doc =
 ;
 
 pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Parse arguments
     const Params = struct {
@@ -176,18 +176,18 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         method: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const size = params.size;
     const method_value = params.method;
 
     if (size == null) {
-        py_utils.setTypeError("size argument", null);
+        python.setTypeError("size argument", null);
         return null;
     }
 
     const tag_letterbox = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_letterbox);
@@ -199,13 +199,13 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         if (square_size == -1 and c.PyErr_Occurred() != null) {
             return null;
         }
-        const size_pos = py_utils.validatePositive(usize, square_size, "Size") catch return null;
+        const size_pos = python.validatePositive(usize, square_size, "Size") catch return null;
         const result = image_letterbox_square(self, size_pos, method) catch return null;
         return @ptrCast(result);
     } else if (c.PyTuple_Check(size) != 0) {
         // It's a tuple for dimensions
         if (c.PyTuple_Size(size) != 2) {
-            py_utils.setValueError("size must be a 2-tuple of (rows, cols)", .{});
+            python.setValueError("size must be a 2-tuple of (rows, cols)", .{});
             return null;
         }
 
@@ -213,7 +213,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         const cols_obj = c.PyTuple_GetItem(size, 1);
 
         if (c.PyLong_Check(rows_obj) == 0 or c.PyLong_Check(cols_obj) == 0) {
-            py_utils.setTypeError("2-tuple", size);
+            python.setTypeError("2-tuple", size);
             return null;
         }
 
@@ -224,8 +224,8 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
             return null;
         }
 
-        const rows_pos = py_utils.validatePositive(usize, rows, "Rows") catch return null;
-        const cols_pos = py_utils.validatePositive(usize, cols, "Cols") catch return null;
+        const rows_pos = python.validatePositive(usize, rows, "Rows") catch return null;
+        const cols_pos = python.validatePositive(usize, cols, "Cols") catch return null;
 
         const result = image_letterbox_shape(self, rows_pos, cols_pos, method) catch return null;
         return @ptrCast(result);
@@ -261,8 +261,8 @@ pub const image_rotate_doc =
 ;
 
 pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -270,13 +270,13 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         method: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
     const method_value = params.method;
 
     const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_rotate);
@@ -284,7 +284,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return self.py_image.?.dispatch(.{ angle, method }, struct {
         fn apply(img: anytype, a: f64, m: Interpolation) ?*c.PyObject {
             const out = img.rotate(allocator, @floatCast(a), m) catch {
-                py_utils.setMemoryError("image rotate");
+                python.setMemoryError("image rotate");
                 return null;
             };
             return @ptrCast(moveImageToPython(out) orelse return null);
@@ -318,8 +318,8 @@ pub const image_warp_doc =
 ;
 
 pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -328,14 +328,14 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         method: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const transform_obj = params.transform;
     const shape_obj = params.shape;
     const method_value = params.method;
 
     const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_warp);
@@ -362,8 +362,8 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         const rows_val = c.PyLong_AsLong(rows_obj);
         const cols_val = c.PyLong_AsLong(cols_obj);
 
-        out_rows = py_utils.validatePositive(usize, rows_val, "rows") catch return null;
-        out_cols = py_utils.validatePositive(usize, cols_val, "cols") catch return null;
+        out_rows = python.validatePositive(usize, rows_val, "rows") catch return null;
+        out_cols = python.validatePositive(usize, cols_val, "cols") catch return null;
     }
 
     return self.py_image.?.dispatch(.{ transform_obj, method, out_rows, out_cols }, struct {
@@ -437,8 +437,8 @@ pub const image_flip_left_right_doc =
 
 pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
@@ -463,8 +463,8 @@ pub const image_flip_top_bottom_doc =
 
 pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
@@ -497,23 +497,23 @@ pub const image_crop_doc =
 ;
 
 pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse Rectangle argument
     const Params = struct {
         rect: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(f32, params.rect) catch return null;
+    const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
 
     return self.py_image.?.dispatch(.{rect}, struct {
         fn apply(img: anytype, r: zignal.Rectangle(f32)) ?*c.PyObject {
             const out = img.crop(allocator, r) catch {
-                py_utils.setMemoryError("cropped image");
+                python.setMemoryError("cropped image");
                 return null;
             };
             return @ptrCast(moveImageToPython(out) orelse return null);
@@ -555,8 +555,8 @@ pub const image_extract_doc =
 ;
 
 pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -566,7 +566,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         method: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const rect_obj = params.rect;
     const angle = params.angle;
@@ -574,10 +574,10 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const method_value = params.method;
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
+    const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
     const tag_extract = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_extract);
@@ -593,12 +593,12 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             if (square == -1 and c.PyErr_Occurred() != null) {
                 return null;
             }
-            const sq = py_utils.validatePositive(usize, square, "size") catch return null;
+            const sq = python.validatePositive(usize, square, "size") catch return null;
             out_rows = sq;
             out_cols = sq;
         } else if (c.PyTuple_Check(size_obj) != 0) {
             if (c.PyTuple_Size(size_obj) != 2) {
-                py_utils.setValueError("size must be a 2-tuple of (rows, cols)", .{});
+                python.setValueError("size must be a 2-tuple of (rows, cols)", .{});
                 return null;
             }
 
@@ -607,20 +607,20 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
             const rows = c.PyLong_AsLong(rows_obj);
             if (rows == -1 and c.PyErr_Occurred() != null) {
-                py_utils.setTypeError("integer", rows_obj);
+                python.setTypeError("integer", rows_obj);
                 return null;
             }
 
             const cols = c.PyLong_AsLong(cols_obj);
             if (cols == -1 and c.PyErr_Occurred() != null) {
-                py_utils.setTypeError("integer", cols_obj);
+                python.setTypeError("integer", cols_obj);
                 return null;
             }
 
-            out_rows = py_utils.validatePositive(usize, rows, "Rows") catch return null;
-            out_cols = py_utils.validatePositive(usize, cols, "Cols") catch return null;
+            out_rows = python.validatePositive(usize, rows, "Rows") catch return null;
+            out_cols = python.validatePositive(usize, cols, "Cols") catch return null;
         } else {
-            py_utils.setTypeError("int or tuple", size_obj);
+            python.setTypeError("int or tuple", size_obj);
             return null;
         }
     }
@@ -666,8 +666,8 @@ pub const image_insert_doc =
 ;
 
 pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     // Parse arguments
     const Params = struct {
@@ -678,7 +678,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         blend_mode: ?*c.PyObject = null,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const source_obj = params.source;
     const rect_obj = params.rect;
@@ -688,17 +688,17 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     // Check if source is an Image object
     if (c.PyObject_IsInstance(source_obj, @ptrCast(getImageType())) <= 0) {
-        py_utils.setTypeError("Image object", source_obj);
+        python.setTypeError("Image object", source_obj);
         return null;
     }
 
-    const source = py_utils.safeCast(ImageObject, source_obj);
+    const source = python.safeCast(ImageObject, source_obj);
 
     // Parse the Rectangle object
-    const rect = py_utils.parseRectangle(f32, rect_obj) catch return null;
+    const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
     const tag_insert = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        py_utils.setValueError("Invalid interpolation method", .{});
+        python.setValueError("Invalid interpolation method", .{});
         return null;
     };
     const method = tagToInterpolation(tag_insert);
@@ -707,7 +707,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     if (blend_obj) |obj| {
         if (obj != c.Py_None()) {
             blend_mode = enum_utils.pyToEnum(Blending, obj) catch {
-                py_utils.setValueError("Invalid blend_mode", .{});
+                python.setValueError("Invalid blend_mode", .{});
                 return null;
             };
         }
@@ -717,14 +717,14 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     switch (self.py_image.?.data) {
         .gray => |*dst| {
             const src_pimg = source.py_image orelse {
-                py_utils.setTypeError("initialized Image", source_obj);
+                python.setTypeError("initialized Image", source_obj);
                 return null;
             };
             switch (src_pimg.data) {
                 .gray => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgb => |img| {
                     var src_converted = img.convert(u8, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -732,7 +732,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 },
                 .rgba => |img| {
                     var src_converted = img.convert(u8, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -742,13 +742,13 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         },
         .rgb => |*dst| {
             const src_pimg = source.py_image orelse {
-                py_utils.setTypeError("initialized Image", source_obj);
+                python.setTypeError("initialized Image", source_obj);
                 return null;
             };
             switch (src_pimg.data) {
                 .gray => |img| {
                     var src_converted = img.convert(Rgb, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -757,7 +757,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 .rgb => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgba => |img| {
                     var src_converted = img.convert(Rgb, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -767,13 +767,13 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         },
         .rgba => |*dst| {
             const src_pimg = source.py_image orelse {
-                py_utils.setTypeError("initialized Image", source_obj);
+                python.setTypeError("initialized Image", source_obj);
                 return null;
             };
             switch (src_pimg.data) {
                 .gray => |img| {
                     var src_converted = img.convert(Rgba, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -781,7 +781,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 },
                 .rgb => |img| {
                     var src_converted = img.convert(Rgba, allocator) catch {
-                        py_utils.setMemoryError("source image conversion");
+                        python.setMemoryError("source image conversion");
                         return null;
                     };
                     defer src_converted.deinit(allocator);

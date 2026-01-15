@@ -17,11 +17,11 @@ const transforms = @import("image/transforms.zig");
 const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
 const makeRgbProxy = @import("pixel_proxy.zig").makeRgbProxy;
 const pixel_iterator = @import("pixel_iterator.zig");
-const py_utils = @import("py_utils.zig");
-const ctx = py_utils.ctx;
+const python = @import("python.zig");
+const ctx = python.ctx;
 const allocator = ctx.allocator;
-pub const registerType = py_utils.registerType;
-const c = py_utils.c;
+pub const registerType = python.register;
+const c = python.c;
 const PyImage = @import("PyImage.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
@@ -111,7 +111,7 @@ const image_init_doc =
 ;
 
 fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Check if the image is already initialized (might be from load or from_numpy)
     if (self.py_image != null) {
@@ -138,14 +138,14 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         dtype: ?*c.PyObject = null, // Optional with default (was keyword-only, now regular optional)
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch {
-        py_utils.setTypeError("(rows, cols, color=None, dtype=None) arguments", null);
+    python.parseArgs(Params, args, kwds, &params) catch {
+        python.setTypeError("(rows, cols, color=None, dtype=None) arguments", null);
         return -1;
     };
 
     // Validate dimensions - validateRange now properly handles negative values when converting to usize
-    const validated_rows = py_utils.validateRange(usize, params.rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
-    const validated_cols = py_utils.validateRange(usize, params.cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
+    const validated_rows = python.validateRange(usize, params.rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
+    const validated_cols = python.validateRange(usize, params.cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
 
     // Detect color input type
     var color_type = ColorInputType.none;
@@ -159,7 +159,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             } else if (tuple_size == 4) {
                 color_type = .rgba_tuple;
             } else {
-                py_utils.setValueError("Color tuple must have 3 or 4 elements", .{});
+                python.setValueError("Color tuple must have 3 or 4 elements", .{});
                 return -1;
             }
         } else if (c.PyObject_IsInstance(params.color, @ptrCast(&color_bindings.rgba)) == 1) {
@@ -188,7 +188,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.rgba))) {
                 target_format = .rgba;
             } else {
-                py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
+                python.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
                 return -1;
             }
         } else {
@@ -200,7 +200,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             } else if (c.PyObject_IsInstance(fmt_obj, @ptrCast(&color_bindings.rgba)) == 1) {
                 target_format = .rgba;
             } else {
-                py_utils.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
+                python.setTypeError("zignal.Gray, zignal.Rgb, or zignal.Rgba", fmt_obj);
                 return -1;
             }
         }
@@ -221,7 +221,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     switch (target_format) {
         .gray => {
             var gimg = Image(u8).init(allocator, validated_rows, validated_cols) catch {
-                py_utils.setMemoryError("image data");
+                python.setMemoryError("image data");
                 return -1;
             };
 
@@ -239,7 +239,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             const pimg = PyImage.createFrom(allocator, gimg, .owned) orelse {
                 gimg.deinit(allocator);
-                py_utils.setMemoryError("image");
+                python.setMemoryError("image");
                 return -1;
             };
             self.py_image = pimg;
@@ -249,7 +249,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         },
         .rgb => {
             var rimg = Image(Rgb).init(allocator, validated_rows, validated_cols) catch {
-                py_utils.setMemoryError("image data");
+                python.setMemoryError("image data");
                 return -1;
             };
 
@@ -267,7 +267,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             const pimg = PyImage.createFrom(allocator, rimg, .owned) orelse {
                 rimg.deinit(allocator);
-                py_utils.setMemoryError("image");
+                python.setMemoryError("image");
                 return -1;
             };
             self.py_image = pimg;
@@ -277,7 +277,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         },
         .rgba => {
             var image = Image(Rgba).init(allocator, validated_rows, validated_cols) catch {
-                py_utils.setMemoryError("image data");
+                python.setMemoryError("image data");
                 return -1;
             };
 
@@ -295,7 +295,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
             const pimg = PyImage.createFrom(allocator, image, .owned) orelse {
                 image.deinit(allocator);
-                py_utils.setMemoryError("image");
+                python.setMemoryError("image");
                 return -1;
             };
             self.py_image = pimg;
@@ -307,13 +307,13 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 }
 
 fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Free PyImage if present
     if (self.py_image) |pimg| {
         var tmp = pimg.*;
-        tmp.deinit(py_utils.ctx.allocator);
-        py_utils.ctx.allocator.destroy(pimg);
+        tmp.deinit(python.ctx.allocator);
+        python.ctx.allocator.destroy(pimg);
         self.py_image = null;
     }
 
@@ -327,11 +327,11 @@ fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
         c.Py_XDECREF(ref);
     }
 
-    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
+    python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     if (self.py_image) |pimg| {
         var buffer: [96]u8 = undefined;
@@ -348,49 +348,49 @@ fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 fn image_len(self_obj: ?*c.PyObject) callconv(.c) c.Py_ssize_t {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Check if image is initialized
     if (self.py_image) |pimg| {
         return @intCast(pimg.rows() * pimg.cols());
     }
-    py_utils.setValueError("Image not initialized", .{});
+    python.setValueError("Image not initialized", .{});
     return -1;
 }
 
 fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     const pimg_opt = self.py_image;
 
-    const coords = py_utils.expectTupleLen(2, key, "tuple of (row, col)") catch return null;
+    const coords = python.expectTupleLen(2, key, "tuple of (row, col)") catch return null;
 
     const row_obj = coords[0];
     const col_obj = coords[1];
 
     const row = c.PyLong_AsLong(row_obj);
     if (row == -1 and c.PyErr_Occurred() != null) {
-        py_utils.setTypeError("integer", row_obj);
+        python.setTypeError("integer", row_obj);
         return null;
     }
 
     const col = c.PyLong_AsLong(col_obj);
     if (col == -1 and c.PyErr_Occurred() != null) {
-        py_utils.setTypeError("integer", col_obj);
+        python.setTypeError("integer", col_obj);
         return null;
     }
 
     // Bounds checking
     if (pimg_opt) |pimg| {
         if (row < 0 or row >= pimg.rows()) {
-            py_utils.setIndexError("Row index out of bounds", .{});
+            python.setIndexError("Row index out of bounds", .{});
             return null;
         }
         if (col < 0 or col >= pimg.cols()) {
-            py_utils.setIndexError("Column index out of bounds", .{});
+            python.setIndexError("Column index out of bounds", .{});
             return null;
         }
     } else {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
 
@@ -408,7 +408,7 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
 }
 
 fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject) callconv(.c) c_int {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // If PyImage present, use it; else use RGBA pointer
     const pimg_opt = self.py_image;
@@ -416,7 +416,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     // Check if key is a slice object (for view[:] = image syntax)
     // Use direct type comparison instead of PySlice_Check to avoid Zig translation issues
     // TODO: replace with `if (c.PySlice_Check(key) != 0) {` after Python 3.10 support is dropped
-    if (py_utils.getPyType(key) == &c.PySlice_Type) {
+    if (python.typeOf(key) == &c.PySlice_Type) {
         // Handle slice assignment
         var start: c.Py_ssize_t = undefined;
         var stop: c.Py_ssize_t = undefined;
@@ -439,20 +439,20 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
 
         // Check if value is an Image object
         if (c.PyObject_IsInstance(value, @ptrCast(&ImageType)) != 1) {
-            py_utils.setTypeError("Image object", value);
+            python.setTypeError("Image object", value);
             return -1;
         }
 
-        const src_image = py_utils.safeCast(ImageObject, value);
+        const src_image = python.safeCast(ImageObject, value);
 
         // Ensure both images are initialized
         if (pimg_opt == null) {
-            py_utils.setValueError("Destination image not initialized", .{});
+            python.setValueError("Destination image not initialized", .{});
             return -1;
         }
 
         if (src_image.py_image == null) {
-            py_utils.setValueError("Source image not initialized", .{});
+            python.setValueError("Source image not initialized", .{});
             return -1;
         }
 
@@ -461,7 +461,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
 
         // Check dimensions match
         if (dst_pimg.rows() != src_pimg.rows() or dst_pimg.cols() != src_pimg.cols()) {
-            py_utils.setValueError(
+            python.setValueError(
                 "Image dimensions must match for slice assignment. Got ({d}, {d}) vs ({d}, {d})",
                 .{ dst_pimg.rows(), dst_pimg.cols(), src_pimg.rows(), src_pimg.cols() },
             );
@@ -474,35 +474,35 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
         return 0;
     }
 
-    const coords = py_utils.expectTupleLen(2, key, "tuple of (row, col)") catch return -1;
+    const coords = python.expectTupleLen(2, key, "tuple of (row, col)") catch return -1;
 
     const row_obj = coords[0];
     const col_obj = coords[1];
 
     const row = c.PyLong_AsLong(row_obj);
     if (row == -1 and c.PyErr_Occurred() != null) {
-        py_utils.setTypeError("integer", row_obj);
+        python.setTypeError("integer", row_obj);
         return -1;
     }
 
     const col = c.PyLong_AsLong(col_obj);
     if (col == -1 and c.PyErr_Occurred() != null) {
-        py_utils.setTypeError("integer", col_obj);
+        python.setTypeError("integer", col_obj);
         return -1;
     }
 
     // Bounds checking
     if (pimg_opt) |pimg| {
         if (row < 0 or row >= pimg.rows()) {
-            py_utils.setIndexError("Row index out of bounds", .{});
+            python.setIndexError("Row index out of bounds", .{});
             return -1;
         }
         if (col < 0 or col >= pimg.cols()) {
-            py_utils.setIndexError("Column index out of bounds", .{});
+            python.setIndexError("Column index out of bounds", .{});
             return -1;
         }
     } else {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return -1;
     }
 
@@ -523,10 +523,10 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
 }
 
 fn image_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     // Require PyImage variant for iteration
     if (self.py_image == null) {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
     return pixel_iterator.new(self_obj);
@@ -555,7 +555,7 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     // Variant-aware equality: compare size and per-pixel RGBA values
     if (self.py_image == null or other.py_image == null) {
         // If either is uninitialized, they are equal only for != case
-        return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
+        return @ptrCast(python.create(op != c.Py_EQ));
     }
     // Store in local variables after null check to avoid repeated unwrapping
     const self_img = self.py_image.?;
@@ -564,7 +564,7 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     const dims_other = .{ other_img.rows(), other_img.cols() };
 
     if (dims_self[0] != dims_other[0] or dims_self[1] != dims_other[1]) {
-        return @ptrCast(py_utils.getPyBool(op != c.Py_EQ));
+        return @ptrCast(python.create(op != c.Py_EQ));
     }
 
     const rows = dims_self[0];
@@ -585,9 +585,9 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     }
 
     if (op == c.Py_EQ) {
-        return @ptrCast(py_utils.getPyBool(equal));
+        return @ptrCast(python.create(equal));
     } else {
-        return @ptrCast(py_utils.getPyBool(!equal));
+        return @ptrCast(python.create(!equal));
     }
 }
 
@@ -664,14 +664,14 @@ const image_format_doc =
 ;
 
 fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     // Parse format_spec argument
     const Params = struct {
         format_spec: [*c]const u8,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     // Convert C string to Zig slice
     const spec_slice = std.mem.span(params.format_spec);
@@ -869,7 +869,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         }
         return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
     } else {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
 }
@@ -1432,7 +1432,7 @@ pub fn wrapPyImage(pimg: *PyImage, parent: ?*c.PyObject) ?*c.PyObject {
         // Note: we don't deinit pimg here as it might be borrowed
         return null;
     };
-    const new_self = py_utils.safeCast(ImageObject, new_obj);
+    const new_self = python.safeCast(ImageObject, new_obj);
     new_self.py_image = pimg;
     new_self.numpy_ref = null;
     if (parent) |p| {
@@ -1444,7 +1444,7 @@ pub fn wrapPyImage(pimg: *PyImage, parent: ?*c.PyObject) ?*c.PyObject {
     return new_obj;
 }
 
-pub var ImageType = py_utils.buildTypeObject(.{
+pub var ImageType = python.buildTypeObject(.{
     .name = "zignal.Image",
     .basicsize = @sizeOf(ImageObject),
     .doc = image_class_doc,
