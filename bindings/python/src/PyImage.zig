@@ -116,8 +116,6 @@ pub fn copyFrom(self: *PyImage, src: PyImage) void {
 /// followed by any arguments in ctx.
 pub fn dispatch(self: *PyImage, ctx: anytype, comptime func: anytype) @TypeOf(@call(.auto, func, .{@as(*Image(u8), undefined)} ++ ctx)) {
     return switch (self.data) {
-        .gray => |*img| @call(.auto, func, .{img} ++ ctx),
-        .rgb => |*img| @call(.auto, func, .{img} ++ ctx),
-        .rgba => |*img| @call(.auto, func, .{img} ++ ctx),
+        inline else => |*img| @call(.auto, func, .{img} ++ ctx),
     };
 }
