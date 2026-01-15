@@ -59,7 +59,7 @@ pub fn build(b: *Build) void {
     // Version info step
     const version_info_step = b.step("version", "Print the resolved version information");
     const version_info_run = b.addRunArtifact(cli);
-    version_info_run.addArg("--version");
+    version_info_run.addArg("version");
     version_info_step.dependOn(&version_info_run.step);
 
     // Check compilation
