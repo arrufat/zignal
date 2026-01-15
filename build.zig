@@ -14,17 +14,17 @@ pub fn build(b: *Build) void {
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
 
     // Export module for use as dependency
-    _ = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig") });
+    const zignal = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig"), .target = target });
+    const version = resolveVersion(b);
+    const version_options = b.addOptions();
+    version_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
+    zignal.addOptions("build_options", version_options);
 
     // Create a simple library for documentation generation
     const lib = b.addLibrary(.{
         .name = "zignal",
         .linkage = .static,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = zignal,
     });
 
     // Generate documentation
@@ -35,6 +35,32 @@ pub fn build(b: *Build) void {
         .install_subdir = "docs",
     });
     docs_step.dependOn(&docs_install.step);
+
+    const cli = b.addExecutable(.{
+        .name = "zignal",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = optimize != .Debug,
+            .imports = &.{
+                .{ .name = "zignal", .module = zignal },
+            },
+        }),
+    });
+    b.installArtifact(cli);
+    const run_step = b.step("run", "Run the CLI app");
+    const run_cmd = b.addRunArtifact(cli);
+    run_step.dependOn(&run_cmd.step);
+    run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+    // Version info step
+    const version_info_step = b.step("version", "Print the resolved version information");
+    const version_info_run = b.addRunArtifact(cli);
+    version_info_run.addArg("--version");
+    version_info_step.dependOn(&version_info_run.step);
 
     // Check compilation
     const check = b.step("check", "Check if zignal compiles");
@@ -94,27 +120,6 @@ pub fn build(b: *Build) void {
     b.default_step.dependOn(docs_step);
     b.default_step.dependOn(fmt_step);
 
-    // Version info step
-    const version_info_step = b.step("version", "Print the resolved version information");
-    const version_info_exe = b.addExecutable(.{
-        .name = "version",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/version.zig"),
-            .target = target,
-            .optimize = .Debug,
-        }),
-    });
-
-    // Add build options to version info executable
-    const version_options = b.addOptions();
-    // Resolve version once to avoid duplicate option declarations
-    const version = resolveVersion(b);
-    version_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
-    version_info_exe.root_module.addOptions("build_options", version_options);
-
-    const version_info_run = b.addRunArtifact(version_info_exe);
-    version_info_step.dependOn(&version_info_run.step);
-
     // Python bindings
     const py_bindings_step = b.step("python-bindings", "Build the python bindings");
     const py_module = b.addLibrary(.{
@@ -125,22 +130,13 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
+            .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
 
     // Link Python for shared library
     const target_info = target.result;
     linkPython(b, py_module, "python3", target.result);
-
-    // Add zignal module as dependency
-    py_module.root_module.addImport("zignal", b.addModule("zignal", .{
-        .root_source_file = b.path("src/root.zig"),
-    }));
-
-    // Add build options to python bindings
-    const py_options = b.addOptions();
-    py_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
-    py_module.root_module.addOptions("build_options", py_options);
 
     // Determine output file extension based on target platform
     const extension = switch (target_info.os.tag) {
@@ -157,21 +153,12 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
             .target = target,
             .optimize = .Debug,
+            .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
 
     // Link Python for executable
     linkPython(b, stub_generator, "python3-embed", target_info);
-
-    // Add zignal module as dependency for stub generator
-    stub_generator.root_module.addImport("zignal", b.addModule("zignal", .{
-        .root_source_file = b.path("src/root.zig"),
-    }));
-
-    // Add build options for version info
-    const stub_options = b.addOptions();
-    stub_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
-    stub_generator.root_module.addOptions("build_options", stub_options);
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
