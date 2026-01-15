@@ -6,9 +6,9 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
 
-const py_utils = @import("../py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-const c = py_utils.c;
+const python = @import("../python.zig");
+const allocator = python.ctx.allocator;
+const c = python.c;
 
 const PyImage = @import("../PyImage.zig");
 
@@ -27,13 +27,13 @@ fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
     const channels = comptime if (T == u8) 1 else if (T == Rgb) 3 else if (T == Rgba) 4 else @compileError("unsupported type");
 
     const np_module = c.PyImport_ImportModule("numpy") orelse {
-        py_utils.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
+        python.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
         return null;
     };
     defer c.Py_DECREF(np_module);
 
     const extra_raw = c.PyMem_Malloc(@sizeOf(BufferExtra)) orelse {
-        py_utils.setMemoryError("buffer metadata");
+        python.setMemoryError("buffer metadata");
         return null;
     };
     const extra: *BufferExtra = @ptrCast(@alignCast(extra_raw));
@@ -113,8 +113,8 @@ pub const image_to_numpy_doc =
 
 pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args; // No arguments
-    const self = py_utils.safeCast(ImageObject, self_obj);
-    py_utils.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
     return self.py_image.?.dispatch(.{self_obj}, struct {
         fn apply(img: anytype, s_obj: ?*c.PyObject) ?*c.PyObject {
@@ -139,7 +139,7 @@ fn imageFromNumpyHelper(
 ) ?*c.PyObject {
     const self = self_opt orelse {
         // This should be unreachable if called correctly
-        py_utils.setRuntimeError("Internal error: ImageObject is null", .{});
+        python.setRuntimeError("Internal error: ImageObject is null", .{});
         return null;
     };
 
@@ -160,7 +160,7 @@ fn imageFromNumpyHelper(
     const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
         c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
-        py_utils.setMemoryError("image");
+        python.setMemoryError("image");
         return null;
     };
     self.py_image = pimg;
@@ -213,12 +213,12 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         array: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const array_obj = params.array;
 
     if (array_obj == null or array_obj == c.Py_None()) {
-        py_utils.setTypeError("non-None array", array_obj);
+        python.setTypeError("non-None array", array_obj);
         return null;
     }
 
@@ -232,12 +232,12 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     defer c.PyBuffer_Release(&buffer);
 
     if (buffer.format != null and (buffer.format[0] != 'B' or buffer.format[1] != 0)) {
-        py_utils.setTypeError("uint8 array", array_obj);
+        python.setTypeError("uint8 array", array_obj);
         return null;
     }
 
     if (buffer.ndim != 3) {
-        py_utils.setValueError("Array must have shape (rows, cols, 1|3|4)", .{});
+        python.setValueError("Array must have shape (rows, cols, 1|3|4)", .{});
         return null;
     }
 
@@ -247,7 +247,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const channels: usize = @intCast(shape[2]);
 
     if (channels != 1 and channels != 3 and channels != 4) {
-        py_utils.setValueError("Array must have 1, 3, or 4 channels", .{});
+        python.setValueError("Array must have 1, 3, or 4 channels", .{});
         return null;
     }
 
@@ -256,14 +256,14 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
 
     const expected_pixel_stride = item_size * @as(c.Py_ssize_t, @intCast(channels));
     if (strides[2] != item_size or strides[1] != expected_pixel_stride) {
-        py_utils.setValueError("Array pixels must be contiguous. Use numpy.ascontiguousarray() first.", .{});
+        python.setValueError("Array pixels must be contiguous. Use numpy.ascontiguousarray() first.", .{});
         return null;
     }
 
     const row_stride_bytes = strides[0];
     const pixel_size: c.Py_ssize_t = @intCast(channels);
     if (@rem(row_stride_bytes, pixel_size) != 0) {
-        py_utils.setValueError("Array row stride must be a multiple of pixel size.", .{});
+        python.setValueError("Array row stride must be a multiple of pixel size.", .{});
         return null;
     }
     const row_stride_pixels: usize = @intCast(@divExact(row_stride_bytes, pixel_size));

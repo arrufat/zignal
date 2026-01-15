@@ -2,7 +2,7 @@
 //! This file defines structures that describe Python bindings in a way
 //! that can be introspected at compile time for stub generation
 
-const c = @import("py_utils.zig").c;
+const c = @import("python.zig").c;
 
 // Python method flags constants (matching Python C API values)
 pub const METH_CLASS = 0x0010;

@@ -3,9 +3,9 @@ const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
 const Rgb = zignal.Rgb(u8);
 
 const image = @import("image.zig");
-const py_utils = @import("py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-const c = py_utils.c;
+const python = @import("python.zig");
+const allocator = python.ctx.allocator;
+const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 // FeatureDistributionMatching Python object
@@ -16,30 +16,30 @@ pub const FeatureDistributionMatchingObject = extern struct {
 };
 
 // Using genericNew helper for standard object creation
-const fdm_new = py_utils.genericNew(FeatureDistributionMatchingObject);
+const fdm_new = python.genericNew(FeatureDistributionMatchingObject);
 
 fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = args;
     _ = kwds;
-    const self = py_utils.safeCast(FeatureDistributionMatchingObject, self_obj);
+    const self = python.safeCast(FeatureDistributionMatchingObject, self_obj);
 
     // Create and initialize FDM using helper
 
     // Create and initialize FDM using helper
-    self.fdm_ptr = py_utils.createHeapObject(FeatureDistributionMatching(Rgb), .{allocator}) catch return -1;
+    self.fdm_ptr = python.createHeapObject(FeatureDistributionMatching(Rgb), .{allocator}) catch return -1;
     return 0;
 }
 
 // Helper function for custom cleanup
 fn fdmDeinit(self: *FeatureDistributionMatchingObject) void {
-    py_utils.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm_ptr);
+    python.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm_ptr);
 }
 
 // Using genericDealloc helper
-const fdm_dealloc = py_utils.genericDealloc(FeatureDistributionMatchingObject, fdmDeinit);
+const fdm_dealloc = python.genericDealloc(FeatureDistributionMatchingObject, fdmDeinit);
 
 fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(FeatureDistributionMatchingObject, self_obj);
+    const self = python.safeCast(FeatureDistributionMatchingObject, self_obj);
 
     if (self.fdm_ptr == null) {
         return c.PyUnicode_FromString("FeatureDistributionMatching(uninitialized)");
@@ -68,13 +68,13 @@ const set_target_doc =
 ;
 
 fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = py_utils.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         image: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const target_obj = params.image;
 
@@ -87,24 +87,24 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         c.PyErr_SetString(c.PyExc_TypeError, "Type mismatch");
         return null;
     }
-    const target_img_obj = py_utils.safeCast(image.ImageObject, target_obj);
+    const target_img_obj = python.safeCast(image.ImageObject, target_obj);
 
     // Accept only RGB format
     if (target_img_obj.py_image == null) {
-        py_utils.setTypeError("Image object", target_obj);
+        python.setTypeError("Image object", target_obj);
         return null;
     }
     const target_rgb: zignal.Image(Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            py_utils.setTypeError("RGB image", target_obj);
+            python.setTypeError("RGB image", target_obj);
             return null;
         },
     };
     fdm_ptr.setTarget(target_rgb) catch |err| {
         switch (err) {
-            error.OutOfMemory => py_utils.setMemoryError("target image"),
-            else => py_utils.setRuntimeError("Failed to set target image: {s}", .{@errorName(err)}),
+            error.OutOfMemory => python.setMemoryError("target image"),
+            else => python.setRuntimeError("Failed to set target image: {s}", .{@errorName(err)}),
         }
         return null;
     };
@@ -133,13 +133,13 @@ const set_source_doc =
 ;
 
 fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = py_utils.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         image: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const source_obj = params.image;
 
@@ -152,22 +152,22 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         c.PyErr_SetString(c.PyExc_TypeError, "Type mismatch");
         return null;
     }
-    const source_img_obj = py_utils.safeCast(image.ImageObject, source_obj);
+    const source_img_obj = python.safeCast(image.ImageObject, source_obj);
 
     if (source_img_obj.py_image == null) {
-        py_utils.setTypeError("Image object", source_obj);
+        python.setTypeError("Image object", source_obj);
         return null;
     }
     const src_rgb: zignal.Image(Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            py_utils.setTypeError("RGB image", source_obj);
+            python.setTypeError("RGB image", source_obj);
             return null;
         },
     };
     fdm_ptr.setSource(src_rgb) catch |err| {
         switch (err) {
-            error.OutOfMemory => py_utils.setMemoryError("source image"),
+            error.OutOfMemory => python.setMemoryError("source image"),
         }
         return null;
     };
@@ -200,14 +200,14 @@ const match_doc =
 ;
 
 fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = py_utils.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         source: ?*c.PyObject,
         target: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
     const source_obj = params.source;
     const target_obj = params.target;
 
@@ -234,14 +234,14 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     const src_rgb2: zignal.Image(Rgb) = switch (source_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            py_utils.setTypeError("RGB image", source_obj);
+            python.setTypeError("RGB image", source_obj);
             return null;
         },
     };
     const dst_rgb2: zignal.Image(Rgb) = switch (target_img_obj.py_image.?.data) {
         .rgb => |imgv| imgv,
         else => {
-            py_utils.setTypeError("RGB image", target_obj);
+            python.setTypeError("RGB image", target_obj);
             return null;
         },
     };
@@ -291,7 +291,7 @@ const update_doc =
 
 fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const fdm_ptr = py_utils.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
 
     // Apply the transformation
     fdm_ptr.update() catch |err| {
@@ -397,7 +397,7 @@ pub const fdm_special_methods_metadata = [_]stub_metadata.MethodInfo{
 };
 
 // Using buildTypeObject helper for cleaner initialization
-pub var FeatureDistributionMatchingType = py_utils.buildTypeObject(.{
+pub var FeatureDistributionMatchingType = python.buildTypeObject(.{
     .name = "zignal.FeatureDistributionMatching",
     .basicsize = @sizeOf(FeatureDistributionMatchingObject),
     .doc = fdm_class_doc,

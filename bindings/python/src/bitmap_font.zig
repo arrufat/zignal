@@ -3,11 +3,11 @@ const std = @import("std");
 const zignal = @import("zignal");
 const BitmapFont = zignal.BitmapFont;
 
-const py_utils = @import("py_utils.zig");
-const ctx = py_utils.ctx;
+const python = @import("python.zig");
+const ctx = python.ctx;
 const allocator = ctx.allocator;
-pub const registerType = py_utils.registerType;
-const c = py_utils.c;
+pub const registerType = python.register;
+const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 pub const BitmapFontObject = extern struct {
@@ -19,7 +19,7 @@ pub const BitmapFontObject = extern struct {
 var cached_font8x8: ?*c.PyObject = null;
 
 // Using genericNew helper for standard object creation
-const bitmap_font_new = py_utils.genericNew(BitmapFontObject);
+const bitmap_font_new = python.genericNew(BitmapFontObject);
 
 // Helper function for custom cleanup
 fn bitmapFontDeinit(self: *BitmapFontObject) void {
@@ -30,10 +30,10 @@ fn bitmapFontDeinit(self: *BitmapFontObject) void {
 }
 
 // Using genericDealloc helper
-const bitmap_font_dealloc = py_utils.genericDealloc(BitmapFontObject, bitmapFontDeinit);
+const bitmap_font_dealloc = python.genericDealloc(BitmapFontObject, bitmapFontDeinit);
 
 fn bitmap_font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(BitmapFontObject, self_obj);
+    const self = python.safeCast(BitmapFontObject, self_obj);
 
     if (self.font) |font| {
         // Create a formatted string with the font name
@@ -74,7 +74,7 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         path: [*c]const u8,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const file_path = params.path;
 
@@ -83,12 +83,12 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     // Create new BitmapFont instance
     const instance = c.PyObject_CallObject(@ptrCast(type_obj), null) orelse return null;
-    const self = py_utils.safeCast(BitmapFontObject, instance);
+    const self = python.safeCast(BitmapFontObject, instance);
 
     // Allocate font on heap
     const font_ptr = allocator.create(BitmapFont) catch {
         c.Py_DECREF(instance);
-        py_utils.setMemoryError("font");
+        python.setMemoryError("font");
         return null;
     };
     // Important: set the font pointer initially to prevent issues
@@ -102,7 +102,7 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         c.Py_DECREF(instance);
 
         // Set appropriate Python exception based on error
-        py_utils.setErrorWithPath(err, path_slice);
+        python.setErrorWithPath(err, path_slice);
         return null;
     };
 
@@ -127,7 +127,7 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     // Return a cached singleton instance; create on first call
     if (cached_font8x8 == null) {
         const instance = c.PyObject_CallObject(@ptrCast(type_obj), null) orelse return null;
-        const self = py_utils.safeCast(BitmapFontObject, instance);
+        const self = python.safeCast(BitmapFontObject, instance);
 
         // Allocate font on heap and create with all characters
         const font_ptr = allocator.create(BitmapFont) catch {
@@ -189,21 +189,21 @@ var bitmap_font_methods = stub_metadata.toPyMethodDefArray(&bitmap_font_methods_
 var bitmap_font_getsetters = [_]c.PyGetSetDef{
     .{
         .name = "name",
-        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontNameToPyObject))),
+        .get = @ptrCast(@alignCast(python.getterOptionalPtr(BitmapFontObject, "font", fontNameToPyObject))),
         .set = null,
         .doc = "Font name",
         .closure = null,
     },
     .{
         .name = "width",
-        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontWidthToPyObject))),
+        .get = @ptrCast(@alignCast(python.getterOptionalPtr(BitmapFontObject, "font", fontWidthToPyObject))),
         .set = null,
         .doc = "Character width in pixels",
         .closure = null,
     },
     .{
         .name = "height",
-        .get = @ptrCast(@alignCast(py_utils.getterOptionalPtr(BitmapFontObject, "font", fontHeightToPyObject))),
+        .get = @ptrCast(@alignCast(python.getterOptionalPtr(BitmapFontObject, "font", fontHeightToPyObject))),
         .set = null,
         .doc = "Character height in pixels",
         .closure = null,
@@ -216,7 +216,7 @@ const bitmap_font_class_doc =
     "gzip-compressed files (.bdf.gz, .pcf.gz).";
 
 // Using buildTypeObject helper for cleaner initialization
-pub var BitmapFontType = py_utils.buildTypeObject(.{
+pub var BitmapFontType = python.buildTypeObject(.{
     .name = "zignal.BitmapFont",
     .basicsize = @sizeOf(BitmapFontObject),
     .doc = bitmap_font_class_doc,

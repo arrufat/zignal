@@ -3,10 +3,10 @@ const std = @import("std");
 const zignal = @import("zignal");
 const RunningStats = zignal.RunningStats;
 
-const py_utils = @import("py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-pub const registerType = py_utils.registerType;
-const c = py_utils.c;
+const python = @import("python.zig");
+const allocator = python.ctx.allocator;
+pub const registerType = python.register;
+const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 const RunningStatsF64 = RunningStats(f64);
@@ -16,15 +16,15 @@ pub const RunningStatsObject = extern struct {
     stats_ptr: ?*RunningStatsF64,
 };
 
-const running_stats_new = py_utils.genericNew(RunningStatsObject);
+const running_stats_new = python.genericNew(RunningStatsObject);
 
 fn running_stats_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = args;
     _ = kwds;
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
+    const self = python.safeCast(RunningStatsObject, self_obj);
 
     const stats_ptr = allocator.create(RunningStatsF64) catch {
-        py_utils.setMemoryError("RunningStats");
+        python.setMemoryError("RunningStats");
         return -1;
     };
     stats_ptr.* = RunningStatsF64.init();
@@ -40,10 +40,10 @@ fn runningStatsDeinit(self: *RunningStatsObject) void {
     self.stats_ptr = null;
 }
 
-const running_stats_dealloc = py_utils.genericDealloc(RunningStatsObject, runningStatsDeinit);
+const running_stats_dealloc = python.genericDealloc(RunningStatsObject, runningStatsDeinit);
 
 fn running_stats_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(RunningStatsObject, self_obj);
+    const self = python.safeCast(RunningStatsObject, self_obj);
 
     if (self.stats_ptr) |ptr| {
         const stats = ptr.*;
@@ -73,16 +73,16 @@ const running_stats_add_doc =
 ;
 
 fn running_stats_add(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         value: f64,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     stats_ptr.add(@floatCast(params.value));
-    return py_utils.getPyNone();
+    return python.none();
 }
 
 const running_stats_extend_doc =
@@ -99,17 +99,17 @@ const running_stats_extend_doc =
 ;
 
 fn running_stats_extend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         values: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const values_obj = params.values;
     if (values_obj == null) {
-        py_utils.setTypeError("Iterable of floats", null);
+        python.setTypeError("Iterable of floats", null);
         return null;
     }
 
@@ -139,7 +139,7 @@ fn running_stats_extend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         stats_ptr.add(@floatCast(value));
     }
 
-    return py_utils.getPyNone();
+    return python.none();
 }
 
 const running_stats_clear_doc =
@@ -156,9 +156,9 @@ const running_stats_clear_doc =
 
 fn running_stats_clear(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     stats_ptr.clear();
-    return py_utils.getPyNone();
+    return python.none();
 }
 
 const running_stats_scale_doc =
@@ -175,13 +175,13 @@ const running_stats_scale_doc =
 ;
 
 fn running_stats_scale(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         value: f64,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const scaled = stats_ptr.scale(params.value);
     return c.PyFloat_FromDouble(scaled);
@@ -200,30 +200,30 @@ const running_stats_combine_doc =
 ;
 
 fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
 
     const Params = struct {
         other: ?*c.PyObject,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const other_obj = params.other orelse {
-        py_utils.setTypeError("RunningStats instance", null);
+        python.setTypeError("RunningStats instance", null);
         return null;
     };
 
-    if (py_utils.getPyType(other_obj) != @as(*c.PyTypeObject, @ptrCast(&RunningStatsType))) {
-        py_utils.setTypeError("RunningStats instance", other_obj);
+    if (python.typeOf(other_obj) != @as(*c.PyTypeObject, @ptrCast(&RunningStatsType))) {
+        python.setTypeError("RunningStats instance", other_obj);
         return null;
     }
 
-    const other_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", other_obj, "RunningStats") orelse return null;
+    const other_ptr = python.unwrap(RunningStatsObject, "stats_ptr", other_obj, "RunningStats") orelse return null;
 
     const combined = stats_ptr.combine(other_ptr.*);
 
     const result = c.PyObject_CallObject(@ptrCast(&RunningStatsType), null) orelse return null;
-    const result_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", result, "RunningStats") orelse {
+    const result_ptr = python.unwrap(RunningStatsObject, "stats_ptr", result, "RunningStats") orelse {
         c.Py_DECREF(result);
         return null;
     };
@@ -278,55 +278,55 @@ var running_stats_methods = stub_metadata.toPyMethodDefArray(&running_stats_meth
 
 fn running_stats_count_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyLong_FromUnsignedLongLong(@intCast(stats_ptr.currentN()));
 }
 
 fn running_stats_sum_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.getSum());
 }
 
 fn running_stats_mean_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.mean());
 }
 
 fn running_stats_variance_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.variance());
 }
 
 fn running_stats_stddev_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.stdDev());
 }
 
 fn running_stats_skewness_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.skewness());
 }
 
 fn running_stats_kurtosis_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.exKurtosis());
 }
 
 fn running_stats_min_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.min());
 }
 
 fn running_stats_max_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const stats_ptr = py_utils.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
+    const stats_ptr = python.unwrap(RunningStatsObject, "stats_ptr", self_obj, "RunningStats") orelse return null;
     return c.PyFloat_FromDouble(stats_ptr.max());
 }
 
@@ -414,7 +414,7 @@ pub const running_stats_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-pub var RunningStatsType = py_utils.buildTypeObject(.{
+pub var RunningStatsType = python.buildTypeObject(.{
     .name = "zignal.RunningStats",
     .basicsize = @sizeOf(RunningStatsObject),
     .doc = running_stats_class_doc,

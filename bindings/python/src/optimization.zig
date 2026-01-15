@@ -6,9 +6,9 @@ const optimization = zignal.optimization;
 const enum_utils = @import("enum_utils.zig");
 const matrix_module = @import("matrix.zig");
 const MatrixObject = matrix_module.MatrixObject;
-const py_utils = @import("py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-const c = py_utils.c;
+const python = @import("python.zig");
+const allocator = python.ctx.allocator;
+const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
 // ============================================================================
@@ -43,14 +43,14 @@ pub const AssignmentObject = extern struct {
 };
 
 // Using genericNew helper for standard object creation
-const assignment_new = py_utils.genericNew(AssignmentObject);
+const assignment_new = python.genericNew(AssignmentObject);
 
 fn assignment_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     _ = self_obj;
     _ = args;
     _ = kwds;
     // Assignment objects are created internally, not by users
-    py_utils.setTypeError("Assignment objects (internal only)", null);
+    python.setTypeError("Assignment objects (internal only)", null);
     return -1;
 }
 
@@ -63,10 +63,10 @@ fn assignmentDeinit(self: *AssignmentObject) void {
 }
 
 // Using genericDealloc helper
-const assignment_dealloc = py_utils.genericDealloc(AssignmentObject, assignmentDeinit);
+const assignment_dealloc = python.genericDealloc(AssignmentObject, assignmentDeinit);
 
 fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(AssignmentObject, self_obj);
+    const self = python.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         var buffer: [256]u8 = undefined;
@@ -82,7 +82,7 @@ fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 // Property getters
 fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(AssignmentObject, self_obj);
+    const self = python.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         // Create a Python list
@@ -93,7 +93,7 @@ fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
             const item = if (assignment) |col|
                 c.PyLong_FromLong(@intCast(col))
             else
-                py_utils.getPyNone();
+                python.none();
 
             if (item == null) {
                 c.Py_DECREF(list);
@@ -106,19 +106,19 @@ fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
         return list;
     }
 
-    py_utils.setValueError("Assignment not initialized", .{});
+    python.setValueError("Assignment not initialized", .{});
     return null;
 }
 
 fn assignment_get_total_cost(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
-    const self = py_utils.safeCast(AssignmentObject, self_obj);
+    const self = python.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
         return c.PyFloat_FromDouble(ptr.total_cost);
     }
 
-    py_utils.setValueError("Assignment not initialized", .{});
+    python.setValueError("Assignment not initialized", .{});
     return null;
 }
 
@@ -141,7 +141,7 @@ var assignment_getset = [_]c.PyGetSetDef{
     .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-pub var AssignmentType = py_utils.buildTypeObject(.{
+pub var AssignmentType = python.buildTypeObject(.{
     .name = "zignal.Assignment",
     .basicsize = @sizeOf(AssignmentObject),
     .doc = assignment_doc,
@@ -192,7 +192,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         policy: ?*c.PyObject = null, // Optional with default
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
     const matrix_obj = params.cost_matrix;
     const policy_obj = params.policy;
 
@@ -201,13 +201,13 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     const matrix_type_obj: *c.PyObject = @ptrCast(&matrix_mod.MatrixType);
     if (c.PyObject_IsInstance(matrix_obj, matrix_type_obj) != 1) {
-        py_utils.setTypeError("Matrix object", matrix_obj);
+        python.setTypeError("Matrix object", matrix_obj);
         return null;
     }
 
-    const matrix = py_utils.safeCast(MatrixObject, matrix_obj);
+    const matrix = python.safeCast(MatrixObject, matrix_obj);
     if (matrix.matrix_ptr == null) {
-        py_utils.setValueError("Matrix is not initialized", .{});
+        python.setValueError("Matrix is not initialized", .{});
         return null;
     }
 
@@ -224,7 +224,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         matrix.matrix_ptr.?.*,
         policy,
     ) catch |err| {
-        py_utils.setZigError(err);
+        python.setZigError(err);
         return null;
     };
 
@@ -236,14 +236,14 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         return null;
     }
 
-    const assignment = py_utils.safeCast(AssignmentObject, assignment_obj);
+    const assignment = python.safeCast(AssignmentObject, assignment_obj);
 
     // Allocate and store the result
     assignment.assignment_ptr = allocator.create(optimization.Assignment) catch {
         c.Py_DECREF(assignment_obj);
         var temp_result = result;
         temp_result.deinit();
-        py_utils.setMemoryError("Assignment");
+        python.setMemoryError("Assignment");
         return null;
     };
     assignment.assignment_ptr.?.* = result;

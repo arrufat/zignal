@@ -1,6 +1,6 @@
 const ImageObject = @import("image.zig").ImageObject;
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
+const python = @import("python.zig");
+const c = python.c;
 
 pub const PixelIteratorObject = extern struct {
     ob_base: c.PyObject,
@@ -32,7 +32,7 @@ const pixel_iterator_doc =
 fn pixel_iterator_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self: *PixelIteratorObject = @ptrCast(self_obj.?);
     if (self.image_ref) |ref| c.Py_XDECREF(ref);
-    py_utils.getPyType(self_obj).*.tp_free.?(self_obj);
+    python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn pixel_iterator_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -98,13 +98,13 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (pixel_obj == null) return null;
 
     // Build tuple (row, col, pixel) using shared helper to manage refcounts
-    const result = py_utils.buildPixelTuple(row, col, pixel_obj) orelse return null;
+    const result = python.buildPixelTuple(row, col, pixel_obj) orelse return null;
 
     self.index += 1;
     return result;
 }
 
-pub var PixelIteratorType = py_utils.buildTypeObject(.{
+pub var PixelIteratorType = python.buildTypeObject(.{
     .name = "zignal.PixelIterator",
     .basicsize = @sizeOf(PixelIteratorObject),
     .doc = pixel_iterator_doc,

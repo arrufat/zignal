@@ -5,9 +5,9 @@ const zignal = @import("zignal");
 const Image = zignal.Image;
 const BinaryKernel = zignal.BinaryKernel;
 
-const py_utils = @import("../py_utils.zig");
-const allocator = py_utils.ctx.allocator;
-const c = py_utils.c;
+const python = @import("../python.zig");
+const allocator = python.ctx.allocator;
+const c = python.c;
 
 const ImageObject = @import("../image.zig").ImageObject;
 const PyImage = @import("../PyImage.zig");
@@ -26,7 +26,7 @@ fn prepareGrayscale(pimg: *PyImage) ?GrayscaleHandle {
         },
         .rgb => |*img| {
             const converted = img.convert(u8, allocator) catch {
-                py_utils.setMemoryError("image conversion");
+                python.setMemoryError("image conversion");
                 return null;
             };
             handle.owned = converted;
@@ -34,7 +34,7 @@ fn prepareGrayscale(pimg: *PyImage) ?GrayscaleHandle {
         },
         .rgba => |*img| {
             const converted = img.convert(u8, allocator) catch {
-                py_utils.setMemoryError("image conversion");
+                python.setMemoryError("image conversion");
                 return null;
             };
             handle.owned = converted;
@@ -49,12 +49,12 @@ fn squareKernel(kernel_size: usize) ?struct {
     kernel: BinaryKernel,
 } {
     if (kernel_size == 0 or kernel_size % 2 == 0) {
-        py_utils.setValueError("kernel_size must be a positive odd integer", .{});
+        python.setValueError("kernel_size must be a positive odd integer", .{});
         return null;
     }
     const total = kernel_size * kernel_size;
     const data = allocator.alloc(u8, total) catch {
-        py_utils.setMemoryError("kernel allocation");
+        python.setMemoryError("kernel allocation");
         return null;
     };
     @memset(data, 1);
@@ -79,10 +79,10 @@ pub const image_threshold_otsu_doc =
 
 pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     if (self.py_image == null) {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
 
@@ -94,11 +94,11 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     defer if (handle.owned) |*owned| owned.deinit(allocator);
 
     const out = Image(u8).initLike(allocator, handle.view.*) catch {
-        py_utils.setMemoryError("threshold operation");
+        python.setMemoryError("threshold operation");
         return null;
     };
     const threshold = handle.view.thresholdOtsu(allocator, out) catch {
-        py_utils.setMemoryError("threshold operation");
+        python.setMemoryError("threshold operation");
         return null;
     };
 
@@ -106,7 +106,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     const tuple = c.PyTuple_New(2) orelse {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
         c.Py_DECREF(@as(?*c.PyObject, @ptrCast(binary_obj)));
-        py_utils.setMemoryError("return tuple");
+        python.setMemoryError("return tuple");
         return null;
     };
 
@@ -135,10 +135,10 @@ pub const image_threshold_adaptive_mean_doc =
 ;
 
 pub fn image_threshold_adaptive_mean(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
 
     if (self.py_image == null) {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
 
@@ -147,17 +147,17 @@ pub fn image_threshold_adaptive_mean(self_obj: ?*c.PyObject, args: ?*c.PyObject,
         c: f64 = 5.0,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const radius_long = params.radius;
     const c_value = params.c;
 
     if (!std.math.isFinite(c_value)) {
-        py_utils.setValueError("c must be finite", .{});
+        python.setValueError("c must be finite", .{});
         return null;
     }
 
-    const radius = py_utils.validatePositive(usize, radius_long, "radius") catch return null;
+    const radius = python.validatePositive(usize, radius_long, "radius") catch return null;
 
     const handle_opt = prepareGrayscale(self.py_image.?) orelse return null;
     var handle = handle_opt;
@@ -167,13 +167,13 @@ pub fn image_threshold_adaptive_mean(self_obj: ?*c.PyObject, args: ?*c.PyObject,
     defer if (handle.owned) |*owned| owned.deinit(allocator);
 
     const out = Image(u8).initLike(allocator, handle.view.*) catch {
-        py_utils.setMemoryError("adaptive threshold operation");
+        python.setMemoryError("adaptive threshold operation");
         return null;
     };
     handle.view.thresholdAdaptiveMean(allocator, radius, @floatCast(c_value), out) catch |err| {
         switch (err) {
-            error.InvalidRadius => py_utils.setValueError("radius must be > 0", .{}),
-            else => py_utils.setMemoryError("threshold operation"),
+            error.InvalidRadius => python.setValueError("radius must be > 0", .{}),
+            else => python.setMemoryError("threshold operation"),
         }
         return null;
     };
@@ -188,12 +188,12 @@ fn morphologyCommon(
     op: enum { dilate, erode, open, close },
 ) ?*c.PyObject {
     if (self.py_image == null) {
-        py_utils.setValueError("Image not initialized", .{});
+        python.setValueError("Image not initialized", .{});
         return null;
     }
 
-    const kernel_size = py_utils.validatePositive(usize, kernel_size_long, "kernel_size") catch return null;
-    const iterations = py_utils.validateNonNegative(usize, iterations_long, "iterations") catch return null;
+    const kernel_size = python.validatePositive(usize, kernel_size_long, "kernel_size") catch return null;
+    const iterations = python.validateNonNegative(usize, iterations_long, "iterations") catch return null;
 
     const kernel_bundle = squareKernel(kernel_size) orelse return null;
     defer allocator.free(kernel_bundle.storage);
@@ -208,7 +208,7 @@ fn morphologyCommon(
     const kernel = kernel_bundle.kernel;
 
     const out = Image(u8).initLike(allocator, handle.view.*) catch {
-        py_utils.setMemoryError("morphological operation");
+        python.setMemoryError("morphological operation");
         return null;
     };
     const result = switch (op) {
@@ -219,7 +219,7 @@ fn morphologyCommon(
     };
 
     result catch {
-        py_utils.setMemoryError("morphological operation");
+        python.setMemoryError("morphological operation");
         return null;
     };
 
@@ -238,13 +238,13 @@ pub const image_dilate_binary_doc =
 ;
 
 pub fn image_dilate_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     const Params = struct {
         kernel_size: c_long = 3,
         iterations: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     return morphologyCommon(self, params.kernel_size, params.iterations, .dilate);
 }
@@ -256,13 +256,13 @@ pub const image_erode_binary_doc =
 ;
 
 pub fn image_erode_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     const Params = struct {
         kernel_size: c_long = 3,
         iterations: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     return morphologyCommon(self, params.kernel_size, params.iterations, .erode);
 }
@@ -274,13 +274,13 @@ pub const image_open_binary_doc =
 ;
 
 pub fn image_open_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     const Params = struct {
         kernel_size: c_long = 3,
         iterations: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     return morphologyCommon(self, params.kernel_size, params.iterations, .open);
 }
@@ -292,13 +292,13 @@ pub const image_close_binary_doc =
 ;
 
 pub fn image_close_binary(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const self = py_utils.safeCast(ImageObject, self_obj);
+    const self = python.safeCast(ImageObject, self_obj);
     const Params = struct {
         kernel_size: c_long = 3,
         iterations: c_long = 1,
     };
     var params: Params = undefined;
-    py_utils.parseArgs(Params, args, kwds, &params) catch return null;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     return morphologyCommon(self, params.kernel_size, params.iterations, .close);
 }

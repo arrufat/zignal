@@ -18,8 +18,8 @@ const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
 const running_stats = @import("running_stats.zig");
 const perlin = @import("perlin.zig");
-const py_utils = @import("py_utils.zig");
-const c = py_utils.c;
+const python = @import("python.zig");
+const c = python.c;
 const rectangle = @import("rectangle.zig");
 const stub_metadata = @import("stub_metadata.zig");
 const transforms = @import("transforms.zig");
@@ -48,7 +48,7 @@ var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions
 
 // Replaces the Py_TYPE macro/inline function which can cause undefined symbol errors.
 comptime {
-    @export(&py_utils.getPyType, .{ .name = "Py_TYPE" });
+    @export(&python.typeOf, .{ .name = "Py_TYPE" });
 }
 
 pub export fn PyInit__zignal() ?*c.PyObject {
@@ -81,7 +81,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     };
 
     inline for (type_table) |entry| {
-        py_utils.registerType(@ptrCast(m), entry.name, entry.ty) catch |err| {
+        python.register(@ptrCast(m), entry.name, entry.ty) catch |err| {
             std.log.err("Failed to register {s}: {}", .{ entry.name, err });
             c.Py_DECREF(m);
             return null;
