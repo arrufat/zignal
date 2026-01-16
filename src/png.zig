@@ -122,21 +122,6 @@ pub const SrgbRenderingIntent = enum(u8) {
     absolute_colorimetric = 3,
 };
 
-/// Color management information
-const ColorInfo = struct {
-    gamma: ?f32,
-    srgb_intent: ?SrgbRenderingIntent,
-
-    const empty = ColorInfo{ .gamma = null, .srgb_intent = null };
-};
-
-/// Configuration for pixel extraction functions
-const PixelExtractionConfig = struct {
-    transparency: ?[]const u8 = null,
-    color_info: ColorInfo = ColorInfo.empty,
-    palette: ?[]const [3]u8 = null,
-};
-
 /// PNG chunk structure
 pub const Chunk = struct {
     length: u32,
@@ -145,15 +130,21 @@ pub const Chunk = struct {
     crc: u32,
 };
 
-/// PNG IHDR (header) chunk data
+/// PNG IHDR (header) chunk data and metadata
 pub const Header = struct {
     width: u32,
     height: u32,
     bit_depth: u8,
     color_type: ColorType,
-    compression_method: u8, // Must be 0 (deflate)
-    filter_method: u8, // Must be 0
-    interlace_method: u8, // 0 = none, 1 = Adam7
+    compression_method: u8 = 0, // Must be 0 (deflate)
+    filter_method: u8 = 0, // Must be 0
+    interlace_method: u8 = 0, // 0 = none, 1 = Adam7
+
+    // Color management metadata (from gAMA and sRGB chunks)
+    // Gamma is stored for metadata purposes but ignored during decoding as files
+    // are typically already gamma-encoded for display.
+    gamma: ?f32 = null,
+    srgb_intent: ?SrgbRenderingIntent = null,
 
     pub fn channels(self: Header) u8 {
         return self.color_type.channels();
@@ -165,6 +156,27 @@ pub const Header = struct {
 
     pub fn scanlineBytes(self: Header) usize {
         return (self.width * self.channels() * self.bit_depth + 7) / 8;
+    }
+
+    /// Returns the total number of pixels in the image as a u64 to prevent overflow.
+    pub fn totalPixels(self: Header) u64 {
+        return @as(u64, self.width) * @as(u64, self.height);
+    }
+
+    /// Returns true if the image format supports alpha transparency (RGBA or Grayscale+Alpha).
+    /// Note: Palette images may also have transparency via tRNS chunks, but this checks the color type definition.
+    pub fn hasAlpha(self: Header) bool {
+        return self.color_type.hasAlpha();
+    }
+
+    /// Returns true if the image uses 16 bits per channel.
+    pub fn is16Bit(self: Header) bool {
+        return self.bit_depth == 16;
+    }
+
+    /// Returns true if the image is strictly grayscale (no color info).
+    pub fn isGrayscale(self: Header) bool {
+        return self.color_type == .grayscale or self.color_type == .grayscale_alpha;
     }
 };
 
@@ -236,7 +248,7 @@ fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
     if (exceeds(u32, limits.max_width, header.width) or exceeds(u32, limits.max_height, header.height)) {
         return error.ImageTooLarge;
     }
-    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
+    const total_pixels = header.totalPixels();
     if (exceeds(u64, limits.max_pixels, total_pixels)) {
         return error.ImageTooLarge;
     }
@@ -250,10 +262,6 @@ pub const PngState = struct {
     idat_data: ArrayList(u8),
     scan_data_bytes: usize = 0,
 
-    // Color management metadata
-    gamma: ?f32 = null, // Gamma value from gAMA chunk
-    srgb_intent: ?SrgbRenderingIntent = null, // sRGB rendering intent
-
     pub fn deinit(self: *PngState, gpa: Allocator) void {
         self.idat_data.deinit(gpa);
         if (self.palette) |palette| {
@@ -265,6 +273,74 @@ pub const PngState = struct {
     }
 };
 
+/// Retrieve metadata from a PNG file without decoding the full image.
+/// This reads headers and ancillary chunks (gAMA, sRGB) but stops before IDAT.
+pub fn getInfo(png_data: []const u8) !Header {
+    if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
+        return error.InvalidPngSignature;
+    }
+
+    var pos: usize = 8;
+    var header: Header = undefined;
+    var header_found = false;
+
+    while (pos + 8 <= png_data.len) {
+        const length = std.mem.readInt(u32, png_data[pos..][0..4], .big);
+        const chunk_type = png_data[pos + 4 ..][0..4];
+
+        // Stop at image data or end of file
+        if (std.mem.eql(u8, chunk_type, "IDAT")) break;
+        if (std.mem.eql(u8, chunk_type, "IEND")) break;
+
+        // Check if we have the full chunk data (length + 4 bytes for type + length bytes data + 4 bytes CRC)
+        // pos points to start of length. Total chunk size in stream = 4 (len) + 4 (type) + length + 4 (crc)
+        // We already advanced past previous chunks. pos is at start of this chunk.
+        // Wait, pos is at start of 'length'.
+        // Data end is at pos + 8 + length.
+        // CRC end is at pos + 8 + length + 4.
+        const chunk_total_len = @as(usize, length) + 12;
+        if (pos + chunk_total_len > png_data.len) {
+            // Truncated ancillary chunk. Stop parsing.
+            break;
+        }
+
+        const data_start = pos + 8;
+        const data = png_data[data_start .. data_start + length];
+
+        if (std.mem.eql(u8, chunk_type, "IHDR")) {
+            if (header_found) return error.MultipleHeaders;
+            // Create a temporary Chunk for parseHeader.
+            // Note: We are skipping CRC verification here for speed and simplicity in getInfo
+            const chunk = Chunk{
+                .length = length,
+                .type = chunk_type.*,
+                .data = data,
+                .crc = 0, // Ignored by parseHeader
+            };
+            header = try parseHeader(chunk);
+            header_found = true;
+        } else if (std.mem.eql(u8, chunk_type, "gAMA") and header_found) {
+            if (length != 4) return error.InvalidGammaLength;
+            const gamma_int = std.mem.readInt(u32, data[0..4], .big);
+            header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
+        } else if (std.mem.eql(u8, chunk_type, "sRGB") and header_found) {
+            if (length != 1) return error.InvalidSrgbLength;
+            const intent_raw = data[0];
+            header.srgb_intent = switch (intent_raw) {
+                0 => .perceptual,
+                1 => .relative_colorimetric,
+                2 => .saturation,
+                3 => .absolute_colorimetric,
+                else => return error.InvalidSrgbIntent,
+            };
+        }
+
+        pos += chunk_total_len;
+    }
+
+    if (!header_found) return error.MissingHeader;
+    return header;
+}
 // CRC table for PNG chunk validation
 var crc_table: [256]u32 = undefined;
 var crc_table_computed = false;
@@ -467,7 +543,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
             header_found = true;
             try enforceHeaderLimits(png_state.header, limits);
         } else if (std.mem.eql(u8, &chunk.type, "PLTE")) {
-            if (png_state.header.color_type == .grayscale or png_state.header.color_type == .grayscale_alpha) {
+            if (png_state.header.isGrayscale()) {
                 return error.PaletteForbiddenForColorType;
             }
             if (chunk_state.seen_idat) return error.PaletteAfterImageData;
@@ -520,7 +596,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
             // gAMA chunk: 4 bytes containing gamma value * 100,000
             if (chunk.length != 4) return error.InvalidGammaLength;
             const gamma_int = std.mem.readInt(u32, chunk.data[0..4][0..4], .big);
-            png_state.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
+            png_state.header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
         } else if (std.mem.eql(u8, &chunk.type, "sRGB")) {
             if (chunk_state.seen_plte) return error.SrgbAfterPalette;
             if (chunk_state.seen_idat) return error.SrgbAfterImageData;
@@ -529,7 +605,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
             if (chunk.length != 1) return error.InvalidSrgbLength;
             if (chunk_state.seen_iccp) return error.ColorProfileConflict;
             const intent_raw = chunk.data[0];
-            png_state.srgb_intent = switch (intent_raw) {
+            png_state.header.srgb_intent = switch (intent_raw) {
                 0 => .perceptual,
                 1 => .relative_colorimetric,
                 2 => .saturation,
@@ -601,45 +677,30 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     // Handle interlaced images separately
     if (png_state.header.interlace_method == 1) {
         // Interlaced image - use Adam7 deinterlacing
-        const color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent };
         switch (png_state.header.color_type) {
             .grayscale, .grayscale_alpha => {
                 if (png_state.transparency != null) {
-                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = color_info };
-                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, null, png_state.transparency) };
                 } else {
-                    const config = PixelExtractionConfig{ .color_info = color_info };
-                    return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_state.header, config) };
+                    return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_state.header, null, null) };
                 }
             },
             .rgb => {
                 if (png_state.transparency != null) {
-                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = color_info };
-                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, null, png_state.transparency) };
                 } else {
-                    const config = PixelExtractionConfig{ .color_info = color_info };
-                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, config) };
+                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, null, null) };
                 }
             },
             .rgba => {
-                const config = PixelExtractionConfig{ .color_info = color_info };
-                return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
+                return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, null, null) };
             },
             .palette => {
                 const palette = png_state.palette orelse return error.MissingPalette;
                 if (png_state.transparency != null) {
-                    const config = PixelExtractionConfig{
-                        .transparency = png_state.transparency,
-                        .color_info = color_info,
-                        .palette = palette,
-                    };
-                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, config) };
+                    return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, palette, png_state.transparency) };
                 } else {
-                    const config = PixelExtractionConfig{
-                        .color_info = color_info,
-                        .palette = palette,
-                    };
-                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, config) };
+                    return .{ .rgb = try deinterlaceAdam7(allocator, Rgb, decompressed, png_state.header, palette, null) };
                 }
             },
         }
@@ -650,7 +711,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
         .grayscale, .grayscale_alpha => {
             if (png_state.transparency != null) {
                 // Create RGBA image when transparency is present
-                const total_pixels = @as(u64, width) * @as(u64, height);
+                const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
                 }
@@ -662,16 +723,15 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(Rgba, src_row, i, png_state.header, config);
+                        pixel.* = extractGrayscalePixel(Rgba, src_row, i, png_state.header, png_state.transparency);
                     }
                 }
 
                 return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
                 // Create grayscale image when no transparency
-                const total_pixels = @as(u64, width) * @as(u64, height);
+                const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
                 }
@@ -683,9 +743,8 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(u8, src_row, i, png_state.header, config);
+                        pixel.* = extractGrayscalePixel(u8, src_row, i, png_state.header, null);
                     }
                 }
 
@@ -695,7 +754,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
         .rgb => {
             if (png_state.transparency != null) {
                 // Create RGBA image when transparency is present
-                const total_pixels = @as(u64, width) * @as(u64, height);
+                const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
                 }
@@ -707,16 +766,15 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .transparency = png_state.transparency, .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgba, src_row, i, png_state.header, config);
+                        pixel.* = extractRgbPixel(Rgba, src_row, i, png_state.header, png_state.transparency);
                     }
                 }
 
                 return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
                 // Create RGB image when no transparency
-                const total_pixels = @as(u64, width) * @as(u64, height);
+                const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
                 }
@@ -728,9 +786,8 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                     const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
                     const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    const config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = png_state.gamma, .srgb_intent = png_state.srgb_intent } };
                     for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, config);
+                        pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, null);
                     }
                 }
 
@@ -739,7 +796,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
         },
         .rgba => {
             // Create RGBA image
-            const total_pixels = @as(u64, width) * @as(u64, height);
+            const total_pixels = png_state.header.totalPixels();
             if (total_pixels > std.math.maxInt(usize)) {
                 return error.ImageTooLarge;
             }
@@ -779,7 +836,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
             const palette = png_state.palette.?;
             const transparency = png_state.transparency;
 
-            const total_pixels = @as(u64, width) * @as(u64, height);
+            const total_pixels = png_state.header.totalPixels();
             if (total_pixels > std.math.maxInt(usize)) {
                 return error.ImageTooLarge;
             }
@@ -1063,14 +1120,11 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     try writer.data.appendSlice(gpa, &signature);
 
     // Create and write IHDR
-    const header = Header{
+    const header: Header = .{
         .width = width,
         .height = height,
         .bit_depth = bit_depth,
         .color_type = color_type,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     const ihdr_data = try createIHDR(header);
@@ -1466,8 +1520,8 @@ fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
 }
 
 /// Deinterlace Adam7 data and convert to requested pixel format
-fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, config: PixelExtractionConfig) !Image(T) {
-    const total_pixels = @as(u64, header.width) * @as(u64, header.height);
+fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, header: Header, palette: ?[]const [3]u8, transparency: ?[]const u8) !Image(T) {
+    const total_pixels = header.totalPixels();
     if (total_pixels > std.math.maxInt(usize)) {
         return error.ImageTooLarge;
     }
@@ -1499,12 +1553,12 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
 
                 // Extract pixel value based on color type and bit depth
                 output_data[final_pixel_idx] = switch (header.color_type) {
-                    .grayscale, .grayscale_alpha => extractGrayscalePixel(T, src_row, pass_x, header, config),
-                    .rgb => extractRgbPixel(T, src_row, pass_x, header, config),
-                    .rgba => extractRgbaPixel(T, src_row, pass_x, header, config),
+                    .grayscale, .grayscale_alpha => extractGrayscalePixel(T, src_row, pass_x, header, transparency),
+                    .rgb => extractRgbPixel(T, src_row, pass_x, header, transparency),
+                    .rgba => extractRgbaPixel(T, src_row, pass_x, header),
                     .palette => blk: {
-                        const palette = config.palette orelse return error.MissingPalette;
-                        break :blk extractPalettePixel(T, src_row, pass_x, header, palette, config.transparency);
+                        const pal = palette orelse return error.MissingPalette;
+                        break :blk extractPalettePixel(T, src_row, pass_x, header, pal, transparency);
                     },
                 };
             }
@@ -1517,7 +1571,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
 }
 
 // Apply gamma correction to a color value
-inline fn applyGammaCorrection(value: u8, config: PixelExtractionConfig) u8 {
+inline fn applyGammaCorrection(value: u8, header: Header) u8 {
     // PNG gamma handling:
     // - gAMA chunk indicates the encoding gamma of the file
     // - sRGB chunk indicates the file is in sRGB color space
@@ -1527,12 +1581,12 @@ inline fn applyGammaCorrection(value: u8, config: PixelExtractionConfig) u8 {
     // Since zignal is primarily used for display and image manipulation (not linear color
     // processing), we don't apply gamma correction by default. This matches the behavior
     // of most image viewers and libraries.
-    _ = config;
+    _ = header;
     return value;
 }
 
 /// Extract grayscale pixel from Adam7 pass data with optional transparency
-fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
+fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, transparency: ?[]const u8) T {
     const pixel_value: u8 = switch (header.bit_depth) {
         8 => if (header.color_type == .grayscale_alpha) src_row[pass_x * 2] else src_row[pass_x],
         16 => blk: {
@@ -1556,9 +1610,9 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
     };
 
     // Check for transparency
-    const is_transparent = if (config.transparency) |trans_data| blk: {
+    const is_transparent = if (transparency) |trans_data| blk: {
         if (header.color_type == .grayscale and trans_data.len >= 2) {
-            const transparent_value = if (header.bit_depth == 16)
+            const transparent_value = if (header.is16Bit())
                 @as(u8, @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8))
             else
                 trans_data[1]; // For 8-bit and sub-byte, use lower byte
@@ -1567,20 +1621,17 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
         break :blk false;
     } else false;
 
-    // Apply gamma correction
-    const corrected_value = applyGammaCorrection(pixel_value, config);
-
     return switch (T) {
-        u8 => corrected_value,
-        Rgb => Rgb{ .r = corrected_value, .g = corrected_value, .b = corrected_value },
-        Rgba => Rgba{ .r = corrected_value, .g = corrected_value, .b = corrected_value, .a = if (is_transparent) 0 else 255 },
+        u8 => pixel_value,
+        Rgb => Rgb{ .r = pixel_value, .g = pixel_value, .b = pixel_value },
+        Rgba => Rgba{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = if (is_transparent) 0 else 255 },
         else => @compileError("Unsupported pixel type"),
     };
 }
 
 /// Extract RGB pixel from Adam7 pass data with optional transparency
-fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
-    const channel_stride: usize = if (header.bit_depth == 16) 2 else 1;
+fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, transparency: ?[]const u8) T {
+    const channel_stride: usize = if (header.is16Bit()) 2 else 1;
     const total_bytes: usize = channel_stride * header.channels();
     const offset = pass_x * total_bytes;
     if (offset + total_bytes > src_row.len) {
@@ -1592,31 +1643,31 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
         };
     }
 
-    const r: u8 = if (header.bit_depth == 16)
+    const r: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8)
     else
         src_row[offset];
-    const g: u8 = if (header.bit_depth == 16)
+    const g: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride];
-    const b: u8 = if (header.bit_depth == 16)
+    const b: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 2];
 
     // Check for transparency
-    const is_transparent = if (config.transparency) |trans_data| blk: {
+    const is_transparent = if (transparency) |trans_data| blk: {
         if (header.color_type == .rgb and trans_data.len >= 6) {
-            const trans_r: u8 = if (header.bit_depth == 16)
+            const trans_r: u8 = if (header.is16Bit())
                 @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8)
             else
                 trans_data[1]; // Use lower byte for 8-bit
-            const trans_g: u8 = if (header.bit_depth == 16)
+            const trans_g: u8 = if (header.is16Bit())
                 @intCast(std.mem.readInt(u16, trans_data[2..4], .big) >> 8)
             else
                 trans_data[3];
-            const trans_b: u8 = if (header.bit_depth == 16)
+            const trans_b: u8 = if (header.is16Bit())
                 @intCast(std.mem.readInt(u16, trans_data[4..6], .big) >> 8)
             else
                 trans_data[5];
@@ -1625,22 +1676,17 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
         break :blk false;
     } else false;
 
-    // Apply gamma correction to RGB channels
-    const corrected_r = applyGammaCorrection(r, config);
-    const corrected_g = applyGammaCorrection(g, config);
-    const corrected_b = applyGammaCorrection(b, config);
-
     return switch (T) {
-        u8 => @as(u8, @intCast((@as(u16, corrected_r) + @as(u16, corrected_g) + @as(u16, corrected_b)) / 3)),
-        Rgb => Rgb{ .r = corrected_r, .g = corrected_g, .b = corrected_b },
-        Rgba => Rgba{ .r = corrected_r, .g = corrected_g, .b = corrected_b, .a = if (is_transparent) 0 else 255 },
+        u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
+        Rgb => Rgb{ .r = r, .g = g, .b = b },
+        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = if (is_transparent) 0 else 255 },
         else => @compileError("Unsupported pixel type"),
     };
 }
 
 /// Extract RGBA pixel from Adam7 pass data
-fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, config: PixelExtractionConfig) T {
-    const channel_stride: usize = if (header.bit_depth == 16) 2 else 1;
+fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header) T {
+    const channel_stride: usize = if (header.is16Bit()) 2 else 1;
     const total_bytes: usize = channel_stride * header.channels();
     const offset = pass_x * total_bytes;
     if (offset + total_bytes > src_row.len) {
@@ -1652,32 +1698,27 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
         };
     }
 
-    const r: u8 = if (header.bit_depth == 16)
+    const r: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8)
     else
         src_row[offset];
-    const g: u8 = if (header.bit_depth == 16)
+    const g: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride];
-    const b: u8 = if (header.bit_depth == 16)
+    const b: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 2];
-    const a: u8 = if (header.bit_depth == 16)
+    const a: u8 = if (header.is16Bit())
         @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 3 .. offset + channel_stride * 3 + 2][0..2], .big) >> 8)
     else
         src_row[offset + channel_stride * 3];
 
-    // Apply gamma correction to RGB channels (not alpha)
-    const corrected_r = applyGammaCorrection(r, config);
-    const corrected_g = applyGammaCorrection(g, config);
-    const corrected_b = applyGammaCorrection(b, config);
-
     return switch (T) {
-        u8 => @as(u8, @intCast((@as(u16, corrected_r) + @as(u16, corrected_g) + @as(u16, corrected_b)) / 3)),
-        Rgb => Rgb{ .r = corrected_r, .g = corrected_g, .b = corrected_b },
-        Rgba => Rgba{ .r = corrected_r, .g = corrected_g, .b = corrected_b, .a = a },
+        u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
+        Rgb => Rgb{ .r = r, .g = g, .b = b },
+        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = a },
         else => @compileError("Unsupported pixel type"),
     };
 }
@@ -2069,7 +2110,7 @@ test "PNG enforces decompressed byte limit" {
 }
 
 test "PNG default decompressed limit covers 8K RGBA 16-bit" {
-    const header = Header{
+    const header: Header = .{
         .width = max_dimensions_default,
         .height = max_dimensions_default,
         .bit_depth = 16,
@@ -2163,14 +2204,11 @@ test "PNG adaptive filter selection" {
     // so .sub is best, and the second row equals the first so .up is best.
     const width: u32 = 8;
     const height: u32 = 2;
-    const header = Header{
+    const header: Header = .{
         .width = width,
         .height = height,
         .bit_depth = 8,
         .color_type = .rgb,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     const scanline_bytes = header.scanlineBytes();
@@ -2515,7 +2553,7 @@ test "PNG bounds checking - malformed palette" {
     };
 
     var png_state = PngState{
-        .header = Header{
+        .header = .{
             .width = 4,
             .height = 4,
             .bit_depth = 8,
@@ -2583,13 +2621,11 @@ test "PNG integer overflow protection" {
 
 test "Adam7 interlaced PNG support" {
     // Test that we can create an interlaced header
-    const interlaced_header = Header{
+    const interlaced_header: Header = .{
         .width = 4,
         .height = 4,
         .bit_depth = 8,
         .color_type = .rgb,
-        .compression_method = 0,
-        .filter_method = 0,
         .interlace_method = 1,
     };
 
@@ -2603,28 +2639,20 @@ test "Adam7 interlaced PNG support" {
 
     // Test pixel extraction functions work correctly
     const rgb_src = [_]u8{ 255, 0, 0, 0, 255, 0, 0, 0, 255 }; // red, green, blue pixels
-    const rgb_pixel = extractRgbPixel(Rgb, &rgb_src, 1, interlaced_header, PixelExtractionConfig{});
+    const rgb_pixel = extractRgbPixel(Rgb, &rgb_src, 1, interlaced_header, null);
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 255, .b = 0 }, rgb_pixel);
 
-    const rgba_header = Header{
-        .width = 4,
-        .height = 4,
-        .bit_depth = 8,
-        .color_type = .rgba,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 1,
-    };
+    const rgba_header: Header = .{ .width = 4, .height = 4, .bit_depth = 8, .color_type = .rgba, .interlace_method = 1 };
 
     const rgba_src = [_]u8{ 255, 0, 0, 255, 0, 255, 0, 128 }; // red (alpha=255), green (alpha=128)
-    const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, rgba_header, PixelExtractionConfig{});
+    const rgba_pixel = extractRgbaPixel(Rgba, &rgba_src, 1, rgba_header);
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
 }
 
 test "Adam7 palette deinterlace with transparency" {
     const allocator = std.testing.allocator;
 
-    const header = Header{
+    const header: Header = .{
         .width = 1,
         .height = 1,
         .bit_depth = 8,
@@ -2641,12 +2669,7 @@ test "Adam7 palette deinterlace with transparency" {
     };
     const transparency = [_]u8{ 255, 64 };
 
-    const config = PixelExtractionConfig{
-        .palette = &palette,
-        .transparency = &transparency,
-    };
-
-    var image = try deinterlaceAdam7(allocator, Rgba, &decompressed, header, config);
+    var image = try deinterlaceAdam7(allocator, Rgba, &decompressed, header, &palette, &transparency);
     defer image.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 1), image.rows);
@@ -2654,7 +2677,7 @@ test "Adam7 palette deinterlace with transparency" {
 }
 
 test "extractPalettePixel handles 4-bit indices" {
-    const header = Header{
+    const header: Header = .{
         .width = 2,
         .height = 1,
         .bit_depth = 4,
@@ -2683,7 +2706,7 @@ test "PNG palette transparency support" {
 
     // Create a palette PNG with transparency
     var png_state = PngState{
-        .header = Header{
+        .header = .{
             .width = 2,
             .height = 2,
             .bit_depth = 8,
@@ -2736,25 +2759,22 @@ test "PNG palette transparency support" {
 test "PNG grayscale transparency support" {
     // Test grayscale 8-bit transparency
     const gray_trans_data = [_]u8{ 0x00, 0x80 }; // Transparent value is 128 (0x80)
-    const gray_header = Header{
+    const gray_header: Header = .{
         .width = 4,
         .height = 1,
         .bit_depth = 8,
         .color_type = .grayscale,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     // Test pixels: 0, 128 (transparent), 255, 64
     const gray_src = [_]u8{ 0, 128, 255, 64 };
 
     // Test transparency detection
-    const config = PixelExtractionConfig{ .transparency = &gray_trans_data };
-    const pixel_normal = extractGrayscalePixel(Rgba, &gray_src, 0, gray_header, config);
-    const pixel_transparent = extractGrayscalePixel(Rgba, &gray_src, 1, gray_header, config);
-    const pixel_white = extractGrayscalePixel(Rgba, &gray_src, 2, gray_header, config);
-    const pixel_gray = extractGrayscalePixel(Rgba, &gray_src, 3, gray_header, config);
+    const trans_slice: []const u8 = &gray_trans_data;
+    const pixel_normal = extractGrayscalePixel(Rgba, &gray_src, 0, gray_header, trans_slice);
+    const pixel_transparent = extractGrayscalePixel(Rgba, &gray_src, 1, gray_header, trans_slice);
+    const pixel_white = extractGrayscalePixel(Rgba, &gray_src, 2, gray_header, trans_slice);
+    const pixel_gray = extractGrayscalePixel(Rgba, &gray_src, 3, gray_header, trans_slice);
 
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 }, pixel_normal);
     try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 0 }, pixel_transparent);
@@ -2765,24 +2785,21 @@ test "PNG grayscale transparency support" {
 test "PNG RGB transparency support" {
     // Test RGB transparency - transparent color is white (255, 255, 255)
     const rgb_trans_data = [_]u8{ 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF }; // White in 16-bit format
-    const rgb_header = Header{
+    const rgb_header: Header = .{
         .width = 3,
         .height = 1,
         .bit_depth = 8,
         .color_type = .rgb,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     // Test pixels: red, white (transparent), blue
     const rgb_src = [_]u8{ 255, 0, 0, 255, 255, 255, 0, 0, 255 };
 
     // Test transparency detection
-    const config = PixelExtractionConfig{ .transparency = &rgb_trans_data };
-    const pixel_red = extractRgbPixel(Rgba, &rgb_src, 0, rgb_header, config);
-    const pixel_white = extractRgbPixel(Rgba, &rgb_src, 1, rgb_header, config);
-    const pixel_blue = extractRgbPixel(Rgba, &rgb_src, 2, rgb_header, config);
+    const trans_slice: []const u8 = &rgb_trans_data;
+    const pixel_red = extractRgbPixel(Rgba, &rgb_src, 0, rgb_header, trans_slice);
+    const pixel_white = extractRgbPixel(Rgba, &rgb_src, 1, rgb_header, trans_slice);
+    const pixel_blue = extractRgbPixel(Rgba, &rgb_src, 2, rgb_header, trans_slice);
 
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, pixel_red);
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 0 }, pixel_white);
@@ -2794,14 +2811,11 @@ test "PNG transparency error cases" {
 
     // Test invalid tRNS chunk for grayscale_alpha (should error)
     var png_state = PngState{
-        .header = Header{
+        .header = .{
             .width = 16,
             .height = 16,
             .bit_depth = 8,
             .color_type = .grayscale_alpha, // This color type cannot have tRNS
-            .compression_method = 0,
-            .filter_method = 0,
-            .interlace_method = 0,
         },
         .idat_data = .empty,
     };
@@ -2821,47 +2835,22 @@ test "PNG transparency error cases" {
 test "PNG 16-bit transparency" {
     // Test 16-bit grayscale transparency
     const gray16_trans_data = [_]u8{ 0x80, 0x00 }; // Transparent value is 0x8000 (32768)
-    const gray16_header = Header{
+    const gray16_header: Header = .{
         .width = 2,
         .height = 1,
         .bit_depth = 16,
         .color_type = .grayscale,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     // Test pixels: 0x8000 (should be transparent), 0x4000 (should be opaque)
     const gray16_src = [_]u8{ 0x80, 0x00, 0x40, 0x00 };
 
-    const config = PixelExtractionConfig{ .transparency = &gray16_trans_data };
-    const pixel_transparent = extractGrayscalePixel(Rgba, &gray16_src, 0, gray16_header, config);
-    const pixel_opaque = extractGrayscalePixel(Rgba, &gray16_src, 1, gray16_header, config);
+    const trans_slice: []const u8 = &gray16_trans_data;
+    const pixel_transparent = extractGrayscalePixel(Rgba, &gray16_src, 0, gray16_header, trans_slice);
+    const pixel_opaque = extractGrayscalePixel(Rgba, &gray16_src, 1, gray16_header, trans_slice);
 
     try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 0 }, pixel_transparent);
     try std.testing.expectEqual(Rgba{ .r = 64, .g = 64, .b = 64, .a = 255 }, pixel_opaque);
-}
-
-test "PNG gamma correction" {
-    // Test that gamma correction is NOT applied for display purposes
-    // PNG files are already gamma-encoded and should be displayed as-is
-    const color_info_gamma = ColorInfo{ .gamma = 0.45455, .srgb_intent = null };
-    const color_info_srgb = ColorInfo{ .gamma = null, .srgb_intent = .perceptual };
-    const color_info_none = ColorInfo.empty;
-
-    // Test gamma correction
-    const input_value: u8 = 128;
-    const gamma_config = PixelExtractionConfig{ .color_info = color_info_gamma };
-    const srgb_config = PixelExtractionConfig{ .color_info = color_info_srgb };
-    const none_config = PixelExtractionConfig{ .color_info = color_info_none };
-    const gamma_result = applyGammaCorrection(input_value, gamma_config);
-    const srgb_result = applyGammaCorrection(input_value, srgb_config);
-    const no_correction = applyGammaCorrection(input_value, none_config);
-
-    // All should return the original value (no correction applied)
-    try std.testing.expectEqual(input_value, gamma_result);
-    try std.testing.expectEqual(input_value, srgb_result);
-    try std.testing.expectEqual(input_value, no_correction);
 }
 
 test "PNG gAMA chunk parsing" {
@@ -2876,7 +2865,7 @@ test "PNG gAMA chunk parsing" {
     };
 
     var png_state = PngState{
-        .header = Header{
+        .header = .{
             .width = 4,
             .height = 4,
             .bit_depth = 8,
@@ -2910,7 +2899,7 @@ test "PNG sRGB chunk parsing" {
     };
 
     var png_state = PngState{
-        .header = Header{
+        .header = .{
             .width = 4,
             .height = 4,
             .bit_depth = 8,
@@ -2936,36 +2925,96 @@ test "PNG sRGB chunk parsing" {
     try std.testing.expectEqual(SrgbRenderingIntent.perceptual, expected_intent);
 }
 
-test "PNG pixel extraction config convenience" {
-    // Test that PixelExtractionConfig provides clean defaults
-    const header = Header{
+test "PNG pixel extraction with transparency" {
+    // Test extraction functions with transparency
+    const header: Header = .{
         .width = 4,
         .height = 4,
         .bit_depth = 8,
         .color_type = .rgb,
-        .compression_method = 0,
-        .filter_method = 0,
-        .interlace_method = 0,
     };
 
     const rgb_src = [_]u8{ 255, 0, 0, 0, 255, 0 }; // red, green pixels
 
-    // Test default config (no transparency, no gamma correction)
-    const default_config = PixelExtractionConfig{};
-    const pixel_default = extractRgbPixel(Rgb, &rgb_src, 0, header, default_config);
+    // Test default (no transparency)
+    const pixel_default = extractRgbPixel(Rgb, &rgb_src, 0, header, null);
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, pixel_default);
 
-    // Test config with transparency
+    // Test with transparency
     const trans_data = [_]u8{ 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00 }; // red is transparent
-    const transparency_config = PixelExtractionConfig{ .transparency = &trans_data };
-    const pixel_with_trans = extractRgbPixel(Rgba, &rgb_src, 0, header, transparency_config);
+    const trans_slice: []const u8 = &trans_data;
+    const pixel_with_trans = extractRgbPixel(Rgba, &rgb_src, 0, header, trans_slice);
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 }, pixel_with_trans);
+}
 
-    // Test config with gamma correction (now gamma is ignored for display)
-    const gamma_config = PixelExtractionConfig{ .color_info = ColorInfo{ .gamma = 2.2, .srgb_intent = null } };
-    const test_src = [_]u8{ 128, 128, 128 }; // middle gray value
-    const pixel_gamma_test = extractRgbPixel(Rgb, &test_src, 0, header, gamma_config);
-    const pixel_no_gamma = extractRgbPixel(Rgb, &test_src, 0, header, default_config);
-    // Gamma correction is not applied for display, so both should be equal
-    try std.testing.expectEqual(pixel_gamma_test, pixel_no_gamma);
+test "PNG getInfo" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 100, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 50, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgb);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const srgb_payload = [_]u8{0};
+    try appendTestChunk(&data, gpa, "sRGB".*, &srgb_payload);
+
+    // Add some random chunk before IDAT
+    try appendTestChunk(&data, gpa, "tEXt".*, &[_]u8{});
+
+    // We don't need IDAT for getInfo to work if we stop before it
+    // But let's add one to make it a valid stream prefix
+    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
+
+    const info = try getInfo(data.items);
+    try std.testing.expectEqual(@as(u32, 100), info.width);
+    try std.testing.expectEqual(@as(u32, 50), info.height);
+    try std.testing.expectEqual(ColorType.rgb, info.color_type);
+    try std.testing.expect(info.srgb_intent != null);
+    try std.testing.expectEqual(SrgbRenderingIntent.perceptual, info.srgb_intent.?);
+}
+
+test "PNG Header helpers" {
+    // 8-bit RGB
+    const h1: Header = .{
+        .width = 100,
+        .height = 50,
+        .bit_depth = 8,
+        .color_type = .rgb,
+    };
+    try std.testing.expectEqual(@as(u64, 5000), h1.totalPixels());
+    try std.testing.expect(!h1.hasAlpha());
+    try std.testing.expect(!h1.is16Bit());
+    try std.testing.expect(!h1.isGrayscale());
+
+    // 16-bit RGBA
+    const h2: Header = .{
+        .width = 10,
+        .height = 10,
+        .bit_depth = 16,
+        .color_type = .rgba,
+    };
+    try std.testing.expectEqual(@as(u64, 100), h2.totalPixels());
+    try std.testing.expect(h2.hasAlpha());
+    try std.testing.expect(h2.is16Bit());
+    try std.testing.expect(!h2.isGrayscale());
+
+    // 8-bit Grayscale Alpha
+    const h3: Header = .{
+        .width = 5,
+        .height = 5,
+        .bit_depth = 8,
+        .color_type = .grayscale_alpha,
+    };
+    try std.testing.expect(h3.hasAlpha());
+    try std.testing.expect(!h3.is16Bit());
+    try std.testing.expect(h3.isGrayscale());
 }
