@@ -202,50 +202,24 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     }
 
     if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
-
-    const zignal_dir = b.pathFromRoot(".");
-
-    var code: u8 = undefined;
-
     // Check if we're exactly on a tagged release
-    _ = b.runAllowFail(
-        &.{ "git", "-C", zignal_dir, "describe", "--tags", "--exact-match" },
-        &code,
-        .ignore,
-    ) catch {
+    _ = runGit(b, &.{ "describe", "--tags", "--exact-match" }) catch {
         // Not on a tag, need to create a dev version
-        const git_hash_raw = b.runAllowFail(
-            &.{ "git", "-C", zignal_dir, "rev-parse", "--short", "HEAD" },
-            &code,
-            .ignore,
-        ) catch return zignal_version;
+        const git_hash_raw = runGit(b, &.{ "rev-parse", "--short", "HEAD" }) catch return zignal_version;
         const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
-
         // Get the commit count - either from base tag or total
         const commit_count = blk: {
             // Try to find the most recent base version tag (ending with .0)
-            const base_tag_raw = b.runAllowFail(
-                &.{ "git", "-C", zignal_dir, "describe", "--tags", "--match=*.0", "--abbrev=0" },
-                &code,
-                .ignore,
-            ) catch {
+            const base_tag_raw = runGit(b, &.{ "describe", "--tags", "--match=*.0", "--abbrev=0" }) catch {
                 // No .0 tags found, fall back to total commit count
-                const git_count_raw = b.runAllowFail(
-                    &.{ "git", "-C", zignal_dir, "rev-list", "--count", "HEAD" },
-                    &code,
-                    .ignore,
-                ) catch return zignal_version;
+                const git_count_raw = runGit(b, &.{ "rev-list", "--count", "HEAD" }) catch return zignal_version;
                 break :blk std.mem.trim(u8, git_count_raw, " \n\r");
             };
-            const base_tag = std.mem.trim(u8, base_tag_raw, " \n\r");
 
+            const base_tag = std.mem.trim(u8, base_tag_raw, " \n\r");
             // Count commits since the base tag
             const count_cmd = b.fmt("{s}..HEAD", .{base_tag});
-            const git_count_raw = b.runAllowFail(
-                &.{ "git", "-C", zignal_dir, "rev-list", "--count", count_cmd },
-                &code,
-                .ignore,
-            ) catch return zignal_version;
+            const git_count_raw = runGit(b, &.{ "rev-list", "--count", count_cmd }) catch return zignal_version;
             break :blk std.mem.trim(u8, git_count_raw, " \n\r");
         };
 
@@ -257,9 +231,19 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
             .build = commit_hash,
         };
     };
-
     // We're exactly on a tag, return the version as-is
     return zignal_version;
+}
+
+/// Helper function to run git commands and return stdout
+fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
+    var code: u8 = undefined;
+    const dir = b.pathFromRoot(".");
+    var full_args: std.ArrayList([]const u8) = .empty;
+    defer full_args.deinit(b.allocator);
+    try full_args.appendSlice(b.allocator, &.{ "git", "-C", dir });
+    try full_args.appendSlice(b.allocator, args);
+    return b.runAllowFail(full_args.items, &code, .ignore);
 }
 
 /// Helper function to link Python to an artifact
@@ -267,71 +251,45 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
 /// @param python_lib: The Python library name ("python3" for shared libs, "python3-embed" for executables)
 /// @param target_info: Target platform information for platform-specific linking
 fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, target_info: std.Target) void {
-    // Link against libc for Python headers
+    const os_tag = target_info.os.tag;
     artifact.root_module.link_libc = true;
-
-    // Add Python include directory if provided via environment variable
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
+        validatePath(python_include, "PYTHON_INCLUDE_DIR");
         artifact.root_module.addIncludePath(.{ .cwd_relative = python_include });
-    } else {
-        // No Python include directory specified - will rely on system default paths
     }
 
-    // Add platform-specific python libraries and flags
-    switch (target_info.os.tag) {
-        .windows => {
-            // On Windows, link against the Python library
-            if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
-                artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+    // Common logic to add library path if provided
+    if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
+        validatePath(libs_dir, "PYTHON_LIBS_DIR");
+        artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+    }
 
-                if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| {
-                    // Remove the .lib extension for linkSystemLibrary
-                    const lib_name_no_ext = if (std.mem.endsWith(u8, lib_name, ".lib"))
-                        lib_name[0 .. lib_name.len - 4]
-                    else
-                        lib_name;
-                    artifact.root_module.linkSystemLibrary(lib_name_no_ext, .{});
-                } else {
-                    // Fallback - try to link against a common Python library name
-                    artifact.root_module.linkSystemLibrary(python_lib, .{});
-                }
-            } else {
-                // No Python library path provided - try system default
-                artifact.root_module.linkSystemLibrary(python_lib, .{});
-            }
-        },
-        .macos => {
-            // On macOS, we need to handle Python linking carefully
-            // During build, we need the library path, but for distribution
-            // we'll use delocate to make the wheel portable
+    // Determine the library name to link against
+    const lib_name_to_link = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| blk: {
+        validateLibName(lib_name, "PYTHON_LIB_NAME");
+        // On Windows, strip the .lib extension
+        if (os_tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
+            break :blk lib_name[0 .. lib_name.len - 4];
+        }
+        break :blk lib_name;
+    } else python_lib;
 
-            // Add library path if provided (needed during build)
-            if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
-                artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
-            } else {
-                // No specific library path provided
-            }
+    artifact.root_module.linkSystemLibrary(lib_name_to_link, .{});
+    if (os_tag == .macos) {
+        artifact.root_module.addRPathSpecial("@loader_path");
+    }
+}
 
-            // Link against Python library
-            if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| {
-                artifact.root_module.linkSystemLibrary(lib_name, .{});
-            } else {
-                artifact.root_module.linkSystemLibrary(python_lib, .{});
-            }
+fn validatePath(path: []const u8, env_name: []const u8) void {
+    if (std.mem.indexOf(u8, path, "..") != null) {
+        std.debug.panic("Invalid path in {s}: '{s}'. Path traversal is not allowed.", .{ env_name, path });
+    }
+}
 
-            // Add rpath for runtime library resolution
-            artifact.root_module.addRPathSpecial("@loader_path");
-
-            // For Python extensions on macOS, we often use -undefined dynamic_lookup
-            // but Zig doesn't have a direct API for this, so we'll rely on
-            // delocate to fix the library dependencies after building
-        },
-        .linux => {
-            artifact.root_module.linkSystemLibrary(python_lib, .{});
-        },
-        else => {
-            // Try the default for other platforms
-            artifact.root_module.linkSystemLibrary(python_lib, .{});
-        },
+fn validateLibName(name: []const u8, env_name: []const u8) void {
+    for (name) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-' and c != '.') {
+            std.debug.panic("Invalid character in {s}: '{c}'. Only alphanumeric, _, -, and . are allowed.", .{ env_name, c });
+        }
     }
 }
