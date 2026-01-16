@@ -40,6 +40,14 @@ pub fn none() ?*c.PyObject {
     return val;
 }
 
+/// Helper to create a Python Rectangle object from a Zig Rectangle
+fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
+    const rectangle = @import("rectangle.zig");
+    const new_args = c.Py_BuildValue("(dddd)", rect.l, rect.t, rect.r, rect.b) orelse return null;
+    defer c.Py_DECREF(new_args);
+    return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), new_args);
+}
+
 /// Creates a Python object from a Zig value.
 pub fn create(value: anytype) ?*c.PyObject {
     const T = @TypeOf(value);
@@ -67,10 +75,12 @@ pub fn create(value: anytype) ?*c.PyObject {
             if (value) |v| {
                 break :blk create(v);
             } else {
-                // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-                c.Py_INCREF(@as(?*c.PyObject, @ptrCast(c.Py_None)));
-                break :blk c.Py_None;
+                break :blk none();
             }
+        },
+        .@"struct" => switch (T) {
+            zignal.Rectangle(f64) => createRectangle(value),
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
         },
         else => null,
     };

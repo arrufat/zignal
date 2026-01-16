@@ -16,12 +16,6 @@ pub const RectangleObject = extern struct {
     bottom: f64,
 };
 
-fn create(rect: Rectangle) ?*c.PyObject {
-    const new_args = c.Py_BuildValue("(dddd)", rect.l, rect.t, rect.r, rect.b) orelse return null;
-    defer c.Py_DECREF(new_args);
-    return c.PyObject_CallObject(@ptrCast(&RectangleType), new_args);
-}
-
 // Using genericNew helper for standard object creation
 const rectangle_new = python.genericNew(RectangleObject);
 
@@ -88,7 +82,7 @@ fn rectangle_init_center(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     _ = python.validatePositive(f64, params.width, "Width") catch return null;
     _ = python.validatePositive(f64, params.height, "Height") catch return null;
     const rect: Rectangle = .initCenter(params.x, params.y, params.width, params.height);
-    return create(rect);
+    return python.create(rect);
 }
 
 // Instance methods
@@ -220,7 +214,7 @@ fn rectangle_grow(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const rect = python.parse(Rectangle, self_obj) catch return null;
-    return create(rect.grow(params.amount));
+    return python.create(rect.grow(params.amount));
 }
 
 const rectangle_shrink_doc =
@@ -242,7 +236,7 @@ fn rectangle_shrink(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const rect = python.parse(Rectangle, self_obj) catch return null;
-    return create(rect.shrink(params.amount));
+    return python.create(rect.shrink(params.amount));
 }
 
 const rectangle_translate_doc =
@@ -261,7 +255,7 @@ fn rectangle_translate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const rect = python.parse(Rectangle, self_obj) catch return null;
-    return create(rect.translate(params.dx, params.dy));
+    return python.create(rect.translate(params.dx, params.dy));
 }
 
 const rectangle_clip_doc =
@@ -280,7 +274,7 @@ fn rectangle_clip(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const bounds = python.parse(Rectangle, params.bounds) catch return null;
     const rect = python.parse(Rectangle, self_obj) catch return null;
-    return create(rect.clip(bounds.reorder()));
+    return python.create(rect.clip(bounds.reorder()));
 }
 
 const rectangle_intersect_doc =
@@ -312,7 +306,7 @@ fn rectangle_intersect(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const other = python.parse(Rectangle, params.other) catch return null;
     return if (rect.intersect(other)) |intersection|
-        return create(intersection)
+        return python.create(intersection)
     else
         return python.none();
 }
@@ -458,7 +452,7 @@ fn rectangle_merge(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const self = python.parse(Rectangle, self_obj) catch return null;
     const other = python.parse(Rectangle, params.other) catch return null;
-    return create(self.merge(other));
+    return python.create(self.merge(other));
 }
 
 const rectangle_reorder_doc =
@@ -471,7 +465,7 @@ const rectangle_reorder_doc =
 fn rectangle_reorder(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const self = python.parse(Rectangle, self_obj) catch return null;
-    return create(self.reorder());
+    return python.create(self.reorder());
 }
 
 const rectangle_aspect_ratio_doc =
