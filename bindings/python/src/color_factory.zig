@@ -65,10 +65,9 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
         /// Create a Python object from a Zig color value
         pub fn createPyObject(zig_color: ZigType, type_obj: *c.PyTypeObject) ?*c.PyObject {
-            const obj = c.PyType_GenericNew(@ptrCast(type_obj), null, null);
+            const obj = c.PyType_GenericNew(type_obj, null, null);
             if (obj == null) return null;
-            const py_obj: *PyObjectType = @ptrCast(obj);
-            zigColorToObject(zig_color, py_obj);
+            zigColorToObject(zig_color, @ptrCast(obj));
             return obj;
         }
 
@@ -101,7 +100,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                         3 => if (fields.len > 3) self.field3 else unreachable,
                         else => unreachable,
                     };
-                    return @ptrCast(@alignCast(python.create(value)));
+                    return python.create(value);
                 }
             }.getter;
         }
@@ -118,7 +117,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     const field_name = field.name;
 
                     // Convert Python value using idiomatic error union
-                    const new_value = python.parse(field.type, @ptrCast(value_obj)) catch |err| {
+                    const new_value = python.parse(field.type, value_obj) catch |err| {
                         switch (err) {
                             python.ConversionError.not_integer => {
                                 c.PyErr_SetString(c.PyExc_TypeError, "Expected integer value");
@@ -750,7 +749,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 else => unreachable,
             };
 
-            return @ptrCast(c.PyUnicode_FromString(formatted.ptr));
+            return @ptrCast(python.create(formatted));
         }
 
         /// Rich comparison method implementing RGBA-based equality/inequality
@@ -760,33 +759,19 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
             if (op != c.Py_EQ and op != c.Py_NE) {
-                const not_impl = c.Py_NotImplemented();
-                c.Py_INCREF(not_impl);
-                return not_impl;
+                return python.notImplemented();
             }
 
             // Convert self to RGBA
-            const self_rgba = color_utils.parseColor(Rgba, self_obj) catch {
-                // If conversion fails, clear error and return NotImplemented
-                c.PyErr_Clear();
-                const not_impl = c.Py_NotImplemented();
-                c.Py_INCREF(not_impl);
-                return not_impl;
-            };
+            const self_rgba = color_utils.parseColor(Rgba, self_obj) catch return python.notImplemented();
 
             // Convert other to RGBA
-            const other_rgba = color_utils.parseColor(Rgba, other_obj) catch {
-                // If conversion fails, clear error and return NotImplemented
-                c.PyErr_Clear();
-                const not_impl = c.Py_NotImplemented();
-                c.Py_INCREF(not_impl);
-                return not_impl;
-            };
+            const other_rgba = color_utils.parseColor(Rgba, other_obj) catch return python.notImplemented();
 
             const equal = self_rgba == other_rgba;
 
             const result = if (op == c.Py_EQ) equal else !equal;
-            return @ptrCast(python.create(result));
+            return python.create(result);
         }
 
         /// __format__ method implementation
@@ -855,7 +840,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 offset += footer.len;
 
                 const formatted = buffer[0..offset];
-                return @ptrCast(c.PyUnicode_FromStringAndSize(formatted.ptr, @intCast(formatted.len)));
+                return python.create(formatted);
             } else if (format_str.len == 0) {
                 // Empty format spec - use repr
                 return repr(self_obj);

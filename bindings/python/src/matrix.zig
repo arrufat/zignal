@@ -208,18 +208,13 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
         while (col_idx < n_cols_usize) : (col_idx += 1) {
             const item = c.PyList_GetItem(row_obj, @intCast(col_idx));
 
-            // Convert to float
-            const float_obj = c.PyFloat_FromDouble(0); // Create a float to check conversion
-            defer c.Py_XDECREF(float_obj);
-
-            const value = c.PyFloat_AsDouble(item);
-            if (value == -1.0 and c.PyErr_Occurred() != null) {
+            const value = python.parse(f64, item) catch {
                 matrix_ptr.deinit();
                 allocator.destroy(matrix_ptr);
-                c.PyErr_Clear();
+                c.PyErr_Clear(); // Clear the generic error from python.parse
                 c.PyErr_SetString(c.PyExc_TypeError, "Matrix elements must be numeric");
                 return -1;
-            }
+            };
 
             matrix_ptr.at(row_idx, col_idx).* = value;
         }
@@ -258,12 +253,12 @@ fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
         // Create a string representation
         var buffer: [256]u8 = undefined;
         const slice = std.fmt.bufPrintZ(&buffer, "Matrix({} x {}, float64)", .{ ptr.rows, ptr.cols }) catch {
-            return c.PyUnicode_FromString("Matrix(error formatting)");
+            return python.create("Matrix(error formatting)");
         };
-        return c.PyUnicode_FromString(slice.ptr);
+        return python.create(slice);
     }
 
-    return c.PyUnicode_FromString("Matrix(uninitialized)");
+    return python.create("Matrix(uninitialized)");
 }
 
 fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -292,22 +287,37 @@ fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
             const str = list.toOwnedSlice(allocator) catch return null;
             defer allocator.free(str);
-            // Use FromStringAndSize to ensure proper length
-            return c.PyUnicode_FromStringAndSize(str.ptr, @intCast(str.len));
+            return python.create(str);
         } else {
             // For large matrices, just show dimensions
             return matrix_repr(self_obj);
         }
     }
 
-    return c.PyUnicode_FromString("Matrix(uninitialized)");
+    return python.create("Matrix(uninitialized)");
 }
 
 // Properties
 fn matrix_shape_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    return c.PyTuple_Pack(2, c.PyLong_FromLong(@intCast(ptr.rows)), c.PyLong_FromLong(@intCast(ptr.cols)));
+
+    const rows_obj = python.create(ptr.rows) orelse return null;
+    const cols_obj = python.create(ptr.cols) orelse {
+        c.Py_DECREF(rows_obj);
+        return null;
+    };
+
+    const tuple = c.PyTuple_New(2) orelse {
+        c.Py_DECREF(rows_obj);
+        c.Py_DECREF(cols_obj);
+        return null;
+    };
+
+    _ = c.PyTuple_SetItem(tuple, 0, rows_obj);
+    _ = c.PyTuple_SetItem(tuple, 1, cols_obj);
+
+    return tuple;
 }
 
 const matrix_to_numpy_doc =
@@ -367,13 +377,27 @@ fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
     defer c.Py_DECREF(frombuffer);
 
     // Call numpy.frombuffer with dtype='float64'
-    const dtype_str = c.PyUnicode_FromString("float64") orelse return null;
+    const dtype_str = python.create("float64") orelse return null;
     defer c.Py_DECREF(dtype_str);
 
     const flat_array = c.PyObject_CallFunctionObjArgs(frombuffer, memview, dtype_str, @as(?*c.PyObject, null)) orelse return null;
     defer c.Py_DECREF(flat_array);
 
-    const shape_tuple = c.PyTuple_Pack(2, c.PyLong_FromLong(@intCast(ptr.rows)), c.PyLong_FromLong(@intCast(ptr.cols))) orelse return null;
+    const rows_obj = python.create(ptr.rows) orelse return null;
+    const cols_obj = python.create(ptr.cols) orelse {
+        c.Py_DECREF(rows_obj);
+        return null;
+    };
+
+    const shape_tuple = c.PyTuple_New(2) orelse {
+        c.Py_DECREF(rows_obj);
+        c.Py_DECREF(cols_obj);
+        return null;
+    };
+
+    _ = c.PyTuple_SetItem(shape_tuple, 0, rows_obj);
+    _ = c.PyTuple_SetItem(shape_tuple, 1, cols_obj);
+
     defer c.Py_DECREF(shape_tuple);
 
     return python.callMethodBorrowingArgs(flat_array, "reshape", shape_tuple);
@@ -521,12 +545,8 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
         const row_obj = c.PyTuple_GetItem(key, 0);
         const col_obj = c.PyTuple_GetItem(key, 1);
 
-        const row = c.PyLong_AsLong(row_obj);
-        const col = c.PyLong_AsLong(col_obj);
-
-        if (c.PyErr_Occurred() != null) {
-            return null;
-        }
+        const row = python.parse(c_long, row_obj) catch return null;
+        const col = python.parse(c_long, col_obj) catch return null;
 
         // Handle negative indices
         const actual_row: usize = if (row < 0)
@@ -546,7 +566,7 @@ fn matrix_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.Py
         }
 
         const value = ptr.at(actual_row, actual_col).*;
-        return c.PyFloat_FromDouble(value);
+        return python.create(value);
     }
 
     python.setTypeError("tuple of two integers", key);
@@ -567,12 +587,8 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
         const row_obj = c.PyTuple_GetItem(key, 0);
         const col_obj = c.PyTuple_GetItem(key, 1);
 
-        const row = c.PyLong_AsLong(row_obj);
-        const col = c.PyLong_AsLong(col_obj);
-
-        if (c.PyErr_Occurred() != null) {
-            return -1;
-        }
+        const row = python.parse(c_long, row_obj) catch return -1;
+        const col = python.parse(c_long, col_obj) catch return -1;
 
         // Handle negative indices
         const actual_row: usize = if (row < 0)
@@ -592,10 +608,7 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
         }
 
         // Get the value as a float
-        const val = c.PyFloat_AsDouble(value);
-        if (c.PyErr_Occurred() != null) {
-            return -1;
-        }
+        const val = python.parse(f64, value) catch return -1;
 
         ptr.at(actual_row, actual_col).* = val;
         return 0;
@@ -632,27 +645,26 @@ fn dispatchMatrixOp(
     }
 
     if (left_is_mat) {
-        const scalar = c.PyFloat_AsDouble(right);
-        if (c.PyErr_Occurred() == null) {
+        if (python.parse(f64, right)) |scalar| {
             const left_ptr = python.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
             return matrixToObject(mat_scalar_op(left_ptr, scalar));
+        } else |_| {
+            python.clearError();
         }
-        c.PyErr_Clear();
     }
 
     if (right_is_mat) {
         if (scalar_mat_op) |op| {
-            const scalar = c.PyFloat_AsDouble(left);
-            if (c.PyErr_Occurred() == null) {
+            if (python.parse(f64, left)) |scalar| {
                 const right_ptr = python.unwrap(MatrixObject, "matrix_ptr", right, "Matrix") orelse return null;
                 return matrixToObject(op(scalar, right_ptr));
+            } else |_| {
+                python.clearError();
             }
-            c.PyErr_Clear();
         }
     }
 
-    c.Py_INCREF(c.Py_NotImplemented());
-    return c.Py_NotImplemented();
+    return python.notImplemented();
 }
 
 fn op_add(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
@@ -701,8 +713,7 @@ fn matrix_matmul(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObj
     if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) != 1 or
         c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) != 1)
     {
-        c.Py_INCREF(c.Py_NotImplemented());
-        return c.Py_NotImplemented();
+        return python.notImplemented();
     }
 
     const self_ptr = python.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
@@ -714,15 +725,10 @@ fn matrix_matmul(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObj
 
 fn matrix_truediv(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) != 1) {
-        c.Py_INCREF(c.Py_NotImplemented());
-        return c.Py_NotImplemented();
+        return python.notImplemented();
     }
 
-    const scalar = c.PyFloat_AsDouble(right);
-    if (c.PyErr_Occurred() != null) {
-        c.Py_INCREF(c.Py_NotImplemented());
-        return c.Py_NotImplemented();
-    }
+    const scalar = python.parse(f64, right) catch return python.notImplemented();
 
     if (scalar == 0.0) {
         c.PyErr_SetString(c.PyExc_ZeroDivisionError, "Cannot divide matrix by zero");
@@ -816,7 +822,7 @@ fn matrixDimensionGetter(comptime dim: enum { rows, cols }) *const anyopaque {
                 .rows => ptr.rows,
                 .cols => ptr.cols,
             };
-            return c.PyLong_FromLong(@intCast(value));
+            return python.create(value);
         }
     };
     return @ptrCast(&Gen.get);
@@ -962,7 +968,7 @@ fn matrix_sum_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.sum();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_mean_doc =
@@ -977,7 +983,7 @@ fn matrix_mean_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.mean();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_min_doc =
@@ -992,7 +998,7 @@ fn matrix_min_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.min();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_max_doc =
@@ -1007,7 +1013,7 @@ fn matrix_max_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.max();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_trace_doc =
@@ -1030,7 +1036,7 @@ fn matrix_trace_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) 
     }
 
     const result = ptr.trace();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_identity_doc =
@@ -1192,7 +1198,7 @@ fn matrix_determinant_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_gram_doc =
@@ -1235,7 +1241,7 @@ const matrix_frobenius_norm_doc =
 fn matrix_frobenius_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    return c.PyFloat_FromDouble(ptr.frobeniusNorm());
+    return python.create(ptr.frobeniusNorm());
 }
 
 const matrix_l1_norm_doc =
@@ -1248,7 +1254,7 @@ const matrix_l1_norm_doc =
 fn matrix_l1_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    return c.PyFloat_FromDouble(ptr.l1Norm());
+    return python.create(ptr.l1Norm());
 }
 
 const matrix_max_norm_doc =
@@ -1329,7 +1335,7 @@ fn matrix_schatten_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds:
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_induced_norm_doc =
@@ -1359,7 +1365,7 @@ fn matrix_induced_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_nuclear_norm_doc =
@@ -1378,7 +1384,7 @@ fn matrix_nuclear_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callco
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_spectral_norm_doc =
@@ -1397,7 +1403,7 @@ fn matrix_spectral_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callc
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_variance_doc =
@@ -1412,7 +1418,7 @@ fn matrix_variance_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.variance();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_std_doc =
@@ -1427,7 +1433,7 @@ fn matrix_std_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const result = ptr.stdDev();
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_pow_doc =
@@ -1624,7 +1630,7 @@ fn matrix_rank_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
         return null;
     };
 
-    return c.PyLong_FromSize_t(result);
+    return python.create(result);
 }
 
 const matrix_pinv_doc =

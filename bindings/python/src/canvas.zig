@@ -306,9 +306,9 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             .rgba => "Rgba",
         };
         const formatted = std.fmt.bufPrintZ(&buffer, "Canvas({d}x{d}, dtype={s})", .{ canvas.rows(), canvas.cols(), dtype_str }) catch return null;
-        return c.PyUnicode_FromString(formatted.ptr);
+        return python.create(formatted);
     } else {
-        return c.PyUnicode_FromString("Canvas(uninitialized)");
+        return python.create("Canvas(uninitialized)");
     }
 }
 
@@ -879,13 +879,13 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 fn canvas_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
-    return c.PyLong_FromLong(@intCast(canvas.rows()));
+    return python.create(canvas.rows());
 }
 
 fn canvas_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
-    return c.PyLong_FromLong(@intCast(canvas.cols()));
+    return python.create(canvas.cols());
 }
 
 fn canvas_get_image(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {

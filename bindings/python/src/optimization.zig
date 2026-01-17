@@ -71,12 +71,12 @@ fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.assignment_ptr) |ptr| {
         var buffer: [256]u8 = undefined;
         const slice = std.fmt.bufPrintZ(&buffer, "Assignment(assignments={} items, total_cost={d:.2})", .{ ptr.assignments.len, ptr.total_cost }) catch {
-            return c.PyUnicode_FromString("Assignment(error formatting)");
+            return python.create("Assignment(error formatting)");
         };
-        return c.PyUnicode_FromString(slice.ptr);
+        return python.create(slice);
     }
 
-    return c.PyUnicode_FromString("Assignment(uninitialized)");
+    return python.create("Assignment(uninitialized)");
 }
 
 // Property getters
@@ -91,7 +91,7 @@ fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
 
         for (ptr.assignments, 0..) |assignment, i| {
             const item = if (assignment) |col|
-                c.PyLong_FromLong(@intCast(col))
+                python.create(col)
             else
                 python.none();
 
@@ -115,7 +115,7 @@ fn assignment_get_total_cost(self_obj: ?*c.PyObject, closure: ?*anyopaque) callc
     const self = python.safeCast(AssignmentObject, self_obj);
 
     if (self.assignment_ptr) |ptr| {
-        return c.PyFloat_FromDouble(ptr.total_cost);
+        return python.create(ptr.total_cost);
     }
 
     python.setValueError("Assignment not initialized", .{});

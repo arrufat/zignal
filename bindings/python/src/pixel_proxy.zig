@@ -1,14 +1,16 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const Rgb = zignal.Rgb(u8);
-const Rgba = zignal.Rgba(u8);
 
+const color = @import("color.zig");
 const color_registry = @import("color_registry.zig");
 const color_utils = @import("color_utils.zig");
 const ImageObject = @import("image.zig").ImageObject;
 const python = @import("python.zig");
 const c = python.c;
+
+const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
 
 // Proxy object layouts
 const RgbPixelProxy = extern struct {
@@ -33,8 +35,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
         fn parentFromObj(self_obj: ?*c.PyObject) ?*ImageObject {
             const self: *ProxyObjectType = @ptrCast(self_obj.?);
-            if (self.parent) |p| return @ptrCast(p);
-            return null;
+            return if (self.parent) |p| @ptrCast(p) else null;
         }
 
         // Helper function to delegate method calls to the underlying color object
@@ -52,40 +53,32 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
         fn dealloc(self_obj: [*c]c.PyObject) callconv(.c) void {
             const self: *ProxyObjectType = @ptrCast(self_obj);
             if (self.parent) |parent| c.Py_DECREF(parent);
-            c.PyObject_Free(@ptrCast(self));
+            c.PyObject_Free(self);
         }
 
         fn richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
             if (op != c.Py_EQ and op != c.Py_NE) {
-                const not_impl = c.Py_NotImplemented();
-                c.Py_INCREF(not_impl);
-                return not_impl;
+                return python.notImplemented();
             }
-            const parent = Self.parentFromObj(@ptrCast(self_obj));
+            const parent = Self.parentFromObj(self_obj);
             if (parent == null or parent.?.py_image == null) {
-                return @ptrCast(python.create(op != c.Py_EQ));
+                return python.create(op != c.Py_EQ);
             }
             const proxy: *ProxyObjectType = @ptrCast(self_obj);
             const px = parent.?.py_image.?.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
 
             var equal = false;
             const other: ?*c.PyObject = @ptrCast(other_obj);
-            const parsed = color_utils.parseColor(Rgba, other) catch null;
-            if (parsed) |rgba| {
-                if (std.meta.eql(ColorType, Rgb)) {
-                    equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and rgba.a == 255);
-                } else if (std.meta.eql(ColorType, Rgba)) {
-                    equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and px.a == rgba.a);
-                } else {
-                    equal = (px == rgba);
-                }
+            const rgba = color_utils.parseColor(Rgba, other) catch return python.notImplemented();
+
+            if (std.meta.eql(ColorType, Rgb)) {
+                equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and rgba.a == 255);
+            } else if (std.meta.eql(ColorType, Rgba)) {
+                equal = (px.r == rgba.r and px.g == rgba.g and px.b == rgba.b and px.a == rgba.a);
             } else {
-                if (c.PyErr_Occurred() != null) c.PyErr_Clear();
-                const not_impl = c.Py_NotImplemented();
-                c.Py_INCREF(not_impl);
-                return not_impl;
+                equal = (px == rgba);
             }
-            return if (op == c.Py_EQ) @ptrCast(python.create(equal)) else @ptrCast(python.create(!equal));
+            return if (op == c.Py_EQ) python.create(equal) else python.create(!equal);
         }
 
         fn getField(comptime index: usize) fn (?*c.PyObject, ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -207,19 +200,17 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
                 // Return the color as the appropriate type
                 if (ColorType == Rgb) {
-                    const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
+                    const obj = c.PyType_GenericNew(&color.rgb, null, null);
                     if (obj == null) return null;
-                    const py_obj: *color_mod.RgbBinding.PyObjectType = @ptrCast(obj);
+                    const py_obj: *color.RgbBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = rgba.r;
                     py_obj.field1 = rgba.g;
                     py_obj.field2 = rgba.b;
                     return obj;
                 } else {
-                    const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
+                    const obj = c.PyType_GenericNew(&color.rgba, null, null);
                     if (obj == null) return null;
-                    const py_obj: *color_mod.RgbaBinding.PyObjectType = @ptrCast(obj);
+                    const py_obj: *color.RgbaBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = rgba.r;
                     py_obj.field1 = rgba.g;
                     py_obj.field2 = rgba.b;
@@ -279,19 +270,17 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
                 // Return the new blended color as an Rgb or Rgba object
                 if (ColorType == Rgb) {
-                    const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgb), null, null);
+                    const obj = c.PyType_GenericNew(&color.rgb, null, null);
                     if (obj == null) return null;
-                    const py_obj: *color_mod.RgbBinding.PyObjectType = @ptrCast(obj);
+                    const py_obj: *color.RgbBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = blended.r;
                     py_obj.field1 = blended.g;
                     py_obj.field2 = blended.b;
                     return obj;
                 } else {
-                    const color_mod = @import("color.zig");
-                    const obj = c.PyType_GenericNew(@ptrCast(&color_mod.rgba), null, null);
+                    const obj = c.PyType_GenericNew(&color.rgba, null, null);
                     if (obj == null) return null;
-                    const py_obj: *color_mod.RgbaBinding.PyObjectType = @ptrCast(obj);
+                    const py_obj: *color.RgbaBinding.PyObjectType = @ptrCast(obj);
                     py_obj.field0 = blended.r;
                     py_obj.field1 = blended.g;
                     py_obj.field2 = blended.b;
@@ -390,7 +379,7 @@ pub var RgbaPixelProxyType = python.buildTypeObject(.{
 });
 
 pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) ?*c.PyObject {
-    const proxy_obj = c.PyType_GenericAlloc(@ptrCast(&RgbPixelProxyType), 0);
+    const proxy_obj = c.PyType_GenericAlloc(&RgbPixelProxyType, 0);
     if (proxy_obj == null) return null;
     const proxy: *RgbPixelProxy = @ptrCast(proxy_obj);
     proxy.parent = parent;
@@ -401,7 +390,7 @@ pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) 
 }
 
 pub fn makeRgbaProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) ?*c.PyObject {
-    const proxy_obj = c.PyType_GenericAlloc(@ptrCast(&RgbaPixelProxyType), 0);
+    const proxy_obj = c.PyType_GenericAlloc(&RgbaPixelProxyType, 0);
     if (proxy_obj == null) return null;
     const proxy: *RgbaPixelProxy = @ptrCast(proxy_obj);
     proxy.parent = parent;

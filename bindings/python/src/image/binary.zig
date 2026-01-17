@@ -111,7 +111,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     };
 
     _ = c.PyTuple_SetItem(tuple, 0, @ptrCast(binary_obj));
-    const threshold_obj = c.PyLong_FromLong(@intCast(threshold));
+    const threshold_obj = python.create(threshold);
     if (threshold_obj == null) {
         c.Py_DECREF(tuple);
         return null;

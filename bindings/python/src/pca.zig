@@ -238,10 +238,7 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     // Convert Python list to f64 array
     for (0..@intCast(list_size)) |i| {
         const item = c.PyList_GetItem(list_obj, @intCast(i));
-        const value = c.PyFloat_AsDouble(item);
-        if (c.PyErr_Occurred() != null) {
-            return null;
-        }
+        const value = python.parse(f64, item) catch return null;
         vector[i] = value;
     }
 
@@ -419,10 +416,7 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     // Convert Python list to f64 array
     for (0..@intCast(list_size)) |i| {
         const item = c.PyList_GetItem(list_obj, @intCast(i));
-        const value = c.PyFloat_AsDouble(item);
-        if (c.PyErr_Occurred() != null) {
-            return null;
-        }
+        const value = python.parse(f64, item) catch return null;
         coeffs[i] = value;
     }
 
@@ -551,7 +545,7 @@ fn pca_get_num_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv
     }
 
     const pca = self.pca_ptr.?;
-    return c.PyLong_FromSize_t(pca.num_components);
+    return python.create(pca.num_components);
 }
 
 fn pca_get_dim(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -569,7 +563,7 @@ fn pca_get_dim(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.Py
         return null;
     }
 
-    return c.PyLong_FromSize_t(pca.dim);
+    return python.create(pca.dim);
 }
 
 // Method definitions

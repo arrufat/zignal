@@ -1,7 +1,10 @@
 const std = @import("std");
-const c = @import("python.zig").c;
-const zignal = @import("zignal");
 const BuiltinEnum = std.builtin.Type.Enum;
+
+const zignal = @import("zignal");
+
+const python = @import("python.zig");
+const c = python.c;
 
 /// Internal: extract enum type info from a Zig type that is either enum or union(enum)
 fn getEnumInfo(comptime E: type) BuiltinEnum {
@@ -45,21 +48,21 @@ pub fn registerEnum(
         while (i < n) : (i += 1) up[i] = std.ascii.toUpper(field.name[i]);
         up[n] = 0; // NUL terminate
 
-        const py_val = c.PyLong_FromLong(@intCast(field.value)) orelse return error.ValueCreationFailed;
+        const py_val = python.create(field.value) orelse return error.ValueCreationFailed;
         defer c.Py_DECREF(py_val);
         if (c.PyDict_SetItemString(values, @ptrCast(&up[0]), py_val) < 0) return error.DictSetFailed;
     }
 
     // Create IntEnum(Name, values) using simple type name
     const name = zignal.meta.getSimpleTypeName(E);
-    const name_uni = c.PyUnicode_FromStringAndSize(name.ptr, @intCast(name.len)) orelse return error.TupleCreationFailed;
+    const name_uni = python.create(name) orelse return error.TupleCreationFailed;
     defer c.Py_DECREF(name_uni);
     const args = c.PyTuple_Pack(2, name_uni, values) orelse return error.TupleCreationFailed;
     defer c.Py_DECREF(args);
     const enum_obj = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
 
     // Set docstring
-    const doc_str = c.PyUnicode_FromStringAndSize(doc.ptr, @intCast(doc.len)) orelse {
+    const doc_str = python.create(doc) orelse {
         c.Py_DECREF(enum_obj);
         return error.DocStringFailed;
     };
@@ -71,7 +74,7 @@ pub fn registerEnum(
     c.Py_DECREF(doc_str);
 
     // Set __module__ to top-level package for docs
-    const module_name = c.PyUnicode_FromString("zignal") orelse {
+    const module_name = python.create("zignal") orelse {
         c.Py_DECREF(enum_obj);
         return error.ModuleNameFailed;
     };

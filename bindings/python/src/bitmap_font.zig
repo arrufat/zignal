@@ -44,12 +44,12 @@ fn bitmap_font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             font.char_height,
         }) catch {
             // Fall back to simple representation if formatting fails
-            return c.PyUnicode_FromString("BitmapFont()");
+            return python.create("BitmapFont()");
         };
-        return c.PyUnicode_FromString(repr_str.ptr);
+        return python.create(repr_str);
     }
 
-    return c.PyUnicode_FromString("BitmapFont()");
+    return python.create("BitmapFont()");
 }
 
 // Class method: load
@@ -152,15 +152,15 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 }
 
 fn fontNameToPyObject(font: *BitmapFont) ?*c.PyObject {
-    return c.PyUnicode_FromStringAndSize(font.name.ptr, @intCast(font.name.len));
+    return python.create(font.name);
 }
 
 fn fontWidthToPyObject(font: *BitmapFont) ?*c.PyObject {
-    return c.PyLong_FromLong(font.char_width);
+    return python.create(font.char_width);
 }
 
 fn fontHeightToPyObject(font: *BitmapFont) ?*c.PyObject {
-    return c.PyLong_FromLong(font.char_height);
+    return python.create(font.char_height);
 }
 
 // Methods metadata (used for both C API and stub generation)
