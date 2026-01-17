@@ -8,19 +8,6 @@ const allocator = python.ctx.allocator;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-fn parsePNormParam(p_obj_opt: ?*c.PyObject) ?f64 {
-    if (p_obj_opt) |p_obj| {
-        if (p_obj == c.Py_None()) return 2.0;
-        const value = c.PyFloat_AsDouble(p_obj);
-        if (c.PyErr_Occurred() != null) {
-            python.setTypeError("float for p", p_obj);
-            return null;
-        }
-        return value;
-    }
-    return 2.0;
-}
-
 const matrix_class_doc =
     \\Matrix for numerical computations with f64 (float64) values.
     \\
@@ -1274,7 +1261,7 @@ const matrix_max_norm_doc =
 fn matrix_max_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    return c.PyFloat_FromDouble(ptr.maxNorm());
+    return python.create(ptr.maxNorm());
 }
 
 const matrix_element_norm_doc =
@@ -1288,30 +1275,27 @@ const matrix_element_norm_doc =
 ;
 
 fn matrix_element_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        p: ?*c.PyObject = null,
-    };
-    var params: Params = undefined;
+    const Params = struct { p: f64 = 2 };
+    var params: Params = .{};
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    const p = parsePNormParam(params.p) orelse return null;
-    if (!std.math.isFinite(p)) {
-        if (!std.math.isInf(p)) {
+    if (!std.math.isFinite(params.p)) {
+        if (!std.math.isInf(params.p)) {
             python.setValueError("Element norm exponent must be finite or ±inf", .{});
             return null;
         }
-    } else if (p < 0) {
+    } else if (params.p < 0) {
         python.setValueError("Element norm requires p >= 0 (or ±inf)", .{});
         return null;
     }
 
-    const result = ptr.elementNorm(p) catch |err| {
+    const result = ptr.elementNorm(params.p) catch |err| {
         python.mapZigError(err, "element norm");
         return null;
     };
 
-    return c.PyFloat_FromDouble(result);
+    return python.create(result);
 }
 
 const matrix_schatten_norm_doc =
@@ -1325,25 +1309,22 @@ const matrix_schatten_norm_doc =
 ;
 
 fn matrix_schatten_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        p: ?*c.PyObject = null,
-    };
-    var params: Params = undefined;
+    const Params = struct { p: f64 = 2 };
+    var params: Params = .{};
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    const p = parsePNormParam(params.p) orelse return null;
-    if (!std.math.isFinite(p)) {
-        if (!(std.math.isInf(p) and p > 0)) {
+    if (!std.math.isFinite(params.p)) {
+        if (!(std.math.isInf(params.p) and params.p > 0)) {
             python.setValueError("Schatten norm exponent must be finite ≥ 1 or +inf", .{});
             return null;
         }
-    } else if (p < 1) {
+    } else if (params.p < 1) {
         python.setValueError("Schatten norm requires p >= 1", .{});
         return null;
     }
 
-    const result = ptr.schattenNorm(allocator, p) catch |err| {
+    const result = ptr.schattenNorm(allocator, params.p) catch |err| {
         python.mapZigError(err, "schatten norm");
         return null;
     };
@@ -1362,21 +1343,18 @@ const matrix_induced_norm_doc =
 ;
 
 fn matrix_induced_norm_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        p: ?*c.PyObject = null,
-    };
-    var params: Params = undefined;
+    const Params = struct { p: f64 = 2 };
+    var params: Params = .{};
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
-    const p = parsePNormParam(params.p) orelse return null;
-    const valid = (p == 1) or (p == 2) or (std.math.isInf(p) and p > 0);
+    const valid = (params.p == 1) or (params.p == 2) or (std.math.isInf(params.p) and params.p > 0);
     if (!valid) {
         python.setValueError("Induced norm supports p = 1, 2, or +inf", .{});
         return null;
     }
 
-    const result = ptr.inducedNorm(allocator, p) catch |err| {
+    const result = ptr.inducedNorm(allocator, params.p) catch |err| {
         python.mapZigError(err, "induced norm");
         return null;
     };
@@ -1486,9 +1464,7 @@ const matrix_row_doc =
 ;
 
 fn matrix_row_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        idx: c_int,
-    };
+    const Params = struct { idx: c_int };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
@@ -1519,9 +1495,7 @@ const matrix_col_doc =
 ;
 
 fn matrix_col_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        idx: c_int,
-    };
+    const Params = struct { idx: c_int };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
@@ -1676,10 +1650,8 @@ const matrix_pinv_doc =
 ;
 
 fn matrix_pinv_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const Params = struct {
-        tolerance: ?f64 = null,
-    };
-    var params: Params = undefined;
+    const Params = struct { tolerance: ?f64 = null };
+    var params: Params = .{};
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
@@ -1883,10 +1855,10 @@ const matrix_svd_doc =
 
 fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const Params = struct {
-        full_matrices: c_int = 1, // True by default
-        compute_uv: c_int = 1, // True by default
+        full_matrices: c_int = 1,
+        compute_uv: c_int = 1,
     };
-    var params: Params = undefined;
+    var params: Params = .{};
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
@@ -2147,7 +2119,7 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&matrix_element_norm_method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = matrix_element_norm_doc,
-        .params = "self, p: float | None = None",
+        .params = "self, p: float = 2",
         .returns = "float",
     },
     .{
@@ -2155,7 +2127,7 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&matrix_schatten_norm_method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = matrix_schatten_norm_doc,
-        .params = "self, p: float | None = None",
+        .params = "self, p: float = 2",
         .returns = "float",
     },
     .{
@@ -2163,7 +2135,7 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
         .meth = @ptrCast(&matrix_induced_norm_method),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = matrix_induced_norm_doc,
-        .params = "self, p: float | None = None",
+        .params = "self, p: float = 2",
         .returns = "float",
     },
     .{
