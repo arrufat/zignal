@@ -737,7 +737,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         }
     }.apply);
 
-    return c.PyFloat_FromDouble(psnr_value);
+    return python.create(psnr_value);
 }
 
 // ============================================================================
@@ -814,7 +814,7 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         }
     }.apply);
 
-    return if (ssim_value) |val| c.PyFloat_FromDouble(val) else null;
+    return if (ssim_value) |val| python.create(val) else null;
 }
 
 // ============================================================================
@@ -886,7 +886,7 @@ pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
         }
     }.apply);
 
-    return if (error_value) |val| c.PyFloat_FromDouble(val) else null;
+    return if (error_value) |val| python.create(val) else null;
 }
 
 // ============================================================================
@@ -897,14 +897,14 @@ pub fn image_get_rows(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
     _ = closure;
     const self = python.safeCast(ImageObject, self_obj);
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
-    return c.PyLong_FromSize_t(self.py_image.?.rows());
+    return python.create(self.py_image.?.rows());
 }
 
 pub fn image_get_cols(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(ImageObject, self_obj);
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
-    return c.PyLong_FromSize_t(self.py_image.?.cols());
+    return python.create(self.py_image.?.cols());
 }
 
 pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {

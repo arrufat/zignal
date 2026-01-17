@@ -341,9 +341,9 @@ fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             .rgba => "Rgba",
         };
         const formatted = std.fmt.bufPrintZ(&buffer, "Image({d}x{d}, dtype={s})", .{ pimg.rows(), pimg.cols(), fmt_name }) catch return null;
-        return c.PyUnicode_FromString(formatted.ptr);
+        return python.create(formatted);
     } else {
-        return c.PyUnicode_FromString("Image(uninitialized)");
+        return python.create("Image(uninitialized)");
     }
 }
 
@@ -367,17 +367,8 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
     const row_obj = coords[0];
     const col_obj = coords[1];
 
-    const row = c.PyLong_AsLong(row_obj);
-    if (row == -1 and c.PyErr_Occurred() != null) {
-        python.setTypeError("integer", row_obj);
-        return null;
-    }
-
-    const col = c.PyLong_AsLong(col_obj);
-    if (col == -1 and c.PyErr_Occurred() != null) {
-        python.setTypeError("integer", col_obj);
-        return null;
-    }
+    const row = python.parse(c_long, row_obj) catch return null;
+    const col = python.parse(c_long, col_obj) catch return null;
 
     // Bounds checking
     if (pimg_opt) |pimg| {
@@ -397,7 +388,7 @@ fn image_getitem(self_obj: ?*c.PyObject, key: ?*c.PyObject) callconv(.c) ?*c.PyO
     // Variant-specific pixel return
     if (pimg_opt) |pimg| {
         return switch (pimg.data) {
-            .gray => |img| return c.PyLong_FromLong(@intCast(img.at(@intCast(row), @intCast(col)).*)),
+            .gray => |img| return python.create(img.at(@intCast(row), @intCast(col)).*),
             .rgb => return makeRgbProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
             .rgba => return makeRgbaProxy(@ptrCast(self_obj), @intCast(row), @intCast(col)),
         };
@@ -479,17 +470,8 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     const row_obj = coords[0];
     const col_obj = coords[1];
 
-    const row = c.PyLong_AsLong(row_obj);
-    if (row == -1 and c.PyErr_Occurred() != null) {
-        python.setTypeError("integer", row_obj);
-        return -1;
-    }
-
-    const col = c.PyLong_AsLong(col_obj);
-    if (col == -1 and c.PyErr_Occurred() != null) {
-        python.setTypeError("integer", col_obj);
-        return -1;
-    }
+    const row = python.parse(c_long, row_obj) catch return -1;
+    const col = python.parse(c_long, col_obj) catch return -1;
 
     // Bounds checking
     if (pimg_opt) |pimg| {
@@ -507,10 +489,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     }
 
     // Parse the color value using parseColorTo
-    const color = color_utils.parseColor(Rgba, value) catch {
-        // Error already set by parseColorTo
-        return -1;
-    };
+    const color = color_utils.parseColor(Rgba, value) catch return -1;
 
     // Set the pixel value
     if (pimg_opt) |pimg| {
@@ -535,17 +514,13 @@ fn image_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
     // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
     if (op != c.Py_EQ and op != c.Py_NE) {
-        const not_impl = c.Py_NotImplemented();
-        c.Py_INCREF(not_impl);
-        return not_impl;
+        return python.notImplemented();
     }
 
     // Check if other is an Image object; if not, defer using NotImplemented
     const image_type: [*c]c.PyTypeObject = @ptrCast(&ImageType);
     if (c.PyObject_TypeCheck(other_obj, image_type) == 0) {
-        const not_impl = c.Py_NotImplemented();
-        c.Py_INCREF(not_impl);
-        return not_impl;
+        return python.notImplemented();
     }
 
     // Cast to ImageObject
@@ -555,7 +530,7 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     // Variant-aware equality: compare size and per-pixel RGBA values
     if (self.py_image == null or other.py_image == null) {
         // If either is uninitialized, they are equal only for != case
-        return @ptrCast(python.create(op != c.Py_EQ));
+        return python.create(op != c.Py_EQ);
     }
     // Store in local variables after null check to avoid repeated unwrapping
     const self_img = self.py_image.?;
@@ -564,7 +539,7 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     const dims_other = .{ other_img.rows(), other_img.cols() };
 
     if (dims_self[0] != dims_other[0] or dims_self[1] != dims_other[1]) {
-        return @ptrCast(python.create(op != c.Py_EQ));
+        return python.create(op != c.Py_EQ);
     }
 
     const rows = dims_self[0];
@@ -585,9 +560,9 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     }
 
     if (op == c.Py_EQ) {
-        return @ptrCast(python.create(equal));
+        return python.create(equal);
     } else {
-        return @ptrCast(python.create(!equal));
+        return python.create(!equal);
     }
 }
 
@@ -867,7 +842,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 };
             },
         }
-        return c.PyUnicode_FromStringAndSize(buffer.items.ptr, @intCast(buffer.items.len));
+        return python.create(buffer.items);
     } else {
         python.setValueError("Image not initialized", .{});
         return null;

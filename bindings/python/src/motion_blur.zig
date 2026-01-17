@@ -87,7 +87,7 @@ fn motion_blur_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
         ) catch return null,
     };
 
-    return c.PyUnicode_FromString(str);
+    return python.create(str);
 }
 
 // ============================================================================
@@ -220,7 +220,7 @@ fn get_type(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObj
         .radial_zoom => "radial_zoom",
         .radial_spin => "radial_spin",
     };
-    return c.PyUnicode_FromString(type_str);
+    return python.create(type_str);
 }
 
 // Predicates for optional properties

@@ -152,7 +152,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     }
 
     // Add __version__ as a module attribute from build options
-    const version_str = c.PyUnicode_FromString(@ptrCast(zignal.version));
+    const version_str = python.create(zignal.version);
     if (version_str == null) {
         c.Py_DECREF(m);
         return null;

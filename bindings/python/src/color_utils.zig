@@ -139,12 +139,7 @@ fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
     if (attr == null) return null;
     defer c.Py_DECREF(attr);
 
-    const value = c.PyLong_AsLong(attr);
-    if (c.PyErr_Occurred() != null) {
-        return null;
-    }
-
-    return value;
+    return python.parse(c_long, attr) catch null;
 }
 
 /// Extract RGB values from a Python object with r,g,b attributes.
@@ -211,11 +206,7 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
 
     // Check if it's an integer (grayscale)
     if (c.PyLong_Check(color_obj) != 0) {
-        const gray_value = c.PyLong_AsLong(color_obj);
-        if (gray_value == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Gray value must be an integer");
-            return error.InvalidColor;
-        }
+        const gray_value = python.parse(c_long, color_obj) catch return error.InvalidColor;
 
         if (gray_value < 0 or gray_value > 255) {
             c.PyErr_SetString(c.PyExc_ValueError, "Gray value must be in range 0-255");
@@ -343,36 +334,20 @@ pub fn parseColorTuple(color_obj: ?*c.PyObject) !Rgba {
 
     // Get R
     const r_obj = c.PyTuple_GetItem(color_obj, 0);
-    r = c.PyLong_AsLong(r_obj);
-    if (r == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
+    r = python.parse(c_long, r_obj) catch return error.InvalidColor;
 
     // Get G
     const g_obj = c.PyTuple_GetItem(color_obj, 1);
-    g = c.PyLong_AsLong(g_obj);
-    if (g == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
+    g = python.parse(c_long, g_obj) catch return error.InvalidColor;
 
     // Get B
     const b_obj = c.PyTuple_GetItem(color_obj, 2);
-    b = c.PyLong_AsLong(b_obj);
-    if (b == -1 and c.PyErr_Occurred() != null) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-        return error.InvalidColor;
-    }
+    b = python.parse(c_long, b_obj) catch return error.InvalidColor;
 
     // Get A if present
     if (size == 4) {
         const a_obj = c.PyTuple_GetItem(color_obj, 3);
-        a = c.PyLong_AsLong(a_obj);
-        if (a == -1 and c.PyErr_Occurred() != null) {
-            c.PyErr_SetString(c.PyExc_TypeError, "Color components must be integers");
-            return error.InvalidColor;
-        }
+        a = python.parse(c_long, a_obj) catch return error.InvalidColor;
     }
 
     // Validate range

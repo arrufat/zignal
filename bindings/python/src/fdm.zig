@@ -42,10 +42,10 @@ fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = python.safeCast(FeatureDistributionMatchingObject, self_obj);
 
     if (self.fdm_ptr == null) {
-        return c.PyUnicode_FromString("FeatureDistributionMatching(uninitialized)");
+        return python.create("FeatureDistributionMatching(uninitialized)");
     }
 
-    return c.PyUnicode_FromString("FeatureDistributionMatching()");
+    return python.create("FeatureDistributionMatching()");
 }
 
 // set_target method

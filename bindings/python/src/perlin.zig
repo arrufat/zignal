@@ -57,7 +57,7 @@ fn perlin_function(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     };
 
     const value = zignal.perlin(f64, params.x, params.y, params.z, options);
-    return c.PyFloat_FromDouble(value);
+    return python.create(value);
 }
 
 pub const perlin_functions_metadata = [_]stub_metadata.FunctionWithMetadata{

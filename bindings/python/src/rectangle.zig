@@ -54,7 +54,7 @@ fn rectangle_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
     var buffer: [128]u8 = undefined;
     const formatted = std.fmt.bufPrintZ(&buffer, "Rectangle({d:.2}, {d:.2}, {d:.2}, {d:.2})", .{ self.left, self.top, self.right, self.bottom }) catch return null;
-    return c.PyUnicode_FromString(formatted.ptr);
+    return python.create(formatted);
 }
 
 // Class method: init_center

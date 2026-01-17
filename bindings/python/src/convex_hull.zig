@@ -54,7 +54,7 @@ const convex_hull_dealloc = python.genericDealloc(ConvexHullObject, convexHullDe
 
 fn convex_hull_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = self_obj;
-    return c.PyUnicode_FromString("ConvexHull()");
+    return python.create("ConvexHull()");
 }
 
 /// Helper to convert a slice of Point2F to a Python list of tuples.
@@ -64,13 +64,13 @@ fn convertHullToPython(points: []const Point2F) ?*c.PyObject {
             const tuple = c.PyTuple_New(2);
             if (tuple == null) return null;
 
-            const x_obj = c.PyFloat_FromDouble(point.x());
+            const x_obj = python.create(point.x());
             if (x_obj == null) {
                 c.Py_DECREF(tuple);
                 return null;
             }
 
-            const y_obj = c.PyFloat_FromDouble(point.y());
+            const y_obj = python.create(point.y());
             if (y_obj == null) {
                 c.Py_DECREF(x_obj);
                 c.Py_DECREF(tuple);

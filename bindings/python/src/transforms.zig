@@ -109,7 +109,7 @@ fn similarity_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "SimilarityTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
 
-    return c.PyUnicode_FromString(str.ptr);
+    return python.create(str);
 }
 
 // Property getters for matrix and bias
@@ -238,7 +238,7 @@ fn affine_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var buffer: [512]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "AffineTransform(matrix=[[{d:.6}, {d:.6}], [{d:.6}, {d:.6}]], bias=({d:.6}, {d:.6}))", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[1][0], self.matrix[1][1], self.bias[0], self.bias[1] }) catch return null;
 
-    return c.PyUnicode_FromString(str.ptr);
+    return python.create(str);
 }
 
 // Property getters for matrix and bias
@@ -412,7 +412,7 @@ fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var buffer: [1024]u8 = undefined;
     const str = std.fmt.bufPrintZ(&buffer, "ProjectiveTransform(matrix=[[{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}], [{d:.6}, {d:.6}, {d:.6}]])", .{ self.matrix[0][0], self.matrix[0][1], self.matrix[0][2], self.matrix[1][0], self.matrix[1][1], self.matrix[1][2], self.matrix[2][0], self.matrix[2][1], self.matrix[2][2] }) catch return null;
 
-    return c.PyUnicode_FromString(str.ptr);
+    return python.create(str);
 }
 
 // Property getter for matrix
