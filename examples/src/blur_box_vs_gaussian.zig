@@ -77,31 +77,24 @@ fn boxesForGaussian(sigma: f32, passes: usize, buffer: []usize) ![]usize {
     return buffer[0..passes];
 }
 
-pub fn main(init: std.process.Init.Minimal) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const io = std.Io.Threaded.global_single_threaded.ioBasic();
-    const args = try init.args.toSlice(allocator);
-    defer allocator.free(args);
-    if (args.len < 2) {
-        std.debug.print("Provide an image path and an optional sigma (default: 1.0)\n", .{});
-        return;
-    }
+pub fn main(init: std.process.Init) !void {
+    var args = try init.minimal.args.iterateAllocator(init.gpa);
+    defer args.deinit();
+    _ = args.skip();
 
-    var original: Image = try .load(io, allocator, args[1]);
-    defer original.deinit(allocator);
-    const sigma: f32 = if (args.len > 2) std.fmt.parseFloat(f32, args[2]) catch 1.0 else 1.0;
+    var original: Image = try .load(init.io, init.gpa, if (args.next()) |arg| arg else "../assets/liza.jpg");
+    defer original.deinit(init.gpa);
+    const sigma: f32 = if (args.next()) |arg| std.fmt.parseFloat(f32, arg) catch 1.0 else 1.0;
 
-    try original.save(io, allocator, "blur_original.png");
+    try original.save(init.io, init.gpa, "blur_original.png");
 
-    var gaussian: Image = try .initLike(allocator, original);
-    defer gaussian.deinit(allocator);
+    var gaussian: Image = try .initLike(init.gpa, original);
+    defer gaussian.deinit(init.gpa);
 
     var timer = try std.time.Timer.start();
-    try original.gaussianBlur(allocator, sigma, gaussian);
+    try original.gaussianBlur(init.gpa, sigma, gaussian);
     const gaussian_ns = timer.read();
-    try gaussian.save(io, allocator, "blur_gaussian.png");
+    try gaussian.save(init.io, init.gpa, "blur_gaussian.png");
 
     std.debug.print("Gaussian blur sigma={d:.1} took {d:.3} ms\n\n", .{ sigma, @as(f64, @floatFromInt(gaussian_ns)) / std.time.ns_per_ms });
     std.debug.print("Box blur approximations using formula: w_ideal = sqrt((12*σ²/n) + 1)\n", .{});
@@ -116,10 +109,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     });
     std.debug.print("{s:-<6}-+-{s:-<20}-+-{s:-<13}-+-{s:-<9}-+-{s:-<9}-+-{s:-<7}-+-{s:-<10}\n", .{ "", "", "", "", "", "", "" });
 
-    var temp_a: Image = try .initLike(allocator, original);
-    defer temp_a.deinit(allocator);
-    var temp_b: Image = try .initLike(allocator, original);
-    defer temp_b.deinit(allocator);
+    var temp_a: Image = try .initLike(init.gpa, original);
+    defer temp_a.deinit(init.gpa);
+    var temp_b: Image = try .initLike(init.gpa, original);
+    defer temp_b.deinit(init.gpa);
 
     const pass_counts = [_]usize{ 1, 2, 3, 4, 5 };
 
@@ -139,7 +132,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             const radius = (width - 1) / 2;
             const dst = scratch[scratch_index];
             scratch_index = (scratch_index + 1) % scratch.len;
-            try source.boxBlur(allocator, radius, dst.*);
+            try source.boxBlur(init.gpa, radius, dst.*);
             source = dst;
             last_result = dst;
         }
@@ -156,7 +149,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
         var name_buf: [48]u8 = undefined;
         const output_name = try std.fmt.bufPrint(&name_buf, "blur_box_pass_{d}.png", .{passes});
-        try last_result.save(io, allocator, output_name);
+        try last_result.save(init.io, init.gpa, output_name);
 
         std.debug.print(
             "{d:>6} | {s:>20} | {d:>13.3} | {d:>8.2}x | {d:>9.2} | {d:>7.4} | {d:>8.2}%\n",
