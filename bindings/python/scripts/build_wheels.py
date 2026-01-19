@@ -111,7 +111,9 @@ def get_current_version() -> str:
     return "unknown"
 
 
-def run_command(cmd: List[str], cwd: Path = None, env: dict = None) -> subprocess.CompletedProcess:
+def run_command(
+    cmd: List[str], cwd: Path | None = None, env: dict | None = None
+) -> subprocess.CompletedProcess:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     if cwd:
@@ -214,7 +216,9 @@ def create_wheel(
         try:
             # Try to import delocate
             subprocess.run(
-                [python_exe, "-m", "delocate", "--version"], capture_output=True, check=True
+                [python_exe, "-m", "delocate", "--version"],
+                capture_output=True,
+                check=True,
             )
 
             print("Running delocate to fix macOS library dependencies...")

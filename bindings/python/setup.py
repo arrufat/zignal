@@ -110,6 +110,38 @@ class ZigBuildExt(build_ext):
             env["PYTHON_LIB_NAME"] = python_lib_name
             print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
 
+        elif sys.platform.startswith("linux"):
+            # Linux specific configuration
+            lib_dir = sysconfig.get_config_var("LIBDIR")
+            if lib_dir and Path(lib_dir).exists():
+                env["PYTHON_LIBS_DIR"] = lib_dir
+                print(f"Setting PYTHON_LIBS_DIR={lib_dir}")
+
+                # Set LD_LIBRARY_PATH to include only the trusted Python library directory.
+                # We do not inherit the existing LD_LIBRARY_PATH to prevent environment
+                # variable injection vulnerabilities (e.g., arbitrary code execution).
+                env["LD_LIBRARY_PATH"] = str(lib_dir)
+
+            # Determine library name
+            ldlibrary = sysconfig.get_config_var("LDLIBRARY")
+            if ldlibrary:
+                # LDLIBRARY is usually 'libpython3.x.so'
+                ldlibrary = ldlibrary.removeprefix("lib")
+                # Strip extensions .so, .so.1.0, etc.
+                if ".so" in ldlibrary:
+                    ldlibrary = ldlibrary.split(".so")[0]
+                elif ".a" in ldlibrary:
+                    ldlibrary = ldlibrary.split(".a")[0]
+
+                env["PYTHON_LIB_NAME"] = ldlibrary
+                print(f"Setting PYTHON_LIB_NAME={ldlibrary}")
+            else:
+                # Fallback
+                version_info = sys.version_info
+                python_lib_name = f"python{version_info.major}.{version_info.minor}{sys.abiflags}"
+                env["PYTHON_LIB_NAME"] = python_lib_name
+                print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
+
         # Build the Zig library with optimizations
         cmd = ["zig", "build", "python-bindings", f"-Doptimize={ext.zig_optimize}"]
         if ext.zig_cpu:
