@@ -107,7 +107,7 @@ def get_project_version():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "0.0.0.dev0"
 
-    if m := re.match(r"^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?", ver):
+    if m := re.match(r"^(\d+\.\d+\.\d+)(?:-([a-zA-Z]+)(?:\.(\d+))?)?", ver):
         base, pre, num = m.groups()
         if not pre:
             return base
