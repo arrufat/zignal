@@ -43,6 +43,7 @@ test = [
 dev = [
     { include-group = "test" },
     "ruff",
+    "ty",
     "pdoc",
     "setuptools>=45",
     "wheel",
