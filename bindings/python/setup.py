@@ -233,8 +233,8 @@ def get_zig_cpu():
 
 
 
-def sync_version():
-    """Sync version from Zig build system directly."""
+def get_project_version():
+    """Get version from Zig build system directly."""
     current_dir = Path(__file__).parent
     project_root = current_dir.parent.parent
 
@@ -248,9 +248,7 @@ def sync_version():
             check=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        # Gracefully ignore errors if zig is not installed or the version command fails.
-        # This allows installation from source distributions where Zig might not be present.
-        return
+        return "0.0.0.dev0"
 
     zig_version = result.stdout.strip()
 
@@ -264,31 +262,23 @@ def sync_version():
         prerelease = match.group(2)
         dev_number = match.group(3)
         if prerelease:
-            python_version = f"{base_version}.dev{dev_number or 0}"
+            normalized = prerelease.lower()
+            if re.match(r'^a(lpha)?$', normalized):
+                tag = 'a'
+            elif re.match(r'^b(eta)?$', normalized):
+                tag = 'b'
+            elif re.match(r'^(c|rc|pre|preview)$', normalized):
+                tag = 'rc'
+            else:
+                tag = '.dev'
+            return f"{base_version}{tag}{dev_number or 0}"
         else:
-            python_version = base_version
-    else:
-        python_version = zig_version
+            return base_version
 
-    # 3. Update pyproject.toml
-    pyproject_path = current_dir / "pyproject.toml"
-    if pyproject_path.exists():
-        content = pyproject_path.read_text()
-        new_content, count = re.subn(
-            r'^version\s*=\s*"[^"]*"',
-            f'version = "{python_version}"',
-            content,
-            flags=re.MULTILINE
-        )
-        if count > 0 and new_content != content:
-            pyproject_path.write_text(new_content)
-            print(f"Synchronized pyproject.toml version: {python_version}")
+    return zig_version
 
 
 if __name__ == "__main__":
-    # Ensure version is in sync with Zig before starting build
-    sync_version()
-
     # Support forcing platform name via environment variable
     # This is useful for avoiding 'universal2' tags on macOS when building for a single arch
     options = {}
@@ -296,6 +286,7 @@ if __name__ == "__main__":
         options["bdist_wheel"] = {"plat_name": os.environ.get("PLAT_NAME")}
 
     setup(
+        version=get_project_version(),
         packages=find_packages(exclude=["tests", "tests.*"]),
         ext_modules=[
             ZigExtension("zignal._zignal", get_zig_target(), get_zig_optimize(), get_zig_cpu())
