@@ -23,22 +23,17 @@ from setuptools import Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.dist import Distribution
 
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
 
 class ZigExtension(Extension):
     """Extension that will be built with Zig."""
 
-    def __init__(
-        self,
-        name: str,
-        zig_target: str = "native",
-        zig_optimize: str = "ReleaseFast",
-        zig_cpu: str = "baseline",
-    ):
-        # Initialize with dummy source to satisfy setuptools
+    def __init__(self, name: str):
         super().__init__(name, sources=[])
-        self.zig_target = zig_target
-        self.zig_optimize = zig_optimize
-        self.zig_cpu = zig_cpu
+        self.target = os.environ.get("ZIG_TARGET", "native")
+        self.optimize = os.environ.get("ZIG_OPTIMIZE", "ReleaseFast")
+        self.cpu = os.environ.get("ZIG_CPU", "baseline")
 
 
 class ZigBuildExt(build_ext):
@@ -48,165 +43,52 @@ class ZigBuildExt(build_ext):
         if not isinstance(ext, ZigExtension):
             return super().build_extension(ext)
 
-        print(
-            f"Building Zig extension with target: {ext.zig_target}, optimize: {ext.zig_optimize}"
-        )
+        env = {**os.environ, "PYTHON_INCLUDE_DIR": sysconfig.get_path("include")}
 
-        # Find the project root (where build.zig is located)
-        current_dir = Path(__file__).parent
-        project_root = current_dir.parent.parent
-
-        # Verify build.zig exists - we always build from source
-        build_zig = project_root / "build.zig"
-        if not build_zig.exists():
-            raise RuntimeError(
-                f"build.zig not found at {build_zig}. "
-                f"The Python bindings must be built from the zignal project root directory "
-                f"which contains the build.zig file and source code."
-            )
-
-        # Set up environment for Zig build to find Python headers and libraries
-        env = os.environ.copy()
-
-        # Get Python include directory
-        python_include = sysconfig.get_path("include")
-        env["PYTHON_INCLUDE_DIR"] = python_include
-        print(f"Setting PYTHON_INCLUDE_DIR={python_include}")
-
-        # On Windows and macOS, we need to provide specific Python library information
         if sys.platform == "win32":
-            # Get Python library directory (usually in libs subdirectory)
-            python_prefix = sysconfig.get_path("stdlib")  # Usually C:\Python313\Lib
-            # Navigate up to get the root, then to libs
-            python_root = Path(python_prefix).parent  # C:\Python313
-            python_libs_dir = python_root / "libs"
+            libs = Path(sysconfig.get_path("stdlib")).parent / "libs"
+            if libs.exists():
+                env.update({
+                    "PYTHON_LIBS_DIR": str(libs),
+                    "PYTHON_LIB_NAME": f"python{sys.version_info.major}{sys.version_info.minor}.lib",
+                })
+        else:
+            if (libdir := sysconfig.get_config_var("LIBDIR")) and Path(libdir).exists():
+                env["PYTHON_LIBS_DIR"] = libdir
+                if sys.platform == "linux":
+                    env["LD_LIBRARY_PATH"] = libdir
 
-            if python_libs_dir.exists():
-                env["PYTHON_LIBS_DIR"] = str(python_libs_dir)
-                print(f"Setting PYTHON_LIBS_DIR={python_libs_dir}")
-
-                # Determine the Python library name (e.g., python313.lib)
-                version_info = sys.version_info
-                python_lib_name = f"python{version_info.major}{version_info.minor}.lib"
-                env["PYTHON_LIB_NAME"] = python_lib_name
-                print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
+            if sys.platform == "darwin":
+                env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
             else:
-                print(
-                    f"Warning: Python libs directory not found at {python_libs_dir}",
-                    file=sys.stderr,
-                )
+                libname = os.path.basename(sysconfig.get_config_var("LDLIBRARY") or sysconfig.get_config_var("LIBRARY") or f"python{sys.version_info.major}.{sys.version_info.minor}")
+                env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
 
-        elif sys.platform == "darwin":
-            # On macOS, we need to provide library path during build
-            # but delocate will fix it afterward for portability
-            version_info = sys.version_info
-            python_lib_name = f"python{version_info.major}.{version_info.minor}"
+        cmd = [
+            "zig",
+            "build",
+            "python-bindings",
+            f"-Doptimize={ext.optimize}",
+            f"-Dcpu={ext.cpu}",
+        ]
+        if ext.target != "native":
+            cmd.append(f"-Dtarget={ext.target}")
 
-            # Get the Python library directory
-            # First try to get it from sysconfig
-            lib_dir = sysconfig.get_config_var("LIBDIR")
-            if not lib_dir or not Path(lib_dir).exists():
-                # Try to find it relative to the Python executable
-                python_exe = sys.executable
-                python_dir = Path(python_exe).parent.parent
-                lib_dir = python_dir / "lib"
-                if not lib_dir.exists():
-                    # Try without lib subdirectory (some installations)
-                    lib_dir = python_dir
+        print(f"Building Zig extension: {' '.join(cmd)}")
+        subprocess.check_call(cmd, cwd=PROJECT_ROOT, env=env)
 
-            if lib_dir and Path(lib_dir).exists():
-                env["PYTHON_LIBS_DIR"] = str(lib_dir)
-                print(f"Setting PYTHON_LIBS_DIR={lib_dir}")
-            else:
-                print("Warning: Could not find Python library directory on macOS")
-
-            env["PYTHON_LIB_NAME"] = python_lib_name
-            print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
-
-        elif sys.platform.startswith("linux"):
-            # Linux specific configuration
-            lib_dir = sysconfig.get_config_var("LIBDIR")
-            if lib_dir and Path(lib_dir).exists():
-                env["PYTHON_LIBS_DIR"] = lib_dir
-                print(f"Setting PYTHON_LIBS_DIR={lib_dir}")
-
-                # Set LD_LIBRARY_PATH to include only the trusted Python library directory.
-                # We do not inherit the existing LD_LIBRARY_PATH to prevent environment
-                # variable injection vulnerabilities (e.g., arbitrary code execution).
-                env["LD_LIBRARY_PATH"] = str(lib_dir)
-
-            # Determine library name
-            ldlibrary = sysconfig.get_config_var("LDLIBRARY")
-            if ldlibrary:
-                # LDLIBRARY is usually 'libpython3.x.so'
-                ldlibrary = ldlibrary.removeprefix("lib")
-                # Strip extensions .so, .so.1.0, etc.
-                if ".so" in ldlibrary:
-                    ldlibrary = ldlibrary.split(".so")[0]
-                elif ".a" in ldlibrary:
-                    ldlibrary = ldlibrary.split(".a")[0]
-
-                env["PYTHON_LIB_NAME"] = ldlibrary
-                print(f"Setting PYTHON_LIB_NAME={ldlibrary}")
-            else:
-                # Fallback
-                version_info = sys.version_info
-                python_lib_name = f"python{version_info.major}.{version_info.minor}{sys.abiflags}"
-                env["PYTHON_LIB_NAME"] = python_lib_name
-                print(f"Setting PYTHON_LIB_NAME={python_lib_name}")
-
-        # Build the Zig library with optimizations
-        cmd = ["zig", "build", "python-bindings", f"-Doptimize={ext.zig_optimize}"]
-        if ext.zig_cpu:
-            cmd.append(f"-Dcpu={ext.zig_cpu}")
-        if ext.zig_target != "native":
-            cmd.extend([f"-Dtarget={ext.zig_target}"])
-
-        print(f"Running: {' '.join(cmd)} in {project_root}")
-        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, env=env)
-
-        if result.returncode != 0:
-            print(f"Zig build failed with return code {result.returncode}", file=sys.stderr)
-            print(f"stdout: {result.stdout}", file=sys.stderr)
-            print(f"stderr: {result.stderr}", file=sys.stderr)
-            raise RuntimeError(f"Zig build failed: {result.stderr}")
-
-        # Find the built library
-        lib_dir = project_root / "zig-out" / "lib"
-
-        # Look for the library with different possible extensions
-        extensions = [".so", ".dylib", ".pyd", ".dll"]
-        library_path = None
-
-        for extension in extensions:
-            candidate = lib_dir / f"_zignal{extension}"
-            if candidate.exists():
-                library_path = candidate
-                break
-
-        if not library_path:
-            raise RuntimeError(
-                f"Built library not found in {lib_dir}. Available files: {list(lib_dir.glob('*')) if lib_dir.exists() else 'directory does not exist'}"
-            )
-
-        # Determine destination path
-        dest_dir = Path(self.get_ext_fullpath(ext.name)).parent
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy to the correct location with correct name
+        # Install built library
+        zig_out = PROJECT_ROOT / "zig-out" / "lib"
+        built_lib = next(zig_out.glob("_zignal*"))
         dest_path = Path(self.get_ext_fullpath(ext.name))
-        shutil.copy2(library_path, dest_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(built_lib, dest_path)
 
-        # Copy stub files if they exist in the source directory
-        source_package_dir = Path(__file__).parent / "zignal"
-        dest_package_dir = dest_dir.parent / "zignal"
-
-        stub_files = ["__init__.pyi", "_zignal.pyi", "py.typed"]
-        for stub_file in stub_files:
-            source_stub = source_package_dir / stub_file
-            if source_stub.exists():
-                dest_stub = dest_package_dir / stub_file
-                shutil.copy2(source_stub, dest_stub)
+        # Copy stub files
+        pkg_dir = Path(__file__).parent / "zignal"
+        for f in ["__init__.pyi", "_zignal.pyi", "py.typed"]:
+            if (src := pkg_dir / f).exists():
+                shutil.copy2(src, dest_path.parent / f)
 
 
 class BinaryDistribution(Distribution):
@@ -216,83 +98,45 @@ class BinaryDistribution(Distribution):
         return True
 
 
-def get_zig_target():
-    """Get Zig target from environment variable, defaulting to native."""
-    return os.environ.get("ZIG_TARGET", "native")
-
-
-def get_zig_optimize():
-    """Get Zig optimization mode from environment variable, defaulting to ReleaseFast."""
-    return os.environ.get("ZIG_OPTIMIZE", "ReleaseFast")
-
-
-def get_zig_cpu():
-    """Get Zig CPU baseline from environment variable, defaulting to 'baseline' for portability."""
-    return os.environ.get("ZIG_CPU", "baseline")
-
-
-
-
 def get_project_version():
     """Get version from Zig build system directly."""
-    current_dir = Path(__file__).parent
-    project_root = current_dir.parent.parent
-
-    # 1. Get version from Zig
     try:
-        result = subprocess.run(
-            ["zig", "build", "version"],
-            cwd=project_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+        ver = subprocess.check_output(
+            ["zig", "build", "version"], cwd=PROJECT_ROOT, text=True
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return "0.0.0.dev0"
 
-    zig_version = result.stdout.strip()
+    if m := re.match(r"^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?", ver):
+        base, pre, num = m.groups()
+        if not pre:
+            return base
 
-    # 2. Convert to Python PEP 440 format
-    # Pattern to match Zig version format: 0.2.0-dev.13+abc123
-    pattern = r"^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?(?:\+(.+))?$"
-    match = re.match(pattern, zig_version)
-
-    if match:
-        base_version = match.group(1)
-        prerelease = match.group(2)
-        dev_number = match.group(3)
-        if prerelease:
-            normalized = prerelease.lower()
-            if re.match(r'^a(lpha)?$', normalized):
-                tag = 'a'
-            elif re.match(r'^b(eta)?$', normalized):
-                tag = 'b'
-            elif re.match(r'^(c|rc|pre|preview)$', normalized):
-                tag = 'rc'
-            else:
-                tag = '.dev'
-            return f"{base_version}{tag}{dev_number or 0}"
+        # Map prerelease tag to PEP 440
+        normalized = pre.lower()
+        if normalized in ("a", "alpha"):
+            tag = "a"
+        elif normalized in ("b", "beta"):
+            tag = "b"
+        elif normalized in ("c", "rc", "pre", "preview"):
+            tag = "rc"
         else:
-            return base_version
+            tag = ".dev"
 
-    return zig_version
+        return f"{base}{tag}{num or 0}"
+
+    return ver
 
 
 if __name__ == "__main__":
-    # Support forcing platform name via environment variable
-    # This is useful for avoiding 'universal2' tags on macOS when building for a single arch
-    options = {}
-    if os.environ.get("PLAT_NAME"):
-        options["bdist_wheel"] = {"plat_name": os.environ.get("PLAT_NAME")}
-
     setup(
         version=get_project_version(),
         packages=find_packages(exclude=["tests", "tests.*"]),
-        ext_modules=[
-            ZigExtension("zignal._zignal", get_zig_target(), get_zig_optimize(), get_zig_cpu())
-        ],
+        ext_modules=[ZigExtension("zignal._zignal")],
         cmdclass={"build_ext": ZigBuildExt},
         distclass=BinaryDistribution,
         zip_safe=False,
-        options=options,
+        options={"bdist_wheel": {"plat_name": os.environ.get("PLAT_NAME")}}
+        if os.environ.get("PLAT_NAME")
+        else {},
     )
