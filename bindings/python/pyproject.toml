@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "zignal-processing"
-version = "0.10.0.dev60"
+dynamic = ["version"]
 description = "Zero-dependency image processing library"
 readme = "README.md"
 authors = [{name = "zignal contributors"}]
