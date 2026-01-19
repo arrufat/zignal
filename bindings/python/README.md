@@ -84,6 +84,31 @@ uv venv && uv pip install -e .     # editable install
 uv run pytest -q                   # run tests
 ```
 
+## Building Wheels
+
+To build a wheel for your current platform:
+
+```bash
+cd bindings/python
+uv run python -m build --wheel
+```
+
+To cross-compile or specify optimization:
+
+```bash
+ZIG_TARGET=x86_64-linux-gnu ZIG_OPTIMIZE=ReleaseFast uv run python -m build --wheel
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `ZIG_TARGET` | Zig target triple | `native` |
+| `ZIG_OPTIMIZE` | Optimization mode (`Debug`, `ReleaseSafe`, `ReleaseFast`, `ReleaseSmall`) | `ReleaseFast` |
+| `ZIG_CPU` | CPU micro-architecture (e.g., `baseline`, `x86_64_v3`) | `baseline` |
+
+For portable Linux wheels, it is recommended to run `auditwheel repair` on the resulting wheel. On macOS, use `delocate-wheel`.
+
 ## Contributing Bindings
 
 Follow the [bindings guide](BINDINGS_GUIDE.md) for argument parsing helpers, enum registration, image ownership, and stub generation.
