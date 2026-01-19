@@ -1,11 +1,24 @@
-"""Setup script for zignal Python bindings."""
+"""
+Setup script for zignal Python bindings.
+
+Usage:
+    python -m build --wheel
+    pip install .
+
+Environment Variables:
+    ZIG_TARGET: The Zig compilation target (e.g., "x86_64-linux-gnu", "native").
+    ZIG_OPTIMIZE: Zig optimization mode (default: "ReleaseFast").
+    ZIG_CPU: Zig CPU architecture (default: "baseline").
+"""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import sysconfig
 from pathlib import Path
+
 from setuptools import Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.dist import Distribution
@@ -19,7 +32,7 @@ class ZigExtension(Extension):
         name: str,
         zig_target: str = "native",
         zig_optimize: str = "ReleaseFast",
-        zig_cpu: str | None = None,
+        zig_cpu: str = "baseline",
     ):
         # Initialize with dummy source to satisfy setuptools
         super().__init__(name, sources=[])
@@ -214,11 +227,74 @@ def get_zig_optimize():
 
 
 def get_zig_cpu():
-    """Get Zig CPU baseline from environment variable, if provided."""
-    return os.environ.get("ZIG_CPU")
+    """Get Zig CPU baseline from environment variable, defaulting to 'baseline' for portability."""
+    return os.environ.get("ZIG_CPU", "baseline")
+
+
+
+
+def sync_version():
+    """Sync version from Zig build system directly."""
+    current_dir = Path(__file__).parent
+    project_root = current_dir.parent.parent
+
+    # 1. Get version from Zig
+    try:
+        result = subprocess.run(
+            ["zig", "build", "version"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        # Gracefully ignore errors if zig is not installed or the version command fails.
+        # This allows installation from source distributions where Zig might not be present.
+        return
+
+    zig_version = result.stdout.strip()
+
+    # 2. Convert to Python PEP 440 format
+    # Pattern to match Zig version format: 0.2.0-dev.13+abc123
+    pattern = r"^(\d+\.\d+\.\d+)(?:-(.+?)(?:\.(\d+))?)?(?:\+(.+))?$"
+    match = re.match(pattern, zig_version)
+
+    if match:
+        base_version = match.group(1)
+        prerelease = match.group(2)
+        dev_number = match.group(3)
+        if prerelease:
+            python_version = f"{base_version}.dev{dev_number or 0}"
+        else:
+            python_version = base_version
+    else:
+        python_version = zig_version
+
+    # 3. Update pyproject.toml
+    pyproject_path = current_dir / "pyproject.toml"
+    if pyproject_path.exists():
+        content = pyproject_path.read_text()
+        new_content, count = re.subn(
+            r'^version\s*=\s*"[^"]*"',
+            f'version = "{python_version}"',
+            content,
+            flags=re.MULTILINE
+        )
+        if count > 0 and new_content != content:
+            pyproject_path.write_text(new_content)
+            print(f"Synchronized pyproject.toml version: {python_version}")
 
 
 if __name__ == "__main__":
+    # Ensure version is in sync with Zig before starting build
+    sync_version()
+
+    # Support forcing platform name via environment variable
+    # This is useful for avoiding 'universal2' tags on macOS when building for a single arch
+    options = {}
+    if os.environ.get("PLAT_NAME"):
+        options["bdist_wheel"] = {"plat_name": os.environ.get("PLAT_NAME")}
+
     setup(
         packages=find_packages(exclude=["tests", "tests.*"]),
         ext_modules=[
@@ -227,4 +303,5 @@ if __name__ == "__main__":
         cmdclass={"build_ext": ZigBuildExt},
         distclass=BinaryDistribution,
         zip_safe=False,
+        options=options,
     )
