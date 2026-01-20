@@ -456,17 +456,29 @@ pub fn svd(
 }
 
 test "svd basic" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const m: usize = 5;
     const n: usize = 4;
     // Example matrix taken from Wikipedia
-    const a: SMatrix(f64, m, n) = .init(.{
+    var a: Matrix(f64) = try .init(allocator, m, n);
+    const data = [m][n]f64{
         .{ 1, 0, 0, 0 },
         .{ 0, 0, 0, 2 },
         .{ 0, 3, 0, 0 },
         .{ 0, 0, 0, 0 },
         .{ 2, 0, 0, 0 },
-    });
-    const res = a.svd(.{ .with_u = true, .with_v = true, .mode = .full_u });
+    };
+    for (0..m) |i| {
+        for (0..n) |j| {
+            a.at(i, j).* = data[i][j];
+        }
+    }
+
+    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    defer res.deinit();
     const u = &res.u;
     const s = &res.s;
     const v = &res.v;
@@ -492,30 +504,41 @@ test "svd basic" {
 }
 
 test "svd modes" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const m: usize = 4;
     const n: usize = 4;
-    const a: SMatrix(f64, m, n) = .init(.{
+    var a: Matrix(f64) = try .init(allocator, m, n);
+    const data = [m][n]f64{
         .{ 2, 1, 0, 0 },
         .{ 1, 2, 1, 0 },
         .{ 0, 1, 2, 1 },
         .{ 0, 0, 1, 2 },
-    });
+    };
+    for (0..m) |i| {
+        for (0..n) |j| {
+            a.at(i, j).* = data[i][j];
+        }
+    }
 
     // Test no_u mode
-    const res_no_u = a.svd(.{ .with_u = false, .with_v = true, .mode = .no_u });
+    var res_no_u = try a.svd(allocator, .{ .with_u = false, .with_v = true, .mode = .no_u });
+    defer res_no_u.deinit();
     const s_no_u = &res_no_u.s;
-    _ = res_no_u.v; // v_no_u
 
     // Test skinny_u mode
-    const res_skinny = a.svd(.{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    var res_skinny = try a.svd(allocator, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    defer res_skinny.deinit();
     const u_skinny = &res_skinny.u;
     const s_skinny = &res_skinny.s;
 
     // Test full_u mode
-    const res_full = a.svd(.{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res_full = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    defer res_full.deinit();
     const u_full = &res_full.u;
     const s_full = &res_full.s;
-    _ = res_full.v; // v_full
 
     // Singular values should be the same across modes
     const tol = @sqrt(std.math.floatEps(f64));
@@ -530,10 +553,15 @@ test "svd modes" {
 }
 
 test "svd identity matrix" {
-    const n: usize = 3;
-    const a: SMatrix(f64, n, n) = .identity();
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    const res = a.svd(.{ .with_u = true, .with_v = true, .mode = .full_u });
+    const n: usize = 3;
+    var a = try Matrix(f64).identity(allocator, n, n);
+
+    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    defer res.deinit();
     const s = &res.s;
 
     // Identity matrix should have all singular values equal to 1
@@ -544,15 +572,26 @@ test "svd identity matrix" {
 }
 
 test "svd singular matrix" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const m: usize = 3;
     const n: usize = 3;
-    const a: SMatrix(f64, m, n) = .init(.{
+    var a = try Matrix(f64).init(allocator, m, n);
+    const data = [m][m]f64{
         .{ 1, 2, 3 },
         .{ 2, 4, 6 },
         .{ 1, 2, 3 },
-    });
+    };
+    for (0..m) |i| {
+        for (0..n) |j| {
+            a.at(i, j).* = data[i][j];
+        }
+    }
 
-    const res = a.svd(.{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    defer res.deinit();
     const s = &res.s;
 
     // This matrix has rank 1, so should have 2 zero singular values
