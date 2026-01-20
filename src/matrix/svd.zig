@@ -510,18 +510,12 @@ test "svd modes" {
 
     const m: usize = 4;
     const n: usize = 4;
-    var a: Matrix(f64) = try .init(allocator, m, n);
-    const data = [m][n]f64{
-        .{ 2, 1, 0, 0 },
-        .{ 1, 2, 1, 0 },
-        .{ 0, 1, 2, 1 },
-        .{ 0, 0, 1, 2 },
-    };
-    for (0..m) |i| {
-        for (0..n) |j| {
-            a.at(i, j).* = data[i][j];
-        }
-    }
+    var a: Matrix(f64) = try .fromSlice(allocator, m, n, &.{
+        2, 1, 0, 0,
+        1, 2, 1, 0,
+        0, 1, 2, 1,
+        0, 0, 1, 2,
+    });
 
     // Test no_u mode
     var res_no_u = try a.svd(allocator, .{ .with_u = false, .with_v = true, .mode = .no_u });
@@ -578,17 +572,11 @@ test "svd singular matrix" {
 
     const m: usize = 3;
     const n: usize = 3;
-    var a = try Matrix(f64).init(allocator, m, n);
-    const data = [m][m]f64{
-        .{ 1, 2, 3 },
-        .{ 2, 4, 6 },
-        .{ 1, 2, 3 },
-    };
-    for (0..m) |i| {
-        for (0..n) |j| {
-            a.at(i, j).* = data[i][j];
-        }
-    }
+    var a: Matrix(f64) = try .fromSlice(allocator, m, n, &.{
+        1, 2, 3,
+        2, 4, 6,
+        1, 2, 3,
+    });
 
     var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
     defer res.deinit();

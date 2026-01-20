@@ -136,6 +136,17 @@ pub fn Matrix(comptime T: type) type {
             };
         }
 
+        /// Initializes a matrix from a flat slice of values.
+        /// The slice length must be exactly rows * cols.
+        pub fn fromSlice(allocator: std.mem.Allocator, rows: usize, cols: usize, data: []const T) !Self {
+            if (data.len != rows * cols) {
+                return error.DimensionMismatch;
+            }
+            const result = try init(allocator, rows, cols);
+            @memcpy(result.items, data);
+            return result;
+        }
+
         pub fn deinit(self: *Self) void {
             if (self.items.len > 0) {
                 self.allocator.free(self.items);
@@ -1659,7 +1670,7 @@ test "matrix propagates chained errors" {
     var invalid = singular.inverse();
     defer invalid.deinit();
 
-    var valid = try Matrix(f64).initAll(arena.allocator(), 2, 2, 1.0);
+    var valid: Matrix(f64) = try .initAll(arena.allocator(), 2, 2, 1.0);
     defer valid.deinit();
 
     var left_error = invalid.add(valid);
@@ -1688,7 +1699,7 @@ test "matrix propagates chained errors" {
 }
 
 test "matrix elementNorm invalid exponent" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
     var m = try Matrix(f64).init(arena.allocator(), 1, 1);
@@ -1700,7 +1711,7 @@ test "matrix elementNorm invalid exponent" {
 }
 
 test "dynamic matrix format" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
     // Test dynamic Matrix formatting
@@ -1754,11 +1765,11 @@ test "dynamic matrix format" {
 }
 
 test "matrix conversions" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
     // Test SMatrix to Matrix conversion
-    const static_matrix = SMatrix(f64, 2, 3).init(.{
+    const static_matrix: SMatrix(f64, 2, 3) = .init(.{
         .{ 1.5, 2.5, 3.5 },
         .{ 4.5, 5.5, 6.5 },
     });
@@ -1775,4 +1786,27 @@ test "matrix conversions" {
             try expectEqual(static_matrix.at(r, c).*, back_to_static.at(r, c).*);
         }
     }
+}
+
+test "Matrix fromSlice" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const data = [_]f64{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
+
+    // Test successful initialization (2x3)
+    var mat = try Matrix(f64).fromSlice(arena.allocator(), 2, 3, &data);
+    defer mat.deinit();
+
+    try expectEqual(@as(usize, 2), mat.rows);
+    try expectEqual(@as(usize, 3), mat.cols);
+    try expectEqual(@as(f64, 1.0), mat.at(0, 0).*);
+    try expectEqual(@as(f64, 2.0), mat.at(0, 1).*);
+    try expectEqual(@as(f64, 3.0), mat.at(0, 2).*);
+    try expectEqual(@as(f64, 4.0), mat.at(1, 0).*);
+    try expectEqual(@as(f64, 5.0), mat.at(1, 1).*);
+    try expectEqual(@as(f64, 6.0), mat.at(1, 2).*);
+
+    // Test dimension mismatch
+    try std.testing.expectError(error.DimensionMismatch, Matrix(f64).fromSlice(arena.allocator(), 2, 2, &data));
 }

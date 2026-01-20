@@ -46,28 +46,21 @@ test "Matrix GEMM operations" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
-    // Create test matrices
-    var a: Matrix(f32) = try .init(arena.allocator(), 2, 3);
-    a.at(0, 0).* = 1.0;
-    a.at(0, 1).* = 2.0;
-    a.at(0, 2).* = 3.0;
-    a.at(1, 0).* = 4.0;
-    a.at(1, 1).* = 5.0;
-    a.at(1, 2).* = 6.0;
+    const a = try Matrix(f32).fromSlice(arena.allocator(), 2, 3, &.{
+        1.0, 2.0, 3.0,
+        4.0, 5.0, 6.0,
+    });
 
-    var b: Matrix(f32) = try .init(arena.allocator(), 3, 2);
-    b.at(0, 0).* = 7.0;
-    b.at(0, 1).* = 8.0;
-    b.at(1, 0).* = 9.0;
-    b.at(1, 1).* = 10.0;
-    b.at(2, 0).* = 11.0;
-    b.at(2, 1).* = 12.0;
+    const b = try Matrix(f32).fromSlice(arena.allocator(), 3, 2, &.{
+        7.0,  8.0,
+        9.0,  10.0,
+        11.0, 12.0,
+    });
 
-    var c: Matrix(f32) = try .init(arena.allocator(), 2, 2);
-    c.at(0, 0).* = 1.0;
-    c.at(0, 1).* = 1.0;
-    c.at(1, 0).* = 1.0;
-    c.at(1, 1).* = 1.0;
+    const c = try Matrix(f32).fromSlice(arena.allocator(), 2, 2, &.{
+        1.0, 1.0,
+        1.0, 1.0,
+    });
 
     // Test basic matrix multiplication: A * B using dot() method
     const dot_result = try a.dot(b).eval();
@@ -260,7 +253,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     // Fill with simple pattern: A[i,j] = i + 1 (row number)
     for (0..9) |i| {
         for (0..9) |j| {
-            test_matrix.at(i, j).* = @as(f32, @floatFromInt(i + 1));
+            test_matrix.at(i, j).* = @floatFromInt(i + 1);
         }
     }
 
