@@ -1816,3 +1816,57 @@ test "color conversion accuracy with reference values" {
     // Yellow: RGB(255,255,0) should have hue=60
     try expectEqualDeep(Hsl(f64){ .h = 60, .s = 100, .l = 50 }, (Rgb(u8){ .r = 255, .g = 255, .b = 0 }).as(f64).to(.hsl));
 }
+
+test "Rgba fade" {
+    const red = Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 255 };
+    try expectEqualDeep(red.fade(0.5), Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 127 });
+    try expectEqualDeep(red.fade(0), Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 0 });
+    try expectEqualDeep(red.fade(1), red);
+
+    const blue = Rgba(f32){ .r = 0, .g = 0, .b = 1, .a = 0.8 };
+    const faded_blue = blue.fade(0.5);
+    try expectApproxEqAbs(faded_blue.a, 0.4, 0.0001);
+    try expectEqual(faded_blue.r, 0);
+    try expectEqual(faded_blue.b, 1);
+}
+
+test "Luma calculation" {
+    // Test known luma values
+    const white = Rgb(u8).white;
+    try expectApproxEqAbs(white.luma(), 1.0, 0.001);
+
+    const black = Rgb(u8).black;
+    try expectApproxEqAbs(black.luma(), 0.0, 0.001);
+
+    const red = Rgb(u8).red; // 0.2126
+    try expectApproxEqAbs(red.luma(), 0.2126, 0.001);
+
+    const green = Rgb(u8).green; // 0.7152
+    try expectApproxEqAbs(green.luma(), 0.7152, 0.001);
+
+    const blue = Rgb(u8).blue; // 0.0722
+    try expectApproxEqAbs(blue.luma(), 0.0722, 0.001);
+
+    // Rgba should ignore alpha
+    const red_alpha = Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 128 };
+    try expectApproxEqAbs(red_alpha.luma(), 0.2126, 0.001);
+}
+
+test "Rgba invert" {
+    const white_transparent = Rgba(u8){ .r = 255, .g = 255, .b = 255, .a = 0 };
+    try expectEqualDeep(white_transparent.invert(), Rgba(u8){ .r = 0, .g = 0, .b = 0, .a = 0 });
+
+    const mixed = Rgba(u8){ .r = 100, .g = 150, .b = 200, .a = 255 };
+    try expectEqualDeep(mixed.invert(), Rgba(u8){ .r = 155, .g = 105, .b = 55, .a = 255 });
+}
+
+test "Color union float" {
+    const red_rgb = Rgb(f32).red;
+    const any_color = Color(f32){ .rgb = red_rgb };
+    
+    // Test conversion through union
+    const as_hsv: Hsv(f32) = any_color.to(.hsv);
+    try expectApproxEqAbs(as_hsv.h, 0, 0.001);
+    try expectApproxEqAbs(as_hsv.s, 100, 0.001);
+    try expectApproxEqAbs(as_hsv.v, 100, 0.001);
+}
