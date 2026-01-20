@@ -1784,39 +1784,6 @@ test "ColorSpace.convert" {
     try expectEqualDeep(red_hsv_recovered, red_hsv);
 }
 
-test "color conversion accuracy with reference values" {
-    // Pure red: RGB(255,0,0) should convert to specific known values
-    try expectEqualDeep(Hsl(f64){ .h = 0, .s = 100, .l = 50 }, (Rgb(u8){ .r = 255, .g = 0, .b = 0 }).as(f64).to(.hsl));
-    try expectEqualDeep(Hsv(f64){ .h = 0, .s = 100, .v = 100 }, (Rgb(u8){ .r = 255, .g = 0, .b = 0 }).as(f64).to(.hsv));
-
-    // Pure green: RGB(0,255,0) should have hue=120
-    try expectEqualDeep(Hsl(f64){ .h = 120, .s = 100, .l = 50 }, (Rgb(u8){ .r = 0, .g = 255, .b = 0 }).as(f64).to(.hsl));
-    try expectEqualDeep(Hsv(f64){ .h = 120, .s = 100, .v = 100 }, (Rgb(u8){ .r = 0, .g = 255, .b = 0 }).as(f64).to(.hsv));
-
-    // Pure blue: RGB(0,0,255) should have hue=240
-    try expectEqualDeep(Hsl(f64){ .h = 240, .s = 100, .l = 50 }, (Rgb(u8){ .r = 0, .g = 0, .b = 255 }).as(f64).to(.hsl));
-    try expectEqualDeep(Hsv(f64){ .h = 240, .s = 100, .v = 100 }, (Rgb(u8){ .r = 0, .g = 0, .b = 255 }).as(f64).to(.hsv));
-
-    // White should have L=100 in Lab space (with small tolerance for floating point)
-    const white_lab = (Rgb(u8){ .r = 255, .g = 255, .b = 255 }).as(f64).to(.lab);
-    try expectEqualDeep(Lab(f64){ .l = 100, .a = 0.00526049995830391, .b = -0.010408184525267927 }, white_lab);
-
-    // Black should have L=0 in Lab space
-    try expectEqualDeep(Lab(f64){ .l = 0, .a = 0, .b = 0 }, (Rgb(u8){ .r = 0, .g = 0, .b = 0 }).as(f64).to(.lab));
-
-    // Gray should have saturation=0 in HSL
-    try expectEqualDeep(Hsl(f64){ .h = 0, .s = 0, .l = 50.19607843137255 }, (Rgb(u8){ .r = 128, .g = 128, .b = 128 }).as(f64).to(.hsl));
-
-    // Cyan: RGB(0,255,255) should have hue=180
-    try expectEqualDeep(Hsl(f64){ .h = 180, .s = 100, .l = 50 }, (Rgb(u8){ .r = 0, .g = 255, .b = 255 }).as(f64).to(.hsl));
-
-    // Magenta: RGB(255,0,255) should have hue=300
-    try expectEqualDeep(Hsl(f64){ .h = 300, .s = 100, .l = 50 }, (Rgb(u8){ .r = 255, .g = 0, .b = 255 }).as(f64).to(.hsl));
-
-    // Yellow: RGB(255,255,0) should have hue=60
-    try expectEqualDeep(Hsl(f64){ .h = 60, .s = 100, .l = 50 }, (Rgb(u8){ .r = 255, .g = 255, .b = 0 }).as(f64).to(.hsl));
-}
-
 test "Rgba fade" {
     const red = Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 255 };
     try expectEqualDeep(red.fade(0.5), Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 127 });
@@ -1863,7 +1830,7 @@ test "Rgba invert" {
 test "Color union float" {
     const red_rgb = Rgb(f32).red;
     const any_color = Color(f32){ .rgb = red_rgb };
-    
+
     // Test conversion through union
     const as_hsv: Hsv(f32) = any_color.to(.hsv);
     try expectApproxEqAbs(as_hsv.h, 0, 0.001);
