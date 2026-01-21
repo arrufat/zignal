@@ -125,10 +125,14 @@ pub fn run(io: Io, gpa: Allocator, args: *std.process.Args.Iterator) !void {
     var stdout = std.Io.File.stdout().writer(io, &buffer);
 
     for (image_paths.items) |path| {
+        if (image_paths.items.len > 1) {
+            try stdout.interface.print("File: {s}\n", .{path});
+            try stdout.interface.flush();
+        }
         var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
         defer image.deinit(gpa);
 
         try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
+        try stdout.interface.flush();
     }
-    try stdout.interface.flush();
 }
