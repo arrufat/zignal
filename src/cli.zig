@@ -38,15 +38,10 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
         if (std.mem.eql(u8, arg, "info")) {
-            if (args.next()) |image_path| {
-                info.run(init.io, init.gpa, image_path) catch |err| {
-                    std.log.err("failed to get info for '{s}': {t}", .{ image_path, err });
-                    std.process.exit(1);
-                };
-            } else {
-                std.log.err("Missing image path for 'info' command", .{});
+            info.run(init.io, init.gpa, &args) catch |err| {
+                std.log.err("info command failed: {t}", .{err});
                 std.process.exit(1);
-            }
+            };
             return;
         }
         if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
