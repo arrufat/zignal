@@ -72,6 +72,7 @@ pub const ShenCastan = @import("image.zig").ShenCastan;
 pub const BinaryKernel = @import("image.zig").BinaryKernel;
 
 // Terminal graphics protocols
+pub const terminal = @import("terminal.zig");
 pub const sixel = @import("sixel.zig");
 pub const kitty = @import("kitty.zig");
 

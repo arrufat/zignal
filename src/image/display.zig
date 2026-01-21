@@ -18,6 +18,8 @@ pub const DisplayFormat = union(enum) {
         width: ?u32 = null,
         /// Optional target height in pixels
         height: ?u32 = null,
+        /// Interpolation method for scaling
+        interpolation: ?@import("interpolation.zig").Interpolation = null,
         pub const default: @This() = .{};
     },
     /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
@@ -194,7 +196,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .enable_chunking = false,
                             .width = options.width,
                             .height = options.height,
-                            .interpolation = .bilinear,
+                            .interpolation = options.interpolation orelse .bilinear,
                         } };
                     } else if (sixel.isSupported(self.io)) {
                         continue :fmt .{ .sixel = .{
@@ -202,7 +204,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .dither = .auto,
                             .width = options.width,
                             .height = options.height,
-                            .interpolation = .nearest_neighbor,
+                            .interpolation = options.interpolation orelse .nearest_neighbor,
                         } };
                     } else {
                         continue :fmt .{ .sgr = .{
