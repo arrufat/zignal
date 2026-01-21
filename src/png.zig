@@ -273,59 +273,94 @@ pub const PngState = struct {
     }
 };
 
-/// Retrieve metadata from a PNG file without decoding the full image.
+/// Retrieve metadata from a PNG stream without decoding the full image.
 /// This reads headers and ancillary chunks (gAMA, sRGB) but stops before IDAT.
-pub fn getInfo(png_data: []const u8) !Header {
-    if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
+pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
+    var bytes_read: usize = 0;
+    var chunk_count: usize = 0;
+
+    const sig = try reader.takeArray(8);
+    bytes_read += sig.len;
+    if (!std.mem.eql(u8, sig, &signature)) {
         return error.InvalidPngSignature;
     }
 
-    var pos: usize = 8;
     var header: Header = undefined;
     var header_found = false;
 
-    while (pos + 8 <= png_data.len) {
-        const length = std.mem.readInt(u32, png_data[pos..][0..4], .big);
-        const chunk_type = png_data[pos + 4 ..][0..4];
-
-        // Stop at image data or end of file
-        if (std.mem.eql(u8, chunk_type, "IDAT")) break;
-        if (std.mem.eql(u8, chunk_type, "IEND")) break;
-
-        // Check if we have the full chunk data (length + 4 bytes for type + length bytes data + 4 bytes CRC)
-        // pos points to start of length. Total chunk size in stream = 4 (len) + 4 (type) + length + 4 (crc)
-        // We already advanced past previous chunks. pos is at start of this chunk.
-        // Wait, pos is at start of 'length'.
-        // Data end is at pos + 8 + length.
-        // CRC end is at pos + 8 + length + 4.
-        const chunk_total_len = @as(usize, length) + 12;
-        if (pos + chunk_total_len > png_data.len) {
-            // Truncated ancillary chunk. Stop parsing.
-            break;
+    while (true) {
+        // Check limits before reading next chunk
+        if (limits.max_png_bytes != 0 and bytes_read > limits.max_png_bytes) {
+            return error.PngDataTooLarge;
+        }
+        if (limits.max_chunks != 0 and chunk_count > limits.max_chunks) {
+            return error.TooManyChunks;
         }
 
-        const data_start = pos + 8;
-        const data = png_data[data_start .. data_start + length];
+        const length = reader.takeInt(u32, .big) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        bytes_read += @sizeOf(u32);
 
-        if (std.mem.eql(u8, chunk_type, "IHDR")) {
+        const chunk_type_ptr = try reader.takeArray(4);
+        bytes_read += chunk_type_ptr.len;
+        const chunk_type = chunk_type_ptr.*;
+
+        chunk_count += 1;
+
+        // Total chunk size: length + 4 (CRC)
+        const total_chunk_size = @as(usize, length) + 4;
+        if (limits.max_png_bytes != 0 and bytes_read + total_chunk_size > limits.max_png_bytes) {
+            return error.PngDataTooLarge;
+        }
+
+        // Stop at image data or end of file
+        if (std.mem.eql(u8, &chunk_type, "IDAT")) break;
+        if (std.mem.eql(u8, &chunk_type, "IEND")) break;
+
+        if (std.mem.eql(u8, &chunk_type, "IHDR")) {
             if (header_found) return error.MultipleHeaders;
-            // Create a temporary Chunk for parseHeader.
-            // Note: We are skipping CRC verification here for speed and simplicity in getInfo
-            const chunk = Chunk{
-                .length = length,
-                .type = chunk_type.*,
-                .data = data,
-                .crc = 0, // Ignored by parseHeader
+            if (length != 13) return error.InvalidHeaderLength;
+
+            const data = try reader.takeArray(13);
+            bytes_read += data.len;
+
+            const width = std.mem.readInt(u32, data[0..4], .big);
+            const height = std.mem.readInt(u32, data[4..8], .big);
+
+            if (width == 0 or height == 0) return error.InvalidDimensions;
+
+            const color_type: ColorType = switch (data[9]) {
+                0 => .grayscale,
+                2 => .rgb,
+                3 => .palette,
+                4 => .grayscale_alpha,
+                6 => .rgba,
+                else => return error.InvalidColorType,
             };
-            header = try parseHeader(chunk);
+
+            header = Header{
+                .width = width,
+                .height = height,
+                .bit_depth = data[8],
+                .color_type = color_type,
+                .compression_method = data[10],
+                .filter_method = data[11],
+                .interlace_method = data[12],
+            };
             header_found = true;
-        } else if (std.mem.eql(u8, chunk_type, "gAMA") and header_found) {
+            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+        } else if (std.mem.eql(u8, &chunk_type, "gAMA") and header_found) {
             if (length != 4) return error.InvalidGammaLength;
-            const gamma_int = std.mem.readInt(u32, data[0..4], .big);
+            const gamma_int = try reader.takeInt(u32, .big);
+            bytes_read += @sizeOf(u32);
             header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
-        } else if (std.mem.eql(u8, chunk_type, "sRGB") and header_found) {
+            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+        } else if (std.mem.eql(u8, &chunk_type, "sRGB") and header_found) {
             if (length != 1) return error.InvalidSrgbLength;
-            const intent_raw = data[0];
+            const intent_raw = try reader.takeByte();
+            bytes_read += @sizeOf(u8);
             header.srgb_intent = switch (intent_raw) {
                 0 => .perceptual,
                 1 => .relative_colorimetric,
@@ -333,14 +368,49 @@ pub fn getInfo(png_data: []const u8) !Header {
                 3 => .absolute_colorimetric,
                 else => return error.InvalidSrgbIntent,
             };
+            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+        } else {
+            // Skip unknown or unneeded chunk data + CRC
+            bytes_read += try reader.discard(std.Io.Limit.limited64(@as(u64, length) + 4));
         }
-
-        pos += chunk_total_len;
     }
 
     if (!header_found) return error.MissingHeader;
     return header;
 }
+
+test "PNG getInfo" {
+    const gpa = std.testing.allocator;
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    try data.appendSlice(gpa, &signature);
+
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], 100, .big);
+    std.mem.writeInt(u32, ihdr[4..8], 200, .big);
+    ihdr[8] = 8;
+    ihdr[9] = @intFromEnum(ColorType.rgba);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+
+    const gama_payload = [_]u8{ 0, 0, 0x88, 0xB8 }; // 35000 -> 0.35
+    try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
+
+    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
+
+    var reader = std.Io.Reader.fixed(data.items);
+    const header = try getInfo(&reader, .{});
+
+    try std.testing.expectEqual(100, header.width);
+    try std.testing.expectEqual(200, header.height);
+    try std.testing.expectEqual(8, header.bit_depth);
+    try std.testing.expectEqual(ColorType.rgba, header.color_type);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), header.gamma.?, 0.0001);
+}
+
 // CRC table for PNG chunk validation
 var crc_table: [256]u32 = undefined;
 var crc_table_computed = false;
@@ -2945,41 +3015,6 @@ test "PNG pixel extraction with transparency" {
     const trans_slice: []const u8 = &trans_data;
     const pixel_with_trans = extractRgbPixel(Rgba, &rgb_src, 0, header, trans_slice);
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 }, pixel_with_trans);
-}
-
-test "PNG getInfo" {
-    const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-
-    try data.appendSlice(gpa, &signature);
-
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 100, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 50, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
-
-    const srgb_payload = [_]u8{0};
-    try appendTestChunk(&data, gpa, "sRGB".*, &srgb_payload);
-
-    // Add some random chunk before IDAT
-    try appendTestChunk(&data, gpa, "tEXt".*, &[_]u8{});
-
-    // We don't need IDAT for getInfo to work if we stop before it
-    // But let's add one to make it a valid stream prefix
-    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
-
-    const info = try getInfo(data.items);
-    try std.testing.expectEqual(@as(u32, 100), info.width);
-    try std.testing.expectEqual(@as(u32, 50), info.height);
-    try std.testing.expectEqual(ColorType.rgb, info.color_type);
-    try std.testing.expect(info.srgb_intent != null);
-    try std.testing.expectEqual(SrgbRenderingIntent.perceptual, info.srgb_intent.?);
 }
 
 test "PNG Header helpers" {

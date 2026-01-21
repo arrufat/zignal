@@ -69,55 +69,60 @@ pub const Header = struct {
     }
 };
 
-/// Retrieve metadata from a JPEG file without decoding the full image.
+/// Retrieve metadata from a JPEG stream without decoding the full image.
 /// Scans for a Start of Frame (SOF) marker.
-pub fn getInfo(data: []const u8) !Header {
-    if (data.len < 2 or !std.mem.eql(u8, data[0..2], &signature)) {
+pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
+    var bytes_read: usize = 0;
+    var marker_count: usize = 0;
+    const MAX_MARKERS_SCAN = 10000; // Sanity limit for markers before SOF
+
+    const sig = try reader.takeArray(2);
+    bytes_read += sig.len;
+    if (!std.mem.eql(u8, sig, &signature)) {
         return error.InvalidJpegFile;
     }
 
-    var pos: usize = 2;
-    while (pos < data.len - 1) {
-        if (data[pos] != 0xFF) {
-            // Not a marker - technically invalid if not inside entropy scan,
-            // but we might just be lost. For getInfo, strictness varies.
-            // But usually we should land on 0xFF.
-            return error.InvalidMarker;
+    while (true) {
+        // Scan for marker (0xFF)
+        while (true) {
+            const byte = try reader.takeByte();
+            bytes_read += 1;
+            if (bytes_read > limits.max_jpeg_bytes) return error.ImageTooLarge;
+            if (byte == 0xFF) break;
         }
 
-        const marker_byte = data[pos + 1];
-        // 0xFF00 is byte stuffing in entropy data, not a marker, but we shouldn't
-        // be in entropy data before SOF.
-        // 0xFF is valid padding byte before a marker.
-        if (marker_byte == 0xFF) {
-            pos += 1;
-            continue;
+        var marker_byte = try reader.takeByte();
+        bytes_read += 1;
+        // 0xFF is valid padding
+        while (marker_byte == 0xFF) {
+            marker_byte = try reader.takeByte();
+            bytes_read += 1;
+            if (bytes_read > limits.max_jpeg_bytes) return error.ImageTooLarge;
         }
+
+        if (marker_byte == 0x00) continue; // stuffed byte
+
+        marker_count += 1;
+        if (marker_count > MAX_MARKERS_SCAN) return error.ImageTooLarge;
 
         const marker_val = (@as(u16, 0xFF) << 8) | marker_byte;
-        const marker = Marker.fromBytes([2]u8{ 0xFF, marker_byte });
-
-        pos += 2; // Skip marker ID
 
         // Markers with no payload
         if (marker_val == 0xFF01 or // TEM
-            (marker_val >= 0xFFD0 and marker_val <= 0xFFD9)) // RSTm, SOI, EOI
+            (marker_val >= 0xFFD0 and marker_val <= 0xFFD7) or // RSTm
+            marker_val == 0xFFD8) // SOI
         {
-            if (marker == .EOI) return error.MissingSOF;
             continue;
         }
 
+        if (marker_val == 0xFFD9) return error.MissingSOF; // EOI
+
         // Markers with payload: read length
-        if (pos + 2 > data.len) return error.UnexpectedEndOfData;
-        const length = (@as(u16, data[pos]) << 8) | data[pos + 1];
+        const length = try reader.takeInt(u16, .big);
+        bytes_read += @sizeOf(u16);
         if (length < 2) return error.InvalidMarker;
 
         // Check if this is a SOF marker
-        // SOF0 (Baseline) = 0xFFC0
-        // SOF1 (Extended Sequential) = 0xFFC1
-        // SOF2 (Progressive) = 0xFFC2
-        // ... SOF15
-        // Exclude DHT(C4), JPG(C8), DAC(CC) from the "C0-CF" range check if using range
         const is_sof = switch (marker_val) {
             0xFFC0, 0xFFC1, 0xFFC2, 0xFFC3, 0xFFC5, 0xFFC6, 0xFFC7, 0xFFC9, 0xFFCA, 0xFFCB, 0xFFCD, 0xFFCE, 0xFFCF => true,
             else => false,
@@ -125,15 +130,22 @@ pub fn getInfo(data: []const u8) !Header {
 
         if (is_sof) {
             const payload_len = length - 2;
-            if (pos + 2 + payload_len > data.len) return error.UnexpectedEndOfData;
-            const payload = data[pos + 2 .. pos + 2 + payload_len];
+            if (payload_len < 6) return error.InvalidSOF;
 
-            if (payload.len < 6) return error.InvalidSOF;
+            // Check if reading payload would exceed limit
+            if (bytes_read + payload_len > limits.max_jpeg_bytes) return error.ImageTooLarge;
 
-            const precision = payload[0];
-            const height = (@as(u16, payload[1]) << 8) | payload[2];
-            const width = (@as(u16, payload[3]) << 8) | payload[4];
-            const num_components = payload[5];
+            const precision = try reader.takeByte();
+            const height = try reader.takeInt(u16, .big);
+            const width = try reader.takeInt(u16, .big);
+            const num_components = try reader.takeByte();
+            bytes_read += 6; // precision(1) + height(2) + width(2) + components(1)
+
+            // Discard remaining component info if any
+            if (payload_len > 6) {
+                const skip = payload_len - 6;
+                bytes_read += try reader.discard(std.Io.Limit.limited(skip));
+            }
 
             return Header{
                 .width = width,
@@ -145,10 +157,52 @@ pub fn getInfo(data: []const u8) !Header {
         }
 
         // Skip payload
-        pos += length;
-    }
+        const skip = length - 2;
+        // Check if skipping would exceed limit (approximate, as discard might not read all if seeking)
+        // But for safety, we count it against the limit.
+        if (bytes_read + skip > limits.max_jpeg_bytes) return error.ImageTooLarge;
 
-    return error.MissingSOF;
+        bytes_read += try reader.discard(std.Io.Limit.limited(skip));
+    }
+}
+test "JPEG getInfo" {
+    const gpa = std.testing.allocator;
+
+    var data: std.ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+
+    // SOI
+    try data.appendSlice(gpa, &signature);
+
+    // APP0
+    try data.append(gpa, 0xFF);
+    try data.append(gpa, 0xE0);
+    try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 16, .big))); // Length
+    try data.appendSlice(gpa, "JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00");
+
+    // SOF0
+    try data.append(gpa, 0xFF);
+    try data.append(gpa, 0xC0);
+    try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 17, .big))); // Length
+    try data.append(gpa, 8); // Precision
+    try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 100, .big))); // Height
+    try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 200, .big))); // Width
+    try data.append(gpa, 3); // Components
+    // Component info (3 * 3 bytes)
+    try data.appendSlice(gpa, &[_]u8{ 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1 });
+
+    // EOI
+    try data.append(gpa, 0xFF);
+    try data.append(gpa, 0xD9);
+
+    var reader = std.Io.Reader.fixed(data.items);
+    const header = try getInfo(&reader, .{});
+
+    try std.testing.expectEqual(200, header.width);
+    try std.testing.expectEqual(100, header.height);
+    try std.testing.expectEqual(8, header.precision);
+    try std.testing.expectEqual(3, header.num_components);
+    try std.testing.expectEqual(FrameType.baseline, header.frame_type);
 }
 
 // -----------------------------
