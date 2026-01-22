@@ -4,11 +4,11 @@ const Io = std.Io;
 
 const zignal = @import("zignal");
 
-const info = @import("cli/info.zig");
-const version = @import("cli/version.zig");
 const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
+const info = @import("cli/info.zig");
 const tile = @import("cli/tile.zig");
+const version = @import("cli/version.zig");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -59,15 +59,15 @@ pub fn main(init: std.process.Init) !void {
             };
             return;
         }
-        if (std.mem.eql(u8, arg, "version")) {
-            try version.run(init.io, &stdout.interface, init.gpa, &args);
-            return;
-        }
         if (std.mem.eql(u8, arg, "info")) {
             info.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("info command failed: {t}", .{err});
                 std.process.exit(1);
             };
+            return;
+        }
+        if (std.mem.eql(u8, arg, "version")) {
+            try version.run(init.io, &stdout.interface, init.gpa, &args);
             return;
         }
         if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
