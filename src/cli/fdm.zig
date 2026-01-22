@@ -94,39 +94,10 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
             source_img.cols,
         );
 
-        const w: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale));
-        const h: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale));
+        const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale)));
+        const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale)));
 
-        // Limit maximum display size to avoid protocol limits (e.g. Sixel 2048 width)
-        // and excessive terminal scrolling.
-        const max_display_width: u32 = 1800; // Leave some margin for 2048 limit
-        const max_display_height: u32 = 1200;
-
-        const total_width = 3 * w;
-        var display_w = total_width;
-        var display_h = h;
-
-        // Apply further downscaling if the combined canvas exceeds hard limits,
-        // preserving the aspect ratio.
-        if (display_w > max_display_width or display_h > max_display_height) {
-            const scale_x = @as(f32, @floatFromInt(max_display_width)) / @as(f32, @floatFromInt(display_w));
-            const scale_y = @as(f32, @floatFromInt(max_display_height)) / @as(f32, @floatFromInt(display_h));
-            const scale = @min(scale_x, scale_y);
-
-            display_w = @intFromFloat(@as(f32, @floatFromInt(display_w)) * scale);
-            display_h = @intFromFloat(@as(f32, @floatFromInt(display_h)) * scale);
-        }
-
-        var protocol: zignal.DisplayFormat = .{ .auto = .default };
         var filter: zignal.Interpolation = .bilinear;
-
-        if (parsed.options.protocol) |p| {
-            protocol = display.parseProtocol(p) catch |err| {
-                std.log.err("Unknown protocol type: {s}", .{p});
-                return err;
-            };
-        }
-
         if (parsed.options.filter) |f| {
             filter = display.parseFilter(f) catch |err| {
                 std.log.err("Unknown filter type: {s}", .{f});
@@ -134,15 +105,15 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
             };
         }
 
-        // Pass the calculated display dimensions to the protocol options
-        display.applyOptions(&protocol, display_w, display_h, filter);
+        const canvas_w = 3 * w;
+        const canvas_h = h;
 
-        var canvas = try zignal.Image(Pixel).init(gpa, display_h, display_w);
+        var canvas = try zignal.Image(Pixel).init(gpa, canvas_h, canvas_w);
         defer canvas.deinit(gpa);
         canvas.fill(.{ .r = 0, .g = 0, .b = 0 });
 
-        const wf = @as(f32, @floatFromInt(display_w)) / 3.0;
-        const hf = @as(f32, @floatFromInt(display_h));
+        const wf = @as(f32, @floatFromInt(w));
+        const hf = @as(f32, @floatFromInt(h));
 
         // Insert original source
         if (original_source) |img| {
@@ -155,10 +126,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         // Insert result
         canvas.insert(source_img, .{ .l = 2 * wf, .t = 0, .r = 3 * wf, .b = hf }, 0, filter, .none);
 
-        try stdout.interface.print("\n", .{});
-        try stdout.interface.print("{f}\n", .{canvas.display(io, protocol)});
+        try display.displayCanvas(io, &canvas, parsed.options.protocol, filter);
     }
 
     try stdout.interface.print("Done.\n", .{});
-    try stdout.interface.flush();
 }

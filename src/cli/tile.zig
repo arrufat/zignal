@@ -24,6 +24,9 @@ const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     filter: ?[]const u8 = null,
+    output: ?[]const u8 = null,
+    display: bool = false,
+    protocol: ?[]const u8 = null,
 
     pub const meta = .{
         .mode = .{ .help = "Layout mode: square, horizontal, vertical, grid, factors", .metavar = "mode" },
@@ -32,32 +35,37 @@ const Args = struct {
         .width = .{ .help = "Force cell width (default: first image width)", .metavar = "N" },
         .height = .{ .help = "Force cell height (default: first image height)", .metavar = "N" },
         .filter = .{ .help = "Resizing filter: nearest, bilinear, bicubic, lanczos", .metavar = "f" },
+        .output = .{ .help = "Output file path", .metavar = "file" },
+        .display = .{ .help = "Display the result in the terminal" },
+        .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
     };
 };
 
 pub const help_text = args.generateHelp(
     Args,
-    "zignal tile <image1> <image2> ... <output> [options]",
-    "Combine multiple images into a single tiled image.",
+    "zignal tile <images...> [options]",
+    "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.",
 );
 
 pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
-    // We need at least 1 input and 1 output (2 args total)
-    if (parsed.help or parsed.positionals.len < 2) {
+    if (parsed.help or parsed.positionals.len < 1) {
         try args.printHelp(io, help_text);
         return;
     }
 
-    const input_paths = parsed.positionals[0 .. parsed.positionals.len - 1];
-    const output_path = parsed.positionals[parsed.positionals.len - 1];
+    const input_paths = parsed.positionals;
     const img_count = input_paths.len;
+    const output_path = parsed.options.output;
+
+    // Display if requested OR if no output file is specified
+    const should_display = parsed.options.display or output_path == null;
 
     var mode: LayoutMode = .square;
     if (parsed.options.mode) |m| {
-        const mode_map = std.StaticStringMap(LayoutMode).initComptime(.{
+        const mode_map: std.StaticStringMap(LayoutMode) = .initComptime(.{
             .{ "square", .square },
             .{ "horizontal", .horizontal },
             .{ "vertical", .vertical },
@@ -126,7 +134,6 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     var stdout = std.Io.File.stdout().writer(io, &buffer);
 
     try stdout.interface.print("Tiling {d} images into a {d}x{d} grid ({s})...\n", .{ img_count, cols, rows, @tagName(mode) });
-    try stdout.interface.flush();
 
     // Determine Cell Size
     var cell_w: u32 = 0;
@@ -140,7 +147,6 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     if (cell_w == 0 or cell_h == 0) {
         // Load first image to establish dimensions
         try stdout.interface.print("Analyzing reference image: {s}...\n", .{input_paths[0]});
-        try stdout.interface.flush();
 
         // Use RGBA for safety to handle transparency
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
@@ -165,7 +171,6 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
 
     try stdout.interface.print("Cell Size: {d}x{d}\n", .{ cell_w, cell_h });
     try stdout.interface.print("Canvas Size: {d}x{d}\n", .{ canvas_w, canvas_h });
-    try stdout.interface.flush();
 
     // Create Canvas
     var canvas = try zignal.Image(zignal.Rgba(u8)).init(gpa, canvas_h, canvas_w);
@@ -188,7 +193,6 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         const c = idx % cols;
 
         try stdout.interface.print("[{d}/{d}] Processing {s}...\n", .{ idx + 1, img_count, path });
-        try stdout.interface.flush();
 
         var img: zignal.Image(zignal.Rgba(u8)) = undefined;
         var loaded_new = false;
@@ -240,8 +244,15 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         canvas.insert(img, dest_rect, 0, filter, .none);
     }
 
-    try stdout.interface.print("Saving to {s}...\n", .{output_path});
-    try stdout.interface.flush();
-    try canvas.save(io, gpa, output_path);
+    if (output_path) |out_path| {
+        try stdout.interface.print("Saving to {s}...\n", .{out_path});
+        try canvas.save(io, gpa, out_path);
+    }
+
+    if (should_display) {
+        try display.displayCanvas(io, &canvas, parsed.options.protocol, filter);
+    }
+
     try stdout.interface.print("Done.\n", .{});
+    try stdout.interface.flush();
 }

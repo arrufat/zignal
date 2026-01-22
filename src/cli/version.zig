@@ -27,5 +27,4 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     var stdout = std.Io.File.stdout().writer(io, &buffer);
 
     try stdout.interface.print("{s}\n", .{zignal.version});
-    try stdout.interface.flush();
 }
