@@ -1,28 +1,27 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
+
 const zignal = @import("zignal");
 const png = zignal.png;
 const jpeg = zignal.jpeg;
-const Allocator = std.mem.Allocator;
-const Io = std.Io;
-const cli_args = @import("args.zig");
+
+const args = @import("args.zig");
 
 const Args = struct {};
 
-pub const help_text = cli_args.generateHelp(
+pub const help_text = args.generateHelp(
     Args,
     "zignal info <image1> <image2> ...",
     "Display detailed information about one or more image files.",
 );
 
 pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try cli_args.parse(Args, gpa, iterator);
+    const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        var buffer: [4096]u8 = undefined;
-        var stdout = std.Io.File.stdout().writer(io, &buffer);
-        try stdout.interface.print("{s}", .{help_text});
-        try stdout.interface.flush();
+        try args.printHelp(io, help_text);
         return;
     }
 
