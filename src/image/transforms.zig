@@ -388,10 +388,10 @@ pub fn Transform(comptime T: type) type {
             const bound_hw = half_width * abs_cos + half_height * abs_sin;
             const bound_hh = half_width * abs_sin + half_height * abs_cos;
 
-            const min_r = if (cy - bound_hh < 0) 0 else @as(usize, @intFromFloat(@floor(cy - bound_hh)));
-            const max_r = @min(@as(usize, self.rows), @as(usize, @intFromFloat(@ceil(cy + bound_hh))) + 1);
-            const min_c = if (cx - bound_hw < 0) 0 else @as(usize, @intFromFloat(@floor(cx - bound_hw)));
-            const max_c = @min(@as(usize, self.cols), @as(usize, @intFromFloat(@ceil(cx + bound_hw))) + 1);
+            const min_r = if (cy - bound_hh < 0) 0 else @as(u32, @intFromFloat(@floor(cy - bound_hh)));
+            const max_r = @min(@as(u32, self.rows), @as(u32, @intFromFloat(@ceil(cy + bound_hh))) + 1);
+            const min_c = if (cx - bound_hw < 0) 0 else @as(u32, @intFromFloat(@floor(cx - bound_hw)));
+            const max_c = @min(@as(u32, self.cols), @as(u32, @intFromFloat(@ceil(cx + bound_hw))) + 1);
 
             // Only iterate over potentially affected pixels
             for (min_r..max_r) |r| {
