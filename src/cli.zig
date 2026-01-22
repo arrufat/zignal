@@ -101,5 +101,4 @@ fn help(io: Io, args: ?*std.process.Args.Iterator) !void {
         }
     }
     try stdout.interface.print("{s}", .{general_help});
-    try stdout.interface.flush();
 }

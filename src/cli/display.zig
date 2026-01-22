@@ -130,3 +130,45 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, 
         },
     }
 }
+
+pub fn displayCanvas(
+    io: Io,
+    image: anytype,
+    protocol_name: ?[]const u8,
+    filter: zignal.Interpolation,
+) !void {
+    const max_display_width: u32 = 1800;
+    const max_display_height: u32 = 1200;
+
+    var display_w = @as(u32, @intCast(image.cols));
+    var display_h = @as(u32, @intCast(image.rows));
+
+    // Apply downscaling if needed, preserving aspect ratio
+    if (display_w > max_display_width or display_h > max_display_height) {
+        const scale_x = @as(f32, @floatFromInt(max_display_width)) / @as(f32, @floatFromInt(display_w));
+        const scale_y = @as(f32, @floatFromInt(max_display_height)) / @as(f32, @floatFromInt(display_h));
+        const scale = @min(scale_x, scale_y);
+
+        display_w = @intFromFloat(@as(f32, @floatFromInt(display_w)) * scale);
+        display_h = @intFromFloat(@as(f32, @floatFromInt(display_h)) * scale);
+    }
+
+    var protocol: zignal.DisplayFormat = .{ .auto = .default };
+
+    if (protocol_name) |p| {
+        protocol = parseProtocol(p) catch |err| {
+            std.log.err("Unknown protocol type: {s}", .{p});
+            return err;
+        };
+    }
+
+    applyOptions(&protocol, display_w, display_h, filter);
+
+    var buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(io, &buffer);
+
+    try stdout.interface.print("\n", .{});
+    try stdout.interface.flush();
+    try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
+    try stdout.interface.flush();
+}
