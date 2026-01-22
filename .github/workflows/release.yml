@@ -1,0 +1,71 @@
+name: Release CLI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Unit tests
+        run: zig build test
+
+  build-and-upload:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux
+            target: x86_64-linux-musl
+            archive: zignal-linux-x86_64.tar.gz
+            exe: zignal
+          - platform: macos
+            target: aarch64-macos
+            archive: zignal-macos-aarch64.tar.gz
+            exe: zignal
+          - platform: windows
+            target: x86_64-windows-gnu
+            archive: zignal-windows-x86_64.zip
+            exe: zignal.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - name: Build ${{ matrix.platform }}
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp zig-out/bin/${{ matrix.exe }} dist/${{ matrix.exe }}
+          if [[ "${{ matrix.archive }}" == *.zip ]]; then
+            (cd dist && zip -r "../${{ matrix.archive }}" "${{ matrix.exe }}")
+          else
+            tar -C dist -czf "${{ matrix.archive }}" "${{ matrix.exe }}"
+          fi
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive }}
