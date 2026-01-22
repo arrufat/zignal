@@ -16,24 +16,21 @@ pub const help_text = args.generateHelp(
     "Display detailed information about one or more image files.",
 );
 
-pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(io, help_text);
+        try args.printHelp(writer, help_text);
         return;
     }
-
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
 
     // Buffer for reading file data
     var read_buffer: [4096]u8 = undefined;
 
     for (parsed.positionals) |image_path| {
         if (parsed.positionals.len > 1) {
-            try stdout.interface.print("File: {s}\n", .{image_path});
+            try writer.print("File: {s}\n", .{image_path});
         }
 
         // Use a block to catch errors for individual files so we can continue to the next one
@@ -49,28 +46,28 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
                     .png => {
                         const info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format:      PNG\n", .{});
-                        try stdout.interface.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try stdout.interface.print("Bit Depth:   {d}\n", .{info.bit_depth});
-                        try stdout.interface.print("Channels:    {d}\n", .{info.channels()});
-                        try stdout.interface.print("Color Space: {s}\n", .{@tagName(info.color_type)});
+                        try writer.print("Format:      PNG\n", .{});
+                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
+                        try writer.print("Channels:    {d}\n", .{info.channels()});
+                        try writer.print("Color Space: {s}\n", .{@tagName(info.color_type)});
 
                         if (info.gamma) |g| {
-                            try stdout.interface.print("Gamma:       {d}\n", .{g});
+                            try writer.print("Gamma:       {d}\n", .{g});
                         }
                         if (info.srgb_intent) |intent| {
-                            try stdout.interface.print("sRGB:        {s}\n", .{@tagName(intent)});
+                            try writer.print("sRGB:        {s}\n", .{@tagName(intent)});
                         }
                     },
                     .jpeg => {
                         const info = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format:      JPEG\n", .{});
-                        try stdout.interface.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try stdout.interface.print("Bit Depth:   {d}\n", .{info.precision});
-                        try stdout.interface.print("Channels:    {d}\n", .{info.num_components});
-                        try stdout.interface.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
-                        try stdout.interface.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
+                        try writer.print("Format:      JPEG\n", .{});
+                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try writer.print("Bit Depth:   {d}\n", .{info.precision});
+                        try writer.print("Channels:    {d}\n", .{info.num_components});
+                        try writer.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
+                        try writer.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
                     },
                 }
             } else {
@@ -86,8 +83,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         }
 
         if (parsed.positionals.len > 1) {
-            try stdout.interface.print("\n", .{});
+            try writer.print("\n", .{});
         }
     }
-    try stdout.interface.flush();
+    try writer.flush();
 }

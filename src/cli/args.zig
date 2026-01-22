@@ -163,10 +163,8 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
     return text;
 }
 
-/// Prints the help message to stdout using the provided Io interface.
-pub fn printHelp(io: std.Io, help_text: []const u8) !void {
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-    try stdout.interface.print("{s}", .{help_text});
-    try stdout.interface.flush();
+/// Prints the help message to stdout using the provided writer.
+pub fn printHelp(writer: *std.Io.Writer, help_text: []const u8) !void {
+    try writer.print("{s}", .{help_text});
+    try writer.flush();
 }

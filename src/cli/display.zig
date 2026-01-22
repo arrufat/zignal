@@ -27,12 +27,12 @@ pub const help_text = args.generateHelp(
     "Display an image in the terminal using supported graphics protocols.",
 );
 
-pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(io, help_text);
+        try args.printHelp(writer, help_text);
         return;
     }
 
@@ -57,19 +57,15 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
 
     applyOptions(&protocol, width, height, filter);
 
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
-            try stdout.interface.print("File: {s}\n", .{path});
-            try stdout.interface.flush();
+            std.log.info("File: {s}", .{path});
         }
         var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
         defer image.deinit(gpa);
 
-        try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
-        try stdout.interface.flush();
+        try writer.print("{f}\n", .{image.display(io, protocol)});
+        try writer.flush();
     }
 }
 
@@ -133,6 +129,7 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, 
 
 pub fn displayCanvas(
     io: Io,
+    writer: *std.Io.Writer,
     image: anytype,
     protocol_name: ?[]const u8,
     filter: zignal.Interpolation,
@@ -164,11 +161,8 @@ pub fn displayCanvas(
 
     applyOptions(&protocol, display_w, display_h, filter);
 
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
-    try stdout.interface.print("\n", .{});
-    try stdout.interface.flush();
-    try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
-    try stdout.interface.flush();
+    try writer.print("\n", .{});
+    try writer.flush();
+    try writer.print("{f}\n", .{image.display(io, protocol)});
+    try writer.flush();
 }
