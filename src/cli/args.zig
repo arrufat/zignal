@@ -16,6 +16,8 @@ pub fn ParseResult(comptime T: type) type {
         options: T,
         /// Slice of positional arguments (non-flag/option arguments).
         positionals: [][]const u8,
+        /// True if the user requested help (via --help or -h).
+        help: bool,
 
         /// Frees the memory allocated for the positionals slice.
         pub fn deinit(self: *const @This(), allocator: Allocator) void {
@@ -38,8 +40,13 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
     var options: T = .{};
     var positionals: std.ArrayList([]const u8) = .empty;
     errdefer positionals.deinit(allocator);
+    var help_requested = false;
 
     while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            help_requested = true;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--")) {
             while (args.next()) |pos| {
                 try positionals.append(allocator, pos);
@@ -87,7 +94,11 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
             try positionals.append(allocator, arg);
         }
     }
-    return .{ .options = options, .positionals = try positionals.toOwnedSlice(allocator) };
+    return .{
+        .options = options,
+        .positionals = try positionals.toOwnedSlice(allocator),
+        .help = help_requested,
+    };
 }
 
 /// Generates a formatted help message at compile-time based on the struct T.
