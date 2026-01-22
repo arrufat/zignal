@@ -32,10 +32,7 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        var buffer: [4096]u8 = undefined;
-        var stdout = std.Io.File.stdout().writer(io, &buffer);
-        try stdout.interface.print("{s}", .{help_text});
-        try stdout.interface.flush();
+        try args.printHelp(io, help_text);
         return;
     }
 
