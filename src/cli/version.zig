@@ -1,13 +1,15 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const Io = std.Io;
+const cli_args = @import("args.zig");
 
-pub const help_text =
-    \\Usage: zignal version
-    \\
-    \\Display version information.
-    \\
-;
+const Args = struct {};
+
+pub const help_text = cli_args.generateHelp(
+    Args,
+    "zignal version",
+    "Display version information.",
+);
 
 pub fn run(io: Io) !void {
     var buffer: [256]u8 = undefined;

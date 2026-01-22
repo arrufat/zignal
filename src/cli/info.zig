@@ -4,27 +4,21 @@ const png = zignal.png;
 const jpeg = zignal.jpeg;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const cli_args = @import("args.zig");
 
-pub const help_text =
-    \\Usage: zignal info <image1> <image2> ...
-    \\
-    \\Display detailed information about one or more image files.
-    \\
-;
+const Args = struct {};
 
-pub fn run(io: Io, gpa: Allocator, args: *std.process.Args.Iterator) !void {
-    var image_paths: std.ArrayList([]const u8) = .empty;
-    defer image_paths.deinit(gpa);
+pub const help_text = cli_args.generateHelp(
+    Args,
+    "zignal info <image1> <image2> ...",
+    "Display detailed information about one or more image files.",
+);
 
-    while (args.next()) |arg| {
-        if (std.mem.startsWith(u8, arg, "-")) {
-            std.log.err("Unknown option: {s}", .{arg});
-            return error.InvalidArguments;
-        }
-        try image_paths.append(gpa, arg);
-    }
+pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+    const parsed = try cli_args.parse(Args, gpa, iterator);
+    defer parsed.deinit(gpa);
 
-    if (image_paths.items.len == 0) {
+    if (parsed.positionals.len == 0) {
         std.log.err("Missing image path for 'info' command", .{});
         return error.InvalidArguments;
     }
@@ -35,8 +29,8 @@ pub fn run(io: Io, gpa: Allocator, args: *std.process.Args.Iterator) !void {
     // Buffer for reading file data
     var read_buffer: [4096]u8 = undefined;
 
-    for (image_paths.items) |image_path| {
-        if (image_paths.items.len > 1) {
+    for (parsed.positionals) |image_path| {
+        if (parsed.positionals.len > 1) {
             try stdout.interface.print("File: {s}\n", .{image_path});
         }
 
@@ -88,7 +82,7 @@ pub fn run(io: Io, gpa: Allocator, args: *std.process.Args.Iterator) !void {
             std.log.err("failed to get info for '{s}': {t}", .{ image_path, err });
         }
 
-        if (image_paths.items.len > 1) {
+        if (parsed.positionals.len > 1) {
             try stdout.interface.print("\n", .{});
         }
     }
