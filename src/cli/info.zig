@@ -18,17 +18,12 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try cli_args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
-    if (parsed.help) {
+    if (parsed.help or parsed.positionals.len == 0) {
         var buffer: [4096]u8 = undefined;
         var stdout = std.Io.File.stdout().writer(io, &buffer);
         try stdout.interface.print("{s}", .{help_text});
         try stdout.interface.flush();
         return;
-    }
-
-    if (parsed.positionals.len == 0) {
-        std.log.err("Missing image path for 'info' command", .{});
-        return error.InvalidArguments;
     }
 
     var buffer: [4096]u8 = undefined;

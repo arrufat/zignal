@@ -34,7 +34,7 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
         if (std.mem.eql(u8, arg, "version")) {
-            try version.run(init.io);
+            try version.run(init.io, init.gpa, &args);
             return;
         }
         if (std.mem.eql(u8, arg, "info")) {
