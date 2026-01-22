@@ -290,7 +290,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns the number of channels or depth of this image type.
-        pub fn channels() usize {
+        pub fn channels() u32 {
             return comptime switch (@typeInfo(T)) {
                 .int, .float => 1,
                 .@"struct" => std.meta.fields(T).len,

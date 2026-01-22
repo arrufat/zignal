@@ -19,7 +19,7 @@ pub fn findUniformValue(comptime T: type, data: []const T) ?T {
     if (vec_len > 1 and data.len >= vec_len * 4) {
         // SIMD path for faster uniformity check
         const first_vec: @Vector(vec_len, T) = @splat(first);
-        var i: usize = 0;
+        var i: u32 = 0;
         while (i + vec_len <= data.len) : (i += vec_len) {
             const vec: @Vector(vec_len, T) = data[i..][0..vec_len].*;
             if (@reduce(.Or, vec != first_vec)) return null;
@@ -67,7 +67,7 @@ pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: st
     var uniform_values: [num_channels]FieldType = undefined;
 
     // Allocate each channel with proper error handling
-    var allocated_count: usize = 0;
+    var allocated_count: u32 = 0;
     errdefer {
         for (0..allocated_count) |i| {
             allocator.free(channels[i]);
@@ -80,7 +80,7 @@ pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: st
     }
 
     // Split in single pass for cache efficiency
-    var idx: usize = 0;
+    var idx: u32 = 0;
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
             const pixel = image.at(r, c).*;
@@ -121,7 +121,7 @@ pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Alloc
 pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
     const fields = std.meta.fields(T);
 
-    var idx: usize = 0;
+    var idx: u32 = 0;
     for (0..out.rows) |r| {
         for (0..out.cols) |c| {
             var result_pixel: T = undefined;
@@ -143,10 +143,10 @@ pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const Fi
 pub fn resizePlaneBilinearU8(
     src: []const u8,
     dst: []u8,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
 ) void {
     const SCALE = 256;
 
@@ -191,18 +191,18 @@ pub fn resizePlaneBilinearU8(
 pub fn resizePlaneNearestU8(
     src: []const u8,
     dst: []u8,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
 ) void {
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
     for (0..dst_rows) |r| {
-        const src_y = @min(src_rows - 1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(r)) * y_ratio))));
+        const src_y = @min(src_rows - 1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(r)) * y_ratio))));
         for (0..dst_cols) |c| {
-            const src_x = @min(src_cols - 1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(c)) * x_ratio))));
+            const src_x = @min(src_cols - 1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(c)) * x_ratio))));
             dst[r * dst_cols + c] = src[src_y * src_cols + src_x];
         }
     }
@@ -212,10 +212,10 @@ pub fn resizePlaneNearestU8(
 pub fn resizePlaneBicubicU8(
     src: []const u8,
     dst: []u8,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
 ) void {
     const SCALE = 256;
 
@@ -274,7 +274,7 @@ pub fn resizePlaneBicubicU8(
                     const wx = cubicKernel(@as(i32, @intCast(kx)) * SCALE - SCALE - fx);
                     const w = @divTrunc(wx * wy, SCALE);
 
-                    const pixel_val = @as(i32, src[@as(usize, @intCast(y_idx)) * src_cols + @as(usize, @intCast(x_idx))]);
+                    const pixel_val = @as(i32, src[@as(u32, @intCast(y_idx)) * src_cols + @as(u32, @intCast(x_idx))]);
                     sum += pixel_val * w;
                     weight_sum += w;
                 }
@@ -294,10 +294,10 @@ pub fn resizePlaneBicubicU8(
 pub fn resizePlaneCatmullRomU8(
     src: []const u8,
     dst: []u8,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
 ) void {
     const SCALE = 256;
 
@@ -356,7 +356,7 @@ pub fn resizePlaneCatmullRomU8(
                     const wx = catmullRomKernel(@as(i32, @intCast(kx)) * SCALE - SCALE - fx);
                     const w = @divTrunc(wx * wy, SCALE);
 
-                    const pixel_val = @as(i32, src[@as(usize, @intCast(y_idx)) * src_cols + @as(usize, @intCast(x_idx))]);
+                    const pixel_val = @as(i32, src[@as(u32, @intCast(y_idx)) * src_cols + @as(u32, @intCast(x_idx))]);
                     sum += pixel_val * w;
                     weight_sum += w;
                 }
@@ -376,10 +376,10 @@ pub fn resizePlaneCatmullRomU8(
 pub fn resizePlaneF32(
     src: []const f32,
     dst: []f32,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
     method: enum { nearest, bilinear, bicubic },
 ) void {
     switch (method) {
@@ -388,9 +388,9 @@ pub fn resizePlaneF32(
             const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
             for (0..dst_rows) |r| {
-                const src_y = @min(src_rows - 1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(r)) * y_ratio))));
+                const src_y = @min(src_rows - 1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(r)) * y_ratio))));
                 for (0..dst_cols) |c| {
-                    const src_x = @min(src_cols - 1, @as(usize, @intFromFloat(@round(@as(f32, @floatFromInt(c)) * x_ratio))));
+                    const src_x = @min(src_cols - 1, @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(c)) * x_ratio))));
                     dst[r * dst_cols + c] = src[src_y * src_cols + src_x];
                 }
             }
@@ -407,13 +407,13 @@ pub fn resizePlaneF32(
 
             for (0..dst_rows) |r| {
                 const src_y_f = @as(f32, @floatFromInt(r)) * y_ratio;
-                const src_y = @as(usize, @intFromFloat(@floor(src_y_f)));
+                const src_y = @as(u32, @intFromFloat(@floor(src_y_f)));
                 const src_y_next = @min(src_y + 1, src_rows - 1);
                 const fy = src_y_f - @floor(src_y_f);
 
                 for (0..dst_cols) |c| {
                     const src_x_f = @as(f32, @floatFromInt(c)) * x_ratio;
-                    const src_x = @as(usize, @intFromFloat(@floor(src_x_f)));
+                    const src_x = @as(u32, @intFromFloat(@floor(src_x_f)));
                     const src_x_next = @min(src_x + 1, src_cols - 1);
                     const fx = src_x_f - @floor(src_x_f);
 
@@ -439,10 +439,10 @@ pub fn resizePlaneF32(
 fn resizePlaneBicubicF32(
     src: []const f32,
     dst: []f32,
-    src_rows: usize,
-    src_cols: usize,
-    dst_rows: usize,
-    dst_cols: usize,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
 ) void {
     const cubicKernel = struct {
         fn eval(t: f32) f32 {
@@ -491,7 +491,7 @@ fn resizePlaneBicubicF32(
                     const wx = cubicKernel(@as(f32, @floatFromInt(@as(isize, @intCast(kx)) - 1)) - fx);
                     const w = wx * wy;
 
-                    sum += src[@as(usize, @intCast(y_idx)) * src_cols + @as(usize, @intCast(x_idx))] * w;
+                    sum += src[@as(u32, @intCast(y_idx)) * src_cols + @as(u32, @intCast(x_idx))] * w;
                     weight_sum += w;
                 }
             }
