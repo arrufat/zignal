@@ -82,8 +82,8 @@ pub inline fn assignPixel(dest: anytype, sample: anytype, blend_mode: Blending) 
 /// A simple image struct that encapsulates the size and the data.
 pub fn Image(comptime T: type) type {
     return struct {
-        rows: usize,
-        cols: usize,
+        rows: u32,
+        cols: u32,
         data: []T,
         stride: usize,
 
@@ -107,7 +107,7 @@ pub fn Image(comptime T: type) type {
 
         /// Constructs an image of rows and cols size allocating its own memory.
         /// The image owns the memory and deinit should be called to free it.
-        pub fn init(allocator: Allocator, rows: usize, cols: usize) !Image(T) {
+        pub fn init(allocator: Allocator, rows: u32, cols: u32) !Image(T) {
             const pixel_count = try std.math.mul(usize, rows, cols);
             return .{
                 .rows = rows,
@@ -141,7 +141,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Constructs an image of rows and cols size from an existing slice.
-        pub fn initFromSlice(rows: usize, cols: usize, data: []T) Image(T) {
+        pub fn initFromSlice(rows: u32, cols: u32, data: []T) Image(T) {
             const expected_len = std.math.mul(usize, rows, cols) catch @panic("Image.initFromSlice overflow");
             assert(data.len >= expected_len);
             return .{
@@ -154,7 +154,7 @@ pub fn Image(comptime T: type) type {
 
         /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
         /// The length of the `bytes` slice must be exactly `rows * cols * @sizeOf(T)`.
-        pub fn initFromBytes(rows: usize, cols: usize, bytes: []u8) Image(T) {
+        pub fn initFromBytes(rows: u32, cols: u32, bytes: []u8) Image(T) {
             const expected_len = std.math.mul(usize, rows, cols) catch @panic("Image.initFromBytes overflow");
             const expected_bytes = std.math.mul(usize, expected_len, @sizeOf(T)) catch @panic("Image.initFromBytes overflow");
             assert(expected_bytes == bytes.len);
@@ -195,7 +195,7 @@ pub fn Image(comptime T: type) type {
 
         /// Sets the border outside `rect` to `value` (rect is clipped to bounds).
         /// Efficiently fills only the top/bottom bands and left/right bands per row.
-        pub fn setBorder(self: Self, rect: Rectangle(usize), value: T) void {
+        pub fn setBorder(self: Self, rect: Rectangle(u32), value: T) void {
             const bounds = self.getRectangle();
             const inner = bounds.intersect(rect) orelse {
                 self.fill(value);
@@ -286,7 +286,7 @@ pub fn Image(comptime T: type) type {
 
         /// Returns the total number of pixels in the image (rows * cols).
         pub inline fn size(self: Self) usize {
-            return self.rows * self.cols;
+            return @as(usize, self.rows) * @as(usize, self.cols);
         }
 
         /// Returns the number of channels or depth of this image type.
@@ -306,7 +306,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns the bounding rectangle for the current image.
-        pub fn getRectangle(self: Self) Rectangle(usize) {
+        pub fn getRectangle(self: Self) Rectangle(u32) {
             return .{ .l = 0, .t = 0, .r = self.cols, .b = self.rows };
         }
 
@@ -327,7 +327,7 @@ pub fn Image(comptime T: type) type {
         /// Returns an image view with boundaries defined by `rect` within the image boundaries.
         /// The returned image references the memory of `self`, so there are no allocations
         /// or copies.
-        pub fn view(self: Self, rect: Rectangle(usize)) Image(T) {
+        pub fn view(self: Self, rect: Rectangle(u32)) Image(T) {
             const clipped = self.getRectangle().intersect(rect) orelse {
                 return Self.empty;
             };
@@ -337,8 +337,8 @@ pub fn Image(comptime T: type) type {
 
             const rows = clipped.height();
             const cols = clipped.width();
-            const start = clipped.t * self.stride + clipped.l;
-            const end = (clipped.b - 1) * self.stride + clipped.r;
+            const start = @as(usize, clipped.t) * self.stride + @as(usize, clipped.l);
+            const end = @as(usize, clipped.b - 1) * self.stride + @as(usize, clipped.r);
             return .{
                 .rows = rows,
                 .cols = cols,
@@ -547,8 +547,8 @@ pub fn Image(comptime T: type) type {
         pub fn scale(self: Self, allocator: Allocator, factor: f32, method: Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
-            const new_rows: usize = @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor));
-            const new_cols: usize = @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor));
+            const new_rows: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor));
+            const new_cols: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor));
 
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
@@ -560,7 +560,7 @@ pub fn Image(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(usize) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(u32) {
             return Transform(T).letterbox(self, allocator, out, method);
         }
 
@@ -661,7 +661,7 @@ pub fn Image(comptime T: type) type {
         /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
         /// defer warped.deinit(allocator);
         /// ```
-        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
+        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: u32, out_cols: u32) !void {
             return Transform(T).warp(self, allocator, transform, method, out, out_rows, out_cols);
         }
 
@@ -681,7 +681,7 @@ pub fn Image(comptime T: type) type {
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn boxBlur(self: Self, allocator: Allocator, radius: usize, out: Self) !void {
+        pub fn boxBlur(self: Self, allocator: Allocator, radius: u32, out: Self) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -690,7 +690,7 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            var planes = Self.Integral.Planes.init();
+            var planes: Self.Integral.Planes = .init();
             defer planes.deinit(allocator);
             try Self.Integral.compute(self, allocator, &planes);
             try Self.Integral.boxBlur(&planes, allocator, self, out, radius);

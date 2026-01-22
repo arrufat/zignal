@@ -133,9 +133,9 @@ fn imageFromNumpyHelper(
     self_opt: ?*ImageObject,
     array_obj: ?*c.PyObject,
     buffer: *c.Py_buffer,
-    rows: usize,
-    cols: usize,
-    row_stride_pixels: usize,
+    rows: u32,
+    cols: u32,
+    row_stride_pixels: u32,
 ) ?*c.PyObject {
     const self = self_opt orelse {
         // This should be unreachable if called correctly
@@ -242,9 +242,9 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     }
 
     const shape: [*]c.Py_ssize_t = @ptrCast(buffer.shape);
-    const rows: usize = @intCast(shape[0]);
-    const cols: usize = @intCast(shape[1]);
-    const channels: usize = @intCast(shape[2]);
+    const rows: u32 = @intCast(shape[0]);
+    const cols: u32 = @intCast(shape[1]);
+    const channels: u32 = @intCast(shape[2]);
 
     if (channels != 1 and channels != 3 and channels != 4) {
         python.setValueError("Array must have 1, 3, or 4 channels", .{});
@@ -266,7 +266,7 @@ pub fn image_from_numpy(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
         python.setValueError("Array row stride must be a multiple of pixel size.", .{});
         return null;
     }
-    const row_stride_pixels: usize = @intCast(@divExact(row_stride_bytes, pixel_size));
+    const row_stride_pixels: u32 = @intCast(@divExact(row_stride_bytes, pixel_size));
 
     const self = @as(?*ImageObject, @ptrCast(c.PyType_GenericAlloc(@ptrCast(getImageType()), 0))) orelse return null;
 

@@ -43,8 +43,8 @@ pub export fn set_lacunarity(val: f32) void {
     opts.lacunarity = val;
 }
 
-pub export fn generate(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
-    const size = rows * cols;
+pub export fn generate(rgba_ptr: [*]Rgba, rows: u32, cols: u32) void {
+    const size = @as(usize, rows) * @as(usize, cols);
     const image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
     for (0..image.rows) |r| {
         const y: f32 = @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(image.rows));

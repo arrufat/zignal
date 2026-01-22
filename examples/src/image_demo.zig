@@ -2,7 +2,6 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgba = zignal.Rgba(u8);
-const Gray = zignal.Gray(u8);
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);

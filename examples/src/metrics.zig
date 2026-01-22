@@ -19,25 +19,23 @@ pub const MetricsResultCount = 3;
 
 pub export fn compute_metrics(
     reference_ptr: [*]Rgba,
-    reference_rows: usize,
-    reference_cols: usize,
+    reference_rows: u32,
+    reference_cols: u32,
     distorted_ptr: [*]Rgba,
-    distorted_rows: usize,
-    distorted_cols: usize,
+    distorted_rows: u32,
+    distorted_cols: u32,
     result_ptr: [*]f64,
 ) void {
     if (reference_rows != distorted_rows or reference_cols != distorted_cols) {
         @panic("Image dimensions must match");
     }
 
-    const pixel_count = reference_rows * reference_cols;
-    const reference_slice = reference_ptr[0..pixel_count];
-    const distorted_slice = distorted_ptr[0..pixel_count];
+    const size = @as(usize, reference_rows) * @as(usize, reference_cols);
 
-    const reference_img: Image(Rgba) = .initFromSlice(reference_rows, reference_cols, reference_slice);
-    const distorted_img: Image(Rgba) = .initFromSlice(distorted_rows, distorted_cols, distorted_slice);
+    const reference_img: Image(Rgba) = .initFromSlice(reference_rows, reference_cols, reference_ptr[0..size]);
+    const distorted_img: Image(Rgba) = .initFromSlice(distorted_rows, distorted_cols, distorted_ptr[0..size]);
 
-    result_ptr[0] = Image(Rgba).psnr(reference_img, distorted_img) catch @panic("PSNR computation failed");
-    result_ptr[1] = Image(Rgba).ssim(reference_img, distorted_img) catch @panic("SSIM computation failed");
-    result_ptr[2] = Image(Rgba).meanPixelError(reference_img, distorted_img) catch @panic("Mean pixel error computation failed");
+    result_ptr[0] = reference_img.psnr(distorted_img) catch @panic("PSNR computation failed");
+    result_ptr[1] = reference_img.ssim(distorted_img) catch @panic("SSIM computation failed");
+    result_ptr[2] = reference_img.meanPixelError(distorted_img) catch @panic("Mean pixel error computation failed");
 }

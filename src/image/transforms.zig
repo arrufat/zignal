@@ -14,7 +14,7 @@ const Interpolation = @import("interpolation.zig").Interpolation;
 const assignPixel = @import("../image.zig").assignPixel;
 
 /// Rotation bounds result
-pub const RotationBounds = struct { rows: usize, cols: usize };
+pub const RotationBounds = struct { rows: u32, cols: u32 };
 
 /// Transform operations for Image(T)
 pub fn Transform(comptime T: type) type {
@@ -46,7 +46,7 @@ pub fn Transform(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(usize) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(u32) {
             const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
@@ -56,7 +56,8 @@ pub fn Transform(comptime T: type) type {
 
             // Ensure output has a contiguous buffer of the requested size
             if (out.isContiguous() and out.data.len > 0) {
-                out.data = try allocator.realloc(out.data, out.rows * out.cols);
+                const new_size = try std.math.mul(usize, out.rows, out.cols);
+                out.data = try allocator.realloc(out.data, new_size);
                 out.stride = out.cols;
             } else {
                 out.* = try .init(allocator, out.rows, out.cols);
@@ -82,15 +83,15 @@ pub fn Transform(comptime T: type) type {
             const aspect_scale = @min(rows_scale, cols_scale);
 
             // Calculate dimensions of the scaled image (ensure at least 1 pixel)
-            const scaled_rows: usize = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.rows))));
-            const scaled_cols: usize = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.cols))));
+            const scaled_rows: u32 = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.rows))));
+            const scaled_cols: u32 = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.cols))));
 
             // Calculate offset to center the image
             const offset_row = (out.rows -| scaled_rows) / 2;
             const offset_col = (out.cols -| scaled_cols) / 2;
 
             // Create rectangle for the letterboxed content
-            const content_rect: Rectangle(usize) = .init(
+            const content_rect: Rectangle(u32) = .init(
                 offset_col,
                 offset_row,
                 offset_col + scaled_cols,
@@ -245,8 +246,8 @@ pub fn Transform(comptime T: type) type {
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
             const chip_top: isize = @intFromFloat(@round(rectangle.t));
             const chip_left: isize = @intFromFloat(@round(rectangle.l));
-            const chip_rows: usize = @intFromFloat(@round(rectangle.height()));
-            const chip_cols: usize = @intFromFloat(@round(rectangle.width()));
+            const chip_rows: u32 = @intFromFloat(@round(rectangle.height()));
+            const chip_cols: u32 = @intFromFloat(@round(rectangle.width()));
 
             const chip = try Self.init(allocator, chip_rows, chip_cols);
             copyRect(self, chip_top, chip_left, chip);
@@ -388,9 +389,9 @@ pub fn Transform(comptime T: type) type {
             const bound_hh = half_width * abs_sin + half_height * abs_cos;
 
             const min_r = if (cy - bound_hh < 0) 0 else @as(usize, @intFromFloat(@floor(cy - bound_hh)));
-            const max_r = @min(self.rows, @as(usize, @intFromFloat(@ceil(cy + bound_hh))) + 1);
+            const max_r = @min(@as(usize, self.rows), @as(usize, @intFromFloat(@ceil(cy + bound_hh))) + 1);
             const min_c = if (cx - bound_hw < 0) 0 else @as(usize, @intFromFloat(@floor(cx - bound_hw)));
-            const max_c = @min(self.cols, @as(usize, @intFromFloat(@ceil(cx + bound_hw))) + 1);
+            const max_c = @min(@as(usize, self.cols), @as(usize, @intFromFloat(@ceil(cx + bound_hw))) + 1);
 
             // Only iterate over potentially affected pixels
             for (min_r..max_r) |r| {
@@ -431,7 +432,7 @@ pub fn Transform(comptime T: type) type {
         // ============================================================================
 
         /// Fast 90-degree counter-clockwise rotation.
-        fn rotate90CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize) !Self {
+        fn rotate90CCW(self: Self, gpa: Allocator, output_rows: u32, output_cols: u32) !Self {
             const offset_r = (output_rows -| self.cols) / 2;
             const offset_c = (output_cols -| self.rows) / 2;
 
@@ -448,7 +449,7 @@ pub fn Transform(comptime T: type) type {
             }
             // Zero only padding bands if any
             if (offset_r != 0 or offset_c != 0) {
-                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
+                const inner: Rectangle(u32) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
                 rotated.setBorder(inner, std.mem.zeroes(T));
             }
 
@@ -456,7 +457,7 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Fast 180-degree rotation.
-        fn rotate180(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize) !Self {
+        fn rotate180(self: Self, gpa: Allocator, output_rows: u32, output_cols: u32) !Self {
             const offset_r = (output_rows -| self.rows) / 2;
             const offset_c = (output_cols -| self.cols) / 2;
 
@@ -472,7 +473,7 @@ pub fn Transform(comptime T: type) type {
                 }
             }
             if (offset_r != 0 or offset_c != 0) {
-                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.cols, offset_r + self.rows);
+                const inner: Rectangle(u32) = .init(offset_c, offset_r, offset_c + self.cols, offset_r + self.rows);
                 rotated.setBorder(inner, std.mem.zeroes(T));
             }
 
@@ -480,7 +481,7 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Fast 270-degree counter-clockwise rotation (90-degree clockwise).
-        fn rotate270CCW(self: Self, gpa: Allocator, output_rows: usize, output_cols: usize) !Self {
+        fn rotate270CCW(self: Self, gpa: Allocator, output_rows: u32, output_cols: u32) !Self {
             const offset_r = (output_rows -| self.cols) / 2;
             const offset_c = (output_cols -| self.rows) / 2;
 
@@ -496,7 +497,7 @@ pub fn Transform(comptime T: type) type {
                 }
             }
             if (offset_r != 0 or offset_c != 0) {
-                const inner: Rectangle(usize) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
+                const inner: Rectangle(u32) = .init(offset_c, offset_r, offset_c + self.rows, offset_r + self.cols);
                 rotated.setBorder(inner, std.mem.zeroes(T));
             }
 
@@ -517,7 +518,7 @@ pub fn Transform(comptime T: type) type {
 
         /// Applies a geometric transform to the image using backward mapping.
         /// For each pixel in the output, applies the transform to find the corresponding source pixel.
-        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: usize, out_cols: usize) !void {
+        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: u32, out_cols: u32) !void {
             const Point = @import("../geometry/Point.zig").Point;
             const interpolation = @import("interpolation.zig");
 
@@ -527,7 +528,8 @@ pub fn Transform(comptime T: type) type {
 
             if (needs_alloc) {
                 if (out.rows > 0 and out.cols > 0 and out.isContiguous()) {
-                    out.data = try allocator.realloc(out.data, out_rows * out_cols);
+                    const new_size = try std.math.mul(usize, out_rows, out_cols);
+                    out.data = try allocator.realloc(out.data, new_size);
                     out.rows = out_rows;
                     out.cols = out_cols;
                     out.stride = out_cols;

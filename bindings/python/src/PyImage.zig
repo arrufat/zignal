@@ -56,20 +56,20 @@ pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Owner
     return p;
 }
 
-pub fn rows(self: *const PyImage) usize {
+pub fn rows(self: *const PyImage) u32 {
     return switch (self.data) {
         inline else => |img| img.rows,
     };
 }
 
-pub fn cols(self: *const PyImage) usize {
+pub fn cols(self: *const PyImage) u32 {
     return switch (self.data) {
         inline else => |img| img.cols,
     };
 }
 
 /// Return the pixel as Rgba regardless of underlying storage, for uniform Python API.
-pub fn getPixelRgba(self: *const PyImage, row: usize, col: usize) Rgba {
+pub fn getPixelRgba(self: *const PyImage, row: u32, col: u32) Rgba {
     return switch (self.data) {
         .gray => |img| blk: {
             const v = img.at(row, col).*;
@@ -84,7 +84,7 @@ pub fn getPixelRgba(self: *const PyImage, row: usize, col: usize) Rgba {
 }
 
 /// Set a pixel from an Rgba value, converting as needed.
-pub fn setPixelRgba(self: *PyImage, row: usize, col: usize, px: Rgba) void {
+pub fn setPixelRgba(self: *PyImage, row: u32, col: u32, px: Rgba) void {
     switch (self.data) {
         .gray => |*img| img.at(row, col).* = px.to(.gray).y,
         .rgb => |*img| img.at(row, col).* = Rgb{ .r = px.r, .g = px.g, .b = px.b },

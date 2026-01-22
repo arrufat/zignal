@@ -424,10 +424,10 @@ pub fn image_view(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const pimg_view = self.py_image.?.dispatch(.{params.rect}, struct {
         fn apply(img: anytype, rect_obj: ?*c.PyObject) ?*PyImage {
             if (rect_obj) |ro| {
-                const rect = python.parse(zignal.Rectangle(usize), ro) catch return null;
+                const rect = python.parse(zignal.Rectangle(u32), ro) catch return null;
                 return PyImage.createFrom(allocator, img.view(rect), .borrowed);
             } else {
-                const full_rect = zignal.Rectangle(usize).init(0, 0, img.cols, img.rows);
+                const full_rect = zignal.Rectangle(u32).init(0, 0, img.cols, img.rows);
                 return PyImage.createFrom(allocator, img.view(full_rect), .borrowed);
             }
         }
@@ -961,10 +961,10 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const rect = python.parse(zignal.Rectangle(usize), params.rect) catch return null;
+    const rect = python.parse(zignal.Rectangle(u32), params.rect) catch return null;
 
     return self.py_image.?.dispatch(.{ rect, params.color }, struct {
-        fn apply(img: anytype, r: zignal.Rectangle(usize), color_obj: ?*c.PyObject) ?*c.PyObject {
+        fn apply(img: anytype, r: zignal.Rectangle(u32), color_obj: ?*c.PyObject) ?*c.PyObject {
             const T = @TypeOf(img.data[0]);
             if (color_obj) |cobj| {
                 img.setBorder(r, parseColorTo(T, cobj) catch return null);

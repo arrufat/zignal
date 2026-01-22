@@ -10,7 +10,7 @@ const color = @import("../../color.zig");
 const Gray = color.Gray;
 
 // Helper function to create a simple gradient test image
-fn createGradientImage(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(u8) {
+fn createGradientImage(allocator: std.mem.Allocator, rows: u32, cols: u32) !Image(u8) {
     var img = try Image(u8).init(allocator, rows, cols);
     for (0..rows) |r| {
         for (0..cols) |c| {
@@ -23,7 +23,7 @@ fn createGradientImage(allocator: std.mem.Allocator, rows: usize, cols: usize) !
 }
 
 // Helper function to create a checkerboard pattern
-fn createCheckerboard(allocator: std.mem.Allocator, rows: usize, cols: usize) !Image(u8) {
+fn createCheckerboard(allocator: std.mem.Allocator, rows: u32, cols: u32) !Image(u8) {
     var img = try Image(u8).init(allocator, rows, cols);
     for (0..rows) |r| {
         for (0..cols) |c| {

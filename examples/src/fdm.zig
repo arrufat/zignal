@@ -3,9 +3,8 @@ const builtin = @import("builtin");
 
 const FeatureDistributionMatching = @import("zignal").FeatureDistributionMatching;
 const Image = @import("zignal").Image;
-const loadPng = @import("zignal").loadPng;
+
 const Rgba = @import("zignal").Rgba(u8);
-const savePng = @import("zignal").savePng;
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -22,17 +21,19 @@ pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noretu
 /// Apply Feature Distribution Matching between source and target images
 pub export fn fdm(
     source_ptr: [*]Rgba,
-    source_rows: usize,
-    source_cols: usize,
+    source_rows: u32,
+    source_cols: u32,
     target_ptr: [*]Rgba,
-    target_rows: usize,
-    target_cols: usize,
+    target_rows: u32,
+    target_cols: u32,
     extra_ptr: ?[*]u8,
     extra_len: usize,
 ) void {
+    const source_size = @as(usize, source_rows) * @as(usize, source_cols);
+    const target_size = @as(usize, target_rows) * @as(usize, target_cols);
     const allocator: std.mem.Allocator = blk: {
         if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
-            const min_size = (source_rows * source_cols + target_rows * target_cols) * @sizeOf(f64) * 50;
+            const min_size = (source_size + target_size) * @sizeOf(f64) * 50;
             if (extra_len < min_size) {
                 std.log.err("Not enough extra memory: need at least {d}, got {d}", .{ min_size, extra_len });
                 @panic("Insufficient memory for FDM");
@@ -48,17 +49,13 @@ pub export fn fdm(
         }
     };
 
-    const src_size = source_rows * source_cols;
-    const ref_size = target_rows * target_cols;
+    const source_image: Image(Rgba) = .initFromSlice(source_rows, source_cols, source_ptr[0..source_size]);
+    const target_image: Image(Rgba) = .initFromSlice(target_rows, target_cols, target_ptr[0..target_size]);
 
-    const src_img: Image(Rgba) = .initFromSlice(source_rows, source_cols, source_ptr[0..src_size]);
-    const ref_img: Image(Rgba) = .initFromSlice(target_rows, target_cols, target_ptr[0..ref_size]);
-
-    // Apply FDM using new API
-    var matcher = FeatureDistributionMatching(Rgba).init(allocator);
+    var matcher: FeatureDistributionMatching(Rgba) = .init(allocator);
     defer matcher.deinit();
 
-    matcher.match(src_img, ref_img) catch |err| {
+    matcher.match(source_image, target_image) catch |err| {
         std.log.err("FDM match failed: {}", .{err});
         @panic("FDM match failed");
     };

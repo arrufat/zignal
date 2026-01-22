@@ -107,13 +107,13 @@ test "copy function in-place behavior" {
 test "view" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
-    const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
+    const rect: Rectangle(u32) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
     try expectEqual(view.isContiguous(), false);
     try expectEqual(image.isContiguous(), true);
     try expectEqual(view.cols, 8);
     try expectEqual(view.rows, 10);
-    try expectEqualDeep(Rectangle(usize){ .l = 0, .t = 0, .r = 8, .b = 10 }, view.getRectangle());
+    try expectEqualDeep(Rectangle(u32){ .l = 0, .t = 0, .r = 8, .b = 10 }, view.getRectangle());
 }
 
 test "view with getRectangle returns full image" {
@@ -151,10 +151,10 @@ test "view with getRectangle returns full image" {
     try expectEqual(@as(u8, 255), image.at(50, 100).*);
 
     // Verify getRectangle() returns expected bounds
-    try expectEqual(@as(usize, 0), full_rect.l);
-    try expectEqual(@as(usize, 0), full_rect.t);
-    try expectEqual(@as(usize, 200), full_rect.r);
-    try expectEqual(@as(usize, 100), full_rect.b);
+    try expectEqual(@as(u32, 0), full_rect.l);
+    try expectEqual(@as(u32, 0), full_rect.t);
+    try expectEqual(@as(u32, 200), full_rect.r);
+    try expectEqual(@as(u32, 100), full_rect.b);
 }
 
 test "rotate orthogonal fast paths" {
@@ -195,17 +195,17 @@ test "rotate orthogonal fast paths" {
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
-    try expectEqual(@as(usize, 3), rotated_0.rows);
-    try expectEqual(@as(usize, 4), rotated_0.cols);
+    try expectEqual(@as(u32, 3), rotated_0.rows);
+    try expectEqual(@as(u32, 4), rotated_0.cols);
     // 90° rotation should have exact swapped dimensions
-    try expectEqual(@as(usize, 4), rotated_90.rows);
-    try expectEqual(@as(usize, 3), rotated_90.cols);
+    try expectEqual(@as(u32, 4), rotated_90.rows);
+    try expectEqual(@as(u32, 3), rotated_90.cols);
     // 180° rotation should have same dimensions as original
-    try expectEqual(@as(usize, 3), rotated_180.rows);
-    try expectEqual(@as(usize, 4), rotated_180.cols);
+    try expectEqual(@as(u32, 3), rotated_180.rows);
+    try expectEqual(@as(u32, 4), rotated_180.cols);
     // 270° rotation should have exact swapped dimensions
-    try expectEqual(@as(usize, 4), rotated_270.rows);
-    try expectEqual(@as(usize, 3), rotated_270.cols);
+    try expectEqual(@as(u32, 4), rotated_270.rows);
+    try expectEqual(@as(u32, 3), rotated_270.cols);
 }
 
 test "rotate arbitrary angle" {
@@ -330,7 +330,7 @@ test "insert and extract inverse relationship" {
     const cases = [_]struct {
         rect: Rectangle(f32),
         angle: f32,
-        size: usize,
+        size: u32,
         method: @import("../../root.zig").Interpolation,
     }{
         .{ .rect = Rectangle(f32).init(10, 10, 50, 50), .angle = 0, .size = 40, .method = .bilinear },

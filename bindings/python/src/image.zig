@@ -144,8 +144,8 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
     };
 
     // Validate dimensions - validateRange now properly handles negative values when converting to usize
-    const validated_rows = python.validateRange(usize, params.rows, 1, std.math.maxInt(usize), "Rows") catch return -1;
-    const validated_cols = python.validateRange(usize, params.cols, 1, std.math.maxInt(usize), "Cols") catch return -1;
+    const validated_rows = python.validateRange(u32, params.rows, 1, std.math.maxInt(u32), "Rows") catch return -1;
+    const validated_cols = python.validateRange(u32, params.cols, 1, std.math.maxInt(u32), "Cols") catch return -1;
 
     // Detect color input type
     var color_type = ColorInputType.none;
@@ -545,9 +545,9 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     const rows = dims_self[0];
     const cols = dims_self[1];
     var equal = true;
-    var r: usize = 0;
+    var r: u32 = 0;
     while (r < rows) : (r += 1) {
-        var cidx: usize = 0;
+        var cidx: u32 = 0;
         while (cidx < cols) : (cidx += 1) {
             const a = self_img.getPixelRgba(r, cidx);
             const b = other_img.getPixelRgba(r, cidx);

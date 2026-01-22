@@ -1,15 +1,13 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb(u8);
 const Canvas = zignal.Canvas;
 const Pca = zignal.Pca;
 const Point = zignal.Point;
 const Matrix = zignal.Matrix;
 
-/// Bounds structure for point clouds
+const Rgb = zignal.Rgb(u8);
 const Bounds = struct { min: @Vector(2, f64), max: @Vector(2, f64) };
 
 /// Generate a 2D point cloud with a clear dominant direction

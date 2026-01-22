@@ -73,21 +73,32 @@ pub fn Rectangle(comptime T: type) type {
         }
 
         /// Returns the width of the rectangle.
-        pub fn width(self: Self) if (@typeInfo(T) == .int) usize else T {
+        pub fn width(self: Self) if (@typeInfo(T) == .int and @typeInfo(T).int.signedness == .signed) usize else T {
             if (self.l >= self.r) return 0;
             return switch (@typeInfo(T)) {
-                .int => @intCast(self.r - self.l),
+                .int => |info| if (info.signedness == .signed) @intCast(self.r - self.l) else self.r - self.l,
                 .float => self.r - self.l,
                 else => unreachable,
             };
         }
 
         /// Returns the height of the rectangle.
-        pub fn height(self: Self) if (@typeInfo(T) == .int) usize else T {
+        pub fn height(self: Self) if (@typeInfo(T) == .int and @typeInfo(T).int.signedness == .signed) usize else T {
             if (self.t >= self.b) return 0;
             return switch (@typeInfo(T)) {
-                .int => @intCast(self.b - self.t),
+                .int => |info| if (info.signedness == .signed) @intCast(self.b - self.t) else self.b - self.t,
                 .float => self.b - self.t,
+                else => unreachable,
+            };
+        }
+
+        /// Returns the perimeter of the rectangle.
+        pub fn perimeter(self: Self) if (@typeInfo(T) == .int) usize else T {
+            const w = self.width();
+            const h = self.height();
+            return switch (@typeInfo(T)) {
+                .int => (@as(usize, @intCast(w)) + @as(usize, @intCast(h))) * 2,
+                .float => (w + h) * 2,
                 else => unreachable,
             };
         }
@@ -95,7 +106,13 @@ pub fn Rectangle(comptime T: type) type {
         /// Returns the area of the rectangle
         pub fn area(self: Self) if (@typeInfo(T) == .int) usize else T {
             if (self.isEmpty()) return 0;
-            return self.height() * self.width();
+            const w = self.width();
+            const h = self.height();
+            return switch (@typeInfo(T)) {
+                .int => @as(usize, @intCast(w)) * @as(usize, @intCast(h)),
+                .float => w * h,
+                else => unreachable,
+            };
         }
 
         /// Returns true if the point is inside the rectangle.
@@ -365,11 +382,6 @@ pub fn Rectangle(comptime T: type) type {
                 .float => @as(f64, w) / @as(f64, h),
                 else => unreachable,
             };
-        }
-
-        /// Returns the perimeter of the rectangle.
-        pub fn perimeter(self: Self) if (@typeInfo(T) == .int) usize else T {
-            return (self.width() + self.height()) * 2;
         }
     };
 }
