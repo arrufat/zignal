@@ -93,7 +93,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Gets a reference to the pixel at the given coordinates, or null if out of bounds.
-        pub inline fn atOrNull(self: Self, row: isize, col: isize) ?*T {
+        pub inline fn atOrNull(self: Self, row: i32, col: i32) ?*T {
             return self.image.atOrNull(row, col);
         }
 
@@ -577,8 +577,8 @@ pub fn Canvas(comptime T: type) type {
         pub fn setPixel(self: Self, point: Point(2, f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
-            const row: isize = @intFromFloat(@floor(point.y()));
-            const col: isize = @intFromFloat(@floor(point.x()));
+            const row: i32 = @intFromFloat(@floor(point.y()));
+            const col: i32 = @intFromFloat(@floor(point.x()));
             if (self.atOrNull(row, col)) |pixel| {
                 const mode: Blending = if (comptime ColorType == Rgba)
                     if (color.a != 255) .normal else .none
@@ -603,17 +603,17 @@ pub fn Canvas(comptime T: type) type {
 
             if (src_rect.isEmpty()) return;
 
-            const origin_x = @as(isize, @intFromFloat(@round(position.x())));
-            const origin_y = @as(isize, @intFromFloat(@round(position.y())));
+            const origin_x = @as(i32, @intFromFloat(@round(position.x())));
+            const origin_y = @as(i32, @intFromFloat(@round(position.y())));
 
             // Simple blit loop with type-based blending
             for (src_rect.t..src_rect.b) |src_r| {
                 const row_offset = src_r - src_rect.t;
-                const dest_y = origin_y + @as(isize, @intCast(row_offset));
+                const dest_y = origin_y + @as(i32, @intCast(row_offset));
 
                 for (src_rect.l..src_rect.r) |src_c| {
                     const col_offset = src_c - src_rect.l;
-                    const dest_x = origin_x + @as(isize, @intCast(col_offset));
+                    const dest_x = origin_x + @as(i32, @intCast(col_offset));
 
                     if (self.atOrNull(dest_y, dest_x)) |dest_pixel| {
                         const src_pixel = source.at(src_r, src_c).*;

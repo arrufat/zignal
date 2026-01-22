@@ -23,11 +23,11 @@ pub fn computeEnergy(
     for (1..rows) |r| {
         for (0..cols) |c| {
             var min: u32 = std.math.maxInt(u32);
-            var i: isize = -1;
+            var i: i32 = -1;
             while (i <= 1) : (i += 1) {
-                var x: isize = @as(isize, @intCast(c)) + i;
+                var x: i32 = @as(i32, @intCast(c)) + i;
                 if (x == energy.cols) x = @intCast(energy.cols - 1);
-                const y: isize = @as(isize, @intCast(r)) - 1;
+                const y: i32 = @as(i32, @intCast(r)) - 1;
                 if (energy.atOrNull(y, x)) |val| {
                     min = @min(val.*, min);
                 }
@@ -47,13 +47,13 @@ pub fn computeSeam(energy: Image(u32), seam: []usize) void {
         }
     }
 
-    var y: isize = @intCast(energy.rows - 2);
+    var y: i32 = @intCast(energy.rows - 2);
     while (y >= 0) : (y -= 1) {
         const r: usize = @intCast(y);
         seam[r] = seam[r + 1];
-        var i: isize = -1;
+        var i: i32 = -1;
         while (i <= 1) : (i += 1) {
-            var x: isize = @as(isize, @intCast(seam[r + 1])) + i;
+            var x: i32 = @as(i32, @intCast(seam[r + 1])) + i;
             if (x == energy.cols) x = @intCast(energy.cols - 1);
             if (energy.atOrNull(y, x)) |curr| {
                 if (energy.atOrNull(y, @intCast(seam[r]))) |prev| {

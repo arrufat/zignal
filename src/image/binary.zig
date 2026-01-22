@@ -229,27 +229,27 @@ pub const Binary = struct {
     fn applyMorph(src: Image(u8), dst: Image(u8), kernel: Kernel, op: Operation) void {
         const rows = src.rows;
         const cols = src.cols;
-        const anchor_r: isize = @intCast(kernel.rows / 2);
-        const anchor_c: isize = @intCast(kernel.cols / 2);
+        const anchor_r: i32 = @intCast(kernel.rows / 2);
+        const anchor_c: i32 = @intCast(kernel.cols / 2);
 
         for (0..rows) |r_usize| {
-            const r: isize = @intCast(r_usize);
+            const r: i32 = @intCast(r_usize);
             for (0..cols) |c_usize| {
-                const c: isize = @intCast(c_usize);
+                const c: i32 = @intCast(c_usize);
                 var value: u8 = switch (op) {
                     .dilate => 0,
                     .erode => 255,
                 };
 
                 outer: for (0..kernel.rows) |kr| {
-                    const kr_isize: isize = @intCast(kr);
-                    const sample_r = r + kr_isize - anchor_r;
+                    const ikr: i32 = @intCast(kr);
+                    const sample_r = r + ikr - anchor_r;
 
                     for (0..kernel.cols) |kc| {
                         if (!kernel.element(kr, kc)) continue;
 
-                        const kc_isize: isize = @intCast(kc);
-                        const sample_c = c + kc_isize - anchor_c;
+                        const ikc: i32 = @intCast(kc);
+                        const sample_c = c + ikc - anchor_c;
 
                         const sample = src.atOrNull(sample_r, sample_c);
 
