@@ -7,6 +7,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,6 +22,10 @@ jobs:
 
       - name: Unit tests
         run: zig build test
+
+      - name: Get Version
+        id: get_version
+        run: echo "VERSION=$(zig build version)" >> $GITHUB_OUTPUT
 
   build-and-upload:
     needs: test
@@ -56,16 +62,31 @@ jobs:
 
       - name: Package artifact
         shell: bash
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
+          ARCHIVE_NAME: ${{ matrix.archive }}
         run: |
+          # Insert version before the first hyphen or at the end if no hyphen
+          # Actually, usually format is name-version-platform.
+          # The current archive name is zignal-platform-arch.
+          # Let's make it zignal-${VERSION}-platform-arch.
+          
+          # We can construct the new name.
+          # matrix.archive is like zignal-linux-x86_64.tar.gz
+          
+          BASE_NAME=$(echo "${{ matrix.archive }}" | sed "s/zignal-/zignal-${VERSION}-/")
+          
           mkdir -p dist
           cp zig-out/bin/${{ matrix.exe }} dist/${{ matrix.exe }}
-          if [[ "${{ matrix.archive }}" == *.zip ]]; then
-            (cd dist && zip -r "../${{ matrix.archive }}" "${{ matrix.exe }}")
+          if [[ "$BASE_NAME" == *.zip ]]; then
+            (cd dist && zip -r "../$BASE_NAME" "${{ matrix.exe }}")
           else
-            tar -C dist -czf "${{ matrix.archive }}" "${{ matrix.exe }}"
+            tar -C dist -czf "$BASE_NAME" "${{ matrix.exe }}"
           fi
+          
+          echo "ASSET_PATH=$BASE_NAME" >> $GITHUB_ENV
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.archive }}
+          files: ${{ env.ASSET_PATH }}
