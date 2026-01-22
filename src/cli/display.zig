@@ -42,38 +42,69 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     var filter: zignal.Interpolation = .bilinear;
 
     if (parsed.options.protocol) |p| {
-        const protocol_map = std.StaticStringMap(zignal.DisplayFormat).initComptime(.{
-            .{ "kitty", zignal.DisplayFormat{ .kitty = .default } },
-            .{ "sixel", zignal.DisplayFormat{ .sixel = .default } },
-            .{ "sgr", zignal.DisplayFormat{ .sgr = .default } },
-            .{ "braille", zignal.DisplayFormat{ .braille = .default } },
-            .{ "auto", zignal.DisplayFormat{ .auto = .default } },
-        });
-        if (protocol_map.get(p)) |p_enum| {
-            protocol = p_enum;
-        } else {
+        protocol = parseProtocol(p) catch |err| {
             std.log.err("Unknown protocol type: {s}", .{p});
-            return error.InvalidArguments;
-        }
+            return err;
+        };
     }
 
     if (parsed.options.filter) |f| {
-        const filter_map = std.StaticStringMap(zignal.Interpolation).initComptime(.{
-            .{ "nearest", .nearest_neighbor },
-            .{ "bilinear", .bilinear },
-            .{ "bicubic", .bicubic },
-            .{ "lanczos", .lanczos },
-            .{ "catmull-rom", .catmull_rom },
-        });
-        if (filter_map.get(f)) |f_enum| {
-            filter = f_enum;
-        } else {
+        filter = parseFilter(f) catch |err| {
             std.log.err("Unknown filter type: {s}", .{f});
-            return error.InvalidArguments;
-        }
+            return err;
+        };
     }
 
-    switch (protocol) {
+    applyOptions(&protocol, width, height, filter);
+
+    var buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(io, &buffer);
+
+    for (parsed.positionals) |path| {
+        if (parsed.positionals.len > 1) {
+            try stdout.interface.print("File: {s}\n", .{path});
+            try stdout.interface.flush();
+        }
+        var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
+        defer image.deinit(gpa);
+
+        try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
+        try stdout.interface.flush();
+    }
+}
+
+pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
+    const protocol_map = std.StaticStringMap(zignal.DisplayFormat).initComptime(.{
+        .{ "kitty", zignal.DisplayFormat{ .kitty = .default } },
+        .{ "sixel", zignal.DisplayFormat{ .sixel = .default } },
+        .{ "sgr", zignal.DisplayFormat{ .sgr = .default } },
+        .{ "braille", zignal.DisplayFormat{ .braille = .default } },
+        .{ "auto", zignal.DisplayFormat{ .auto = .default } },
+    });
+    if (protocol_map.get(name)) |p_enum| {
+        return p_enum;
+    } else {
+        return error.InvalidArguments;
+    }
+}
+
+pub fn parseFilter(name: []const u8) !zignal.Interpolation {
+    const filter_map = std.StaticStringMap(zignal.Interpolation).initComptime(.{
+        .{ "nearest", .nearest_neighbor },
+        .{ "bilinear", .bilinear },
+        .{ "bicubic", .bicubic },
+        .{ "lanczos", .lanczos },
+        .{ "catmull-rom", .catmull_rom },
+    });
+    if (filter_map.get(name)) |f_enum| {
+        return f_enum;
+    } else {
+        return error.InvalidArguments;
+    }
+}
+
+pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, filter: zignal.Interpolation) void {
+    switch (protocol.*) {
         .kitty => |*opts| {
             opts.width = width;
             opts.height = height;
@@ -97,20 +128,5 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
             opts.height = height;
             opts.interpolation = filter;
         },
-    }
-
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
-    for (parsed.positionals) |path| {
-        if (parsed.positionals.len > 1) {
-            try stdout.interface.print("File: {s}\n", .{path});
-            try stdout.interface.flush();
-        }
-        var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
-        defer image.deinit(gpa);
-
-        try stdout.interface.print("{f}\n", .{image.display(io, protocol)});
-        try stdout.interface.flush();
     }
 }
