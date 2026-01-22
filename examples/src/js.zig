@@ -1,6 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const assert = std.debug.assert;
 
 pub const js = struct {
     extern "js" fn log(ptr: [*]const u8, len: usize) void;

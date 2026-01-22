@@ -4,7 +4,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 
 const Gray = zignal.Gray(u8);
-const Image = zignal.Image(u8);
+const Image = zignal.Image(Gray);
 
 fn formatWidths(widths: []const usize, buffer: []u8) ![]const u8 {
     if (buffer.len == 0) return error.BufferTooSmall;

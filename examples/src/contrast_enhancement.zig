@@ -21,12 +21,12 @@ pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noretu
     @trap();
 }
 
-fn imageFromPtr(rgba_ptr: [*]Rgba, rows: usize, cols: usize) Image(Rgba) {
-    const total_pixels = std.math.mul(usize, rows, cols) catch @panic("contrast_enhancement: image too large");
-    return Image(Rgba).initFromSlice(rows, cols, rgba_ptr[0..total_pixels]);
+fn imageFromPtr(rgba_ptr: [*]Rgba, rows: u32, cols: u32) Image(Rgba) {
+    const total_pixels = @as(usize, rows) * @as(usize, cols);
+    return Image(Rgba).initFromSlice(@intCast(rows), @intCast(cols), rgba_ptr[0..total_pixels]);
 }
 
-pub export fn autocontrast_inplace(rgba_ptr: [*]Rgba, rows: usize, cols: usize, cutoff: f32) void {
+pub export fn autocontrast_inplace(rgba_ptr: [*]Rgba, rows: u32, cols: u32, cutoff: f32) void {
     const sanitized_cutoff = std.math.clamp(cutoff, 0.0, 0.49);
     const image = imageFromPtr(rgba_ptr, rows, cols);
     image.autocontrast(sanitized_cutoff) catch |err| {
@@ -34,7 +34,7 @@ pub export fn autocontrast_inplace(rgba_ptr: [*]Rgba, rows: usize, cols: usize, 
     };
 }
 
-pub export fn equalize_inplace(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
+pub export fn equalize_inplace(rgba_ptr: [*]Rgba, rows: u32, cols: u32) void {
     const image = imageFromPtr(rgba_ptr, rows, cols);
     image.equalize();
 }

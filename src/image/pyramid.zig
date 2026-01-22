@@ -57,8 +57,8 @@ pub fn ImagePyramid(comptime T: type) type {
             for (1..n_levels) |i| {
                 // Calculate dimensions for this level
                 const scale = std.math.pow(f32, scale_factor, @as(f32, @floatFromInt(i)));
-                const new_rows = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(source.rows)) / scale)));
-                const new_cols = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(source.cols)) / scale)));
+                const new_rows = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(source.rows)) / scale)));
+                const new_cols = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(source.cols)) / scale)));
 
                 // Skip if image becomes too small
                 if (new_rows < 8 or new_cols < 8) {
@@ -150,7 +150,7 @@ pub fn ImagePyramid(comptime T: type) type {
         pub fn totalPixels(self: Self) usize {
             var total: usize = 0;
             for (self.levels) |level| {
-                total += level.rows * level.cols;
+                total += @as(usize, level.rows) * @as(usize, level.cols);
             }
             return total;
         }
@@ -187,8 +187,8 @@ test "ImagePyramid basic construction" {
     try expectEqual(@as(f32, 1.5), pyramid.scale_factor);
 
     // Check first level is original size
-    try expectEqual(@as(usize, 640), pyramid.levels[0].rows);
-    try expectEqual(@as(usize, 480), pyramid.levels[0].cols);
+    try expectEqual(@as(u32, 640), pyramid.levels[0].rows);
+    try expectEqual(@as(u32, 480), pyramid.levels[0].cols);
 
     // Check subsequent levels are smaller
     for (1..pyramid.n_levels) |i| {

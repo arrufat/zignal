@@ -157,7 +157,7 @@ pub fn Canvas(comptime T: type) type {
         /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
         /// The view shares memory with the parent canvas - changes are reflected in both.
         /// Coordinates are automatically clipped to the canvas bounds.
-        pub fn view(self: Self, rect: Rectangle(usize)) Self {
+        pub fn view(self: Self, rect: Rectangle(u32)) Self {
             return .{
                 .image = self.image.view(rect),
                 .allocator = self.allocator,

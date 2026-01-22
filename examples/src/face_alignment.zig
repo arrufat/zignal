@@ -4,13 +4,11 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
+
 const Rgba = zignal.Rgba(u8);
-const Hsv = zignal.Hsv;
-const Canvas = zignal.Canvas;
 
 const Point = zignal.Point(2, f32);
 const SimilarityTransform = zignal.SimilarityTransform(f32);
-const Rectangle = zignal.Rectangle(f32);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -95,11 +93,11 @@ pub fn extractAlignedFace(
 
 pub export fn extract_aligned_face(
     rgba_ptr: [*]Rgba,
-    rows: usize,
-    cols: usize,
+    rows: u32,
+    cols: u32,
     out_ptr: [*]Rgba,
-    out_rows: usize,
-    out_cols: usize,
+    out_rows: u32,
+    out_cols: u32,
     padding: f32,
     blurring: i32,
     landmarks_ptr: [*]const Point,
@@ -110,7 +108,7 @@ pub export fn extract_aligned_face(
     var arena: std.heap.ArenaAllocator = .init(blk: {
         if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
             // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
-            assert(extra_len >= 9 * rows * cols);
+            assert(extra_len >= 9 * @as(usize, rows) * @as(usize, cols));
             if (extra_ptr) |ptr| {
                 var fba: std.heap.FixedBufferAllocator = .init(ptr[0..extra_len]);
                 break :blk fba.allocator();
@@ -124,7 +122,8 @@ pub export fn extract_aligned_face(
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0 .. rows * cols]);
+    const size = @as(usize, rows) * @as(usize, cols);
+    const image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
 
     const landmarks: []const Point = blk: {
         var array: std.ArrayList(Point) = .empty;
@@ -142,7 +141,8 @@ pub export fn extract_aligned_face(
     };
     defer allocator.free(landmarks);
 
-    var aligned: Image(Rgba) = .initFromSlice(out_rows, out_cols, out_ptr[0 .. out_rows * out_cols]);
+    const out_size = @as(usize, out_rows) * @as(usize, out_cols);
+    var aligned: Image(Rgba) = .initFromSlice(out_rows, out_cols, out_ptr[0..out_size]);
     extractAlignedFace(Rgba, allocator, image, landmarks, padding, blurring, &aligned) catch {
         std.log.err("Ran out of memory while extracting the aligned face", .{});
         @panic("OOM");

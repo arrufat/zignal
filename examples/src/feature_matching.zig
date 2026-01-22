@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const BruteForceMatcher = zignal.BruteForceMatcher;
@@ -7,13 +6,14 @@ const Canvas = zignal.Canvas;
 const Image = zignal.Image;
 const Orb = zignal.Orb;
 const Point = zignal.Point;
-const Rgba = zignal.Rgba(u8);
 
-// WASM-specific imports
 const js = @import("js.zig");
 pub const alloc = js.alloc;
 pub const free = js.free;
 
+const Rgba = zignal.Rgba(u8);
+
+// WASM-specific imports
 pub const std_options: std.Options = .{
     .logFn = js.logFn,
     .log_level = std.log.default_level,
@@ -199,14 +199,14 @@ fn createMatchVisualizationWithParams(
 // WASM export function for feature matching - writes directly to output buffer
 pub export fn matchAndVisualize(
     image1_ptr: [*]Rgba,
-    rows1: usize,
-    cols1: usize,
+    rows1: u32,
+    cols1: u32,
     image2_ptr: [*]Rgba,
-    rows2: usize,
-    cols2: usize,
+    rows2: u32,
+    cols2: u32,
     result_ptr: [*]Rgba,
-    result_rows: usize,
-    result_cols: usize,
+    result_rows: u32,
+    result_cols: u32,
     n_features: u16,
     scale_factor: f32,
     n_levels: u8,
@@ -218,10 +218,10 @@ pub export fn matchAndVisualize(
     const allocator = std.heap.wasm_allocator;
 
     // Create images from input data
-    const img1_size = rows1 * cols1;
+    const img1_size = @as(usize, rows1) * @as(usize, cols1);
     const img1: Image(Rgba) = .initFromSlice(rows1, cols1, image1_ptr[0..img1_size]);
 
-    const img2_size = rows2 * cols2;
+    const img2_size = @as(usize, rows2) * @as(usize, cols2);
     const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
 
     // Use the shared visualization function with custom parameters
@@ -232,7 +232,7 @@ pub export fn matchAndVisualize(
     defer viz.deinit(allocator);
 
     // Create output image view
-    const result_size = result_rows * result_cols;
+    const result_size = @as(usize, result_rows) * @as(usize, result_cols);
     var result: Image(Rgba) = .initFromSlice(result_rows, result_cols, result_ptr[0..result_size]);
 
     // Copy RGBA visualization to result
@@ -246,11 +246,11 @@ pub export fn matchAndVisualize(
 // WASM export function to get match statistics
 pub export fn getMatchStats(
     image1_ptr: [*]Rgba,
-    rows1: usize,
-    cols1: usize,
+    rows1: u32,
+    cols1: u32,
     image2_ptr: [*]Rgba,
-    rows2: usize,
-    cols2: usize,
+    rows2: u32,
+    cols2: u32,
     stats_ptr: [*]f32,
     n_features: u16,
     scale_factor: f32,
@@ -263,10 +263,10 @@ pub export fn getMatchStats(
     const allocator = std.heap.wasm_allocator;
 
     // Create images from input data
-    const img1_size = rows1 * cols1;
+    const img1_size = @as(usize, rows1) * @as(usize, cols1);
     const img1: Image(Rgba) = .initFromSlice(rows1, cols1, image1_ptr[0..img1_size]);
 
-    const img2_size = rows2 * cols2;
+    const img2_size = @as(usize, rows2) * @as(usize, cols2);
     const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
 
     // Convert to grayscale

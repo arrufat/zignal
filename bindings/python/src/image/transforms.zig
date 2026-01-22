@@ -45,10 +45,10 @@ fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObj
     }.apply);
 }
 
-fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
+fn image_reshape(self: *ImageObject, rows: u32, cols: u32, method: Interpolation) !*ImageObject {
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
-        fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
+        fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
             img.resize(allocator, out, m) catch return error.OutOfMemory;
             return moveImageToPython(out) orelse error.OutOfMemory;
@@ -56,10 +56,10 @@ fn image_reshape(self: *ImageObject, rows: usize, cols: usize, method: Interpola
     }.apply);
 }
 
-fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: Interpolation) !*ImageObject {
+fn image_letterbox_shape(self: *ImageObject, rows: u32, cols: u32, method: Interpolation) !*ImageObject {
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
-        fn apply(img: anytype, r: usize, col: usize, m: Interpolation) !*ImageObject {
+        fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             var out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
             _ = img.letterbox(allocator, &out, m) catch {
                 out.deinit(allocator);
@@ -70,7 +70,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: usize, cols: usize, method: I
     }.apply);
 }
 
-fn image_letterbox_square(self: *ImageObject, size: usize, method: Interpolation) !*ImageObject {
+fn image_letterbox_square(self: *ImageObject, size: u32, method: Interpolation) !*ImageObject {
     return image_letterbox_shape(self, size, size, method);
 }
 
@@ -143,8 +143,8 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             return null;
         }
 
-        const rows_pos = python.validatePositive(usize, rows, "Rows") catch return null;
-        const cols_pos = python.validatePositive(usize, cols, "Cols") catch return null;
+        const rows_pos = python.validatePositive(u32, rows, "Rows") catch return null;
+        const cols_pos = python.validatePositive(u32, cols, "Cols") catch return null;
 
         const result = image_reshape(self, rows_pos, cols_pos, method) catch return null;
         return @ptrCast(result);
@@ -199,7 +199,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         if (square_size == -1 and c.PyErr_Occurred() != null) {
             return null;
         }
-        const size_pos = python.validatePositive(usize, square_size, "Size") catch return null;
+        const size_pos = python.validatePositive(u32, square_size, "Size") catch return null;
         const result = image_letterbox_square(self, size_pos, method) catch return null;
         return @ptrCast(result);
     } else if (c.PyTuple_Check(size) != 0) {
@@ -224,8 +224,8 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
             return null;
         }
 
-        const rows_pos = python.validatePositive(usize, rows, "Rows") catch return null;
-        const cols_pos = python.validatePositive(usize, cols, "Cols") catch return null;
+        const rows_pos = python.validatePositive(u32, rows, "Rows") catch return null;
+        const cols_pos = python.validatePositive(u32, cols, "Cols") catch return null;
 
         const result = image_letterbox_shape(self, rows_pos, cols_pos, method) catch return null;
         return @ptrCast(result);
@@ -362,12 +362,12 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         const rows_val = c.PyLong_AsLong(rows_obj);
         const cols_val = c.PyLong_AsLong(cols_obj);
 
-        out_rows = python.validatePositive(usize, rows_val, "rows") catch return null;
-        out_cols = python.validatePositive(usize, cols_val, "cols") catch return null;
+        out_rows = python.validatePositive(u32, rows_val, "rows") catch return null;
+        out_cols = python.validatePositive(u32, cols_val, "cols") catch return null;
     }
 
     return self.py_image.?.dispatch(.{ transform_obj, method, out_rows, out_cols }, struct {
-        fn apply(img: anytype, t_obj: ?*c.PyObject, m: Interpolation, orows: usize, ocols: usize) ?*c.PyObject {
+        fn apply(img: anytype, t_obj: ?*c.PyObject, m: Interpolation, orows: u32, ocols: u32) ?*c.PyObject {
             var warped_img: @TypeOf(img.*) = .empty;
 
             // Determine transform type and apply warp
@@ -583,8 +583,8 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const method = tagToInterpolation(tag_extract);
 
     // Determine output size
-    var out_rows: usize = @intFromFloat(@round(rect.height()));
-    var out_cols: usize = @intFromFloat(@round(rect.width()));
+    var out_rows: u32 = @intFromFloat(@round(rect.height()));
+    var out_cols: u32 = @intFromFloat(@round(rect.width()));
 
     if (size_obj != null and size_obj != c.Py_None()) {
         // Accept either an integer (square) or a tuple (rows, cols)
@@ -593,7 +593,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
             if (square == -1 and c.PyErr_Occurred() != null) {
                 return null;
             }
-            const sq = python.validatePositive(usize, square, "size") catch return null;
+            const sq = python.validatePositive(u32, square, "size") catch return null;
             out_rows = sq;
             out_cols = sq;
         } else if (c.PyTuple_Check(size_obj) != 0) {
@@ -617,8 +617,8 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                 return null;
             }
 
-            out_rows = python.validatePositive(usize, rows, "Rows") catch return null;
-            out_cols = python.validatePositive(usize, cols, "Cols") catch return null;
+            out_rows = python.validatePositive(u32, rows, "Rows") catch return null;
+            out_cols = python.validatePositive(u32, cols, "Cols") catch return null;
         } else {
             python.setTypeError("int or tuple", size_obj);
             return null;
@@ -626,7 +626,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method }, struct {
-        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: usize, ocols: usize, m: Interpolation) ?*c.PyObject {
+        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation) ?*c.PyObject {
             const out = @TypeOf(img.*).init(allocator, orows, ocols) catch {
                 c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                 return null;

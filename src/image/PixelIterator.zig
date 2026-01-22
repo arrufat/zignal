@@ -8,9 +8,9 @@ const Rectangle = @import("../geometry.zig").Rectangle;
 pub fn PixelIterator(comptime T: type) type {
     return struct {
         data: []T,
-        cols: usize,
+        cols: u32,
         stride: usize,
-        rows: usize,
+        rows: u32,
         current_row: usize = 0,
         current_col: usize = 0,
 
@@ -106,14 +106,14 @@ test "PixelIterator with views" {
     }
 
     // Create a view (2x2 from position 1,1)
-    const view = img.view(Rectangle(usize){ .l = 1, .t = 1, .r = 3, .b = 3 });
+    const view = img.view(Rectangle(u32){ .l = 1, .t = 1, .r = 3, .b = 3 });
 
     // Test that view is not contiguous (has padding between rows)
     try std.testing.expect(!view.isContiguous());
 
     // Verify view dimensions
-    try std.testing.expectEqual(@as(usize, 2), view.rows);
-    try std.testing.expectEqual(@as(usize, 2), view.cols);
+    try std.testing.expectEqual(@as(u32, 2), view.rows);
+    try std.testing.expectEqual(@as(u32, 2), view.cols);
     try std.testing.expectEqual(@as(usize, 4), view.stride);
 
     // Test pixel iterator on view
@@ -174,7 +174,7 @@ test "PixelIterator reuse with init" {
     try std.testing.expectEqual(@as(usize, 9), count);
 
     // Verify we can still use it with views
-    const view = img2.view(Rectangle(usize){ .l = 1, .t = 1, .r = 3, .b = 3 });
+    const view = img2.view(Rectangle(u32){ .l = 1, .t = 1, .r = 3, .b = 3 });
     iter.init(view);
     const expected = [_]u8{ 4, 5, 7, 8 };
     count = 0;

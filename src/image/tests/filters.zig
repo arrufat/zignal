@@ -78,7 +78,7 @@ test "boxBlur radius 0 with views" {
 test "view" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
-    const rect: Rectangle(usize) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
+    const rect: Rectangle(u32) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
     const view = image.view(rect);
     try expectEqual(view.isContiguous(), false);
     try expectEqual(image.isContiguous(), true);
@@ -187,7 +187,7 @@ test "boxBlur struct type" {
 test "boxBlur border area calculations" {
     // Test that border pixels get correct area calculations by comparing
     // uniform images with different values
-    const test_size = 12;
+    const test_size: u32 = 12;
     const radius = 3;
 
     // Test with uniform image - all pixels should have the same value after blur
@@ -234,8 +234,8 @@ test "boxBlur border area calculations" {
 
 test "boxBlur struct type comprehensive" {
     // Test RGBA with both large images (SIMD) and small images (scalar)
-    for ([_]usize{ 8, 32 }) |test_size| { // Small and large
-        for ([_]usize{ 1, 3 }) |radius| {
+    for ([_]u32{ 8, 32 }) |test_size| { // Small and large
+        for ([_]u32{ 1, 3 }) |radius| {
             var image: Image(Rgba) = try .init(std.testing.allocator, test_size, test_size);
             defer image.deinit(std.testing.allocator);
 
@@ -614,7 +614,7 @@ test "repro: stride bug in f32 separable convolution" {
     }
 
     // Create a 3x3 view in the middle
-    const rect = Rectangle(usize){ .l = 1, .t = 1, .r = 4, .b = 4 };
+    const rect = Rectangle(u32){ .l = 1, .t = 1, .r = 4, .b = 4 };
     const view = base.view(rect);
     // view.stride is 5, view.cols is 3.
 
@@ -715,7 +715,7 @@ test "convolve into view (stride-safe)" {
     for (base_dst.data) |*p| p.* = 0xAA;
 
     // Views over a 4x4 region; note view.stride != view.cols
-    const rect: Rectangle(usize) = .{ .l = 2, .t = 1, .r = 6, .b = 5 }; // width=4, height=4
+    const rect: Rectangle(u32) = .{ .l = 2, .t = 1, .r = 6, .b = 5 }; // width=4, height=4
     var src_view = base_src.view(rect);
     var dst_view = base_dst.view(rect);
 
@@ -759,7 +759,7 @@ test "convolveSeparable into view (stride-safe)" {
     for (base_dst.data) |*p| p.* = 0x55;
 
     // Define a view region; ensure stride != cols for the view
-    const rect: Rectangle(usize) = .{ .l = 1, .t = 2, .r = 6, .b = 6 }; // width=5, height=4
+    const rect: Rectangle(u32) = .{ .l = 1, .t = 2, .r = 6, .b = 6 }; // width=5, height=4
     var src_view = base_src.view(rect);
     var dst_view = base_dst.view(rect);
 

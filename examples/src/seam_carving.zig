@@ -4,10 +4,8 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const isColor = zignal.color.isColor;
-const Rgb = zignal.Rgb(u8);
+
 const Rgba = zignal.Rgba(u8);
-const Gray = zignal.Gray(u8);
 
 pub const std_options: std.Options = .{
     .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
@@ -96,9 +94,17 @@ pub fn removeSeam(comptime T: type, image: *Image(T), seam: []const usize) void 
     image.data = image.data[0..(size - image.rows)];
 }
 
-pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr: ?[*]u8, extra_len: usize, seam_ptr: [*]usize, seam_size: usize) void {
+pub export fn seam_carve(
+    rgba_ptr: [*]Rgba,
+    rows: u32,
+    cols: u32,
+    extra_ptr: ?[*]u8,
+    extra_len: usize,
+    seam_ptr: [*]usize,
+    seam_size: u32,
+) void {
     assert(seam_size == rows);
-    const size = rows * cols;
+    const size = @as(usize, rows) * @as(usize, cols);
     var image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
 
     const allocator: std.mem.Allocator = blk: {
@@ -130,11 +136,11 @@ pub export fn seam_carve(rgba_ptr: [*]Rgba, rows: usize, cols: usize, extra_ptr:
     removeSeam(Rgba, &image, seam);
 }
 
-pub export fn transpose(rgba_ptr: [*]Rgba, rows: usize, cols: usize) void {
+pub export fn transpose(rgba_ptr: [*]Rgba, rows: u32, cols: u32) void {
     for (0..rows) |r| {
         for (0..cols) |c| {
-            const orig_pos = r * cols + c;
-            const tran_pos = c * rows + r;
+            const orig_pos = @as(usize, r) * @as(usize, cols) + @as(usize, c);
+            const tran_pos = @as(usize, c) * @as(usize, rows) + @as(usize, r);
             const temp = rgba_ptr[orig_pos];
             rgba_ptr[orig_pos] = rgba_ptr[tran_pos];
             rgba_ptr[tran_pos] = temp;
