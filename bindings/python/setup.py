@@ -48,10 +48,12 @@ class ZigBuildExt(build_ext):
         if sys.platform == "win32":
             libs = Path(sysconfig.get_path("stdlib")).parent / "libs"
             if libs.exists():
-                env.update({
-                    "PYTHON_LIBS_DIR": str(libs),
-                    "PYTHON_LIB_NAME": f"python{sys.version_info.major}{sys.version_info.minor}.lib",
-                })
+                env.update(
+                    {
+                        "PYTHON_LIBS_DIR": str(libs),
+                        "PYTHON_LIB_NAME": f"python{sys.version_info.major}{sys.version_info.minor}.lib",
+                    }
+                )
         else:
             if (libdir := sysconfig.get_config_var("LIBDIR")) and Path(libdir).exists():
                 env["PYTHON_LIBS_DIR"] = libdir
@@ -61,7 +63,11 @@ class ZigBuildExt(build_ext):
             if sys.platform == "darwin":
                 env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
             else:
-                libname = os.path.basename(sysconfig.get_config_var("LDLIBRARY") or sysconfig.get_config_var("LIBRARY") or f"python{sys.version_info.major}.{sys.version_info.minor}")
+                libname = os.path.basename(
+                    sysconfig.get_config_var("LDLIBRARY")
+                    or sysconfig.get_config_var("LIBRARY")
+                    or f"python{sys.version_info.major}.{sys.version_info.minor}"
+                )
                 env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
 
         cmd = [
