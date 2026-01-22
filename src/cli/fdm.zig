@@ -31,12 +31,12 @@ pub const help_text = args.generateHelp(
     ,
 );
 
-pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len < 2 or parsed.positionals.len > 3) {
-        try args.printHelp(io, help_text);
+        try args.printHelp(writer, help_text);
         return;
     }
 
@@ -47,11 +47,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     // Display if requested OR if no output file is specified
     const should_display = parsed.options.display or output_path == null;
 
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
-    try stdout.interface.print("Source: {s}\n", .{source_path});
-    try stdout.interface.print("Target: {s}\n", .{target_path});
+    std.log.info("Source: {s}", .{source_path});
+    std.log.info("Target: {s}", .{target_path});
 
     // Use Rgb(u8) for style transfer
     const Pixel = zignal.Rgb(u8);
@@ -75,13 +72,13 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     var fdm: zignal.FeatureDistributionMatching(Pixel) = .init(gpa);
     defer fdm.deinit();
 
-    try stdout.interface.print("Applying FDM style transfer...\n", .{});
+    std.log.info("Applying FDM style transfer...", .{});
 
     // Apply match
     try fdm.match(source_img, target_img);
 
     if (output_path) |out_path| {
-        try stdout.interface.print("Saving result to {s}...\n", .{out_path});
+        std.log.info("Saving result to {s}...", .{out_path});
         try source_img.save(io, gpa, out_path);
     }
 
@@ -126,8 +123,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         // Insert result
         canvas.insert(source_img, .{ .l = 2 * wf, .t = 0, .r = 3 * wf, .b = hf }, 0, filter, .none);
 
-        try display.displayCanvas(io, &canvas, parsed.options.protocol, filter);
+        try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }
 
-    try stdout.interface.print("Done.\n", .{});
+    std.log.info("Done.", .{});
 }

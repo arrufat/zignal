@@ -47,12 +47,12 @@ pub const help_text = args.generateHelp(
     "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.",
 );
 
-pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len < 1) {
-        try args.printHelp(io, help_text);
+        try args.printHelp(writer, help_text);
         return;
     }
 
@@ -130,10 +130,7 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         },
     }
 
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
-    try stdout.interface.print("Tiling {d} images into a {d}x{d} grid ({s})...\n", .{ img_count, cols, rows, @tagName(mode) });
+    std.log.info("Tiling {d} images into a {d}x{d} grid ({s})...", .{ img_count, cols, rows, @tagName(mode) });
 
     // Determine Cell Size
     var cell_w: u32 = 0;
@@ -146,7 +143,7 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
 
     if (cell_w == 0 or cell_h == 0) {
         // Load first image to establish dimensions
-        try stdout.interface.print("Analyzing reference image: {s}...\n", .{input_paths[0]});
+        std.log.info("Analyzing reference image: {s}...", .{input_paths[0]});
 
         // Use RGBA for safety to handle transparency
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
@@ -169,8 +166,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const canvas_w = cols * cell_w;
     const canvas_h = rows * cell_h;
 
-    try stdout.interface.print("Cell Size: {d}x{d}\n", .{ cell_w, cell_h });
-    try stdout.interface.print("Canvas Size: {d}x{d}\n", .{ canvas_w, canvas_h });
+    std.log.info("Cell Size: {d}x{d}", .{ cell_w, cell_h });
+    std.log.info("Canvas Size: {d}x{d}", .{ canvas_w, canvas_h });
 
     // Create Canvas
     var canvas = try zignal.Image(zignal.Rgba(u8)).init(gpa, canvas_h, canvas_w);
@@ -192,7 +189,7 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         const r = idx / cols;
         const c = idx % cols;
 
-        try stdout.interface.print("[{d}/{d}] Processing {s}...\n", .{ idx + 1, img_count, path });
+        std.log.info("[{d}/{d}] Processing {s}...", .{ idx + 1, img_count, path });
 
         var img: zignal.Image(zignal.Rgba(u8)) = undefined;
         var loaded_new = false;
@@ -245,14 +242,13 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     }
 
     if (output_path) |out_path| {
-        try stdout.interface.print("Saving to {s}...\n", .{out_path});
+        std.log.info("Saving to {s}...", .{out_path});
         try canvas.save(io, gpa, out_path);
     }
 
     if (should_display) {
-        try display.displayCanvas(io, &canvas, parsed.options.protocol, filter);
+        try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }
 
-    try stdout.interface.print("Done.\n", .{});
-    try stdout.interface.flush();
+    std.log.info("Done.", .{});
 }

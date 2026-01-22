@@ -10,6 +10,10 @@ const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
 const tile = @import("cli/tile.zig");
 
+pub const std_options: std.Options = .{
+    .log_level = .debug,
+};
+
 const general_help =
     \\Usage: zignal <command> [options]
     \\
@@ -29,55 +33,56 @@ pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
     defer args.deinit();
     _ = args.skip();
+
+    var buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &buffer);
+
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "display")) {
-            display.run(init.io, init.gpa, &args) catch |err| {
+            display.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("display command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
         }
         if (std.mem.eql(u8, arg, "fdm")) {
-            fdm.run(init.io, init.gpa, &args) catch |err| {
+            fdm.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("fdm command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
         }
         if (std.mem.eql(u8, arg, "tile")) {
-            tile.run(init.io, init.gpa, &args) catch |err| {
+            tile.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("tile command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
         }
         if (std.mem.eql(u8, arg, "version")) {
-            try version.run(init.io, init.gpa, &args);
+            try version.run(init.io, &stdout.interface, init.gpa, &args);
             return;
         }
         if (std.mem.eql(u8, arg, "info")) {
-            info.run(init.io, init.gpa, &args) catch |err| {
+            info.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("info command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
         }
         if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            try help(init.io, &args);
+            try help(&stdout.interface, &args);
             return;
         }
 
         std.log.err("Unknown command: '{s}'", .{arg});
-        try help(init.io, null);
+        try help(&stdout.interface, null);
         std.process.exit(1);
     }
-    try help(init.io, null);
+    try help(&stdout.interface, null);
 }
 
-fn help(io: Io, args: ?*std.process.Args.Iterator) !void {
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(io, &buffer);
-
+fn help(stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
     if (args) |commands| {
         if (commands.next()) |subcmd| {
             const help_map = std.StaticStringMap([]const u8).initComptime(.{
@@ -90,15 +95,16 @@ fn help(io: Io, args: ?*std.process.Args.Iterator) !void {
             });
 
             if (help_map.get(subcmd)) |text| {
-                try stdout.interface.print("{s}", .{text});
+                try stdout.print("{s}", .{text});
             } else {
-                try stdout.interface.print("Unknown command: \"{s}\"\n\n{s}", .{ subcmd, general_help });
-                try stdout.interface.flush();
+                try stdout.print("Unknown command: \"{s}\"\n\n{s}", .{ subcmd, general_help });
+                try stdout.flush();
                 std.process.exit(1);
             }
-            try stdout.interface.flush();
+            try stdout.flush();
             return;
         }
     }
-    try stdout.interface.print("{s}", .{general_help});
+    try stdout.print("{s}", .{general_help});
+    try stdout.flush();
 }
