@@ -5,8 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
-
-const display_cmd = @import("display.zig");
+const display = @import("display.zig");
 
 const Args = struct {
     display: bool = false,
@@ -27,7 +26,9 @@ const Args = struct {
 pub const help_text = args.generateHelp(
     Args,
     "zignal fdm <source> <target> [output] [options]",
-    "Apply Feature Distribution Matching (style transfer) from target to source image.\nIf output is omitted, the result is displayed in the terminal.",
+    \\Apply Feature Distribution Matching (style transfer) from target to source image.
+    \\If output is omitted, the result is displayed in the terminal."
+    ,
 );
 
 pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
@@ -51,13 +52,12 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
 
     try stdout.interface.print("Source: {s}\n", .{source_path});
     try stdout.interface.print("Target: {s}\n", .{target_path});
-    try stdout.interface.flush();
 
     // Use Rgb(u8) for style transfer
     const Pixel = zignal.Rgb(u8);
 
     // Load source image
-    var source_img = try zignal.Image(Pixel).load(io, gpa, source_path);
+    var source_img: zignal.Image(Pixel) = try .load(io, gpa, source_path);
     defer source_img.deinit(gpa);
 
     // Keep a copy of the original for display if needed
@@ -68,22 +68,20 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     defer if (original_source) |*img| img.deinit(gpa);
 
     // Load target image
-    var target_img = try zignal.Image(Pixel).load(io, gpa, target_path);
+    var target_img: zignal.Image(Pixel) = try .load(io, gpa, target_path);
     defer target_img.deinit(gpa);
 
     // Initialize FDM
-    var fdm = zignal.FeatureDistributionMatching(Pixel).init(gpa);
+    var fdm: zignal.FeatureDistributionMatching(Pixel) = .init(gpa);
     defer fdm.deinit();
 
     try stdout.interface.print("Applying FDM style transfer...\n", .{});
-    try stdout.interface.flush();
 
     // Apply match
     try fdm.match(source_img, target_img);
 
     if (output_path) |out_path| {
         try stdout.interface.print("Saving result to {s}...\n", .{out_path});
-        try stdout.interface.flush();
         try source_img.save(io, gpa, out_path);
     }
 
@@ -96,8 +94,8 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
             source_img.cols,
         );
 
-        const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale)));
-        const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale)));
+        const w: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale));
+        const h: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale));
 
         // Limit maximum display size to avoid protocol limits (e.g. Sixel 2048 width)
         // and excessive terminal scrolling.
@@ -123,21 +121,21 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         var filter: zignal.Interpolation = .bilinear;
 
         if (parsed.options.protocol) |p| {
-            protocol = display_cmd.parseProtocol(p) catch |err| {
+            protocol = display.parseProtocol(p) catch |err| {
                 std.log.err("Unknown protocol type: {s}", .{p});
                 return err;
             };
         }
 
         if (parsed.options.filter) |f| {
-            filter = display_cmd.parseFilter(f) catch |err| {
+            filter = display.parseFilter(f) catch |err| {
                 std.log.err("Unknown filter type: {s}", .{f});
                 return err;
             };
         }
 
         // Pass the calculated display dimensions to the protocol options
-        display_cmd.applyOptions(&protocol, display_w, display_h, filter);
+        display.applyOptions(&protocol, display_w, display_h, filter);
 
         var canvas = try zignal.Image(Pixel).init(gpa, display_h, display_w);
         defer canvas.deinit(gpa);
@@ -158,9 +156,7 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
         canvas.insert(source_img, .{ .l = 2 * wf, .t = 0, .r = 3 * wf, .b = hf }, 0, filter, .none);
 
         try stdout.interface.print("\n", .{});
-        try stdout.interface.flush();
         try stdout.interface.print("{f}\n", .{canvas.display(io, protocol)});
-        try stdout.interface.flush();
     }
 
     try stdout.interface.print("Done.\n", .{});
