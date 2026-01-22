@@ -89,17 +89,23 @@ pub fn isKittySupported(io: std.Io) !bool {
 }
 
 /// Compute aspect-preserving scale factor given optional target width/height.
-/// Returns 1.0 when both are null, or the smaller scale when both are set.
+/// Enforces a maximum dimension of 2048 pixels to avoid excessive terminal memory usage.
 pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) f32 {
-    if (width_opt == null and height_opt == null) return 1.0;
-    var scale_x: f32 = 1.0;
-    var scale_y: f32 = 1.0;
-    if (width_opt) |w| {
-        scale_x = @as(f32, @floatFromInt(w)) / @as(f32, @floatFromInt(cols));
-    }
-    if (height_opt) |h| {
-        scale_y = @as(f32, @floatFromInt(h)) / @as(f32, @floatFromInt(rows));
-    }
+    const max_dim: u32 = 2048;
+
+    // Use user-provided values or fall back to the image's own dimensions
+    var target_w: u32 = width_opt orelse @intCast(cols);
+    var target_h: u32 = height_opt orelse @intCast(rows);
+
+    // Enforce the cap on the target dimensions
+    target_w = @min(target_w, max_dim);
+    target_h = @min(target_h, max_dim);
+
+    // Calculate scale factors to fit the image into the (possibly capped) target box
+    const scale_x = @as(f32, @floatFromInt(target_w)) / @as(f32, @floatFromInt(cols));
+    const scale_y = @as(f32, @floatFromInt(target_h)) / @as(f32, @floatFromInt(rows));
+
+    // Return the smaller scale to ensure aspect ratio preservation while fitting in the box
     return @min(scale_x, scale_y);
 }
 

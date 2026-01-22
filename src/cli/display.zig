@@ -99,6 +99,9 @@ pub fn parseFilter(name: []const u8) !zignal.Interpolation {
     }
 }
 
+/// Applies user-provided scaling and filter options to a display protocol.
+/// Note: If width and height are null, the protocol will automatically enforce
+/// the global 2048x2048 dimension cap during rendering.
 pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, filter: zignal.Interpolation) void {
     switch (protocol.*) {
         .kitty => |*opts| {
@@ -127,6 +130,10 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, 
     }
 }
 
+/// Helper function to display an image canvas in the terminal.
+/// Automatically handles protocol selection and scaling options.
+/// Note: Implicitly caps image dimensions to 2048x2048 via aspectScale to prevent
+/// excessive memory usage in the terminal.
 pub fn displayCanvas(
     io: Io,
     writer: *std.Io.Writer,
@@ -134,22 +141,6 @@ pub fn displayCanvas(
     protocol_name: ?[]const u8,
     filter: zignal.Interpolation,
 ) !void {
-    const max_display_width: u32 = 1800;
-    const max_display_height: u32 = 1200;
-
-    var display_w = @as(u32, @intCast(image.cols));
-    var display_h = @as(u32, @intCast(image.rows));
-
-    // Apply downscaling if needed, preserving aspect ratio
-    if (display_w > max_display_width or display_h > max_display_height) {
-        const scale_x = @as(f32, @floatFromInt(max_display_width)) / @as(f32, @floatFromInt(display_w));
-        const scale_y = @as(f32, @floatFromInt(max_display_height)) / @as(f32, @floatFromInt(display_h));
-        const scale = @min(scale_x, scale_y);
-
-        display_w = @intFromFloat(@as(f32, @floatFromInt(display_w)) * scale);
-        display_h = @intFromFloat(@as(f32, @floatFromInt(display_h)) * scale);
-    }
-
     var protocol: zignal.DisplayFormat = .{ .auto = .default };
 
     if (protocol_name) |p| {
@@ -159,10 +150,8 @@ pub fn displayCanvas(
         };
     }
 
-    applyOptions(&protocol, display_w, display_h, filter);
+    applyOptions(&protocol, null, null, filter);
 
-    try writer.print("\n", .{});
-    try writer.flush();
     try writer.print("{f}\n", .{image.display(io, protocol)});
     try writer.flush();
 }
