@@ -45,29 +45,29 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
 
                 switch (fmt) {
                     .png => {
-                        const png_info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+                        const info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format: PNG\n", .{});
-                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ png_info.width, png_info.height });
-                        try stdout.interface.print("Bit Depth: {d}\n", .{png_info.bit_depth});
-                        try stdout.interface.print("Color Type: {s}\n", .{@tagName(png_info.color_type)});
-                        try stdout.interface.print("Channels: {d}\n", .{png_info.channels()});
+                        try stdout.interface.print("Format:     PNG\n", .{});
+                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ info.width, info.height });
+                        try stdout.interface.print("Bit Depth:  {d}\n", .{info.bit_depth});
+                        try stdout.interface.print("Channels:   {d}\n", .{info.channels()});
+                        try stdout.interface.print("Color Type: {s}\n", .{@tagName(info.color_type)});
 
-                        if (png_info.gamma) |g| {
-                            try stdout.interface.print("Gamma: {d}\n", .{g});
+                        if (info.gamma) |g| {
+                            try stdout.interface.print("Gamma:      {d}\n", .{g});
                         }
-                        if (png_info.srgb_intent) |intent| {
-                            try stdout.interface.print("sRGB Intent: {s}\n", .{@tagName(intent)});
+                        if (info.srgb_intent) |intent| {
+                            try stdout.interface.print("sRGB:       {s}\n", .{@tagName(intent)});
                         }
                     },
                     .jpeg => {
-                        const header = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+                        const info = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format: JPEG\n", .{});
-                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ header.width, header.height });
-                        try stdout.interface.print("Precision: {d}-bit\n", .{header.precision});
-                        try stdout.interface.print("Components: {d}\n", .{header.num_components});
-                        try stdout.interface.print("Type: {s}\n", .{@tagName(header.frame_type)});
+                        try stdout.interface.print("Format:     JPEG\n", .{});
+                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ info.width, info.height });
+                        try stdout.interface.print("Bit Depth:  {d}\n", .{info.precision});
+                        try stdout.interface.print("Channels:   {d}\n", .{info.num_components});
+                        try stdout.interface.print("Frame Type: {s}\n", .{@tagName(info.frame_type)});
                     },
                 }
             } else {
