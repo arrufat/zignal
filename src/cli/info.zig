@@ -18,6 +18,14 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try cli_args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
+    if (parsed.help) {
+        var buffer: [4096]u8 = undefined;
+        var stdout = std.Io.File.stdout().writer(io, &buffer);
+        try stdout.interface.print("{s}", .{help_text});
+        try stdout.interface.flush();
+        return;
+    }
+
     if (parsed.positionals.len == 0) {
         std.log.err("Missing image path for 'info' command", .{});
         return error.InvalidArguments;
@@ -47,27 +55,28 @@ pub fn run(io: Io, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
                     .png => {
                         const info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format:     PNG\n", .{});
-                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ info.width, info.height });
-                        try stdout.interface.print("Bit Depth:  {d}\n", .{info.bit_depth});
-                        try stdout.interface.print("Channels:   {d}\n", .{info.channels()});
-                        try stdout.interface.print("Color Type: {s}\n", .{@tagName(info.color_type)});
+                        try stdout.interface.print("Format:      PNG\n", .{});
+                        try stdout.interface.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try stdout.interface.print("Bit Depth:   {d}\n", .{info.bit_depth});
+                        try stdout.interface.print("Channels:    {d}\n", .{info.channels()});
+                        try stdout.interface.print("Color Space: {s}\n", .{@tagName(info.color_type)});
 
                         if (info.gamma) |g| {
-                            try stdout.interface.print("Gamma:      {d}\n", .{g});
+                            try stdout.interface.print("Gamma:       {d}\n", .{g});
                         }
                         if (info.srgb_intent) |intent| {
-                            try stdout.interface.print("sRGB:       {s}\n", .{@tagName(intent)});
+                            try stdout.interface.print("sRGB:        {s}\n", .{@tagName(intent)});
                         }
                     },
                     .jpeg => {
                         const info = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try stdout.interface.print("Format:     JPEG\n", .{});
-                        try stdout.interface.print("Dimensions: {d}x{d}\n", .{ info.width, info.height });
-                        try stdout.interface.print("Bit Depth:  {d}\n", .{info.precision});
-                        try stdout.interface.print("Channels:   {d}\n", .{info.num_components});
-                        try stdout.interface.print("Frame Type: {s}\n", .{@tagName(info.frame_type)});
+                        try stdout.interface.print("Format:      JPEG\n", .{});
+                        try stdout.interface.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try stdout.interface.print("Bit Depth:   {d}\n", .{info.precision});
+                        try stdout.interface.print("Channels:    {d}\n", .{info.num_components});
+                        try stdout.interface.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
+                        try stdout.interface.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
                     },
                 }
             } else {
