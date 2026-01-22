@@ -448,7 +448,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns the optional value at row, col in the image.
-        pub fn atOrNull(self: Self, row: isize, col: isize) ?*T {
+        pub fn atOrNull(self: Self, row: i32, col: i32) ?*T {
             const irows: isize = @intCast(self.rows);
             const icols: isize = @intCast(self.cols);
             if (row < 0 or col < 0 or row >= irows or col >= icols) {

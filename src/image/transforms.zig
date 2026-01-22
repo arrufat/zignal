@@ -244,8 +244,8 @@ pub fn Transform(comptime T: type) type {
         /// - `allocator`: The allocator to use for the cropped image's data.
         /// - `rectangle`: The `Rectangle(f32)` defining the region to crop. Coordinates will be rounded.
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
-            const chip_top: isize = @intFromFloat(@round(rectangle.t));
-            const chip_left: isize = @intFromFloat(@round(rectangle.l));
+            const chip_top: i32 = @intFromFloat(@round(rectangle.t));
+            const chip_left: i32 = @intFromFloat(@round(rectangle.l));
             const chip_rows: u32 = @intFromFloat(@round(rectangle.height()));
             const chip_cols: u32 = @intFromFloat(@round(rectangle.width()));
 
@@ -284,8 +284,8 @@ pub fn Transform(comptime T: type) type {
                 @abs(height - frows) < epsilon)
             {
                 // Use the same logic as crop
-                const rect_top: isize = @intFromFloat(@round(rect.t));
-                const rect_left: isize = @intFromFloat(@round(rect.l));
+                const rect_top: i32 = @intFromFloat(@round(rect.t));
+                const rect_left: i32 = @intFromFloat(@round(rect.l));
                 copyRect(self, rect_top, rect_left, out);
                 return;
             }
@@ -356,12 +356,12 @@ pub fn Transform(comptime T: type) type {
                 @abs(rect_width - fcols) < epsilon and
                 @abs(rect_height - frows) < epsilon)
             {
-                const dst_top: isize = @intFromFloat(@round(rect.t));
-                const dst_left: isize = @intFromFloat(@round(rect.l));
+                const dst_top: i32 = @intFromFloat(@round(rect.t));
+                const dst_left: i32 = @intFromFloat(@round(rect.l));
                 for (0..source.rows) |r| {
-                    const y: isize = dst_top + @as(isize, @intCast(r));
+                    const y: i32 = dst_top + @as(i32, @intCast(r));
                     for (0..source.cols) |c| {
-                        const x: isize = dst_left + @as(isize, @intCast(c));
+                        const x: i32 = dst_left + @as(i32, @intCast(c));
                         if (self.atOrNull(y, x)) |dest| {
                             assignPixel(dest, source.at(r, c).*, blend_mode);
                         }
@@ -506,11 +506,11 @@ pub fn Transform(comptime T: type) type {
 
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
         /// Used by both `crop` and `extract` (in fast-path).
-        fn copyRect(self: Self, rect_top: isize, rect_left: isize, out: Self) void {
+        fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self) void {
             for (0..out.rows) |r| {
-                const ir: isize = @intCast(r);
+                const ir: i32 = @intCast(r);
                 for (0..out.cols) |c| {
-                    const ic: isize = @intCast(c);
+                    const ic: i32 = @intCast(c);
                     out.at(r, c).* = if (self.atOrNull(ir + rect_top, ic + rect_left)) |val| val.* else std.mem.zeroes(T);
                 }
             }
