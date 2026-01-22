@@ -7,12 +7,14 @@ const zignal = @import("zignal");
 const info = @import("cli/info.zig");
 const version = @import("cli/version.zig");
 const display = @import("cli/display.zig");
+const fdm = @import("cli/fdm.zig");
 
 const general_help =
     \\Usage: zignal <command> [options]
     \\
     \\Commands:
     \\  display  Display an image in the terminal
+    \\  fdm      Apply Feature Distribution Matching (style transfer)
     \\  info     Display image information
     \\  version  Display version information
     \\  help     Display this help message
@@ -29,6 +31,13 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, arg, "display")) {
             display.run(init.io, init.gpa, &args) catch |err| {
                 std.log.err("display command failed: {t}", .{err});
+                std.process.exit(1);
+            };
+            return;
+        }
+        if (std.mem.eql(u8, arg, "fdm")) {
+            fdm.run(init.io, init.gpa, &args) catch |err| {
+                std.log.err("fdm command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
@@ -64,6 +73,7 @@ fn help(io: Io, args: ?*std.process.Args.Iterator) !void {
         if (commands.next()) |subcmd| {
             const help_map = std.StaticStringMap([]const u8).initComptime(.{
                 .{ "display", display.help_text },
+                .{ "fdm", fdm.help_text },
                 .{ "info", info.help_text },
                 .{ "version", version.help_text },
                 .{ "help", general_help },
