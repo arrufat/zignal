@@ -175,13 +175,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer canvas.deinit(gpa);
     canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Fill black (opaque)
 
-    var filter: zignal.Interpolation = .bilinear;
-    if (parsed.options.filter) |f| {
-        filter = common.parseFilter(f) catch |err| {
-            std.log.err("Unknown filter type: {s}", .{f});
-            return err;
-        };
-    }
+    const filter = try common.resolveFilter(parsed.options.filter);
 
     // Process Images
     for (input_paths, 0..) |path, idx| {

@@ -39,46 +39,25 @@ pub fn main(init: std.process.Init) !void {
     var buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(init.io, &buffer);
 
+    const CommandFn = *const fn (Io, *std.Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void;
+    const commands: std.StaticStringMap(CommandFn) = .initComptime(.{
+        .{ "display", display.run },
+        .{ "resize", resize.run },
+        .{ "fdm", fdm.run },
+        .{ "tile", tile.run },
+        .{ "info", info.run },
+        .{ "version", version.run },
+    });
+
     while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "display")) {
-            display.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("display command failed: {t}", .{err});
+        if (commands.get(arg)) |runFn| {
+            runFn(init.io, &stdout.interface, init.gpa, &args) catch |err| {
+                std.log.err("{s} command failed: {t}", .{ arg, err });
                 std.process.exit(1);
             };
             return;
         }
-        if (std.mem.eql(u8, arg, "resize")) {
-            resize.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("resize command failed: {t}", .{err});
-                std.process.exit(1);
-            };
-            return;
-        }
-        if (std.mem.eql(u8, arg, "fdm")) {
-            fdm.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("fdm command failed: {t}", .{err});
-                std.process.exit(1);
-            };
-            return;
-        }
-        if (std.mem.eql(u8, arg, "tile")) {
-            tile.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("tile command failed: {t}", .{err});
-                std.process.exit(1);
-            };
-            return;
-        }
-        if (std.mem.eql(u8, arg, "info")) {
-            info.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("info command failed: {t}", .{err});
-                std.process.exit(1);
-            };
-            return;
-        }
-        if (std.mem.eql(u8, arg, "version")) {
-            try version.run(init.io, &stdout.interface, init.gpa, &args);
-            return;
-        }
+
         if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try help(&stdout.interface, &args);
             return;
