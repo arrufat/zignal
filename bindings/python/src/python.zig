@@ -903,10 +903,10 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
 
     // Check range before converting to avoid truncation issues with @intCast
     switch (ValueType) {
-        c_long, c_int => {
+        c_long, c_int, isize => {
             // For integer types, check range using the original value
             if (value < min or value > max) {
-                var buffer: [256]u8 = undefined;
+                var buffer: [512]u8 = undefined;
                 const msg = blk: {
                     // For infinity or max integer values, simplify the message
                     if (info == .float and std.math.isInf(max)) {
@@ -932,18 +932,18 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
             const min_f64 = if (info == .float) @as(f64, min) else @as(f64, @floatFromInt(min));
             const max_f64 = if (info == .float) @as(f64, max) else @as(f64, @floatFromInt(max));
             if (value < min_f64 or value > max_f64) {
-                var buffer: [256]u8 = undefined;
+                var buffer: [512]u8 = undefined;
                 const msg = std.fmt.bufPrintZ(&buffer, "{s} must be between {} and {}", .{ name, min, max }) catch "Value out of range";
                 c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                 return error.OutOfRange;
             }
         },
-        else => @compileError("Unsupported value type"),
+        else => @compileError("Unsupported value type " ++ @typeName(ValueType)),
     }
 
     // Now convert after range check
     const converted = switch (ValueType) {
-        c_long, c_int => blk: {
+        c_long, c_int, isize => blk: {
             if (info == .float) {
                 break :blk @as(T, @floatFromInt(value));
             } else {
@@ -966,10 +966,17 @@ pub fn validateNonNegative(comptime T: type, value: anytype, name: []const u8) !
 
 /// Convenience function for strictly positive values (> 0)
 pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
-    const info = @typeInfo(T);
-    const max = if (info == .float) std.math.inf(T) else std.math.maxInt(T);
-    // For floats, allow any positive value > 0. For integers, minimum is 1.
-    const min = if (info == .float) std.math.floatEps(T) else 1;
+    const min: T, const max: T = switch (@typeInfo(T)) {
+        .float => .{
+            std.math.floatEps(T),
+            std.math.floatMax(T),
+        },
+        .int => .{
+            1,
+            std.math.maxInt(T),
+        },
+        else => @compileError("Unsupported type: " ++ @typeName(T)),
+    };
     return validateRange(T, value, min, max, name);
 }
 

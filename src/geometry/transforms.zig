@@ -160,9 +160,9 @@ pub fn AffineTransform(comptime T: type) type {
         pub fn find(self: *Self, allocator: std.mem.Allocator, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len == to_points.len);
             assert(from_points.len >= 3);
-            var p: Matrix(T) = try .init(allocator, 3, from_points.len);
+            var p: Matrix(T) = try .init(allocator, 3, @as(u32, @intCast(from_points.len)));
             defer p.deinit();
-            var q: Matrix(T) = try .init(allocator, 2, to_points.len);
+            var q: Matrix(T) = try .init(allocator, 2, @as(u32, @intCast(to_points.len)));
             defer q.deinit();
             for (0..from_points.len) |i| {
                 p.at(0, i).* = from_points[i].x();
@@ -174,7 +174,7 @@ pub fn AffineTransform(comptime T: type) type {
             }
             // Use Matrix operations to perform matrix operations
             // Compute the pseudo-inverse so we can support additional correspondences
-            var effective_rank: usize = 0;
+            var effective_rank: u32 = 0;
             var pinv_chain = p.pseudoInverse(.{ .effective_rank = &effective_rank });
             var pinv = try pinv_chain.eval();
             defer pinv.deinit();

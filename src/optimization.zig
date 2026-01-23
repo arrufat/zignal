@@ -22,7 +22,7 @@ pub const OptimizationPolicy = enum {
 pub const Assignment = struct {
     /// assignments[i] = j means row i is assigned to column j
     /// null means row i has no assignment
-    assignments: []?usize,
+    assignments: []?u32,
     /// Total cost of the assignment
     total_cost: f64,
     /// Allocator used for assignments array
@@ -162,9 +162,9 @@ pub fn solveAssignmentProblem(
     }
 
     // Arrays for tracking assignments and coverings
-    var row_assignment = try allocator.alloc(?usize, n);
+    var row_assignment = try allocator.alloc(?u32, n);
     defer allocator.free(row_assignment);
-    var col_assignment = try allocator.alloc(?usize, n);
+    var col_assignment = try allocator.alloc(?u32, n);
     defer allocator.free(col_assignment);
     const row_covered = try allocator.alloc(bool, n);
     defer allocator.free(row_covered);
@@ -188,8 +188,8 @@ pub fn solveAssignmentProblem(
     for (0..n) |i| {
         for (0..n) |j| {
             if (work[i * n + j] == 0 and row_assignment[i] == null and col_assignment[j] == null) {
-                row_assignment[i] = j;
-                col_assignment[j] = i;
+                row_assignment[i] = @intCast(j);
+                col_assignment[j] = @intCast(i);
                 starred[i * n + j] = true; // Star the zero
             }
         }
@@ -213,7 +213,7 @@ pub fn solveAssignmentProblem(
         }
 
         // Check if all columns are covered (optimal assignment found)
-        var covered_count: usize = 0;
+        var covered_count: u32 = 0;
         for (col_covered) |covered| {
             if (covered) covered_count += 1;
         }
@@ -223,16 +223,16 @@ pub fn solveAssignmentProblem(
         while (true) {
             // Find uncovered zero
             var found_zero = false;
-            var zero_row: usize = 0;
-            var zero_col: usize = 0;
+            var zero_row: u32 = 0;
+            var zero_col: u32 = 0;
 
             search: for (0..n) |i| {
                 if (!row_covered[i]) {
                     for (0..n) |j| {
                         if (!col_covered[j]) {
                             if (work[i * n + j] == 0) {
-                                zero_row = i;
-                                zero_col = j;
+                                zero_row = @intCast(i);
+                                zero_col = @intCast(j);
                                 found_zero = true;
                                 break :search;
                             }
@@ -308,7 +308,7 @@ pub fn solveAssignmentProblem(
 
     // Calculate total cost and prepare result
     var total_cost: f64 = 0;
-    var result_assignments = try allocator.alloc(?usize, n_rows);
+    var result_assignments = try allocator.alloc(?u32, n_rows);
     for (0..n_rows) |i| {
         if (row_assignment[i]) |col| {
             if (col < n_cols) {
@@ -331,8 +331,8 @@ pub fn solveAssignmentProblem(
     };
 }
 
-fn countAssignments(assignments: []const ?usize) usize {
-    var count: usize = 0;
+fn countAssignments(assignments: []const ?u32) u32 {
+    var count: u32 = 0;
     for (assignments) |a| {
         if (a != null) count += 1;
     }
@@ -343,18 +343,18 @@ fn constructAugmentingPath(
     allocator: Allocator,
     starred: []bool,
     primed: []bool,
-    start_row: usize,
-    start_col: usize,
-    row_assignment: []?usize,
-    col_assignment: []?usize,
-    n: usize,
+    start_row: u32,
+    start_col: u32,
+    row_assignment: []?u32,
+    col_assignment: []?u32,
+    n: u32,
 ) !void {
     // Build augmenting path: alternating primed and starred zeros
     // Path can have up to 2*n elements (alternating starred and primed)
-    const PathNode = struct { row: usize, col: usize };
-    const path = try allocator.alloc(PathNode, 2 * n);
+    const PathNode = struct { row: u32, col: u32 };
+    const path = try allocator.alloc(PathNode, 2 * @as(usize, n));
     defer allocator.free(path);
-    var path_len: usize = 0;
+    var path_len: u32 = 0;
 
     path[path_len] = .{ .row = start_row, .col = start_col };
     path_len += 1;
@@ -368,7 +368,7 @@ fn constructAugmentingPath(
 
         if (star_row) |r| {
             // Add starred zero to path
-            path[path_len] = .{ .row = r, .col = current_col };
+            path[path_len] = .{ .row = @intCast(r), .col = current_col };
             path_len += 1;
 
             // Find primed zero in this row
@@ -378,9 +378,9 @@ fn constructAugmentingPath(
 
             if (prime_col) |c| {
                 // Add primed zero to path
-                path[path_len] = .{ .row = r, .col = c };
+                path[path_len] = .{ .row = @intCast(r), .col = @intCast(c) };
                 path_len += 1;
-                current_col = c;
+                current_col = @intCast(c);
             } else {
                 break;
             }
@@ -403,8 +403,8 @@ fn constructAugmentingPath(
     for (0..n) |i| {
         for (0..n) |j| {
             if (starred[i * n + j]) {
-                row_assignment[i] = j;
-                col_assignment[j] = i;
+                row_assignment[i] = @intCast(j);
+                col_assignment[j] = @intCast(i);
             }
         }
     }
@@ -435,7 +435,7 @@ test "Hungarian algorithm - simple 3x3" {
     defer result.deinit();
 
     // Optimal: row0->col2 (3), row1->col1 (4), row2->col0 (3), total=10
-    try expectEqual(@as(usize, 3), result.assignments.len);
+    try expectEqual(@as(u32, 3), result.assignments.len);
     try expectEqual(@as(f64, 10), result.total_cost);
 }
 
@@ -461,7 +461,7 @@ test "Hungarian algorithm - integer matrix" {
     defer result.deinit();
 
     // Verify we got valid assignments
-    try expectEqual(@as(usize, 3), result.assignments.len);
+    try expectEqual(@as(u32, 3), result.assignments.len);
 
     // Check that each row has an assignment
     for (result.assignments) |assignment| {
@@ -489,7 +489,7 @@ test "Hungarian algorithm - rectangular matrix" {
     var result = try solveAssignmentProblem(f32, allocator, cost, .min);
     defer result.deinit();
 
-    try expectEqual(@as(usize, 2), result.assignments.len);
+    try expectEqual(@as(u32, 2), result.assignments.len);
     // Optimal: row0->col0 (1), row1->col2 (1), total=2
     try expectEqual(@as(f64, 2), result.total_cost);
 }

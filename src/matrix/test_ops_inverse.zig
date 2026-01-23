@@ -86,7 +86,7 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
     }
 
     // Test 5x5 matrix inverse
-    var mat5 = try Matrix(f64).init(arena.allocator(), 5, 5);
+    var mat5: Matrix(f64) = try .init(arena.allocator(), 5, 5);
     // Create a diagonally dominant matrix (well-conditioned)
     for (0..5) |i| {
         for (0..5) |j| {
@@ -152,7 +152,7 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var tall = try Matrix(f64).init(allocator, 4, 3);
+    var tall: Matrix(f64) = try .init(allocator, 4, 3);
     defer tall.deinit();
     tall.at(0, 0).* = 1.0;
     tall.at(0, 1).* = 2.0;
@@ -167,7 +167,7 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     tall.at(3, 1).* = -1.0;
     tall.at(3, 2).* = 2.0;
 
-    var tall_rank: usize = undefined;
+    var tall_rank: u32 = undefined;
     var tall_pinv = try tall.pseudoInverse(.{ .effective_rank = &tall_rank }).eval();
     defer tall_pinv.deinit();
     var tall_recon = try tall.dot(tall_pinv).dot(tall).eval();
@@ -188,7 +188,7 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
         }
     }
 
-    var wide = try Matrix(f64).init(allocator, 3, 5);
+    var wide: Matrix(f64) = try .init(allocator, 3, 5);
     defer wide.deinit();
     wide.at(0, 0).* = 1.0;
     wide.at(0, 1).* = -2.0;
@@ -206,7 +206,7 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     wide.at(2, 3).* = -2.0;
     wide.at(2, 4).* = 0.25;
 
-    var wide_rank: usize = undefined;
+    var wide_rank: u32 = undefined;
     var wide_pinv = try wide.pseudoInverse(.{ .effective_rank = &wide_rank }).eval();
     defer wide_pinv.deinit();
     var wide_recon = try wide.dot(wide_pinv).dot(wide).eval();
@@ -235,17 +235,17 @@ test "Matrix pseudo-inverse zero matrix" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var zero = try Matrix(f64).initAll(allocator, 4, 2, 0);
+    var zero: Matrix(f64) = try .initAll(allocator, 4, 2, 0);
     defer zero.deinit();
 
-    var rank: usize = 1234;
+    var rank: u32 = 1234;
     var pinv = try zero.pseudoInverse(.{ .effective_rank = &rank }).eval();
     defer pinv.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), pinv.rows);
-    try std.testing.expectEqual(@as(usize, 4), pinv.cols);
+    try std.testing.expectEqual(@as(u32, 2), pinv.rows);
+    try std.testing.expectEqual(@as(u32, 4), pinv.cols);
     for (0..pinv.items.len) |i| {
         try std.testing.expectEqual(@as(f64, 0), pinv.items[i]);
     }
-    try std.testing.expectEqual(@as(usize, 0), rank);
+    try std.testing.expectEqual(@as(u32, 0), rank);
 }

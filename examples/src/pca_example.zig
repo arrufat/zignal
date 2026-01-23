@@ -12,7 +12,7 @@ const Bounds = struct { min: @Vector(2, f64), max: @Vector(2, f64) };
 
 /// Generate a 2D point cloud with a clear dominant direction
 fn generatePointCloud(allocator: std.mem.Allocator, num_points: usize) !Matrix(f64) {
-    var points: Matrix(f64) = try .init(allocator, num_points, 2);
+    var points: Matrix(f64) = try .init(allocator, @as(u32, @intCast(num_points)), 2);
 
     // Use a deterministic random number generator for reproducible results
     var prng: std.Random.DefaultPrng = .init(42);
