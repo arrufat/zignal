@@ -8,8 +8,11 @@ const Orb = zignal.Orb;
 const Point = zignal.Point;
 
 const js = @import("js.zig");
-pub const alloc = js.alloc;
-pub const free = js.free;
+
+comptime {
+    _ = js.alloc;
+    _ = js.free;
+}
 
 const Rgba = zignal.Rgba(u8);
 

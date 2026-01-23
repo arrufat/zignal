@@ -129,7 +129,7 @@ pub fn main(init: std.process.Init) !void {
 
         for (widths) |width| {
             std.debug.assert(width >= 1 and (width % 2 == 1));
-            const radius = (width - 1) / 2;
+            const radius: u32 = @intCast((width - 1) / 2);
             const dst = scratch[scratch_index];
             scratch_index = (scratch_index + 1) % scratch.len;
             try source.boxBlur(init.gpa, radius, dst.*);
