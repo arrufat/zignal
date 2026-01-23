@@ -24,12 +24,12 @@ const Args = struct {
     };
 };
 
+pub const description = "Apply Feature Distribution Matching (style transfer) from target to source image.\nIf output is omitted, the result is displayed in the terminal.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal fdm <source> <target> [output] [options]",
-    \\Apply Feature Distribution Matching (style transfer) from target to source image.
-    \\If output is omitted, the result is displayed in the terminal."
-    ,
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {

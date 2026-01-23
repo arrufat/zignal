@@ -42,10 +42,12 @@ const Args = struct {
     };
 };
 
+pub const description = "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal tile <images...> [options]",
-    "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.",
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
