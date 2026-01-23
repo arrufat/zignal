@@ -41,6 +41,25 @@ Requires Python 3.10+, no external dependencies
 
 [Bindings](bindings/python) | [PyPI Package](https://pypi.org/project/zignal-processing/) | [Documentation](https://bfactory-ai.github.io/zignal/python/zignal.html)
 
+### CLI
+
+Zignal includes a command-line interface for common operations.
+
+```bash
+# Build the CLI
+zig build
+
+# Run commands
+zig-out/bin/zignal <command> [options]
+```
+
+**Available commands:**
+- `display` - View images in the terminal (supports Kitty, Sixel, etc.)
+- `resize` - Resize images with various filters
+- `tile` - Combine multiple images into a grid
+- `fdm` - Apply style transfer (Feature Distribution Matching)
+- `info` - Show image metadata
+
 ## Examples
 
 [Interactive demos](https://bfactory-ai.github.io/zignal/examples) showcasing Zignal's capabilities:
