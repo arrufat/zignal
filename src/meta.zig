@@ -182,3 +182,34 @@ pub fn hasAlphaChannel(comptime T: type) bool {
 pub inline fn isRgba(comptime T: type) bool {
     return isRgb(T) and hasAlphaChannel(T);
 }
+
+/// Safely casts a value to type T, returning an error if the value is out of range.
+/// Supports casting from float to int (with rounding and bounds check).
+pub fn safeCast(comptime T: type, value: anytype) !T {
+    const ValueType = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .int => |int_info| {
+            switch (@typeInfo(ValueType)) {
+                .int, .comptime_int => return std.math.cast(T, value) orelse error.Overflow,
+                .float, .comptime_float => {
+                    if (!std.math.isFinite(value)) return error.Overflow;
+                    const rounded = @round(value);
+                    const min_limit = @as(f64, @floatFromInt(std.math.minInt(T)));
+                    const max_limit = @as(f64, @floatFromInt(std.math.maxInt(T)));
+                    if (rounded < min_limit or rounded > max_limit) return error.Overflow;
+                    // Special check for negative zero or small negative floats casting to unsigned
+                    if (int_info.signedness == .unsigned and rounded < 0) return error.Overflow;
+                    return @intFromFloat(rounded);
+                },
+                else => @compileError("safeCast only supports numeric inputs"),
+            }
+        },
+        .float => {
+            switch (@typeInfo(ValueType)) {
+                .int, .comptime_int, .float, .comptime_float => return @floatCast(value),
+                else => @compileError("safeCast only supports numeric inputs"),
+            }
+        },
+        else => @compileError("safeCast only supports numeric target types"),
+    }
+}

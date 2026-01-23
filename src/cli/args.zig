@@ -77,6 +77,11 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
                                 std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
                                 return error.InvalidArguments;
                             };
+                        } else if (@typeInfo(ChildType) == .float) {
+                            @field(options, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
+                                std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
+                                return error.InvalidArguments;
+                            };
                         } else {
                             @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
                         }

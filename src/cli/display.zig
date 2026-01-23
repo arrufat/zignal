@@ -6,6 +6,7 @@ const zignal = @import("zignal");
 const terminal = zignal.terminal;
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 
 const Args = struct {
     width: ?u32 = null,
@@ -49,7 +50,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     }
 
     if (parsed.options.filter) |f| {
-        filter = parseFilter(f) catch |err| {
+        filter = common.parseFilter(f) catch |err| {
             std.log.err("Unknown filter type: {s}", .{f});
             return err;
         };
@@ -79,21 +80,6 @@ pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
     });
     if (protocol_map.get(name)) |p_enum| {
         return p_enum;
-    } else {
-        return error.InvalidArguments;
-    }
-}
-
-pub fn parseFilter(name: []const u8) !zignal.Interpolation {
-    const filter_map = std.StaticStringMap(zignal.Interpolation).initComptime(.{
-        .{ "nearest", .nearest_neighbor },
-        .{ "bilinear", .bilinear },
-        .{ "bicubic", .bicubic },
-        .{ "lanczos", .lanczos },
-        .{ "catmull-rom", .catmull_rom },
-    });
-    if (filter_map.get(name)) |f_enum| {
-        return f_enum;
     } else {
         return error.InvalidArguments;
     }
