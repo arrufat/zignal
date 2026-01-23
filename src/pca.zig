@@ -69,9 +69,9 @@ pub fn Pca(comptime T: type) type {
         /// Eigenvalues in descending order
         eigenvalues: []T,
         /// Number of components retained
-        num_components: usize,
+        num_components: u32,
         /// Dimension of input vectors
-        dim: usize,
+        dim: u32,
         /// Memory allocator
         allocator: Allocator,
 
@@ -108,7 +108,7 @@ pub fn Pca(comptime T: type) type {
         /// - Uses covariance path when `n > dim`, Gram path otherwise.
         /// - Replaces previous `components`/`eigenvalues` if already fitted.
         /// - Returns `error.InsufficientData` for `n < 2` and `error.InvalidComponents` for `0`.
-        pub fn fit(self: *Self, data_matrix: Matrix(T), num_components: ?usize) !void {
+        pub fn fit(self: *Self, data_matrix: Matrix(T), num_components: ?u32) !void {
             const n_samples = data_matrix.rows;
             const data_dim = data_matrix.cols;
 
@@ -193,7 +193,7 @@ pub fn Pca(comptime T: type) type {
                 const VecSize = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     var sum: T = 0;
-                    var j: usize = 0;
+                    var j: u32 = 0;
                     // Vectorized loop
                     while (j + VecSize <= self.dim) : (j += VecSize) {
                         var centered_arr: [VecSize]T = undefined;
@@ -246,7 +246,7 @@ pub fn Pca(comptime T: type) type {
                 const VecSize = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     const weight = coefficients[i];
-                    var j: usize = 0;
+                    var j: u32 = 0;
                     // Vectorized loop
                     while (j + VecSize <= self.dim) : (j += VecSize) {
                         var comp_arr: [VecSize]T = undefined;
@@ -292,7 +292,7 @@ pub fn Pca(comptime T: type) type {
             if (data_matrix.rows == 0) return error.NoVectors;
 
             // Build centered data matrix
-            var centered_matrix: Matrix(T) = try Matrix(T).init(self.allocator, data_matrix.rows, self.dim);
+            var centered_matrix: Matrix(T) = try .init(self.allocator, data_matrix.rows, self.dim);
             defer centered_matrix.deinit();
 
             for (0..data_matrix.rows) |i| {
@@ -322,7 +322,7 @@ pub fn Pca(comptime T: type) type {
         ///
         /// Example: For 1000 RGB images (1000×3 matrix), we compute a 3×3 covariance
         /// matrix instead of a 1000×1000 Gram matrix, making it much more efficient.
-        fn computeComponentsFromCovariance(self: *Self, data_matrix: *Matrix(T), num_components: usize) !void {
+        fn computeComponentsFromCovariance(self: *Self, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled covariance matrix (X^T * X) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
@@ -337,7 +337,7 @@ pub fn Pca(comptime T: type) type {
             // Prepare outputs
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.realloc(self.eigenvalues, num_components);
-            self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
+            self.components = try .init(self.allocator, self.dim, num_components);
 
             // Compute SVD of covariance matrix
             var result = try cov_matrix.svd(self.allocator, .{
@@ -378,7 +378,7 @@ pub fn Pca(comptime T: type) type {
         ///
         /// Example: For 10 high-dimensional vectors (10×1000 matrix), we compute a
         /// 10×10 Gram matrix instead of a 1000×1000 covariance matrix.
-        fn computeComponentsFromGram(self: *Self, data_matrix: *Matrix(T), num_components: usize) !void {
+        fn computeComponentsFromGram(self: *Self, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled Gram matrix (X * X^T) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
@@ -393,7 +393,7 @@ pub fn Pca(comptime T: type) type {
             // Extract components by projecting data onto eigenvectors
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.realloc(self.eigenvalues, num_components);
-            self.components = try Matrix(T).init(self.allocator, self.dim, num_components);
+            self.components = try .init(self.allocator, self.dim, num_components);
 
             // Compute SVD of Gram matrix
             var result = try gram_matrix.svd(self.allocator, .{
@@ -439,8 +439,8 @@ test "PCA initialization and cleanup" {
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), pca.num_components);
-    try std.testing.expectEqual(@as(usize, 0), pca.dim);
+    try std.testing.expectEqual(@as(u32, 0), pca.num_components);
+    try std.testing.expectEqual(@as(u32, 0), pca.dim);
 }
 
 test "PCA on 2D vectors" {
@@ -607,13 +607,13 @@ test "PCA edge case: minimum samples (n=2)" {
     defer pca.deinit();
 
     try pca.fit(data, null); // Should fit with 1 component
-    try std.testing.expectEqual(@as(usize, 1), pca.num_components);
+    try std.testing.expectEqual(@as(u32, 1), pca.num_components);
 
     // Test projection
     const test_vec = [_]f64{ 2.0, 3.0 };
     const coeffs = try pca.project(&test_vec);
     defer allocator.free(coeffs);
-    try std.testing.expectEqual(@as(usize, 1), coeffs.len);
+    try std.testing.expectEqual(@as(u32, 1), coeffs.len);
 }
 
 test "PCA edge case: zero variance data" {

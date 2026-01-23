@@ -12,15 +12,15 @@ const formatting = @import("formatting.zig");
 const svd_module = @import("svd_static.zig");
 
 /// Creates a static matrix with elements of type T and size rows times cols.
-pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) type {
+pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
     return struct {
         pub const SvdMode = svd_module.SvdMode;
         pub const SvdOptions = svd_module.SvdOptions;
         pub const SvdResult = svd_module.SvdResult;
         const Self = @This();
         items: [rows][cols]T = undefined,
-        comptime rows: usize = rows,
-        comptime cols: usize = cols,
+        comptime rows: u32 = rows,
+        comptime cols: u32 = cols,
 
         fn ensureFloat(comptime context: []const u8) void {
             comptime if (@typeInfo(T) != .float)
@@ -44,7 +44,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
         }
 
         /// Returns the rows and columns as a struct.
-        pub fn shape(self: Self) struct { usize, usize } {
+        pub fn shape(self: Self) struct { u32, u32 } {
             _ = self;
             return .{ rows, cols };
         }
@@ -614,7 +614,7 @@ pub fn SMatrix(comptime T: type, comptime rows: usize, comptime cols: usize) typ
 
         /// Returns a new matrix with dimensions `new_rows` x `new_cols`, containing the same elements
         /// as `self` interpreted in row-major order.
-        pub fn reshape(self: Self, comptime new_rows: usize, comptime new_cols: usize) SMatrix(T, new_rows, new_cols) {
+        pub fn reshape(self: Self, comptime new_rows: u32, comptime new_cols: u32) SMatrix(T, new_rows, new_cols) {
             comptime assert(rows * cols == new_rows * new_cols);
             var result: SMatrix(T, new_rows, new_cols) = .{};
             for (0..new_rows) |r| {

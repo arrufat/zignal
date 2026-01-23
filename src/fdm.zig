@@ -76,7 +76,9 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
             if (T == u8) {
                 // Grayscale image
-                self.target_size = target_image.rows * target_image.cols;
+                const size = @as(usize, target_image.rows) * @as(usize, target_image.cols);
+                if (size > std.math.maxInt(u32)) return error.Overflow;
+                self.target_size = size;
                 self.target_is_grayscale = true;
 
                 // Compute grayscale statistics
@@ -105,8 +107,10 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 };
             } else {
                 // Color image - extract features and compute covariance
-                self.target_size = target_image.rows * target_image.cols;
-                var feature_mat = try Matrix(f64).init(self.allocator, self.target_size, 3);
+                const size = @as(usize, target_image.rows) * @as(usize, target_image.cols);
+                if (size > std.math.maxInt(u32)) return error.Overflow;
+                self.target_size = size;
+                var feature_mat: Matrix(f64) = try .init(self.allocator, @intCast(self.target_size), 3);
                 defer feature_mat.deinit();
 
                 self.target_is_grayscale = getFeatureMatrix(T, target_image, &feature_mat);
@@ -186,8 +190,9 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
             if (T == u8) {
                 // Grayscale processing
-                const source_size = source_img.rows * source_img.cols;
-                var source_matrix = try Matrix(f64).init(self.allocator, source_size, 1);
+                const source_size = @as(usize, source_img.rows) * @as(usize, source_img.cols);
+                if (source_size > std.math.maxInt(u32)) return error.Overflow;
+                var source_matrix: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 1);
                 defer source_matrix.deinit();
 
                 grayscaleImageToMatrix(source_img, &source_matrix);
@@ -211,11 +216,12 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 grayscaleMatrixToImage(source_matrix, source_img, self.target_mean[0]);
             } else {
                 // Color processing
-                const source_size = source_img.rows * source_img.cols;
+                const source_size = @as(usize, source_img.rows) * @as(usize, source_img.cols);
+                if (source_size > std.math.maxInt(u32)) return error.Overflow;
 
                 if (self.target_is_grayscale) {
                     // Target statistics are 1D. Build a single-channel matrix directly using Rec.709 luminance.
-                    var gray_matrix = try Matrix(f64).init(self.allocator, source_size, 1);
+                    var gray_matrix: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 1);
                     defer gray_matrix.deinit();
 
                     var idx: usize = 0;
@@ -247,7 +253,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     reshapeToImage(T, gray_matrix, source_img, self.target_mean, true);
                 } else {
                     // Full color transformation
-                    var feature_mat_source = try Matrix(f64).init(self.allocator, source_size, 3);
+                    var feature_mat_source: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 3);
                     defer feature_mat_source.deinit();
 
                     _ = getFeatureMatrix(T, source_img, &feature_mat_source);
@@ -272,7 +278,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     });
 
                     // Create Σ_src^(-1/2) * Σ_target^(1/2) diagonal
-                    var sigma_combined = try Matrix(f64).init(self.allocator, 3, 3);
+                    var sigma_combined: Matrix(f64) = try .init(self.allocator, 3, 3);
                     defer sigma_combined.deinit();
                     @memset(sigma_combined.items, 0);
 
@@ -291,7 +297,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     var u_source = try Matrix(f64).fromSMatrix(self.allocator, source_svd.u);
                     defer u_source.deinit();
 
-                    var u_target_t = try Matrix(f64).init(self.allocator, 3, 3);
+                    var u_target_t: Matrix(f64) = try .init(self.allocator, 3, 3);
                     defer u_target_t.deinit();
                     for (0..3) |i| {
                         for (0..3) |j| {
@@ -300,7 +306,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     }
 
                     // Create a copy of u_source and apply diagonal matrix
-                    var u_source_scaled = try Matrix(f64).init(self.allocator, u_source.rows, u_source.cols);
+                    var u_source_scaled: Matrix(f64) = try .init(self.allocator, u_source.rows, u_source.cols);
                     defer u_source_scaled.deinit();
                     @memcpy(u_source_scaled.items, u_source.items);
 
@@ -353,12 +359,12 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 /// ## Example Usage
 /// ```zig
 /// // Single image transformation
-/// var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+/// var fdm: FeatureDistributionMatching(Rgb(u8)) = .init(allocator);
 /// defer fdm.deinit();
 /// try fdm.match(source_img, target_img); // Modifies source_img in-place
 ///
 /// // Batch processing with same target style
-/// var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+/// var fdm: FeatureDistributionMatching(Rgb(u8)) = .init(allocator);
 /// defer fdm.deinit();
 /// try fdm.setTarget(style_image);
 /// for (images_to_transform) |img| {
@@ -470,7 +476,7 @@ test "FDM mean and covariance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
-    var source_img = try Image(Rgb).init(allocator, 50, 50);
+    var source_img: Image(Rgb) = try .init(allocator, 50, 50);
     defer source_img.deinit(allocator);
     for (source_img.data, 0..) |*pixel, i| {
         // Create specific pattern for known covariance structure
@@ -484,7 +490,7 @@ test "FDM mean and covariance matching" {
     }
 
     // Create target image with different known statistics
-    var target_img = try Image(Rgb).init(allocator, 50, 50);
+    var target_img: Image(Rgb) = try .init(allocator, 50, 50);
     defer target_img.deinit(allocator);
     for (target_img.data, 0..) |*pixel, i| {
         const x = i % 50;
@@ -526,7 +532,7 @@ test "FDM mean and covariance matching" {
     target_var_b /= @as(f64, @floatFromInt(target_img.data.len));
 
     // Apply FDM using new API
-    var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+    var fdm: FeatureDistributionMatching(Rgb) = .init(allocator);
     defer fdm.deinit();
     try fdm.match(source_img, target_img);
 
@@ -574,7 +580,7 @@ test "FDM grayscale mean and variance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
-    var source_img = try Image(u8).init(allocator, 100, 1);
+    var source_img: Image(u8) = try .init(allocator, 100, 1);
     defer source_img.deinit(allocator);
 
     // Fill with values 0-99 for known mean=49.5, variance
@@ -583,7 +589,7 @@ test "FDM grayscale mean and variance matching" {
     }
 
     // Create target image with different known statistics
-    var target_img = try Image(u8).init(allocator, 100, 1);
+    var target_img: Image(u8) = try .init(allocator, 100, 1);
     defer target_img.deinit(allocator);
 
     // Fill with values 100-199 for known mean=149.5
@@ -592,7 +598,7 @@ test "FDM grayscale mean and variance matching" {
     }
 
     // Apply FDM using new API
-    var fdm = FeatureDistributionMatching(u8).init(allocator);
+    var fdm: FeatureDistributionMatching(u8) = .init(allocator);
     defer fdm.deinit();
     try fdm.match(source_img, target_img);
 
@@ -611,7 +617,7 @@ test "FDM batch processing with reused target" {
     const allocator = testing.allocator;
 
     // Create a target style image
-    var target_img = try Image(Rgb).init(allocator, 20, 20);
+    var target_img: Image(Rgb) = try .init(allocator, 20, 20);
     defer target_img.deinit(allocator);
     for (target_img.data, 0..) |*pixel, i| {
         // Warm color palette
@@ -625,10 +631,10 @@ test "FDM batch processing with reused target" {
     // Create multiple source images to transform
     var source_images: [3]Image(Rgb) = undefined;
     for (&source_images, 0..) |*img, idx| {
-        img.* = try Image(Rgb).init(allocator, 20, 20);
+        img.* = try .init(allocator, 20, 20);
         for (img.data, 0..) |*pixel, i| {
             // Different cool color patterns
-            pixel.* = Rgb{
+            pixel.* = .{
                 .r = @intCast((idx * 20 + i) % 100),
                 .g = @intCast((idx * 30 + i) % 150),
                 .b = @intCast((idx * 40 + i) % 200),
@@ -640,7 +646,7 @@ test "FDM batch processing with reused target" {
     };
 
     // Create FDM instance and set target once
-    var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+    var fdm: FeatureDistributionMatching(Rgb) = .init(allocator);
     defer fdm.deinit();
     try fdm.setTarget(target_img);
 
@@ -676,7 +682,7 @@ test "FDM grayscale target applied to color source" {
     const allocator = testing.allocator;
 
     // Build a color source image with distinct RGB patterns.
-    var source_img = try Image(Rgb).init(allocator, 12, 12);
+    var source_img: Image(Rgb) = try .init(allocator, 12, 12);
     defer source_img.deinit(allocator);
     for (source_img.data, 0..) |*pixel, idx| {
         const x = idx % 12;
@@ -689,32 +695,32 @@ test "FDM grayscale target applied to color source" {
     }
 
     // Target image is RGB but grayscale-valued.
-    var target_img = try Image(Rgb).init(allocator, 12, 12);
+    var target_img: Image(Rgb) = try .init(allocator, 12, 12);
     defer target_img.deinit(allocator);
     for (target_img.data, 0..) |*pixel, idx| {
         const val: u8 = @intCast(40 + (idx % 160));
-        pixel.* = Rgb{ .r = val, .g = val, .b = val };
+        pixel.* = .{ .r = val, .g = val, .b = val };
     }
 
     // Pre-compute target statistics (on 0-255 scale).
-    var target_stats = RunningStats(f64).init();
+    var target_stats: RunningStats(f64) = .init();
     for (target_img.data) |pixel| {
         target_stats.add(@as(f64, @floatFromInt(pixel.r)));
     }
     const target_mean = target_stats.mean();
     const target_var = populationVariance(target_stats);
 
-    var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+    var fdm: FeatureDistributionMatching(Rgb) = .init(allocator);
     defer fdm.deinit();
 
     try fdm.match(source_img, target_img);
 
     // Result image should be grayscale and match target statistics within tolerance.
-    var result_stats = RunningStats(f64).init();
+    var result_stats: RunningStats(f64) = .init();
     for (source_img.data) |pixel| {
         try expectEqual(pixel.r, pixel.g);
         try expectEqual(pixel.g, pixel.b);
-        result_stats.add(@as(f64, @floatFromInt(pixel.r)));
+        result_stats.add(@floatFromInt(pixel.r));
     }
 
     const result_mean = result_stats.mean();
@@ -727,21 +733,21 @@ test "FDM grayscale target applied to color source" {
 test "FDM error handling" {
     const allocator = testing.allocator;
 
-    var fdm = FeatureDistributionMatching(Rgb).init(allocator);
+    var fdm: FeatureDistributionMatching(Rgb) = .init(allocator);
     defer fdm.deinit();
 
     // Test update without setting images
     try testing.expectError(error.NoTargetSet, fdm.update());
 
     // Set target but not source
-    var target_img = try Image(Rgb).init(allocator, 10, 10);
+    var target_img: Image(Rgb) = try .init(allocator, 10, 10);
     defer target_img.deinit(allocator);
     try fdm.setTarget(target_img);
 
     try testing.expectError(error.NoSourceSet, fdm.update());
 
     // Now it should work
-    var source_img = try Image(Rgb).init(allocator, 10, 10);
+    var source_img: Image(Rgb) = try .init(allocator, 10, 10);
     defer source_img.deinit(allocator);
     try fdm.setSource(source_img);
     try fdm.update(); // Should succeed

@@ -156,7 +156,7 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     }
 
     // Convert num_components to optional usize
-    const components: ?usize = if (num_components < 0) null else @intCast(num_components);
+    const components: ?u32 = if (num_components < 0) null else @intCast(num_components);
 
     // Fit the PCA model
     self.pca_ptr.?.fit(matrix_struct.matrix_ptr.?.*, components) catch |err| {
