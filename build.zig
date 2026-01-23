@@ -43,6 +43,7 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
             },
@@ -168,6 +169,10 @@ pub fn build(b: *Build) void {
     const output_name = b.fmt("lib/_zignal{s}", .{extension});
     const install_py_module = b.addInstallFile(py_module.getEmittedBin(), output_name);
 
+    // Ensure CLI is installed to zig-out/bin so setup.py can find it
+    const install_cli = b.addInstallArtifact(cli, .{});
+    py_bindings_step.dependOn(&install_cli.step);
+
     // Make python-bindings depend on stub generation so stubs are always up to date
     py_bindings_step.dependOn(&run_stub_generator.step);
     py_bindings_step.dependOn(&install_py_module.step);
@@ -176,6 +181,12 @@ pub fn build(b: *Build) void {
     const pkg_dir = b.pathJoin(&.{ b.build_root.path.?, "bindings/python/zignal" });
     const wf = b.addWriteFiles();
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
+
+    // Copy CLI tool to python package
+    const cli_ext = if (target_info.os.tag == .windows) ".exe" else "";
+    const cli_name = b.fmt("zignal{s}", .{cli_ext});
+    _ = wf.addCopyFile(cli.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
+
     py_bindings_step.dependOn(&wf.step);
 }
 

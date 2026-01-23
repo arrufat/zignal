@@ -103,6 +103,13 @@ jobs:
         echo "Installing wheel: $wheel"
         uv pip install "$wheel"
 
+        # Verify CLI works
+        PROJECT_ROOT="$GITHUB_WORKSPACE/bindings/python"
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          PROJECT_ROOT=$(cygpath -w "$PROJECT_ROOT")
+        fi
+        uv run --project "$PROJECT_ROOT" zignal version
+
         # Create a temp directory safely using Python
         TEST_TMP_DIR=$(python -c "import tempfile; print(tempfile.mkdtemp())")
         echo "Testing in: $TEST_TMP_DIR"
