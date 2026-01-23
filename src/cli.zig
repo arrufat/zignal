@@ -11,17 +11,24 @@ const resize = @import("cli/resize.zig");
 const tile = @import("cli/tile.zig");
 const version = @import("cli/version.zig");
 
+const root = @This();
+
 pub const std_options: std.Options = .{
     .log_level = .debug,
 };
 
-const cli = Cli.init(&.{ "display", "resize", "fdm", "tile", "info", "version" });
+const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "version" });
 
 pub fn main(init: std.process.Init) !void {
-    try cli.run(init);
-}
+    var args = try init.minimal.args.iterateAllocator(init.gpa);
+    defer args.deinit();
+    _ = args.skip();
 
-const root = @This();
+    var buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &buffer);
+
+    try cli.run(init.gpa, init.io, &stdout.interface, &args);
+}
 
 pub const Command = struct {
     name: []const u8,
@@ -42,7 +49,7 @@ pub const Cli = struct {
                     .name = name,
                     .run = module.run,
                     .description = module.description,
-                    .help = module.help_text,
+                    .help = module.help,
                 };
             }
             break :blk items;
@@ -50,17 +57,10 @@ pub const Cli = struct {
         return Cli{ .commands = &cmds };
     }
 
-    pub fn run(self: Cli, proc_init: std.process.Init) !void {
-        var args = try proc_init.minimal.args.iterateAllocator(proc_init.gpa);
-        defer args.deinit();
-        _ = args.skip();
-
-        var buffer: [4096]u8 = undefined;
-        var stdout = std.Io.File.stdout().writer(proc_init.io, &buffer);
-
+    pub fn run(self: Cli, allocator: Allocator, io: Io, stdout: *std.Io.Writer, args: *std.process.Args.Iterator) !void {
         if (args.next()) |arg| {
             if (self.getCommand(arg)) |cmd| {
-                cmd.run(proc_init.io, &stdout.interface, proc_init.gpa, &args) catch |err| {
+                cmd.run(io, stdout, allocator, args) catch |err| {
                     std.log.err("{s} command failed: {t}", .{ arg, err });
                     std.process.exit(1);
                 };
@@ -68,15 +68,15 @@ pub const Cli = struct {
             }
 
             if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-                try self.printHelp(&stdout.interface, &args);
+                try self.printHelp(stdout, args);
                 return;
             }
 
             std.log.err("Unknown command: '{s}'", .{arg});
-            try self.printHelp(&stdout.interface, null);
+            try self.printHelp(stdout, null);
             std.process.exit(1);
         }
-        try self.printHelp(&stdout.interface, null);
+        try self.printHelp(stdout, null);
     }
 
     fn getCommand(self: Cli, name: []const u8) ?Command {

@@ -24,7 +24,7 @@ const Args = struct {
 
 pub const description = "Display an image in the terminal using supported graphics protocols.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal display <image> [options]",
     description,
@@ -35,7 +35,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 

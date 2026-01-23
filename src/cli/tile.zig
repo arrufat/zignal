@@ -44,7 +44,7 @@ const Args = struct {
 
 pub const description = "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal tile <images...> [options]",
     description,
@@ -55,7 +55,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len < 1) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 
