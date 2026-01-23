@@ -49,12 +49,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         };
     }
 
-    if (parsed.options.filter) |f| {
-        filter = common.parseFilter(f) catch |err| {
-            std.log.err("Unknown filter type: {s}", .{f});
-            return err;
-        };
-    }
+    filter = try common.resolveFilter(parsed.options.filter);
 
     applyOptions(&protocol, width, height, filter);
 

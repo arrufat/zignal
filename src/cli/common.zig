@@ -16,3 +16,13 @@ pub fn parseFilter(name: []const u8) !zignal.Interpolation {
         return error.InvalidArguments;
     }
 }
+
+pub fn resolveFilter(name: ?[]const u8) !zignal.Interpolation {
+    if (name) |n| {
+        return parseFilter(n) catch |err| {
+            std.log.err("Unknown filter type: {s}", .{n});
+            return err;
+        };
+    }
+    return .bilinear;
+}

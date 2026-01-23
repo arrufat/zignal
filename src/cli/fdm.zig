@@ -95,13 +95,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale)));
         const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale)));
 
-        var filter: zignal.Interpolation = .bilinear;
-        if (parsed.options.filter) |f| {
-            filter = common.parseFilter(f) catch |err| {
-                std.log.err("Unknown filter type: {s}", .{f});
-                return err;
-            };
-        }
+        const filter = try common.resolveFilter(parsed.options.filter);
 
         const canvas_w = 3 * w;
         const canvas_h = h;
