@@ -7,127 +7,144 @@ const zignal = @import("zignal");
 const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
 const info = @import("cli/info.zig");
+const resize = @import("cli/resize.zig");
 const tile = @import("cli/tile.zig");
 const version = @import("cli/version.zig");
-const resize = @import("cli/resize.zig");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
 };
 
-const command_names = .{ "display", "resize", "fdm", "tile", "info", "version" };
+const cli = Cli.init(&.{ "display", "resize", "fdm", "tile", "info", "version" });
 
-const Command = struct {
+pub fn main(init: std.process.Init) !void {
+    try cli.run(init);
+}
+
+const root = @This();
+
+pub const Command = struct {
+    name: []const u8,
     run: *const fn (Io, *std.Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void,
     description: []const u8,
     help: []const u8,
 };
 
-const commands = blk: {
-    const KV = struct { []const u8, Command };
-    var items: [command_names.len]KV = undefined;
-    for (command_names, 0..) |name, i| {
-        const module = @field(@This(), name);
-        items[i] = .{ name, Command{
-            .run = module.run,
-            .description = module.description,
-            .help = module.help_text,
-        } };
-    }
-    break :blk std.StaticStringMap(Command).initComptime(items);
-};
+pub const Cli = struct {
+    commands: []const Command,
 
-fn generateGeneralHelp() []const u8 {
-    var text: []const u8 =
-        \\Usage: zignal <command> [options]
-        \\
-        \\Commands:
-        \\
-    ;
-
-    // First pass: find max length
-    comptime var max_len = 0;
-    inline for (command_names) |name| {
-        if (name.len > max_len) max_len = name.len;
-    }
-    const help_cmd_len = "help".len;
-    if (help_cmd_len > max_len) max_len = help_cmd_len;
-
-    const padding_target = max_len + 2;
-
-    inline for (command_names) |name| {
-        const module = @field(@This(), name);
-        // Take the first line of the description
-        const desc = blk: {
-            var iter = std.mem.splitSequence(u8, module.description, "\n");
-            break :blk iter.first();
-        };
-
-        const padding_len = padding_target - name.len;
-        const padding = " " ** padding_len;
-        text = text ++ "  " ++ name ++ padding ++ desc ++ "\n";
-    }
-
-    // Add help command manually
-    const padding_len = padding_target - "help".len;
-    const padding = " " ** padding_len;
-    text = text ++ "  help" ++ padding ++ "Display this help message\n";
-
-    text = text ++
-        \\
-        \\Run 'zignal help <command>' for more information on a specific command.
-        \\
-    ;
-    return text;
-}
-
-const general_help = generateGeneralHelp();
-
-pub fn main(init: std.process.Init) !void {
-    var args = try init.minimal.args.iterateAllocator(init.gpa);
-    defer args.deinit();
-    _ = args.skip();
-
-    var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(init.io, &buffer);
-
-    while (args.next()) |arg| {
-        if (commands.get(arg)) |cmd| {
-            cmd.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
-                std.log.err("{s} command failed: {t}", .{ arg, err });
-                std.process.exit(1);
-            };
-            return;
-        }
-
-        if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            try help(&stdout.interface, &args);
-            return;
-        }
-
-        std.log.err("Unknown command: '{s}'", .{arg});
-        try help(&stdout.interface, null);
-        std.process.exit(1);
-    }
-    try help(&stdout.interface, null);
-}
-
-fn help(stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
-    if (args) |iterator| {
-        if (iterator.next()) |subcmd| {
-            if (commands.get(subcmd)) |cmd| {
-                try stdout.print("{s}", .{cmd.help});
-            } else if (std.mem.eql(u8, subcmd, "help")) {
-                try stdout.print("{s}", .{general_help});
-            } else {
-                try stdout.print("Unknown command: \"{s}\"\n\n{s}", .{ subcmd, general_help });
-                try stdout.flush();
-                std.process.exit(1);
+    pub fn init(comptime names: []const []const u8) Cli {
+        const cmds = comptime blk: {
+            var items: [names.len]Command = undefined;
+            for (names, 0..) |name, i| {
+                const module = @field(root, name);
+                items[i] = Command{
+                    .name = name,
+                    .run = module.run,
+                    .description = module.description,
+                    .help = module.help_text,
+                };
             }
-            try stdout.flush();
-            return;
-        }
+            break :blk items;
+        };
+        return Cli{ .commands = &cmds };
     }
-    try stdout.print("{s}", .{general_help});
-    try stdout.flush();
-}
+
+    pub fn run(self: Cli, proc_init: std.process.Init) !void {
+        var args = try proc_init.minimal.args.iterateAllocator(proc_init.gpa);
+        defer args.deinit();
+        _ = args.skip();
+
+        var buffer: [4096]u8 = undefined;
+        var stdout = std.Io.File.stdout().writer(proc_init.io, &buffer);
+
+        if (args.next()) |arg| {
+            if (self.getCommand(arg)) |cmd| {
+                cmd.run(proc_init.io, &stdout.interface, proc_init.gpa, &args) catch |err| {
+                    std.log.err("{s} command failed: {t}", .{ arg, err });
+                    std.process.exit(1);
+                };
+                return;
+            }
+
+            if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try self.printHelp(&stdout.interface, &args);
+                return;
+            }
+
+            std.log.err("Unknown command: '{s}'", .{arg});
+            try self.printHelp(&stdout.interface, null);
+            std.process.exit(1);
+        }
+        try self.printHelp(&stdout.interface, null);
+    }
+
+    fn getCommand(self: Cli, name: []const u8) ?Command {
+        for (self.commands) |cmd| {
+            if (std.mem.eql(u8, cmd.name, name)) return cmd;
+        }
+        return null;
+    }
+
+    fn printHelp(self: Cli, stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
+        if (args) |iterator| {
+            if (iterator.next()) |subcmd| {
+                if (self.getCommand(subcmd)) |cmd| {
+                    try stdout.print("{s}", .{cmd.help});
+                } else if (std.mem.eql(u8, subcmd, "help")) {
+                    try self.printGeneralHelp(stdout);
+                } else {
+                    try stdout.print("Unknown command: \"{s}\"\n\n", .{subcmd});
+                    try self.printGeneralHelp(stdout);
+                    try stdout.flush();
+                    std.process.exit(1);
+                }
+                try stdout.flush();
+                return;
+            }
+        }
+        try self.printGeneralHelp(stdout);
+        try stdout.flush();
+    }
+
+    fn printGeneralHelp(self: Cli, stdout: *std.Io.Writer) !void {
+        try stdout.print(
+            \\Usage: zignal <command> [options]
+            \\
+            \\Commands:
+            \\
+        , .{});
+
+        var max_len: usize = 0;
+        for (self.commands) |cmd| {
+            if (cmd.name.len > max_len) max_len = cmd.name.len;
+        }
+        const help_len = "help".len;
+        if (help_len > max_len) max_len = help_len;
+
+        const padding_target = max_len + 2;
+
+        for (self.commands) |cmd| {
+            var desc_iter = std.mem.splitSequence(u8, cmd.description, "\n");
+            const desc = desc_iter.first();
+
+            try stdout.print("  {s}", .{cmd.name});
+            var i: usize = 0;
+            const pad_len = padding_target - cmd.name.len;
+            while (i < pad_len) : (i += 1) try stdout.writeAll(" ");
+            try stdout.print("{s}\n", .{desc});
+        }
+
+        try stdout.print("  help", .{});
+        var i: usize = 0;
+        const pad_len = padding_target - help_len;
+        while (i < pad_len) : (i += 1) try stdout.writeAll(" ");
+        try stdout.print("Display this help message\n", .{});
+
+        try stdout.print(
+            \\
+            \\Run 'zignal help <command>' for more information on a specific command.
+            \\
+        , .{});
+    }
+};
