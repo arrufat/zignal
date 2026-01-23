@@ -26,7 +26,7 @@ const Args = struct {
 
 pub const description = "Apply Feature Distribution Matching (style transfer) from target to source image.\nIf output is omitted, the result is displayed in the terminal.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal fdm <source> <target> [output] [options]",
     description,
@@ -37,7 +37,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len < 2 or parsed.positionals.len > 3) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 

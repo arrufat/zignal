@@ -26,7 +26,7 @@ const Args = struct {
 
 pub const description = "Resize an image using various interpolation methods.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal resize <image> --output <path> [options]",
     description,
@@ -37,7 +37,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 

@@ -12,7 +12,7 @@ const Args = struct {};
 
 pub const description = "Display detailed information about one or more image files.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal info <image1> <image2> ...",
     description,
@@ -23,7 +23,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 

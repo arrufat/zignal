@@ -10,7 +10,7 @@ const Args = struct {};
 
 pub const description = "Display version information.";
 
-pub const help_text = args.generateHelp(
+pub const help = args.generateHelp(
     Args,
     "zignal version",
     description,
@@ -22,7 +22,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer parsed.deinit(gpa);
 
     if (parsed.help) {
-        try args.printHelp(writer, help_text);
+        try args.printHelp(writer, help);
         return;
     }
 
