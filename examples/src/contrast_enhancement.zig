@@ -11,8 +11,10 @@ pub const std_options: std.Options = .{
     .log_level = .info,
 };
 
-pub const alloc = js.alloc;
-pub const free = js.free;
+comptime {
+    _ = js.alloc;
+    _ = js.free;
+}
 
 pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
     _ = st;

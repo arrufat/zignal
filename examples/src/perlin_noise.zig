@@ -6,10 +6,17 @@ const PerlinOptions = zignal.PerlinOptions;
 const Rgba = zignal.Rgba(u8);
 const Image = zignal.Image;
 
+const js = @import("js.zig");
+
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
+    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = .info,
 };
+
+comptime {
+    _ = js.alloc;
+    _ = js.free;
+}
 
 var opts: PerlinOptions(f32) = .{
     .amplitude = 1,

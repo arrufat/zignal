@@ -6,10 +6,17 @@ const Image = @import("zignal").Image;
 
 const Rgba = @import("zignal").Rgba(u8);
 
+const js = @import("js.zig");
+
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) @import("js.zig").logFn else std.log.defaultLog,
+    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = std.log.default_level,
 };
+
+comptime {
+    _ = js.alloc;
+    _ = js.free;
+}
 
 pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
     _ = st;

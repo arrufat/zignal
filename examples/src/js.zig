@@ -25,11 +25,11 @@ pub fn logFn(
     js.log(line.ptr, line.len);
 }
 
-export fn alloc(len: usize) [*]u8 {
+pub export fn alloc(len: usize) [*]u8 {
     const slice = std.heap.wasm_allocator.alloc(u8, len) catch @panic("OOM");
     return slice.ptr;
 }
 
-export fn free(ptr: [*]const u8, len: usize) void {
+pub export fn free(ptr: [*]const u8, len: usize) void {
     std.heap.wasm_allocator.free(ptr[0..len]);
 }
