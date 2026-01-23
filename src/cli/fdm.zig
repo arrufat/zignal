@@ -20,7 +20,7 @@ const Args = struct {
         .width = .{ .help = "Width of each sub-image", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image", .metavar = "N" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Scaling filter: nearest, bilinear, bicubic, lanczos, catmull-rom", .metavar = "f" },
+        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
     };
 };
 

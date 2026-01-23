@@ -18,7 +18,7 @@ const Args = struct {
         .width = .{ .help = "Target width in pixels", .metavar = "N" },
         .height = .{ .help = "Target height in pixels", .metavar = "N" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Scaling filter: nearest, bilinear, bicubic, lanczos, catmull-rom", .metavar = "f" },
+        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
     };
 };
 

@@ -35,7 +35,7 @@ const Args = struct {
         .cols = .{ .help = "Number of columns (for grid mode)", .metavar = "N" },
         .width = .{ .help = "Force cell width (default: first image width)", .metavar = "N" },
         .height = .{ .help = "Force cell height (default: first image height)", .metavar = "N" },
-        .filter = .{ .help = "Resizing filter: nearest, bilinear, bicubic, lanczos", .metavar = "f" },
+        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
         .output = .{ .help = "Output file path", .metavar = "file" },
         .display = .{ .help = "Display the result in the terminal" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
