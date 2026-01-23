@@ -10,10 +10,12 @@ const args = @import("args.zig");
 
 const Args = struct {};
 
+pub const description = "Display detailed information about one or more image files.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal info <image1> <image2> ...",
-    "Display detailed information about one or more image files.",
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {

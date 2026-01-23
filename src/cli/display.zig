@@ -22,10 +22,12 @@ const Args = struct {
     };
 };
 
+pub const description = "Display an image in the terminal using supported graphics protocols.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal display <image> [options]",
-    "Display an image in the terminal using supported graphics protocols.",
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {

@@ -24,10 +24,12 @@ const Args = struct {
     };
 };
 
+pub const description = "Resize an image using various interpolation methods.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal resize <image> --output <path> [options]",
-    "Resize an image using various interpolation methods.",
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {

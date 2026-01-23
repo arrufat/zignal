@@ -8,10 +8,12 @@ const args = @import("args.zig");
 
 const Args = struct {};
 
+pub const description = "Display version information.";
+
 pub const help_text = args.generateHelp(
     Args,
     "zignal version",
-    "Display version information.",
+    description,
 );
 
 pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
