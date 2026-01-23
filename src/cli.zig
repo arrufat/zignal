@@ -9,6 +9,7 @@ const fdm = @import("cli/fdm.zig");
 const info = @import("cli/info.zig");
 const tile = @import("cli/tile.zig");
 const version = @import("cli/version.zig");
+const resize = @import("cli/resize.zig");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -19,6 +20,7 @@ const general_help =
     \\
     \\Commands:
     \\  display  Display an image in the terminal
+    \\  resize   Resize an image
     \\  fdm      Apply Feature Distribution Matching (style transfer)
     \\  tile     Combine multiple images into a grid
     \\  info     Display image information
@@ -41,6 +43,13 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, arg, "display")) {
             display.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
                 std.log.err("display command failed: {t}", .{err});
+                std.process.exit(1);
+            };
+            return;
+        }
+        if (std.mem.eql(u8, arg, "resize")) {
+            resize.run(init.io, &stdout.interface, init.gpa, &args) catch |err| {
+                std.log.err("resize command failed: {t}", .{err});
                 std.process.exit(1);
             };
             return;
@@ -87,6 +96,7 @@ fn help(stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
         if (commands.next()) |subcmd| {
             const help_map = std.StaticStringMap([]const u8).initComptime(.{
                 .{ "display", display.help_text },
+                .{ "resize", resize.help_text },
                 .{ "fdm", fdm.help_text },
                 .{ "tile", tile.help_text },
                 .{ "info", info.help_text },

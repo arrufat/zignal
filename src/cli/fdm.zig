@@ -6,6 +6,7 @@ const zignal = @import("zignal");
 
 const args = @import("args.zig");
 const display = @import("display.zig");
+const common = @import("common.zig");
 
 const Args = struct {
     display: bool = false,
@@ -96,7 +97,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
         var filter: zignal.Interpolation = .bilinear;
         if (parsed.options.filter) |f| {
-            filter = display.parseFilter(f) catch |err| {
+            filter = common.parseFilter(f) catch |err| {
                 std.log.err("Unknown filter type: {s}", .{f});
                 return err;
             };
