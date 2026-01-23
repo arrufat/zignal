@@ -13,6 +13,8 @@ bindings/python/zignal/*.so
 bindings/python/zignal/*.dylib
 bindings/python/zignal/*.pyd
 bindings/python/zignal/*.dll
+bindings/python/zignal/zignal
+bindings/python/zignal/zignal.exe
 
 # Python cache and bytecode
 bindings/python/**/__pycache__/

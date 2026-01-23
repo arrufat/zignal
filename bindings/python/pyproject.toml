@@ -25,6 +25,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+zignal = "zignal.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/bfactory-ai/zignal"
 Repository = "https://github.com/bfactory-ai/zignal"
