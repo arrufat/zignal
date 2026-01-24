@@ -1,12 +1,13 @@
 const zignal = @import("zignal");
 const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
-const Rgb = zignal.Rgb(u8);
 
 const image = @import("image.zig");
 const python = @import("python.zig");
 const allocator = python.ctx.allocator;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
+
+const Rgb = zignal.Rgb(u8);
 
 // FeatureDistributionMatching Python object
 pub const FeatureDistributionMatchingObject = extern struct {
@@ -104,11 +105,10 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     fdm_ptr.setTarget(target_rgb) catch |err| {
         switch (err) {
             error.OutOfMemory => python.setMemoryError("target image"),
-            else => python.setRuntimeError("Failed to set target image: {s}", .{@errorName(err)}),
+            error.NotConverged => python.setRuntimeError("FDM failed: {t}", .{err}),
         }
         return null;
     };
-    // Success
 
     const none = c.Py_None();
     c.Py_INCREF(none);

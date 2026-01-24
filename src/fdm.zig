@@ -12,6 +12,7 @@ const Rgba = @import("color.zig").Rgba(u8);
 const Gray = @import("color.zig").Gray;
 const convertColor = @import("color.zig").convertColor;
 const RunningStats = @import("stats.zig").RunningStats;
+const CovarianceStats = @import("stats.zig").CovarianceStats;
 
 /// Feature Distribution Matching struct for stateful image style transfer.
 /// Allows efficient batch processing by reusing target distribution statistics.
@@ -26,12 +27,11 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
         // Target distribution statistics (computed once, reused)
         target_mean: [3]f64,
-        target_cov_u: Matrix(f64),
-        target_cov_s: [3]f64,
+        target_cov_u: Matrix(f64), // Eigenvectors of covariance
+        target_cov_s: [3]f64, // Eigenvalues of covariance
         target_is_grayscale: bool,
-        target_size: usize,
 
-        // Source image reference (not statistics, as source is modified in-place)
+        // Source image reference
         source_image: ?Image(T),
 
         // State flags
@@ -46,12 +46,11 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 .target_cov_u = Matrix(f64){
                     .rows = 0,
                     .cols = 0,
-                    .items = &[_]f64{},
+                    .items = &[_]f64{}, // Safe because rows=0 guards against deinit
                     .allocator = allocator,
                 },
                 .target_cov_s = @splat(0),
                 .target_is_grayscale = false,
-                .target_size = 0,
                 .source_image = null,
                 .has_target = false,
                 .has_source = false,
@@ -74,91 +73,56 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 self.target_cov_u.deinit();
             }
 
+            var stats = CovarianceStats(3, f64).init();
+
+            // Pass 1: Accumulate statistics
             if (T == u8) {
-                // Grayscale image
-                const size = @as(usize, target_image.rows) * @as(usize, target_image.cols);
-                if (size > std.math.maxInt(u32)) return error.Overflow;
-                self.target_size = size;
+                for (target_image.data) |pixel| {
+                    const v = @as(f64, @floatFromInt(pixel)) / 255.0;
+                    stats.add(.{ v, v, v });
+                }
                 self.target_is_grayscale = true;
-
-                // Compute grayscale statistics
-                var sum: f64 = 0;
-                for (target_image.data) |pixel| {
-                    sum += @as(f64, @floatFromInt(pixel)) / 255.0;
-                }
-                const mean = sum / @as(f64, @floatFromInt(self.target_size));
-                self.target_mean = .{ mean, 0, 0 };
-
-                // Compute variance (store explicit zeros for unused entries)
-                var variance: f64 = 0;
-                for (target_image.data) |pixel| {
-                    const val = @as(f64, @floatFromInt(pixel)) / 255.0 - self.target_mean[0];
-                    variance += val * val;
-                }
-                variance /= @as(f64, @floatFromInt(self.target_size));
-                self.target_cov_s = .{ variance, 0, 0 };
-
-                // No eigenvectors needed for grayscale
-                self.target_cov_u = Matrix(f64){
-                    .rows = 0,
-                    .cols = 0,
-                    .items = &[_]f64{},
-                    .allocator = self.allocator,
-                };
             } else {
-                // Color image - extract features and compute covariance
-                const size = @as(usize, target_image.rows) * @as(usize, target_image.cols);
-                if (size > std.math.maxInt(u32)) return error.Overflow;
-                self.target_size = size;
-                var feature_mat: Matrix(f64) = try .init(self.allocator, @intCast(self.target_size), 3);
-                defer feature_mat.deinit();
+                var is_gray = true;
+                for (target_image.data) |pixel| {
+                    const r = @as(f64, @floatFromInt(pixel.r)) / 255.0;
+                    const g = @as(f64, @floatFromInt(pixel.g)) / 255.0;
+                    const b = @as(f64, @floatFromInt(pixel.b)) / 255.0;
+                    stats.add(.{ r, g, b });
+                    if (pixel.r != pixel.g or pixel.g != pixel.b) is_gray = false;
+                }
+                self.target_is_grayscale = is_gray;
+            }
 
-                self.target_is_grayscale = getFeatureMatrix(T, target_image, &feature_mat);
-                if (self.target_is_grayscale) {
-                    self.target_mean = centerImage(&feature_mat, 1);
-                } else {
-                    self.target_mean = centerImage(&feature_mat, 3);
+            self.target_mean = stats.mean();
+
+            if (self.target_is_grayscale) {
+                // Grayscale logic: only variance matters
+                const cov = stats.varianceVector();
+                // Use the variance of the first channel (all are same) as the eigenvalue
+                self.target_cov_s = .{ cov[0], 0, 0 };
+
+                // Initialize empty matrix for U since we won't use it
+                self.target_cov_u = Matrix(f64){ .rows = 0, .cols = 0, .items = &[_]f64{}, .allocator = self.allocator };
+            } else {
+                // Color logic: Full SVD of covariance
+                var cov_matrix = try stats.covarianceMatrix(self.allocator);
+                defer cov_matrix.deinit();
+
+                const cov_static = cov_matrix.toSMatrix(3, 3);
+                const target_svd = cov_static.svd(.{
+                    .with_u = true,
+                    .with_v = false,
+                    .mode = .skinny_u,
+                });
+
+                if (target_svd.converged != 0) {
+                    return error.NotConverged;
                 }
 
-                if (self.target_is_grayscale) {
-                    // Grayscale disguised as color
-                    var variance: f64 = 0;
-                    for (0..feature_mat.rows) |r| {
-                        const val = feature_mat.at(r, 0).*;
-                        variance += val * val;
-                    }
-                    variance /= @as(f64, @floatFromInt(feature_mat.rows));
-                    self.target_cov_s = .{ variance, 0, 0 };
-                    self.target_cov_u = Matrix(f64){
-                        .rows = 0,
-                        .cols = 0,
-                        .items = &[_]f64{},
-                        .allocator = self.allocator,
-                    };
-                } else {
-                    // Full color - compute and store SVD
-                    var cov_matrix = try feature_mat.gemm(
-                        true,
-                        feature_mat,
-                        false,
-                        1.0 / @as(f64, @floatFromInt(self.target_size)),
-                        0.0,
-                        null,
-                    ).eval();
-                    defer cov_matrix.deinit();
-
-                    const cov_static = cov_matrix.toSMatrix(3, 3);
-                    const target_svd = cov_static.svd(.{
-                        .with_u = true,
-                        .with_v = false,
-                        .mode = .skinny_u,
-                    });
-
-                    // Store eigenvectors and eigenvalues (copy from static to owned)
-                    self.target_cov_u = try Matrix(f64).fromSMatrix(self.allocator, target_svd.u);
-                    for (0..3) |i| {
-                        self.target_cov_s[i] = target_svd.s.at(i, 0).*;
-                    }
+                self.target_cov_u = try Matrix(f64).fromSMatrix(self.allocator, target_svd.u);
+                for (0..3) |i| {
+                    self.target_cov_s[i] = target_svd.s.at(i, 0).*;
                 }
             }
 
@@ -166,14 +130,12 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
         }
 
         /// Set the source image to be transformed.
-        /// The source will be modified in-place when update() is called.
         pub fn setSource(self: *Self, source_image: Image(T)) !void {
             self.source_image = source_image;
             self.has_source = true;
         }
 
-        /// Set both source and target images at once and apply the transformation.
-        /// This is a convenience method that calls setTarget, setSource, and update.
+        /// Convenience method to match source to target immediately.
         pub fn match(self: *Self, source_image: Image(T), target_image: Image(T)) !void {
             try self.setTarget(target_image);
             try self.setSource(source_image);
@@ -181,149 +143,137 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
         }
 
         /// Apply the feature distribution matching transformation.
-        /// Modifies the source image in-place to match the target distribution.
+        /// Modifies the source image in-place.
         pub fn update(self: *Self) !void {
             if (!self.has_target) return error.NoTargetSet;
             if (!self.has_source or self.source_image == null) return error.NoSourceSet;
 
             const source_img = self.source_image.?;
+            var stats = CovarianceStats(3, f64).init();
 
+            // Pass 1: Compute source statistics
             if (T == u8) {
-                // Grayscale processing
-                const source_size = @as(usize, source_img.rows) * @as(usize, source_img.cols);
-                if (source_size > std.math.maxInt(u32)) return error.Overflow;
-                var source_matrix: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 1);
-                defer source_matrix.deinit();
-
-                grayscaleImageToMatrix(source_img, &source_matrix);
-                _ = centerImage(&source_matrix, 1);
-
-                // Apply variance matching
-                const source_var = blk: {
-                    var var_sum: f64 = 0;
-                    for (0..source_matrix.rows) |r| {
-                        const val = source_matrix.at(r, 0).*;
-                        var_sum += val * val;
+                for (source_img.data) |pixel| {
+                    const v = @as(f64, @floatFromInt(pixel)) / 255.0;
+                    stats.add(.{ v, v, v });
+                }
+            } else {
+                if (self.target_is_grayscale) {
+                    // If target is grayscale, treat source as luminance for stats
+                    for (source_img.data) |pixel| {
+                        // Using convertColor logic to get grayscale value.
+                        const gray = convertColor(u8, pixel);
+                        const v = @as(f64, @floatFromInt(gray)) / 255.0;
+                        stats.add(.{ v, v, v });
                     }
-                    break :blk var_sum / @as(f64, @floatFromInt(source_matrix.rows));
-                };
+                } else {
+                    for (source_img.data) |pixel| {
+                        stats.add(.{
+                            @as(f64, @floatFromInt(pixel.r)) / 255.0,
+                            @as(f64, @floatFromInt(pixel.g)) / 255.0,
+                            @as(f64, @floatFromInt(pixel.b)) / 255.0,
+                        });
+                    }
+                }
+            }
 
-                const scale_factor = if (source_var > 1e-10) @sqrt(self.target_cov_s[0] / source_var) else 1.0;
-                for (0..source_matrix.rows) |r| {
-                    source_matrix.at(r, 0).* *= scale_factor;
+            const source_mean = stats.mean();
+
+            // Pass 2: Apply transformation
+            if (T == u8 or self.target_is_grayscale) {
+                // Scalar matching logic
+                const source_cov = stats.varianceVector();
+                const source_var = source_cov[0];
+                const scale = if (source_var > 1e-10) @sqrt(self.target_cov_s[0] / source_var) else 1.0;
+                const offset = self.target_mean[0] - source_mean[0] * scale;
+
+                if (T == u8) {
+                    for (source_img.data) |*pixel| {
+                        const val = @as(f64, @floatFromInt(pixel.*)) / 255.0;
+                        const result = clamp(val * scale + offset, 0, 1);
+                        pixel.* = @as(u8, @intFromFloat(@round(255.0 * result)));
+                    }
+                } else {
+                    for (source_img.data) |*pixel| {
+                        // Color image, target is grayscale: convert to gray then match
+                        const val = @as(f64, @floatFromInt(convertColor(u8, pixel.*))) / 255.0;
+                        const result = clamp(val * scale + offset, 0, 1);
+                        const res_u8 = @as(u8, @intFromFloat(@round(255.0 * result)));
+                        pixel.* = .{ .r = res_u8, .g = res_u8, .b = res_u8 };
+                    }
+                }
+            } else {
+                // Color matching logic
+                var source_cov_mat = try stats.covarianceMatrix(self.allocator);
+                defer source_cov_mat.deinit();
+
+                // Compute W transform matrix
+                // W = U_s * diag(sqrt(lambda_t / lambda_s)) * U_t^T
+
+                const source_cov_static = source_cov_mat.toSMatrix(3, 3);
+                const source_svd = source_cov_static.svd(.{ .with_u = true, .with_v = false, .mode = .skinny_u });
+
+                if (source_svd.converged != 0) {
+                    return error.NotConverged;
                 }
 
-                grayscaleMatrixToImage(source_matrix, source_img, self.target_mean[0]);
-            } else {
-                // Color processing
-                const source_size = @as(usize, source_img.rows) * @as(usize, source_img.cols);
-                if (source_size > std.math.maxInt(u32)) return error.Overflow;
+                // Construct combined scaling matrix
+                var sigma_combined = try Matrix(f64).init(self.allocator, 3, 3);
+                defer sigma_combined.deinit();
+                @memset(sigma_combined.items, 0);
 
-                if (self.target_is_grayscale) {
-                    // Target statistics are 1D. Build a single-channel matrix directly using Rec.709 luminance.
-                    var gray_matrix: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 1);
-                    defer gray_matrix.deinit();
-
-                    var idx: usize = 0;
-                    for (0..source_img.rows) |r| {
-                        for (0..source_img.cols) |c| {
-                            const pixel_ptr = source_img.at(r, c);
-                            const gray_u8 = convertColor(u8, pixel_ptr.*);
-                            gray_matrix.at(idx, 0).* = @as(f64, @floatFromInt(gray_u8)) / 255.0;
-                            idx += 1;
-                        }
+                for (0..3) |i| {
+                    const s_val = source_svd.s.at(i, 0).*;
+                    const t_val = self.target_cov_s[i];
+                    if (s_val > 1e-10) {
+                        sigma_combined.at(i, i).* = @sqrt(t_val / s_val);
                     }
+                }
 
-                    _ = centerImage(&gray_matrix, 1);
+                var u_source = try Matrix(f64).fromSMatrix(self.allocator, source_svd.u);
+                defer u_source.deinit();
 
-                    const source_var = blk: {
-                        var var_sum: f64 = 0;
-                        for (0..gray_matrix.rows) |r| {
-                            const val = gray_matrix.at(r, 0).*;
-                            var_sum += val * val;
-                        }
-                        break :blk var_sum / @as(f64, @floatFromInt(gray_matrix.rows));
-                    };
+                var u_target_t = self.target_cov_u.transpose();
+                defer u_target_t.deinit();
 
-                    const scale_factor = if (source_var > 1e-10) @sqrt(self.target_cov_s[0] / source_var) else 1.0;
-                    for (0..gray_matrix.rows) |r| {
-                        gray_matrix.at(r, 0).* *= scale_factor;
+                // w_temp = u_source * sigma_combined
+                var w_temp = try u_source.dot(sigma_combined).eval();
+                defer w_temp.deinit();
+
+                // w = w_temp * u_target_t
+                var w = try w_temp.dot(u_target_t).eval();
+                defer w.deinit();
+
+                // Apply W to every pixel
+                // X_new = (X - mu_s) * W + mu_t
+                // Optimization: Precompute 'bias' = mu_t - mu_s * W
+                // Then X_new = X * W + bias
+
+                // Compute mu_s * W (row vector multiply)
+                var bias: [3]f64 = undefined;
+                for (0..3) |j| {
+                    var sum: f64 = 0;
+                    for (0..3) |k| {
+                        sum += source_mean[k] * w.at(k, j).*;
                     }
+                    bias[j] = self.target_mean[j] - sum;
+                }
 
-                    reshapeToImage(T, gray_matrix, source_img, self.target_mean, true);
-                } else {
-                    // Full color transformation
-                    var feature_mat_source: Matrix(f64) = try .init(self.allocator, @intCast(source_size), 3);
-                    defer feature_mat_source.deinit();
+                // In-place update
+                for (source_img.data) |*pixel| {
+                    const r = @as(f64, @floatFromInt(pixel.r)) / 255.0;
+                    const g = @as(f64, @floatFromInt(pixel.g)) / 255.0;
+                    const b = @as(f64, @floatFromInt(pixel.b)) / 255.0;
 
-                    _ = getFeatureMatrix(T, source_img, &feature_mat_source);
-                    _ = centerImage(&feature_mat_source, 3);
+                    // Apply linear transform: pixel * W + bias
+                    var res = [3]f64{ 0, 0, 0 };
+                    res[0] = r * w.at(0, 0).* + g * w.at(1, 0).* + b * w.at(2, 0).* + bias[0];
+                    res[1] = r * w.at(0, 1).* + g * w.at(1, 1).* + b * w.at(2, 1).* + bias[1];
+                    res[2] = r * w.at(0, 2).* + g * w.at(1, 2).* + b * w.at(2, 2).* + bias[2];
 
-                    // Compute source covariance
-                    var source_cov_matrix = try feature_mat_source.gemm(
-                        true,
-                        feature_mat_source,
-                        false,
-                        1.0 / @as(f64, @floatFromInt(source_size)),
-                        0.0,
-                        null,
-                    ).eval();
-                    defer source_cov_matrix.deinit();
-
-                    const source_cov = source_cov_matrix.toSMatrix(3, 3);
-                    const source_svd = source_cov.svd(.{
-                        .with_u = true,
-                        .with_v = false,
-                        .mode = .skinny_u,
-                    });
-
-                    // Create Σ_src^(-1/2) * Σ_target^(1/2) diagonal
-                    var sigma_combined: Matrix(f64) = try .init(self.allocator, 3, 3);
-                    defer sigma_combined.deinit();
-                    @memset(sigma_combined.items, 0);
-
-                    for (0..3) |i| {
-                        const source_eigenval = source_svd.s.at(i, 0).*;
-                        const target_eigenval = self.target_cov_s[i];
-
-                        if (source_eigenval > 1e-10 and target_eigenval > std.math.floatEps(f64)) {
-                            sigma_combined.at(i, i).* = @sqrt(target_eigenval / source_eigenval);
-                        } else {
-                            sigma_combined.at(i, i).* = 0;
-                        }
-                    }
-
-                    // Compute W = U_src * Σ_combined * U_target^T
-                    var u_source = try Matrix(f64).fromSMatrix(self.allocator, source_svd.u);
-                    defer u_source.deinit();
-
-                    var u_target_t: Matrix(f64) = try .init(self.allocator, 3, 3);
-                    defer u_target_t.deinit();
-                    for (0..3) |i| {
-                        for (0..3) |j| {
-                            u_target_t.at(i, j).* = self.target_cov_u.at(j, i).*;
-                        }
-                    }
-
-                    // Create a copy of u_source and apply diagonal matrix
-                    var u_source_scaled: Matrix(f64) = try .init(self.allocator, u_source.rows, u_source.cols);
-                    defer u_source_scaled.deinit();
-                    @memcpy(u_source_scaled.items, u_source.items);
-
-                    for (0..3) |r| {
-                        for (0..3) |c| {
-                            u_source_scaled.at(r, c).* *= sigma_combined.at(c, c).*;
-                        }
-                    }
-
-                    var w_matrix = try u_source_scaled.dot(u_target_t).eval();
-                    defer w_matrix.deinit();
-
-                    // Apply transformation
-                    var result_matrix = try feature_mat_source.dot(w_matrix).eval();
-                    defer result_matrix.deinit();
-
-                    reshapeToImage(T, result_matrix, source_img, self.target_mean, false);
+                    pixel.r = @intFromFloat(@round(255.0 * clamp(res[0], 0, 1)));
+                    pixel.g = @intFromFloat(@round(255.0 * clamp(res[1], 0, 1)));
+                    pixel.b = @intFromFloat(@round(255.0 * clamp(res[2], 0, 1)));
                 }
             }
         }
@@ -337,12 +287,10 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 ///
 /// ## Algorithm
 /// FDM works by matching the first and second-order statistics of pixel distributions:
-/// 1. **Reshape** - Convert images to feature matrices (H×W, 3)
-/// 2. **Center** - Subtract mean from both source and target
-/// 3. **Whiten** - Transform source to have identity covariance: Cov(X_src) = I
-/// 4. **Color Transform** - Apply target covariance: Cov(X_result) = Cov(X_target)
-/// 5. **Restore Mean** - Add target mean to final result
-/// 6. **Reshape** - Convert back to image format
+/// 1. **Accumulate** - Stream pixels to compute mean and covariance statistics (O(1) memory)
+/// 2. **Whiten** - Transform source to have identity covariance: Cov(X_src) = I
+/// 3. **Color Transform** - Apply target covariance: Cov(X_result) = Cov(X_target)
+/// 4. **Restore Mean** - Add target mean to final result
 ///
 /// ## Mathematical Foundation
 /// Given source X_src and target X_target, FDM computes:
@@ -372,98 +320,6 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 ///     try fdm.update(); // Modifies img in-place
 /// }
 /// ```
-
-// ============================================================================
-// FDM Helper Functions - Corresponding to the listed steps in the paper
-// ============================================================================
-
-/// Step 1: Get feature matrix - reshape to feature matrix (H*W,C)
-/// Returns true if the image is grayscale (R=G=B for all pixels)
-fn getFeatureMatrix(comptime T: type, image: Image(T), matrix: *Matrix(f64)) bool {
-    var is_grayscale = true;
-    var i: usize = 0;
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const p = image.at(r, c);
-            matrix.at(i, 0).* = @as(f64, @floatFromInt(p.r)) / 255;
-            matrix.at(i, 1).* = @as(f64, @floatFromInt(p.g)) / 255;
-            matrix.at(i, 2).* = @as(f64, @floatFromInt(p.b)) / 255;
-
-            if (is_grayscale and (p.r != p.g or p.g != p.b)) {
-                is_grayscale = false;
-            }
-            i += 1;
-        }
-    }
-    return is_grayscale;
-}
-
-/// Step 2: Center image - subtract mean
-fn centerImage(matrix: *Matrix(f64), comptime channels: usize) [3]f64 {
-    var means: [3]f64 = @splat(0);
-    for (0..channels) |c| {
-        for (0..matrix.rows) |r| {
-            means[c] += matrix.at(r, c).*;
-        }
-        means[c] /= @floatFromInt(matrix.rows);
-        for (0..matrix.rows) |r| {
-            matrix.at(r, c).* -= means[c];
-        }
-    }
-    return means;
-}
-
-/// Steps 5-6: Reshape back to original image shape and add target mean
-fn reshapeToImage(comptime T: type, matrix: Matrix(f64), image: Image(T), target_mean: [3]f64, is_grayscale: bool) void {
-    var i: usize = 0;
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            if (is_grayscale) {
-                // For grayscale, use the single channel for all RGB components
-                const gray_val = matrix.at(i, 0).* + target_mean[0];
-                const final_gray = @as(u8, @intFromFloat(@round(255 * clamp(gray_val, 0, 1))));
-                image.at(r, c).r = final_gray;
-                image.at(r, c).g = final_gray;
-                image.at(r, c).b = final_gray;
-            } else {
-                // Step 5 is implicitly done here: Add target mean
-                const final_r = matrix.at(i, 0).* + target_mean[0];
-                const final_g = matrix.at(i, 1).* + target_mean[1];
-                const final_b = matrix.at(i, 2).* + target_mean[2];
-
-                image.at(r, c).r = @intFromFloat(@round(255 * clamp(final_r, 0, 1)));
-                image.at(r, c).g = @intFromFloat(@round(255 * clamp(final_g, 0, 1)));
-                image.at(r, c).b = @intFromFloat(@round(255 * clamp(final_b, 0, 1)));
-            }
-            i += 1;
-        }
-    }
-}
-
-/// Helper: Convert grayscale image to matrix
-fn grayscaleImageToMatrix(image: Image(u8), matrix: *Matrix(f64)) void {
-    var i: usize = 0;
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const p = image.at(r, c);
-            matrix.at(i, 0).* = @as(f64, @floatFromInt(p.*)) / 255.0;
-            i += 1;
-        }
-    }
-}
-
-/// Helper: Convert matrix back to grayscale image with target mean
-fn grayscaleMatrixToImage(matrix: Matrix(f64), image: Image(u8), target_mean: f64) void {
-    var i: usize = 0;
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const val = clamp(matrix.at(i, 0).* + target_mean, 0, 1);
-            image.at(r, c).* = @intFromFloat(@round(255.0 * val));
-            i += 1;
-        }
-    }
-}
-
 fn populationVariance(stats: RunningStats(f64)) f64 {
     const n_samples = stats.currentN();
     if (n_samples <= 1) return 0;
