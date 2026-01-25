@@ -184,15 +184,15 @@ test "boundary conditions - nearest neighbor" {
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
 
-    // Nearest neighbor should work at all boundaries
+    // Nearest neighbor should work at all boundaries due to mirror reflection
     try std.testing.expect(img.interpolate(-0.4, 0, .nearest_neighbor) != null); // Rounds to (0, 0)
     try std.testing.expect(img.interpolate(9.4, 9.4, .nearest_neighbor) != null); // Rounds to (9, 9)
 
-    // Out of bounds
-    try expectEqual(@as(?u8, null), img.interpolate(-1, 0, .nearest_neighbor));
-    try expectEqual(@as(?u8, null), img.interpolate(0, -1, .nearest_neighbor));
-    try expectEqual(@as(?u8, null), img.interpolate(10, 0, .nearest_neighbor));
-    try expectEqual(@as(?u8, null), img.interpolate(0, 10, .nearest_neighbor));
+    // Out of bounds - should reflect back into range
+    try std.testing.expect(img.interpolate(-1, 0, .nearest_neighbor) != null);
+    try std.testing.expect(img.interpolate(0, -1, .nearest_neighbor) != null);
+    try std.testing.expect(img.interpolate(10, 0, .nearest_neighbor) != null);
+    try std.testing.expect(img.interpolate(0, 10, .nearest_neighbor) != null);
 }
 
 test "boundary conditions - bilinear" {
@@ -200,13 +200,11 @@ test "boundary conditions - bilinear" {
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
 
-    // Bilinear needs 2x2 neighborhood
+    // Bilinear should work everywhere due to mirror reflection
     try std.testing.expect(img.interpolate(0, 0, .bilinear) != null);
     try std.testing.expect(img.interpolate(8.9, 8.9, .bilinear) != null);
-
-    // Should fail at the edge when we need pixels beyond
-    try expectEqual(@as(?u8, null), img.interpolate(9.1, 9.1, .bilinear));
-    try expectEqual(@as(?u8, null), img.interpolate(-0.1, 0, .bilinear));
+    try std.testing.expect(img.interpolate(9.1, 9.1, .bilinear) != null);
+    try std.testing.expect(img.interpolate(-0.1, 0, .bilinear) != null);
 }
 
 test "boundary conditions - bicubic" {
@@ -214,13 +212,11 @@ test "boundary conditions - bicubic" {
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
 
-    // Bicubic needs 4x4 neighborhood
+    // Bicubic should work everywhere due to mirror reflection
     try std.testing.expect(img.interpolate(1, 1, .bicubic) != null);
     try std.testing.expect(img.interpolate(7.9, 7.9, .bicubic) != null);
-
-    // Should fail near edges
-    try expectEqual(@as(?u8, null), img.interpolate(0.5, 0.5, .bicubic));
-    try expectEqual(@as(?u8, null), img.interpolate(8.1, 8.1, .bicubic));
+    try std.testing.expect(img.interpolate(0.5, 0.5, .bicubic) != null);
+    try std.testing.expect(img.interpolate(8.1, 8.1, .bicubic) != null);
 }
 
 test "boundary conditions - lanczos" {
@@ -228,13 +224,11 @@ test "boundary conditions - lanczos" {
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
 
-    // Lanczos needs 6x6 neighborhood
+    // Lanczos should work everywhere due to mirror reflection
     try std.testing.expect(img.interpolate(2, 2, .lanczos) != null);
     try std.testing.expect(img.interpolate(6.9, 6.9, .lanczos) != null);
-
-    // Should fail near edges
-    try expectEqual(@as(?u8, null), img.interpolate(1.5, 1.5, .lanczos));
-    try expectEqual(@as(?u8, null), img.interpolate(7.1, 7.1, .lanczos));
+    try std.testing.expect(img.interpolate(1.5, 1.5, .lanczos) != null);
+    try std.testing.expect(img.interpolate(7.1, 7.1, .lanczos) != null);
 }
 
 test "RGB image interpolation" {
@@ -597,16 +591,13 @@ test "single pixel image handling" {
 
     img.at(0, 0).* = 42;
 
-    // Only nearest neighbor should work with 1x1 image
-    const val_nn = img.interpolate(0, 0, .nearest_neighbor);
-    try expectEqual(@as(u8, 42), val_nn.?);
-
-    // All others should return null (not enough neighbors)
-    try expectEqual(@as(?u8, null), img.interpolate(0, 0, .bilinear));
-    try expectEqual(@as(?u8, null), img.interpolate(0, 0, .bicubic));
-    try expectEqual(@as(?u8, null), img.interpolate(0, 0, .catmull_rom));
-    try expectEqual(@as(?u8, null), img.interpolate(0, 0, .lanczos));
-    try expectEqual(@as(?u8, null), img.interpolate(0, 0, .{ .mitchell = .default }));
+    // All methods should work with 1x1 image due to mirror reflection
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .nearest_neighbor).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bilinear).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bicubic).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .catmull_rom).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .lanczos).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .{ .mitchell = .default }).?);
 }
 
 test "RGB clamping stress test" {

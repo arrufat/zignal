@@ -49,30 +49,12 @@ pub fn computeCoords(
             return .{ .row = @intCast(r), .col = @intCast(c) };
         },
         .mirror => {
-            if (rows == 0 or cols == 0) return null;
-            var r = row;
-            var c = col;
-            // Handle negative row indices
-            while (r < 0) {
-                r = -r - 1;
-                if (r >= rows) r = 2 * rows - r - 1;
-            }
-            // Handle row indices >= rows
-            while (r >= rows) {
-                r = 2 * rows - r - 1;
-                if (r < 0) r = -r - 1;
-            }
-            // Handle negative column indices
-            while (c < 0) {
-                c = -c - 1;
-                if (c >= cols) c = 2 * cols - c - 1;
-            }
-            // Handle column indices >= cols
-            while (c >= cols) {
-                c = 2 * cols - c - 1;
-                if (c < 0) c = -c - 1;
-            }
-            return .{ .row = @intCast(r), .col = @intCast(c) };
+            if (rows <= 0 or cols <= 0) return null;
+            if (rows == 1 and cols == 1) return .{ .row = 0, .col = 0 };
+
+            const r = resolveIndex(row, rows, .mirror).?;
+            const c = resolveIndex(col, cols, .mirror).?;
+            return .{ .row = r, .col = c };
         },
         .wrap => {
             const r = @mod(row, rows);
@@ -104,18 +86,12 @@ pub fn resolveIndex(idx: isize, length: isize, border: BorderMode) ?usize {
             return @intCast(clamped);
         },
         .mirror => {
-            if (length == 0) return null;
+            if (length <= 0) return null;
             if (length == 1) return 0;
-            var i = idx;
-            const max = length - 1;
-            while (i < 0 or i > max) {
-                if (i < 0) {
-                    i = -i - 1;
-                } else {
-                    i = 2 * length - i - 2;
-                }
-            }
-            return @intCast(i);
+            const period = 2 * (length - 1);
+            const m = @mod(idx, period);
+            const i = if (m < 0) m + period else m;
+            return @intCast(if (i >= length) period - i else i);
         },
         .wrap => {
             if (length == 0) return null;
