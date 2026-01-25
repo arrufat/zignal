@@ -31,11 +31,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const clamp = meta.clamp;
 const channel_ops = @import("channel_ops.zig");
-const Image = @import("../image.zig").Image;
+const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Interpolation method for image resizing and sampling
 ///
@@ -76,6 +77,9 @@ pub const Interpolation = union(enum) {
 ///
 /// Returns the interpolated pixel value or null if the coordinates are out of bounds
 pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation) ?T {
+    if (!std.math.isFinite(x) or !std.math.isFinite(y)) return null;
+    const range_limit = @as(f32, @floatFromInt(std.math.maxInt(isize) / 2));
+    if (@abs(x) > range_limit or @abs(y) > range_limit) return null;
     return switch (method) {
         .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y),
         .bilinear => interpolateBilinear(T, self, x, y),
@@ -278,11 +282,10 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
 // ============================================================================
 
 fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    const col: isize = @intFromFloat(@round(x));
-    const row: isize = @intFromFloat(@round(y));
+    const col = resolveIndex(@intFromFloat(@round(x)), @intCast(self.cols), .mirror) orelse return null;
+    const row = resolveIndex(@intFromFloat(@round(y)), @intCast(self.rows), .mirror) orelse return null;
 
-    if (col < 0 or row < 0 or col >= self.cols or row >= self.rows) return null;
-    return self.at(@intCast(row), @intCast(col)).*;
+    return self.at(row, col).*;
 }
 
 fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
@@ -291,17 +294,18 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     const right = left + 1;
     const bottom = top + 1;
 
-    if (!(left >= 0 and top >= 0 and right < self.cols and bottom < self.rows)) {
-        return null;
-    }
+    const r0 = resolveIndex(top, @intCast(self.rows), .mirror) orelse return null;
+    const r1 = resolveIndex(bottom, @intCast(self.rows), .mirror) orelse return null;
+    const c0 = resolveIndex(left, @intCast(self.cols), .mirror) orelse return null;
+    const c1 = resolveIndex(right, @intCast(self.cols), .mirror) orelse return null;
 
     const lr_frac: f32 = x - as(f32, left);
     const tb_frac: f32 = y - as(f32, top);
 
-    const tl: T = self.at(@intCast(top), @intCast(left)).*;
-    const tr: T = self.at(@intCast(top), @intCast(right)).*;
-    const bl: T = self.at(@intCast(bottom), @intCast(left)).*;
-    const br: T = self.at(@intCast(bottom), @intCast(right)).*;
+    const tl: T = self.at(r0, c0).*;
+    const tr: T = self.at(r0, c1).*;
+    const bl: T = self.at(r1, c0).*;
+    const br: T = self.at(r1, c1).*;
 
     const scale = 256;
     const fx: i32 = @intFromFloat(@round(lr_frac * scale));
@@ -395,16 +399,6 @@ fn interpolateWithKernel(
     const fx = x - as(f32, ix);
     const fy = y - as(f32, iy);
 
-    // Check bounds for the entire kernel window
-    const min_x = ix - @as(isize, @intCast(window_radius - 1));
-    const max_x = ix + @as(isize, @intCast(window_radius));
-    const min_y = iy - @as(isize, @intCast(window_radius - 1));
-    const max_y = iy + @as(isize, @intCast(window_radius));
-
-    if (min_x < 0 or max_x >= self.cols or min_y < 0 or max_y >= self.rows) {
-        return null;
-    }
-
     const window_size = window_radius * 2;
 
     // Calculate weights
@@ -435,13 +429,17 @@ fn interpolateWithKernel(
             var weight_sum: f32 = 0;
 
             inline for (0..window_size) |j| {
-                inline for (0..window_size) |i| {
-                    const pixel_y = @as(usize, @intCast(iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j))));
-                    const pixel_x = @as(usize, @intCast(ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i))));
-                    const pixel = self.at(pixel_y, pixel_x).*;
-                    const weight = x_weights[i] * y_weights[j];
-                    sum += as(f32, pixel) * weight;
-                    weight_sum += weight;
+                const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
+                if (resolveIndex(row_idx, @intCast(self.rows), .mirror)) |pixel_y| {
+                    inline for (0..window_size) |i| {
+                        const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
+                        if (resolveIndex(col_idx, @intCast(self.cols), .mirror)) |pixel_x| {
+                            const pixel = self.at(pixel_y, pixel_x).*;
+                            const weight = x_weights[i] * y_weights[j];
+                            sum += as(f32, pixel) * weight;
+                            weight_sum += weight;
+                        }
+                    }
                 }
             }
 
@@ -449,22 +447,29 @@ fn interpolateWithKernel(
             result = clamp(T, val);
         },
         .@"struct" => {
-            inline for (std.meta.fields(T)) |f| {
-                var sum: f32 = 0;
-                var weight_sum: f32 = 0;
+            const fields = std.meta.fields(T);
+            var sums: [fields.len]f32 = @splat(0);
+            var weight_sum: f32 = 0;
 
-                inline for (0..window_size) |j| {
+            inline for (0..window_size) |j| {
+                const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
+                if (resolveIndex(row_idx, @intCast(self.rows), .mirror)) |pixel_y| {
                     inline for (0..window_size) |i| {
-                        const pixel_y = @as(usize, @intCast(iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j))));
-                        const pixel_x = @as(usize, @intCast(ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i))));
-                        const pixel = self.at(pixel_y, pixel_x).*;
-                        const weight = x_weights[i] * y_weights[j];
-                        sum += as(f32, @field(pixel, f.name)) * weight;
-                        weight_sum += weight;
+                        const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
+                        if (resolveIndex(col_idx, @intCast(self.cols), .mirror)) |pixel_x| {
+                            const pixel = self.at(pixel_y, pixel_x).*;
+                            const weight = x_weights[i] * y_weights[j];
+                            inline for (fields, 0..) |f, f_idx| {
+                                sums[f_idx] += as(f32, @field(pixel, f.name)) * weight;
+                            }
+                            weight_sum += weight;
+                        }
                     }
                 }
+            }
 
-                const val = if (weight_sum != 0) sum / weight_sum else 0;
+            inline for (fields, 0..) |f, f_idx| {
+                const val = if (weight_sum != 0) sums[f_idx] / weight_sum else 0;
                 @field(result, f.name) = clamp(f.type, val);
             }
         },
