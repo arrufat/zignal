@@ -257,6 +257,33 @@ fn lanczosKernel(x: f32, a: f32) f32 {
     return (a * @sin(pi_x) * @sin(pi_x_over_a)) / (pi_x * pi_x);
 }
 
+/// Lanczos3 Look-Up Table for fast weight calculation
+const lanczos3_lut: [1025]f32 = blk: {
+    const size = 1024;
+    const max_dist: f32 = 3.0;
+    const step = size / max_dist;
+    @setEvalBranchQuota(4000);
+    var vals: [size + 1]f32 = undefined;
+    for (0..1025) |i| {
+        const x = @as(f32, @floatFromInt(i)) / step;
+        vals[i] = lanczosKernel(x, 3.0);
+    }
+    break :blk vals;
+};
+
+/// Lanczos3 kernel function using a pre-calculated LUT
+fn lanczos3KernelLut(x: f32) f32 {
+    const ax = @abs(x);
+    if (ax >= 3.0) return 0;
+
+    const step = 1024.0 / 3.0;
+    const pos = ax * step;
+    const idx: usize = @intFromFloat(pos);
+    const frac = pos - @as(f32, @floatFromInt(idx));
+
+    return lanczos3_lut[idx] * (1.0 - frac) + lanczos3_lut[idx + 1] * frac;
+}
+
 /// Mitchell-Netravali kernel function
 /// Parameterized cubic filter with control over blur (m_b) and ringing (m_c)
 fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
@@ -376,8 +403,7 @@ fn interpolateCatmullRom(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
 }
 
 fn interpolateLanczos(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    const a: f32 = 3.0; // Lanczos3
-    return interpolateWithKernel(T, self, x, y, 3, lanczosKernel, .{a});
+    return interpolateWithKernel(T, self, x, y, 3, lanczos3KernelLut, .{});
 }
 
 fn interpolateMitchell(comptime T: type, self: Image(T), x: f32, y: f32, m_b: f32, m_c: f32) ?T {
