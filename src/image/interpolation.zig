@@ -303,24 +303,58 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     const bl: T = self.at(@intCast(bottom), @intCast(left)).*;
     const br: T = self.at(@intCast(bottom), @intCast(right)).*;
 
+    const scale = 256;
+    const fx: i32 = @intFromFloat(@round(lr_frac * scale));
+    const fy: i32 = @intFromFloat(@round(tb_frac * scale));
+
+    const lerpInt = struct {
+        fn lerp(comptime P: type, p_tl: P, p_tr: P, p_bl: P, p_br: P, p_fx: i32, p_fy: i32) P {
+            const info = @typeInfo(P).int;
+            const Intermediate = if (info.bits <= 8) i32 else i64;
+
+            const tl_i = @as(Intermediate, @intCast(p_tl));
+            const tr_i = @as(Intermediate, @intCast(p_tr));
+            const bl_i = @as(Intermediate, @intCast(p_bl));
+            const br_i = @as(Intermediate, @intCast(p_br));
+
+            const top_val = tl_i * (scale - p_fx) + tr_i * p_fx;
+            const bottom_val = bl_i * (scale - p_fx) + br_i * p_fx;
+            const result = @divTrunc(top_val * (scale - p_fy) + bottom_val * p_fy + (scale * scale / 2), scale * scale);
+            return clamp(P, result);
+        }
+    }.lerp;
+
+    const lerpFloat = struct {
+        fn lerp(comptime P: type, p_tl: P, p_tr: P, p_bl: P, p_br: P, p_lr_frac: f32, p_tb_frac: f32) P {
+            return clamp(P, (1 - p_tb_frac) * ((1 - p_lr_frac) * as(f32, p_tl) +
+                p_lr_frac * as(f32, p_tr)) +
+                p_tb_frac * ((1 - p_lr_frac) * as(f32, p_bl) +
+                    p_lr_frac * as(f32, p_br)));
+        }
+    }.lerp;
+
     // Handle different pixel types
     var temp: T = undefined;
     switch (@typeInfo(T)) {
-        .int, .float => {
-            temp = clamp(T, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) +
-                lr_frac * as(f32, tr)) +
-                tb_frac * ((1 - lr_frac) * as(f32, bl) +
-                    lr_frac * as(f32, br)));
+        .int => |info| {
+            temp = if (info.bits <= 16)
+                lerpInt(T, tl, tr, bl, br, fx, fy)
+            else
+                lerpFloat(T, tl, tr, bl, br, lr_frac, tb_frac);
         },
+        .float => temp = lerpFloat(T, tl, tr, bl, br, lr_frac, tb_frac),
         .@"struct" => {
             inline for (std.meta.fields(T)) |f| {
-                @field(temp, f.name) = clamp(
-                    f.type,
-                    (1 - tb_frac) * ((1 - lr_frac) * as(f32, @field(tl, f.name)) +
-                        lr_frac * as(f32, @field(tr, f.name))) +
-                        tb_frac * ((1 - lr_frac) * as(f32, @field(bl, f.name)) +
-                            lr_frac * as(f32, @field(br, f.name))),
-                );
+                const f_tl = @field(tl, f.name);
+                const f_tr = @field(tr, f.name);
+                const f_bl = @field(bl, f.name);
+                const f_br = @field(br, f.name);
+
+                const info = @typeInfo(f.type);
+                @field(temp, f.name) = if (info == .int and info.int.bits <= 16)
+                    lerpInt(f.type, f_tl, f_tr, f_bl, f_br, fx, fy)
+                else
+                    lerpFloat(f.type, f_tl, f_tr, f_bl, f_br, lr_frac, tb_frac);
             }
         },
         else => @compileError("Unsupported type for bilinear interpolation: " ++ @typeName(T)),
