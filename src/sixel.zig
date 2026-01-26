@@ -110,7 +110,7 @@ pub const Profile = struct {
 
 inline fn monotonicNs() u64 {
     const instant = std.time.Instant.now() catch {
-        @panic("monotonic clock not supported");
+        return 0;
     };
 
     if (@TypeOf(instant.timestamp) == u64) {
@@ -154,7 +154,7 @@ pub fn fromImageProfiled(
     var width = image.cols;
     var height = image.rows;
     const scale = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
-    if (@abs(scale - 1.0) > 0.0) {
+    if (@abs(scale - 1.0) > 1e-5) {
         width = @intFromFloat(@as(f32, @floatFromInt(width)) * scale);
         height = @intFromFloat(@as(f32, @floatFromInt(height)) * scale);
     }
