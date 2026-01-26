@@ -126,70 +126,81 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
 
     // Channel separation for RGB/RGBA types with u8 components
     if (comptime meta.isRgb(T)) {
-        const channels = channel_ops.splitChannels(T, self, allocator) catch {
-            // Fallback to generic implementation on allocation failure
-            resizeGeneric(T, self, out, method);
-            return;
+        // Only use optimized path if the method has an implementation in channel_ops
+        const has_optimized_plane_op = switch (method) {
+            .nearest_neighbor, .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => true,
         };
-        defer for (channels) |channel| allocator.free(channel);
 
-        // Allocate output channels
-        const out_plane_size = out.rows * out.cols;
-        var out_channels: [channels.len][]u8 = undefined;
-        var allocated_count: usize = 0;
-        errdefer {
-            for (0..allocated_count) |i| {
-                allocator.free(out_channels[i]);
-            }
-        }
-
-        // Allocate each output channel
-        for (&out_channels) |*ch| {
-            ch.* = allocator.alloc(u8, out_plane_size) catch {
-                // Free already allocated channels and fallback
-                for (0..allocated_count) |i| {
-                    allocator.free(out_channels[i]);
-                }
+        if (has_optimized_plane_op) {
+            const channels = channel_ops.splitChannels(T, self, allocator) catch {
+                // Fallback to generic implementation on allocation failure
                 resizeGeneric(T, self, out, method);
                 return;
             };
-            allocated_count += 1;
-        }
-        defer for (out_channels) |ch| allocator.free(ch);
+            defer for (channels) |channel| allocator.free(channel);
 
-        // Resize each channel using optimized plane functions
-        switch (method) {
-            .nearest_neighbor => {
-                inline for (channels, out_channels) |src_ch, dst_ch| {
-                    channel_ops.resizePlaneNearestU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+            // Allocate output channels
+            const out_plane_size = try std.math.mul(usize, out.rows, out.cols);
+            var out_channels: [channels.len][]u8 = undefined;
+            var allocated_count: usize = 0;
+            errdefer {
+                for (0..allocated_count) |i| {
+                    allocator.free(out_channels[i]);
                 }
-            },
-            .bilinear => {
-                inline for (channels, out_channels) |src_ch, dst_ch| {
-                    channel_ops.resizePlaneBilinearU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                }
-            },
-            .bicubic => {
-                inline for (channels, out_channels) |src_ch, dst_ch| {
-                    channel_ops.resizePlaneBicubicU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                }
-            },
-            .catmull_rom => {
-                inline for (channels, out_channels) |src_ch, dst_ch| {
-                    channel_ops.resizePlaneCatmullRomU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                }
-            },
-            .mitchell, .lanczos => {
-                // Mitchell and Lanczos are more complex, fall back to generic for now
-                // This ensures correct interpolation even if not optimized
-                resizeGeneric(T, self, out, method);
-                return;
-            },
-        }
+            }
 
-        // Combine channels back
-        channel_ops.mergeChannels(T, out_channels, out);
-        return;
+            // Allocate each output channel
+            for (&out_channels) |*ch| {
+                ch.* = allocator.alloc(u8, out_plane_size) catch {
+                    // Free already allocated channels and fallback
+                    for (0..allocated_count) |i| {
+                        allocator.free(out_channels[i]);
+                    }
+                    resizeGeneric(T, self, out, method);
+                    return;
+                };
+                allocated_count += 1;
+            }
+            defer for (out_channels) |ch| allocator.free(ch);
+
+            // Resize each channel using optimized plane functions
+            switch (method) {
+                .nearest_neighbor => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneNearestU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+                .bilinear => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneBilinearU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+                .bicubic => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneBicubicU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+                .catmull_rom => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneCatmullRomU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+                .mitchell => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneMitchellU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+                .lanczos => {
+                    inline for (channels, out_channels) |src_ch, dst_ch| {
+                        channel_ops.resizePlaneLanczosU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
+                    }
+                },
+            }
+
+            // Combine channels back
+            channel_ops.mergeChannels(T, out_channels, out);
+            return;
+        }
     }
 
     // Fall back to generic implementation
@@ -198,21 +209,22 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
 
 /// Generic resize implementation for non-optimized types
 fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interpolation) void {
-    const max_src_x = @as(f32, @floatFromInt(self.cols - 1));
-    const max_src_y = @as(f32, @floatFromInt(self.rows - 1));
+    const scale_x = @as(f32, @floatFromInt(self.cols)) / @as(f32, @floatFromInt(out.cols));
+    const scale_y = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(out.rows));
 
     for (0..out.rows) |r| {
-        const src_y: f32 = if (out.rows == 1)
-            0.5 * max_src_y
-        else
-            @as(f32, @floatFromInt(r)) * (max_src_y / @as(f32, @floatFromInt(out.rows - 1)));
+        const src_y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
         for (0..out.cols) |c| {
-            const src_x: f32 = if (out.cols == 1)
-                0.5 * max_src_x
-            else
-                @as(f32, @floatFromInt(c)) * (max_src_x / @as(f32, @floatFromInt(out.cols - 1)));
+            const src_x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
             if (interpolate(T, self, src_x, src_y, method)) |val| {
                 out.at(r, c).* = val;
+            } else {
+                // Fallback for failed interpolation (e.g., boundary conditions)
+                out.at(r, c).* = switch (@typeInfo(T)) {
+                    .int, .float => 0,
+                    .@"struct" => std.mem.zeroes(T),
+                    else => @compileError("Unsupported type for fallback in resizeGeneric: " ++ @typeName(T)),
+                };
             }
         }
     }
@@ -223,7 +235,7 @@ fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interp
 // ============================================================================
 
 /// Bicubic kernel function
-/// Classic bicubic interpolation kernel with a=-0.5
+/// Classic bicubic interpolation kernel with a=-1.0
 fn bicubicKernel(t: f32) f32 {
     const at = @abs(t);
     if (at <= 1) {
