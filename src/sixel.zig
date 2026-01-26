@@ -5,7 +5,9 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 const expect = std.testing.expect;
+const meta = @import("meta.zig");
 const clamp = std.math.clamp;
 
 const convertColor = @import("color.zig").convertColor;
@@ -51,6 +53,8 @@ pub const DitherMode = enum {
     floyd_steinberg,
     /// Atkinson dithering (used by original Macintosh)
     atkinson,
+    /// Ordered dithering (Bayer 8x8 matrix), faster and parallelizable
+    ordered,
     /// Automatic heuristics based on palette size and image dimensions
     auto,
 };
@@ -199,7 +203,7 @@ pub fn fromImageProfiled(
                 break :blk DitherMode.none;
             }
             if (palette_size <= 16) break :blk DitherMode.atkinson;
-            break :blk DitherMode.floyd_steinberg;
+            break :blk DitherMode.ordered;
         },
         else => options.dither,
     };
@@ -220,11 +224,12 @@ pub fn fromImageProfiled(
             prepared_img_opt = try image.convert(Rgb, gpa);
         } else {
             var scaled_img = try Image(Rgb).init(gpa, height, width);
+            const inv_scale = 1.0 / scale;
 
             for (0..height) |row_idx| {
+                const src_y = @as(f32, @floatFromInt(row_idx)) * inv_scale;
                 for (0..width) |col_idx| {
-                    const src_x = @as(f32, @floatFromInt(col_idx)) / scale;
-                    const src_y = @as(f32, @floatFromInt(row_idx)) / scale;
+                    const src_x = @as(f32, @floatFromInt(col_idx)) * inv_scale;
 
                     const rgb_value = blk: {
                         if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
@@ -271,6 +276,7 @@ pub fn fromImageProfiled(
         switch (dither_mode) {
             .floyd_steinberg => applyErrorDiffusion(working_img.*, palette[0..palette_size], color_lut, floyd_steinberg_config),
             .atkinson => applyErrorDiffusion(working_img.*, palette[0..palette_size], color_lut, atkinson_config),
+            .ordered => applyOrderedDither(working_img.*, palette[0..palette_size], color_lut),
             else => {},
         }
 
@@ -381,55 +387,65 @@ pub fn fromImageProfiled(
             color_generation_counter = 1;
         }
 
-        for (0..width) |col| {
-            const column_generation = column_generation_counter;
-            column_generation_counter += 1;
-            if (column_generation_counter == 0) {
-                @memset(&column_stamp, 0);
-                column_generation_counter = 1;
+        // Prepare row slices for fast access
+        var row_slices: [6][]const Rgb = undefined;
+        const limit = @min(6, height - row);
+
+        for (0..limit) |i| {
+            const r = row + i;
+            if (prepared_img_ptr) |ptr| {
+                const offset = r * ptr.stride;
+                row_slices[i] = ptr.data[offset .. offset + ptr.cols];
+            } else {
+                if (comptime is_rgb) {
+                    const offset = r * image.stride;
+                    row_slices[i] = image.data[offset .. offset + image.cols];
+                }
             }
+        }
 
-            var column_len: usize = 0;
+        const block_size = 128; // Fits widely in L1 with 256 colors
+        var col_base: usize = 0;
+        while (col_base < width) : (col_base += block_size) {
+            const col_limit = @min(col_base + block_size, width);
 
-            for (0..6) |bit| {
-                const pixel_row = row + bit;
-                if (pixel_row >= height) continue;
+            for (col_base..col_limit) |col| {
+                const column_generation = column_generation_counter;
+                column_generation_counter += 1;
+                if (column_generation_counter == 0) {
+                    @memset(&column_stamp, 0);
+                    column_generation_counter = 1;
+                }
 
-                const color_idx = if (prepared_img_ptr) |img_ptr| blk: {
-                    const rgb = img_ptr.at(pixel_row, col).*;
-                    break :blk color_lut.lookup(rgb);
-                } else blk: {
-                    if (comptime is_rgb) {
-                        const rgb = image.at(pixel_row, col).*;
-                        break :blk color_lut.lookup(rgb);
-                    } else {
-                        const rgb = convertColor(Rgb, image.at(pixel_row, col).*); // fallback conversion
-                        break :blk color_lut.lookup(rgb);
+                var column_len: usize = 0;
+
+                for (0..limit) |bit| {
+                    const rgb = row_slices[bit][col];
+                    const color_idx = color_lut.lookup(rgb);
+
+                    if (!colors_used[color_idx]) {
+                        colors_used[color_idx] = true;
                     }
-                };
 
-                if (!colors_used[color_idx]) {
-                    colors_used[color_idx] = true;
+                    if (column_stamp[color_idx] != column_generation) {
+                        column_stamp[color_idx] = column_generation;
+                        column_index[color_idx] = @intCast(column_len);
+                        column_colors[column_len] = @intCast(color_idx);
+                        column_bits[column_len] = 0;
+                        column_len += 1;
+                    }
+
+                    const idx = column_index[color_idx];
+                    column_bits[idx] |= @as(u8, 1) << @intCast(bit);
                 }
 
-                if (column_stamp[color_idx] != column_generation) {
-                    column_stamp[color_idx] = column_generation;
-                    column_index[color_idx] = @intCast(column_len);
-                    column_colors[column_len] = @intCast(color_idx);
-                    column_bits[column_len] = 0;
-                    column_len += 1;
+                for (0..column_len) |idx| {
+                    const color_idx = column_colors[idx];
+                    const bits = column_bits[idx];
+                    const offset = @as(usize, color_idx) * width + col;
+                    color_map_storage[offset] = if (bits != 0) bits + sixel_char_offset else sixel_char_offset;
+                    color_map_generation[offset] = row_generation;
                 }
-
-                const idx = column_index[color_idx];
-                column_bits[idx] |= @as(u8, 1) << @intCast(bit);
-            }
-
-            for (0..column_len) |idx| {
-                const color_idx = column_colors[idx];
-                const bits = column_bits[idx];
-                const offset = @as(usize, color_idx) * width + col;
-                color_map_storage[offset] = if (bits != 0) bits + sixel_char_offset else sixel_char_offset;
-                color_map_generation[offset] = row_generation;
             }
         }
 
@@ -534,6 +550,18 @@ const ColorLookupTable = struct {
     fn init(palette: []const Rgb) ColorLookupTable {
         var self: ColorLookupTable = undefined;
         const LUT_SIZE = @as(usize, 1) << color_quantize_bits;
+
+        // Flatten palette for SIMD processing
+        var pal_r: [256]i32 = undefined;
+        var pal_g: [256]i32 = undefined;
+        var pal_b: [256]i32 = undefined;
+
+        for (palette, 0..) |c, i| {
+            pal_r[i] = c.r;
+            pal_g[i] = c.g;
+            pal_b[i] = c.b;
+        }
+
         for (0..LUT_SIZE) |r| {
             for (0..LUT_SIZE) |g| {
                 for (0..LUT_SIZE) |b| {
@@ -542,32 +570,82 @@ const ColorLookupTable = struct {
                         .g = @intCast(g << (8 - color_quantize_bits) | (g >> (2 * color_quantize_bits - 8))),
                         .b = @intCast(b << (8 - color_quantize_bits) | (b >> (2 * color_quantize_bits - 8))),
                     };
-                    self.table[r][g][b] = findNearestColor(palette, rgb);
+                    self.table[r][g][b] = findNearestColorSIMD(palette.len, &pal_r, &pal_g, &pal_b, rgb);
                 }
             }
         }
         return self;
     }
 
-    /// Finds the nearest color in a palette to the target color
-    fn findNearestColor(pal: []const Rgb, target: Rgb) u8 {
-        var best_idx: u8 = 0;
-        var best_dist: u32 = std.math.maxInt(u32);
+    /// Finds the nearest color in a palette to the target color using SIMD
+    fn findNearestColorSIMD(
+        len: usize,
+        pal_r: *const [256]i32,
+        pal_g: *const [256]i32,
+        pal_b: *const [256]i32,
+        target: Rgb,
+    ) u8 {
+        const VecWidth = 16;
+        const V = @Vector(VecWidth, i32);
 
-        for (pal, 0..) |p, idx| {
-            const dr = if (target.r > p.r) target.r - p.r else p.r - target.r;
-            const dg = if (target.g > p.g) target.g - p.g else p.g - target.g;
-            const db = if (target.b > p.b) target.b - p.b else p.b - target.b;
-            const dist = @as(u32, dr) * @as(u32, dr) +
-                @as(u32, dg) * @as(u32, dg) +
-                @as(u32, db) * @as(u32, db);
+        const tr = @as(i32, target.r);
+        const tg = @as(i32, target.g);
+        const tb = @as(i32, target.b);
 
-            if (dist < best_dist) {
-                best_dist = dist;
-                best_idx = @intCast(idx);
+        const v_tr: V = @splat(tr);
+        const v_tg: V = @splat(tg);
+        const v_tb: V = @splat(tb);
+
+        // Track min distance and index.
+        // We pack distance (upper bits) and index (lower 8 bits) into a u32 score.
+        var best_score: u32 = std.math.maxInt(u32);
+
+        // Pre-compute base indices: [0, 1, 2, ..., 15]
+        const iota: V = blk: {
+            var idxs: [VecWidth]i32 = undefined;
+            for (0..VecWidth) |k| idxs[k] = @intCast(k);
+            break :blk idxs;
+        };
+
+        var i: usize = 0;
+
+        // Main SIMD loop
+        while (i + VecWidth <= len) : (i += VecWidth) {
+            const vr: V = pal_r[i..][0..VecWidth].*;
+            const vg: V = pal_g[i..][0..VecWidth].*;
+            const vb: V = pal_b[i..][0..VecWidth].*;
+
+            const dr = vr - v_tr;
+            const dg = vg - v_tg;
+            const db = vb - v_tb;
+
+            const dist = dr * dr + dg * dg + db * db;
+
+            // Calculate current indices
+            const indices: V = iota + @as(V, @splat(@intCast(i)));
+
+            // Pack score: (dist << 8) | index
+            const score = (@as(@Vector(VecWidth, u32), @bitCast(dist)) << @as(@Vector(VecWidth, u5), @splat(8))) | @as(@Vector(VecWidth, u32), @bitCast(indices));
+
+            const min_vec_score = @reduce(.Min, score);
+            if (min_vec_score < best_score) {
+                best_score = min_vec_score;
             }
         }
-        return best_idx;
+
+        // Scalar tail loop
+        while (i < len) : (i += 1) {
+            const dr = pal_r[i] - tr;
+            const dg = pal_g[i] - tg;
+            const db = pal_b[i] - tb;
+            const dist = dr * dr + dg * dg + db * db;
+            const score = (@as(u32, @intCast(dist)) << 8) | @as(u32, @intCast(i));
+            if (score < best_score) {
+                best_score = score;
+            }
+        }
+
+        return @intCast(best_score & 0xFF);
     }
 
     /// Looks up the palette index for the given RGB color.
@@ -709,6 +787,7 @@ const DitherEntry = struct {
 };
 
 const DitherConfig = struct {
+    mode: DitherMode,
     distributions: []const DitherEntry,
 };
 
@@ -716,6 +795,7 @@ const DitherConfig = struct {
 //          X   7/16
 //  3/16  5/16  1/16
 const floyd_steinberg_config = DitherConfig{
+    .mode = .floyd_steinberg,
     .distributions = &[_]DitherEntry{
         .{ .dx = 1, .dy = 0, .weight = 7, .divisor_shift = 4 }, // right
         .{ .dx = -1, .dy = 1, .weight = 3, .divisor_shift = 4 }, // bottom-left
@@ -729,6 +809,7 @@ const floyd_steinberg_config = DitherConfig{
 //   1/8   1/8  1/8
 //         1/8
 const atkinson_config = DitherConfig{
+    .mode = .atkinson,
     .distributions = &[_]DitherEntry{
         .{ .dx = 1, .dy = 0, .weight = 1, .divisor_shift = 3 }, // right
         .{ .dx = 2, .dy = 0, .weight = 1, .divisor_shift = 3 }, // right+1
@@ -738,6 +819,126 @@ const atkinson_config = DitherConfig{
         .{ .dx = 0, .dy = 2, .weight = 1, .divisor_shift = 3 }, // bottom+1
     },
 };
+
+/// Bayer 8x8 ordered dithering matrix
+const bayer8x8 = [8][8]i32{
+    .{ 0, 32, 8, 40, 2, 34, 10, 42 },
+    .{ 48, 16, 56, 24, 50, 18, 58, 26 },
+    .{ 12, 44, 4, 36, 14, 46, 6, 38 },
+    .{ 60, 28, 52, 20, 62, 30, 54, 22 },
+    .{ 3, 35, 11, 43, 1, 33, 9, 41 },
+    .{ 51, 19, 59, 27, 49, 17, 57, 25 },
+    .{ 15, 47, 7, 39, 13, 45, 5, 37 },
+    .{ 63, 31, 55, 23, 61, 29, 53, 21 },
+};
+
+/// Applies ordered dithering using a Bayer matrix
+fn applyOrderedDither(
+    img: Image(Rgb),
+    pal: []const Rgb,
+    lut: ColorLookupTable,
+) void {
+    const rows = img.rows;
+    const cols = img.cols;
+    const stride = img.stride;
+
+    const T = @TypeOf(img.data[0].r);
+    comptime assert(T == u8); // Sixel pipeline is currently u8-only
+
+    // Scale factor for dithering strength.
+    // The matrix values are 0..63. We center them at 0 (-32..31) and scale.
+    // A spread of ~16-32 is usually good for 8-bit color.
+    // Optimized for spread=16 (shift by 1)
+
+    // Check if we can use SIMD (Rgb must be 3 bytes packed)
+    const can_simd = comptime @sizeOf(Rgb) == 3;
+
+    for (0..rows) |r| {
+        const row_offset = r * stride;
+        const row_slice = img.data[row_offset .. row_offset + cols];
+        const bayer_row = &bayer8x8[r & 7];
+
+        // Pre-compute offsets for the current row to avoid repeated calculation
+        var offsets: [8]i32 = undefined;
+        for (0..8) |i| {
+            offsets[i] = (bayer_row[i] - 32) >> 1;
+        }
+
+        var c: usize = 0;
+
+        if (can_simd) {
+            // Build SIMD offset vector (8 pixels * 3 channels = 24 values)
+            // Offsets are broadcast to R, G, B components
+            var offset_arr: [24]i16 = undefined;
+            inline for (0..8) |i| {
+                const val: i16 = @intCast(offsets[i]);
+                offset_arr[i * 3] = val;
+                offset_arr[i * 3 + 1] = val;
+                offset_arr[i * 3 + 2] = val;
+            }
+            const offset_vec: @Vector(24, i16) = offset_arr;
+            const min_vec: @Vector(24, i16) = @splat(0);
+            const max_vec: @Vector(24, i16) = @splat(255);
+
+            // SIMD Loop: Process 8 pixels (24 bytes) at a time
+            while (cols >= 8 and c <= cols - 8) : (c += 8) {
+                // 1. Load 8 pixels (24 bytes)
+                const ptr = @as([*]const u8, @ptrCast(row_slice.ptr)) + c * 3;
+                const pixels_u8: @Vector(24, u8) = ptr[0..24].*;
+
+                // 2. Add offsets (widen to i16)
+                const pixels_i16 = @as(@Vector(24, i16), pixels_u8);
+                const result_i16 = pixels_i16 + offset_vec;
+
+                // 3. Clamp
+                const clamped = @min(@max(result_i16, min_vec), max_vec);
+
+                // 4. Narrow back to u8 AND pre-quantize for lookup (shift right by 3)
+                // We do the shift here in SIMD to save 24 shifts in the scalar loop
+                const result_u8 = @as(@Vector(24, u8), @intCast(clamped));
+                const quantized_vec = result_u8 >> @as(@Vector(24, u3), @splat(8 - color_quantize_bits));
+                const q_arr: [24]u8 = quantized_vec;
+
+                // 5. Lookup and store (scalar part) using pre-quantized values
+                for (0..8) |k| {
+                    const r5 = q_arr[k * 3];
+                    const g5 = q_arr[k * 3 + 1];
+                    const b5 = q_arr[k * 3 + 2];
+                    const idx = lut.table[r5][g5][b5];
+                    row_slice[c + k] = pal[idx];
+                }
+            }
+        } else {
+            // Scalar unrolled loop for non-packed structures
+            while (cols >= 8 and c <= cols - 8) : (c += 8) {
+                inline for (0..8) |k| {
+                    var pixel = row_slice[c + k];
+                    const offset = offsets[k];
+
+                    const r5 = meta.clamp(u8, @as(i32, pixel.r) + offset) >> (8 - color_quantize_bits);
+                    const g5 = meta.clamp(u8, @as(i32, pixel.g) + offset) >> (8 - color_quantize_bits);
+                    const b5 = meta.clamp(u8, @as(i32, pixel.b) + offset) >> (8 - color_quantize_bits);
+
+                    const idx = lut.table[r5][g5][b5];
+                    row_slice[c + k] = pal[idx];
+                }
+            }
+        }
+
+        // Handle remaining pixels
+        while (c < cols) : (c += 1) {
+            var pixel = row_slice[c];
+            const offset = offsets[c & 7];
+
+            const r5 = meta.clamp(u8, @as(i32, pixel.r) + offset) >> (8 - color_quantize_bits);
+            const g5 = meta.clamp(u8, @as(i32, pixel.g) + offset) >> (8 - color_quantize_bits);
+            const b5 = meta.clamp(u8, @as(i32, pixel.b) + offset) >> (8 - color_quantize_bits);
+
+            const idx = lut.table[r5][g5][b5];
+            row_slice[c] = pal[idx];
+        }
+    }
+}
 
 /// Unified error diffusion dithering implementation
 fn applyErrorDiffusion(
@@ -752,42 +953,122 @@ fn applyErrorDiffusion(
     const rows_isize: isize = @intCast(rows);
     const cols_isize: isize = @intCast(cols);
 
-    for (0..rows) |r| {
-        const row_offset = r * stride;
-        const row_slice = img.data[row_offset .. row_offset + cols];
-        for (0..cols) |c| {
-            const current = row_slice[c];
-            const idx = lut.lookup(current);
-            const quantized = pal[idx];
+    const T = @TypeOf(img.data[0].r);
+    comptime assert(T == u8); // Sixel pipeline is currently u8-only
 
-            const r_error = @as(i16, current.r) - @as(i16, quantized.r);
-            const g_error = @as(i16, current.g) - @as(i16, quantized.g);
-            const b_error = @as(i16, current.b) - @as(i16, quantized.b);
-
-            row_slice[c] = quantized;
-
-            for (config.distributions) |dist| {
-                const c_isize: isize = @intCast(c);
-                const r_isize: isize = @intCast(r);
-                const nc_signed = c_isize + dist.dx;
-                const nr_signed = r_isize + dist.dy;
-                if (nr_signed < 0 or nr_signed >= rows_isize or nc_signed < 0 or nc_signed >= cols_isize) continue;
-
-                const nr: usize = @intCast(nr_signed);
-                const nc: usize = @intCast(nc_signed);
-                const neighbor_index = nr * stride + nc;
-
-                const weight = @as(i32, dist.weight);
-                const r_delta = divTruncPow2(@as(i32, r_error) * weight, dist.divisor_shift);
-                const g_delta = divTruncPow2(@as(i32, g_error) * weight, dist.divisor_shift);
-                const b_delta = divTruncPow2(@as(i32, b_error) * weight, dist.divisor_shift);
-
-                var neighbor_ptr = &img.data[neighbor_index];
-                neighbor_ptr.r = clampToU8(@as(i32, neighbor_ptr.r) + r_delta);
-                neighbor_ptr.g = clampToU8(@as(i32, neighbor_ptr.g) + g_delta);
-                neighbor_ptr.b = clampToU8(@as(i32, neighbor_ptr.b) + b_delta);
-            }
+    // Helper for updating a pixel
+    const updatePixel = struct {
+        inline fn call(ptr: *Rgb, r_err: i16, g_err: i16, b_err: i16, weight: i32, shift: u3) void {
+            ptr.r = clampToU8(@as(i32, ptr.r) + divTruncPow2(@as(i32, r_err) * weight, shift));
+            ptr.g = clampToU8(@as(i32, ptr.g) + divTruncPow2(@as(i32, g_err) * weight, shift));
+            ptr.b = clampToU8(@as(i32, ptr.b) + divTruncPow2(@as(i32, b_err) * weight, shift));
         }
+    }.call;
+
+    switch (config.mode) {
+        .floyd_steinberg => {
+            // Optimized Floyd-Steinberg loop
+            for (0..rows) |r| {
+                const row_offset = r * stride;
+                const row_slice = img.data[row_offset .. row_offset + cols];
+                const is_safe_row = r < rows - 1;
+
+                for (0..cols) |c| {
+                    const current = row_slice[c];
+                    const idx = lut.lookup(current);
+                    const quantized = pal[idx];
+                    row_slice[c] = quantized;
+
+                    const r_err = @as(i16, current.r) - @as(i16, quantized.r);
+                    const g_err = @as(i16, current.g) - @as(i16, quantized.g);
+                    const b_err = @as(i16, current.b) - @as(i16, quantized.b);
+
+                    // Safe path (center of image)
+                    if (is_safe_row and c > 0 and c < cols - 1) {
+                        const next_row_offset = (r + 1) * stride;
+                        updatePixel(&img.data[row_offset + c + 1], r_err, g_err, b_err, 7, 4);
+                        updatePixel(&img.data[next_row_offset + c - 1], r_err, g_err, b_err, 3, 4);
+                        updatePixel(&img.data[next_row_offset + c], r_err, g_err, b_err, 5, 4);
+                        updatePixel(&img.data[next_row_offset + c + 1], r_err, g_err, b_err, 1, 4);
+                    } else {
+                        // Boundary path
+                        for (config.distributions) |dist| {
+                            const nc_signed = @as(isize, @intCast(c)) + dist.dx;
+                            const nr_signed = @as(isize, @intCast(r)) + dist.dy;
+                            if (nr_signed >= 0 and nr_signed < rows_isize and nc_signed >= 0 and nc_signed < cols_isize) {
+                                const neighbor_idx = @as(usize, @intCast(nr_signed)) * stride + @as(usize, @intCast(nc_signed));
+                                updatePixel(&img.data[neighbor_idx], r_err, g_err, b_err, dist.weight, dist.divisor_shift);
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        .atkinson => {
+            // Optimized Atkinson loop
+            for (0..rows) |r| {
+                const row_offset = r * stride;
+                const row_slice = img.data[row_offset .. row_offset + cols];
+                const is_safe_row = r < rows - 2;
+
+                for (0..cols) |c| {
+                    const current = row_slice[c];
+                    const idx = lut.lookup(current);
+                    const quantized = pal[idx];
+                    row_slice[c] = quantized;
+
+                    const r_err = @as(i16, current.r) - @as(i16, quantized.r);
+                    const g_err = @as(i16, current.g) - @as(i16, quantized.g);
+                    const b_err = @as(i16, current.b) - @as(i16, quantized.b);
+
+                    if (is_safe_row and c > 0 and c < cols - 2) {
+                        const r1_offset = (r + 1) * stride;
+                        const r2_offset = (r + 2) * stride;
+                        updatePixel(&img.data[row_offset + c + 1], r_err, g_err, b_err, 1, 3);
+                        updatePixel(&img.data[row_offset + c + 2], r_err, g_err, b_err, 1, 3);
+                        updatePixel(&img.data[r1_offset + c - 1], r_err, g_err, b_err, 1, 3);
+                        updatePixel(&img.data[r1_offset + c], r_err, g_err, b_err, 1, 3);
+                        updatePixel(&img.data[r1_offset + c + 1], r_err, g_err, b_err, 1, 3);
+                        updatePixel(&img.data[r2_offset + c], r_err, g_err, b_err, 1, 3);
+                    } else {
+                        for (config.distributions) |dist| {
+                            const nc_signed = @as(isize, @intCast(c)) + dist.dx;
+                            const nr_signed = @as(isize, @intCast(r)) + dist.dy;
+                            if (nr_signed >= 0 and nr_signed < rows_isize and nc_signed >= 0 and nc_signed < cols_isize) {
+                                const neighbor_idx = @as(usize, @intCast(nr_signed)) * stride + @as(usize, @intCast(nc_signed));
+                                updatePixel(&img.data[neighbor_idx], r_err, g_err, b_err, dist.weight, dist.divisor_shift);
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        else => {
+            // Generic fallback
+            for (0..rows) |r| {
+                const row_offset = r * stride;
+                const row_slice = img.data[row_offset .. row_offset + cols];
+                for (0..cols) |c| {
+                    const current = row_slice[c];
+                    const idx = lut.lookup(current);
+                    const quantized = pal[idx];
+                    row_slice[c] = quantized;
+
+                    const r_err = @as(i16, current.r) - @as(i16, quantized.r);
+                    const g_err = @as(i16, current.g) - @as(i16, quantized.g);
+                    const b_err = @as(i16, current.b) - @as(i16, quantized.b);
+
+                    for (config.distributions) |dist| {
+                        const nc_signed = @as(isize, @intCast(c)) + dist.dx;
+                        const nr_signed = @as(isize, @intCast(r)) + dist.dy;
+                        if (nr_signed >= 0 and nr_signed < rows_isize and nc_signed >= 0 and nc_signed < cols_isize) {
+                            const neighbor_idx = @as(usize, @intCast(nr_signed)) * stride + @as(usize, @intCast(nc_signed));
+                            updatePixel(&img.data[neighbor_idx], r_err, g_err, b_err, dist.weight, dist.divisor_shift);
+                        }
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -867,9 +1148,8 @@ fn generateAdaptivePalette(
         defer releaseAdaptiveHistogram(hist_handle);
 
         // Build histogram using reusable buffers with generation tracking
-        for (0..image.rows) |r| {
-            for (0..image.cols) |c| {
-                const pixel = image.at(r, c).*;
+        if (image.stride == image.cols) {
+            for (image.data) |pixel| {
                 const rgb = convertColor(Rgb, pixel);
 
                 const r5 = rgb.r >> (8 - color_quantize_bits);
@@ -884,6 +1164,26 @@ fn generateAdaptivePalette(
                     try touched_indices.append(gpa, @intCast(hist_index));
                 }
                 hist_handle.counts[hist_index] += 1;
+            }
+        } else {
+            for (0..image.rows) |r| {
+                for (0..image.cols) |c| {
+                    const pixel = image.at(r, c).*;
+                    const rgb = convertColor(Rgb, pixel);
+
+                    const r5 = rgb.r >> (8 - color_quantize_bits);
+                    const g5 = rgb.g >> (8 - color_quantize_bits);
+                    const b5 = rgb.b >> (8 - color_quantize_bits);
+                    const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
+                    const hist_index: usize = @intCast(key);
+
+                    if (hist_handle.stamps[hist_index] != hist_handle.generation) {
+                        hist_handle.stamps[hist_index] = hist_handle.generation;
+                        hist_handle.counts[hist_index] = 0;
+                        try touched_indices.append(gpa, @intCast(hist_index));
+                    }
+                    hist_handle.counts[hist_index] += 1;
+                }
             }
         }
 
