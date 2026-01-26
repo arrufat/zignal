@@ -10,6 +10,7 @@ const expect = std.testing.expect;
 const meta = @import("meta.zig");
 const clamp = std.math.clamp;
 
+const rle = @import("compression/rle.zig");
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Interpolation = @import("image/interpolation.zig").Interpolation;
@@ -304,12 +305,9 @@ pub fn fromImageProfiled(
     // P1=1 (aspect ratio 1:1), P2=1 (keep background)
     // Note: Some terminals don't respect the height parameter and will show
     // black padding for images whose height is not a multiple of 6
-    const header = try std.fmt.allocPrint(gpa, "\x1bPq\"1;1;{d};{d}", .{ width, height });
-    defer gpa.free(header);
-    try output.appendSlice(gpa, header);
+    try output.print(gpa, "\x1bPq\"1;1;{d};{d}", .{ width, height });
 
     // Define palette - unified approach
-    var palette_buf: [64]u8 = undefined; // Buffer for building palette strings
 
     var palette_emit_start: u64 = 0;
     if (profiler != null) palette_emit_start = monotonicNs();
@@ -332,20 +330,7 @@ pub fn fromImageProfiled(
         const b_val = (@as(u32, p.b) * 100 + 127) / 255;
 
         // Build palette definition
-        palette_buf[0] = '#';
-        var pos: usize = 1;
-        pos += std.fmt.printInt(palette_buf[pos..], i, 10, .lower, .{});
-        palette_buf[pos..][0..3].* = ";2;".*;
-        pos += 3;
-        pos += std.fmt.printInt(palette_buf[pos..], r_val, 10, .lower, .{});
-        palette_buf[pos] = ';';
-        pos += 1;
-        pos += std.fmt.printInt(palette_buf[pos..], g_val, 10, .lower, .{});
-        palette_buf[pos] = ';';
-        pos += 1;
-        pos += std.fmt.printInt(palette_buf[pos..], b_val, 10, .lower, .{});
-
-        try output.appendSlice(gpa, palette_buf[0..pos]);
+        try output.print(gpa, "#{d};2;{d};{d};{d}", .{ i, r_val, g_val, b_val });
     }
 
     if (profiler) |p| {
@@ -455,24 +440,40 @@ pub fn fromImageProfiled(
 
             if (c != current_color) {
                 current_color = c;
-                var color_select_buf: [16]u8 = undefined;
-                color_select_buf[0] = '#';
-                const len = std.fmt.printInt(color_select_buf[1..], current_color, 10, .lower, .{});
-                try output.appendSlice(gpa, color_select_buf[0 .. len + 1]);
+                try output.print(gpa, "#{d}", .{current_color});
             }
 
             var row_buffer: [max_supported_width]u8 = undefined;
             if (width > row_buffer.len) return error.ImageTooWide;
 
             @memset(row_buffer[0..width], sixel_char_offset);
-            for (0..width) |col| {
-                const offset = c * width + col;
-                if (color_map_generation[offset] == row_generation) {
-                    row_buffer[col] = color_map_storage[offset];
+            var effective_compression_end: usize = 0;
+            if (width > 0) {
+                var current_last_used_col: usize = 0;
+                for (0..width) |col| {
+                    const offset = c * width + col;
+                    if (color_map_generation[offset] == row_generation) {
+                        row_buffer[col] = color_map_storage[offset];
+                        current_last_used_col = col;
+                    }
+                }
+                if (current_last_used_col == 0 and row_buffer[0] == sixel_char_offset) {
+                    effective_compression_end = 0;
+                } else {
+                    effective_compression_end = current_last_used_col + 1;
                 }
             }
 
-            try output.appendSlice(gpa, row_buffer[0..width]);
+            var compressor: rle.Compressor(u8) = .{ .data = row_buffer[0..effective_compression_end] };
+            while (compressor.next()) |entry| {
+                if (entry.count > 3) {
+                    try output.print(gpa, "!{d}{c}", .{ entry.count, entry.value });
+                } else {
+                    for (0..entry.count) |_| {
+                        try output.append(gpa, entry.value);
+                    }
+                }
+            }
 
             var more_colors = false;
             for (c + 1..palette_size) |nc| {
