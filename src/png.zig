@@ -6,14 +6,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const convertColor = @import("color.zig").convertColor;
-const zlib = @import("compression/zlib.zig");
 const deflate = @import("compression/deflate.zig");
+const zlib = @import("compression/zlib.zig");
+const convertColor = @import("color.zig").convertColor;
+const Gray = @import("color.zig").Gray;
 const Image = @import("image.zig").Image;
+
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
-const Gray = @import("color.zig").Gray;
-
 const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
@@ -411,13 +411,14 @@ test "PNG getInfo" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.35), header.gamma.?, 0.0001);
 }
 
-// CRC table for PNG chunk validation
-var crc_table: [256]u32 = undefined;
-var crc_table_computed = false;
-
-fn makeCrcTable() void {
+// CRC table for PNG chunk validation (computed at compile-time)
+const crc_table = blk: {
+    @setEvalBranchQuota(20000);
+    var table: [8][256]u32 = undefined;
     var c: u32 = undefined;
     var n: usize = 0;
+
+    // Compute the first table (byte-by-byte, standard)
     while (n < 256) : (n += 1) {
         c = @intCast(n);
         var k: u8 = 0;
@@ -428,17 +429,56 @@ fn makeCrcTable() void {
                 c = c >> 1;
             }
         }
-        crc_table[n] = c;
+        table[0][n] = c;
     }
-    crc_table_computed = true;
-}
+
+    // Compute the remaining 7 tables for Slice-by-8
+    // table[k][i] = (table[k-1][i] >> 8) ^ table[0][table[k-1][i] & 0xFF]
+    var k: usize = 1;
+    while (k < 8) : (k += 1) {
+        n = 0;
+        while (n < 256) : (n += 1) {
+            const x = table[k - 1][n];
+            table[k][n] = (x >> 8) ^ table[0][x & 0xFF];
+        }
+    }
+    break :blk table;
+};
 
 fn updateCrc(initial_crc: u32, buf: []const u8) u32 {
     var c = initial_crc;
-    if (!crc_table_computed) makeCrcTable();
+    var i: usize = 0;
 
-    for (buf) |byte| {
-        c = crc_table[(c ^ byte) & 0xff] ^ (c >> 8);
+    // Process single bytes until the buffer is aligned to a 4-byte boundary.
+    // This ensures that `std.mem.readInt` can perform efficient aligned reads.
+    while (i < buf.len and (@intFromPtr(&buf[i]) & (@alignOf(u32) - 1) != 0)) {
+        c = crc_table[0][(c ^ buf[i]) & 0xff] ^ (c >> 8);
+        i += 1;
+    }
+
+    // Process 8 bytes at a time
+    while (i + 8 <= buf.len) {
+        // Load 8 bytes (little endian)
+        // 'one' includes the XOR with current CRC state
+        const one = c ^ std.mem.readInt(u32, buf[i..][0..4], .little);
+        const two = std.mem.readInt(u32, buf[i + 4 ..][0..4], .little);
+
+        // Perform 8 lookups and XOR them
+        c = crc_table[7][one & 0xFF] ^
+            crc_table[6][(one >> 8) & 0xFF] ^
+            crc_table[5][(one >> 16) & 0xFF] ^
+            crc_table[4][(one >> 24) & 0xFF] ^
+            crc_table[3][two & 0xFF] ^
+            crc_table[2][(two >> 8) & 0xFF] ^
+            crc_table[1][(two >> 16) & 0xFF] ^
+            crc_table[0][(two >> 24) & 0xFF];
+
+        i += 8;
+    }
+
+    // Handle remaining bytes
+    while (i < buf.len) : (i += 1) {
+        c = crc_table[0][(c ^ buf[i]) & 0xff] ^ (c >> 8);
     }
     return c;
 }
