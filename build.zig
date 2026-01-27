@@ -43,7 +43,7 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
-            .link_libc = true,
+            .link_libc = target.result.os.tag == .windows,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
             },
