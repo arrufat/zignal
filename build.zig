@@ -14,7 +14,10 @@ pub fn build(b: *Build) void {
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
 
     // Export module for use as dependency
-    const zignal = b.addModule("zignal", .{ .root_source_file = b.path("src/root.zig"), .target = target });
+    const zignal = b.addModule("zignal", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+    });
     const version = resolveVersion(b);
     const version_options = b.addOptions();
     version_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
@@ -36,10 +39,10 @@ pub fn build(b: *Build) void {
     });
     docs_step.dependOn(&docs_install.step);
 
-    const cli = b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = "zignal",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/cli.zig"),
+            .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
@@ -49,9 +52,9 @@ pub fn build(b: *Build) void {
             },
         }),
     });
-    b.installArtifact(cli);
+    b.installArtifact(exe);
     const run_step = b.step("run", "Run the CLI app");
-    const run_cmd = b.addRunArtifact(cli);
+    const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -59,7 +62,7 @@ pub fn build(b: *Build) void {
     }
     // Version info step
     const version_info_step = b.step("version", "Print the resolved version information");
-    const version_info_run = b.addRunArtifact(cli);
+    const version_info_run = b.addRunArtifact(exe);
     version_info_run.addArg("version");
     version_info_step.dependOn(&version_info_run.step);
 
@@ -170,7 +173,7 @@ pub fn build(b: *Build) void {
     const install_py_module = b.addInstallFile(py_module.getEmittedBin(), output_name);
 
     // Ensure CLI is installed to zig-out/bin so setup.py can find it
-    const install_cli = b.addInstallArtifact(cli, .{});
+    const install_cli = b.addInstallArtifact(exe, .{});
     py_bindings_step.dependOn(&install_cli.step);
 
     // Make python-bindings depend on stub generation so stubs are always up to date
@@ -185,7 +188,7 @@ pub fn build(b: *Build) void {
     // Copy CLI tool to python package
     const cli_ext = if (target_info.os.tag == .windows) ".exe" else "";
     const cli_name = b.fmt("zignal{s}", .{cli_ext});
-    _ = wf.addCopyFile(cli.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
+    _ = wf.addCopyFile(exe.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
 
     py_bindings_step.dependOn(&wf.step);
 }
