@@ -1606,57 +1606,65 @@ const HuffmanCode = struct { length_minus_one: u4, code: u16 };
 pub const BitReader = struct {
     data: []const u8,
     byte_pos: usize = 0,
-    bit_buffer: u32 = 0,
-    bit_count: u5 = 0,
+    bit_buffer: u64 = 0,
+    bit_count: u7 = 0,
 
     pub fn init(data: []const u8) BitReader {
         return .{ .data = data };
     }
 
-    pub fn peekBits(self: *BitReader, num_bits: u5) !u32 {
-        if (num_bits > 24) return error.InvalidData;
-        try self.fillBits(num_bits);
-        return (self.bit_buffer >> 1) >> @intCast(31 - num_bits);
+    pub fn peekBits(self: *BitReader, num_bits: u6) !u32 {
+        if (num_bits == 0) return 0;
+        if (num_bits > 32) return error.InvalidData;
+        try self.fillBits(@intCast(num_bits));
+        return @intCast(self.bit_buffer >> @intCast(64 - @as(u7, num_bits)));
     }
 
-    pub fn fillBits(self: *BitReader, num_bits: u5) !void {
-        while (self.bit_count < num_bits) {
-            if (self.byte_pos >= self.data.len) {
-                return error.UnexpectedEndOfData;
-            }
+    pub fn fillBits(self: *BitReader, num_bits: u7) !void {
+        // Optimization: process bytes in a tighter loop with a wider bit buffer to reduce call frequency
+        while (self.bit_count <= 56 and self.bit_count < num_bits) {
+            if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
 
-            var byte_curr: u32 = self.data[self.byte_pos];
+            var byte_curr: u64 = self.data[self.byte_pos];
             self.byte_pos += 1;
 
-            while (byte_curr == 0xFF) {
-                if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
-                const byte_next: u8 = self.data[self.byte_pos];
-                self.byte_pos += 1;
-
-                if (byte_next == 0x00) {
-                    break;
-                } else if (byte_next == 0xFF) {
-                    continue;
-                } else if (byte_next >= 0xD0 and byte_next <= 0xD7) {
-                    // Restart marker found - just skip it, validation happens at scan level
+            if (byte_curr == 0xFF) {
+                // Rare case: JPEG marker escape (0xFF 0x00) or restart marker
+                while (true) {
                     if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
-                    byte_curr = self.data[self.byte_pos];
+                    const byte_next: u8 = self.data[self.byte_pos];
                     self.byte_pos += 1;
-                } else {
-                    self.byte_pos -= 2;
-                    return error.UnexpectedEndOfData;
+
+                    if (byte_next == 0x00) {
+                        break;
+                    } else if (byte_next == 0xFF) {
+                        continue;
+                    } else if (byte_next >= 0xD0 and byte_next <= 0xD7) {
+                        if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
+                        byte_curr = self.data[self.byte_pos];
+                        self.byte_pos += 1;
+                        // After consuming a restart marker and reading the next byte,
+                        // we must check if THAT byte is also 0xFF.
+                        if (byte_curr == 0xFF) continue;
+                        break;
+                    } else {
+                        // Marker encountered, stop filling bits here
+                        self.byte_pos -= 2;
+                        return error.UnexpectedEndOfData;
+                    }
                 }
             }
 
-            self.bit_buffer |= byte_curr << @intCast(24 - self.bit_count);
+            self.bit_buffer |= byte_curr << @intCast(56 - self.bit_count);
             self.bit_count += 8;
         }
     }
 
-    pub fn consumeBits(self: *BitReader, num_bits: u5) void {
-        std.debug.assert(num_bits <= self.bit_count and num_bits <= 16);
-        self.bit_buffer <<= num_bits;
-        self.bit_count -= num_bits;
+    pub fn consumeBits(self: *BitReader, num_bits: u6) void {
+        if (num_bits == 0) return;
+        std.debug.assert(num_bits <= self.bit_count and num_bits <= 32);
+        self.bit_buffer <<= @intCast(num_bits);
+        self.bit_count -= @intCast(num_bits);
     }
 
     pub fn getBits(self: *BitReader, n: u5) !u32 {
@@ -2322,80 +2330,141 @@ fn idct1D(s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32, s6: i32, s7: i32
 }
 
 fn idct8x8(block: *[64]i32) void {
-    // Pass 1: process columns
-    for (0..8) |x| {
-        const s0 = block[0 * 8 + x];
-        const s1 = block[1 * 8 + x];
-        const s2 = block[2 * 8 + x];
-        const s3 = block[3 * 8 + x];
-        const s4 = block[4 * 8 + x];
-        const s5 = block[5 * 8 + x];
-        const s6 = block[6 * 8 + x];
-        const s7 = block[7 * 8 + x];
+    const V = @Vector(8, i32);
+    var rows: [8]V = undefined;
 
-        var x0: i32 = 0;
-        var x1: i32 = 0;
-        var x2: i32 = 0;
-        var x3: i32 = 0;
-        var t0: i32 = 0;
-        var t1: i32 = 0;
-        var t2: i32 = 0;
-        var t3: i32 = 0;
-
-        x0, x1, x2, x3, t0, t1, t2, t3 = idct1D(s0, s1, s2, s3, s4, s5, s6, s7);
-
-        x0 += 512;
-        x1 += 512;
-        x2 += 512;
-        x3 += 512;
-
-        block[0 * 8 + x] = (x0 + t3) >> 10;
-        block[1 * 8 + x] = (x1 + t2) >> 10;
-        block[2 * 8 + x] = (x2 + t1) >> 10;
-        block[3 * 8 + x] = (x3 + t0) >> 10;
-        block[4 * 8 + x] = (x3 - t0) >> 10;
-        block[5 * 8 + x] = (x2 - t1) >> 10;
-        block[6 * 8 + x] = (x1 - t2) >> 10;
-        block[7 * 8 + x] = (x0 - t3) >> 10;
+    // Load 8 rows as vectors
+    for (0..8) |i| {
+        rows[i] = block[i * 8 ..][0..8].*;
     }
 
-    // Pass 2: process rows
-    for (0..8) |y| {
-        const s0 = block[y * 8 + 0];
-        const s1 = block[y * 8 + 1];
-        const s2 = block[y * 8 + 2];
-        const s3 = block[y * 8 + 3];
-        const s4 = block[y * 8 + 4];
-        const s5 = block[y * 8 + 5];
-        const s6 = block[y * 8 + 6];
-        const s7 = block[y * 8 + 7];
+    // Pass 1: process rows (vectorize across 8 rows)
+    const res1 = idct1DVec(rows);
 
-        var x0: i32 = 0;
-        var x1: i32 = 0;
-        var x2: i32 = 0;
-        var x3: i32 = 0;
-        var t0: i32 = 0;
-        var t1: i32 = 0;
-        var t2: i32 = 0;
-        var t3: i32 = 0;
+    const v512: V = @splat(512);
+    const x0_1 = res1.x0 + v512;
+    const x1_1 = res1.x1 + v512;
+    const x2_1 = res1.x2 + v512;
+    const x3_1 = res1.x3 + v512;
 
-        x0, x1, x2, x3, t0, t1, t2, t3 = idct1D(s0, s1, s2, s3, s4, s5, s6, s7);
+    rows[0] = (x0_1 + res1.t3) >> @splat(10);
+    rows[1] = (x1_1 + res1.t2) >> @splat(10);
+    rows[2] = (x2_1 + res1.t1) >> @splat(10);
+    rows[3] = (x3_1 + res1.t0) >> @splat(10);
+    rows[4] = (x3_1 - res1.t0) >> @splat(10);
+    rows[5] = (x2_1 - res1.t1) >> @splat(10);
+    rows[6] = (x1_1 - res1.t2) >> @splat(10);
+    rows[7] = (x0_1 - res1.t3) >> @splat(10);
 
-        // add 0.5 scaled up by factor
-        x0 += (1 << 17) / 2;
-        x1 += (1 << 17) / 2;
-        x2 += (1 << 17) / 2;
-        x3 += (1 << 17) / 2;
+    // Transpose to process columns in Pass 2
+    const tr = transpose8x8(rows);
 
-        block[y * 8 + 0] = (x0 + t3) >> 17;
-        block[y * 8 + 1] = (x1 + t2) >> 17;
-        block[y * 8 + 2] = (x2 + t1) >> 17;
-        block[y * 8 + 3] = (x3 + t0) >> 17;
-        block[y * 8 + 4] = (x3 - t0) >> 17;
-        block[y * 8 + 5] = (x2 - t1) >> 17;
-        block[y * 8 + 6] = (x1 - t2) >> 17;
-        block[y * 8 + 7] = (x0 - t3) >> 17;
+    // Pass 2: process columns (vectorize across 8 columns)
+    const res2 = idct1DVec(tr);
+
+    const vHalf: V = @splat((1 << 17) / 2);
+    const x0_2 = res2.x0 + vHalf;
+    const x1_2 = res2.x1 + vHalf;
+    const x2_2 = res2.x2 + vHalf;
+    const x3_2 = res2.x3 + vHalf;
+
+    const r0_f = (x0_2 + res2.t3) >> @splat(17);
+    const r1_f = (x1_2 + res2.t2) >> @splat(17);
+    const r2_f = (x2_2 + res2.t1) >> @splat(17);
+    const r3_f = (x3_2 + res2.t0) >> @splat(17);
+    const r4_f = (x3_2 - res2.t0) >> @splat(17);
+    const r5_f = (x2_2 - res2.t1) >> @splat(17);
+    const r6_f = (x1_2 - res2.t2) >> @splat(17);
+    const r7_f = (x0_2 - res2.t3) >> @splat(17);
+
+    // Transpose back to row-major
+    const final = transpose8x8(.{ r0_f, r1_f, r2_f, r3_f, r4_f, r5_f, r6_f, r7_f });
+
+    // Store back
+    for (0..8) |i| {
+        block[i * 8 ..][0..8].* = final[i];
     }
+}
+
+fn idct1DVec(s: [8]@Vector(8, i32)) struct {
+    x0: @Vector(8, i32),
+    x1: @Vector(8, i32),
+    x2: @Vector(8, i32),
+    x3: @Vector(8, i32),
+    t0: @Vector(8, i32),
+    t1: @Vector(8, i32),
+    t2: @Vector(8, i32),
+    t3: @Vector(8, i32),
+} {
+    // Note: We use i32 for intermediate calculations.
+    // For 8-bit JPEGs, the maximum intermediate value is roughly 10^8, which fits
+    // comfortably within i32 (limit ~2*10^9). Using i64 would double register
+    // pressure and halve throughput on AVX2, which is not worth the theoretical
+    // safety margin for 12-bit images (which we don't support yet).
+    const V = @Vector(8, i32);
+    const v541: V = @splat(f2f(0.5411961));
+    const v184: V = @splat(f2f(-1.847759065));
+    const v076: V = @splat(f2f(0.765366865));
+    const v117: V = @splat(f2f(1.175875602));
+    const v029: V = @splat(f2f(0.298631336));
+    const v205: V = @splat(f2f(2.053119869));
+    const v307: V = @splat(f2f(3.072711026));
+    const v150: V = @splat(f2f(1.501321110));
+    const v089: V = @splat(f2f(-0.899976223));
+    const v256: V = @splat(f2f(-2.562915447));
+    const v196: V = @splat(f2f(-1.961570560));
+    const v039: V = @splat(f2f(-0.390180644));
+
+    var p2 = s[2];
+    var p3 = s[6];
+
+    var p1 = (p2 + p3) * v541;
+    const t2 = p1 + p3 * v184;
+    const t3 = p1 + p2 * v076;
+    p2 = s[0];
+    p3 = s[4];
+    const t0 = (p2 + p3) * @as(V, @splat(4096));
+    const t1 = (p2 - p3) * @as(V, @splat(4096));
+    const x0 = t0 + t3;
+    const x3 = t0 - t3;
+    const x1 = t1 + t2;
+    const x2 = t1 - t2;
+
+    var w0 = s[7];
+    var w1 = s[5];
+    var w2 = s[3];
+    var w3 = s[1];
+    p3 = w0 + w2;
+    var p4 = w1 + w3;
+    p1 = w0 + w3;
+    p2 = w1 + w2;
+    const p5 = (p3 + p4) * v117;
+    w0 = w0 * v029;
+    w1 = w1 * v205;
+    w2 = w2 * v307;
+    w3 = w3 * v150;
+    p1 = p5 + p1 * v089;
+    p2 = p5 + p2 * v256;
+    p3 = p3 * v196;
+    p4 = p4 * v039;
+    w3 += p1 + p4;
+    w2 += p2 + p3;
+    w1 += p2 + p4;
+    w0 += p1 + p3;
+
+    return .{ .x0 = x0, .x1 = x1, .x2 = x2, .x3 = x3, .t0 = w0, .t1 = w1, .t2 = w2, .t3 = w3 };
+}
+
+fn transpose8x8(rows: [8]@Vector(8, i32)) [8]@Vector(8, i32) {
+    var res = rows;
+    inline for (0..8) |i| {
+        inline for (i + 1..8) |j| {
+            const tmp = res[i][j];
+            res[i][j] = res[j][i];
+            res[j][i] = tmp;
+        }
+    }
+    return res;
 }
 
 // Upsample chroma component for 4:2:0 subsampling using bilinear interpolation
@@ -2694,23 +2763,24 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
     // 4:4:4 - no chroma subsampling, each component has same number of blocks
     if (max_h == 1 and max_v == 1) {
+        const V = @Vector(8, i32);
         for (state.block_storage.?, 0..) |*block_set, idx| {
-            // Direct YCbCr to RGB conversion without upsampling
-            for (0..64) |i| {
-                const Y = block_set[0][i];
-                const Cb = block_set[1][i];
-                const Cr = block_set[2][i];
+            // Optimized YCbCr to RGB conversion using SIMD to process 8 pixels at once
+            var i: usize = 0;
+            while (i < 64) : (i += 8) {
+                const Y: V = block_set[0][i..][0..8].*;
+                const Cb: V = block_set[1][i..][0..8].*;
+                const Cr: V = block_set[2][i..][0..8].*;
 
-                const ycbcr: Ycbcr = .{
-                    .y = @intCast(@min(255, @max(0, Y))),
-                    .cb = @intCast(@min(255, @max(0, Cb + 128))),
-                    .cr = @intCast(@min(255, @max(0, Cr + 128))),
-                };
-                const rgb = ycbcr.to(.rgb);
+                const r = Y + ((@as(V, @splat(91881)) * Cr + @as(V, @splat(32768))) >> @splat(16));
+                const g = Y - ((@as(V, @splat(22554)) * Cb + @as(V, @splat(46802)) * Cr + @as(V, @splat(32768))) >> @splat(16));
+                const b = Y + ((@as(V, @splat(116130)) * Cb + @as(V, @splat(32768))) >> @splat(16));
 
-                state.rgb_storage.?[idx][0][i] = rgb.r;
-                state.rgb_storage.?[idx][1][i] = rgb.g;
-                state.rgb_storage.?[idx][2][i] = rgb.b;
+                inline for (0..8) |k| {
+                    state.rgb_storage.?[idx][0][i + k] = @intCast(std.math.clamp(r[k], 0, 255));
+                    state.rgb_storage.?[idx][1][i + k] = @intCast(std.math.clamp(g[k], 0, 255));
+                    state.rgb_storage.?[idx][2][i + k] = @intCast(std.math.clamp(b[k], 0, 255));
+                }
             }
         }
         return;
