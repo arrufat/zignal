@@ -1404,25 +1404,63 @@ fn defilterRow(
         },
         .average => {
             // Add the average of left and above bytes
-            for (current_row, 0..) |*byte, i| {
-                const left: u16 = if (i >= bytes_per_pixel) current_row[i - bytes_per_pixel] else 0;
-                const above: u16 = if (previous_row) |prev| prev[i] else 0;
-                const avg: u8 = @intCast((left + above) / 2);
-                byte.* = byte.* +% avg;
+            const bpp = bytes_per_pixel;
+            if (previous_row) |prev| {
+                // First pixel (no left neighbor)
+                for (0..bpp) |i| {
+                    const above = prev[i];
+                    const avg = above / 2;
+                    current_row[i] = current_row[i] +% avg;
+                }
+                // Remaining pixels
+                for (bpp..current_row.len) |i| {
+                    const left = current_row[i - bpp];
+                    const above = prev[i];
+                    const avg: u8 = @intCast((@as(u16, left) + above) / 2);
+                    current_row[i] = current_row[i] +% avg;
+                }
+            } else {
+                // First row (no above neighbor), equivalent to SUB but with avg/2 logic?
+                // Actually for first row, Average uses only Left (since Above is 0)
+                // Left + 0 / 2 = Left / 2
+                // First pixel has neither left nor above -> 0
+                // So nothing changes for first pixel.
+                for (bpp..current_row.len) |i| {
+                    const left = current_row[i - bpp];
+                    const avg = left / 2;
+                    current_row[i] = current_row[i] +% avg;
+                }
             }
         },
         .paeth => {
             // Use Paeth predictor
-            for (current_row, 0..) |*byte, i| {
-                const left: i32 = if (i >= bytes_per_pixel) current_row[i - bytes_per_pixel] else 0;
-                const above: i32 = if (previous_row) |prev| prev[i] else 0;
-                const upper_left: i32 = if (previous_row != null and i >= bytes_per_pixel)
-                    previous_row.?[i - bytes_per_pixel]
-                else
-                    0;
-
-                const paeth = paethPredictor(left, above, upper_left);
-                byte.* = byte.* +% paeth;
+            const bpp = bytes_per_pixel;
+            if (previous_row) |prev| {
+                // First pixel (no left neighbor -> left=0, upper_left=0)
+                // Paeth(0, above, 0) -> abs(above - 0) vs abs(above - above) vs abs(above - 0)
+                // -> pa=above, pb=0, pc=above. min is pb=0. Returns above.
+                for (0..bpp) |i| {
+                    const above = prev[i];
+                    // Paeth(0, above, 0) simplifies to 'above'
+                    current_row[i] = current_row[i] +% above;
+                }
+                // Remaining pixels
+                for (bpp..current_row.len) |i| {
+                    const left = current_row[i - bpp];
+                    const above = prev[i];
+                    const upper_left = prev[i - bpp];
+                    const paeth = paethPredictor(left, above, upper_left);
+                    current_row[i] = current_row[i] +% paeth;
+                }
+            } else {
+                // First row: Above = 0, UpperLeft = 0.
+                // Paeth(Left, 0, 0) -> pa=Left, pb=Left, pc=Left.
+                // Ties go to Left. So returns Left.
+                // Same as Sub filter.
+                var i: usize = bpp;
+                while (i < current_row.len) : (i += 1) {
+                    current_row[i] = current_row[i] +% current_row[i - bpp];
+                }
             }
         },
     }
@@ -1441,39 +1479,72 @@ fn filterRow(
         },
         .sub => {
             // Subtract the byte to the left
-            for (current_row, original_row, 0..) |*filtered, orig, i| {
-                const left: u8 = if (i >= bytes_per_pixel) original_row[i - bytes_per_pixel] else 0;
+            const bpp = bytes_per_pixel;
+            @memcpy(current_row[0..bpp], original_row[0..bpp]);
+            for (current_row[bpp..], original_row[bpp..], 0..) |*filtered, orig, i| {
+                const left = original_row[i]; // i starts at 0, which corresponds to index 'bpp' in original_row. So left is at index i (original_row[bpp+i - bpp])
                 filtered.* = orig -% left;
             }
         },
         .up => {
             // Subtract the byte above
-            for (current_row, original_row, 0..) |*filtered, orig, i| {
-                const above: u8 = if (previous_row) |prev| prev[i] else 0;
-                filtered.* = orig -% above;
+            if (previous_row) |prev| {
+                for (current_row, original_row, prev) |*filtered, orig, above| {
+                    filtered.* = orig -% above;
+                }
+            } else {
+                @memcpy(current_row, original_row);
             }
         },
         .average => {
-            // Subtract the average of left and above bytes
-            for (current_row, original_row, 0..) |*filtered, orig, i| {
-                const left: u16 = if (i >= bytes_per_pixel) original_row[i - bytes_per_pixel] else 0;
-                const above: u16 = if (previous_row) |prev| prev[i] else 0;
-                const avg: u8 = @intCast((left + above) / 2);
-                filtered.* = orig -% avg;
+            const bpp = bytes_per_pixel;
+            if (previous_row) |prev| {
+                // First pixel (no left neighbor)
+                for (0..bpp) |i| {
+                    const above = prev[i];
+                    const avg = above / 2;
+                    current_row[i] = original_row[i] -% avg;
+                }
+                // Remaining pixels
+                for (bpp..original_row.len) |i| {
+                    const left = original_row[i - bpp];
+                    const above = prev[i];
+                    const avg: u8 = @intCast((@as(u16, left) + above) / 2);
+                    current_row[i] = original_row[i] -% avg;
+                }
+            } else {
+                // First row (no above neighbor)
+                @memcpy(current_row[0..bpp], original_row[0..bpp]);
+                for (bpp..original_row.len) |i| {
+                    const left = original_row[i - bpp];
+                    const avg = left / 2;
+                    current_row[i] = original_row[i] -% avg;
+                }
             }
         },
         .paeth => {
-            // Subtract Paeth predictor
-            for (current_row, original_row, 0..) |*filtered, orig, i| {
-                const left: i32 = if (i >= bytes_per_pixel) original_row[i - bytes_per_pixel] else 0;
-                const above: i32 = if (previous_row) |prev| prev[i] else 0;
-                const upper_left: i32 = if (previous_row != null and i >= bytes_per_pixel)
-                    previous_row.?[i - bytes_per_pixel]
-                else
-                    0;
-
-                const paeth = paethPredictor(left, above, upper_left);
-                filtered.* = orig -% paeth;
+            const bpp = bytes_per_pixel;
+            if (previous_row) |prev| {
+                // First pixel (no left neighbor) -> Paeth(0, above, 0) = above
+                for (0..bpp) |i| {
+                    const above = prev[i];
+                    current_row[i] = original_row[i] -% above;
+                }
+                // Remaining pixels
+                for (bpp..original_row.len) |i| {
+                    const left = original_row[i - bpp];
+                    const above = prev[i];
+                    const upper_left = prev[i - bpp];
+                    const paeth = paethPredictor(left, above, upper_left);
+                    current_row[i] = original_row[i] -% paeth;
+                }
+            } else {
+                // First row (no above) -> Paeth(Left, 0, 0) = Left
+                @memcpy(current_row[0..bpp], original_row[0..bpp]);
+                for (bpp..original_row.len) |i| {
+                    const left = original_row[i - bpp];
+                    current_row[i] = original_row[i] -% left;
+                }
             }
         },
     }
