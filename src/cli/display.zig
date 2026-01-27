@@ -138,3 +138,56 @@ pub fn displayCanvas(
     try writer.print("{f}\n", .{image.display(io, protocol)});
     try writer.flush();
 }
+
+pub fn createHorizontalComposite(
+    comptime T: type,
+    allocator: Allocator,
+    images: []const zignal.Image(T),
+    user_width: ?u32,
+    user_height: ?u32,
+    filter: zignal.Interpolation,
+) !zignal.Image(T) {
+    if (images.len == 0) return zignal.Image(T).init(allocator, 1, 1);
+
+    // Use the first image as reference for aspect ratio scaling
+    const ref_img = images[0];
+
+    // Calculate scale based on user constraints relative to the first image
+    const scale_factor = zignal.terminal.aspectScale(
+        user_width,
+        user_height,
+        ref_img.rows,
+        ref_img.cols,
+    );
+
+    // Calculate dimensions for each sub-image
+    const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(ref_img.cols)) * scale_factor)));
+    const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(ref_img.rows)) * scale_factor)));
+
+    // Safety check for zero dimensions
+    const final_w = if (w == 0) 1 else w;
+    const final_h = if (h == 0) 1 else h;
+
+    const canvas_w = @as(u32, @intCast(images.len)) * final_w;
+    const canvas_h = final_h;
+
+    var canvas = try zignal.Image(T).init(allocator, canvas_h, canvas_w);
+
+    // Fill background
+    if (@hasDecl(T, "black")) {
+        canvas.fill(T.black);
+    } else {
+        @memset(canvas.asBytes(), 0);
+    }
+
+    const wf = @as(f32, @floatFromInt(final_w));
+    const hf = @as(f32, @floatFromInt(final_h));
+
+    for (images, 0..) |img, i| {
+        const offset_x = @as(f32, @floatFromInt(i)) * wf;
+        // Use .none blend mode to overwrite (copy) pixels directly
+        canvas.insert(img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, filter, .none);
+    }
+
+    return canvas;
+}

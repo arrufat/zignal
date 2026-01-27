@@ -84,39 +84,21 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     }
 
     if (should_display) {
-        // Calculate proportional scale factor for a single sub-image based on user constraints
-        const user_scale = zignal.terminal.aspectScale(
-            parsed.options.width,
-            parsed.options.height,
-            source_img.rows,
-            source_img.cols,
-        );
-
-        const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.cols)) * user_scale)));
-        const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(source_img.rows)) * user_scale)));
-
         const filter = try common.resolveFilter(parsed.options.filter);
 
-        const canvas_w = 3 * w;
-        const canvas_h = h;
+        // We know original_source is not null because we initialized it if should_display is true
+        // provided source_img.dupe didn't fail (which would have returned error).
+        const images = [_]zignal.Image(Pixel){ original_source.?, target_img, source_img };
 
-        var canvas = try zignal.Image(Pixel).init(gpa, canvas_h, canvas_w);
+        var canvas = try display.createHorizontalComposite(
+            Pixel,
+            gpa,
+            &images,
+            parsed.options.width,
+            parsed.options.height,
+            filter,
+        );
         defer canvas.deinit(gpa);
-        canvas.fill(.{ .r = 0, .g = 0, .b = 0 });
-
-        const wf = @as(f32, @floatFromInt(w));
-        const hf = @as(f32, @floatFromInt(h));
-
-        // Insert original source
-        if (original_source) |img| {
-            canvas.insert(img, .{ .l = 0, .t = 0, .r = wf, .b = hf }, 0, filter, .none);
-        }
-
-        // Insert target
-        canvas.insert(target_img, .{ .l = wf, .t = 0, .r = 2 * wf, .b = hf }, 0, filter, .none);
-
-        // Insert result
-        canvas.insert(source_img, .{ .l = 2 * wf, .t = 0, .r = 3 * wf, .b = hf }, 0, filter, .none);
 
         try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }

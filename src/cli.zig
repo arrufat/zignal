@@ -4,6 +4,7 @@ const Io = std.Io;
 
 const zignal = @import("zignal");
 
+const diff = @import("cli/diff.zig");
 const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
 const info = @import("cli/info.zig");
@@ -19,7 +20,7 @@ pub const std_options: std.Options = .{
     .log_level = .debug,
 };
 
-const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "metrics", "stats", "version" });
+const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "metrics", "stats", "diff", "version" });
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
