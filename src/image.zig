@@ -20,7 +20,10 @@ const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
 const jpeg = @import("jpeg.zig");
 const png = @import("png.zig");
+const meta = @import("meta.zig");
 const metrics = @import("image/metrics.zig");
+const diff_mod = @import("image/diff.zig");
+const RunningStats = @import("stats.zig").RunningStats;
 
 // Import image sub-modules (private for internal use)
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
@@ -1173,6 +1176,19 @@ pub fn Image(comptime T: type) type {
         /// Returns an error if the images have different dimensions or are too small (< 11x11).
         pub fn ssim(self: Self, other: Self) !f64 {
             return metrics.ssim(T, self, other);
+        }
+
+        /// Options for computing image differences.
+        pub const DiffOptions = diff_mod.DiffOptions;
+
+        /// Result of a difference operation.
+        pub const DiffResult = diff_mod.DiffResult;
+
+        /// Computes the difference between `self` and `other` per pixel/channel.
+        /// The result is stored in `out`, which must have the same dimensions.
+        /// Applies scaling, thresholding, and visualization options in a single pass.
+        pub fn diff(self: Self, other: Self, out: Self, opts: DiffOptions) !DiffResult {
+            return diff_mod.compute(T, self, other, out, opts);
         }
 
         /// Computes the mean absolute pixel error normalized by the maximum channel value
