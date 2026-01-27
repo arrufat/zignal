@@ -7,7 +7,9 @@ const zignal = @import("zignal");
 const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
 const info = @import("cli/info.zig");
+const metrics = @import("cli/metrics.zig");
 const resize = @import("cli/resize.zig");
+const stats = @import("cli/stats.zig");
 const tile = @import("cli/tile.zig");
 const version = @import("cli/version.zig");
 
@@ -17,7 +19,7 @@ pub const std_options: std.Options = .{
     .log_level = .debug,
 };
 
-const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "version" });
+const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "metrics", "stats", "version" });
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
