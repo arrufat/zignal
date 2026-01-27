@@ -890,14 +890,34 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                 }
                 var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
 
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
+                if (png_state.header.bit_depth == 8) {
+                    // Optimized path for 8-bit RGB
+                    for (0..height) |y| {
+                        const src_row_start = y * (scanline_bytes + 1) + 1;
+                        const dst_row_start = y * width;
+                        const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                        const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                    for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, null);
+                        for (dst_row, 0..) |*pixel, i| {
+                            const offset = i * 3;
+                            if (offset + 3 <= src_row.len) {
+                                pixel.* = .{ .r = src_row[offset], .g = src_row[offset + 1], .b = src_row[offset + 2] };
+                            } else {
+                                pixel.* = .{ .r = 0, .g = 0, .b = 0 };
+                            }
+                        }
+                    }
+                } else {
+                    // Generic path (e.g., 16-bit)
+                    for (0..height) |y| {
+                        const src_row_start = y * (scanline_bytes + 1) + 1;
+                        const dst_row_start = y * width;
+                        const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                        const dst_row = output_data[dst_row_start .. dst_row_start + width];
+
+                        for (dst_row, 0..) |*pixel, i| {
+                            pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, null);
+                        }
                     }
                 }
 
@@ -912,22 +932,38 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
             }
             var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
 
-            for (0..height) |y| {
-                const src_row_start = y * (scanline_bytes + 1) + 1;
-                const dst_row_start = y * width;
-                const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                const dst_row = output_data[dst_row_start .. dst_row_start + width];
+            if (png_state.header.bit_depth == 8) {
+                // Optimized path for 8-bit RGBA
+                for (0..height) |y| {
+                    const src_row_start = y * (scanline_bytes + 1) + 1;
+                    const dst_row_start = y * width;
+                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
 
-                for (dst_row, 0..) |*pixel, i| {
-                    if (png_state.header.bit_depth == 8) {
-                        pixel.* = Rgba{ .r = src_row[i * 4], .g = src_row[i * 4 + 1], .b = src_row[i * 4 + 2], .a = src_row[i * 4 + 3] };
-                    } else {
+                    for (dst_row, 0..) |*pixel, i| {
+                        const offset = i * 4;
+                        if (offset + 4 <= src_row.len) {
+                            pixel.* = .{ .r = src_row[offset], .g = src_row[offset + 1], .b = src_row[offset + 2], .a = src_row[offset + 3] };
+                        } else {
+                            pixel.* = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+                        }
+                    }
+                }
+            } else {
+                // Generic/16-bit path
+                for (0..height) |y| {
+                    const src_row_start = y * (scanline_bytes + 1) + 1;
+                    const dst_row_start = y * width;
+                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
+                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
+
+                    for (dst_row, 0..) |*pixel, i| {
                         // 16-bit to 8-bit conversion
                         const offset = i * 8;
                         if (offset + 8 > src_row.len) {
-                            pixel.* = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+                            pixel.* = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
                         } else {
-                            pixel.* = Rgba{
+                            pixel.* = .{
                                 .r = @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8),
                                 .g = @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8),
                                 .b = @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8),
@@ -987,7 +1023,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
                         // Get alpha value from transparency chunk (default to opaque if not present)
                         const alpha = if (index < transparency_data.len) transparency_data[index] else 255;
 
-                        pixel.* = Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha };
+                        pixel.* = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha };
                     }
                 }
 
@@ -1023,7 +1059,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
 
                         if (index >= palette.len) return error.InvalidPaletteIndex;
                         const rgb = palette[index];
-                        pixel.* = Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
+                        pixel.* = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
                     }
                 }
 
@@ -1733,8 +1769,8 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
 
     return switch (T) {
         u8 => pixel_value,
-        Rgb => Rgb{ .r = pixel_value, .g = pixel_value, .b = pixel_value },
-        Rgba => Rgba{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = if (is_transparent) 0 else 255 },
+        Rgb => .{ .r = pixel_value, .g = pixel_value, .b = pixel_value },
+        Rgba => .{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = if (is_transparent) 0 else 255 },
         else => @compileError("Unsupported pixel type"),
     };
 }
@@ -1747,8 +1783,8 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
     if (offset + total_bytes > src_row.len) {
         return switch (T) {
             u8 => 0,
-            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
-            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            Rgb => .{ .r = 0, .g = 0, .b = 0 },
+            Rgba => .{ .r = 0, .g = 0, .b = 0, .a = 255 },
             else => @compileError("Unsupported pixel type"),
         };
     }
@@ -1788,8 +1824,8 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
 
     return switch (T) {
         u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
-        Rgb => Rgb{ .r = r, .g = g, .b = b },
-        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = if (is_transparent) 0 else 255 },
+        Rgb => .{ .r = r, .g = g, .b = b },
+        Rgba => .{ .r = r, .g = g, .b = b, .a = if (is_transparent) 0 else 255 },
         else => @compileError("Unsupported pixel type"),
     };
 }
@@ -1802,8 +1838,8 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
     if (offset + total_bytes > src_row.len) {
         return switch (T) {
             u8 => 0,
-            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
-            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            Rgb => .{ .r = 0, .g = 0, .b = 0 },
+            Rgba => .{ .r = 0, .g = 0, .b = 0, .a = 255 },
             else => @compileError("Unsupported pixel type"),
         };
     }
@@ -1827,8 +1863,8 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
 
     return switch (T) {
         u8 => @as(u8, @intCast((@as(u16, r) + @as(u16, g) + @as(u16, b)) / 3)),
-        Rgb => Rgb{ .r = r, .g = g, .b = b },
-        Rgba => Rgba{ .r = r, .g = g, .b = b, .a = a },
+        Rgb => .{ .r = r, .g = g, .b = b },
+        Rgba => .{ .r = r, .g = g, .b = b, .a = a },
         else => @compileError("Unsupported pixel type"),
     };
 }
@@ -1864,8 +1900,8 @@ fn extractPalettePixel(
     if (index >= palette.len) {
         return switch (T) {
             u8 => 0,
-            Rgb => Rgb{ .r = 0, .g = 0, .b = 0 },
-            Rgba => Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 },
+            Rgb => .{ .r = 0, .g = 0, .b = 0 },
+            Rgba => .{ .r = 0, .g = 0, .b = 0, .a = 255 },
             else => @compileError("Unsupported pixel type for palette conversion"),
         };
     }
@@ -1878,8 +1914,8 @@ fn extractPalettePixel(
 
     return switch (T) {
         u8 => @as(u8, @intCast((@as(u16, rgb[0]) + @as(u16, rgb[1]) + @as(u16, rgb[2])) / 3)),
-        Rgb => Rgb{ .r = rgb[0], .g = rgb[1], .b = rgb[2] },
-        Rgba => Rgba{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha },
+        Rgb => .{ .r = rgb[0], .g = rgb[1], .b = rgb[2] },
+        Rgba => .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha },
         else => @compileError("Unsupported pixel type for palette conversion"),
     };
 }
@@ -2360,7 +2396,7 @@ test "PNG fixed filters round-trip" {
             const r: u8 = @intCast((x * 255) / (width - 1));
             const g: u8 = @intCast((y * 255) / (height - 1));
             const b: u8 = @intCast(((x + y) * 255) / (width + height - 2));
-            img.data[y * width + x] = Rgb{ .r = r, .g = g, .b = b };
+            img.data[y * width + x] = .{ .r = r, .g = g, .b = b };
         }
     }
 
@@ -2489,8 +2525,8 @@ test "PNG encode with color management chunks" {
 
     // Create test image
     var test_data = [_]Rgb{
-        Rgb{ .r = 255, .g = 0, .b = 0 }, Rgb{ .r = 0, .g = 255, .b = 0 },
-        Rgb{ .r = 0, .g = 0, .b = 255 }, Rgb{ .r = 255, .g = 255, .b = 0 },
+        .{ .r = 255, .g = 0, .b = 0 }, .{ .r = 0, .g = 255, .b = 0 },
+        .{ .r = 0, .g = 0, .b = 255 }, .{ .r = 255, .g = 255, .b = 0 },
     };
     const test_image: Image(Rgb) = .initFromSlice(2, 2, &test_data);
 
