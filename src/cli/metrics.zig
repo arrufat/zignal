@@ -42,7 +42,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         try writer.print("\nComparing: {s}\n", .{path});
 
         // Load target image
-        var img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, path);
+        var img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
+            std.log.err("Failed to load image '{s}': {t}", .{ path, err });
+            continue;
+        };
         defer img.deinit(gpa);
 
         if (img.rows != ref_img.rows or img.cols != ref_img.cols) {
@@ -52,8 +55,8 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             continue;
         }
 
-        const psnr_val = try ref_img.psnr(img);
-        const mean_err = try ref_img.meanPixelError(img);
+        const psnr_val = ref_img.psnr(img) catch unreachable;
+        const mean_err = ref_img.meanPixelError(img) catch unreachable;
 
         // SSIM calculation
         var ssim_val: f64 = 0;
