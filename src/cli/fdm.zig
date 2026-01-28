@@ -48,9 +48,6 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     // Display if requested OR if no output file is specified
     const should_display = parsed.options.display or output_path == null;
 
-    std.log.debug("Source: {s}", .{source_path});
-    std.log.debug("Target: {s}", .{target_path});
-
     // Use Rgb(u8) for style transfer
     const Pixel = zignal.Rgb(u8);
 

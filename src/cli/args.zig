@@ -95,6 +95,7 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
 
                     if (ChildType == bool) {
                         @field(options, field.name) = true;
+                        std.log.debug("Option --{s} set to true", .{field.name});
                     } else {
                         const val_str = args.next() orelse {
                             std.log.err("Missing value for --{s}", .{field.name});
@@ -103,16 +104,19 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
 
                         if (ChildType == []const u8) {
                             @field(options, field.name) = val_str;
+                            std.log.debug("Option --{s} set to '{s}'", .{ field.name, val_str });
                         } else if (@typeInfo(ChildType) == .int) {
                             @field(options, field.name) = std.fmt.parseInt(ChildType, val_str, 10) catch {
                                 std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
                                 return error.InvalidArguments;
                             };
+                            std.log.debug("Option --{s} set to {s}", .{ field.name, val_str });
                         } else if (@typeInfo(ChildType) == .float) {
                             @field(options, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
                                 std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
                                 return error.InvalidArguments;
                             };
+                            std.log.debug("Option --{s} set to {s}", .{ field.name, val_str });
                         } else {
                             @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
                         }
