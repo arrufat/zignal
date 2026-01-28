@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
-const gzip = @import("../compression/gzip.zig");
+const compression = @import("../compression/flate.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -78,11 +78,9 @@ pub fn load(io: std.Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFi
     defer if (decompressed_data) |data| gpa.free(data);
 
     if (is_compressed) {
-        decompressed_data = gzip.decompress(gpa, raw_file_contents, max_file_size) catch |err| switch (err) {
-            error.InvalidGzipData,
-            error.InvalidGzipHeader,
+        decompressed_data = compression.inflate(gpa, raw_file_contents, .limited(max_file_size), .gzip) catch |err| switch (err) {
+            error.ReadFailed,
             error.OutputLimitExceeded,
-            error.InvalidOutputLimit,
             => return BdfError.InvalidCompression,
             else => return err,
         };
@@ -855,7 +853,7 @@ pub fn save(io: std.Io, gpa: Allocator, font: BitmapFont, path: []const u8) !voi
 
     if (is_compressed) {
         // Compress the BDF content
-        const compressed_data = try gzip.compress(gpa, bdf_content.items, .level_1, .default);
+        const compressed_data = try compression.deflate(gpa, bdf_content.items, .{ .type = .default, .level = .level_1 }, .gzip);
         defer gpa.free(compressed_data);
         try file.writeStreamingAll(io, compressed_data);
     } else {
