@@ -61,12 +61,14 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const should_display = parsed.options.display or parsed.options.output == null;
 
     // Load images
+    std.log.debug("Loading first image: {s}", .{path1});
     var img1 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path1) catch |err| {
         std.log.err("Failed to load image '{s}': {}", .{ path1, err });
         return;
     };
     defer img1.deinit(gpa);
 
+    std.log.debug("Loading second image: {s}", .{path2});
     var img2 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path2) catch |err| {
         std.log.err("Failed to load image '{s}': {}", .{ path2, err });
         return;
@@ -84,7 +86,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const threshold = parsed.options.threshold orelse 0;
     const binary = parsed.options.binary;
 
-    std.log.info("Computing difference...", .{});
+    std.log.debug("Computing difference...", .{});
 
     var diff_img = try zignal.Image(zignal.Rgba(u8)).init(gpa, img1.rows, img1.cols);
     defer diff_img.deinit(gpa);
@@ -97,7 +99,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         .force_opaque = true, // Force visual result to be opaque
     };
 
+    var timer = try std.time.Timer.start();
     const result = try img1.diff(img2, diff_img, diff_opts);
+    const diff_ns = timer.read();
+    std.log.debug("Diff computation took {d:.3} ms", .{@as(f64, @floatFromInt(diff_ns)) / std.time.ns_per_ms});
 
     // If using binary mode, stats.max() will be 255 if any diff found, or 0.
     // If using absolute mode (with scaling), stats.max() will be the max visualization brightness.
@@ -127,6 +132,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         );
         defer canvas.deinit(gpa);
 
+        std.log.debug("Displaying result...", .{});
         try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }
 }

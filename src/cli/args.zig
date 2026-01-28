@@ -65,6 +65,7 @@ pub fn parseLogLevel(arg: []const u8, args: *std.process.Args.Iterator) !bool {
 /// Boolean fields are treated as flags (no value required).
 /// Supported types: bool, integer types, and []const u8.
 pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Iterator) !ParseResult(T) {
+    std.log.debug("Parsing arguments for type {s}...", .{@typeName(T)});
     var options: T = .{};
     var positionals: std.ArrayList([]const u8) = .empty;
     errdefer positionals.deinit(allocator);

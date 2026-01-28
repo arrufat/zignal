@@ -19,10 +19,12 @@ pub fn parseFilter(name: []const u8) !zignal.Interpolation {
 
 pub fn resolveFilter(name: ?[]const u8) !zignal.Interpolation {
     if (name) |n| {
+        std.log.debug("Resolving filter: {s}", .{n});
         return parseFilter(n) catch |err| {
             std.log.err("Unknown filter type: {s}", .{n});
             return err;
         };
     }
+    std.log.debug("Using default filter: bilinear", .{});
     return .bilinear;
 }

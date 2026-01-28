@@ -48,13 +48,14 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     // Display if requested OR if no output file is specified
     const should_display = parsed.options.display or output_path == null;
 
-    std.log.info("Source: {s}", .{source_path});
-    std.log.info("Target: {s}", .{target_path});
+    std.log.debug("Source: {s}", .{source_path});
+    std.log.debug("Target: {s}", .{target_path});
 
     // Use Rgb(u8) for style transfer
     const Pixel = zignal.Rgb(u8);
 
     // Load source image
+    std.log.debug("Loading source image: {s}", .{source_path});
     var source_img: zignal.Image(Pixel) = try .load(io, gpa, source_path);
     defer source_img.deinit(gpa);
 
@@ -66,6 +67,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer if (original_source) |*img| img.deinit(gpa);
 
     // Load target image
+    std.log.debug("Loading target image: {s}", .{target_path});
     var target_img: zignal.Image(Pixel) = try .load(io, gpa, target_path);
     defer target_img.deinit(gpa);
 
@@ -73,10 +75,13 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     var fdm: zignal.FeatureDistributionMatching(Pixel) = .init(gpa);
     defer fdm.deinit();
 
-    std.log.info("Applying FDM style transfer...", .{});
+    std.log.debug("Applying FDM style transfer...", .{});
 
+    var timer = try std.time.Timer.start();
     // Apply match
     try fdm.match(source_img, target_img);
+    const fdm_ns = timer.read();
+    std.log.debug("FDM took {d:.3} ms", .{@as(f64, @floatFromInt(fdm_ns)) / std.time.ns_per_ms});
 
     if (output_path) |out_path| {
         std.log.info("Saving result to {s}...", .{out_path});
@@ -102,6 +107,4 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
         try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }
-
-    std.log.info("Done.", .{});
 }

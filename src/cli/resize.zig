@@ -79,9 +79,9 @@ fn processImage(
     filter: zignal.Interpolation,
 ) !void {
     if (is_batch) {
-        std.log.info("Processing {s}...", .{input_path});
+        std.log.debug("Processing {s}...", .{input_path});
     } else {
-        std.log.info("Loading {s}...", .{input_path});
+        std.log.debug("Loading {s}...", .{input_path});
     }
 
     const output_arg = options.output.?;
@@ -146,7 +146,10 @@ fn processImage(
     var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, new_height, new_width);
     defer out.deinit(gpa);
 
+    var timer = try std.time.Timer.start();
     try img.resize(gpa, out, filter);
+    const resize_ns = timer.read();
+    std.log.debug("Resize operation took {d:.3} ms", .{@as(f64, @floatFromInt(resize_ns)) / std.time.ns_per_ms});
 
     // Save output
     if (is_batch) {

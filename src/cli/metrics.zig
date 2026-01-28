@@ -34,7 +34,8 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const ref_path = parsed.positionals[0];
     const targets = parsed.positionals[1..];
 
-    std.log.info("Reference image: {s}", .{ref_path});
+    std.log.debug("Reference image: {s}", .{ref_path});
+    std.log.debug("Loading reference image...", .{});
     var ref_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, ref_path);
     defer ref_img.deinit(gpa);
 
@@ -42,6 +43,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         try writer.print("\nComparing: {s}\n", .{path});
 
         // Load target image
+        std.log.debug("Loading target image: {s}", .{path});
         var img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("Failed to load image '{s}': {t}", .{ path, err });
             continue;
@@ -55,6 +57,9 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             continue;
         }
 
+        std.log.debug("Calculating metrics...", .{});
+        var timer = try std.time.Timer.start();
+
         const psnr_val = ref_img.psnr(img) catch unreachable;
         const mean_err = ref_img.meanPixelError(img) catch unreachable;
 
@@ -66,6 +71,9 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         } else {
             std.log.warn("Image {s} is too small for SSIM (min 11x11)", .{path});
         }
+
+        const metrics_ns = timer.read();
+        std.log.debug("Metrics calculation took {d:.3} ms", .{@as(f64, @floatFromInt(metrics_ns)) / std.time.ns_per_ms});
 
         try writer.print("  PSNR: {d:.4} dB\n", .{psnr_val});
         try writer.print("  SSIM: {d:.4}\n", .{ssim_val});
