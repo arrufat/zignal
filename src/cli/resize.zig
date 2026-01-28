@@ -41,10 +41,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         return;
     }
 
-    if (parsed.options.output == null) {
+    const output_arg = parsed.options.output orelse {
         std.log.err("Missing mandatory option: --output <file_or_dir>", .{});
         return error.InvalidArguments;
-    }
+    };
 
     // Validate conflicting options
     if (parsed.options.scale != null and (parsed.options.width != null or parsed.options.height != null)) {
@@ -61,9 +61,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const filter = try common.resolveFilter(parsed.options.filter);
 
     const is_batch = parsed.positionals.len > 1;
+    const target = try common.resolveOutputTarget(io, output_arg, is_batch);
 
     for (parsed.positionals) |input_path| {
-        processImage(io, gpa, input_path, parsed.options, is_batch, filter) catch |err| {
+        processImage(io, gpa, input_path, target.path, target.is_directory, is_batch, filter, parsed.options) catch |err| {
             std.log.err("failed to resize '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
         };
@@ -74,23 +75,17 @@ fn processImage(
     io: Io,
     gpa: Allocator,
     input_path: []const u8,
-    options: Args,
+    output_arg: []const u8,
+    use_as_dir: bool,
     is_batch: bool,
     filter: zignal.Interpolation,
+    options: Args,
 ) !void {
     if (is_batch) {
         std.log.debug("Processing {s}...", .{input_path});
     } else {
         std.log.debug("Loading {s}...", .{input_path});
     }
-
-    const output_arg = options.output.?;
-
-    // Determine output path
-    // If batching, treat output_arg as a directory.
-    // If single file, use output_arg as the filename unless it ends in a separator.
-    const ends_with_sep = std.mem.endsWith(u8, output_arg, "/") or std.mem.endsWith(u8, output_arg, "\\");
-    const use_as_dir = is_batch or ends_with_sep;
 
     const output_path = if (use_as_dir) try blk_path: {
         const basename = std.fs.path.basename(input_path);
