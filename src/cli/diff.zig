@@ -133,6 +133,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         defer canvas.deinit(gpa);
 
         std.log.debug("Displaying result...", .{});
-        try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
+        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null, filter);
+        try display.displayCanvas(io, writer, &canvas, format);
     }
 }
