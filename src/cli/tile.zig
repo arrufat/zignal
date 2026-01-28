@@ -110,6 +110,8 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             cols = parsed.options.cols.?;
             if (rows * cols < img_count) {
                 std.log.warn("Grid size ({d}x{d}={d}) is smaller than image count ({d}). Some images will be ignored.", .{ rows, cols, rows * cols, img_count });
+            } else if (rows * cols > img_count) {
+                std.log.debug("Grid size ({d}x{d}={d}) is larger than image count ({d}). Empty cells will be black.", .{ rows, cols, rows * cols, img_count });
             }
         },
         .factors => {
@@ -130,6 +132,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
                 rows = cols;
                 cols = tmp;
             }
+            std.log.debug("Factors mode: calculated {d}x{d} grid for {d} images", .{ rows, cols, n });
         },
     }
 
@@ -146,7 +149,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
     if (cell_w == 0 or cell_h == 0) {
         // Load first image to establish dimensions
-        std.log.info("Analyzing reference image: {s}...", .{input_paths[0]});
+        std.log.debug("Analyzing reference image: {s}...", .{input_paths[0]});
 
         // Use RGBA for safety to handle transparency
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
@@ -169,10 +172,11 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const canvas_w = cols * cell_w;
     const canvas_h = rows * cell_h;
 
-    std.log.info("Cell Size: {d}x{d}", .{ cell_w, cell_h });
-    std.log.info("Canvas Size: {d}x{d}", .{ canvas_w, canvas_h });
+    std.log.debug("Cell Size: {d}x{d}", .{ cell_w, cell_h });
+    std.log.debug("Canvas Size: {d}x{d}", .{ canvas_w, canvas_h });
 
     // Create Canvas
+    std.log.debug("Creating canvas...", .{});
     var canvas = try zignal.Image(zignal.Rgba(u8)).init(gpa, canvas_h, canvas_w);
     defer canvas.deinit(gpa);
     canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Fill black (opaque)
@@ -180,22 +184,25 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const filter = try common.resolveFilter(parsed.options.filter);
 
     // Process Images
+    var timer = try std.time.Timer.start();
     for (input_paths, 0..) |path, idx| {
         if (idx >= rows * cols) break;
 
         const r = idx / cols;
         const c = idx % cols;
 
-        std.log.info("[{d}/{d}] Processing {s}...", .{ idx + 1, img_count, path });
+        std.log.debug("[{d}/{d}] Processing {s}...", .{ idx + 1, img_count, path });
 
         var img: zignal.Image(zignal.Rgba(u8)) = undefined;
         var loaded_new = false;
 
         // Optimization: Use the already loaded reference if it's the first one
         if (idx == 0 and reference_img != null) {
+            std.log.debug("Using reference image for slot {d}", .{idx});
             img = reference_img.?;
         } else {
             // Load
+            std.log.debug("Loading image for slot {d}: {s}", .{ idx, path });
             img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
                 std.log.warn("Failed to load {s}: {s}. Skipping slot.", .{ path, @errorName(err) });
                 continue;
@@ -237,6 +244,8 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
         canvas.insert(img, dest_rect, 0, filter, .none);
     }
+    const tile_ns = timer.read();
+    std.log.debug("Tiling operation took {d:.3} ms", .{@as(f64, @floatFromInt(tile_ns)) / std.time.ns_per_ms});
 
     if (output_path) |out_path| {
         std.log.info("Saving to {s}...", .{out_path});
@@ -246,6 +255,4 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     if (should_display) {
         try display.displayCanvas(io, writer, &canvas, parsed.options.protocol, filter);
     }
-
-    std.log.info("Done.", .{});
 }

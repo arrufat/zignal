@@ -37,8 +37,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
         // Use a block to catch errors for individual files so we can continue to the next one
         const result = blk: {
+            std.log.debug("Detecting format for: {s}", .{image_path});
             const image_format = zignal.ImageFormat.detectFromPath(io, gpa, image_path) catch |err| break :blk err;
             if (image_format) |fmt| {
+                std.log.debug("Format detected: {s}", .{@tagName(fmt)});
                 const file = std.Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
                 defer file.close(io);
 

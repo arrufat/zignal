@@ -57,17 +57,23 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
-            std.log.info("File: {s}", .{path});
+            std.log.debug("File: {s}", .{path});
         }
-        var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
+        std.log.debug("Loading image: {s}", .{path});
+        var image: zignal.Image(zignal.Rgba(u8)) = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
+            std.log.err("Failed to load image '{s}': {}", .{ path, err });
+            continue;
+        };
         defer image.deinit(gpa);
 
+        std.log.debug("Displaying image...", .{});
         try writer.print("{f}\n", .{image.display(io, protocol)});
         try writer.flush();
     }
 }
 
 pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
+    std.log.debug("Parsing protocol: {s}", .{name});
     const protocol_map = std.StaticStringMap(zignal.DisplayFormat).initComptime(.{
         .{ "kitty", zignal.DisplayFormat{ .kitty = .default } },
         .{ "sixel", zignal.DisplayFormat{ .sixel = .default } },

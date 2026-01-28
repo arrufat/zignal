@@ -31,12 +31,15 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         }
 
         // Load image as RGBA(u8)
+        std.log.debug("Loading image: {s}", .{path});
         var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("Failed to load image '{s}': {t}", .{ path, err });
             continue;
         };
         defer image.deinit(gpa);
 
+        std.log.debug("Computing statistics...", .{});
+        var timer = try std.time.Timer.start();
         var r_stats: zignal.RunningStats(f64) = .init();
         var g_stats: zignal.RunningStats(f64) = .init();
         var b_stats: zignal.RunningStats(f64) = .init();
@@ -46,6 +49,8 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             g_stats.add(pixel.g);
             b_stats.add(pixel.b);
         }
+        const stats_ns = timer.read();
+        std.log.debug("Statistics computed in {d:.3} ms", .{@as(f64, @floatFromInt(stats_ns)) / std.time.ns_per_ms});
 
         try writer.print("{s: <8} {s: >8} {s: >8} {s: >10} {s: >10}\n", .{ "Channel", "Min", "Max", "Mean", "StdDev" });
         inline for (.{ .{ "Red", &r_stats }, .{ "Green", &g_stats }, .{ "Blue", &b_stats } }) |entry| {
