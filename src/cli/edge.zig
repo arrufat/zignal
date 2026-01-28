@@ -69,18 +69,18 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const output_path = parsed.options.output;
     const should_display = parsed.options.display or output_path == null;
 
+    const algo_map = std.StaticStringMap(Algo).initComptime(.{
+        .{ "sobel", .sobel },
+        .{ "canny", .canny },
+        .{ "shen-castan", .shen_castan },
+    });
+
     var algo: Algo = .sobel;
     if (parsed.options.algo) |a| {
-        if (std.mem.eql(u8, a, "sobel")) {
-            algo = .sobel;
-        } else if (std.mem.eql(u8, a, "canny")) {
-            algo = .canny;
-        } else if (std.mem.eql(u8, a, "shen-castan")) {
-            algo = .shen_castan;
-        } else {
+        algo = algo_map.get(a) orelse {
             std.log.err("Unknown algorithm: {s}. Supported: sobel, canny, shen-castan", .{a});
             return error.InvalidArguments;
-        }
+        };
     }
 
     std.log.debug("Loading image: {s}", .{input_path});
