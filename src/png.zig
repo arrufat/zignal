@@ -1572,16 +1572,16 @@ fn selectBestFilter(
     var best_cost: u32 = std.math.maxInt(u32);
 
     const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
-    for (filters) |filter_type| {
+    for (filters) |filter| {
         // Skip filters that reference a previous row if none exists
-        const invalid_for_first_row = (previous_row == null and (filter_type == .up or filter_type == .average or filter_type == .paeth));
+        const invalid_for_first_row = (previous_row == null and (filter == .up or filter == .average or filter == .paeth));
         if (invalid_for_first_row) continue;
 
-        filterRow(filter_type, temp_buffer, src_row, previous_row, bytes_per_pixel);
+        filterRow(filter, temp_buffer, src_row, previous_row, bytes_per_pixel);
         const cost = calculateFilterCost(temp_buffer);
         if (cost < best_cost) {
             best_cost = cost;
-            best_filter = filter_type;
+            best_filter = filter;
         }
     }
 
@@ -2469,9 +2469,9 @@ test "PNG fixed filters round-trip" {
     }
 
     const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
-    for (filters) |ft| {
+    for (filters) |filter| {
         const png_data = try encode(Rgb, allocator, img, .{
-            .filter = .{ .fixed = ft },
+            .filter = .{ .fixed = filter },
             .strategy = .{ .type = .filtered, .level = .level_1 },
         });
         defer allocator.free(png_data);
