@@ -1,5 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
+
+pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug else .err;
 
 /// Configuration for a specific command-line option.
 pub const OptionConfig = struct {
@@ -32,6 +35,31 @@ fn PayloadType(comptime T: type) type {
     return if (info == .optional) info.optional.child else T;
 }
 
+/// Checks if the argument is a log level flag and parses it.
+/// Returns true if consumed, false otherwise.
+pub fn parseLogLevel(arg: []const u8, args: *std.process.Args.Iterator) !bool {
+    if (!std.mem.eql(u8, arg, "--log-level")) return false;
+
+    const level_str = args.next() orelse {
+        std.log.err("Missing value for --log-level", .{});
+        return error.InvalidArguments;
+    };
+    runtime_log_level = std.meta.stringToEnum(std.log.Level, level_str) orelse {
+        const level_names = comptime blk: {
+            var names: []const u8 = "";
+            const fields = std.meta.fields(std.log.Level);
+            for (fields, 0..) |field, i| {
+                names = names ++ field.name;
+                if (i < fields.len - 1) names = names ++ ", ";
+            }
+            break :blk names;
+        };
+        std.log.err("Invalid log level: {s}. Supported levels: {s}", .{ level_str, level_names });
+        return error.InvalidArguments;
+    };
+    return true;
+}
+
 /// Parses command-line arguments into a struct of type T.
 /// T should be a struct where fields represent options (e.g., `width: ?u32`).
 /// Boolean fields are treated as flags (no value required).
@@ -47,6 +75,8 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
             help_requested = true;
             continue;
         }
+        if (try parseLogLevel(arg, args)) continue;
+
         if (std.mem.eql(u8, arg, "--")) {
             while (args.next()) |pos| {
                 try positionals.append(allocator, pos);
