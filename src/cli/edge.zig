@@ -129,6 +129,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
     if (should_display) {
         const filter = try common.resolveFilter(parsed.options.filter);
-        try display.displayCanvas(io, writer, out_img, parsed.options.protocol, filter);
+        const format = try display.resolveDisplayFormat(parsed.options.protocol, parsed.options.width, parsed.options.height, filter);
+        try display.displayCanvas(io, writer, out_img, format);
     }
 }

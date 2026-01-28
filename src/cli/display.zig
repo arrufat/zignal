@@ -41,19 +41,9 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
     const width = parsed.options.width;
     const height = parsed.options.height;
-    var protocol: zignal.DisplayFormat = .{ .auto = .default };
-    var filter: zignal.Interpolation = .bilinear;
+    const filter = try common.resolveFilter(parsed.options.filter);
 
-    if (parsed.options.protocol) |p| {
-        protocol = parseProtocol(p) catch |err| {
-            std.log.err("Unknown protocol type: {s}", .{p});
-            return err;
-        };
-    }
-
-    filter = try common.resolveFilter(parsed.options.filter);
-
-    applyOptions(&protocol, width, height, filter);
+    const display_fmt = try resolveDisplayFormat(parsed.options.protocol, width, height, filter);
 
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
@@ -67,9 +57,25 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         defer image.deinit(gpa);
 
         std.log.debug("Displaying image...", .{});
-        try writer.print("{f}\n", .{image.display(io, protocol)});
-        try writer.flush();
+        try displayCanvas(io, writer, image, display_fmt);
     }
+}
+
+pub fn resolveDisplayFormat(
+    protocol_name: ?[]const u8,
+    width: ?u32,
+    height: ?u32,
+    filter: zignal.Interpolation,
+) !zignal.DisplayFormat {
+    var protocol: zignal.DisplayFormat = .{ .auto = .default };
+    if (protocol_name) |p| {
+        protocol = parseProtocol(p) catch |err| {
+            std.log.err("Unknown protocol type: {s}", .{p});
+            return err;
+        };
+    }
+    applyOptions(&protocol, width, height, filter);
+    return protocol;
 }
 
 pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
@@ -127,21 +133,9 @@ pub fn displayCanvas(
     io: Io,
     writer: *std.Io.Writer,
     image: anytype,
-    protocol_name: ?[]const u8,
-    filter: zignal.Interpolation,
+    format: zignal.DisplayFormat,
 ) !void {
-    var protocol: zignal.DisplayFormat = .{ .auto = .default };
-
-    if (protocol_name) |p| {
-        protocol = parseProtocol(p) catch |err| {
-            std.log.err("Unknown protocol type: {s}", .{p});
-            return err;
-        };
-    }
-
-    applyOptions(&protocol, null, null, filter);
-
-    try writer.print("{f}\n", .{image.display(io, protocol)});
+    try writer.print("{f}\n", .{image.display(io, format)});
     try writer.flush();
 }
 
