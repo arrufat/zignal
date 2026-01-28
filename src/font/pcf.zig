@@ -12,9 +12,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const LoadFilter = @import("../font.zig").LoadFilter;
 const max_file_size = @import("../font.zig").max_file_size;
-const gzip = @import("../compression/gzip.zig");
+const LoadFilter = @import("../font.zig").LoadFilter;
+const compression = @import("../compression/flate.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -202,11 +202,9 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        decompressed_data = gzip.decompress(allocator, raw_file_contents, max_file_size) catch |err| switch (err) {
-            error.InvalidGzipData,
-            error.InvalidGzipHeader,
+        decompressed_data = compression.inflate(allocator, raw_file_contents, .limited(max_file_size), .gzip) catch |err| switch (err) {
+            error.ReadFailed,
             error.OutputLimitExceeded,
-            error.InvalidOutputLimit,
             => return PcfError.InvalidCompression,
             else => return err,
         };

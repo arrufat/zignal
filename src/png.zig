@@ -6,8 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const deflate = @import("compression/deflate.zig");
-const zlib = @import("compression/zlib.zig");
+const compression = @import("compression/flate.zig");
 const convertColor = @import("color.zig").convertColor;
 const Gray = @import("color.zig").Gray;
 const Image = @import("image.zig").Image;
@@ -774,7 +773,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     rgba: Image(Rgba),
 } {
     // Decompress IDAT data
-    const decompressed = try zlib.decompress(allocator, png_state.idat_data.items, png_state.scan_data_bytes);
+    const decompressed = try compression.inflate(allocator, png_state.idat_data.items, .limited(png_state.scan_data_bytes), .zlib);
     defer allocator.free(decompressed);
 
     // Apply row defiltering
@@ -1229,15 +1228,13 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
 
 // PNG encoding options
 pub const EncodeOptions = struct {
-    filter_mode: FilterMode = .adaptive,
-    compression_level: deflate.CompressionLevel = .level_6,
-    compression_strategy: deflate.CompressionStrategy = .filtered,
+    filter: FilterMode = .adaptive,
+    strategy: compression.Strategy = .filtered,
     gamma: ?f32 = null,
     srgb_intent: ?SrgbRenderingIntent = null,
     pub const default: EncodeOptions = .{
-        .filter_mode = .adaptive,
-        .compression_level = .level_6,
-        .compression_strategy = .default,
+        .filter = .adaptive,
+        .strategy = .filtered,
     };
 };
 
@@ -1291,7 +1288,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     }
 
     // Apply row filtering based on options
-    const filtered_data = switch (options.filter_mode) {
+    const filtered_data = switch (options.filter) {
         .none => try filterScanlines(gpa, image_data, header, .none),
         .adaptive => try filterScanlinesAdaptive(gpa, image_data, header),
         .fixed => |filter_type| try filterScanlines(gpa, image_data, header, filter_type),
@@ -1299,7 +1296,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     defer gpa.free(filtered_data);
 
     // Compress filtered data with zlib format (required for PNG IDAT)
-    const compressed_data = try zlib.compress(gpa, filtered_data, options.compression_level, options.compression_strategy);
+    const compressed_data = try compression.deflate(gpa, filtered_data, options.strategy, .zlib);
     defer gpa.free(compressed_data);
 
     // Write IDAT chunk
@@ -2473,7 +2470,10 @@ test "PNG fixed filters round-trip" {
 
     const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
     for (filters) |ft| {
-        const png_data = try encode(Rgb, allocator, img, .{ .filter_mode = .{ .fixed = ft }, .compression_level = .level_1, .compression_strategy = .filtered });
+        const png_data = try encode(Rgb, allocator, img, .{
+            .filter = .{ .fixed = ft },
+            .strategy = .{ .type = .filtered, .level = .level_1 },
+        });
         defer allocator.free(png_data);
 
         var state = try decode(allocator, png_data, .{});
