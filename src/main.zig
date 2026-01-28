@@ -1,9 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 
+const cli_args = @import("cli/args.zig");
 const diff = @import("cli/diff.zig");
 const display = @import("cli/display.zig");
 const fdm = @import("cli/fdm.zig");
@@ -16,8 +18,19 @@ const version = @import("cli/version.zig");
 
 const root = @This();
 
+pub fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.default),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(level) > @intFromEnum(cli_args.runtime_log_level)) return;
+    std.log.defaultLog(level, scope, format, args);
+}
+
 pub const std_options: std.Options = .{
     .log_level = .debug,
+    .logFn = logFn,
 };
 
 const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "metrics", "stats", "diff", "version" });
@@ -61,21 +74,32 @@ pub const Cli = struct {
     }
 
     pub fn run(self: Cli, allocator: Allocator, io: Io, stdout: *std.Io.Writer, args: *std.process.Args.Iterator) !void {
-        if (args.next()) |arg| {
-            if (self.getCommand(arg)) |cmd| {
+        var arg = args.next();
+
+        // Handle global flags
+        while (arg) |a| {
+            if (try cli_args.parseLogLevel(a, args)) {
+                arg = args.next();
+            } else {
+                break;
+            }
+        }
+
+        if (arg) |cmd_name| {
+            if (self.getCommand(cmd_name)) |cmd| {
                 cmd.run(io, stdout, allocator, args) catch |err| {
-                    std.log.err("{s} command failed: {t}", .{ arg, err });
+                    std.log.err("{s} command failed: {t}", .{ cmd_name, err });
                     std.process.exit(1);
                 };
                 return;
             }
 
-            if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            if (std.mem.eql(u8, cmd_name, "help") or std.mem.eql(u8, cmd_name, "--help") or std.mem.eql(u8, cmd_name, "-h")) {
                 try self.printHelp(stdout, args);
                 return;
             }
 
-            std.log.err("Unknown command: '{s}'", .{arg});
+            std.log.err("Unknown command: '{s}'", .{cmd_name});
             try self.printHelp(stdout, null);
             std.process.exit(1);
         }
@@ -111,12 +135,24 @@ pub const Cli = struct {
     }
 
     fn printGeneralHelp(self: Cli, stdout: *std.Io.Writer) !void {
+        const level_names = comptime blk: {
+            var names: []const u8 = "";
+            const fields = std.meta.fields(std.log.Level);
+            for (fields, 0..) |field, i| {
+                names = names ++ field.name;
+                if (i < fields.len - 1) names = names ++ ", ";
+            }
+            break :blk names;
+        };
         try stdout.print(
-            \\Usage: zignal <command> [options]
+            \\Usage: zignal [options] <command> [command-options]
+            \\
+            \\Global Options:
+            \\  --log-level <level>   Set the logging level ({s})
             \\
             \\Commands:
             \\
-        , .{});
+        , .{level_names});
 
         var max_len: usize = 0;
         for (self.commands) |cmd| {
