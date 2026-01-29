@@ -6,7 +6,6 @@ const zignal = @import("zignal");
 
 const args = @import("args.zig");
 const display = @import("display.zig");
-const common = @import("common.zig");
 
 const LayoutMode = enum {
     square,
@@ -46,7 +45,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 

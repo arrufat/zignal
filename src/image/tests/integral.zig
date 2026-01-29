@@ -6,7 +6,6 @@ const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
 const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
-const Gray = color.Gray;
 const Integral = @import("../integral.zig").Integral;
 
 test "integral image scalar" {

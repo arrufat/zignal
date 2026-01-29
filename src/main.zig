@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const zignal = @import("zignal");
 
 const cli_args = @import("cli/args.zig");
+
 const blur = @import("cli/blur.zig");
 const diff = @import("cli/diff.zig");
 const display = @import("cli/display.zig");
@@ -47,14 +48,14 @@ pub fn main(init: std.process.Init) !void {
     _ = args.skip();
 
     var buffer: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(init.io, &buffer);
+    var stdout = Io.File.stdout().writer(init.io, &buffer);
 
     try cli.run(init.gpa, init.io, &stdout.interface, &args);
 }
 
 pub const Command = struct {
     name: []const u8,
-    run: *const fn (Io, *std.Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void,
+    run: *const fn (Io, *Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void,
     description: []const u8,
     help: []const u8,
 };
@@ -67,7 +68,7 @@ pub const Cli = struct {
             var items: [names.len]Command = undefined;
             for (names, 0..) |name, i| {
                 const module = @field(root, name);
-                items[i] = Command{
+                items[i] = .{
                     .name = name,
                     .run = module.run,
                     .description = module.description,
@@ -83,7 +84,7 @@ pub const Cli = struct {
         self: Cli,
         allocator: Allocator,
         io: Io,
-        stdout: *std.Io.Writer,
+        stdout: *Io.Writer,
         args: *std.process.Args.Iterator,
     ) !void {
         var arg = args.next();
@@ -124,7 +125,7 @@ pub const Cli = struct {
         } else null;
     }
 
-    fn printHelp(self: Cli, stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
+    fn printHelp(self: Cli, stdout: *Io.Writer, args: ?*std.process.Args.Iterator) !void {
         if (args) |iterator| {
             if (iterator.next()) |subcmd| {
                 if (self.getCommand(subcmd)) |cmd| {
@@ -145,7 +146,7 @@ pub const Cli = struct {
         try stdout.flush();
     }
 
-    fn printGeneralHelp(self: Cli, stdout: *std.Io.Writer) !void {
+    fn printGeneralHelp(self: Cli, stdout: *Io.Writer) !void {
         const level_names = comptime blk: {
             var names: []const u8 = "";
             const fields = std.meta.fields(std.log.Level);

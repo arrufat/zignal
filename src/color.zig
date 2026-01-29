@@ -23,6 +23,7 @@
 //!   - Runtime dynamic color handling via the `Color(T)` union.
 
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -108,7 +109,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
 }
 
 /// Internal helper to format color structs with ANSI colors for terminal output.
-fn formatColor(comptime T: type, self: T, writer: *std.Io.Writer) !void {
+fn formatColor(comptime T: type, self: T, writer: *Io.Writer) !void {
     // Get the short type name
     const type_name = comptime getSimpleTypeName(T);
 
@@ -299,7 +300,7 @@ pub fn Rgb(comptime T: type) type {
         }
 
         /// Formats the color for terminal output.
-        pub fn format(self: Rgb(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Rgb(T), writer: *Io.Writer) !void {
             return formatColor(Rgb(T), self, writer);
         }
 
@@ -422,7 +423,7 @@ pub fn Rgba(comptime T: type) type {
         }
 
         /// Formats the color for terminal output.
-        pub fn format(self: Rgba(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Rgba(T), writer: *Io.Writer) !void {
             return formatColor(Rgba(T), self, writer);
         }
 
@@ -480,7 +481,7 @@ pub fn Gray(comptime T: type) type {
         y: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Gray(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Gray(T), writer: *Io.Writer) !void {
             return formatColor(Gray(T), self, writer);
         }
 
@@ -533,7 +534,7 @@ pub fn Hsv(comptime T: type) type {
         v: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Hsv(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Hsv(T), writer: *Io.Writer) !void {
             return formatColor(Hsv(T), self, writer);
         }
 
@@ -571,7 +572,7 @@ pub fn Hsl(comptime T: type) type {
         l: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Hsl(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Hsl(T), writer: *Io.Writer) !void {
             return formatColor(Hsl(T), self, writer);
         }
 
@@ -611,7 +612,7 @@ pub fn Xyz(comptime T: type) type {
         z: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Xyz(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Xyz(T), writer: *Io.Writer) !void {
             return formatColor(Xyz(T), self, writer);
         }
 
@@ -655,7 +656,7 @@ pub fn Lab(comptime T: type) type {
         b: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Lab(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Lab(T), writer: *Io.Writer) !void {
             return formatColor(Lab(T), self, writer);
         }
 
@@ -694,7 +695,7 @@ pub fn Lch(comptime T: type) type {
         h: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Lch(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Lch(T), writer: *Io.Writer) !void {
             return formatColor(Lch(T), self, writer);
         }
 
@@ -730,7 +731,7 @@ pub fn Lms(comptime T: type) type {
         s: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Lms(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Lms(T), writer: *Io.Writer) !void {
             return formatColor(Lms(T), self, writer);
         }
 
@@ -768,7 +769,7 @@ pub fn Oklab(comptime T: type) type {
         b: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Oklab(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Oklab(T), writer: *Io.Writer) !void {
             return formatColor(Oklab(T), self, writer);
         }
 
@@ -807,7 +808,7 @@ pub fn Oklch(comptime T: type) type {
         h: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Oklch(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Oklch(T), writer: *Io.Writer) !void {
             return formatColor(Oklch(T), self, writer);
         }
 
@@ -846,7 +847,7 @@ pub fn Xyb(comptime T: type) type {
         b: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Xyb(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Xyb(T), writer: *Io.Writer) !void {
             return formatColor(Xyb(T), self, writer);
         }
 
@@ -886,7 +887,7 @@ pub fn Ycbcr(comptime T: type) type {
         cr: T,
 
         /// Formats the color for terminal output.
-        pub fn format(self: Ycbcr(T), writer: *std.Io.Writer) !void {
+        pub fn format(self: Ycbcr(T), writer: *Io.Writer) !void {
             return formatColor(Ycbcr(T), self, writer);
         }
 
@@ -1714,7 +1715,7 @@ test "vivid colors" {
 test "Color formatting" {
     const red: Rgb(u8) = .{ .r = 255, .g = 0, .b = 0 };
     var buffer: [512]u8 = undefined;
-    var stream: std.Io.Writer = .fixed(&buffer);
+    var stream: Io.Writer = .fixed(&buffer);
 
     try red.format(&stream);
     const result_red = buffer[0..stream.end];
