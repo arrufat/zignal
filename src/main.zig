@@ -7,16 +7,19 @@ const zignal = @import("zignal");
 
 const cli_args = @import("cli/args.zig");
 
-const blur = @import("cli/blur.zig");
-const diff = @import("cli/diff.zig");
-const display = @import("cli/display.zig");
-const edges = @import("cli/edges.zig");
-const fdm = @import("cli/fdm.zig");
-const info = @import("cli/info.zig");
-const metrics = @import("cli/metrics.zig");
-const resize = @import("cli/resize.zig");
-const tile = @import("cli/tile.zig");
-const version = @import("cli/version.zig");
+// Subcommands are automatically discovered from public declarations that
+// have 'run', 'description', and 'help'. They are marked 'pub' so that
+// the compiler and linters don't complain about them being unused.
+pub const blur = @import("cli/blur.zig");
+pub const diff = @import("cli/diff.zig");
+pub const display = @import("cli/display.zig");
+pub const edges = @import("cli/edges.zig");
+pub const fdm = @import("cli/fdm.zig");
+pub const info = @import("cli/info.zig");
+pub const metrics = @import("cli/metrics.zig");
+pub const resize = @import("cli/resize.zig");
+pub const tile = @import("cli/tile.zig");
+pub const version = @import("cli/version.zig");
 
 const root = @This();
 
@@ -35,13 +38,6 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-const cli: Cli = .init(&.{
-    "blur",    "diff",   "display",
-    "edges",   "fdm",    "info",
-    "metrics", "resize", "tile",
-    "version",
-});
-
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
     defer args.deinit();
@@ -50,6 +46,7 @@ pub fn main(init: std.process.Init) !void {
     var buffer: [4096]u8 = undefined;
     var stdout = Io.File.stdout().writer(init.io, &buffer);
 
+    const cli: Cli = .init();
     try cli.run(init.gpa, init.io, &stdout.interface, &args);
 }
 
@@ -63,21 +60,49 @@ pub const Command = struct {
 pub const Cli = struct {
     commands: []const Command,
 
-    pub fn init(comptime names: []const []const u8) Cli {
+    pub fn init() Cli {
         const cmds = comptime blk: {
-            var items: [names.len]Command = undefined;
-            for (names, 0..) |name, i| {
-                const module = @field(root, name);
-                items[i] = .{
-                    .name = name,
-                    .run = module.run,
-                    .description = module.description,
-                    .help = module.help,
-                };
+            var command_count: comptime_int = 0;
+            for (std.meta.declarations(root)) |decl| {
+                if (getCommandModule(decl) != null) {
+                    command_count += 1;
+                }
             }
-            break :blk items;
+
+            var array: [command_count]Command = undefined;
+            var i: comptime_int = 0;
+            for (std.meta.declarations(root)) |decl| {
+                if (getCommandModule(decl)) |val| {
+                    array[i] = .{
+                        .name = decl.name,
+                        .run = val.run,
+                        .description = val.description,
+                        .help = val.help,
+                    };
+                    i += 1;
+                }
+            }
+
+            std.sort.block(Command, &array, {}, struct {
+                fn lessThan(_: void, lhs: Command, rhs: Command) bool {
+                    return std.mem.lessThan(u8, lhs.name, rhs.name);
+                }
+            }.lessThan);
+
+            break :blk array;
         };
         return .{ .commands = &cmds };
+    }
+
+    fn getCommandModule(comptime decl: anytype) ?type {
+        const val = @field(root, decl.name);
+        return if (@TypeOf(val) == type and
+            @hasDecl(val, "run") and
+            @hasDecl(val, "description") and
+            @hasDecl(val, "help"))
+            val
+        else
+            null;
     }
 
     pub fn run(
