@@ -79,9 +79,6 @@ pub const kitty = @import("kitty.zig");
 pub const png = @import("png.zig");
 pub const jpeg = @import("jpeg.zig");
 
-// Compression formats
-pub const compression = @import("compression/flate.zig");
-
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;

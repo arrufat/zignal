@@ -11,10 +11,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
+const flate = std.compress.flate;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
-const compression = @import("../compression/flate.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -202,19 +202,43 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        decompressed_data = compression.inflate(allocator, raw_file_contents, .limited(max_file_size), .gzip) catch |err| switch (err) {
-            error.ReadFailed,
-            error.OutputLimitExceeded,
-            => return PcfError.InvalidCompression,
-            else => return err,
-        };
+        var reader: std.Io.Reader = .fixed(raw_file_contents);
+
+        const buffer = try allocator.alloc(u8, flate.max_window_len);
+        defer allocator.free(buffer);
+
+        var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
+
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
+
+        var remaining = std.Io.Limit.limited(max_file_size);
+        while (remaining.nonzero()) {
+            const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
+                error.EndOfStream => break,
+                error.ReadFailed => return PcfError.InvalidCompression,
+                else => return err,
+            };
+            remaining = remaining.subtract(n).?;
+        } else {
+            var one_byte_buf: [1]u8 = undefined;
+            var dummy_writer = std.Io.Writer.fixed(&one_byte_buf);
+            if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
+                if (n > 0) return PcfError.InvalidCompression;
+            } else |err| switch (err) {
+                error.EndOfStream => {},
+                error.ReadFailed => return PcfError.InvalidCompression,
+                else => return err,
+            }
+        }
+        decompressed_data = try aw.toOwnedSlice();
         file_contents = decompressed_data.?;
     } else {
         file_contents = raw_file_contents;
     }
 
     // Use arena for temporary allocations
-    var arena = std.heap.ArenaAllocator.init(allocator);
+    var arena: std.heap.ArenaAllocator = .init(allocator);
     defer arena.deinit();
     const arena_allocator = arena.allocator();
 

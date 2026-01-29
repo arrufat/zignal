@@ -6,10 +6,10 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const flate = std.compress.flate;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
-const compression = @import("../compression/flate.zig");
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -78,12 +78,37 @@ pub fn load(io: std.Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFi
     defer if (decompressed_data) |data| gpa.free(data);
 
     if (is_compressed) {
-        decompressed_data = compression.inflate(gpa, raw_file_contents, .limited(max_file_size), .gzip) catch |err| switch (err) {
-            error.ReadFailed,
-            error.OutputLimitExceeded,
-            => return BdfError.InvalidCompression,
-            else => return err,
-        };
+        var reader: std.Io.Reader = .fixed(raw_file_contents);
+
+        const buffer = try gpa.alloc(u8, flate.max_window_len);
+        defer gpa.free(buffer);
+
+        var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
+
+        var aw: std.Io.Writer.Allocating = .init(gpa);
+        defer aw.deinit();
+
+        var remaining = std.Io.Limit.limited(max_file_size);
+        while (remaining.nonzero()) {
+            const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
+                error.EndOfStream => break,
+                error.ReadFailed => return BdfError.InvalidCompression,
+                else => return err,
+            };
+            remaining = remaining.subtract(n).?;
+        } else {
+            var one_byte_buf: [1]u8 = undefined;
+            var dummy_writer = std.Io.Writer.fixed(&one_byte_buf);
+            if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
+                if (n > 0) return BdfError.InvalidCompression;
+            } else |err| switch (err) {
+                error.EndOfStream => {},
+                error.ReadFailed => return BdfError.InvalidCompression,
+                else => return err,
+            }
+        }
+
+        decompressed_data = try aw.toOwnedSlice();
         file_contents = decompressed_data.?;
     } else {
         file_contents = raw_file_contents;
@@ -853,7 +878,18 @@ pub fn save(io: std.Io, gpa: Allocator, font: BitmapFont, path: []const u8) !voi
 
     if (is_compressed) {
         // Compress the BDF content
-        const compressed_data = try compression.deflate(gpa, bdf_content.items, .{ .type = .default, .level = .level_1 }, .gzip);
+        var aw: std.Io.Writer.Allocating = .init(gpa);
+        defer aw.deinit();
+        try aw.ensureTotalCapacity(bdf_content.items.len / 2 + 64);
+
+        const buffer = try gpa.alloc(u8, flate.max_window_len);
+        defer gpa.free(buffer);
+
+        var gzip_compressor: flate.Compress = try .init(&aw.writer, buffer, .gzip, .level_1);
+        try gzip_compressor.writer.writeAll(bdf_content.items);
+        try gzip_compressor.writer.flush();
+
+        const compressed_data = try aw.toOwnedSlice();
         defer gpa.free(compressed_data);
         try file.writeStreamingAll(io, compressed_data);
     } else {
