@@ -89,7 +89,17 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
             var found = false;
 
             inline for (std.meta.fields(T)) |field| {
-                if (std.mem.eql(u8, flag_name, field.name)) {
+                const matches = blk: {
+                    if (flag_name.len != field.name.len) break :blk false;
+                    for (flag_name, field.name) |c_flag, c_field| {
+                        if (c_flag == c_field) continue;
+                        if (c_flag == '-' and c_field == '_') continue;
+                        break :blk false;
+                    }
+                    break :blk true;
+                };
+
+                if (matches) {
                     found = true;
                     const ChildType = PayloadType(field.type);
 
@@ -167,10 +177,18 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
         else
             "value";
 
+        const flag_name_fmt = comptime blk: {
+            var res: [field.name.len]u8 = undefined;
+            for (field.name, 0..) |c, i| {
+                res[i] = if (c == '_') '-' else c;
+            }
+            break :blk res;
+        };
+
         const flag_len = if (is_bool)
-            ("  --" ++ field.name).len
+            ("  --" ++ flag_name_fmt).len
         else
-            ("  --" ++ field.name ++ " <" ++ metavar ++ ">").len;
+            ("  --" ++ flag_name_fmt ++ " <" ++ metavar ++ ">").len;
 
         if (flag_len > max_len) max_len = flag_len;
     }
@@ -190,10 +208,18 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
 
         const is_bool = PayloadType(field.type) == bool;
 
+        const flag_name_fmt = comptime blk: {
+            var res: [field.name.len]u8 = undefined;
+            for (field.name, 0..) |c, i| {
+                res[i] = if (c == '_') '-' else c;
+            }
+            break :blk res;
+        };
+
         const flag_str = if (is_bool)
-            "  --" ++ field.name
+            "  --" ++ flag_name_fmt
         else
-            "  --" ++ field.name ++ " <" ++ metavar ++ ">";
+            "  --" ++ flag_name_fmt ++ " <" ++ metavar ++ ">";
 
         const padding_len = padding_target - flag_str.len;
         const padding = " " ** padding_len;
