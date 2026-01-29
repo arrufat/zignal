@@ -34,7 +34,12 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-const cli: Cli = .init(&.{ "display", "resize", "blur", "fdm", "tile", "info", "metrics", "diff", "edges", "version" });
+const cli: Cli = .init(&.{
+    "blur",    "diff",   "display",
+    "edges",   "fdm",    "info",
+    "metrics", "resize", "tile",
+    "version",
+});
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -71,10 +76,16 @@ pub const Cli = struct {
             }
             break :blk items;
         };
-        return Cli{ .commands = &cmds };
+        return .{ .commands = &cmds };
     }
 
-    pub fn run(self: Cli, allocator: Allocator, io: Io, stdout: *std.Io.Writer, args: *std.process.Args.Iterator) !void {
+    pub fn run(
+        self: Cli,
+        allocator: Allocator,
+        io: Io,
+        stdout: *std.Io.Writer,
+        args: *std.process.Args.Iterator,
+    ) !void {
         var arg = args.next();
 
         // Handle global flags
@@ -108,10 +119,9 @@ pub const Cli = struct {
     }
 
     fn getCommand(self: Cli, name: []const u8) ?Command {
-        for (self.commands) |cmd| {
-            if (std.mem.eql(u8, cmd.name, name)) return cmd;
-        }
-        return null;
+        return for (self.commands) |cmd| {
+            if (std.mem.eql(u8, cmd.name, name)) break cmd;
+        } else null;
     }
 
     fn printHelp(self: Cli, stdout: *std.Io.Writer, args: ?*std.process.Args.Iterator) !void {
