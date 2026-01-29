@@ -8,8 +8,6 @@ const args = @import("args.zig");
 const display = @import("display.zig");
 const common = @import("common.zig");
 
-// reusing parseFilter
-
 const LayoutMode = enum {
     square,
     horizontal,
@@ -24,7 +22,6 @@ const Args = struct {
     cols: ?u32 = null,
     width: ?u32 = null,
     height: ?u32 = null,
-    filter: ?[]const u8 = null,
     output: ?[]const u8 = null,
     display: bool = false,
     protocol: ?[]const u8 = null,
@@ -35,7 +32,6 @@ const Args = struct {
         .cols = .{ .help = "Number of columns (for grid mode)", .metavar = "N" },
         .width = .{ .help = "Force cell width (default: first image width)", .metavar = "N" },
         .height = .{ .help = "Force cell height (default: first image height)", .metavar = "N" },
-        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
         .output = .{ .help = "Output file path", .metavar = "file" },
         .display = .{ .help = "Display the result in the terminal" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
@@ -181,8 +177,6 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     defer canvas.deinit(gpa);
     canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Fill black (opaque)
 
-    const filter = try common.resolveFilter(parsed.options.filter);
-
     // Process Images
     var timer = try std.time.Timer.start();
     for (input_paths, 0..) |path, idx| {
@@ -242,7 +236,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             .b = cell_t + y_offset + target_h,
         };
 
-        canvas.insert(img, dest_rect, 0, filter, .none);
+        canvas.insert(img, dest_rect, 0, .bilinear, .none);
     }
     const tile_ns = timer.read();
     std.log.debug("Tiling operation took {d:.3} ms", .{@as(f64, @floatFromInt(tile_ns)) / std.time.ns_per_ms});
@@ -253,7 +247,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     }
 
     if (should_display) {
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null, filter);
+        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

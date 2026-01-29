@@ -74,7 +74,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                 .sgr => |options| {
                     const scale_factor = terminal.aspectScale(options.width, options.height, self.image.rows, self.image.cols);
                     if (@abs(scale_factor - 1.0) > 0.001) {
-                        scaled_image = self.image.scale(allocator, scale_factor, .nearest_neighbor) catch null;
+                        scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
                         if (scaled_image) |*img| {
                             image_to_display = img;
                         }
