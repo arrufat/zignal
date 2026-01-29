@@ -4,7 +4,7 @@
 
 All examples can be accessed as web demos at:
 
-[https://bfactory-ai.github.io/zignal/examples/](https://bfactory-ai.github.io/zignal/examples/)
+[https://arrufat.github.io/zignal/examples/](https://arrufat.github.io/zignal/examples/)
 
 ## Development
 
