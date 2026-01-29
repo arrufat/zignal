@@ -9,21 +9,19 @@
 //! - Views for zero-copy sub-image operations
 
 const std = @import("std");
-const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
+const assert = std.debug.assert;
 
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
-const Gray = @import("color.zig").Gray;
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
 const jpeg = @import("jpeg.zig");
 const png = @import("png.zig");
-const meta = @import("meta.zig");
 const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
-const RunningStats = @import("stats.zig").RunningStats;
 
 // Import image sub-modules (private for internal use)
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
@@ -248,7 +246,7 @@ pub fn Image(comptime T: type) type {
         /// var img = try Image(Rgb).load(io, allocator, "photo.jpg");
         /// defer img.deinit(allocator);
         /// ```
-        pub fn load(io: std.Io, allocator: Allocator, file_path: []const u8) !Self {
+        pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
             const image_format = try ImageFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedImageFormat;
 
             return switch (image_format) {
@@ -277,7 +275,7 @@ pub fn Image(comptime T: type) type {
 
         /// Saves the image to a file in PNG format.
         /// Returns an error if the file path doesn't end in `.png` or `.PNG`.
-        pub fn save(self: Self, io: std.Io, allocator: Allocator, file_path: []const u8) !void {
+        pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             if (std.ascii.endsWithIgnoreCase(file_path, ".png")) {
                 try png.save(T, io, allocator, self, file_path);
             } else if (std.ascii.endsWithIgnoreCase(file_path, ".jpg") or std.ascii.endsWithIgnoreCase(file_path, ".jpeg")) {
@@ -479,7 +477,7 @@ pub fn Image(comptime T: type) type {
         /// std.debug.print("{f}", .{img.display(io, .{ .sixel = .{ .palette_mode = .adaptive } })});
         /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});  // Kitty graphics protocol
         /// ```
-        pub fn display(self: *const Self, io: std.Io, display_format: DisplayFormat) DisplayFormatter(T) {
+        pub fn display(self: *const Self, io: Io, display_format: DisplayFormat) DisplayFormatter(T) {
             return DisplayFormatter(T){
                 .image = self,
                 .display_format = display_format,
@@ -488,7 +486,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Displays the image information: color type, rows and cols.
-        pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn format(self: Self, writer: *Io.Writer) Io.Writer.Error!void {
             const type_name: []const u8 = @typeName(T);
             if (std.mem.lastIndexOfScalar(u8, type_name, '.')) |pos| {
                 try writer.print("Image({s}){{ .rows = {d}, .cols = {d} }}", .{ type_name[pos + 1 ..], self.rows, self.cols });

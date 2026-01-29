@@ -1,6 +1,7 @@
 //! Matrix formatting utilities for both static and dynamic matrices
 
 const std = @import("std");
+const Io = std.Io;
 
 /// Helper function to format numbers with fallback to scientific notation
 fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, value: T) []const u8 {
@@ -14,7 +15,7 @@ fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, va
 }
 
 /// Generic matrix formatting function that works with both SMatrix and Matrix
-pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *std.Io.Writer) !void {
+pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *Io.Writer) !void {
     const MatrixType = @TypeOf(matrix);
 
     // Matrix has allocator field, SMatrix doesn't
@@ -74,7 +75,7 @@ pub fn DecimalFormatter(comptime MatrixType: type, comptime precision: u8) type 
         const Self = @This();
         matrix: MatrixType,
 
-        pub fn format(self: Self, writer: *std.Io.Writer) !void {
+        pub fn format(self: Self, writer: *Io.Writer) !void {
             const number_fmt = std.fmt.comptimePrint("{{d:.{d}}}", .{precision});
             try formatMatrix(self.matrix, number_fmt, writer);
         }
@@ -87,7 +88,7 @@ pub fn ScientificFormatter(comptime MatrixType: type) type {
         const Self = @This();
         matrix: MatrixType,
 
-        pub fn format(self: Self, writer: *std.Io.Writer) !void {
+        pub fn format(self: Self, writer: *Io.Writer) !void {
             try formatMatrix(self.matrix, "{e}", writer);
         }
     };
@@ -108,7 +109,7 @@ test "static matrix format" {
     m.at(1, 2).* = -5.67;
 
     var buffer: [512]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream: Io.Writer = .fixed(&buffer);
 
     // Test default formatting (scientific notation)
     try stream.print("{f}", .{m});

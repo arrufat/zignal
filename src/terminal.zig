@@ -4,6 +4,7 @@
 //! (sixel, kitty) and other terminal features.
 
 const std = @import("std");
+const Io = std.Io;
 const builtin = @import("builtin");
 
 // Buffer size for terminal responses
@@ -47,8 +48,8 @@ pub const DetectionOptions = struct {
 };
 
 /// Check if stdout is connected to a TTY
-pub fn isStdoutTty(io: std.Io) bool {
-    return std.Io.File.stdout().isTty(io) catch |err| switch (err) {
+pub fn isStdoutTty(io: Io) bool {
+    return Io.File.stdout().isTty(io) catch |err| switch (err) {
         error.Canceled => {
             io.recancel();
             return false;
@@ -57,7 +58,7 @@ pub fn isStdoutTty(io: std.Io) bool {
 }
 
 /// Detect if the terminal supports sixel graphics protocol
-pub fn isSixelSupported(io: std.Io) !bool {
+pub fn isSixelSupported(io: Io) !bool {
     var state: State = try .init(io);
     defer state.deinit();
 
@@ -71,7 +72,7 @@ pub fn isSixelSupported(io: std.Io) !bool {
 }
 
 /// Detect if the terminal supports Kitty graphics protocol
-pub fn isKittySupported(io: std.Io) !bool {
+pub fn isKittySupported(io: Io) !bool {
     var state: State = try .init(io);
     defer state.deinit();
 
@@ -127,13 +128,13 @@ pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) 
 /// const supported = state.checkSixelSupport(.device_attributes);
 /// ```
 const State = struct {
-    io: std.Io,
+    io: Io,
     /// Standard input file handle
-    stdin: std.Io.File,
+    stdin: Io.File,
     /// Standard output file handle
-    stdout: std.Io.File,
+    stdout: Io.File,
     /// Standard error file handle
-    stderr: std.Io.File,
+    stderr: Io.File,
     /// Original terminal state to restore on cleanup
     original_state: TerminalState,
 
@@ -144,10 +145,10 @@ const State = struct {
     /// On POSIX systems, saves the current termios settings.
     ///
     /// Returns an error if terminal initialization fails.
-    fn init(io: std.Io) !State {
-        const stdin = std.Io.File.stdin();
-        const stdout = std.Io.File.stdout();
-        const stderr = std.Io.File.stderr();
+    fn init(io: Io) !State {
+        const stdin = Io.File.stdin();
+        const stdout = Io.File.stdout();
+        const stderr = Io.File.stderr();
 
         if (builtin.os.tag == .windows) {
             // Windows-specific initialization

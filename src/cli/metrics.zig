@@ -16,7 +16,7 @@ pub const help = args.generateHelp(
     description ++ "\n\nThe first image provided is used as the reference, and all subsequent images are compared against it.",
 );
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 

@@ -5,7 +5,6 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
-const display = @import("display.zig");
 const common = @import("common.zig");
 
 const Args = struct {
@@ -32,7 +31,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -88,8 +87,8 @@ fn processImage(
     }
 
     const output_path = if (use_as_dir) try blk_path: {
-        const basename = std.fs.path.basename(input_path);
-        break :blk_path std.fs.path.join(gpa, &[_][]const u8{ output_arg, basename });
+        const basename = Io.Dir.path.basename(input_path);
+        break :blk_path Io.Dir.path.join(gpa, &[_][]const u8{ output_arg, basename });
     } else output_arg;
     defer if (use_as_dir) gpa.free(output_path);
 

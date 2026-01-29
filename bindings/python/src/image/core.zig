@@ -1,6 +1,7 @@
 //! Core image operations: I/O, memory management, type conversion
 
 const std = @import("std");
+const Io = std.Io;
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
@@ -133,7 +134,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     if (is_jpeg) {
         // Read file and decode JPEG
-        const data = std.Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_jpeg_limits.max_jpeg_bytes))) catch |err| {
+        const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_jpeg_limits.max_jpeg_bytes))) catch |err| {
             python.setErrorWithPath(err, path_slice);
             return null;
         };
@@ -158,7 +159,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // PNG: load native dtype (Gray, RGB, RGBA)
     if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
-        const data = std.Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_png_limits.max_png_bytes))) catch |err| {
+        const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_png_limits.max_png_bytes))) catch |err| {
             python.setErrorWithPath(err, path_slice);
             return null;
         };

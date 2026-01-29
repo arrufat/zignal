@@ -7,10 +7,10 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const Gray = @import("../color.zig").Gray;
+const Image = @import("../image.zig").Image;
+
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
-const Image = @import("../image.zig").Image;
 
 /// Generic histogram type that adapts its structure based on the pixel type.
 /// For u8: single channel histogram

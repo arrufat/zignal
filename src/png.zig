@@ -6,9 +6,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const flate = std.compress.flate;
+const Io = std.Io;
 
 const convertColor = @import("color.zig").convertColor;
-const Gray = @import("color.zig").Gray;
 const Image = @import("image.zig").Image;
 
 const Rgb = @import("color.zig").Rgb(u8);
@@ -274,7 +274,7 @@ pub const PngState = struct {
 
 /// Retrieve metadata from a PNG stream without decoding the full image.
 /// This reads headers and ancillary chunks (gAMA, sRGB) but stops before IDAT.
-pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
+pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     var bytes_read: usize = 0;
     var chunk_count: usize = 0;
 
@@ -349,13 +349,13 @@ pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
                 .interlace_method = data[12],
             };
             header_found = true;
-            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
         } else if (std.mem.eql(u8, &chunk_type, "gAMA") and header_found) {
             if (length != 4) return error.InvalidGammaLength;
             const gamma_int = try reader.takeInt(u32, .big);
             bytes_read += @sizeOf(u32);
             header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
-            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
         } else if (std.mem.eql(u8, &chunk_type, "sRGB") and header_found) {
             if (length != 1) return error.InvalidSrgbLength;
             const intent_raw = try reader.takeByte();
@@ -367,10 +367,10 @@ pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
                 3 => .absolute_colorimetric,
                 else => return error.InvalidSrgbIntent,
             };
-            bytes_read += try reader.discard(std.Io.Limit.limited(4)); // CRC
+            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
         } else {
             // Skip unknown or unneeded chunk data + CRC
-            bytes_read += try reader.discard(std.Io.Limit.limited64(@as(u64, length) + 4));
+            bytes_read += try reader.discard(Io.Limit.limited64(@as(u64, length) + 4));
         }
     }
 
@@ -400,7 +400,7 @@ test "PNG getInfo" {
 
     try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
 
-    var reader = std.Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(data.items);
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(100, header.width);
@@ -773,17 +773,17 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     rgba: Image(Rgba),
 } {
     // Decompress IDAT data
-    var reader: std.Io.Reader = .fixed(png_state.idat_data.items);
+    var reader: Io.Reader = .fixed(png_state.idat_data.items);
 
     const buffer = try allocator.alloc(u8, flate.max_window_len);
     defer allocator.free(buffer);
 
     var decompressor: flate.Decompress = .init(&reader, .zlib, buffer);
 
-    var aw: std.Io.Writer.Allocating = .init(allocator);
+    var aw: Io.Writer.Allocating = .init(allocator);
     errdefer aw.deinit();
 
-    var remaining: std.Io.Limit = .limited(png_state.scan_data_bytes);
+    var remaining: Io.Limit = .limited(png_state.scan_data_bytes);
     while (remaining.nonzero()) {
         const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
             error.EndOfStream => break,
@@ -793,7 +793,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     } else {
         // We've hit the limit, check if there's more data.
         var one_byte_buf: [1]u8 = undefined;
-        var dummy_writer: std.Io.Writer = .fixed(&one_byte_buf);
+        var dummy_writer: Io.Writer = .fixed(&one_byte_buf);
         if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
             if (n > 0) return error.ImageTooLarge;
         } else |err| switch (err) {
@@ -1145,9 +1145,9 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
     }
 }
 
-pub fn load(comptime T: type, io: std.Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     const read_limit = if (limits.max_png_bytes == 0) std.math.maxInt(usize) else limits.max_png_bytes;
-    const png_data = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const png_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(png_data);
     return loadFromBytes(T, allocator, png_data, limits);
 }
@@ -1333,7 +1333,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     defer gpa.free(filtered_data);
 
     // Compress filtered data with zlib format (required for PNG IDAT)
-    var aw: std.Io.Writer.Allocating = .init(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
     try aw.ensureTotalCapacity(filtered_data.len / 2 + 64);
 
@@ -1393,14 +1393,14 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 /// - file_path: Output PNG file path
 ///
 /// Errors: OutOfMemory, file creation/write errors, encoding errors
-pub fn save(comptime T: type, io: std.Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
 
-    const file = if (std.fs.path.isAbsolute(file_path))
-        try std.Io.Dir.createFileAbsolute(io, file_path, .{})
+    const file = if (Io.Dir.path.isAbsolute(file_path))
+        try Io.Dir.createFileAbsolute(io, file_path, .{})
     else
-        try std.Io.Dir.cwd().createFile(io, file_path, .{});
+        try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
 
     try file.writeStreamingAll(io, png_data);

@@ -4,11 +4,13 @@
 //! Supports both fixed-width and variable-width fonts.
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
-const Rectangle = @import("../geometry.zig").Rectangle;
-const GlyphData = @import("GlyphData.zig");
-const FontFormat = @import("format.zig").FontFormat;
+
 const LoadFilter = @import("../font.zig").LoadFilter;
+const Rectangle = @import("../geometry.zig").Rectangle;
+const FontFormat = @import("format.zig").FontFormat;
+const GlyphData = @import("GlyphData.zig");
 
 const BitmapFont = @This();
 
@@ -53,7 +55,7 @@ font_ascent: ?i16 = null,
 /// // Load specific ranges:
 /// const font = try BitmapFont.load(io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
 /// ```
-pub fn load(io: std.Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
+pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
     const font_format = try FontFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
         .bdf => @import("bdf.zig").load(io, allocator, file_path, filter),
@@ -310,7 +312,7 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
 
 /// Saves the font to a file in BDF format.
 /// Returns an error if the file path doesn't end in `.bdf` or `.bdf.gz` (case-insensitive).
-pub fn save(self: BitmapFont, io: std.Io, allocator: Allocator, file_path: []const u8) !void {
+pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u8) !void {
     const valid_extension = std.ascii.endsWithIgnoreCase(file_path, ".bdf") or
         std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz");
 
@@ -321,7 +323,7 @@ pub fn save(self: BitmapFont, io: std.Io, allocator: Allocator, file_path: []con
 }
 
 /// Displays the font information: name, dimensions, and character range.
-pub fn format(self: BitmapFont, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+pub fn format(self: BitmapFont, writer: *Io.Writer) Io.Writer.Error!void {
     // Count total glyphs if using glyph map
     const glyph_count = if (self.glyph_map) |map| map.count() else blk: {
         if (self.first_char <= self.last_char) {

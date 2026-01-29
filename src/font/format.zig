@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 /// Supported font formats for automatic detection and loading
 pub const FontFormat = enum {
@@ -34,7 +35,7 @@ pub const FontFormat = enum {
     }
 
     /// Detect font format from file path by reading the first few bytes
-    pub fn detectFromPath(io: std.Io, _: Allocator, file_path: []const u8) !?FontFormat {
+    pub fn detectFromPath(io: Io, _: Allocator, file_path: []const u8) !?FontFormat {
         // Check if file is gzip compressed based on extension
         if (std.mem.endsWith(u8, file_path, ".pcf.gz")) {
             return .pcf;
@@ -43,7 +44,7 @@ pub const FontFormat = enum {
             return .bdf;
         }
 
-        const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+        const file = try Io.Dir.cwd().openFile(io, file_path, .{});
         defer file.close(io);
 
         var header: [16]u8 = undefined;

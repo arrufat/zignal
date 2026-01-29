@@ -5,14 +5,14 @@ const testing = std.testing;
 const expectEqual = testing.expectEqual;
 const expectApproxEqAbs = testing.expectApproxEqAbs;
 
+const convertColor = @import("color.zig").convertColor;
+const CovarianceStats = @import("stats.zig").CovarianceStats;
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
+const RunningStats = @import("stats.zig").RunningStats;
+
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
-const Gray = @import("color.zig").Gray;
-const convertColor = @import("color.zig").convertColor;
-const RunningStats = @import("stats.zig").RunningStats;
-const CovarianceStats = @import("stats.zig").CovarianceStats;
 
 /// Feature Distribution Matching struct for stateful image style transfer.
 /// Allows efficient batch processing by reusing target distribution statistics.

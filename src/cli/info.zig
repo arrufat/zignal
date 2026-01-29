@@ -24,7 +24,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -47,7 +47,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             const image_format = zignal.ImageFormat.detectFromPath(io, gpa, image_path) catch |err| break :blk err;
             if (image_format) |fmt| {
                 std.log.debug("Format detected: {s}", .{@tagName(fmt)});
-                const file = std.Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
+                const file = Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
                 defer file.close(io);
 
                 var reader = file.reader(io, &read_buffer);

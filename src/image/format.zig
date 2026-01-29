@@ -2,8 +2,10 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const png = @import("../png.zig");
+const Io = std.Io;
+
 const jpeg = @import("../jpeg.zig");
+const png = @import("../png.zig");
 
 /// Supported image formats for automatic detection and loading
 pub const ImageFormat = enum {
@@ -30,8 +32,8 @@ pub const ImageFormat = enum {
     }
 
     /// Detect image format from file path by reading the first few bytes
-    pub fn detectFromPath(io: std.Io, _: Allocator, file_path: []const u8) !?ImageFormat {
-        const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+    pub fn detectFromPath(io: Io, _: Allocator, file_path: []const u8) !?ImageFormat {
+        const file = try Io.Dir.cwd().openFile(io, file_path, .{});
         defer file.close(io);
 
         var header: [8]u8 = undefined;

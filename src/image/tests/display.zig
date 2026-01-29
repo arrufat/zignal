@@ -1,6 +1,7 @@
 //! Display format tests
 
 const std = @import("std");
+const Io = std.Io;
 const expectEqualStrings = std.testing.expectEqualStrings;
 
 const color = @import("../../color.zig");
@@ -21,7 +22,7 @@ test "image format sgr" {
 
     // Test that format function works without error
     var buffer: [256]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream = Io.Writer.fixed(&buffer);
 
     // Force SGR format for testing
     try stream.print("{f}", .{image.display(std.testing.io, .{ .sgr = .default })});
@@ -52,7 +53,7 @@ test "image format sgr odd rows" {
 
     // Test SGR format with odd rows
     var buffer: [512]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream = Io.Writer.fixed(&buffer);
 
     try stream.print("{f}", .{image.display(std.testing.io, .{ .sgr = .default })});
     const result = buffer[0..stream.end];
@@ -89,7 +90,7 @@ test "image format braille" {
 
     // Test braille format with default threshold
     var buffer: [256]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream = Io.Writer.fixed(&buffer);
 
     try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
     const result = buffer[0..stream.end];
@@ -122,7 +123,7 @@ test "image format braille custom threshold" {
 
     // Test with threshold 0.3 (should turn on pixels > 30% brightness)
     var buffer: [256]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream = Io.Writer.fixed(&buffer);
 
     try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .threshold = 0.3 } })});
     const result = buffer[0..stream.end];
@@ -157,7 +158,7 @@ test "image format braille large image" {
 
     // Test braille format
     var buffer: [256]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream = Io.Writer.fixed(&buffer);
 
     try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
     const result = buffer[0..stream.end];

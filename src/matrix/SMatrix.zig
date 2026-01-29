@@ -1,6 +1,7 @@
 //! Static matrix with compile-time dimensions
 
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
@@ -717,7 +718,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Default formatting (scientific notation)
-        pub fn format(self: Self, writer: *std.Io.Writer) !void {
+        pub fn format(self: Self, writer: *Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
         }
     };

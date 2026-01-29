@@ -1,15 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Gray = @import("../color.zig").Gray;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
-const channel_ops = @import("channel_ops.zig");
 const border = @import("border.zig");
 
 /// Border handling modes for filter operations
 pub const BorderMode = border.BorderMode;
+const channel_ops = @import("channel_ops.zig");
 
 /// Pixel I/O operations for type-specific convolution.
 /// Provides unified load/store operations for both u8 (with integer scaling) and f32.

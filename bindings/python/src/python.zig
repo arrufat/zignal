@@ -1,13 +1,14 @@
 const std = @import("std");
+const Io = std.Io;
 
 const zignal = @import("zignal");
 const Point = zignal.Point;
 
 pub const ctx = struct {
-    io: std.Io,
+    io: Io,
     allocator: std.mem.Allocator,
 }{
-    .io = std.Io.Threaded.global_single_threaded.ioBasic(),
+    .io = Io.Threaded.global_single_threaded.ioBasic(),
     .allocator = std.heap.c_allocator,
 };
 
@@ -873,7 +874,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
     };
 
     // Format error message with path and error name for debugging
-    var buffer: [std.fs.max_path_bytes + 128]u8 = undefined;
+    var buffer: [Io.Dir.max_path_bytes + 128]u8 = undefined;
     const msg = std.fmt.bufPrintZ(&buffer, "Could not open file '{s}': {s}", .{ path, @errorName(err) }) catch "Could not open file";
     c.PyErr_SetString(exc_type, msg.ptr);
 }

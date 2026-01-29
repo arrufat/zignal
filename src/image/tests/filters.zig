@@ -6,13 +6,12 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
-const Rgb = color.Rgb(u8);
-const Rgba = color.Rgba(u8);
-const Hsl = color.Hsl(f64);
-const Gray = color.Gray;
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 const BorderMode = @import("../../image.zig").BorderMode;
+
+const Rgb = color.Rgb(u8);
+const Rgba = color.Rgba(u8);
 
 test "invert" {
     // Test grayscale

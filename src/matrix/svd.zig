@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const Matrix = @import("Matrix.zig").Matrix;
-const SMatrix = @import("SMatrix.zig").SMatrix;
 
 /// Controls the size and computation of the left singular vectors matrix (U) in SVD.
 /// This allows optimization of memory usage and computation time based on your needs.
