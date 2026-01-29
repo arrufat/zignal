@@ -23,11 +23,11 @@
 //! ## Examples
 //!
 //! Interactive examples and demos are available at:
-//! [https://bfactory-ai.github.io/zignal/examples/](https://bfactory-ai.github.io/zignal/examples/)
+//! [https://arrufat.github.io/zignal/examples/](https://arrufat.github.io/zignal/examples/)
 //!
 //! ## Source Code
 //!
-//! Available on [GitHub](https://github.com/bfactory-ai/zignal).
+//! Available on [GitHub](https://github.com/arrufat/zignal).
 
 /// The zignal version
 pub const version = @import("build_options").version;

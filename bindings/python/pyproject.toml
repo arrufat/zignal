@@ -29,10 +29,10 @@ dependencies = []
 zignal = "zignal.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/bfactory-ai/zignal"
-Repository = "https://github.com/bfactory-ai/zignal"
-Documentation = "https://bfactory-ai.github.io/zignal/python/zignal.html"
-Issues = "https://github.com/bfactory-ai/zignal/issues"
+Homepage = "https://github.com/arrufat/zignal"
+Repository = "https://github.com/arrufat/zignal"
+Documentation = "https://arrufat.github.io/zignal/python/zignal.html"
+Issues = "https://github.com/arrufat/zignal/issues"
 
 [project.optional-dependencies]
 test = ["pytest", "numpy"]
