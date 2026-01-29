@@ -12,13 +12,11 @@ const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?[]const u8 = null,
-    filter: ?[]const u8 = null,
 
     pub const meta = .{
         .width = .{ .help = "Target width in pixels", .metavar = "N" },
         .height = .{ .help = "Target height in pixels", .metavar = "N" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
     };
 };
 
@@ -39,11 +37,11 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         return;
     }
 
-    const width = parsed.options.width;
-    const height = parsed.options.height;
-    const filter = try common.resolveFilter(parsed.options.filter);
-
-    const display_fmt = try resolveDisplayFormat(parsed.options.protocol, width, height, filter);
+    const display_fmt = try resolveDisplayFormat(
+        parsed.options.protocol,
+        parsed.options.width,
+        parsed.options.height,
+    );
 
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
@@ -65,7 +63,6 @@ pub fn resolveDisplayFormat(
     protocol_name: ?[]const u8,
     width: ?u32,
     height: ?u32,
-    filter: zignal.Interpolation,
 ) !zignal.DisplayFormat {
     var protocol: zignal.DisplayFormat = .{ .auto = .default };
     if (protocol_name) |p| {
@@ -74,7 +71,7 @@ pub fn resolveDisplayFormat(
             return err;
         };
     }
-    applyOptions(&protocol, width, height, filter);
+    applyOptions(&protocol, width, height);
     return protocol;
 }
 
@@ -97,17 +94,17 @@ pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
 /// Applies user-provided scaling and filter options to a display protocol.
 /// Note: If width and height are null, the protocol will automatically enforce
 /// the global 2048x2048 dimension cap during rendering.
-pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, filter: zignal.Interpolation) void {
+pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {
     switch (protocol.*) {
         .kitty => |*opts| {
             opts.width = width;
             opts.height = height;
-            opts.interpolation = filter;
+            opts.interpolation = .bilinear;
         },
         .sixel => |*opts| {
             opts.width = width;
             opts.height = height;
-            opts.interpolation = filter;
+            opts.interpolation = .bilinear;
         },
         .sgr => |*opts| {
             opts.width = width;
@@ -120,7 +117,7 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32, 
         .auto => |*opts| {
             opts.width = width;
             opts.height = height;
-            opts.interpolation = filter;
+            opts.interpolation = .bilinear;
         },
     }
 }
@@ -145,7 +142,6 @@ pub fn createHorizontalComposite(
     images: []const zignal.Image(T),
     user_width: ?u32,
     user_height: ?u32,
-    filter: zignal.Interpolation,
 ) !zignal.Image(T) {
     if (images.len == 0) return zignal.Image(T).init(allocator, 1, 1);
 
@@ -186,7 +182,7 @@ pub fn createHorizontalComposite(
     for (images, 0..) |img, i| {
         const offset_x = @as(f32, @floatFromInt(i)) * wf;
         // Use .none blend mode to overwrite (copy) pixels directly
-        canvas.insert(img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, filter, .none);
+        canvas.insert(img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, .bilinear, .none);
     }
 
     return canvas;

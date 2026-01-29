@@ -17,7 +17,6 @@ const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?[]const u8 = null,
-    filter: ?[]const u8 = null,
 
     pub const meta = .{
         .output = .{ .help = "Path to save the difference image", .metavar = "path" },
@@ -28,7 +27,6 @@ const Args = struct {
         .width = .{ .help = "Width of each sub-image for display", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image for display", .metavar = "N" },
         .protocol = .{ .help = "Force display protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Interpolation filter for display resizing", .metavar = "name" },
     };
 };
 
@@ -118,8 +116,6 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     }
 
     if (should_display) {
-        const filter = try common.resolveFilter(parsed.options.filter);
-
         const images = [_]zignal.Image(zignal.Rgba(u8)){ img1, img2, diff_img };
 
         var canvas = try display.createHorizontalComposite(
@@ -128,12 +124,11 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             &images,
             parsed.options.width,
             parsed.options.height,
-            filter,
         );
         defer canvas.deinit(gpa);
 
         std.log.debug("Displaying result...", .{});
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null, filter);
+        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

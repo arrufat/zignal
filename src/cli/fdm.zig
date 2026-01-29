@@ -13,14 +13,12 @@ const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?[]const u8 = null,
-    filter: ?[]const u8 = null,
 
     pub const meta = .{
         .display = .{ .help = "Display the result in the terminal" },
         .width = .{ .help = "Width of each sub-image", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image", .metavar = "N" },
         .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Interpolation filter (nearest, bilinear, bicubic, catmull-rom, mitchell, lanczos)", .metavar = "name" },
     };
 };
 
@@ -86,10 +84,6 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     }
 
     if (should_display) {
-        const filter = try common.resolveFilter(parsed.options.filter);
-
-        // We know original_source is not null because we initialized it if should_display is true
-        // provided source_img.dupe didn't fail (which would have returned error).
         const images = [_]zignal.Image(Pixel){ original_source.?, target_img, source_img };
 
         var canvas = try display.createHorizontalComposite(
@@ -98,11 +92,10 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             &images,
             parsed.options.width,
             parsed.options.height,
-            filter,
         );
         defer canvas.deinit(gpa);
 
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null, filter);
+        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

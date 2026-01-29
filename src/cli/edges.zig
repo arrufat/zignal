@@ -9,7 +9,7 @@ const common = @import("common.zig");
 const display = @import("display.zig");
 
 const Args = struct {
-    algo: ?[]const u8 = null,
+    filter: ?[]const u8 = null,
     output: ?[]const u8 = null,
     display: bool = false,
 
@@ -24,10 +24,9 @@ const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?[]const u8 = null,
-    filter: ?[]const u8 = null,
 
     pub const meta = .{
-        .algo = .{ .help = "Algorithm: sobel, canny, shen-castan (default: sobel)", .metavar = "name" },
+        .filter = .{ .help = "Filter: sobel, canny, shen-castan (default: sobel)", .metavar = "name" },
         .output = .{ .help = "Output file path (default: display only)", .metavar = "path" },
         .display = .{ .help = "Display the result in the terminal (default if no output)" },
         .sigma = .{ .help = "Canny sigma (def: 1.0) or Shen-Castan smoothing (def: 0.9)", .metavar = "float" },
@@ -38,7 +37,6 @@ const Args = struct {
         .width = .{ .help = "Display width", .metavar = "N" },
         .height = .{ .help = "Display height", .metavar = "N" },
         .protocol = .{ .help = "Display protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
-        .filter = .{ .help = "Display resize filter", .metavar = "name" },
     };
 };
 
@@ -46,7 +44,7 @@ pub const description = "Perform edge detection on an image using Sobel, Canny, 
 
 pub const help = args.generateHelp(
     Args,
-    "zignal edge <image> [options]",
+    "zignal edges <image> [options]",
     description,
 );
 
@@ -72,9 +70,9 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     });
 
     var algo: Algo = .sobel;
-    if (parsed.options.algo) |a| {
-        algo = algo_map.get(a) orelse {
-            std.log.err("Unknown algorithm: {s}. Supported: sobel, canny, shen-castan", .{a});
+    if (parsed.options.filter) |f| {
+        algo = algo_map.get(f) orelse {
+            std.log.err("Unknown filter: {s}. Supported: sobel, canny, shen-castan", .{f});
             return error.InvalidArguments;
         };
     }
@@ -157,8 +155,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const filter = try common.resolveFilter(options.filter);
-        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height, filter);
+        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height);
         try display.displayCanvas(io, writer, out_img, format);
     }
 }
