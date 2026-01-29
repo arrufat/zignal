@@ -8,7 +8,6 @@ const expectError = std.testing.expectError;
 const color = @import("../../color.zig");
 const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
-const Gray = color.Gray;
 const Image = @import("../../image.zig").Image;
 
 test "PSNR identical images returns inf" {

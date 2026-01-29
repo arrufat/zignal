@@ -3,10 +3,8 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const zignal = @import("zignal");
-const terminal = zignal.terminal;
 
 const args = @import("args.zig");
-const common = @import("common.zig");
 
 const Args = struct {
     width: ?u32 = null,
@@ -28,7 +26,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -128,7 +126,7 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) 
 /// excessive memory usage in the terminal.
 pub fn displayCanvas(
     io: Io,
-    writer: *std.Io.Writer,
+    writer: *Io.Writer,
     image: anytype,
     format: zignal.DisplayFormat,
 ) !void {
