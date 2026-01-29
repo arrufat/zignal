@@ -1,6 +1,6 @@
 # Zignal Python Bindings
 
-[![PyPI version](https://img.shields.io/pypi/v/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Python versions](https://img.shields.io/pypi/pyversions/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Downloads](https://static.pepy.tech/badge/zignal-processing)](https://pepy.tech/project/zignal-processing) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bfactory-ai/zignal/blob/main/LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Python versions](https://img.shields.io/pypi/pyversions/zignal-processing.svg)](https://pypi.org/project/zignal-processing/) [![Downloads](https://static.pepy.tech/badge/zignal-processing)](https://pepy.tech/project/zignal-processing) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/arrufat/zignal/blob/main/LICENSE)
 
 
 Zero-dependency image processing primitives written in Zig and packaged for Python.
@@ -71,9 +71,9 @@ img.save("out.png")
 
 ## Documentation & Support
 
-- Docs: https://bfactory-ai.github.io/zignal/python/zignal.html
-- Source: https://github.com/bfactory-ai/zignal
-- Issues: https://github.com/bfactory-ai/zignal/issues
+- Docs: https://arrufat.github.io/zignal/python/zignal.html
+- Source: https://github.com/arrufat/zignal
+- Issues: https://github.com/arrufat/zignal/issues
 
 ## Development
 
@@ -112,6 +112,11 @@ For portable Linux wheels, it is recommended to run `auditwheel repair` on the r
 ## Contributing Bindings
 
 Follow the [bindings guide](BINDINGS_GUIDE.md) for argument parsing helpers, enum registration, image ownership, and stub generation.
+
+## Sponsors
+
+Special thanks to **[B Factory, Inc](https://www.bfactory.ai/)**, the **Founding Sponsor** of Zignal.
+They originally developed this library and graciously transferred ownership to the community to ensure its long-term maintenance and growth.
 
 ## License
 
