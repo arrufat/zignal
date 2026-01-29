@@ -280,7 +280,7 @@ fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, 
         validateLibName(lib_name, "PYTHON_LIB_NAME");
         // On Windows, strip the .lib extension
         if (os_tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
-            break :blk lib_name[0 .. lib_name.len - 4];
+            break :blk lib_name[0 .. lib_name.len - ".lib".len];
         }
         break :blk lib_name;
     } else python_lib;
