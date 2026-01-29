@@ -130,7 +130,11 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                 // Sample along the motion line
                                 var t: f32 = -half_dist;
-                                while (t <= half_dist) : (t += 1.0) {
+                                // Use a safety limit to prevent infinite loops with large float values
+                                const loop_limit = distance + 2;
+                                for (0..loop_limit) |_| {
+                                    if (t > half_dist) break;
+
                                     const sample_x = @as(f32, @floatFromInt(c)) + t * cos_angle;
                                     const sample_y = @as(f32, @floatFromInt(r)) + t * sin_angle;
 
@@ -159,6 +163,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                                         sum += value;
                                         count += 1;
                                     }
+                                    t += 1.0;
                                 }
 
                                 const result = if (count > 0) sum / count else as(f32, image.at(r, c).*);
@@ -183,7 +188,11 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                     // Sample along the motion line
                                     var t: f32 = -half_dist;
-                                    while (t <= half_dist) : (t += 1.0) {
+                                    // Use a safety limit to prevent infinite loops with large float values
+                                    const loop_limit = distance + 2;
+                                    for (0..loop_limit) |_| {
+                                        if (t > half_dist) break;
+
                                         const sample_x = @as(f32, @floatFromInt(c)) + t * cos_angle;
                                         const sample_y = @as(f32, @floatFromInt(r)) + t * sin_angle;
 
@@ -212,6 +221,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                                             sum += value;
                                             count += 1;
                                         }
+                                        t += 1.0;
                                     }
 
                                     const channel_result = if (count > 0) sum / count else as(f32, @field(image.at(r, c).*, field.name));

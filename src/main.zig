@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const zignal = @import("zignal");
 
 const cli_args = @import("cli/args.zig");
+const blur = @import("cli/blur.zig");
 const diff = @import("cli/diff.zig");
 const display = @import("cli/display.zig");
 const edge = @import("cli/edge.zig");
@@ -33,7 +34,7 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-const cli: Cli = .init(&.{ "display", "resize", "fdm", "tile", "info", "metrics", "diff", "edge", "version" });
+const cli: Cli = .init(&.{ "display", "resize", "blur", "fdm", "tile", "info", "metrics", "diff", "edge", "version" });
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);

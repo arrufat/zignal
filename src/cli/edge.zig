@@ -65,10 +65,6 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         return;
     }
 
-    const input_path = parsed.positionals[0];
-    const output_path = parsed.options.output;
-    const should_display = parsed.options.display or output_path == null;
-
     const algo_map = std.StaticStringMap(Algo).initComptime(.{
         .{ "sobel", .sobel },
         .{ "canny", .canny },
@@ -83,6 +79,33 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
         };
     }
 
+    const is_batch = parsed.positionals.len > 1;
+    var target: ?common.OutputTarget = null;
+
+    if (parsed.options.output) |out_path| {
+        target = try common.resolveOutputTarget(io, out_path, is_batch);
+    }
+
+    const should_display = parsed.options.display or target == null;
+
+    for (parsed.positionals) |input_path| {
+        processImage(io, writer, gpa, input_path, target, should_display, algo, parsed.options) catch |err| {
+            std.log.err("failed to process image '{s}': {t}", .{ input_path, err });
+            if (!is_batch) return err;
+        };
+    }
+}
+
+fn processImage(
+    io: Io,
+    writer: *std.Io.Writer,
+    gpa: Allocator,
+    input_path: []const u8,
+    target: ?common.OutputTarget,
+    should_display: bool,
+    algo: Algo,
+    options: Args,
+) !void {
     std.log.debug("Loading image: {s}", .{input_path});
     var img = try zignal.Image(u8).load(io, gpa, input_path);
     defer img.deinit(gpa);
@@ -98,19 +121,19 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
             try img.sobel(gpa, out_img);
         },
         .canny => {
-            const sigma = parsed.options.sigma orelse 1.0;
-            const low = parsed.options.low orelse 50.0;
-            const high = parsed.options.high orelse 100.0;
+            const sigma = options.sigma orelse 1.0;
+            const low = options.low orelse 50.0;
+            const high = options.high orelse 100.0;
             std.log.debug("Canny params: sigma={d:.2}, low={d:.2}, high={d:.2}", .{ sigma, low, high });
             try img.canny(gpa, sigma, low, high, out_img);
         },
         .shen_castan => {
             const opts = zignal.ShenCastan{
-                .smooth = parsed.options.sigma orelse 0.9,
-                .window_size = parsed.options.window orelse 7,
-                .high_ratio = parsed.options.high orelse 0.99,
-                .low_rel = parsed.options.low orelse 0.5,
-                .use_nms = parsed.options.nms,
+                .smooth = options.sigma orelse 0.9,
+                .window_size = options.window orelse 7,
+                .high_ratio = options.high orelse 0.99,
+                .low_rel = options.low orelse 0.5,
+                .use_nms = options.nms,
             };
             std.log.debug("Shen-Castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
                 opts.smooth, opts.window_size, opts.high_ratio, opts.low_rel, opts.use_nms,
@@ -122,14 +145,20 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
     const duration_ns = timer.read();
     std.log.debug("Edge detection took {d:.3} ms", .{@as(f64, @floatFromInt(duration_ns)) / std.time.ns_per_ms});
 
-    if (output_path) |path| {
-        std.log.info("Saving result to {s}...", .{path});
-        try out_img.save(io, gpa, path);
+    if (target) |tgt| {
+        const output_path = if (tgt.is_directory) try blk_path: {
+            const basename = std.fs.path.basename(input_path);
+            break :blk_path std.fs.path.join(gpa, &[_][]const u8{ tgt.path, basename });
+        } else tgt.path;
+        defer if (tgt.is_directory) gpa.free(output_path);
+
+        std.log.info("Saving result to {s}...", .{output_path});
+        try out_img.save(io, gpa, output_path);
     }
 
     if (should_display) {
-        const filter = try common.resolveFilter(parsed.options.filter);
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, parsed.options.width, parsed.options.height, filter);
+        const filter = try common.resolveFilter(options.filter);
+        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height, filter);
         try display.displayCanvas(io, writer, out_img, format);
     }
 }
