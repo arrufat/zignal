@@ -1,10 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
+
+const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
 const Edges = @import("../edges.zig").Edges;
-const color = @import("../../color.zig");
+
 const Rgb = color.Rgb(u8);
-const Gray = color.Gray;
 
 test "Shen-Castan edge detection basic functionality" {
     const allocator = testing.allocator;

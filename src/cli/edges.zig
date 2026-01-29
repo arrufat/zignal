@@ -54,7 +54,7 @@ const Algo = enum {
     shen_castan,
 };
 
-pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -96,7 +96,7 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
 
 fn processImage(
     io: Io,
-    writer: *std.Io.Writer,
+    writer: *Io.Writer,
     gpa: Allocator,
     input_path: []const u8,
     target: ?common.OutputTarget,
@@ -145,8 +145,8 @@ fn processImage(
 
     if (target) |tgt| {
         const output_path = if (tgt.is_directory) try blk_path: {
-            const basename = std.fs.path.basename(input_path);
-            break :blk_path std.fs.path.join(gpa, &[_][]const u8{ tgt.path, basename });
+            const basename = Io.Dir.path.basename(input_path);
+            break :blk_path Io.Dir.path.join(gpa, &[_][]const u8{ tgt.path, basename });
         } else tgt.path;
         defer if (tgt.is_directory) gpa.free(output_path);
 

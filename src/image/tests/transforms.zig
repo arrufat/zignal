@@ -3,13 +3,13 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
-const Image = @import("../../image.zig").Image;
+
 const color = @import("../../color.zig");
-const Rgb = color.Rgb(u8);
-const Rgba = color.Rgba(u8);
-const Gray = color.Gray;
 const Rectangle = @import("../../geometry.zig").Rectangle;
+const Image = @import("../../image.zig").Image;
 const Interpolation = @import("../../root.zig").Interpolation;
+
+const Rgba = color.Rgba(u8);
 
 test "getRectangle" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);

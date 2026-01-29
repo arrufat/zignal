@@ -1,6 +1,7 @@
 const std = @import("std");
-const zignal = @import("zignal");
 const Io = std.Io;
+
+const zignal = @import("zignal");
 
 pub const OutputTarget = struct {
     path: []const u8,
@@ -15,7 +16,7 @@ pub fn resolveOutputTarget(
     var is_directory = false;
 
     // Try to open it as a directory first. This is the most robust check.
-    if (std.Io.Dir.cwd().openDir(io, output_arg, .{})) |dir| {
+    if (Io.Dir.cwd().openDir(io, output_arg, .{})) |dir| {
         dir.close(io);
         is_directory = true;
     } else |err| switch (err) {
@@ -33,7 +34,7 @@ pub fn resolveOutputTarget(
             if (ends_with_sep) {
                 is_directory = true;
                 std.log.debug("Creating output directory '{s}'...", .{output_arg});
-                try std.Io.Dir.cwd().createDirPath(io, output_arg);
+                try Io.Dir.cwd().createDirPath(io, output_arg);
             } else {
                 if (is_batch) {
                     std.log.err("Output path '{s}' does not exist and does not end with a separator. Batch output requires a directory.", .{output_arg});

@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
@@ -174,7 +175,7 @@ pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
-    const io = std.Io.Threaded.global_single_threaded.ioBasic();
+    const io = Io.Threaded.global_single_threaded.ioBasic();
 
     const canvas_size = 400;
     const num_points = 200;

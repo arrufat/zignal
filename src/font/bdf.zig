@@ -7,6 +7,7 @@ const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const flate = std.compress.flate;
+const Io = std.Io;
 
 const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
@@ -64,12 +65,12 @@ const BdfParseState = struct {
 /// - allocator: Memory allocator
 /// - path: Path to BDF file
 /// - filter: Filter for which characters to load
-pub fn load(io: std.Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
+pub fn load(io: Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
     const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Read entire file into memory
-    const raw_file_contents = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(max_file_size));
+    const raw_file_contents = try Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(max_file_size));
     defer gpa.free(raw_file_contents);
 
     // Decompress if needed
@@ -78,17 +79,17 @@ pub fn load(io: std.Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFi
     defer if (decompressed_data) |data| gpa.free(data);
 
     if (is_compressed) {
-        var reader: std.Io.Reader = .fixed(raw_file_contents);
+        var reader: Io.Reader = .fixed(raw_file_contents);
 
         const buffer = try gpa.alloc(u8, flate.max_window_len);
         defer gpa.free(buffer);
 
         var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
 
-        var aw: std.Io.Writer.Allocating = .init(gpa);
+        var aw: Io.Writer.Allocating = .init(gpa);
         defer aw.deinit();
 
-        var remaining = std.Io.Limit.limited(max_file_size);
+        var remaining = Io.Limit.limited(max_file_size);
         while (remaining.nonzero()) {
             const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
                 error.EndOfStream => break,
@@ -98,7 +99,7 @@ pub fn load(io: std.Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFi
             remaining = remaining.subtract(n).?;
         } else {
             var one_byte_buf: [1]u8 = undefined;
-            var dummy_writer = std.Io.Writer.fixed(&one_byte_buf);
+            var dummy_writer = Io.Writer.fixed(&one_byte_buf);
             if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
                 if (n > 0) return BdfError.InvalidCompression;
             } else |err| switch (err) {
@@ -625,7 +626,7 @@ test "BDF parses glyph rows wider than 32 bits" {
     const dir_path = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
     defer testing.allocator.free(dir_path);
 
-    const file_path = try std.fs.path.join(testing.allocator, &.{ dir_path, "wide_font.bdf" });
+    const file_path = try Io.Dir.path.join(testing.allocator, &.{ dir_path, "wide_font.bdf" });
     defer testing.allocator.free(file_path);
 
     try tmp_dir.dir.writeFile(testing.io, .{ .sub_path = "wide_font.bdf", .data = wide_bdf });
@@ -694,14 +695,14 @@ test "BDF save and load compressed roundtrip" {
     const full_path = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
     defer testing.allocator.free(full_path);
 
-    const test_path = try std.fs.path.join(testing.allocator, &.{ full_path, test_filename });
+    const test_path = try Io.Dir.path.join(testing.allocator, &.{ full_path, test_filename });
     defer testing.allocator.free(test_path);
 
     // Save compressed
     try font.save(testing.io, testing.allocator, test_path);
 
     // Verify the file is compressed by checking magic number
-    const file = try std.Io.Dir.openFileAbsolute(testing.io, test_path, .{});
+    const file = try Io.Dir.openFileAbsolute(testing.io, test_path, .{});
     defer file.close(testing.io);
     var header: [2]u8 = undefined;
     var iov = [_][]u8{header[0..]};
@@ -800,7 +801,7 @@ test "BDF save and load roundtrip" {
     const full_path = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
     defer testing.allocator.free(full_path);
 
-    const test_path = try std.fs.path.join(testing.allocator, &.{ full_path, test_filename });
+    const test_path = try Io.Dir.path.join(testing.allocator, &.{ full_path, test_filename });
     defer testing.allocator.free(test_path);
 
     try font.save(testing.io, testing.allocator, test_path);
@@ -827,7 +828,7 @@ test "BDF save and load roundtrip" {
 }
 
 /// Save a BitmapFont to a BDF file
-pub fn save(io: std.Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
+pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     // Create buffer for BDF content
     var bdf_content: std.ArrayList(u8) = .empty;
     defer bdf_content.deinit(gpa);
@@ -870,15 +871,15 @@ pub fn save(io: std.Io, gpa: Allocator, font: BitmapFont, path: []const u8) !voi
     const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     // Write to file
-    const file = if (std.fs.path.isAbsolute(path))
-        try std.Io.Dir.createFileAbsolute(io, path, .{})
+    const file = if (Io.Dir.path.isAbsolute(path))
+        try Io.Dir.createFileAbsolute(io, path, .{})
     else
-        try std.Io.Dir.cwd().createFile(io, path, .{});
+        try Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
 
     if (is_compressed) {
         // Compress the BDF content
-        var aw: std.Io.Writer.Allocating = .init(gpa);
+        var aw: Io.Writer.Allocating = .init(gpa);
         defer aw.deinit();
         try aw.ensureTotalCapacity(bdf_content.items.len / 2 + 64);
 

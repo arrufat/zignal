@@ -5,11 +5,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
+
 const Rgb = @import("color.zig").Rgb(u8);
-const Gray = @import("color.zig").Gray;
 const Ycbcr = @import("color.zig").Ycbcr(u8);
 
 const max_file_size: usize = 100 * 1024 * 1024;
@@ -71,7 +72,7 @@ pub const Header = struct {
 
 /// Retrieve metadata from a JPEG stream without decoding the full image.
 /// Scans for a Start of Frame (SOF) marker.
-pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
+pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     var bytes_read: usize = 0;
     var marker_count: usize = 0;
     const MAX_MARKERS_SCAN = 10000; // Sanity limit for markers before SOF
@@ -144,7 +145,7 @@ pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
             // Discard remaining component info if any
             if (payload_len > 6) {
                 const skip = payload_len - 6;
-                bytes_read += try reader.discard(std.Io.Limit.limited(skip));
+                bytes_read += try reader.discard(.limited(skip));
             }
 
             return Header{
@@ -162,7 +163,7 @@ pub fn getInfo(reader: *std.Io.Reader, limits: DecodeLimits) !Header {
         // But for safety, we count it against the limit.
         if (bytes_read + skip > limits.max_jpeg_bytes) return error.ImageTooLarge;
 
-        bytes_read += try reader.discard(std.Io.Limit.limited(skip));
+        bytes_read += try reader.discard(.limited(skip));
     }
 }
 test "JPEG getInfo" {
@@ -195,7 +196,7 @@ test "JPEG getInfo" {
     try data.append(gpa, 0xFF);
     try data.append(gpa, 0xD9);
 
-    var reader = std.Io.Reader.fixed(data.items);
+    var reader: Io.Reader = .fixed(data.items);
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(200, header.width);
@@ -224,14 +225,14 @@ pub const EncodeOptions = struct {
 };
 
 /// Save Image to JPEG file with baseline encoding.
-pub fn save(comptime T: type, io: std.Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
+pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const bytes = try encode(T, allocator, image, .{ .subsampling = .yuv420 });
     defer allocator.free(bytes);
 
-    const file = if (std.fs.path.isAbsolute(file_path))
-        try std.Io.Dir.createFileAbsolute(io, file_path, .{})
+    const file = if (Io.Dir.path.isAbsolute(file_path))
+        try Io.Dir.createFileAbsolute(io, file_path, .{})
     else
-        try std.Io.Dir.cwd().createFile(io, file_path, .{});
+        try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, bytes);
 }
@@ -3084,9 +3085,9 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
     }
 }
 
-pub fn load(comptime T: type, io: std.Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     const read_limit = if (limits.max_jpeg_bytes == 0) std.math.maxInt(usize) else limits.max_jpeg_bytes;
-    const jpeg_data = try std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const jpeg_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, allocator, jpeg_data, limits);
 }

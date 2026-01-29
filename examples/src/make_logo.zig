@@ -5,9 +5,12 @@
 //! signal processing (waveforms) and image processing (color channels).
 
 const std = @import("std");
+const Io = std.Io;
+
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Canvas = zignal.Canvas;
+
 const Rgb = zignal.Rgb(u8);
 const Oklab = zignal.Oklab(f64);
 const Oklch = zignal.Oklch(f64);
@@ -16,7 +19,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    const io = std.Io.Threaded.global_single_threaded.ioBasic();
+    const io = Io.Threaded.global_single_threaded.ioBasic();
 
     // Create a 512x512 image for the logo
     var image: Image(Rgb) = try .init(allocator, 512, 512);

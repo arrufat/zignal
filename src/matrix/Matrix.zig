@@ -42,6 +42,7 @@
 //! - Extraction: `row()`, `col()`, `subMatrix()`
 
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -1610,7 +1611,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Default formatting (scientific notation)
-        pub fn format(self: Self, writer: *std.Io.Writer) !void {
+        pub fn format(self: Self, writer: *Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
         }
 
@@ -1722,7 +1723,7 @@ test "dynamic matrix format" {
     dm.at(1, 1).* = 0.57721;
 
     var buffer: [512]u8 = undefined;
-    var stream = std.Io.Writer.fixed(&buffer);
+    var stream: Io.Writer = .fixed(&buffer);
 
     // Test default format (scientific notation)
     try stream.print("{f}", .{dm});

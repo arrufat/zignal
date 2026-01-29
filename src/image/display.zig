@@ -1,15 +1,16 @@
 //! Terminal display formatting for images
 
 const std = @import("std");
+const Io = std.Io;
 
 const color = @import("../color.zig");
-const Rgb = @import("../color.zig").Rgb(u8);
 const Image = @import("../image.zig").Image;
 const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");
 const terminal = @import("../terminal.zig");
 
-// Import Image type directly - Zig's lazy compilation handles circular imports
+const Rgb = @import("../color.zig").Rgb(u8);
+
 /// Display format options
 pub const DisplayFormat = union(enum) {
     /// Automatically detect the best format (kitty -> sixel -> sgr)
@@ -54,11 +55,11 @@ pub fn DisplayFormatter(comptime T: type) type {
     return struct {
         image: *const Image(T),
         display_format: DisplayFormat,
-        io: std.Io,
+        io: Io,
 
         const Self = @This();
 
-        pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn format(self: Self, writer: *Io.Writer) Io.Writer.Error!void {
             // Setup allocator once for potential scaling
             var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
             defer arena.deinit();

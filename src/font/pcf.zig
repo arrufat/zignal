@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const testing = std.testing;
 const flate = std.compress.flate;
 
@@ -188,12 +189,12 @@ const PropertiesInfo = struct {
 /// - allocator: Memory allocator
 /// - path: Path to PCF file
 /// - filter: Filter for which characters to load
-pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
+pub fn load(io: Io, allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
     const is_compressed = std.mem.endsWith(u8, path, ".gz");
 
     // Read file into memory
-    const raw_file_contents = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_file_size));
+    const raw_file_contents = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_file_size));
     defer allocator.free(raw_file_contents);
 
     // Decompress if needed
@@ -202,17 +203,17 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: 
     defer if (decompressed_data) |data| allocator.free(data);
 
     if (is_compressed) {
-        var reader: std.Io.Reader = .fixed(raw_file_contents);
+        var reader: Io.Reader = .fixed(raw_file_contents);
 
         const buffer = try allocator.alloc(u8, flate.max_window_len);
         defer allocator.free(buffer);
 
         var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
 
-        var aw: std.Io.Writer.Allocating = .init(allocator);
+        var aw: Io.Writer.Allocating = .init(allocator);
         defer aw.deinit();
 
-        var remaining = std.Io.Limit.limited(max_file_size);
+        var remaining = Io.Limit.limited(max_file_size);
         while (remaining.nonzero()) {
             const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
                 error.EndOfStream => break,
@@ -222,7 +223,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: 
             remaining = remaining.subtract(n).?;
         } else {
             var one_byte_buf: [1]u8 = undefined;
-            var dummy_writer = std.Io.Writer.fixed(&one_byte_buf);
+            var dummy_writer = Io.Writer.fixed(&one_byte_buf);
             if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
                 if (n > 0) return PcfError.InvalidCompression;
             } else |err| switch (err) {
@@ -243,7 +244,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, path: []const u8, filter: 
     const arena_allocator = arena.allocator();
 
     // Parse PCF file
-    var reader: std.Io.Reader = .fixed(file_contents);
+    var reader: Io.Reader = .fixed(file_contents);
 
     // Read and verify header
     const header = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -362,7 +363,7 @@ fn validateTableBounds(data: []const u8, table: TableEntry) !void {
 fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
     try validateTableBounds(data, table);
 
-    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
+    var reader: Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
     const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -420,7 +421,7 @@ fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
 fn parseProperties(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !PropertiesInfo {
     try validateTableBounds(data, table);
 
-    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
+    var reader: Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
     const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -527,7 +528,7 @@ fn getStringProperty(properties: []const Property, name: []const u8) ?[]const u8
 }
 
 /// Read metric from stream (handles both compressed and uncompressed formats)
-fn readMetric(reader: *std.Io.Reader, byte_order: std.builtin.Endian, compressed: bool) !Metric {
+fn readMetric(reader: *Io.Reader, byte_order: std.builtin.Endian, compressed: bool) !Metric {
     if (compressed) {
         // Read compressed metric (5 bytes, each offset by 0x80)
         const lsb = try reader.takeVarInt(u8, .little, 1);
@@ -561,7 +562,7 @@ fn readMetric(reader: *std.Io.Reader, byte_order: std.builtin.Endian, compressed
 fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !EncodingEntry {
     try validateTableBounds(data, table);
 
-    var reader = std.Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
+    var reader = Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
     const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -604,7 +605,7 @@ const MetricsInfo = struct {
 fn parseMetrics(allocator: std.mem.Allocator, data: []const u8, table: TableEntry, max_glyphs: usize) !MetricsInfo {
     try validateTableBounds(data, table);
 
-    var reader = std.Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
+    var reader = Io.Reader.fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
     const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -668,7 +669,7 @@ const BitmapSizes = struct {
 fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntry) !BitmapInfo {
     try validateTableBounds(data, table);
 
-    var reader: std.Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
+    var reader: Io.Reader = .fixed(data[table.offset .. table.offset + table.size]);
 
     // Read format field and determine byte order
     const format = try reader.takeVarInt(u32, .little, @sizeOf(u32));
@@ -1018,7 +1019,7 @@ test "Table bounds validation" {
 
 test "Metric reading" {
     var buffer: [64]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer = Io.Writer.fixed(&buffer);
 
     // Write compressed metric
     try writer.writeByte(0x82); // LSB: 2 (0x82 - 0x80)
@@ -1027,7 +1028,7 @@ test "Metric reading" {
     try writer.writeByte(0x90); // Ascent: 16 (0x90 - 0x80)
     try writer.writeByte(0x82); // Descent: 2 (0x82 - 0x80)
 
-    var reader: std.Io.Reader = .fixed(buffer[0..writer.end]);
+    var reader: Io.Reader = .fixed(buffer[0..writer.end]);
 
     const metric = try readMetric(&reader, .little, true);
     try testing.expectEqual(@as(i16, 2), metric.left_sided_bearing);
@@ -1042,7 +1043,7 @@ test "Properties parsing" {
 
     // Create a minimal properties table with just one integer property for simplicity
     var buffer: [256]u8 = undefined;
-    var writer: std.Io.Writer = .fixed(&buffer);
+    var writer: Io.Writer = .fixed(&buffer);
 
     // Write format (little endian, no special flags)
     try writer.writeInt(u32, 0x00000000, .little);

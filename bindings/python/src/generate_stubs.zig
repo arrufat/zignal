@@ -2,6 +2,7 @@
 // This leverages Zig's compile-time reflection to create accurate type information
 
 const std = @import("std");
+const Io = std.Io;
 const zignal = @import("zignal");
 const python = @import("python.zig");
 const color_registry = @import("color_registry.zig");
@@ -737,14 +738,14 @@ pub fn main() !void {
 
     // Write _zignal.pyi (stub file for C extension)
     {
-        const file = try std.Io.Dir.cwd().createFile(io, "_zignal.pyi", .{});
+        const file = try Io.Dir.cwd().createFile(io, "_zignal.pyi", .{});
         defer file.close(io);
         try file.writeStreamingAll(io, main_stub_content);
     }
 
     // Write __init__.pyi (package-level stub file)
     {
-        const file = try std.Io.Dir.cwd().createFile(io, "__init__.pyi", .{});
+        const file = try Io.Dir.cwd().createFile(io, "__init__.pyi", .{});
         defer file.close(io);
         try file.writeStreamingAll(io, init_stub_content);
     }

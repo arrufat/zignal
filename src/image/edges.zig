@@ -2,14 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
-const Gray = @import("../color.zig").Gray;
+const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
-const ShenCastan = @import("ShenCastan.zig");
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-const convertColor = @import("../color.zig").convertColor;
 const convolve = @import("convolution.zig").convolve;
+const ShenCastan = @import("ShenCastan.zig");
 
 /// Sobel X gradient kernel (horizontal edges)
 const sobel_x = [3][3]f32{

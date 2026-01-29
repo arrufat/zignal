@@ -4,10 +4,10 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
+
+const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
 const Interpolation = @import("../interpolation.zig").Interpolation;
-const color = @import("../../color.zig");
-const Gray = color.Gray;
 
 // Helper function to create a simple gradient test image
 fn createGradientImage(allocator: std.mem.Allocator, rows: u32, cols: u32) !Image(u8) {
