@@ -7,6 +7,9 @@ const zignal = @import("zignal");
 
 const cli_args = @import("cli/args.zig");
 
+// Subcommands are automatically discovered from public declarations that
+// have 'run', 'description', and 'help'. They are marked 'pub' so that
+// the compiler and linters don't complain about them being unused.
 pub const blur = @import("cli/blur.zig");
 pub const diff = @import("cli/diff.zig");
 pub const display = @import("cli/display.zig");
@@ -59,35 +62,47 @@ pub const Cli = struct {
 
     pub fn init() Cli {
         const cmds = comptime blk: {
-            var items: []const Command = &.{};
+            var command_count: comptime_int = 0;
             for (std.meta.declarations(root)) |decl| {
-                const val = @field(root, decl.name);
-                if (@TypeOf(val) == type and
-                    @hasDecl(val, "run") and
-                    @hasDecl(val, "description") and
-                    @hasDecl(val, "help"))
-                {
-                    items = items ++ .{Command{
+                if (getCommandModule(decl) != null) {
+                    command_count += 1;
+                }
+            }
+
+            var array: [command_count]Command = undefined;
+            var i: comptime_int = 0;
+            for (std.meta.declarations(root)) |decl| {
+                if (getCommandModule(decl)) |val| {
+                    array[i] = .{
                         .name = decl.name,
                         .run = val.run,
                         .description = val.description,
                         .help = val.help,
-                    }};
+                    };
+                    i += 1;
                 }
             }
 
-            var array: [items.len]Command = undefined;
-            @memcpy(&array, items);
-
             std.sort.block(Command, &array, {}, struct {
-                fn less(_: void, lhs: Command, rhs: Command) bool {
+                fn lessThan(_: void, lhs: Command, rhs: Command) bool {
                     return std.mem.lessThan(u8, lhs.name, rhs.name);
                 }
-            }.less);
+            }.lessThan);
 
             break :blk array;
         };
         return .{ .commands = &cmds };
+    }
+
+    fn getCommandModule(comptime decl: anytype) ?type {
+        const val = @field(root, decl.name);
+        return if (@TypeOf(val) == type and
+            @hasDecl(val, "run") and
+            @hasDecl(val, "description") and
+            @hasDecl(val, "help"))
+            val
+        else
+            null;
     }
 
     pub fn run(
