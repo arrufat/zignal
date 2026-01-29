@@ -7,16 +7,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
-const meta = @import("meta.zig");
 const clamp = std.math.clamp;
 
-const rle = @import("compression/rle.zig");
 const convertColor = @import("color.zig").convertColor;
 const Image = @import("image.zig").Image;
 const Interpolation = @import("image/interpolation.zig").Interpolation;
-const Rgb = @import("color.zig").Rgb(u8);
+const meta = @import("meta.zig");
+const rle = @import("rle.zig");
 const terminal = @import("terminal.zig");
 
+const Rgb = @import("color.zig").Rgb(u8);
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
 const max_supported_width: usize = 2048;
 const color_quantize_bits: u5 = 5; // For 32x32x32 color lookup table
