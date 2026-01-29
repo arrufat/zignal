@@ -8,13 +8,19 @@ const jpeg = zignal.jpeg;
 
 const args = @import("args.zig");
 
-const Args = struct {};
+const Args = struct {
+    stats: bool = false,
+
+    pub const meta = .{
+        .stats = .{ .help = "Compute and display image statistics (min, max, mean, stdDev)" },
+    };
+};
 
 pub const description = "Display detailed information about one or more image files.";
 
 pub const help = args.generateHelp(
     Args,
-    "zignal info <image1> <image2> ...",
+    "zignal info [options] <image1> <image2> ...",
     description,
 );
 
@@ -76,6 +82,38 @@ pub fn run(io: Io, writer: *std.Io.Writer, gpa: Allocator, iterator: *std.proces
                 }
             } else {
                 break :blk error.UnsupportedImageFormat;
+            }
+
+            if (parsed.options.stats) {
+                // Load image as RGBA(u8)
+                std.log.debug("Loading image for stats: {s}", .{image_path});
+                var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, image_path) catch |err| break :blk err;
+                defer image.deinit(gpa);
+
+                std.log.debug("Computing statistics...", .{});
+                var timer = try std.time.Timer.start();
+                var r_stats: zignal.RunningStats(f64) = .init();
+                var g_stats: zignal.RunningStats(f64) = .init();
+                var b_stats: zignal.RunningStats(f64) = .init();
+
+                for (image.data) |pixel| {
+                    r_stats.add(pixel.r);
+                    g_stats.add(pixel.g);
+                    b_stats.add(pixel.b);
+                }
+                const stats_ns = timer.read();
+                std.log.debug("Statistics computed in {d:.3} ms", .{@as(f64, @floatFromInt(stats_ns)) / std.time.ns_per_ms});
+
+                try writer.print("\n{s: <8} {s: >8} {s: >8} {s: >10} {s: >10}\n", .{ "Channel", "Min", "Max", "Mean", "StdDev" });
+                inline for (.{ .{ "Red", &r_stats }, .{ "Green", &g_stats }, .{ "Blue", &b_stats } }) |entry| {
+                    try writer.print("{s: <8} {d: >8} {d: >8} {d: >10.2} {d: >10.2}\n", .{
+                        entry[0],
+                        entry[1].min(),
+                        entry[1].max(),
+                        entry[1].mean(),
+                        entry[1].stdDev(),
+                    });
+                }
             }
             break :blk void{};
         };
