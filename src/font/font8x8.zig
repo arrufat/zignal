@@ -156,7 +156,7 @@ test "static font is available" {
     // Test getting character data
     const char_data = basic.getCharData('A');
     try testing.expect(char_data != null);
-    try testing.expectEqual(@as(usize, 8), char_data.?.len);
+    try testing.expectEqual(@as(u32, 8), char_data.?.len);
 }
 
 test "create ASCII font dynamically" {
@@ -175,7 +175,7 @@ test "create ASCII font dynamically" {
     // Test getting character data through glyph map
     const char_data = dynamic_font.getCharData('A');
     try testing.expect(char_data != null);
-    try testing.expectEqual(@as(usize, 8), char_data.?.len);
+    try testing.expectEqual(@as(u32, 8), char_data.?.len);
 }
 
 test "create extended Latin font" {
@@ -191,7 +191,7 @@ test "create extended Latin font" {
     // Test extended Latin character (© copyright symbol at 0xA9)
     const extended_char = extended_font.getCharData(0xA9);
     try testing.expect(extended_char != null);
-    try testing.expectEqual(@as(usize, 8), extended_char.?.len);
+    try testing.expectEqual(@as(u32, 8), extended_char.?.len);
 }
 
 test "create box drawing font" {
