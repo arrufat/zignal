@@ -168,7 +168,7 @@ pub const PyCanvas = struct {
     }
 
     /// Draw another image.
-    pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(usize), blend_mode: Blending) void {
+    pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(u32), blend_mode: Blending) void {
         switch (self.data) {
             inline else => |*canvas| switch (source.data) {
                 inline else => |img| canvas.drawImage(img, position, source_rect, blend_mode),
@@ -547,10 +547,10 @@ fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         return null;
     };
 
-    var rect_opt: ?Rectangle(usize) = null;
+    var rect_opt: ?Rectangle(u32) = null;
     if (params.source_rect) |rect_obj| {
         if (rect_obj != c.Py_None()) {
-            rect_opt = python.parse(zignal.Rectangle(usize), rect_obj) catch return null;
+            rect_opt = python.parse(Rectangle(u32), rect_obj) catch return null;
         }
     }
 
