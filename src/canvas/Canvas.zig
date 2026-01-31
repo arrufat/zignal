@@ -108,7 +108,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Returns the total number of pixels in the canvas (rows * cols).
-        pub inline fn size(self: Self) u32 {
+        pub inline fn size(self: Self) usize {
             return self.image.size();
         }
 
