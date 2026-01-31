@@ -578,8 +578,8 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     encoding.default_char = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
 
     // Calculate total encodings with overflow protection
-    const cols = @as(usize, encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1);
-    const rows = @as(usize, encoding.max_byte1 - encoding.min_byte1 + 1);
+    const cols = @as(u32, encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1);
+    const rows = @as(u32, encoding.max_byte1 - encoding.min_byte1 + 1);
     const encodings_count = cols * rows;
 
     if (encodings_count > max_glyph_count) {
@@ -598,7 +598,7 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
 /// Metrics parsing result
 const MetricsInfo = struct {
     metrics: []Metric,
-    glyph_count: usize,
+    glyph_count: u32,
 };
 
 /// Parse metrics table
@@ -778,7 +778,7 @@ fn convertToBitmapFont(
     // Determine which glyphs to include
     var glyph_list: std.ArrayList(struct {
         codepoint: u32,
-        glyph_index: usize,
+        glyph_index: u32,
         metric: Metric,
     }) = .empty;
     defer glyph_list.deinit(gpa);
@@ -819,7 +819,7 @@ fn convertToBitmapFont(
     }
 
     // Pre-calculate total bitmap size needed
-    var total_bitmap_size: usize = 0;
+    var total_bitmap_size: u32 = 0;
     for (glyph_list.items) |glyph_info| {
         const dims = getGlyphDimensions(glyph_info.metric);
         const bytes_per_row = (dims.width + 7) / 8;

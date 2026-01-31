@@ -81,7 +81,7 @@ test "thick lines have correct width" {
     const color = Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
     // Test different line widths
-    const line_widths = [_]usize{ 1, 3, 5, 10, 20 };
+    const line_widths = [_]u32{ 1, 3, 5, 10, 20 };
 
     for (line_widths) |line_width| {
         // Clear image
@@ -91,7 +91,7 @@ test "thick lines have correct width" {
 
         // Draw horizontal line in the middle
         const y = @as(f32, @floatFromInt(height / 2));
-        canvas.drawLine(.init(.{ 50, y }), .init(.{ 150, y }), color, line_width, .fast);
+        canvas.drawLine(.init(.{ 50, y }), .init(.{ 150, y }), color, @intCast(line_width), .fast);
 
         // Measure actual width at several points along the line
         var measured_widths: [3]usize = .{ 0, 0, 0 };
@@ -197,7 +197,7 @@ test "circle outline has correct thickness" {
             pixel.* = Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
         }
 
-        canvas.drawCircle(center, radius, color, line_width, .fast);
+        canvas.drawCircle(center, radius, color, @intCast(line_width), .fast);
 
         // Sample along several radii to check thickness
         const angles = [_]f32{ 0, std.math.pi / @as(f32, 4), std.math.pi / @as(f32, 2), 3 * std.math.pi / @as(f32, 4) };
@@ -296,7 +296,7 @@ test "drawImage supports source rect and clipping" {
     src.at(1, 2).* = .{ .r = 170, .g = 180, .b = 190, .a = 255 };
 
     const canvas: Canvas(Rgba) = .init(allocator, dest);
-    const src_rect: Rectangle(usize) = .init(1, 0, 3, 2);
+    const src_rect: Rectangle(u32) = .init(1, 0, 3, 2);
     canvas.drawImage(src, .init(.{ 0, 0 }), src_rect, .normal);
 
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
