@@ -64,8 +64,8 @@ pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFil
 }
 
 /// Get number of bytes per row for this font
-pub fn bytesPerRow(self: BitmapFont) usize {
-    return (@as(usize, self.char_width) + 7) / 8;
+pub fn bytesPerRow(self: BitmapFont) u32 {
+    return (@as(u32, self.char_width) + 7) / 8;
 }
 
 /// Get the bitmap data for a specific character
@@ -73,9 +73,9 @@ pub fn bytesPerRow(self: BitmapFont) usize {
 pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
     // For ASCII fonts WITHOUT glyph_map, use the standard fixed-size layout
     if (self.glyph_map == null and codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
-        const index: usize = @as(u8, @intCast(codepoint)) - self.first_char;
+        const index: u32 = @as(u8, @intCast(codepoint)) - self.first_char;
         const bytes_per_row = self.bytesPerRow();
-        const bytes_per_char = @as(usize, self.char_height) * bytes_per_row;
+        const bytes_per_char = @as(u32, self.char_height) * bytes_per_row;
         const offset = index * bytes_per_char;
         return self.data[offset .. offset + bytes_per_char];
     }
@@ -86,8 +86,8 @@ pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
             if (self.glyph_data) |data| {
                 if (idx < data.len) {
                     const glyph = data[idx];
-                    const glyph_bytes_per_row = (@as(usize, glyph.width) + 7) / 8;
-                    const glyph_size = @as(usize, glyph.height) * glyph_bytes_per_row;
+                    const glyph_bytes_per_row = (@as(u32, glyph.width) + 7) / 8;
+                    const glyph_size = @as(u32, glyph.height) * glyph_bytes_per_row;
                     return self.data[glyph.bitmap_offset .. glyph.bitmap_offset + glyph_size];
                 }
             }
@@ -99,14 +99,14 @@ pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
 
 /// Get bitmap data for a specific row of a character
 /// Returns null if the character is not in the font
-pub fn getCharRow(self: BitmapFont, codepoint: u21, row: usize) ?[]const u8 {
+pub fn getCharRow(self: BitmapFont, codepoint: u21, row: u32) ?[]const u8 {
     // For variable-width fonts, we need to handle per-glyph dimensions
     if (self.glyph_map != null) {
         const glyph_info = self.getGlyphInfo(codepoint) orelse return null;
         if (row >= glyph_info.height) return null;
 
         const char_data = self.getCharData(codepoint) orelse return null;
-        const glyph_bytes_per_row = (@as(usize, glyph_info.width) + 7) / 8;
+        const glyph_bytes_per_row = (@as(u32, glyph_info.width) + 7) / 8;
         const row_offset = row * glyph_bytes_per_row;
         return char_data[row_offset .. row_offset + glyph_bytes_per_row];
     }
@@ -265,7 +265,7 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
     };
 
     const bytes_per_row = if (self.glyph_map != null)
-        (@as(usize, glyph_info.width) + 7) / 8
+        (@as(u32, glyph_info.width) + 7) / 8
     else
         self.bytesPerRow();
 

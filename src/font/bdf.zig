@@ -44,7 +44,7 @@ const BdfGlyph = struct {
     },
     device_width: i16,
     bitmap_offset: usize,
-    bitmap_size: usize,
+    bitmap_size: u32,
 };
 
 /// Single-pass BDF parser state
@@ -128,7 +128,7 @@ pub fn load(io: Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter
     state.font = try parseHeader(gpa, &lines);
 
     // Parse glyphs
-    var parsed_glyphs: usize = 0;
+    var parsed_glyphs: u32 = 0;
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
 
@@ -318,7 +318,7 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
 
             // Parse and store bitmap data
             const bytes_per_row = (glyph.bbox.width + 7) / 8;
-            glyph.bitmap_size = @as(usize, glyph.bbox.height) * bytes_per_row;
+            glyph.bitmap_size = @as(u32, glyph.bbox.height) * bytes_per_row;
 
             for (0..glyph.bbox.height) |_| {
                 const bitmap_line = lines.next() orelse return BdfError.InvalidBitmapData;
@@ -400,8 +400,8 @@ fn convertToBitmapFont(
     bitmap_data: []u8,
     all_ascii: bool,
 ) !BitmapFont {
-    const char_width = @as(usize, @intCast(@abs(font.bbox_width)));
-    const char_height = @as(usize, @intCast(@abs(font.bbox_height)));
+    const char_width = @as(u32, @intCast(@abs(font.bbox_width)));
+    const char_height = @as(u32, @intCast(@abs(font.bbox_height)));
 
     if (all_ascii and glyphs.len > 0) {
         // ASCII font - determine range
@@ -426,7 +426,7 @@ fn convertToBitmapFont(
 
         if (need_glyph_data) {
             // Variable-width ASCII font
-            var map = std.AutoHashMap(u32, usize).init(allocator);
+            var map: std.AutoHashMap(u32, usize) = .init(allocator);
             errdefer map.deinit();
 
             var glyph_data_list = try allocator.alloc(GlyphData, glyphs.len);
@@ -503,7 +503,7 @@ fn convertToBitmapFont(
         }
     } else {
         // Unicode font - use sparse storage
-        var map = std.AutoHashMap(u32, usize).init(allocator);
+        var map: std.AutoHashMap(u32, usize) = .init(allocator);
         errdefer map.deinit();
 
         var glyph_data_list = try allocator.alloc(GlyphData, glyphs.len);
@@ -595,7 +595,7 @@ test "BDF to BitmapFont conversion" {
     // Test that 'A' was converted correctly
     const char_data = font.getCharData('A');
     try testing.expect(char_data != null);
-    try testing.expectEqual(@as(usize, 8), char_data.?.len);
+    try testing.expectEqual(@as(u32, 8), char_data.?.len);
 
     // Check bitmap conversion
     try testing.expectEqual(@as(u8, 0x18), char_data.?[0]);
@@ -843,7 +843,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
         defer gpa.free(encodings);
 
         var iter = map.iterator();
-        var idx: usize = 0;
+        var idx: u32 = 0;
         while (iter.next()) |entry| : (idx += 1) {
             encodings[idx] = entry.key_ptr.*;
         }
@@ -1009,18 +1009,18 @@ fn writeBdfGlyph(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFon
     // Write bitmap data
     const glyph_data = if (font.glyph_map != null) blk: {
         // Variable-width font
-        const glyph_bytes_per_row = (@as(usize, glyph_info.width) + 7) / 8;
-        const glyph_size = @as(usize, glyph_info.height) * glyph_bytes_per_row;
+        const glyph_bytes_per_row = (@as(u32, glyph_info.width) + 7) / 8;
+        const glyph_size = @as(u32, glyph_info.height) * glyph_bytes_per_row;
         break :blk font.data[glyph_info.bitmap_offset .. glyph_info.bitmap_offset + glyph_size];
     } else blk: {
         // Fixed-width ASCII font
         const bytes_per_row = font.bytesPerRow();
-        const bytes_per_char = @as(usize, font.char_height) * bytes_per_row;
+        const bytes_per_char = @as(u32, font.char_height) * bytes_per_row;
         const offset = glyph_idx * bytes_per_char;
         break :blk font.data[offset .. offset + bytes_per_char];
     };
 
-    const glyph_bytes_per_row = (@as(usize, glyph_info.width) + 7) / 8;
+    const glyph_bytes_per_row = (@as(u32, glyph_info.width) + 7) / 8;
     for (0..glyph_info.height) |row| {
         const row_start = row * glyph_bytes_per_row;
         const row_end = row_start + glyph_bytes_per_row;

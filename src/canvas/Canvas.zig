@@ -59,15 +59,15 @@ pub fn Canvas(comptime T: type) type {
             return .{ .image = image, .allocator = allocator };
         }
 
-        /// Clamps a floating-point coordinate to image bounds and converts to usize.
-        /// Returns the clamped coordinate as a usize index.
-        inline fn clampToImageBounds(coord: f32, max_size: usize) usize {
+        /// Clamps a floating-point coordinate to image bounds and converts to u32 .
+        /// Returns the clamped coordinate as a u32  index.
+        inline fn clampToImageBounds(coord: f32, max_size: u32) u32 {
             return @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(max_size)), coord)));
         }
 
         /// Clamps a rectangle to image bounds and returns integer pixel coordinates.
         /// Returns null if the rectangle is completely outside the image.
-        inline fn clampRectToImage(self: Self, rect: Rectangle(f32)) ?Rectangle(usize) {
+        inline fn clampRectToImage(self: Self, rect: Rectangle(f32)) ?Rectangle(u32) {
             const left = clampToImageBounds(rect.l, self.image.cols);
             const top = clampToImageBounds(rect.t, self.image.rows);
             const right = clampToImageBounds(rect.r, self.image.cols);
@@ -88,7 +88,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Gets a reference to the pixel at the given coordinates.
         /// Panics if coordinates are out of bounds.
-        pub inline fn at(self: Self, row: usize, col: usize) *T {
+        pub inline fn at(self: Self, row: u32, col: u32) *T {
             return self.image.at(row, col);
         }
 
@@ -98,17 +98,17 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Returns the number of rows (height) in the canvas.
-        pub inline fn rows(self: Self) usize {
+        pub inline fn rows(self: Self) u32 {
             return self.image.rows;
         }
 
         /// Returns the number of columns (width) in the canvas.
-        pub inline fn cols(self: Self) usize {
+        pub inline fn cols(self: Self) u32 {
             return self.image.cols;
         }
 
         /// Returns the total number of pixels in the canvas (rows * cols).
-        pub inline fn size(self: Self) usize {
+        pub inline fn size(self: Self) u32 {
             return self.image.size();
         }
 
@@ -172,9 +172,9 @@ pub fn Canvas(comptime T: type) type {
             if (y < 0 or y >= frows) return;
             if (x2 < 0 or x1 >= fcols) return;
 
-            const row: usize = @intFromFloat(y);
-            const start: usize = @intFromFloat(@max(0, @floor(x1)));
-            const end: usize = @intFromFloat(@min(fcols - 1, @ceil(x2)));
+            const row: u32 = @intFromFloat(y);
+            const start: u32 = @intFromFloat(@max(0, @floor(x1)));
+            const end: u32 = @intFromFloat(@min(fcols - 1, @ceil(x2)));
 
             if (start > end) return;
 
@@ -197,7 +197,7 @@ pub fn Canvas(comptime T: type) type {
         /// - width: Line thickness in pixels (0 = no drawing)
         /// - mode: .fast (performance) or .soft (quality with antialiasing)
         /// Note: `.fast` prioritizes raw throughput and never blends with existing pixels.
-        pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: u32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -210,7 +210,7 @@ pub fn Canvas(comptime T: type) type {
         /// Internal dispatcher for fast (non-antialiased) line rendering.
         /// - Width 1: Uses Bresenham's algorithm for pixel-perfect precision
         /// - Width >1: Uses rectangle-based approach with circular end caps
-        fn drawLineFast(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
+        fn drawLineFast(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             if (width == 1) {
                 // Use Bresenham's algorithm for 1px lines - fast and precise
                 self.drawLineBresenham(p1, p2, color);
@@ -222,7 +222,7 @@ pub fn Canvas(comptime T: type) type {
         /// Internal dispatcher for soft (antialiased) line rendering.
         /// - Width 1: Uses Xiaolin Wu's algorithm for optimal thin line antialiasing
         /// - Width >1: Uses distance-based algorithm for superior thick line quality
-        fn drawLineSoft(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
+        fn drawLineSoft(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             if (width == 1) {
                 // Use Wu's algorithm for 1px lines - optimal antialiasing and performance
                 self.drawLineXiaolinWu(p1, p2, color);
@@ -396,7 +396,7 @@ pub fn Canvas(comptime T: type) type {
         /// Constructs a filled rectangle perpendicular to the line direction,
         /// then adds circular end caps for smooth line termination.
         /// Handles zero-length lines by drawing a single filled circle.
-        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
+        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             const solid_color = convertColor(T, color);
 
             // For thick lines, draw as a filled rectangle
@@ -437,7 +437,7 @@ pub fn Canvas(comptime T: type) type {
         /// applying smooth alpha falloff at edges for superior visual quality.
         /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
         /// More expensive than rectangle-based approach but produces better results.
-        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: usize, color: anytype) void {
+        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
@@ -470,8 +470,8 @@ pub fn Canvas(comptime T: type) type {
                     const x_start = x1 - half_width;
                     const x_end = x1 + half_width;
                     if (needs_alpha_blend) {
-                        const px_start = @as(usize, @intFromFloat(@max(0, @floor(x_start))));
-                        const px_end = @as(usize, @intFromFloat(@min(fcols - 1, @ceil(x_end))));
+                        const px_start = @as(u32, @intFromFloat(@max(0, @floor(x_start))));
+                        const px_end = @as(u32, @intFromFloat(@min(fcols - 1, @ceil(x_end))));
                         if (px_start > px_end) continue;
                         var px = px_start;
                         while (px <= px_end) : (px += 1) {
@@ -591,12 +591,12 @@ pub fn Canvas(comptime T: type) type {
         /// Draws another image onto this canvas at the given top-left position.
         /// Supports alpha blending for RGBA images with the normal blend mode.
         /// For rotation, scaling, or custom blend modes, users should access the canvas's image field directly.
-        pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(usize), blend_mode: Blending) void {
+        pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(u32), blend_mode: Blending) void {
             const SourcePixelType = std.meta.Child(@TypeOf(source.data));
 
             if (source.rows == 0 or source.cols == 0) return;
 
-            const SourceRect = Rectangle(usize);
+            const SourceRect = Rectangle(u32);
             const full_rect = SourceRect.init(0, 0, source.cols, source.rows);
             const requested = source_rect_opt orelse full_rect;
             const src_rect = full_rect.intersect(requested) orelse return;
@@ -642,7 +642,7 @@ pub fn Canvas(comptime T: type) type {
         /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
         /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
         /// Round joints are added at vertices to ensure smooth connections.
-        pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
@@ -653,7 +653,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws the outline of a rectangle on the given image.
-        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: u32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             // Rectangle has exclusive r,b bounds, but drawPolygon needs inclusive points
             // So we subtract 1 from r and b to get the actual corner positions
@@ -700,7 +700,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Draws the outline of a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for fast aliased edges.
-        pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: usize, mode: DrawMode) void {
+        pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: u32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
@@ -736,7 +736,7 @@ pub fn Canvas(comptime T: type) type {
         /// // Draw a red quarter arc from 0 to π/2 (90 degrees)
         /// try canvas.drawArc(center, 50, 0, std.math.pi / 2.0, Rgb.red, 2, .soft);
         /// ```
-        pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: usize, mode: DrawMode) !void {
+        pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: u32, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
@@ -764,7 +764,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing solid (aliased) circle outlines.
-        fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: usize, color: anytype) void {
+        fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             if (width == 1) {
                 // Use fast Bresenham for 1-pixel width
                 const cx = @round(center.x());
@@ -806,10 +806,10 @@ pub fn Canvas(comptime T: type) type {
                 const solid_color = convertColor(T, color);
 
                 // Calculate bounding box
-                const left: usize = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-                const top: usize = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-                const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-                const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+                const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
+                const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
+                const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
+                const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
                 for (top..bottom) |r| {
                     const y = @as(f32, @floatFromInt(r)) - center.y();
@@ -829,7 +829,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing smooth (anti-aliased) circle outlines.
-        fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: usize, color: anytype) void {
+        fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const line_width: f32 = @floatFromInt(width);
@@ -837,10 +837,10 @@ pub fn Canvas(comptime T: type) type {
             const outer_radius = radius + line_width / 2.0;
 
             // Calculate bounding box
-            const left: usize = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+            const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
+            const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
+            const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
+            const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
             const c2 = convertColor(Rgba, color);
 
@@ -875,7 +875,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing solid (aliased) arc outlines.
-        fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: usize, color: anytype) void {
+        fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) void {
             if (width == 1) {
                 // Use modified Bresenham for 1-pixel width arcs
                 const cx = @round(center.x());
@@ -924,10 +924,10 @@ pub fn Canvas(comptime T: type) type {
                 const outer_radius = radius + line_width / 2.0;
 
                 // Calculate bounding box
-                const left: usize = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-                const top: usize = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-                const right: usize = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-                const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+                const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
+                const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
+                const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
+                const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
 
                 if (left >= right or top >= bottom) return;
 
@@ -950,13 +950,13 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing smooth (anti-aliased) arc outlines.
-        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: usize, color: anytype) !void {
+        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) !void {
             // Generate polygon approximation of the arc
             const angle_span = end_angle - start_angle;
             const arc_length = @abs(angle_span) * radius;
 
             // Determine number of segments based on arc length
-            const segments = @max(@as(usize, 8), @as(usize, @intFromFloat(@ceil(arc_length / 5.0))));
+            const segments = @max(@as(u32, 8), @as(u32, @intFromFloat(@ceil(arc_length / 5.0))));
             const angle_step = angle_span / @as(f32, @floatFromInt(segments));
 
             // Stack allocation for reasonable arc sizes
@@ -1050,7 +1050,7 @@ pub fn Canvas(comptime T: type) type {
 
             var y = start_y;
             while (y <= end_y) : (y += 1) {
-                var intersection_count: usize = 0;
+                var intersection_count: u32 = 0;
 
                 // Count intersections first
                 for (0..polygon.len) |i| {
@@ -1076,7 +1076,7 @@ pub fn Canvas(comptime T: type) type {
                 }
 
                 // Find actual intersections
-                var idx: usize = 0;
+                var idx: u32 = 0;
                 for (0..polygon.len) |i| {
                     const p1 = polygon[i];
                     const p2 = polygon[(i + 1) % polygon.len];
@@ -1097,7 +1097,7 @@ pub fn Canvas(comptime T: type) type {
                 }
 
                 // Fill between pairs of intersections
-                var i: usize = 0;
+                var i: u32 = 0;
                 while (i + 1 < intersection_slice.len) : (i += 2) {
                     const left_edge = intersection_slice[i];
                     const right_edge = intersection_slice[i + 1];
@@ -1201,10 +1201,10 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: usize = @intFromFloat(@round(@max(0, center.x() - radius)));
-            const top: usize = @intFromFloat(@round(@max(0, center.y() - radius)));
-            const right: usize = @intFromFloat(@round(@min(fcols, center.x() + radius)));
-            const bottom: usize = @intFromFloat(@round(@min(frows, center.y() + radius)));
+            const left: u32 = @intFromFloat(@round(@max(0, center.x() - radius)));
+            const top: u32 = @intFromFloat(@round(@max(0, center.y() - radius)));
+            const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + radius)));
+            const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + radius)));
 
             for (top..bottom) |r| {
                 const y = as(f32, r) - center.y();
@@ -1351,7 +1351,7 @@ pub fn Canvas(comptime T: type) type {
             // Calculate bounding box
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const bounds: Rectangle(usize) = .{
+            const bounds: Rectangle(u32) = .{
                 .l = @intFromFloat(@round(@max(0, center.x() - radius - 1))),
                 .t = @intFromFloat(@round(@max(0, center.y() - radius - 1))),
                 .r = @intFromFloat(@round(@min(fcols, center.x() + radius + 1))),
@@ -1406,7 +1406,7 @@ pub fn Canvas(comptime T: type) type {
             p1: Point(2, f32),
             p2: Point(2, f32),
             color: anytype,
-            width: usize,
+            width: u32,
             mode: DrawMode,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
@@ -1435,7 +1435,7 @@ pub fn Canvas(comptime T: type) type {
             p2: Point(2, f32),
             p3: Point(2, f32),
             color: anytype,
-            width: usize,
+            width: u32,
             mode: DrawMode,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
@@ -1459,7 +1459,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws a spline polygon outline with Bézier curves connecting vertices.
         /// The polygon's edges are rendered as cubic Bézier splines for smooth, curved appearance.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn drawSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: usize, tension: f32, mode: DrawMode) void {
+        pub fn drawSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, tension: f32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
 
@@ -1481,7 +1481,7 @@ pub fn Canvas(comptime T: type) type {
 
             // Stack buffer for common cases (up to 50 segments per curve, 8 curves)
             var stack_buffer: [spline_polygon_stack_buffer_size]Point(2, f32) = undefined;
-            var total_points: usize = 0;
+            var total_points: u32 = 0;
 
             // First pass: calculate total points needed
             const pixels_per_segment = pixels_per_segment_fast; // Balance between quality and performance for filled shapes
@@ -1491,7 +1491,7 @@ pub fn Canvas(comptime T: type) type {
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(usize, @intFromFloat(estimated_length / pixels_per_segment))));
+                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
                 total_points += segments;
             }
 
@@ -1508,7 +1508,7 @@ pub fn Canvas(comptime T: type) type {
             }
 
             // Second pass: tessellate curves into the buffer
-            var write_idx: usize = 0;
+            var write_idx: u32 = 0;
             for (0..polygon.len) |i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
@@ -1516,7 +1516,7 @@ pub fn Canvas(comptime T: type) type {
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
 
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(usize, @intFromFloat(estimated_length / pixels_per_segment))));
+                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
 
                 // Tessellate directly into our buffer
                 const segment_buffer = points_buffer[write_idx .. write_idx + segments];
@@ -1596,13 +1596,13 @@ pub fn Canvas(comptime T: type) type {
         fn tessellateBezier(
             estimated_length: f32,
             pixels_per_segment: f32,
-            min_segments: usize,
-            max_segments: usize,
+            min_segments: u32,
+            max_segments: u32,
             comptime evalFn: anytype,
             evalArgs: anytype,
             buffer: []Point(2, f32),
-        ) usize {
-            const segments = @max(min_segments, @min(max_segments, @as(usize, @intFromFloat(estimated_length / pixels_per_segment))));
+        ) u32 {
+            const segments = @max(min_segments, @min(max_segments, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
             const actual_segments = @min(segments, buffer.len);
 
             for (0..actual_segments) |i| {
@@ -1618,11 +1618,11 @@ pub fn Canvas(comptime T: type) type {
             self: Self,
             estimated_length: f32,
             pixels_per_segment: f32,
-            min_segments: usize,
+            min_segments: u32,
             comptime evalFn: anytype,
             evalArgs: anytype,
             color: anytype,
-            width: usize,
+            width: u32,
             mode: DrawMode,
         ) void {
             var stack_buffer: [bezier_max_segments_count]Point(2, f32) = undefined;
@@ -1669,7 +1669,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Helper function to get a bit value from glyph bitmap data.
         /// Returns 1 if the bit is set, 0 otherwise.
-        inline fn getGlyphBit(char_data: []const u8, row: usize, col: usize, bytes_per_row: usize) u1 {
+        inline fn getGlyphBit(char_data: []const u8, row: usize, col: usize, bytes_per_row: u32) u1 {
             const byte_idx = col / 8;
             const bit_idx = col % 8;
             const row_byte_offset = row * bytes_per_row + byte_idx;
@@ -1679,10 +1679,10 @@ pub fn Canvas(comptime T: type) type {
 
         /// Helper function to calculate bytes per row for a glyph.
         /// Handles both fixed-width and variable-width fonts.
-        inline fn calculateGlyphBytesPerRow(glyph_info: anytype, font: anytype) usize {
+        inline fn calculateGlyphBytesPerRow(glyph_info: anytype, font: anytype) u32 {
             // Variable-width fonts use glyph-specific width, fixed-width fonts use font-wide stride
             return if (font.glyph_map != null)
-                (@as(usize, glyph_info.width) + 7) / 8
+                (@as(u32, glyph_info.width) + 7) / 8
             else
                 font.bytesPerRow();
         }
@@ -1781,10 +1781,10 @@ pub fn Canvas(comptime T: type) type {
                                             const y_end_f = @ceil(base_y + scale);
 
                                             // Clip to the valid rectangle
-                                            const x_start = @as(usize, @intFromFloat(@max(x_start_f, clip_rect.l)));
-                                            const y_start = @as(usize, @intFromFloat(@max(y_start_f, clip_rect.t)));
-                                            const x_end = @as(usize, @intFromFloat(@min(x_end_f, clip_rect.r)));
-                                            const y_end = @as(usize, @intFromFloat(@min(y_end_f, clip_rect.b)));
+                                            const x_start = @as(u32, @intFromFloat(@max(x_start_f, clip_rect.l)));
+                                            const y_start = @as(u32, @intFromFloat(@max(y_start_f, clip_rect.t)));
+                                            const x_end = @as(u32, @intFromFloat(@min(x_end_f, clip_rect.r)));
+                                            const y_end = @as(u32, @intFromFloat(@min(y_end_f, clip_rect.b)));
 
                                             // Fill the pixel block
                                             if (x_start < x_end and y_start < y_end) {
@@ -1836,8 +1836,8 @@ pub fn Canvas(comptime T: type) type {
                                             while (row_f <= row_end_f) : (row_f += 1) {
                                                 var col_f = col_start_f;
                                                 while (col_f <= col_end_f) : (col_f += 1) {
-                                                    const row_idx = @as(usize, @intFromFloat(row_f));
-                                                    const col_idx = @as(usize, @intFromFloat(col_f));
+                                                    const row_idx = @as(u32, @intFromFloat(row_f));
+                                                    const col_idx = @as(u32, @intFromFloat(col_f));
 
                                                     if (getGlyphBit(char_data, row_idx, col_idx, glyph_bytes_per_row) != 0) {
                                                         // Calculate how much this pixel contributes
