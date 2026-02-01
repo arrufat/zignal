@@ -514,46 +514,46 @@ test "Matrix Cholesky decomposition" {
     mat.at(1, 1).* = 5.0;
     mat.at(1, 2).* = 3.0;
     mat.at(2, 0).* = 2.0;
-        mat.at(2, 1).* = 3.0;
-        mat.at(2, 2).* = 6.0;
-    
-        var chol = try mat.cholesky().eval();
-        defer chol.deinit();
-    
-        // Check L
-        const eps = 1e-10;
-        const expected_l_data = [_]f64{
-            2.0, 0.0, 0.0,
-            1.0, 2.0, 0.0,
-            1.0, 1.0, 2.0,
-        };
-        var expected_l = try Matrix(f64).fromSlice(arena.allocator(), 3, 3, &expected_l_data);
-        defer expected_l.deinit();
-    
-        for (0..3) |i| {
-            for (0..3) |j| {
-                try std.testing.expectApproxEqAbs(expected_l.at(i, j).*, chol.at(i, j).*, eps);
-            }
+    mat.at(2, 1).* = 3.0;
+    mat.at(2, 2).* = 6.0;
+
+    var chol = try mat.cholesky().eval();
+    defer chol.deinit();
+
+    // Check L
+    const eps = 1e-10;
+    const expected_l_data = [_]f64{
+        2.0, 0.0, 0.0,
+        1.0, 2.0, 0.0,
+        1.0, 1.0, 2.0,
+    };
+    var expected_l = try Matrix(f64).fromSlice(arena.allocator(), 3, 3, &expected_l_data);
+    defer expected_l.deinit();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(expected_l.at(i, j).*, chol.at(i, j).*, eps);
         }
-    
-        // Verify L * L^T = A
-        var lt = chol.transpose();
-        defer lt.deinit();
-        var recon = try chol.dot(lt).eval();
-        defer recon.deinit();
-    
-        for (0..3) |i| {
-            for (0..3) |j| {
-                try std.testing.expectApproxEqAbs(mat.at(i, j).*, recon.at(i, j).*, eps);
-            }
-        }
-    
-        // Test non-positive definite matrix
-        var non_spd = try Matrix(f64).init(arena.allocator(), 2, 2);
-        non_spd.at(0, 0).* = 1.0;
-        non_spd.at(0, 1).* = 2.0;
-        non_spd.at(1, 0).* = 2.0;
-        non_spd.at(1, 1).* = 1.0; // Det = 1 - 4 = -3, not positive definite
-    
-        try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky().eval());
     }
+
+    // Verify L * L^T = A
+    var lt = chol.transpose();
+    defer lt.deinit();
+    var recon = try chol.dot(lt).eval();
+    defer recon.deinit();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(mat.at(i, j).*, recon.at(i, j).*, eps);
+        }
+    }
+
+    // Test non-positive definite matrix
+    var non_spd = try Matrix(f64).init(arena.allocator(), 2, 2);
+    non_spd.at(0, 0).* = 1.0;
+    non_spd.at(0, 1).* = 2.0;
+    non_spd.at(1, 0).* = 2.0;
+    non_spd.at(1, 1).* = 1.0; // Det = 1 - 4 = -3, not positive definite
+
+    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky().eval());
+}
