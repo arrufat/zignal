@@ -1391,7 +1391,7 @@ pub fn Matrix(comptime T: type) type {
 
                     if (i == j) {
                         const val = self.at(i, i).* - accum;
-                        if (val <= std.math.floatEps(T)) return error.NotPositiveDefinite;
+                        if (val <= 0) return error.NotPositiveDefinite;
                         l.at(i, i).* = @sqrt(val);
                     } else {
                         const val = self.at(i, j).* - accum;

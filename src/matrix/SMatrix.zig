@@ -710,7 +710,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
 
                     if (i == j) {
                         const val = self.items[i][i] - accum;
-                        if (val <= std.math.floatEps(T)) return error.NotPositiveDefinite;
+                        if (val <= 0) return error.NotPositiveDefinite;
                         l.items[i][i] = @sqrt(val);
                     } else {
                         const val = self.items[i][j] - accum;
