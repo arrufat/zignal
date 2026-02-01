@@ -695,6 +695,32 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
             return inv;
         }
 
+        /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
+        /// Returns L such that A = L * L^T where L is lower triangular.
+        pub fn cholesky(self: Self) !SMatrix(T, rows, cols) {
+            comptime assert(rows == cols);
+            var l: SMatrix(T, rows, cols) = .initAll(0);
+
+            for (0..rows) |i| {
+                for (0..i + 1) |j| {
+                    var accum: T = 0;
+                    for (0..j) |k| {
+                        accum += l.items[i][k] * l.items[j][k];
+                    }
+
+                    if (i == j) {
+                        const val = self.items[i][i] - accum;
+                        if (val <= std.math.floatEps(T)) return error.NotPositiveDefinite;
+                        l.items[i][i] = @sqrt(val);
+                    } else {
+                        const val = self.items[i][j] - accum;
+                        l.items[i][j] = val / l.items[j][j];
+                    }
+                }
+            }
+            return l;
+        }
+
         /// Performs singular value decomposition (SVD) on the matrix.
         /// Returns the decomposition A = U × Σ × V^T where:
         /// - U contains left singular vectors
@@ -1040,4 +1066,34 @@ test "SMatrix fromSlice" {
     try expectEqual(@as(f32, 4.0), mat.at(1, 0).*);
     try expectEqual(@as(f32, 5.0), mat.at(1, 1).*);
     try expectEqual(@as(f32, 6.0), mat.at(1, 2).*);
+}
+
+test "SMatrix Cholesky" {
+    const mat: SMatrix(f64, 3, 3) = .init(.{
+        .{ 4.0, 2.0, 2.0 },
+        .{ 2.0, 5.0, 3.0 },
+        .{ 2.0, 3.0, 6.0 },
+    });
+
+    const chol = try mat.cholesky();
+    const eps = 1e-10;
+
+    // Check L
+    try expectApproxEqAbs(@as(f64, 2.0), chol.items[0][0], eps);
+    try expectApproxEqAbs(@as(f64, 0.0), chol.items[0][1], eps);
+    try expectApproxEqAbs(@as(f64, 1.0), chol.items[1][0], eps);
+    try expectApproxEqAbs(@as(f64, 2.0), chol.items[1][1], eps);
+    try expectApproxEqAbs(@as(f64, 1.0), chol.items[2][0], eps);
+    try expectApproxEqAbs(@as(f64, 1.0), chol.items[2][1], eps);
+    try expectApproxEqAbs(@as(f64, 2.0), chol.items[2][2], eps);
+
+    // Verify L*L^T = A
+    const lt = chol.transpose();
+    const recon = chol.dot(lt);
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try expectApproxEqAbs(mat.items[i][j], recon.items[i][j], eps);
+        }
+    }
 }
