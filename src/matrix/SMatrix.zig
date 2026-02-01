@@ -15,9 +15,9 @@ const svd_module = @import("svd_static.zig");
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
     return struct {
-        pub const SvdMode = svd_module.SvdMode;
-        pub const SvdOptions = svd_module.SvdOptions;
-        pub const SvdResult = svd_module.SvdResult;
+        pub const SvdMode = svd_module.Mode;
+        pub const SvdOptions = svd_module.Options;
+        pub const SvdResult = svd_module.Result;
         const Self = @This();
         items: [rows][cols]T = undefined,
         comptime rows: u32 = rows,
