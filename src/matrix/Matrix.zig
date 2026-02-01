@@ -1362,36 +1362,26 @@ pub fn Matrix(comptime T: type) type {
             };
         }
 
-        pub const CholeskyResult = struct {
-            l: Matrix(T), // Lower triangular matrix
-
-            pub fn deinit(self: *@This()) void {
-                self.l.deinit();
-            }
-        };
-
         /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
         /// Returns L such that A = L * L^T where L is lower triangular.
-        pub fn cholesky(self: Self) !CholeskyResult {
-            if (self.err) |e| return e;
-            comptime assert(@typeInfo(T) == .float);
-            if (self.rows != self.cols) return error.NotSquare;
-
+        /// This is a chainable operation.
+        pub fn cholesky(self: Self) Self {
+            if (self.err != null) return self;
+            ensureFloat("cholesky");
+            if (self.rows != self.cols) return errorMatrix(self.allocator, error.NotSquare);
             const n = self.rows;
-            var l = try Matrix(T).init(self.allocator, n, n);
-            errdefer l.deinit();
+            var l = Matrix(T).init(self.allocator, n, n) catch |e| return errorMatrix(self.allocator, e);
             @memset(l.items, 0);
-
             for (0..n) |i| {
                 for (0..i + 1) |j| {
                     var accum: T = 0;
-                    for (0..j) |k| {
-                        accum += l.at(i, k).* * l.at(j, k).*;
-                    }
-
+                    for (0..j) |k| accum += l.at(i, k).* * l.at(j, k).*;
                     if (i == j) {
                         const val = self.at(i, i).* - accum;
-                        if (val <= 0) return error.NotPositiveDefinite;
+                        if (val <= 0) {
+                            l.deinit();
+                            return errorMatrix(self.allocator, error.NotPositiveDefinite);
+                        }
                         l.at(i, i).* = @sqrt(val);
                     } else {
                         const val = self.at(i, j).* - accum;
@@ -1399,8 +1389,7 @@ pub fn Matrix(comptime T: type) type {
                     }
                 }
             }
-
-            return .{ .l = l };
+            return l;
         }
 
         /// Computes the determinant of the matrix using analytical formulas for small matrices
