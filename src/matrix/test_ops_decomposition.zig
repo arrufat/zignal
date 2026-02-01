@@ -522,15 +522,19 @@ test "Matrix Cholesky decomposition" {
 
     // Check L
     const eps = 1e-10;
-    try std.testing.expectApproxEqAbs(@as(f64, 2.0), chol.l.at(0, 0).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.0), chol.l.at(0, 1).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.0), chol.l.at(0, 2).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 1.0), chol.l.at(1, 0).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 2.0), chol.l.at(1, 1).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.0), chol.l.at(1, 2).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 1.0), chol.l.at(2, 0).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 1.0), chol.l.at(2, 1).*, eps);
-    try std.testing.expectApproxEqAbs(@as(f64, 2.0), chol.l.at(2, 2).*, eps);
+    const expected_l_data = [_]f64{
+        2.0, 0.0, 0.0,
+        1.0, 2.0, 0.0,
+        1.0, 1.0, 2.0,
+    };
+    var expected_l = try Matrix(f64).fromSlice(arena.allocator(), 3, 3, &expected_l_data);
+    defer expected_l.deinit();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(expected_l.at(i, j).*, chol.l.at(i, j).*, eps);
+        }
+    }
 
     // Verify L * L^T = A
     var lt = chol.l.transpose();
@@ -540,7 +544,7 @@ test "Matrix Cholesky decomposition" {
 
     for (0..3) |i| {
         for (0..3) |j| {
-             try std.testing.expectApproxEqAbs(mat.at(i, j).*, recon.at(i, j).*, eps);
+            try std.testing.expectApproxEqAbs(mat.at(i, j).*, recon.at(i, j).*, eps);
         }
     }
 

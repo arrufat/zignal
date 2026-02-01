@@ -1079,13 +1079,16 @@ test "SMatrix Cholesky" {
     const eps = 1e-10;
 
     // Check L
-    try expectApproxEqAbs(@as(f64, 2.0), chol.items[0][0], eps);
-    try expectApproxEqAbs(@as(f64, 0.0), chol.items[0][1], eps);
-    try expectApproxEqAbs(@as(f64, 1.0), chol.items[1][0], eps);
-    try expectApproxEqAbs(@as(f64, 2.0), chol.items[1][1], eps);
-    try expectApproxEqAbs(@as(f64, 1.0), chol.items[2][0], eps);
-    try expectApproxEqAbs(@as(f64, 1.0), chol.items[2][1], eps);
-    try expectApproxEqAbs(@as(f64, 2.0), chol.items[2][2], eps);
+    const expected_l: SMatrix(f64, 3, 3) = .init(.{
+        .{ 2.0, 0.0, 0.0 },
+        .{ 1.0, 2.0, 0.0 },
+        .{ 1.0, 1.0, 2.0 },
+    });
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try expectApproxEqAbs(expected_l.items[i][j], chol.items[i][j], eps);
+        }
+    }
 
     // Verify L*L^T = A
     const lt = chol.transpose();
