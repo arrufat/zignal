@@ -71,9 +71,9 @@ const simd_alignment = 64;
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
     return struct {
-        pub const SvdMode = svd_module.SvdMode;
-        pub const SvdOptions = svd_module.SvdOptions;
-        pub const SvdResult = svd_module.SvdResult;
+        pub const SvdMode = svd_module.Mode;
+        pub const SvdOptions = svd_module.Options;
+        pub const SvdResult = svd_module.Result;
 
         pub const Permutation = struct {
             pub const Mode = enum { row, column };

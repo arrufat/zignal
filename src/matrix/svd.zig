@@ -4,7 +4,7 @@ const Matrix = @import("Matrix.zig").Matrix;
 
 /// Controls the size and computation of the left singular vectors matrix (U) in SVD.
 /// This allows optimization of memory usage and computation time based on your needs.
-pub const SvdMode = enum {
+pub const Mode = enum {
     /// Skip computation of U matrix entirely. Use when only singular values are needed.
     no_u,
     /// Compute only the first n columns of U (economy/thin SVD). Results in U being m×n.
@@ -16,7 +16,7 @@ pub const SvdMode = enum {
 
 /// Internal state machine for the SVD algorithm's iterative process.
 /// Based on the classical Golub-Reinsch algorithm.
-const SvdState = enum {
+const State = enum {
     /// Test if the superdiagonal element can be set to zero (decoupling test)
     test_splitting,
     /// Cancel the superdiagonal element using Givens rotations
@@ -29,7 +29,7 @@ const SvdState = enum {
 
 /// Configuration options for SVD computation.
 /// Allows fine-grained control over which matrices are computed.
-pub const SvdOptions = struct {
+pub const Options = struct {
     /// Whether to compute the left singular vectors (U matrix).
     /// Set to false when only singular values are needed.
     with_u: bool = true,
@@ -38,7 +38,7 @@ pub const SvdOptions = struct {
     with_v: bool = false,
     /// Controls the size of the U matrix when with_u is true.
     /// Ignored when with_u is false.
-    mode: SvdMode = .full_u,
+    mode: Mode = .full_u,
 };
 
 /// Result type for SVD decomposition: A = U × Σ × V^T
@@ -50,7 +50,7 @@ pub const SvdOptions = struct {
 /// - U: m×m (full_u), m×n (skinny_u), or empty (no_u)
 /// - s: n×1 vector of singular values in descending order
 /// - V: n×n matrix (or empty if with_v=false)
-pub fn SvdResult(comptime T: type) type {
+pub fn Result(comptime T: type) type {
     return struct {
         /// Left singular vectors matrix. Each column is a left singular vector.
         /// Dimensions: m×m (full_u) or m×n (skinny_u)
@@ -96,8 +96,8 @@ pub fn svd(
     comptime T: type,
     allocator: std.mem.Allocator,
     a: Matrix(T),
-    options: SvdOptions,
-) !SvdResult(T) {
+    options: Options,
+) !Result(T) {
     std.debug.assert(a.rows >= a.cols);
     var eps: T = std.math.floatEps(T);
     const tol: T = std.math.floatMin(T) / eps;
@@ -287,18 +287,18 @@ pub fn svd(
         const k = n - 1 - rk;
         var iter: usize = 0;
 
-        svd_state: switch (SvdState.test_splitting) {
+        state: switch (State.test_splitting) {
             .test_splitting => {
                 for (0..k + 1) |rl| {
                     l = k - rl;
                     if (@abs(e.at(l, 0).*) <= eps) {
-                        continue :svd_state .test_convergence;
+                        continue :state .test_convergence;
                     }
                     if (@abs(q.at(l - 1, 0).*) <= eps) {
-                        continue :svd_state .cancellation;
+                        continue :state .cancellation;
                     }
                 }
-                continue :svd_state .test_convergence;
+                continue :state .test_convergence;
             },
 
             .cancellation => {
@@ -311,7 +311,7 @@ pub fn svd(
                     e.at(i, 0).* *= c;
 
                     if (@abs(f) <= eps) {
-                        continue :svd_state .test_convergence;
+                        continue :state .test_convergence;
                     }
                     g = q.at(i, 0).*;
                     h = @sqrt(f * f + g * g);
@@ -327,19 +327,19 @@ pub fn svd(
                         }
                     }
                 }
-                continue :svd_state .test_convergence;
+                continue :state .test_convergence;
             },
 
             .test_convergence => {
                 z = q.at(k, 0).*;
                 if (l == k) {
-                    continue :svd_state .convergence_check;
+                    continue :state .convergence_check;
                 }
                 // Shift from bottom 2x2 minor.
                 iter += 1;
                 if (iter > 300) {
                     retval = k;
-                    break :svd_state;
+                    break :state;
                 }
                 x = q.at(l, 0).*;
                 y = q.at(k - 1, 0).*;
@@ -393,7 +393,7 @@ pub fn svd(
                 e.at(l, 0).* = 0;
                 e.at(k, 0).* = f;
                 q.at(k, 0).* = x;
-                continue :svd_state .test_splitting;
+                continue :state .test_splitting;
             },
 
             .convergence_check => {
@@ -406,7 +406,7 @@ pub fn svd(
                         }
                     }
                 }
-                break :svd_state;
+                break :state;
             },
         }
     }
@@ -451,7 +451,7 @@ pub fn svd(
         }
     }
 
-    return SvdResult(T){ .u = u, .s = q, .v = v, .converged = retval };
+    return Result(T){ .u = u, .s = q, .v = v, .converged = retval };
 }
 
 test "svd basic" {
