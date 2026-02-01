@@ -496,3 +496,64 @@ test "Matrix rank computation" {
     }
     try expectEqual(@as(usize, 1), try row_vec.rank());
 }
+
+test "Matrix Cholesky decomposition" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const MatrixError = @import("Matrix.zig").MatrixError;
+
+    // Test 3x3 symmetric positive-definite matrix
+    var mat = try Matrix(f64).init(arena.allocator(), 3, 3);
+    // A = L * L^T
+    // L = [[2, 0, 0], [1, 2, 0], [1, 1, 2]]
+    // A = [[4, 2, 2], [2, 5, 3], [2, 3, 6]]
+    mat.at(0, 0).* = 4.0;
+    mat.at(0, 1).* = 2.0;
+    mat.at(0, 2).* = 2.0;
+    mat.at(1, 0).* = 2.0;
+    mat.at(1, 1).* = 5.0;
+    mat.at(1, 2).* = 3.0;
+    mat.at(2, 0).* = 2.0;
+    mat.at(2, 1).* = 3.0;
+    mat.at(2, 2).* = 6.0;
+
+    var chol = try mat.cholesky();
+    defer chol.deinit();
+
+    // Check L
+    const eps = 1e-10;
+    const expected_l_data = [_]f64{
+        2.0, 0.0, 0.0,
+        1.0, 2.0, 0.0,
+        1.0, 1.0, 2.0,
+    };
+    var expected_l = try Matrix(f64).fromSlice(arena.allocator(), 3, 3, &expected_l_data);
+    defer expected_l.deinit();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(expected_l.at(i, j).*, chol.l.at(i, j).*, eps);
+        }
+    }
+
+    // Verify L * L^T = A
+    var lt = chol.l.transpose();
+    defer lt.deinit();
+    var recon = try chol.l.dot(lt).eval();
+    defer recon.deinit();
+
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try std.testing.expectApproxEqAbs(mat.at(i, j).*, recon.at(i, j).*, eps);
+        }
+    }
+
+    // Test non-positive definite matrix
+    var non_spd = try Matrix(f64).init(arena.allocator(), 2, 2);
+    non_spd.at(0, 0).* = 1.0;
+    non_spd.at(0, 1).* = 2.0;
+    non_spd.at(1, 0).* = 2.0;
+    non_spd.at(1, 1).* = 1.0; // Det = 1 - 4 = -3, not positive definite
+
+    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky());
+}

@@ -62,6 +62,7 @@ pub const MatrixError = error{
     OutOfMemory,
     NotConverged,
     InvalidArgument,
+    NotPositiveDefinite,
 };
 
 /// Recommended alignment for SIMD operations (64 bytes covers AVX-512)
@@ -1359,6 +1360,47 @@ pub fn Matrix(comptime T: type) type {
                 .p = p,
                 .sign = sign,
             };
+        }
+
+        pub const CholeskyResult = struct {
+            l: Matrix(T), // Lower triangular matrix
+
+            pub fn deinit(self: *@This()) void {
+                self.l.deinit();
+            }
+        };
+
+        /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
+        /// Returns L such that A = L * L^T where L is lower triangular.
+        pub fn cholesky(self: Self) !CholeskyResult {
+            if (self.err) |e| return e;
+            comptime assert(@typeInfo(T) == .float);
+            if (self.rows != self.cols) return error.NotSquare;
+
+            const n = self.rows;
+            var l = try Matrix(T).init(self.allocator, n, n);
+            errdefer l.deinit();
+            @memset(l.items, 0);
+
+            for (0..n) |i| {
+                for (0..i + 1) |j| {
+                    var accum: T = 0;
+                    for (0..j) |k| {
+                        accum += l.at(i, k).* * l.at(j, k).*;
+                    }
+
+                    if (i == j) {
+                        const val = self.at(i, i).* - accum;
+                        if (val <= 0) return error.NotPositiveDefinite;
+                        l.at(i, i).* = @sqrt(val);
+                    } else {
+                        const val = self.at(i, j).* - accum;
+                        l.at(i, j).* = val / l.at(j, j).*;
+                    }
+                }
+            }
+
+            return .{ .l = l };
         }
 
         /// Computes the determinant of the matrix using analytical formulas for small matrices
