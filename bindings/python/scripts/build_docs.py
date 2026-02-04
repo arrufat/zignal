@@ -16,12 +16,6 @@ from pathlib import Path
 
 
 def main():
-    # Setup paths using absolute resolution
-    script_path = Path(__file__).resolve()
-    project_root = script_path.parents[3]  # scripts -> python -> bindings -> zignal root
-    bindings_dir = script_path.parents[1]  # scripts -> python
-    os.chdir(project_root)
-
     # 1. Build Bindings
     print("Building Python bindings...")
     if subprocess.call(["zig", "build", "python-bindings"]) != 0:
@@ -30,7 +24,7 @@ def main():
     # 2. Type Check with ty
     print("Validating type stubs with ty...")
     try:
-        subprocess.check_call(["ty", "check", "bindings/python/zignal"])
+        subprocess.check_call(["ty", "check", "zignal"])
         print("Success: Type annotations look good!")
     except FileNotFoundError:
         print("Warning: 'ty' not found. Install it with 'uv pip install ty'.")
@@ -38,7 +32,7 @@ def main():
         sys.exit("Error: Type validation failed!")
 
     # 3. Generate Docs with pdoc
-    docs_dir = bindings_dir / "docs"
+    docs_dir = Path("docs")
     if docs_dir.exists():
         shutil.rmtree(docs_dir)
     docs_dir.mkdir(parents=True, exist_ok=True)
@@ -54,15 +48,14 @@ def main():
         (stub_pkg_dir / "py.typed").touch()
 
         # Copy _zignal.pyi to the stub package
-        pyi_source = bindings_dir / "zignal" / "_zignal.pyi"
-        shutil.copy2(pyi_source, stub_pkg_dir / "__init__.pyi")
+        shutil.copy2("zignal/_zignal.pyi", stub_pkg_dir / "__init__.pyi")
 
         # Empty module to trigger site build (enables search)
         (temp_path / "empty.py").write_text("'''Search placeholder'''")
 
         # Update PYTHONPATH
         env = os.environ.copy()
-        env["PYTHONPATH"] = str(temp_path) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(temp_path), env.get("PYTHONPATH")]))
 
         # Run pdoc
         cmd = ["pdoc", "zignal", "empty", "-o", str(docs_dir), "--no-show-source"]
