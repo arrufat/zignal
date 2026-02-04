@@ -310,7 +310,7 @@ fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
 }
 
 // Method definitions with metadata
-pub const fdm_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const fdm_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "set_target",
         .meth = @ptrCast(&fdm_set_target),
@@ -346,7 +346,7 @@ pub const fdm_methods_metadata = [_]stub_metadata.MethodWithMetadata{
 };
 
 // Generate PyMethodDef array from metadata
-var fdm_methods = stub_metadata.toPyMethodDefArray(&fdm_methods_metadata);
+var fdm_methods = python.toPyMethodDefArray(&fdm_methods_metadata);
 
 // Class documentation - keep it simple
 const fdm_class_doc = "Feature Distribution Matching for image style transfer.";
