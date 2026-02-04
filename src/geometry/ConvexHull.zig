@@ -45,8 +45,7 @@ pub fn ConvexHull(comptime T: type) type {
                 return null;
             }
             self.points.clearRetainingCapacity();
-            try self.points.resize(self.gpa, points.len);
-            @memcpy(self.points.items, points);
+            try self.points.appendSlice(self.gpa, points);
 
             // Find the topmost-leftmost point (lowest y, then lowest x)
             var lowest_idx: usize = 0;
