@@ -79,14 +79,6 @@ const lab_epsilon = 0.008856;
 const lab_kappa_div_116 = 7.787;
 const lab_delta = 16.0 / 116.0;
 
-/// Normalizes hue to the [0, 360) range.
-fn normalizeHue(h: anytype) @TypeOf(h) {
-    var result = h;
-    while (result < 0) result += 360;
-    while (result >= 360) result -= 360;
-    return result;
-}
-
 /// Returns true if `T` can be interpreted as a color by Zignal APIs.
 ///
 /// This includes:
@@ -1099,7 +1091,7 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
     };
 
     return .{
-        .h = normalizeHue(h),
+        .h = @mod(h, 360.0),
         .s = if (max == 0) 0 else (delta / max) * 100,
         .v = max * 100,
     };
@@ -1108,7 +1100,7 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
 /// Converts HSL to RGB.
 fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h = normalizeHue(hsl.h);
+    const h = @mod(hsl.h, 360);
     const s = @max(0, @min(1, hsl.s / 100));
     const l = @max(0, @min(1, hsl.l / 100));
 
@@ -1165,7 +1157,7 @@ fn rgbToHsl(comptime T: type, rgb: Rgb(T)) Hsl(T) {
     const s = if (delta == 0) 0 else if (l < 0.5) delta / (2 * l) else delta / (2 - 2 * l);
 
     return .{
-        .h = normalizeHue(hue * 60.0),
+        .h = @mod(hue * 60.0, 360.0),
         .s = @max(0, @min(1, s)) * 100.0,
         .l = @max(0, @min(1, l)) * 100.0,
     };
@@ -1353,7 +1345,7 @@ fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     return .{
         .l = lab.l,
         .c = c,
-        .h = normalizeHue(h),
+        .h = @mod(h, 360.0),
     };
 }
 
@@ -1437,7 +1429,7 @@ fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     return .{
         .l = oklab.l,
         .c = c,
-        .h = normalizeHue(h),
+        .h = @mod(h, 360.0),
     };
 }
 
