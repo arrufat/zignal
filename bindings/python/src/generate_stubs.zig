@@ -673,7 +673,8 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
 
     // Header
     try stub.write("# Type stubs for zignal package\n");
-    try stub.write("# This file helps LSPs understand the module structure\n\n");
+    try stub.write("# This file helps LSPs understand the module structure\n");
+    try stub.write("# ruff: noqa: I001\n\n");
     try stub.write("from __future__ import annotations\n\n");
 
     // Re-export all types from _zignal
@@ -687,32 +688,37 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     }
 
     // Add Image and classes
-    try stub.write("    Rectangle as Rectangle,\n");
-    try stub.write("    BitmapFont as BitmapFont,\n");
-    try stub.write("    Image as Image,\n");
-    try stub.write("    Matrix as Matrix,\n");
-    try stub.write("    Canvas as Canvas,\n");
-    try stub.write("    Interpolation as Interpolation,\n");
-    try stub.write("    Blending as Blending,\n");
-    try stub.write("    DrawMode as DrawMode,\n");
-    try stub.write("    MotionBlur as MotionBlur,\n");
-    try stub.write("    OptimizationPolicy as OptimizationPolicy,\n");
-    try stub.write("    Assignment as Assignment,\n");
-    try stub.write("    FeatureDistributionMatching as FeatureDistributionMatching,\n");
-    try stub.write("    PCA as PCA,\n");
-    try stub.write("    RunningStats as RunningStats,\n");
-    try stub.write("    ConvexHull as ConvexHull,\n");
-    try stub.write("    SimilarityTransform as SimilarityTransform,\n");
-    try stub.write("    AffineTransform as AffineTransform,\n");
-    try stub.write("    ProjectiveTransform as ProjectiveTransform,\n");
-    try stub.write("    solve_assignment_problem as solve_assignment_problem,\n");
-    try stub.write("    # Type aliases\n");
-    try stub.write("    Point as Point,\n");
-    try stub.write("    Size as Size,\n");
-    try stub.write("    RgbTuple as RgbTuple,\n");
-    try stub.write("    RgbaTuple as RgbaTuple,\n");
-    try stub.write("    Color as Color,\n");
-    try stub.write(")\n\n");
+    try stub.write(
+        \\    Rectangle as Rectangle,
+        \\    BitmapFont as BitmapFont,
+        \\    Image as Image,
+        \\    Matrix as Matrix,
+        \\    Canvas as Canvas,
+        \\    Interpolation as Interpolation,
+        \\    Blending as Blending,
+        \\    DrawMode as DrawMode,
+        \\    MotionBlur as MotionBlur,
+        \\    OptimizationPolicy as OptimizationPolicy,
+        \\    Assignment as Assignment,
+        \\    FeatureDistributionMatching as FeatureDistributionMatching,
+        \\    PCA as PCA,
+        \\    RunningStats as RunningStats,
+        \\    ConvexHull as ConvexHull,
+        \\    SimilarityTransform as SimilarityTransform,
+        \\    AffineTransform as AffineTransform,
+        \\    ProjectiveTransform as ProjectiveTransform,
+        \\    solve_assignment_problem as solve_assignment_problem,
+        \\    # Type aliases
+        \\    Point as Point,
+        \\    Size as Size,
+        \\    RgbTuple as RgbTuple,
+        \\    RgbaTuple as RgbaTuple,
+        \\    Color as Color,
+        \\)
+        \\
+        \\
+    );
+
 
     // Module metadata
     try stub.write("__version__: str\n");
