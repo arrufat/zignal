@@ -21,16 +21,15 @@ pub fn computeOrientation(comptime T: type, a: Point(2, T), b: Point(2, T), c: P
 /// Returns true when the slice of points contains at least one non-collinear triplet.
 pub fn hasNonCollinearTriplet(comptime T: type, points: []const Point(2, T)) bool {
     if (points.len < 3) return false;
-    for (0..points.len) |i| {
+    return blk: for (0..points.len) |i| {
         for (i + 1..points.len) |j| {
             for (j + 1..points.len) |k| {
                 if (computeOrientation(T, points[i], points[j], points[k]) != .collinear) {
-                    return true;
+                    break :blk true;
                 }
             }
         }
-    }
-    return false;
+    } else false;
 }
 
 /// Returns true if, and only if, point `p` is inside the triangle `tri`.
