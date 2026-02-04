@@ -617,7 +617,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     // Generate Transform classes from metadata
     // SimilarityTransform
     const similarity_methods = transforms_module.similarity_methods_metadata;
-    const similarity_properties = transforms_module.similarity_properties_metadata;
+    const similarity_properties = stub_metadata.extractPropertyInfo(&transforms_module.similarity_properties_metadata);
     const similarity_doc = std.mem.span(transforms_module.SimilarityTransformType.tp_doc);
     try generateClassFromMetadata(&stub, .{
         .name = "SimilarityTransform",
@@ -630,7 +630,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
 
     // AffineTransform
     const affine_methods = transforms_module.affine_methods_metadata;
-    const affine_properties = transforms_module.affine_properties_metadata;
+    const affine_properties = stub_metadata.extractPropertyInfo(&transforms_module.affine_properties_metadata);
     const affine_doc = std.mem.span(transforms_module.AffineTransformType.tp_doc);
     try generateClassFromMetadata(&stub, .{
         .name = "AffineTransform",
@@ -643,7 +643,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
 
     // ProjectiveTransform
     const projective_methods = transforms_module.projective_methods_metadata;
-    const projective_properties = transforms_module.projective_properties_metadata;
+    const projective_properties = stub_metadata.extractPropertyInfo(&transforms_module.projective_properties_metadata);
     const projective_doc = std.mem.span(transforms_module.ProjectiveTransformType.tp_doc);
     try generateClassFromMetadata(&stub, .{
         .name = "ProjectiveTransform",

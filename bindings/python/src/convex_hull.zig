@@ -208,7 +208,7 @@ fn convex_hull_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
     return python.none();
 }
 
-pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const convex_hull_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "find",
         .meth = @ptrCast(&convex_hull_find),
@@ -235,9 +235,9 @@ pub const convex_hull_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var convex_hull_methods = stub_metadata.toPyMethodDefArray(&convex_hull_methods_metadata);
+var convex_hull_methods = python.toPyMethodDefArray(&convex_hull_methods_metadata);
 
-pub const convex_hull_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const convex_hull_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "points",
         .get = @ptrCast(&convex_hull_get_points),
@@ -247,7 +247,7 @@ pub const convex_hull_properties_metadata = [_]stub_metadata.PropertyWithMetadat
     },
 };
 
-var convex_hull_getset = stub_metadata.toPyGetSetDefArray(&convex_hull_properties_metadata);
+var convex_hull_getset = python.toPyGetSetDefArray(&convex_hull_properties_metadata);
 
 // Class documentation - keep it simple
 const convex_hull_class_doc = "Convex hull computation using Graham's scan algorithm.";

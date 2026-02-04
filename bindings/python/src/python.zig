@@ -1462,3 +1462,117 @@ pub fn listFromSlice(comptime T: type, slice: []const T) ?*c.PyObject {
         else => @compileError("listFromSlice for type " ++ @typeName(T) ++ " requires a custom converter overload"),
     };
 }
+
+// ============================================================================
+// Metadata for Binding Generation (Runtime)
+// ============================================================================
+
+// Python method flags constants
+pub const METH_CLASS = c.METH_CLASS;
+pub const METH_STATIC = c.METH_STATIC;
+
+/// Enhanced method definition that includes both PyMethodDef fields and metadata
+pub const MethodWithMetadata = struct {
+    name: []const u8,
+    meth: *const anyopaque,
+    flags: c_int,
+    doc: []const u8,
+    params: []const u8,
+    returns: []const u8,
+};
+
+/// Enhanced property definition with metadata
+pub const PropertyWithMetadata = struct {
+    name: []const u8,
+    get: *const anyopaque,
+    set: ?*anyopaque = null,
+    doc: []const u8,
+    type: []const u8,
+};
+
+/// Enhanced function definition for module-level functions
+pub const FunctionWithMetadata = struct {
+    name: []const u8,
+    meth: *const anyopaque,
+    flags: c_int,
+    doc: []const u8,
+    params: []const u8,
+    returns: []const u8,
+};
+
+/// Convert an array of MethodWithMetadata to PyMethodDef array at compile time
+pub fn toPyMethodDefArray(
+    comptime methods: []const MethodWithMetadata,
+) [methods.len + 1]c.PyMethodDef {
+    comptime {
+        var result: [methods.len + 1]c.PyMethodDef = undefined;
+        for (methods, 0..) |m, i| {
+            result[i] = .{
+                .ml_name = m.name.ptr,
+                .ml_meth = @ptrCast(@alignCast(m.meth)),
+                .ml_flags = m.flags,
+                .ml_doc = m.doc.ptr,
+            };
+        }
+        // Sentinel value
+        result[methods.len] = .{
+            .ml_name = null,
+            .ml_meth = null,
+            .ml_flags = 0,
+            .ml_doc = null,
+        };
+        return result;
+    }
+}
+
+/// Convert an array of PropertyWithMetadata to PyGetSetDef array at compile time
+pub fn toPyGetSetDefArray(
+    comptime props: []const PropertyWithMetadata,
+) [props.len + 1]c.PyGetSetDef {
+    comptime {
+        var result: [props.len + 1]c.PyGetSetDef = undefined;
+        for (props, 0..) |p, i| {
+            result[i] = .{
+                .name = p.name.ptr,
+                .get = @ptrCast(@alignCast(p.get)),
+                .set = if (p.set) |s| @ptrCast(@alignCast(s)) else null,
+                .doc = p.doc.ptr,
+                .closure = null,
+            };
+        }
+        // Sentinel value
+        result[props.len] = .{
+            .name = null,
+            .get = null,
+            .set = null,
+            .doc = null,
+            .closure = null,
+        };
+        return result;
+    }
+}
+
+/// Convert an array of FunctionWithMetadata to PyMethodDef array at compile time
+pub fn functionsToPyMethodDefArray(
+    comptime funcs: []const FunctionWithMetadata,
+) [funcs.len + 1]c.PyMethodDef {
+    comptime {
+        var result: [funcs.len + 1]c.PyMethodDef = undefined;
+        for (funcs, 0..) |f, i| {
+            result[i] = .{
+                .ml_name = f.name.ptr,
+                .ml_meth = @ptrCast(@alignCast(f.meth)),
+                .ml_flags = f.flags,
+                .ml_doc = f.doc.ptr,
+            };
+        }
+        // Sentinel value
+        result[funcs.len] = .{
+            .ml_name = null,
+            .ml_meth = null,
+            .ml_flags = 0,
+            .ml_doc = null,
+        };
+        return result;
+    }
+}

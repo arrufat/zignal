@@ -8,7 +8,6 @@ const ctx = python.ctx;
 const allocator = ctx.allocator;
 pub const registerType = python.register;
 const c = python.c;
-const stub_metadata = @import("stub_metadata.zig");
 
 pub const BitmapFontObject = extern struct {
     ob_base: c.PyObject,
@@ -164,7 +163,7 @@ fn fontHeightToPyObject(font: *BitmapFont) ?*c.PyObject {
 }
 
 // Methods metadata (used for both C API and stub generation)
-pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const bitmap_font_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "load",
         .meth = @ptrCast(&bitmap_font_load),
@@ -183,7 +182,7 @@ pub const bitmap_font_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var bitmap_font_methods = stub_metadata.toPyMethodDefArray(&bitmap_font_methods_metadata);
+var bitmap_font_methods = python.toPyMethodDefArray(&bitmap_font_methods_metadata);
 
 // Properties for BitmapFont
 var bitmap_font_getsetters = [_]c.PyGetSetDef{

@@ -505,7 +505,7 @@ fn rectangle_get_height(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.
     return python.create(self.height());
 }
 
-pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const rectangle_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "init_center",
         .meth = @ptrCast(&rectangle_init_center),
@@ -684,9 +684,9 @@ pub const rectangle_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var rectangle_methods = stub_metadata.toPyMethodDefArray(&rectangle_methods_metadata);
+var rectangle_methods = python.toPyMethodDefArray(&rectangle_methods_metadata);
 
-pub const rectangle_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const rectangle_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "left",
         .get = python.getterForField(RectangleObject, "left"),
@@ -731,27 +731,7 @@ pub const rectangle_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-// Auto-generate field getters with custom width/height getters
-var rectangle_getset = python.autoGetSetCustom(
-    RectangleObject,
-    &.{ "left", "top", "right", "bottom" },
-    &[_]c.PyGetSetDef{
-        .{
-            .name = "width".ptr,
-            .get = @ptrCast(@alignCast(&rectangle_get_width)),
-            .set = null,
-            .doc = "Width of the rectangle (`right` - `left`)".ptr,
-            .closure = null,
-        },
-        .{
-            .name = "height".ptr,
-            .get = @ptrCast(@alignCast(&rectangle_get_height)),
-            .set = null,
-            .doc = "Height of the rectangle (`bottom` - `top`)".ptr,
-            .closure = null,
-        },
-    },
-);
+var rectangle_getset = python.toPyGetSetDefArray(&rectangle_properties_metadata);
 
 // Class documentation - keep it simple
 const rectangle_class_doc = "A rectangle defined by its `left`, `top`, `right`, and `bottom` coordinates.";
