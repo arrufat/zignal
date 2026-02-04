@@ -21,7 +21,6 @@ const perlin = @import("perlin.zig");
 const python = @import("python.zig");
 const c = python.c;
 const rectangle = @import("rectangle.zig");
-const stub_metadata = @import("stub_metadata.zig");
 const transforms = @import("transforms.zig");
 const enum_utils = @import("enum_utils.zig");
 
@@ -44,7 +43,7 @@ var zignal_module = c.PyModuleDef{
 pub const module_functions_metadata = optimization.module_functions_metadata ++ perlin.perlin_functions_metadata;
 
 // Generate PyMethodDef array at compile time
-var zignal_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);
+var zignal_methods = python.functionsToPyMethodDefArray(&module_functions_metadata);
 
 // Replaces the Py_TYPE macro/inline function which can cause undefined symbol errors.
 comptime {

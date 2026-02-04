@@ -122,11 +122,24 @@ var similarity_methods = [_]c.PyMethodDef{
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var similarity_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(SimilarityTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = @ptrCast(@alignCast(python.getterTuple2FromArrayField(SimilarityTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
+pub const similarity_properties_metadata = [_]python.PropertyWithMetadata{
+    .{
+        .name = "matrix",
+        .get = python.getterMatrixNested(SimilarityTransformObject, "matrix", 2, 2),
+        .set = null,
+        .type = "list[list[float]]",
+        .doc = "2x2 transformation matrix",
+    },
+    .{
+        .name = "bias",
+        .get = python.getterTuple2FromArrayField(SimilarityTransformObject, "bias", 0, 1),
+        .set = null,
+        .type = "tuple[float, float]",
+        .doc = "Translation vector (x, y)",
+    },
 };
+
+var similarity_getset = python.toPyGetSetDefArray(&similarity_properties_metadata);
 
 pub var SimilarityTransformType = python.buildTypeObject(.{
     .name = "zignal.SimilarityTransform",
@@ -251,11 +264,24 @@ var affine_methods = [_]c.PyMethodDef{
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var affine_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(AffineTransformObject, "matrix", 2, 2))), .set = null, .doc = "2x2 transformation matrix", .closure = null },
-    .{ .name = "bias", .get = @ptrCast(@alignCast(python.getterTuple2FromArrayField(AffineTransformObject, "bias", 0, 1))), .set = null, .doc = "Translation vector (x, y)", .closure = null },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
+pub const affine_properties_metadata = [_]python.PropertyWithMetadata{
+    .{
+        .name = "matrix",
+        .get = python.getterMatrixNested(AffineTransformObject, "matrix", 2, 2),
+        .set = null,
+        .type = "list[list[float]]",
+        .doc = "2x2 transformation matrix",
+    },
+    .{
+        .name = "bias",
+        .get = python.getterTuple2FromArrayField(AffineTransformObject, "bias", 0, 1),
+        .set = null,
+        .type = "tuple[float, float]",
+        .doc = "Translation vector (x, y)",
+    },
 };
+
+var affine_getset = python.toPyGetSetDefArray(&affine_properties_metadata);
 
 pub var AffineTransformType = python.buildTypeObject(.{
     .name = "zignal.AffineTransform",
@@ -424,10 +450,17 @@ var projective_methods = [_]c.PyMethodDef{
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var projective_getset = [_]c.PyGetSetDef{
-    .{ .name = "matrix", .get = @ptrCast(@alignCast(python.getterMatrixNested(ProjectiveTransformObject, "matrix", 3, 3))), .set = null, .doc = "3x3 homogeneous transformation matrix", .closure = null },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
+pub const projective_properties_metadata = [_]python.PropertyWithMetadata{
+    .{
+        .name = "matrix",
+        .get = python.getterMatrixNested(ProjectiveTransformObject, "matrix", 3, 3),
+        .set = null,
+        .type = "list[list[float]]",
+        .doc = "3x3 homogeneous transformation matrix",
+    },
 };
+
+var projective_getset = python.toPyGetSetDefArray(&projective_properties_metadata);
 
 pub var ProjectiveTransformType = python.buildTypeObject(.{
     .name = "zignal.ProjectiveTransform",
@@ -463,19 +496,6 @@ pub const similarity_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-pub const similarity_properties_metadata = [_]stub_metadata.PropertyInfo{
-    .{
-        .name = "matrix",
-        .type = "list[list[float]]",
-        .doc = "2x2 transformation matrix",
-    },
-    .{
-        .name = "bias",
-        .type = "tuple[float, float]",
-        .doc = "Translation vector (x, y)",
-    },
-};
-
 pub const affine_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
@@ -488,19 +508,6 @@ pub const affine_methods_metadata = [_]stub_metadata.MethodInfo{
         .params = "self, points: tuple[float, float] | list[tuple[float, float]]",
         .returns = "tuple[float, float] | list[tuple[float, float]]",
         .doc = "Transform point(s). Returns same type as input.",
-    },
-};
-
-pub const affine_properties_metadata = [_]stub_metadata.PropertyInfo{
-    .{
-        .name = "matrix",
-        .type = "list[list[float]]",
-        .doc = "2x2 transformation matrix",
-    },
-    .{
-        .name = "bias",
-        .type = "tuple[float, float]",
-        .doc = "Translation vector (x, y)",
     },
 };
 
@@ -522,13 +529,5 @@ pub const projective_methods_metadata = [_]stub_metadata.MethodInfo{
         .params = "self",
         .returns = "ProjectiveTransform | None",
         .doc = "Get inverse transform, or None if not invertible.",
-    },
-};
-
-pub const projective_properties_metadata = [_]stub_metadata.PropertyInfo{
-    .{
-        .name = "matrix",
-        .type = "list[list[float]]",
-        .doc = "3x3 homogeneous transformation matrix",
     },
 };

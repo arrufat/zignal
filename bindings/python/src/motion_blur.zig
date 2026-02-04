@@ -285,44 +285,7 @@ var motion_blur_methods = [_]c.PyMethodDef{
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
-var motion_blur_getset = [_]c.PyGetSetDef{
-    .{
-        .name = "type",
-        .get = get_type,
-        .set = null,
-        .doc = "Type of motion blur: 'linear', 'radial_zoom', or 'radial_spin'",
-        .closure = null,
-    },
-    .{
-        .name = "angle",
-        .get = @ptrCast(@alignCast(python.getterOptionalFieldWhere(MotionBlurObject, "angle", is_linear))),
-        .set = null,
-        .doc = "Blur angle in radians (linear only)",
-        .closure = null,
-    },
-    .{
-        .name = "distance",
-        .get = @ptrCast(@alignCast(python.getterOptionalFieldWhere(MotionBlurObject, "distance", is_linear))),
-        .set = null,
-        .doc = "Blur distance in pixels (linear only)",
-        .closure = null,
-    },
-    .{
-        .name = "center",
-        .get = @ptrCast(@alignCast(python.getterTuple2FieldsWhere(MotionBlurObject, "center_x", "center_y", is_not_linear))),
-        .set = null,
-        .doc = "Normalized center position (zoom/spin only)",
-        .closure = null,
-    },
-    .{
-        .name = "strength",
-        .get = @ptrCast(@alignCast(python.getterOptionalFieldWhere(MotionBlurObject, "strength", is_not_linear))),
-        .set = null,
-        .doc = "Blur strength 0.0-1.0 (zoom/spin only)",
-        .closure = null,
-    },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
-};
+var motion_blur_getset = python.toPyGetSetDefArray(&motion_blur_properties_metadata);
 
 // Using buildTypeObject helper for cleaner initialization
 pub var MotionBlurType = python.buildTypeObject(.{
@@ -341,7 +304,7 @@ pub var MotionBlurType = python.buildTypeObject(.{
 // Metadata for stub generation
 // ============================================================================
 
-pub const motion_blur_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const motion_blur_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "type",
         .get = get_type,

@@ -9,7 +9,6 @@ const MatrixObject = matrix_module.MatrixObject;
 const python = @import("python.zig");
 const allocator = python.ctx.allocator;
 const c = python.c;
-const stub_metadata = @import("stub_metadata.zig");
 
 // ============================================================================
 // OPTIMIZATION POLICY ENUM
@@ -252,7 +251,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
 }
 
 // Assignment metadata for stub generation
-pub const assignment_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const assignment_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "assignments",
         .get = @ptrCast(&assignment_get_assignments),
@@ -270,7 +269,7 @@ pub const assignment_properties_metadata = [_]stub_metadata.PropertyWithMetadata
 };
 
 // Module function definitions
-pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{
+pub const module_functions_metadata = [_]python.FunctionWithMetadata{
     .{
         .name = "solve_assignment_problem",
         .meth = @ptrCast(&solve_assignment_problem),
@@ -282,4 +281,4 @@ pub const module_functions_metadata = [_]stub_metadata.FunctionWithMetadata{
 };
 
 // Generate PyMethodDef array at compile time
-pub var optimization_methods = stub_metadata.functionsToPyMethodDefArray(&module_functions_metadata);
+pub var optimization_methods = python.functionsToPyMethodDefArray(&module_functions_metadata);

@@ -4,7 +4,6 @@ const zignal = @import("zignal");
 
 const python = @import("python.zig");
 const c = python.c;
-const stub_metadata = @import("stub_metadata.zig");
 
 const max_octaves: c_long = 32;
 const max_lacunarity: f64 = 16.0;
@@ -60,7 +59,7 @@ fn perlin_function(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     return python.create(value);
 }
 
-pub const perlin_functions_metadata = [_]stub_metadata.FunctionWithMetadata{
+pub const perlin_functions_metadata = [_]python.FunctionWithMetadata{
     .{
         .name = "perlin",
         .meth = @ptrCast(&perlin_function),
