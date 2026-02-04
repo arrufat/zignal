@@ -21,6 +21,26 @@
 //!   - Color blending operations (`blendColors`).
 //!   - Terminal output formatting for easy debugging.
 //!   - Runtime dynamic color handling via the `Color(T)` union.
+//!
+//! ## Usage Examples
+//!
+//! ```zig
+//! const zignal = @import("zignal");
+//! const Rgb = zignal.color.Rgb;
+//! const Lab = zignal.color.Lab;
+//!
+//! // Create a color from hex
+//! const red = Rgb(u8).initHex(0xFF0000);
+//!
+//! // Convert to Lab (automatically handles 0-255 to 0-1 scaling if needed)
+//! const red_lab = red.to(.lab);
+//!
+//! // Create a float-based RGB color
+//! const blue = Rgb(f32){ .r = 0.0, .g = 0.0, .b = 1.0 };
+//!
+//! // Convert to HSV
+//! const blue_hsv = blue.to(.hsv);
+//! ```
 
 const std = @import("std");
 const Io = std.Io;
@@ -39,16 +59,25 @@ pub const Blending = blending.Blending;
 pub const blendColors = blending.blendColors;
 const getSimpleTypeName = @import("meta.zig").getSimpleTypeName;
 
-// Fixed-point Rec.601 coefficients scaled by 2^16.
-const CB_R: i32 = -11059;
-const CB_G: i32 = -21710;
-const CB_B: i32 = 32768;
-const CR_R: i32 = 32768;
-const CR_G: i32 = -27439;
-const CR_B: i32 = -5329;
-const Y_R: i32 = 19595;
-const Y_G: i32 = 38470;
-const Y_B: i32 = 7471;
+// Rec.709 Luma coefficients (used for Grayscale/Luma)
+const luma_r = 0.2126;
+const luma_g = 0.7152;
+const luma_b = 0.0722;
+
+// XYB Biases (JPEG XL)
+const xyb_bias = 0.00379307325527544933;
+const xyb_cbrt_bias_encode = 0.15595420054924863;
+const xyb_cbrt_bias_decode = 0.15594113236791331;
+
+// CIE D65 White Point
+const d65_x = 95.047;
+const d65_y = 100.000;
+const d65_z = 108.883;
+
+// CIELAB Constants
+const lab_epsilon = 0.008856;
+const lab_kappa_div_116 = 7.787;
+const lab_delta = 16.0 / 116.0;
 
 /// Returns true if `T` can be interpreted as a color by Zignal APIs.
 ///
@@ -64,6 +93,9 @@ pub fn isColor(comptime T: type) bool {
 }
 
 /// Converts a color from one type and/or space to another.
+///
+/// When converting from a scalar to a color struct, the scalar is interpreted
+/// as a grayscale luminance value.
 pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     const SrcType = @TypeOf(source);
     if (DestType == SrcType) return source;
@@ -83,6 +115,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
             .@"struct" => |info| info.fields[0].type,
             else => @compileError("Destination type must be a color struct"),
         };
+        // Interpret scalar as grayscale
         const gray = Gray(SrcType){ .y = source };
         if (DestType.space == .gray) return gray.as(DestT);
         return gray.as(DestT).to(DestType.space).as(DestT);
@@ -134,7 +167,7 @@ fn formatColor(comptime T: type, self: T, writer: *Io.Writer) !void {
         const value = @field(self, field.name);
         switch (field.type) {
             u8 => try writer.print("{d}", .{value}),
-            f64, f32 => try writer.print("{d:.2}", .{value}), // 2 decimal places for floats
+            f64, f32 => try writer.print("{d:.2}", .{value}),
             else => try writer.print("{any}", .{value}),
         }
 
@@ -428,6 +461,7 @@ pub fn Rgba(comptime T: type) type {
         }
 
         /// Converts the color to another color space.
+        /// Note: The alpha channel is discarded during conversion to non-alpha spaces.
         pub fn to(self: Rgba(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .rgba => self,
@@ -943,28 +977,31 @@ fn rgbToYcbcr(comptime T: type, rgb: Rgb(T)) Ycbcr(T) {
         const g: i32 = rgb.g;
         const b: i32 = rgb.b;
 
-        const y: u8 = @intCast(clamp((@as(i64, Y_R) * r + @as(i64, Y_G) * g + @as(i64, Y_B) * b + 32768) >> 16, 0, 255));
-        const cb_tmp: i64 = ((@as(i64, CB_R) * r + @as(i64, CB_G) * g + @as(i64, CB_B) * b + 32768) >> 16) + 128;
-        const cr_tmp: i64 = ((@as(i64, CR_R) * r + @as(i64, CR_G) * g + @as(i64, CR_B) * b + 32768) >> 16) + 128;
+        const y_r: i64 = 19595;
+        const y_g: i64 = 38470;
+        const y_b: i64 = 7471;
+        const cb_r: i64 = -11059;
+        const cb_g: i64 = -21710;
+        const cb_b: i64 = 32768;
+        const cr_r: i64 = 32768;
+        const cr_g: i64 = -27439;
+        const cr_b: i64 = -5329;
+
         return .{
-            .y = y,
-            .cb = @intCast(clamp(cb_tmp, 0, 255)),
-            .cr = @intCast(clamp(cr_tmp, 0, 255)),
+            .y = @intCast(clamp((y_r * r + y_g * g + y_b * b + 32768) >> 16, 0, 255)),
+            .cb = @intCast(clamp(((cb_r * r + cb_g * g + cb_b * b + 32768) >> 16) + 128, 0, 255)),
+            .cr = @intCast(clamp(((cr_r * r + cr_g * g + cr_b * b + 32768) >> 16) + 128, 0, 255)),
         };
     } else {
-        const y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-        const cb = (rgb.b - y) / 1.772;
-        const cr = (rgb.r - y) / 1.402;
+        const y = clamp(0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b, 0, 1);
         return .{
-            .y = clamp(y, 0, 1),
-            .cb = clamp(cb, -0.5, 0.5),
-            .cr = clamp(cr, -0.5, 0.5),
+            .y = y,
+            .cb = clamp((rgb.b - y) / 1.772, -0.5, 0.5),
+            .cr = clamp((rgb.r - y) / 1.402, -0.5, 0.5),
         };
     }
 }
 
-/// Converts RGB to grayscale using BT.601 luminance coefficients, matching the Y component of YCbCr.
-/// For `u8`, uses 16-bit fixed-point arithmetic for consistency with the YCbCr path.
 /// Calculates the perceptual luminance using ITU-R BT.709 coefficients.
 /// Returns a value in the range [0.0, 1.0].
 pub fn rgbLuma(r: anytype, g: anytype, b: anytype) f64 {
@@ -972,21 +1009,25 @@ pub fn rgbLuma(r: anytype, g: anytype, b: anytype) f64 {
     const r_f: f64 = if (T == u8) @as(f64, @floatFromInt(r)) / 255.0 else @floatCast(r);
     const g_f: f64 = if (T == u8) @as(f64, @floatFromInt(g)) / 255.0 else @floatCast(g);
     const b_f: f64 = if (T == u8) @as(f64, @floatFromInt(b)) / 255.0 else @floatCast(b);
-    return 0.2126 * r_f + 0.7152 * g_f + 0.0722 * b_f;
+    return luma_r * r_f + luma_g * g_f + luma_b * b_f;
 }
 
 /// Converts RGB to grayscale using BT.709 luminance coefficients.
+/// Y = 0.2126*R + 0.7152*G + 0.0722*B
 fn rgbToGray(comptime T: type, rgb: Rgb(T)) Gray(T) {
     if (T == u8) {
         const r: i32 = rgb.r;
         const g: i32 = rgb.g;
         const b: i32 = rgb.b;
-        // BT.709 coefficients scaled by 65536 (2^16) for fixed-point
-        // Y = 0.2126*R + 0.7152*G + 0.0722*B
-        return .{ .y = @intCast(clamp((13933 * r + 46871 * g + 4732 * b + 32768) >> 16, 0, 255)) };
+        const scale = 1 << 16;
+        const offset = 1 << 15;
+        const yr: i32 = @intFromFloat(@round(luma_r * scale));
+        const yg: i32 = @intFromFloat(@round(luma_g * scale));
+        const yb: i32 = @intFromFloat(@round(luma_b * scale));
+        return .{ .y = @intCast(clamp((yr * r + yg * g + yb * b + offset) >> 16, 0, 255)) };
     } else {
         comptime assert(@typeInfo(T) == .float);
-        const y = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+        const y = @as(T, luma_r) * rgb.r + @as(T, luma_g) * rgb.g + @as(T, luma_b) * rgb.b;
         return .{ .y = clamp(y, 0, 1) };
     }
 }
@@ -1006,9 +1047,9 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
         const cb: i64 = @as(i64, ycbcr.cb) - 128;
         const cr: i64 = @as(i64, ycbcr.cr) - 128;
 
-        const r: u8 = @intCast(clamp(y + ((91881 * cr + 32768) >> 16), 0, 255));
-        const g: u8 = @intCast(clamp(y - ((22554 * cb + 46802 * cr + 32768) >> 16), 0, 255));
-        const b: u8 = @intCast(clamp(y + ((116130 * cb + 32768) >> 16), 0, 255));
+        const r: u8 = @intCast(clamp((65536 * y + 91881 * cr + 32768) >> 16, 0, 255));
+        const g: u8 = @intCast(clamp((65536 * y - 22554 * cb - 46802 * cr + 32768) >> 16, 0, 255));
+        const b: u8 = @intCast(clamp((65536 * y + 116130 * cb + 32768) >> 16, 0, 255));
 
         return .{ .r = r, .g = g, .b = b };
     } else {
@@ -1039,16 +1080,18 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
     const max = @max(rgb.r, @max(rgb.g, rgb.b));
     const delta = max - min;
 
+    const h: T = if (delta == 0) 0 else blk: {
+        if (max == rgb.r) {
+            break :blk (rgb.g - rgb.b) / delta * 60;
+        } else if (max == rgb.g) {
+            break :blk 120 + (rgb.b - rgb.r) / delta * 60;
+        } else {
+            break :blk 240 + (rgb.r - rgb.g) / delta * 60;
+        }
+    };
+
     return .{
-        .h = if (delta == 0) 0 else blk: {
-            if (max == rgb.r) {
-                break :blk @mod((rgb.g - rgb.b) / delta * 60, 360);
-            } else if (max == rgb.g) {
-                break :blk @mod(120 + (rgb.b - rgb.r) / delta * 60, 360);
-            } else {
-                break :blk @mod(240 + (rgb.r - rgb.g) / delta * 60, 360);
-            }
-        },
+        .h = @mod(h, 360.0),
         .s = if (max == 0) 0 else (delta / max) * 100,
         .v = max * 100,
     };
@@ -1057,7 +1100,7 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
 /// Converts HSL to RGB.
 fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h = @max(0, @min(360, hsl.h));
+    const h = @mod(hsl.h, 360);
     const s = @max(0, @min(1, hsl.s / 100));
     const l = @max(0, @min(1, hsl.l / 100));
 
@@ -1229,64 +1272,68 @@ fn xyzToRgb(comptime T: type, xyz: Xyz(T)) Rgb(T) {
 /// Converts XYZ to Lab.
 fn xyzToLab(comptime T: type, xyz: Xyz(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
-    var xn = xyz.x / 95.047;
-    var yn = xyz.y / 100.000;
-    var zn = xyz.z / 108.883;
+    var xn = xyz.x / d65_x;
+    var yn = xyz.y / d65_y;
+    var zn = xyz.z / d65_z;
 
-    if (xn > 0.008856) {
+    if (xn > lab_epsilon) {
         xn = pow(T, xn, 1.0 / 3.0);
     } else {
-        xn = (7.787 * xn) + (16.0 / 116.0);
+        xn = (lab_kappa_div_116 * xn) + lab_delta;
     }
 
-    if (yn > 0.008856) {
+    if (yn > lab_epsilon) {
         yn = pow(T, yn, 1.0 / 3.0);
     } else {
-        yn = (7.787 * yn) + (16.0 / 116.0);
+        yn = (lab_kappa_div_116 * yn) + lab_delta;
     }
 
-    if (zn > 0.008856) {
+    if (zn > lab_epsilon) {
         zn = pow(T, zn, 1.0 / 3.0);
     } else {
-        zn = (7.787 * zn) + (16.0 / 116.0);
+        zn = (lab_kappa_div_116 * zn) + lab_delta;
     }
 
     return .{
-        .l = clamp(116.0 * yn - 16.0, 0, 100),
-        .a = clamp(500.0 * (xn - yn), -128, 127),
-        .b = clamp(200.0 * (yn - zn), -128, 127),
+        // L* is typically 0-100, but we only clamp to positive.
+        .l = @max(0, 116.0 * yn - 16.0),
+        // a* and b* are theoretically unbounded, though often within [-128, 127].
+        // We remove the hard clamping to support wide-gamut colors.
+        .a = 500.0 * (xn - yn),
+        .b = 200.0 * (yn - zn),
     };
 }
 
 /// Converts Lab to XYZ.
 fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
-    var y: f64 = (@max(0, @min(100, lab.l)) + 16.0) / 116.0;
-    var x: f64 = (@max(-128, @min(127, lab.a)) / 500.0) + y;
-    var z: f64 = y - (@max(-128, @min(127, lab.b)) / 200.0);
+    // Inverse CIELAB transformation
+    var y: f64 = (lab.l + 16.0) / 116.0;
+    var x: f64 = (lab.a / 500.0) + y;
+    var z: f64 = y - (lab.b / 200.0);
 
-    if (pow(f64, y, 3.0) > 0.008856) {
+    if (pow(f64, y, 3.0) > lab_epsilon) {
         y = pow(f64, y, 3.0);
     } else {
-        y = (y - 16.0 / 116.0) / 7.787;
+        y = (y - lab_delta) / lab_kappa_div_116;
     }
 
-    if (pow(f64, x, 3.0) > 0.008856) {
+    if (pow(f64, x, 3.0) > lab_epsilon) {
         x = pow(f64, x, 3.0);
     } else {
-        x = (x - 16.0 / 116.0) / 7.787;
+        x = (x - lab_delta) / lab_kappa_div_116;
     }
 
-    if (pow(f64, z, 3.0) > 0.008856) {
+    if (pow(f64, z, 3.0) > lab_epsilon) {
         z = pow(f64, z, 3.0);
     } else {
-        z = (z - 16.0 / 116.0) / 7.787;
+        z = (z - lab_delta) / lab_kappa_div_116;
     }
 
     return .{
-        .x = @floatCast(x * 95.047),
-        .y = @floatCast(y * 100.000),
-        .z = @floatCast(z * 108.883),
+        .x = @floatCast(x * d65_x),
+        .y = @floatCast(y * d65_y),
+        .z = @floatCast(z * d65_z),
     };
 }
 
@@ -1294,15 +1341,11 @@ fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
 fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(lab.a * lab.a + lab.b * lab.b);
-    var h = std.math.atan2(lab.b, lab.a) * 180.0 / std.math.pi;
-    // Ensure hue is in range [0, 360)
-    if (h < 0) {
-        h += 360.0;
-    }
+    const h = std.math.atan2(lab.b, lab.a) * 180.0 / std.math.pi;
     return .{
         .l = lab.l,
         .c = c,
-        .h = h,
+        .h = @mod(h, 360.0),
     };
 }
 
@@ -1381,17 +1424,12 @@ fn oklabToXyz(comptime T: type, oklab: Oklab(T)) Xyz(T) {
 fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
-    var h = std.math.atan2(oklab.b, oklab.a) * 180.0 / std.math.pi;
-
-    // Ensure hue is in range [0, 360)
-    if (h < 0) {
-        h += 360.0;
-    }
+    const h = std.math.atan2(oklab.b, oklab.a) * 180.0 / std.math.pi;
 
     return .{
         .l = oklab.l,
         .c = c,
-        .h = h,
+        .h = @mod(h, 360.0),
     };
 }
 
@@ -1414,16 +1452,13 @@ fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
     const g = (xyz.x * -0.9689 + xyz.y * 1.8758 + xyz.z * 0.0415) / 100;
     const b = (xyz.x * 0.0557 + xyz.y * -0.2040 + xyz.z * 1.0570) / 100;
 
-    const bias = 0.00379307325527544933;
-    const cbrt_bias = 0.15595420054924863;
+    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + xyb_bias);
+    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + xyb_bias);
+    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + xyb_bias);
 
-    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + bias);
-    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + bias);
-    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias);
-
-    const l_dash = std.math.cbrt(l) - cbrt_bias;
-    const m_dash = std.math.cbrt(m) - cbrt_bias;
-    const s_dash = std.math.cbrt(s) - cbrt_bias;
+    const l_dash = std.math.cbrt(l) - xyb_cbrt_bias_encode;
+    const m_dash = std.math.cbrt(m) - xyb_cbrt_bias_encode;
+    const s_dash = std.math.cbrt(s) - xyb_cbrt_bias_encode;
 
     return .{
         .x = 0.5 * (l_dash - m_dash),
@@ -1435,20 +1470,17 @@ fn xyzToXyb(comptime T: type, xyz: Xyz(T)) Xyb(T) {
 /// Converts XYB to XYZ.
 fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
-    const cbrt_bias = 0.15594113236791331;
-    const bias = 0.00379307325527544933;
-
     const l_dash = xyb.y + xyb.x;
     const m_dash = xyb.y - xyb.x;
     const s_dash = xyb.b;
 
-    const l_cbrt = l_dash + cbrt_bias;
-    const m_cbrt = m_dash + cbrt_bias;
-    const s_cbrt = s_dash + cbrt_bias;
+    const l_cbrt = l_dash + xyb_cbrt_bias_decode;
+    const m_cbrt = m_dash + xyb_cbrt_bias_decode;
+    const s_cbrt = s_dash + xyb_cbrt_bias_decode;
 
-    const l = (l_cbrt * l_cbrt * l_cbrt) - bias;
-    const m = (m_cbrt * m_cbrt * m_cbrt) - bias;
-    const s = (s_cbrt * s_cbrt * s_cbrt) - bias;
+    const l = (l_cbrt * l_cbrt * l_cbrt) - xyb_bias;
+    const m = (m_cbrt * m_cbrt * m_cbrt) - xyb_bias;
+    const s = (s_cbrt * s_cbrt * s_cbrt) - xyb_bias;
 
     const r = 11.031566901960783 * l - 9.866943921568629 * m - 0.16462299647058826 * s;
     const g = -3.254147380392157 * l + 4.418770392156863 * m - 0.16462299647058826 * s;
@@ -1468,16 +1500,13 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     const g = gammaToLinear(T, rgb.g);
     const b = gammaToLinear(T, rgb.b);
 
-    const bias = 0.00379307325527544933;
-    const cbrt_bias = 0.15595420054924863;
+    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + xyb_bias);
+    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + xyb_bias);
+    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + xyb_bias);
 
-    const l = @max(0, 0.30 * r + 0.622 * g + 0.078 * b + bias);
-    const m = @max(0, 0.23 * r + 0.692 * g + 0.078 * b + bias);
-    const s = @max(0, 0.24342268924547819 * r + 0.20476744424496821 * g + 0.5518098665095536 * b + bias);
-
-    const l_dash = std.math.cbrt(l) - cbrt_bias;
-    const m_dash = std.math.cbrt(m) - cbrt_bias;
-    const s_dash = std.math.cbrt(s) - cbrt_bias;
+    const l_dash = std.math.cbrt(l) - xyb_cbrt_bias_encode;
+    const m_dash = std.math.cbrt(m) - xyb_cbrt_bias_encode;
+    const s_dash = std.math.cbrt(s) - xyb_cbrt_bias_encode;
 
     return .{
         .x = 0.5 * (l_dash - m_dash),
@@ -1489,20 +1518,17 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
 /// Converts XYB to RGB.
 fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
-    const cbrt_bias = 0.15594113236791331;
-    const bias = 0.00379307325527544933;
-
     const l_dash = xyb.y + xyb.x;
     const m_dash = xyb.y - xyb.x;
     const s_dash = xyb.b;
 
-    const l_cbrt = l_dash + cbrt_bias;
-    const m_cbrt = m_dash + cbrt_bias;
-    const s_cbrt = s_dash + cbrt_bias;
+    const l_cbrt = l_dash + xyb_cbrt_bias_decode;
+    const m_cbrt = m_dash + xyb_cbrt_bias_decode;
+    const s_cbrt = s_dash + xyb_cbrt_bias_decode;
 
-    const l = (l_cbrt * l_cbrt * l_cbrt) - bias;
-    const m = (m_cbrt * m_cbrt * m_cbrt) - bias;
-    const s = (s_cbrt * s_cbrt * s_cbrt) - bias;
+    const l = (l_cbrt * l_cbrt * l_cbrt) - xyb_bias;
+    const m = (m_cbrt * m_cbrt * m_cbrt) - xyb_bias;
+    const s = (s_cbrt * s_cbrt * s_cbrt) - xyb_bias;
 
     const r = 11.031566901960783 * l - 9.866943921568629 * m - 0.16462299647058826 * s;
     const g = -3.254147380392157 * l + 4.418770392156863 * m - 0.16462299647058826 * s;
@@ -1837,4 +1863,17 @@ test "Color union float" {
     try expectApproxEqAbs(as_hsv.h, 0, 0.001);
     try expectApproxEqAbs(as_hsv.s, 100, 0.001);
     try expectApproxEqAbs(as_hsv.v, 100, 0.001);
+}
+
+test "clamping out-of-range inputs" {
+    // Negative float should clamp to 0
+    try expectEqual(convertColor(u8, @as(f32, -0.5)), @as(u8, 0));
+    // Float > 1 should clamp to 255
+    try expectEqual(convertColor(u8, @as(f32, 1.5)), @as(u8, 255));
+
+    const rgb_over = Rgb(f32){ .r = 1.2, .g = -0.2, .b = 0.5 };
+    const rgb_u8 = rgb_over.as(u8);
+    try expectEqual(rgb_u8.r, 255);
+    try expectEqual(rgb_u8.g, 0);
+    try expectEqual(rgb_u8.b, 128);
 }
