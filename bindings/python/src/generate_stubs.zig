@@ -229,6 +229,7 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     // Standard Python methods
     try stub.write("    def __repr__(self) -> str: ...\n");
     try stub.write("    def __str__(self) -> str: ...\n");
+    try stub.write("    __hash__ = None\n");
 }
 
 /// Generate class from metadata
