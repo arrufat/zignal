@@ -992,7 +992,7 @@ const canvas_draw_text_doc =
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
 ;
 
-pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "fill",
         .meth = @ptrCast(&canvas_fill),
@@ -1123,9 +1123,9 @@ pub const canvas_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var canvas_methods = stub_metadata.toPyMethodDefArray(&canvas_methods_metadata);
+var canvas_methods = python.toPyMethodDefArray(&canvas_methods_metadata);
 
-pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const canvas_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "rows",
         .get = @ptrCast(&canvas_get_rows),
@@ -1149,7 +1149,7 @@ pub const canvas_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-var canvas_getset = stub_metadata.toPyGetSetDefArray(&canvas_properties_metadata);
+var canvas_getset = python.toPyGetSetDefArray(&canvas_properties_metadata);
 
 // Canvas class documentation - keep it simple
 const canvas_class_doc = "Canvas for drawing operations on images.";

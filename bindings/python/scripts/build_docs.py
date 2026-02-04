@@ -16,52 +16,54 @@ from pathlib import Path
 
 
 def main():
-    # Use absolute paths to avoid confusion during chdir
-    script_path = Path(__file__).resolve()
-    bindings_dir = script_path.parent.parent
-    root = bindings_dir.parent.parent
-    os.chdir(root)
-
     # 1. Build Bindings
     print("Building Python bindings...")
-    try:
-        subprocess.check_call(["zig", "build", "python-bindings"])
-    except subprocess.CalledProcessError:
+    if subprocess.call(["zig", "build", "python-bindings"]) != 0:
         sys.exit("Error: Failed to build Python bindings.")
 
     # 2. Type Check with ty
     print("Validating type stubs with ty...")
     try:
-        # Check the package directory which contains the .pyi stubs
-        # Path is relative to the project root
-        subprocess.check_call(["ty", "check", "bindings/python/zignal"])
+        subprocess.check_call(["ty", "check", "zignal"])
         print("Success: Type annotations look good!")
     except FileNotFoundError:
-        print("Warning: 'ty' not found. Skipping type validation.")
+        print("Warning: 'ty' not found. Install it with 'uv pip install ty'.")
     except subprocess.CalledProcessError:
-        sys.exit("Error: Type validation failed! Please check the stubs in bindings/python/zignal")
+        sys.exit("Error: Type validation failed!")
 
-    # 3. Generate Docs
-    docs_dir = bindings_dir / "docs"
-    shutil.rmtree(docs_dir, ignore_errors=True)
-    docs_dir.mkdir(parents=True)
+    # 3. Generate Docs with pdoc
+    docs_dir = Path("docs")
+    if docs_dir.exists():
+        shutil.rmtree(docs_dir)
+    docs_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Generating documentation with pdoc...")
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        (tmp_path / "empty.py").write_text("'''Search index placeholder.'''")
+    print("Generating documentation...")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
 
-        # Set PYTHONPATH to include the dummy module for search generation
-        # We explicitly do not inherit PYTHONPATH to ensure a hermetic build
-        env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+        # Fix for broken annotations: Create a stub package
+        # This forces pdoc to read annotations from the .pyi file
+        stub_pkg_dir = temp_path / "zignal-stubs"
+        stub_pkg_dir.mkdir()
+        (stub_pkg_dir / "py.typed").touch()
 
-        try:
-            subprocess.check_call(
-                ["pdoc", "zignal", "empty", "-o", str(docs_dir), "--no-show-source"],
-                env=env
-            )
-        except subprocess.CalledProcessError:
-            sys.exit("Error: Failed to generate documentation with pdoc.")
+        # Copy _zignal.pyi to the stub package
+        shutil.copy2("zignal/_zignal.pyi", stub_pkg_dir / "__init__.pyi")
+
+        # Empty module to trigger site build (enables search)
+        (temp_path / "empty.py").write_text("'''Search placeholder'''")
+
+        # Update PYTHONPATH
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(temp_path), env.get("PYTHONPATH")]))
+
+        # Run pdoc
+        cmd = ["pdoc", "zignal", "empty", "-o", str(docs_dir), "--no-show-source"]
+
+        if subprocess.call(cmd, env=env) != 0:
+            sys.exit("Error generating documentation.")
+
+    print(f"\nDocumentation generated in {docs_dir}")
 
 
 if __name__ == "__main__":

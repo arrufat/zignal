@@ -229,7 +229,7 @@ fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     return result;
 }
 
-pub const running_stats_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const running_stats_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "add",
         .meth = @ptrCast(&running_stats_add),
@@ -272,7 +272,7 @@ pub const running_stats_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var running_stats_methods = stub_metadata.toPyMethodDefArray(&running_stats_methods_metadata);
+var running_stats_methods = python.toPyMethodDefArray(&running_stats_methods_metadata);
 
 fn running_stats_count_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
@@ -328,7 +328,7 @@ fn running_stats_max_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callco
     return python.create(stats_ptr.max());
 }
 
-pub const running_stats_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const running_stats_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "count",
         .get = running_stats_count_getter,
@@ -394,7 +394,7 @@ pub const running_stats_properties_metadata = [_]stub_metadata.PropertyWithMetad
     },
 };
 
-var running_stats_getset = stub_metadata.toPyGetSetDefArray(&running_stats_properties_metadata);
+var running_stats_getset = python.toPyGetSetDefArray(&running_stats_properties_metadata);
 
 const running_stats_class_doc =
     \\Online statistics accumulator using Welford's algorithm.

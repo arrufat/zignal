@@ -1943,7 +1943,7 @@ fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 }
 
 // Metadata for stub generation
-pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
+pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "full",
         .meth = @ptrCast(&matrix_full),
@@ -2250,14 +2250,14 @@ pub const matrix_methods_metadata = [_]stub_metadata.MethodWithMetadata{
     },
 };
 
-var matrix_methods = stub_metadata.toPyMethodDefArray(&matrix_methods_metadata);
+var matrix_methods = python.toPyMethodDefArray(&matrix_methods_metadata);
 
 fn matrix_T_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     return matrix_transpose(self_obj, null);
 }
 
-pub const matrix_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const matrix_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "rows",
         .get = matrix_rows_getter,
@@ -2295,7 +2295,7 @@ pub const matrix_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-var matrix_getset = stub_metadata.toPyGetSetDefArray(&matrix_properties_metadata);
+var matrix_getset = python.toPyGetSetDefArray(&matrix_properties_metadata);
 
 pub const matrix_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{

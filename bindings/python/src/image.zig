@@ -854,7 +854,7 @@ pub const image_methods_metadata = blk: {
     // ========================================================================
     // Core/Creation methods
     // ========================================================================
-    const core_methods = [_]stub_metadata.MethodWithMetadata{
+    const core_methods = [_]python.MethodWithMetadata{
         .{
             .name = "load",
             .meth = @ptrCast(&core.image_load),
@@ -972,7 +972,7 @@ pub const image_methods_metadata = blk: {
     // ========================================================================
     // NumPy interop
     // ========================================================================
-    const numpy_methods = [_]stub_metadata.MethodWithMetadata{
+    const numpy_methods = [_]python.MethodWithMetadata{
         .{
             .name = "from_numpy",
             .meth = @ptrCast(&numpy_interop.image_from_numpy),
@@ -994,7 +994,7 @@ pub const image_methods_metadata = blk: {
     // ========================================================================
     // Geometric transforms
     // ========================================================================
-    const transform_methods = [_]stub_metadata.MethodWithMetadata{
+    const transform_methods = [_]python.MethodWithMetadata{
         .{
             .name = "resize",
             .meth = @ptrCast(&transforms.image_resize),
@@ -1072,7 +1072,7 @@ pub const image_methods_metadata = blk: {
     // ========================================================================
     // Filtering/Effects
     // ========================================================================
-    const filter_methods = [_]stub_metadata.MethodWithMetadata{
+    const filter_methods = [_]python.MethodWithMetadata{
         .{
             .name = "box_blur",
             .meth = @ptrCast(&filtering.image_box_blur),
@@ -1262,7 +1262,7 @@ pub const image_methods_metadata = blk: {
     // ========================================================================
     // Special Python methods
     // ========================================================================
-    const special_methods = [_]stub_metadata.MethodWithMetadata{
+    const special_methods = [_]python.MethodWithMetadata{
         .{
             .name = "__format__",
             .meth = @ptrCast(&image_format),
@@ -1277,9 +1277,9 @@ pub const image_methods_metadata = blk: {
     break :blk core_methods ++ numpy_methods ++ transform_methods ++ filter_methods ++ special_methods;
 };
 
-var image_methods = stub_metadata.toPyMethodDefArray(&image_methods_metadata);
+var image_methods = python.toPyMethodDefArray(&image_methods_metadata);
 
-pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
+pub const image_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "rows",
         .get = @ptrCast(&core.image_get_rows),
@@ -1303,7 +1303,7 @@ pub const image_properties_metadata = [_]stub_metadata.PropertyWithMetadata{
     },
 };
 
-var image_getset = stub_metadata.toPyGetSetDefArray(&image_properties_metadata);
+var image_getset = python.toPyGetSetDefArray(&image_properties_metadata);
 
 // Special methods metadata for stub generation
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
