@@ -79,6 +79,31 @@ pub const Tracer = struct {
         return paths;
     }
 
+    /// Pre-calculated neighbor offsets and normalized direction vectors.
+    const Neighbor = struct {
+        offset: [2]isize,
+        dir: Point(2, f32),
+    };
+
+    const neighbors: [8]Neighbor = blk: {
+        var n: [8]Neighbor = undefined;
+        const offsets = [_][2]isize{
+            .{ -1, -1 }, .{ -1, 0 }, .{ -1, 1 },
+            .{ 0, -1 },  .{ 0, 1 },  .{ 1, -1 },
+            .{ 1, 0 },   .{ 1, 1 },
+        };
+        for (offsets, 0..) |off, i| {
+            const dx = @as(f32, @floatFromInt(off[1]));
+            const dy = @as(f32, @floatFromInt(off[0]));
+            const len = @sqrt(dx * dx + dy * dy);
+            n[i] = .{
+                .offset = off,
+                .dir = Point(2, f32).init(.{ dx / len, dy / len }),
+            };
+        }
+        break :blk n;
+    };
+
     /// Follows connected neighbors, preferring those that maintain the current direction (inertia).
     /// This prevents sharp 90-degree turns at junctions when a straight path is available.
     fn followPath(self: Tracer, edges: Image(u8), visited: *Image(u8), start_r: usize, start_c: usize) !Path {
@@ -89,13 +114,6 @@ pub const Tracer = struct {
         // Add start point
         try path.append(self.allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
         visited.at(curr_r, curr_c).* = 1;
-
-        // Neighbor offsets (8-connectivity)
-        const offsets = [_][2]isize{
-            .{ -1, -1 }, .{ -1, 0 }, .{ -1, 1 },
-            .{ 0, -1 },  .{ 0, 1 },  .{ 1, -1 },
-            .{ 1, 0 },   .{ 1, 1 },
-        };
 
         while (true) {
             var best_r: ?usize = null;
@@ -113,9 +131,9 @@ pub const Tracer = struct {
             }
 
             // Check all neighbors
-            for (offsets) |offset| {
-                const next_r_i = @as(isize, @intCast(curr_r)) + offset[0];
-                const next_c_i = @as(isize, @intCast(curr_c)) + offset[1];
+            for (neighbors) |n| {
+                const next_r_i = @as(isize, @intCast(curr_r)) + n.offset[0];
+                const next_c_i = @as(isize, @intCast(curr_c)) + n.offset[1];
 
                 if (next_r_i >= 0 and next_r_i < edges.rows and
                     next_c_i >= 0 and next_c_i < edges.cols)
@@ -131,10 +149,7 @@ pub const Tracer = struct {
                         }
 
                         // Calculate direction score: dot product of (prev_dir) . (candidate_dir)
-                        const dx = @as(f32, @floatFromInt(offset[1]));
-                        const dy = @as(f32, @floatFromInt(offset[0]));
-                        const len = @sqrt(dx * dx + dy * dy);
-                        const score = prev_dir.x() * (dx / len) + prev_dir.y() * (dy / len);
+                        const score = prev_dir.dot(n.dir);
 
                         if (score > best_score) {
                             best_score = score;
