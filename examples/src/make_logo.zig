@@ -87,7 +87,7 @@ fn drawSignalWaves(canvas: *Canvas(Rgb), allocator: std.mem.Allocator) !void {
         frequency: f32,
         phase: f32,
         color: Rgb,
-        width: usize,
+        width: u32,
         comment: []const u8,
     }{
         .{ .y_offset = 140, .amplitude = 40, .frequency = 3.0, .phase = 0, .color = Rgb{ .r = 255, .g = 60, .b = 60 }, .width = 4, .comment = "L-cone (Red, ~450 THz)" },
