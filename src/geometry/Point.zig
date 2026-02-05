@@ -237,16 +237,24 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         pub fn areAllCollinear(points: []const Self) bool {
             comptime assert(dim == 2);
             if (points.len < 3) return true;
-            for (0..points.len) |i| {
-                for (i + 1..points.len) |j| {
-                    for (j + 1..points.len) |k| {
-                        if (points[i].orientation(points[j], points[k]) != .collinear) {
-                            return false;
-                        }
-                    }
-                }
+
+            const p1 = points[0];
+            var i: usize = 1;
+            // Find the first point distinct from p1
+            while (i < points.len) : (i += 1) {
+                if (points[i].distanceSquared(p1) > 0) break;
             }
-            return true;
+
+            // If all points are identical to p1, they are collinear
+            if (i == points.len) return true;
+
+            const p2 = points[i];
+            // Check if all subsequent points are collinear with p1 and p2
+            return for (points[i + 1 ..]) |p| {
+                if (p1.orientation(p2, p) != .collinear) {
+                    break false;
+                }
+            } else true;
         }
 
         // Dimension conversion/projection methods
