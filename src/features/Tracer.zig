@@ -173,7 +173,7 @@ pub const Tracer = struct {
         keep[0] = true;
         keep[points.len - 1] = true;
 
-        self.douglasPeucker(points, keep, 0, points.len - 1);
+        try self.douglasPeucker(points, keep, 0, points.len - 1);
 
         // Build the final path
         var simplified: Path = .empty;
@@ -185,32 +185,38 @@ pub const Tracer = struct {
         return simplified;
     }
 
-    /// Recursive step of RDP.
-    /// Finds the point furthest from the line segment (start, end).
-    /// If distance > epsilon, split and recurse.
-    fn douglasPeucker(self: Tracer, points: []const Point(2, f32), keep: []bool, start_idx: usize, end_idx: usize) void {
-        if (end_idx <= start_idx + 1) return;
+    /// Iterative RDP implementation using an explicit stack to avoid recursion depth limits.
+    fn douglasPeucker(self: Tracer, points: []const Point(2, f32), keep: []bool, start_idx: usize, end_idx: usize) !void {
+        const Range = struct { start: usize, end: usize };
+        var stack: ArrayList(Range) = .empty;
+        defer stack.deinit(self.allocator);
 
-        const first = points[start_idx];
-        const last = points[end_idx];
+        try stack.append(self.allocator, .{ .start = start_idx, .end = end_idx });
 
-        var max_dist: f32 = 0;
-        var index: usize = 0;
+        while (stack.pop()) |range| {
+            if (range.end <= range.start + 1) continue;
 
-        // Find point with maximum perpendicular distance
-        var i: usize = start_idx + 1;
-        while (i < end_idx) : (i += 1) {
-            const d = points[i].distanceToSegment(first, last);
-            if (d > max_dist) {
-                max_dist = d;
-                index = i;
+            const first = points[range.start];
+            const last = points[range.end];
+
+            var max_dist: f32 = 0;
+            var index: usize = 0;
+
+            // Find point with maximum perpendicular distance
+            var i: usize = range.start + 1;
+            while (i < range.end) : (i += 1) {
+                const d = points[i].distanceToSegment(first, last);
+                if (d > max_dist) {
+                    max_dist = d;
+                    index = i;
+                }
             }
-        }
 
-        if (max_dist > self.simplification_epsilon) {
-            keep[index] = true;
-            self.douglasPeucker(points, keep, start_idx, index);
-            self.douglasPeucker(points, keep, index, end_idx);
+            if (max_dist > self.simplification_epsilon) {
+                keep[index] = true;
+                try stack.append(self.allocator, .{ .start = range.start, .end = index });
+                try stack.append(self.allocator, .{ .start = index, .end = range.end });
+            }
         }
     }
 };
