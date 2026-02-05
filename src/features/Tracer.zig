@@ -77,8 +77,8 @@ pub const Tracer = struct {
         return paths;
     }
 
-    /// Greedily follows connected neighbors.
-    /// Note: This is a simple chain tracer. Complex junctions might split paths arbitrarily.
+    /// Follows connected neighbors, preferring those that maintain the current direction (inertia).
+    /// This prevents sharp 90-degree turns at junctions when a straight path is available.
     fn followPath(self: Tracer, edges: Image(u8), visited: *Image(u8), start_r: usize, start_c: usize) !Path {
         var path: Path = .empty;
         var curr_r = start_r;
@@ -96,8 +96,21 @@ pub const Tracer = struct {
         };
 
         while (true) {
-            var found_next = false;
+            var best_r: ?usize = null;
+            var best_c: ?usize = null;
+            var best_score: f32 = -2.0;
 
+            // Determine current direction if we have history
+            var prev_dir: Point(2, f32) = Point(2, f32).origin;
+            const has_history = path.items.len >= 2;
+
+            if (has_history) {
+                const p_curr = path.items[path.items.len - 1];
+                const p_prev = path.items[path.items.len - 2];
+                prev_dir = p_curr.sub(p_prev).normalize();
+            }
+
+            // Check all neighbors
             for (offsets) |offset| {
                 const next_r_i = @as(isize, @intCast(curr_r)) + offset[0];
                 const next_c_i = @as(isize, @intCast(curr_c)) + offset[1];
@@ -108,19 +121,35 @@ pub const Tracer = struct {
                     const next_r: usize = @intCast(next_r_i);
                     const next_c: usize = @intCast(next_c_i);
 
-                    // Check if it's an edge and not visited
                     if (edges.at(next_r, next_c).* > 0 and visited.at(next_r, next_c).* == 0) {
-                        curr_r = next_r;
-                        curr_c = next_c;
-                        try path.append(self.allocator, Point(2, f32).init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
-                        visited.at(curr_r, curr_c).* = 1;
-                        found_next = true;
-                        break; // Greedy: take the first valid neighbor found
+                        if (!has_history) {
+                            best_r = next_r;
+                            best_c = next_c;
+                            break;
+                        }
+
+                        // Calculate direction score: dot product of (prev_dir) . (candidate_dir)
+                        const dx = @as(f32, @floatFromInt(offset[1]));
+                        const dy = @as(f32, @floatFromInt(offset[0]));
+                        const len = @sqrt(dx * dx + dy * dy);
+                        const score = prev_dir.x() * (dx / len) + prev_dir.y() * (dy / len);
+
+                        if (score > best_score) {
+                            best_score = score;
+                            best_r = next_r;
+                            best_c = next_c;
+                        }
                     }
                 }
             }
 
-            if (!found_next) break;
+            if (best_r) |r| {
+                const c = best_c.?;
+                curr_r = r;
+                curr_c = c;
+                try path.append(self.allocator, Point(2, f32).init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
+                visited.at(curr_r, curr_c).* = 1;
+            } else break;
         }
 
         return path;
