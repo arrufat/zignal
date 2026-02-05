@@ -719,7 +719,6 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\
     );
 
-
     // Module metadata
     try stub.write("__version__: str\n");
     try stub.write("__all__: list[str]\n");

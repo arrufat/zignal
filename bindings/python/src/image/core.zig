@@ -19,7 +19,6 @@ const python = @import("../python.zig");
 const ctx = python.ctx;
 const allocator = ctx.allocator;
 const c = python.c;
-const rectangle = @import("../rectangle.zig");
 
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
@@ -488,13 +487,7 @@ pub fn image_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            const left: f64 = 0.0;
-            const top: f64 = 0.0;
-            const right: f64 = @floatFromInt(img.cols);
-            const bottom: f64 = @floatFromInt(img.rows);
-            const args_tuple = c.Py_BuildValue("(dddd)", left, top, right, bottom) orelse return null;
-            defer c.Py_DECREF(args_tuple);
-            return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
+            return python.create(zignal.Rectangle(f64).init(0, 0, @floatFromInt(img.cols), @floatFromInt(img.rows)));
         }
     }.apply);
 }
