@@ -209,11 +209,11 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Only available for 2D points.
         pub fn orientation(self: Self, b: Self, c: Self) Orientation {
             comptime assert(dim == 2);
-            const v: T = self.x() * (b.y() - c.y()) + b.x() * (c.y() - self.y()) + c.x() * (self.y() - b.y());
-            const val_w: T = self.x() * (c.y() - b.y()) + c.x() * (b.y() - self.y()) + b.x() * (self.y() - c.y());
-            if (v * val_w == 0) return .collinear;
-            if (v < 0) return .clockwise;
-            if (v > 0) return .counter_clockwise;
+            const u: T = self.x() * (b.y() - c.y()) + b.x() * (c.y() - self.y()) + c.x() * (self.y() - b.y());
+            const v: T = self.x() * (c.y() - b.y()) + c.x() * (b.y() - self.y()) + b.x() * (self.y() - c.y());
+            if (u * v == 0) return .collinear;
+            if (u < 0) return .clockwise;
+            if (u > 0) return .counter_clockwise;
             return .collinear;
         }
 
