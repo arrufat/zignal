@@ -13,7 +13,7 @@ const Rgb = zignal.Rgb(u8);
 pub const FeatureDistributionMatchingObject = extern struct {
     ob_base: c.PyObject,
     // Store a pointer to the heap-allocated FDM struct
-    fdm_ptr: ?*FeatureDistributionMatching(Rgb),
+    fdm: ?*FeatureDistributionMatching(Rgb),
 };
 
 // Using genericNew helper for standard object creation
@@ -23,17 +23,13 @@ fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     _ = args;
     _ = kwds;
     const self = python.safeCast(FeatureDistributionMatchingObject, self_obj);
-
-    // Create and initialize FDM using helper
-
-    // Create and initialize FDM using helper
-    self.fdm_ptr = python.createHeapObject(FeatureDistributionMatching(Rgb), .{allocator}) catch return -1;
+    self.fdm = python.allocate(FeatureDistributionMatching(Rgb), .{allocator}) catch return -1;
     return 0;
 }
 
 // Helper function for custom cleanup
 fn fdmDeinit(self: *FeatureDistributionMatchingObject) void {
-    python.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm_ptr);
+    python.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm);
 }
 
 // Using genericDealloc helper
@@ -42,7 +38,7 @@ const fdm_dealloc = python.genericDealloc(FeatureDistributionMatchingObject, fdm
 fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = python.safeCast(FeatureDistributionMatchingObject, self_obj);
 
-    if (self.fdm_ptr == null) {
+    if (self.fdm == null) {
         return python.create("FeatureDistributionMatching(uninitialized)");
     }
 
@@ -69,7 +65,7 @@ const set_target_doc =
 ;
 
 fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm = python.unwrap(FeatureDistributionMatchingObject, "fdm", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         image: ?*c.PyObject,
@@ -102,7 +98,7 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             return null;
         },
     };
-    fdm_ptr.setTarget(target_rgb) catch |err| {
+    fdm.setTarget(target_rgb) catch |err| {
         switch (err) {
             error.OutOfMemory => python.setMemoryError("target image"),
             error.NotConverged => python.setRuntimeError("FDM failed: {t}", .{err}),
@@ -133,7 +129,7 @@ const set_source_doc =
 ;
 
 fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm = python.unwrap(FeatureDistributionMatchingObject, "fdm", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         image: ?*c.PyObject,
@@ -165,7 +161,7 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             return null;
         },
     };
-    fdm_ptr.setSource(src_rgb) catch |err| {
+    fdm.setSource(src_rgb) catch |err| {
         switch (err) {
             error.OutOfMemory => python.setMemoryError("source image"),
         }
@@ -200,7 +196,7 @@ const match_doc =
 ;
 
 fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm = python.unwrap(FeatureDistributionMatchingObject, "fdm", self_obj, "FeatureDistributionMatching") orelse return null;
 
     const Params = struct {
         source: ?*c.PyObject,
@@ -247,7 +243,7 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     };
 
     // Call match
-    fdm_ptr.match(src_rgb2, dst_rgb2) catch |err| {
+    fdm.match(src_rgb2, dst_rgb2) catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during match"),
             error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set"),
@@ -291,10 +287,10 @@ const update_doc =
 
 fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
-    const fdm_ptr = python.unwrap(FeatureDistributionMatchingObject, "fdm_ptr", self_obj, "FeatureDistributionMatching") orelse return null;
+    const fdm = python.unwrap(FeatureDistributionMatchingObject, "fdm", self_obj, "FeatureDistributionMatching") orelse return null;
 
     // Apply the transformation
-    fdm_ptr.update() catch |err| {
+    fdm.update() catch |err| {
         switch (err) {
             error.OutOfMemory => c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory during update"),
             error.NoTargetSet => c.PyErr_SetString(c.PyExc_RuntimeError, "No target image set. Call set_target() or match() first"),

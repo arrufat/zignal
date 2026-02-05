@@ -64,6 +64,11 @@ fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
     return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), new_args);
 }
 
+/// Helper to create a Python Point tuple from a Zig Point
+fn createPoint(p: anytype) ?*c.PyObject {
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
+}
+
 /// Creates a Python object from a Zig value.
 pub fn create(value: anytype) ?*c.PyObject {
     const T = @TypeOf(value);
@@ -109,6 +114,7 @@ pub fn create(value: anytype) ?*c.PyObject {
         },
         .@"struct" => switch (T) {
             zignal.Rectangle(f64) => createRectangle(value),
+            Point(2, f32), Point(2, f64) => createPoint(value),
             else => @compileError("Unsupported type: " ++ @typeName(T)),
         },
         else => null,
@@ -1371,12 +1377,19 @@ pub fn buildTypeObject(comptime config: TypeObjectConfig) c.PyTypeObject {
 }
 
 /// Create a heap-allocated object with automatic memory management
-pub fn createHeapObject(comptime T: type, args: anytype) !*T {
+pub fn allocate(comptime T: type, args: anytype) !*T {
     const obj = ctx.allocator.create(T) catch {
         setMemoryError(@typeName(T));
         return error.OutOfMemory;
     };
-    obj.* = T.init(args[0]);
+
+    const ResultType = @typeInfo(@TypeOf(T.init)).@"fn".return_type.?;
+    if (@typeInfo(ResultType) == .error_union) {
+        obj.* = try @call(.auto, T.init, args);
+    } else {
+        obj.* = @call(.auto, T.init, args);
+    }
+
     return obj;
 }
 
