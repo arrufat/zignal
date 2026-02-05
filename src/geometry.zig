@@ -6,6 +6,7 @@
 // Import points from geometry subdirectory
 const points = @import("geometry/Point.zig");
 pub const Point = points.Point;
+pub const Orientation = points.Orientation;
 
 // Import Rectangle
 pub const Rectangle = @import("geometry/Rectangle.zig").Rectangle;
@@ -17,21 +18,13 @@ pub const AffineTransform = transforms.AffineTransform;
 pub const ProjectiveTransform = transforms.ProjectiveTransform;
 
 // Import ConvexHull
-pub const ConvexHull = @import("geometry/ConvexHull.zig").ConvexHull;
-
-// Import utility functions
-const utils = @import("geometry/utils.zig");
-pub const pointInTriangle = utils.pointInTriangle;
-pub const findBarycenter = utils.findBarycenter;
-pub const hasNonCollinearTriplet = utils.hasNonCollinearTriplet;
-pub const orientation = utils.orientation;
-pub const Orientation = utils.Orientation;
+const convex_hull = @import("geometry/ConvexHull.zig");
+pub const ConvexHull = convex_hull.ConvexHull;
 
 // Re-export tests to ensure everything compiles
 test {
     _ = points;
     _ = @import("geometry/Rectangle.zig");
     _ = transforms;
-    _ = @import("geometry/ConvexHull.zig");
-    _ = utils;
+    _ = convex_hull;
 }

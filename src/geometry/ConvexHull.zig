@@ -5,7 +5,6 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 
 const Point = @import("Point.zig").Point;
 const Rectangle = @import("Rectangle.zig").Rectangle;
-const computeOrientation = @import("utils.zig").computeOrientation;
 
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
@@ -30,7 +29,7 @@ pub fn ConvexHull(comptime T: type) type {
 
         /// Compares the points by polar angle in clockwise order.
         fn clockwiseOrder(p: Point(2, T), a: Point(2, T), b: Point(2, T)) bool {
-            return switch (computeOrientation(T, p, a, b)) {
+            return switch (p.orientation(a, b)) {
                 .clockwise => true,
                 .counter_clockwise => false,
                 .collinear => p.distanceSquared(a) < p.distanceSquared(b),
@@ -70,9 +69,7 @@ pub fn ConvexHull(comptime T: type) type {
             // Process remaining points
             for (self.points.items[1..]) |p| {
                 // Remove points that do NOT create a clockwise turn
-                while (self.hull.items.len > 1 and computeOrientation(
-                    T,
-                    self.hull.items[self.hull.items.len - 2],
+                while (self.hull.items.len > 1 and self.hull.items[self.hull.items.len - 2].orientation(
                     self.hull.items[self.hull.items.len - 1],
                     p,
                 ) != .clockwise) {
@@ -118,12 +115,13 @@ pub fn ConvexHull(comptime T: type) type {
             }
             if (!self.isValid()) return false;
 
-            // Check orientation of point relative to all edges.            // Since vertices are in clockwise order, the point must be to the right (clockwise)
+            // Check orientation of point relative to all edges.
+            // Since vertices are in clockwise order, the point must be to the right (clockwise)
             // or collinear with every edge to be inside.
             for (0..self.hull.items.len) |i| {
                 const p1 = self.hull.items[i];
                 const p2 = self.hull.items[(i + 1) % self.hull.items.len];
-                const orientation = computeOrientation(T, p1, p2, p);
+                const orientation = p1.orientation(p2, p);
 
                 // If point is to the left (counter-clockwise) of any edge, it's outside
                 if (orientation == .counter_clockwise) {
@@ -196,14 +194,31 @@ test "convex hull" {
     try expectEqual(empty, null);
 }
 
-test "computeOrientation" {
+test "orientation" {
     // These three points can have different orientations due to floating point precision.
     const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
     const b: Point(2, f32) = .init(.{ 3.6271343e-1, 9.712454e-1 });
     const c: Point(2, f32) = .init(.{ 3.9276862e-1, 8.9579517e-1 });
-    const orientation_abc = computeOrientation(f32, a, b, c);
-    const orientation_acb = computeOrientation(f32, a, c, b);
+    const orientation_abc = a.orientation(b, c);
+    const orientation_acb = a.orientation(c, b);
     try std.testing.expectEqual(orientation_abc, orientation_acb);
+}
+
+test "areAllCollinear" {
+    const pts_collinear: []const Point(2, f32) = &.{
+        .init(.{ 0, 0 }),
+        .init(.{ 1, 1 }),
+        .init(.{ 2, 2 }),
+        .init(.{ 3, 3 }),
+    };
+    try std.testing.expect(Point(2, f32).areAllCollinear(pts_collinear));
+
+    const pts_non_collinear: []const Point(2, f32) = &.{
+        .init(.{ 0, 0 }),
+        .init(.{ 1, 0 }),
+        .init(.{ 0, 1 }),
+    };
+    try std.testing.expect(!Point(2, f32).areAllCollinear(pts_non_collinear));
 }
 
 test "convex hull square" {
