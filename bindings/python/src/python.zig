@@ -1385,7 +1385,11 @@ pub fn allocate(comptime T: type, args: anytype) !*T {
 
     const ResultType = @typeInfo(@TypeOf(T.init)).@"fn".return_type.?;
     if (@typeInfo(ResultType) == .error_union) {
-        obj.* = try @call(.auto, T.init, args);
+        obj.* = @call(.auto, T.init, args) catch |err| {
+            ctx.allocator.destroy(obj);
+            mapZigError(err, @typeName(T));
+            return err;
+        };
     } else {
         obj.* = @call(.auto, T.init, args);
     }
