@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const SMatrix = @import("../matrix.zig").SMatrix;
 const Matrix = @import("../matrix.zig").Matrix;
 const Point = @import("Point.zig").Point;
-const geom_utils = @import("utils.zig");
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
 /// function.  Use the fit method to update the transform to map between two sets of points.
@@ -248,7 +247,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
         pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
-            if (!geom_utils.hasNonCollinearTriplet(T, from_points) or !geom_utils.hasNonCollinearTriplet(T, to_points)) {
+            if (Point(2, T).areAllCollinear(from_points) or Point(2, T).areAllCollinear(to_points)) {
                 return error.RankDeficient;
             }
             var accum: SMatrix(T, 9, 9) = .initAll(0);
