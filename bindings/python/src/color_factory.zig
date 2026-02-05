@@ -177,37 +177,44 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.setter;
         }
 
+        fn countMethods() usize {
+            var count: usize = 3; // format, to, sentinel
+            if (@hasDecl(ZigColorType, "blend")) count += 1;
+            if (@hasDecl(ZigColorType, "invert")) count += 1;
+            if (@hasDecl(ZigColorType, "luma")) count += 1;
+            if (@hasDecl(ZigColorType, "hex")) count += 1;
+            if (@hasDecl(ZigColorType, "initHex")) count += 1;
+            if (@hasDecl(ZigColorType, "withAlpha")) count += 1;
+            return count;
+        }
+
         /// Generate methods array - __format__, blend, to, invert, luma, hex, from_hex, with_alpha
-        pub fn generateMethods() [9]c.PyMethodDef {
-            var methods: [9]c.PyMethodDef = undefined;
-            var index: usize = 0;
-
-            // Add __format__ method
-            methods[index] = c.PyMethodDef{
-                .ml_name = "__format__",
-                .ml_meth = @ptrCast(&formatMethod),
-                .ml_flags = c.METH_VARARGS,
-                .ml_doc =
-                \\Format the color object with optional format specifier.
-                \\
-                \\## Parameters
-                \\- `format_spec` (str): Format specifier string:
-                \\  - `''` (empty): Returns the default repr() output
-                \\  - `'sgr'`: Returns SGR-colored terminal representation
-                \\
-                \\## Examples
-                \\```python
-                \\color = zignal.Rgb(255, 0, 0)
-                \\print(f"{color}")        # Default repr: Rgb(r=255, g=0, b=0)
-                \\print(f"{color:sgr}")   # SGR colored output in terminal
-                \\```
-                ,
+        pub fn generateMethods() [countMethods()]c.PyMethodDef {
+            const format_method = [_]c.PyMethodDef{
+                .{
+                    .ml_name = "__format__",
+                    .ml_meth = @ptrCast(&formatMethod),
+                    .ml_flags = c.METH_VARARGS,
+                    .ml_doc =
+                    \\Format the color object with optional format specifier.
+                    \\
+                    \\## Parameters
+                    \\- `format_spec` (str): Format specifier string:
+                    \\  - `''` (empty): Returns the default repr() output
+                    \\  - `'sgr'`: Returns SGR-colored terminal representation
+                    \\
+                    \\## Examples
+                    \\```python
+                    \\color = zignal.Rgb(255, 0, 0)
+                    \\print(f"{color}")        # Default repr: Rgb(r=255, g=0, b=0)
+                    \\print(f"{color:sgr}")   # SGR colored output in terminal
+                    \\```
+                    ,
+                },
             };
-            index += 1;
 
-            // Add blend method if the type has it
-            if (@hasDecl(ZigColorType, "blend")) {
-                methods[index] = c.PyMethodDef{
+            const blend_method = if (@hasDecl(ZigColorType, "blend")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "blend",
                     .ml_meth = @ptrCast(&blendMethod),
                     .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS,
@@ -227,71 +234,68 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     \\result = base.blend(overlay, mode=zignal.Blending.MULTIPLY)
                     \\```
                     ,
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            // Add generic to(space) conversion
-            methods[index] = c.PyMethodDef{
-                .ml_name = "to",
-                .ml_meth = @ptrCast(&toMethod),
-                .ml_flags = c.METH_VARARGS,
-                .ml_doc = "Convert to the given color type (pass the class, e.g. zignal.Rgb).",
+            const to_method = [_]c.PyMethodDef{
+                .{
+                    .ml_name = "to",
+                    .ml_meth = @ptrCast(&toMethod),
+                    .ml_flags = c.METH_VARARGS,
+                    .ml_doc = "Convert to the given color type (pass the class, e.g. zignal.Rgb).",
+                },
             };
-            index += 1;
 
-            if (@hasDecl(ZigColorType, "invert")) {
-                methods[index] = c.PyMethodDef{
+            const invert_method = if (@hasDecl(ZigColorType, "invert")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "invert",
                     .ml_meth = @ptrCast(&invertMethod),
                     .ml_flags = c.METH_NOARGS,
                     .ml_doc = "Return a new color with inverted components while preserving alpha (if present).",
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            if (@hasDecl(ZigColorType, "luma")) {
-                methods[index] = c.PyMethodDef{
+            const luma_method = if (@hasDecl(ZigColorType, "luma")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "luma",
                     .ml_meth = @ptrCast(&lumaMethod),
                     .ml_flags = c.METH_NOARGS,
                     .ml_doc = "Calculate the perceptual luminance (0.0 to 1.0) using ITU-R BT.709 coefficients.",
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            if (@hasDecl(ZigColorType, "hex")) {
-                methods[index] = c.PyMethodDef{
+            const hex_method = if (@hasDecl(ZigColorType, "hex")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "hex",
                     .ml_meth = @ptrCast(&hexMethod),
                     .ml_flags = c.METH_NOARGS,
                     .ml_doc = "Return the hexadecimal representation of the color (e.g. 0xRRGGBB or 0xRRGGBBAA).",
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            if (@hasDecl(ZigColorType, "initHex")) {
-                methods[index] = c.PyMethodDef{
+            const from_hex_method = if (@hasDecl(ZigColorType, "initHex")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "from_hex",
                     .ml_meth = @ptrCast(&fromHexMethod),
                     .ml_flags = c.METH_VARARGS | c.METH_STATIC,
                     .ml_doc = "Create a color from a hexadecimal value (e.g. 0xRRGGBB or 0xRRGGBBAA).",
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            if (@hasDecl(ZigColorType, "withAlpha")) {
-                methods[index] = c.PyMethodDef{
+            const with_alpha_method = if (@hasDecl(ZigColorType, "withAlpha")) [_]c.PyMethodDef{
+                .{
                     .ml_name = "with_alpha",
                     .ml_meth = @ptrCast(&withAlphaMethod),
                     .ml_flags = c.METH_VARARGS,
                     .ml_doc = "Return a new Rgba color with the specified alpha channel value.",
-                };
-                index += 1;
-            }
+                },
+            } else [_]c.PyMethodDef{};
 
-            methods[index] = c.PyMethodDef{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null };
-            return methods;
+            const sentinel = [_]c.PyMethodDef{
+                .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
+            };
+
+            return format_method ++ blend_method ++ to_method ++ invert_method ++ luma_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
         }
 
         /// invert method implementation

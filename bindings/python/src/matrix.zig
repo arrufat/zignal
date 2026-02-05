@@ -158,20 +158,7 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
 
     const n_cols = python.validatePositive(u32, c.PyList_Size(first_row), "cols") catch return -1;
 
-    // Create the matrix
-    const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        python.setMemoryError("Matrix");
-        return -1;
-    };
-
-    matrix_ptr.* = Matrix(f64).init(allocator, n_rows, n_cols) catch {
-        allocator.destroy(matrix_ptr);
-        python.setMemoryError("matrix data");
-        return -1;
-    };
-
-    // const n_rows: u32 = @intCast(irows);
-    // const n_cols: u32 = @intCast(icols);
+    const matrix = python.allocate(Matrix(f64), .{ allocator, n_rows, n_cols }) catch return -1;
 
     // Fill matrix with data from list
     var row_idx: u32 = 0;
@@ -180,8 +167,8 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
 
         // Check that this is a list
         if (c.PyList_Check(row_obj) != 1) {
-            matrix_ptr.deinit();
-            allocator.destroy(matrix_ptr);
+            matrix.deinit();
+            allocator.destroy(matrix);
             python.setTypeError("list", row_obj);
             return -1;
         }
@@ -189,8 +176,8 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
         // Check that row has correct number of columns
         const row_size = c.PyList_Size(row_obj);
         if (row_size != @as(isize, n_cols)) {
-            matrix_ptr.deinit();
-            allocator.destroy(matrix_ptr);
+            matrix.deinit();
+            allocator.destroy(matrix);
             python.setValueError("All rows must have the same number of columns", .{});
             return -1;
         }
@@ -201,18 +188,18 @@ fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
             const item = c.PyList_GetItem(row_obj, col_idx);
 
             const value = python.parse(f64, item) catch {
-                matrix_ptr.deinit();
-                allocator.destroy(matrix_ptr);
+                matrix.deinit();
+                allocator.destroy(matrix);
                 c.PyErr_Clear(); // Clear the generic error from python.parse
                 c.PyErr_SetString(c.PyExc_TypeError, "Matrix elements must be numeric");
                 return -1;
             };
 
-            matrix_ptr.at(row_idx, col_idx).* = value;
+            matrix.at(row_idx, col_idx).* = value;
         }
     }
 
-    self.matrix_ptr = matrix_ptr;
+    self.matrix_ptr = matrix;
     self.owns_memory = true;
     self.numpy_ref = null;
 

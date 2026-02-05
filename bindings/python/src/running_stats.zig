@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const RunningStats = zignal.RunningStats;
 
 const python = @import("python.zig");
 const allocator = python.ctx.allocator;
@@ -9,11 +8,11 @@ pub const registerType = python.register;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-const RunningStatsF64 = RunningStats(f64);
+const RunningStats = zignal.RunningStats(f64);
 
 pub const RunningStatsObject = extern struct {
     ob_base: c.PyObject,
-    stats_ptr: ?*RunningStatsF64,
+    stats_ptr: ?*RunningStats,
 };
 
 const running_stats_new = python.genericNew(RunningStatsObject);
@@ -23,11 +22,7 @@ fn running_stats_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     _ = kwds;
     const self = python.safeCast(RunningStatsObject, self_obj);
 
-    const stats_ptr = allocator.create(RunningStatsF64) catch {
-        python.setMemoryError("RunningStats");
-        return -1;
-    };
-    stats_ptr.* = RunningStatsF64.init();
+    const stats_ptr = python.allocate(RunningStats, .{}) catch return -1;
     self.stats_ptr = stats_ptr;
 
     return 0;
