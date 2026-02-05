@@ -9,8 +9,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+
+const geometry = @import("../geometry.zig");
+const Point = geometry.Point;
 const Image = @import("../image.zig").Image;
-const Point = @import("../geometry/Point.zig").Point;
 
 pub const Tracer = struct {
     allocator: Allocator,
@@ -49,7 +51,7 @@ pub const Tracer = struct {
         }
 
         // Keep track of visited pixels to avoid infinite loops and duplicate paths
-        var visited = try Image(u8).init(self.allocator, edges.rows, edges.cols);
+        var visited: Image(u8) = try .init(self.allocator, edges.rows, edges.cols);
         defer visited.deinit(self.allocator);
         @memset(visited.data, 0);
 
@@ -85,7 +87,7 @@ pub const Tracer = struct {
         var curr_c = start_c;
 
         // Add start point
-        try path.append(self.allocator, Point(2, f32).init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
+        try path.append(self.allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
         visited.at(curr_r, curr_c).* = 1;
 
         // Neighbor offsets (8-connectivity)
@@ -147,7 +149,7 @@ pub const Tracer = struct {
                 const c = best_c.?;
                 curr_r = r;
                 curr_c = c;
-                try path.append(self.allocator, Point(2, f32).init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
+                try path.append(self.allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
                 visited.at(curr_r, curr_c).* = 1;
             } else break;
         }
@@ -158,7 +160,7 @@ pub const Tracer = struct {
     /// Simplifies a path using the Ramer-Douglas-Peucker algorithm.
     fn simplifyPath(self: Tracer, points: []const Point(2, f32)) !Path {
         if (points.len < 3) {
-            var new_path = try Path.initCapacity(self.allocator, points.len);
+            var new_path: Path = try .initCapacity(self.allocator, points.len);
             try new_path.appendSlice(self.allocator, points);
             return new_path;
         }
@@ -198,7 +200,7 @@ pub const Tracer = struct {
         // Find point with maximum perpendicular distance
         var i: usize = start_idx + 1;
         while (i < end_idx) : (i += 1) {
-            const d = perpendicularDistance(points[i], first, last);
+            const d = points[i].distanceToSegment(first, last);
             if (d > max_dist) {
                 max_dist = d;
                 index = i;
@@ -212,29 +214,3 @@ pub const Tracer = struct {
         }
     }
 };
-
-/// Computes the perpendicular distance from point P to the line segment AB.
-fn perpendicularDistance(p: Point(2, f32), a: Point(2, f32), b: Point(2, f32)) f32 {
-    const ab = b.sub(a);
-    const ap = p.sub(a);
-
-    const ab_len_sq = ab.normSquared();
-
-    if (ab_len_sq == 0) {
-        return ap.norm();
-    }
-
-    // Project AP onto AB to find the parameter t
-    // t = (AP . AB) / |AB|^2
-    const t = ap.dot(ab) / ab_len_sq;
-
-    if (t < 0.0) {
-        return ap.norm(); // Closest point is A
-    } else if (t > 1.0) {
-        return p.sub(b).norm(); // Closest point is B
-    }
-
-    // Closest point is on the segment
-    const projection = a.add(ab.scale(t));
-    return p.sub(projection).norm();
-}
