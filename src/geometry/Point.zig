@@ -2,6 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 const meta = @import("../meta.zig");
 
+/// Possible orientations of a triplet of 2D points.
+pub const Orientation = enum {
+    collinear,
+    clockwise,
+    counter_clockwise,
+};
+
 /// A unified point type supporting arbitrary dimensions with SIMD acceleration.
 /// Common dimensions 2D, 3D, 4D have convenient x(), y(), z(), w() accessors.
 /// Direct access to components via .items[index].
@@ -164,6 +171,90 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Compute squared distance (avoids sqrt for performance)
         pub fn distanceSquared(self: Self, other: Self) T {
             return self.sub(other).normSquared();
+        }
+
+        /// Computes the shortest distance from this point to the line segment defined by endpoints `a` and `b`.
+        ///
+        /// This function calculates the perpendicular distance if the projection of this point onto the line
+        /// containing the segment falls within the segment's boundaries. If the projection falls
+        /// outside, it returns the Euclidean distance to the nearest endpoint (`a` or `b`).
+        pub fn distanceToSegment(self: Self, a: Self, b: Self) T {
+            comptime assert(@typeInfo(T) == .float);
+            const ab = b.sub(a);
+            const ap = self.sub(a);
+
+            const ab_len_sq = ab.normSquared();
+
+            if (ab_len_sq == 0) {
+                return ap.norm();
+            }
+
+            // Project AP onto AB to find the parameter t
+            // t = (AP . AB) / |AB|^2
+            const t = ap.dot(ab) / ab_len_sq;
+
+            if (t <= 0.0) {
+                return ap.norm(); // Closest point is A
+            } else if (t >= 1.0) {
+                return self.sub(b).norm(); // Closest point is B
+            }
+
+            // Closest point is on the segment
+            const projection = a.add(ab.scale(t));
+            return self.sub(projection).norm();
+        }
+
+        /// Computes the orientation of this point relative to points `b` and `c`.
+        /// Returns clockwise, counter-clockwise, or collinear.
+        /// Only available for 2D points.
+        pub fn orientation(self: Self, b: Self, c: Self) Orientation {
+            comptime assert(dim == 2);
+            const u: T = self.x() * (b.y() - c.y()) + b.x() * (c.y() - self.y()) + c.x() * (self.y() - b.y());
+            const v: T = self.x() * (c.y() - b.y()) + c.x() * (b.y() - self.y()) + b.x() * (self.y() - c.y());
+            if (u * v == 0) return .collinear;
+            if (u < 0) return .clockwise;
+            if (u > 0) return .counter_clockwise;
+            return .collinear;
+        }
+
+        /// Returns true if, and only if, this point is inside the triangle defined by vertices `a`, `b`, and `c`.
+        /// Uses the barycentric coordinate method.
+        /// Only available for 2D points.
+        pub fn inTriangle(self: Self, a: Self, b: Self, c: Self) bool {
+            comptime assert(dim == 2);
+            const s = (a.x() - c.x()) * (self.y() - c.y()) - (a.y() - c.y()) * (self.x() - c.x());
+            const t = (b.x() - a.x()) * (self.y() - a.y()) - (b.y() - a.y()) * (self.x() - a.x());
+
+            if ((s < 0) != (t < 0) and s != 0 and t != 0)
+                return false;
+
+            const d = (c.x() - b.x()) * (self.y() - b.y()) - (c.y() - b.y()) * (self.x() - b.x());
+            return d == 0 or (d < 0) == (s + t < 0);
+        }
+
+        /// Returns true when all points in the slice are collinear.
+        /// Only available for 2D points.
+        pub fn areAllCollinear(points: []const Self) bool {
+            comptime assert(dim == 2);
+            if (points.len < 3) return true;
+
+            const p1 = points[0];
+            var i: usize = 1;
+            // Find the first point distinct from p1
+            while (i < points.len) : (i += 1) {
+                if (points[i].distanceSquared(p1) > 0) break;
+            }
+
+            // If all points are identical to p1, they are collinear
+            if (i == points.len) return true;
+
+            const p2 = points[i];
+            // Check if all subsequent points are collinear with p1 and p2
+            return for (points[i + 1 ..]) |p| {
+                if (p1.orientation(p2, p) != .collinear) {
+                    break false;
+                }
+            } else true;
         }
 
         // Dimension conversion/projection methods
@@ -404,4 +495,93 @@ test "3D cross product" {
     try std.testing.expectEqual(@as(f64, 0.0), k.x());
     try std.testing.expectEqual(@as(f64, 0.0), k.y());
     try std.testing.expectEqual(@as(f64, 1.0), k.z());
+}
+
+test "Point distanceToSegment" {
+    const P2 = Point(2, f64);
+    const a = P2.init(.{ 0.0, 0.0 });
+    const b = P2.init(.{ 10.0, 0.0 });
+
+    // Point above the segment (perpendicular)
+    const p1 = P2.init(.{ 5.0, 5.0 });
+    try std.testing.expectApproxEqAbs(@as(f64, 5.0), p1.distanceToSegment(a, b), 1e-9);
+
+    // Point before the segment (closest to a)
+    const p2 = P2.init(.{ -3.0, 4.0 });
+    try std.testing.expectApproxEqAbs(@as(f64, 5.0), p2.distanceToSegment(a, b), 1e-9);
+
+    // Point after the segment (closest to b)
+    const p3 = P2.init(.{ 13.0, 4.0 });
+    try std.testing.expectApproxEqAbs(@as(f64, 5.0), p3.distanceToSegment(a, b), 1e-9);
+
+    // Point on the segment
+    const p4 = P2.init(.{ 2.0, 0.0 });
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), p4.distanceToSegment(a, b), 1e-9);
+
+    // Zero-length segment (a == b)
+    const p5 = P2.init(.{ 3.0, 4.0 });
+    try std.testing.expectApproxEqAbs(@as(f64, 5.0), p5.distanceToSegment(a, a), 1e-9);
+}
+
+test "Point orientation" {
+    const P2 = Point(2, f64);
+    const a = P2.init(.{ 0.0, 0.0 });
+    const b = P2.init(.{ 1.0, 0.0 });
+    const c = P2.init(.{ 1.0, 1.0 });
+    const d = P2.init(.{ 0.5, 0.0 });
+
+    try std.testing.expectEqual(Orientation.counter_clockwise, a.orientation(b, c));
+    try std.testing.expectEqual(Orientation.clockwise, a.orientation(c, b));
+    try std.testing.expectEqual(Orientation.collinear, a.orientation(b, d));
+}
+
+test "Point orientation precision" {
+    // These three points can have different orientations due to floating point precision.
+    // The robust check ensures they are consistently treated (e.g., as collinear).
+    const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
+    const b: Point(2, f32) = .init(.{ 3.6271343e-1, 9.712454e-1 });
+    const c: Point(2, f32) = .init(.{ 3.9276862e-1, 8.9579517e-1 });
+
+    const orientation_abc = a.orientation(b, c);
+    const orientation_acb = a.orientation(c, b);
+
+    try std.testing.expectEqual(orientation_abc, orientation_acb);
+}
+
+test "Point inTriangle" {
+    const P2 = Point(2, f32);
+    const tri = [_]P2{
+        .init(.{ 0.0, 0.0 }),
+        .init(.{ 2.0, 0.0 }),
+        .init(.{ 1.0, 2.0 }),
+    };
+    var p = P2.init(.{ 1.0, 1.0 });
+    try std.testing.expect(p.inTriangle(tri[0], tri[1], tri[2]));
+
+    p = .init(.{ 3.0, 1.0 });
+    try std.testing.expect(!p.inTriangle(tri[0], tri[1], tri[2]));
+
+    p = .init(.{ 1.0, 0.0 });
+    try std.testing.expect(p.inTriangle(tri[0], tri[1], tri[2]));
+
+    p = .init(.{ 0.0, 0.0 });
+    try std.testing.expect(p.inTriangle(tri[0], tri[1], tri[2]));
+}
+
+test "Point areAllCollinear" {
+    const P2 = Point(2, f32);
+    const pts_collinear: []const P2 = &.{
+        .init(.{ 0, 0 }),
+        .init(.{ 1, 1 }),
+        .init(.{ 2, 2 }),
+        .init(.{ 3, 3 }),
+    };
+    try std.testing.expect(P2.areAllCollinear(pts_collinear));
+
+    const pts_non_collinear: []const P2 = &.{
+        .init(.{ 0, 0 }),
+        .init(.{ 1, 0 }),
+        .init(.{ 0, 1 }),
+    };
+    try std.testing.expect(!P2.areAllCollinear(pts_non_collinear));
 }
