@@ -66,7 +66,7 @@ fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
 
 /// Helper to create a Python Point tuple from a Zig Point
 fn createPoint(p: anytype) ?*c.PyObject {
-    return c.Py_BuildValue("(dd)", p.x(), p.y());
+    return c.Py_BuildValue("(dd)", @as(f64, @floatCast(p.x())), @as(f64, @floatCast(p.y())));
 }
 
 /// Creates a Python object from a Zig value.
