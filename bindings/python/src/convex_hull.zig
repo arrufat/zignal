@@ -1,7 +1,6 @@
 const zignal = @import("zignal");
 const ConvexHull = zignal.ConvexHull(f64);
 const Point2F = zignal.Point(2, f64);
-const rectangle = @import("rectangle.zig");
 
 const python = @import("python.zig");
 pub const registerType = python.register;
@@ -18,9 +17,7 @@ const convex_hull_new = python.genericNew(ConvexHullObject);
 
 fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = python.safeCast(ConvexHullObject, self_obj);
-
-    // Using createHeapObject helper for allocation with error handling
-    self.hull = python.createHeapObject(ConvexHull, .{python.ctx.allocator}) catch return -1;
+    self.hull = python.allocate(ConvexHull, .{python.ctx.allocator}) catch return -1;
 
     // Parse optional points argument
     const Params = struct {
@@ -61,25 +58,7 @@ fn convex_hull_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 fn convertHullToPython(points: []const Point2F) ?*c.PyObject {
     return python.listFromSliceCustom(Point2F, points, struct {
         fn toPythonTuple(point: Point2F, _: usize) ?*c.PyObject {
-            const tuple = c.PyTuple_New(2);
-            if (tuple == null) return null;
-
-            const x_obj = python.create(point.x());
-            if (x_obj == null) {
-                c.Py_DECREF(tuple);
-                return null;
-            }
-
-            const y_obj = python.create(point.y());
-            if (y_obj == null) {
-                c.Py_DECREF(x_obj);
-                c.Py_DECREF(tuple);
-                return null;
-            }
-
-            _ = c.PyTuple_SetItem(tuple, 0, x_obj);
-            _ = c.PyTuple_SetItem(tuple, 1, y_obj);
-            return tuple;
+            return python.create(point);
         }
     }.toPythonTuple);
 }
@@ -194,15 +173,7 @@ fn convex_hull_get_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
     const hull = python.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
 
     if (hull.getRectangle()) |rect| {
-        const args_tuple = c.Py_BuildValue(
-            "(dddd)",
-            rect.l,
-            rect.t,
-            rect.r,
-            rect.b,
-        ) orelse return null;
-        defer c.Py_DECREF(args_tuple);
-        return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), args_tuple);
+        return python.create(rect);
     }
 
     return python.none();

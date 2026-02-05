@@ -77,18 +77,7 @@ fn pca_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     _ = kwds;
     const self = python.safeCast(PCAObject, self_obj);
 
-    // Create and store the PCA struct
-    const pca_ptr = allocator.create(Pca(f64)) catch {
-        python.setMemoryError("PCA");
-        return -1;
-    };
-
-    // Initialize the PCA instance
-    pca_ptr.* = Pca(f64).init(allocator) catch {
-        allocator.destroy(pca_ptr);
-        python.setMemoryError("PCA initialization");
-        return -1;
-    };
+    const pca_ptr = python.allocate(Pca(f64), .{allocator}) catch return -1;
     self.pca_ptr = pca_ptr;
 
     return 0;
