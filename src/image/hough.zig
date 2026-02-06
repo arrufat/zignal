@@ -174,6 +174,8 @@ pub const HoughTransform = struct {
 
     /// Finds strong lines in the accumulator image using Non-Maximum Suppression.
     /// Returns a slice of lines that must be freed by the caller using `allocator`.
+    /// Note: The returned lines (p1, p2) are in the local coordinate system of the `box`
+    /// passed to `compute` (i.e., [0, size] x [0, size]).
     pub fn findLines(
         self: Self,
         accumulator: Image(u32),
@@ -185,11 +187,29 @@ pub const HoughTransform = struct {
         var lines = try std.ArrayList(HoughLine).initCapacity(allocator, 128);
         defer lines.deinit(allocator);
 
-        // 1. Collect all candidates above threshold
-        for (0..accumulator.rows) |r| {
-            for (0..accumulator.cols) |c| {
+        // 1. Collect all candidates above threshold with 3x3 Non-Maximum Suppression (NMS)
+        // We skip the 1-pixel border to simplify neighbor checks.
+        if (accumulator.rows < 3 or accumulator.cols < 3) return &[_]HoughLine{};
+
+        for (1..accumulator.rows - 1) |r| {
+            for (1..accumulator.cols - 1) |c| {
                 const votes = accumulator.at(r, c).*;
-                if (votes >= threshold) {
+                if (votes < threshold) continue;
+
+                // 3x3 local maximum check
+                var is_local_max = true;
+                check_neighbors: for (r - 1 .. r + 2) |nr| {
+                    for (c - 1 .. c + 2) |nc| {
+                        // Skip self
+                        if (nr == r and nc == c) continue;
+                        if (accumulator.at(nr, nc).* > votes) {
+                            is_local_max = false;
+                            break :check_neighbors;
+                        }
+                    }
+                }
+
+                if (is_local_max) {
                     const props = self.getLineProperties(Point(2, f32).init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }));
                     
                     // Calculate endpoints for the line segment
