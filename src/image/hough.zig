@@ -28,6 +28,7 @@ pub const HoughTransform = struct {
     even_size: u32,
     cos_table: []i32,
     sin_table: []i32,
+    y_cache: []i32,
     allocator: Allocator,
 
     const Self = @This();
@@ -42,6 +43,8 @@ pub const HoughTransform = struct {
         errdefer allocator.free(cos_table);
         const sin_table = try allocator.alloc(i32, size);
         errdefer allocator.free(sin_table);
+        const y_cache = try allocator.alloc(i32, size);
+        errdefer allocator.free(y_cache);
 
         const scale: f64 = 1 << 16;
         const sqrt_2 = math.sqrt(2.0);
@@ -57,6 +60,7 @@ pub const HoughTransform = struct {
             .even_size = even_size,
             .cos_table = cos_table,
             .sin_table = sin_table,
+            .y_cache = y_cache,
             .allocator = allocator,
         };
     }
@@ -64,43 +68,68 @@ pub const HoughTransform = struct {
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.cos_table);
         self.allocator.free(self.sin_table);
+        self.allocator.free(self.y_cache);
     }
 
     /// Performs the Hough Transform on a binary edge image.
-    /// Optimized with pure integer arithmetic in the inner loop.
+    /// Optimized with integer arithmetic, precomputed Y-terms, and loop unrolling.
     pub fn compute(self: Self, edges: Image(u8), box: Rectangle(u32), accumulator: Image(u32)) void {
         assert(box.width() == self.size and box.height() == self.size);
         assert(accumulator.rows == self.size and accumulator.cols == self.size);
 
         const area = box.intersect(edges.getRectangle()) orelse return;
 
-        // Precompute constants for integer math
-        // We use x_rel * 2.0 and y_rel * 2.0 in the formula.
-        // x_rel = c - box.l - (size - 1)/2.0
-        // x_rel * 2.0 = 2*c - 2*box.l - size + 1
-
         const size_minus_one: i32 = @intCast(self.size - 1);
         const box_t: i32 = @intCast(box.t);
         const box_l: i32 = @intCast(box.l);
-
         const offset = @as(i32, @intFromFloat(((1 << 16) * @as(f64, @floatFromInt(self.even_size)) / 4.0) + 0.5));
+
+        // Use a local slice for faster access and to avoid bounds checks in the hot loop
+        const cos_table = self.cos_table;
+        const y_cache = self.y_cache;
+        const max_n4 = (self.size / 4) * 4;
 
         var r = area.t;
         while (r < area.b) : (r += 1) {
-            // y_val represents (y_rel * 2.0)
             const y_val = 2 * (@as(i32, @intCast(r)) - box_t) - size_minus_one;
+
+            // Precompute Y terms for this row
+            // This lifts one multiplication out of the inner loop (size * size reduction)
+            for (0..self.size) |t| {
+                y_cache[t] = y_val * self.sin_table[t];
+            }
 
             var c = area.l;
             while (c < area.r) : (c += 1) {
                 if (edges.at(r, c).* == 0) continue;
 
-                // x_val represents (x_rel * 2.0)
                 const x_val = 2 * (@as(i32, @intCast(c)) - box_l) - size_minus_one;
 
-                // Inner loop uses only integer arithmetic (multiplication + addition)
-                for (0..self.size) |t| {
-                    const rho = x_val * self.cos_table[t] + y_val * self.sin_table[t];
+                var t: usize = 0;
+                while (t < max_n4) {
+                    // Unrolled 4x for better pipelining and reduced loop overhead
+                    const rho0 = x_val * cos_table[t] + y_cache[t];
+                    const rr0 = ((rho0 >> 1) + (offset << 1)) >> 16;
+                    if (rr0 >= 0 and rr0 < self.size) accumulator.at(@intCast(rr0), t).* += 1;
 
+                    const rho1 = x_val * cos_table[t + 1] + y_cache[t + 1];
+                    const rr1 = ((rho1 >> 1) + (offset << 1)) >> 16;
+                    if (rr1 >= 0 and rr1 < self.size) accumulator.at(@intCast(rr1), t + 1).* += 1;
+
+                    const rho2 = x_val * cos_table[t + 2] + y_cache[t + 2];
+                    const rr2 = ((rho2 >> 1) + (offset << 1)) >> 16;
+                    if (rr2 >= 0 and rr2 < self.size) accumulator.at(@intCast(rr2), t + 2).* += 1;
+
+                    const rho3 = x_val * cos_table[t + 3] + y_cache[t + 3];
+                    const rr3 = ((rho3 >> 1) + (offset << 1)) >> 16;
+                    if (rr3 >= 0 and rr3 < self.size) accumulator.at(@intCast(rr3), t + 3).* += 1;
+
+                    t += 4;
+                }
+
+                // Handle remaining items
+                while (t < self.size) : (t += 1) {
+                    const rho = x_val * cos_table[t] + y_cache[t];
                     const rr = ((rho >> 1) + (offset << 1)) >> 16;
                     if (rr >= 0 and rr < self.size) {
                         accumulator.at(@intCast(rr), t).* += 1;
@@ -119,10 +148,10 @@ pub const HoughTransform = struct {
         angle_nms_thresh: f32,
         radius_nms_thresh: f32,
     ) ![]Line {
-        var lines: std.ArrayList(Line) = try .initCapacity(allocator, 128);
+        var lines = try std.ArrayList(Line).initCapacity(allocator, 128);
         defer lines.deinit(allocator);
 
-        if (accumulator.rows < 3 or accumulator.cols < 3) return &[_]Line{};
+        if (accumulator.rows < 3 or accumulator.cols < 3) return try allocator.alloc(Line, 0);
 
         for (1..accumulator.rows - 1) |r| {
             for (1..accumulator.cols - 1) |c| {
@@ -141,8 +170,8 @@ pub const HoughTransform = struct {
                 }
 
                 if (is_local_max) {
-                    const props = self.getLineProperties(@as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)));
-                    try lines.append(allocator, self.createLine(props, votes));
+                    const angle, const radius = self.getLineProperties(@floatFromInt(c), @floatFromInt(r));
+                    try lines.append(allocator, self.createLine(angle, radius, votes));
                 }
             }
         }
@@ -174,32 +203,29 @@ pub const HoughTransform = struct {
         return final_lines.toOwnedSlice(allocator);
     }
 
-    fn getLineProperties(self: Self, theta_idx: f32, rho_idx: f32) struct { angle: f32, radius: f32 } {
+    /// Returns angle and radius
+    fn getLineProperties(self: Self, theta_idx: f32, rho_idx: f32) struct { f32, f32 } {
         const center_val = @as(f32, @floatFromInt(self.size - 1)) / 2.0;
-        // theta_idx corresponds to angle. 0 -> 0 degrees (horizontal line)
         const angle = 180.0 * (theta_idx - center_val) / @as(f32, @floatFromInt(self.even_size));
-        // rho_idx corresponds to radius.
         const radius = (rho_idx - center_val) * math.sqrt(@as(f32, 2.0));
-        return .{ .angle = angle, .radius = radius };
+        return .{ angle, radius };
     }
 
-    fn createLine(self: Self, props: anytype, score: u32) Line {
+    fn createLine(self: Self, angle: f32, radius: f32, score: u32) Line {
         const center = @as(f32, @floatFromInt(self.size - 1)) / 2.0;
-        // theta_math = angle_api + 90.
-        // If angle_api = 0 (horizontal line), then theta_math = 90 (vertical normal).
-        const theta_rad = (props.angle + 90.0) * math.pi / 180.0;
+        const theta_rad = (angle + 90.0) * math.pi / 180.0;
         const cos_t = @cos(theta_rad);
         const sin_t = @sin(theta_rad);
 
-        const p_center = Point(2, f32).init(.{ props.radius * cos_t, props.radius * sin_t });
-        const dir = Point(2, f32).init(.{ -sin_t, cos_t });
+        const p_center: Point(2, f32) = .init(.{ radius * cos_t, radius * sin_t });
+        const dir: Point(2, f32) = .init(.{ -sin_t, cos_t });
         const huge = @as(f32, @floatFromInt(self.size)) * 2.0;
 
         var p1: Point(2, f32) = .init(.{ center + p_center.x() + dir.x() * huge, center + p_center.y() + dir.y() * huge });
         var p2: Point(2, f32) = .init(.{ center + p_center.x() - dir.x() * huge, center + p_center.y() - dir.y() * huge });
         clipLine(.{ .l = 0, .t = 0, .r = @floatFromInt(self.size), .b = @floatFromInt(self.size) }, &p1, &p2);
 
-        return .{ .angle = props.angle, .radius = props.radius, .score = score, .p1 = p1, .p2 = p2 };
+        return .{ .angle = angle, .radius = radius, .score = score, .p1 = p1, .p2 = p2 };
     }
 };
 
@@ -233,7 +259,7 @@ fn clipLine(rect: Rectangle(f32), p1: *Point(2, f32), p2: *Point(2, f32)) void {
 test "HoughTransform: detect horizontal line" {
     const allocator = std.testing.allocator;
     const size = 64;
-    var edges = try Image(u8).init(allocator, size, size);
+    var edges: Image(u8) = try .init(allocator, size, size);
     defer edges.deinit(allocator);
     edges.fill(0);
     for (0..size) |c| edges.at(32, c).* = 255;
