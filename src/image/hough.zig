@@ -7,23 +7,23 @@ const Image = @import("../image.zig").Image;
 const Point = @import("../geometry.zig").Point;
 const Rectangle = @import("../geometry.zig").Rectangle;
 
-/// Represents a detected line in Hough space.
-pub const HoughLine = struct {
-    /// Angle of the line in degrees.
-    /// 0 means horizontal, 90/-90 means vertical.
-    angle: f32,
-    /// Distance from the center of the image.
-    radius: f32,
-    /// Strength of the line (vote count).
-    score: u32,
-    /// Computed start point of the line segment (clipped to image bounds).
-    p1: Point(2, f32),
-    /// Computed end point of the line segment (clipped to image bounds).
-    p2: Point(2, f32),
-};
-
 /// Hough Transform implementation for line detection.
 pub const HoughTransform = struct {
+    /// Represents a detected line in Hough space.
+    pub const Line = struct {
+        /// Angle of the line in degrees.
+        /// 0 means horizontal, 90/-90 means vertical.
+        angle: f32,
+        /// Distance from the center of the image.
+        radius: f32,
+        /// Strength of the line (vote count).
+        score: u32,
+        /// Computed start point of the line segment (clipped to image bounds).
+        p1: Point(2, f32),
+        /// Computed end point of the line segment (clipped to image bounds).
+        p2: Point(2, f32),
+    };
+
     size: u32,
     even_size: u32,
     cos_table: []i32,
@@ -108,11 +108,11 @@ pub const HoughTransform = struct {
         angle_nms_thresh: f32,
         radius_nms_thresh: f32,
         allocator: Allocator,
-    ) ![]HoughLine {
-        var lines = try std.ArrayList(HoughLine).initCapacity(allocator, 128);
+    ) ![]Line {
+        var lines = try std.ArrayList(Line).initCapacity(allocator, 128);
         defer lines.deinit(allocator);
 
-        if (accumulator.rows < 3 or accumulator.cols < 3) return &[_]HoughLine{};
+        if (accumulator.rows < 3 or accumulator.cols < 3) return &[_]Line{};
 
         for (1..accumulator.rows - 1) |r| {
             for (1..accumulator.cols - 1) |c| {
@@ -137,11 +137,11 @@ pub const HoughTransform = struct {
             }
         }
 
-        std.mem.sort(HoughLine, lines.items, {}, struct {
-            fn lessThan(_: void, a: HoughLine, b: HoughLine) bool { return a.score > b.score; }
+        std.mem.sort(Line, lines.items, {}, struct {
+            fn lessThan(_: void, a: Line, b: Line) bool { return a.score > b.score; }
         }.lessThan);
 
-        var final_lines = try std.ArrayList(HoughLine).initCapacity(allocator, lines.items.len);
+        var final_lines = try std.ArrayList(Line).initCapacity(allocator, lines.items.len);
         errdefer final_lines.deinit(allocator);
         
         for (lines.items) |candidate| {
@@ -170,7 +170,7 @@ pub const HoughTransform = struct {
         return .{ .angle = angle, .radius = radius };
     }
 
-    fn createLine(self: Self, props: anytype, score: u32) HoughLine {
+    fn createLine(self: Self, props: anytype, score: u32) Line {
         const center = @as(f32, @floatFromInt(self.size - 1)) / 2.0;
         // theta_math = angle_api + 90.
         // If angle_api = 0 (horizontal line), then theta_math = 90 (vertical normal).
