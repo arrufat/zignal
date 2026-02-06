@@ -215,12 +215,8 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Returns a matrix filled with random floating-point numbers.
-        pub fn random(allocator: std.mem.Allocator, rows: u32, cols: u32, seed: ?u64) !Self {
-            // Avoid relying on the TLS CSPRNG used by std.crypto.random, which can be
-            // uninitialised in some embedding scenarios (e.g. Python extension module),
-            // and seed a local PRNG instead.
-            const s: u64 = seed orelse clockSeed();
-            var prng: std.Random.DefaultPrng = .init(s);
+        pub fn random(allocator: std.mem.Allocator, rows: u32, cols: u32, seed: u64) !Self {
+            var prng: std.Random.DefaultPrng = .init(seed);
             var rand = prng.random();
 
             var result = try init(allocator, rows, cols);
@@ -228,15 +224,6 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = rand.float(T);
             }
             return result;
-        }
-
-        inline fn clockSeed() u64 {
-            if (comptime builtin.os.tag == .linux) {
-                var ts: std.os.linux.timespec = undefined;
-                _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.REALTIME, &ts);
-                return @truncate((@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec)));
-            }
-            return 0;
         }
 
         // ===== Chainable operations (return Self) =====
