@@ -71,10 +71,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     std.log.debug("Applying FDM style transfer...", .{});
 
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
     // Apply match
     try fdm.match(source_img, target_img);
-    const fdm_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const fdm_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("FDM took {d:.3} ms", .{@as(f64, @floatFromInt(fdm_ns)) / std.time.ns_per_ms});
 
     if (output_path) |out_path| {
