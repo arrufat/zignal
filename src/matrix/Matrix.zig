@@ -42,6 +42,7 @@
 //! - Extraction: `row()`, `col()`, `subMatrix()`
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
@@ -230,20 +231,12 @@ pub fn Matrix(comptime T: type) type {
         }
 
         inline fn clockSeed() u64 {
-            // Use a coarse time-based seed that is always available.
-            // std.time.Instant works across platforms without relying on TLS CSPRNG.
-            const now = std.time.Instant.now() catch return 0;
-            const ts = now.timestamp;
-            return switch (@TypeOf(ts)) {
-                std.posix.timespec => blk: {
-                    // Combine seconds and nanoseconds; truncate to 64 bits.
-                    const sec: u128 = @intCast(ts.sec);
-                    const nsec: u128 = @intCast(ts.nsec);
-                    const mixed = (sec << 32) ^ nsec;
-                    break :blk @truncate(mixed);
-                },
-                else => @truncate(ts),
-            };
+            if (comptime builtin.os.tag == .linux) {
+                var ts: std.os.linux.timespec = undefined;
+                _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.REALTIME, &ts);
+                return @truncate((@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec)));
+            }
+            return 0;
         }
 
         // ===== Chainable operations (return Self) =====

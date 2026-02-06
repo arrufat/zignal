@@ -140,9 +140,10 @@ fn processImage(
     var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, new_height, new_width);
     defer out.deinit(gpa);
 
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
     try img.resize(gpa, out, filter);
-    const resize_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const resize_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Resize operation took {d:.3} ms", .{@as(f64, @floatFromInt(resize_ns)) / std.time.ns_per_ms});
 
     // Save output

@@ -58,7 +58,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         }
 
         std.log.debug("Calculating metrics...", .{});
-        var timer = try std.time.Timer.start();
+        const start_time = std.Io.Clock.awake.now(io);
 
         const psnr_val = ref_img.psnr(img) catch unreachable;
         const mean_err = ref_img.meanPixelError(img) catch unreachable;
@@ -72,7 +72,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             std.log.warn("Image {s} is too small for SSIM (min 11x11)", .{path});
         }
 
-        const metrics_ns = timer.read();
+        const end_time = std.Io.Clock.awake.now(io);
+        const metrics_ns = start_time.durationTo(end_time).toNanoseconds();
         std.log.debug("Metrics calculation took {d:.3} ms", .{@as(f64, @floatFromInt(metrics_ns)) / std.time.ns_per_ms});
 
         try writer.print("  PSNR: {d:.4} dB\n", .{psnr_val});

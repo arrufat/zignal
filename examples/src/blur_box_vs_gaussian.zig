@@ -91,9 +91,10 @@ pub fn main(init: std.process.Init) !void {
     var gaussian: Image = try .initLike(init.gpa, original);
     defer gaussian.deinit(init.gpa);
 
-    var timer = try std.time.Timer.start();
+    const start_gaussian = std.Io.Clock.awake.now(init.io);
     try original.gaussianBlur(init.gpa, sigma, gaussian);
-    const gaussian_ns = timer.read();
+    const end_gaussian = std.Io.Clock.awake.now(init.io);
+    const gaussian_ns = start_gaussian.durationTo(end_gaussian).toNanoseconds();
     try gaussian.save(init.io, init.gpa, "blur_gaussian.png");
 
     std.debug.print("Gaussian blur sigma={d:.1} took {d:.3} ms\n\n", .{ sigma, @as(f64, @floatFromInt(gaussian_ns)) / std.time.ns_per_ms });
@@ -121,7 +122,7 @@ pub fn main(init: std.process.Init) !void {
         const widths = try boxesForGaussian(sigma, passes, widths_storage[0..passes]);
 
         // Apply box blur passes
-        var box_timer = try std.time.Timer.start();
+        const start_box = std.Io.Clock.awake.now(init.io);
         var source: *const Image = &original;
         var scratch = [_]*Image{ &temp_a, &temp_b };
         var scratch_index: usize = 0;
@@ -137,7 +138,8 @@ pub fn main(init: std.process.Init) !void {
             last_result = dst;
         }
 
-        const box_ns = box_timer.read();
+        const end_box = std.Io.Clock.awake.now(init.io);
+        const box_ns = start_box.durationTo(end_box).toNanoseconds();
         const speedup = @as(f64, @floatFromInt(gaussian_ns)) / @as(f64, @floatFromInt(box_ns));
         const psnr = try gaussian.psnr(last_result.*);
         const ssim_value = try gaussian.ssim(last_result.*);

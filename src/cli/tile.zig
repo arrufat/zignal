@@ -177,7 +177,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Fill black (opaque)
 
     // Process Images
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
     for (input_paths, 0..) |path, idx| {
         if (idx >= rows * cols) break;
 
@@ -237,7 +237,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         canvas.insert(img, dest_rect, 0, .bilinear, .none);
     }
-    const tile_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const tile_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Tiling operation took {d:.3} ms", .{@as(f64, @floatFromInt(tile_ns)) / std.time.ns_per_ms});
 
     if (output_path) |out_path| {
