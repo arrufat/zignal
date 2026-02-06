@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) void {
         "feature_matching",
         "metrics",
         "contrast_enhancement",
+        "hough_animation",
     };
 
     // List of additional examples to build as executables
@@ -28,8 +29,6 @@ pub fn build(b: *std.Build) void {
         "motion_blur_demo",
         "edge_detection",
         "blur_box_vs_gaussian",
-        "trace_edges",
-        "hough_animation",
     };
 
     // Build exec_examples with run steps and check compilation

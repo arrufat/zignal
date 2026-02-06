@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hough Transform Animation</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        #canvas-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .canvas-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: black;
+        }
+        h2 {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Hough Transform</h1>
+        <p>Real-time animation of line detection using the Hough Transform</p>
+        <p><i>Ported from the <a href="http://dlib.net/hough_transform_ex.cpp.html">dlib C++ example</a></i></p>
+    </div>
+    <div class="instructions">
+        The left canvas shows a rotating line and the detected result in red.
+        The right canvas shows the Hough accumulator (parameter space), where intersections indicate lines.
+    </div>
+    
+    <div id="image-container">
+        <div class="canvas-wrapper">
+            <h3>Input & Detection</h3>
+            <canvas id="canvas-image" width="400" height="400"></canvas>
+        </div>
+        <div class="canvas-wrapper">
+            <h3>Hough Accumulator</h3>
+            <canvas id="canvas-accumulator" width="300" height="300"></canvas>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="toggleButton">Pause</button>
+        <div id="stats">
+            <span id="fps-counter">FPS: 0</span> | 
+            <span id="compute-time">Compute: 0 ms</span>
+        </div>
+    </div>
+
+    <script src="hough-animation.js"></script>
+</body>
+</html>
