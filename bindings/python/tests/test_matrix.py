@@ -89,7 +89,7 @@ def test_creation_methods():
     i = zignal.Matrix.identity(4, 4)
     assert i.shape == (4, 4)
 
-    r = zignal.Matrix.random(2, 3)
+    r = zignal.Matrix.random(2, 3, 0)
     assert r.shape == (2, 3)
 
     # Test random with seed
