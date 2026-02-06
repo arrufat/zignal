@@ -140,7 +140,7 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
 
     // Draw detected line
     if (max_val > 0) {
-        const lines = hough.findLines(accumulator, max_val, 0, 0, allocator) catch &[_]HoughTransform.Line{};
+        const lines = hough.findLines(allocator, accumulator, max_val, 0, 0) catch &[_]HoughTransform.Line{};
         defer allocator.free(lines);
 
         if (lines.len > 0) {
