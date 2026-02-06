@@ -42,26 +42,33 @@ fn rotatePoint(center: Point(2, f32), p: Point(2, f32), angle: f32) Point(2, f32
 }
 
 // Convert grayscale/heatmap value to Jet colormap RGB
+// Matches dlib's colormap_jet implementation for better contrast
 fn jet(v: f32) Rgba {
+    const gray = v * 8.0;
+    const s = 0.5;
     var r: f32 = 0;
     var g: f32 = 0;
     var b: f32 = 0;
 
-    if (v < 0.25) {
+    if (gray <= 1.0) {
         r = 0;
-        g = 4.0 * v;
+        g = 0;
+        b = (gray + 1.0) * s;
+    } else if (gray <= 3.0) {
+        r = 0;
+        g = (gray - 1.0) * s;
         b = 1.0;
-    } else if (v < 0.5) {
-        r = 0;
+    } else if (gray <= 5.0) {
+        r = (gray - 3.0) * s;
         g = 1.0;
-        b = 1.0 + 4.0 * (0.25 - v);
-    } else if (v < 0.75) {
-        r = 4.0 * (v - 0.5);
-        g = 1.0;
+        b = (5.0 - gray) * s;
+    } else if (gray <= 7.0) {
+        r = 1.0;
+        g = (7.0 - gray) * s;
         b = 0;
     } else {
-        r = 1.0;
-        g = 1.0 + 4.0 * (0.75 - v);
+        r = (9.0 - gray) * s;
+        g = 0;
         b = 0;
     }
 
