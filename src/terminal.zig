@@ -26,6 +26,7 @@ const win_api = if (builtin.os.tag == .windows) struct {
     extern "kernel32" fn GetConsoleMode(hConsoleHandle: ?*anyopaque, lpMode: *u32) callconv(.c) i32;
     extern "kernel32" fn SetConsoleMode(hConsoleHandle: ?*anyopaque, dwMode: u32) callconv(.c) i32;
     extern "kernel32" fn Sleep(dwMilliseconds: u32) callconv(.winapi) void;
+    extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
     extern "c" fn _kbhit() callconv(.c) c_int;
     extern "c" fn _getch() callconv(.c) c_int;
 } else void;
@@ -262,11 +263,10 @@ const State = struct {
     /// On POSIX, relies on termios timeout settings.
     fn readWithTimeout(self: *const State, buffer: []u8, timeout_ms: u64) !usize {
         if (builtin.os.tag == .windows) {
-            const start_time = try std.time.Instant.now();
-            const timeout_ns = timeout_ms * std.time.ns_per_ms;
+            const start_time = win_api.GetTickCount64();
             var total_read: usize = 0;
 
-            while ((try std.time.Instant.now()).since(start_time) < timeout_ns) {
+            while (win_api.GetTickCount64() - start_time < timeout_ms) {
                 // Check if console has input available
                 if (win_api._kbhit() != 0) {
                     // Read one character
