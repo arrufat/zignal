@@ -88,11 +88,8 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Returns a matrix filled with random floating-point numbers.
-        pub fn random(seed: ?u64) Self {
-            // Use a local PRNG seeded from a timestamp to avoid TLS CSPRNG issues
-            // when called from embedded runtimes (e.g. Python extension).
-            const s: u64 = seed orelse clockSeed();
-            var prng: std.Random.DefaultPrng = .init(s);
+        pub fn random(seed: u64) Self {
+            var prng: std.Random.DefaultPrng = .init(seed);
             var rand = prng.random();
             var result: Self = .{};
             for (0..rows) |r| {
@@ -101,15 +98,6 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                 }
             }
             return result;
-        }
-
-        inline fn clockSeed() u64 {
-            if (comptime builtin.os.tag == .linux) {
-                var ts: std.os.linux.timespec = undefined;
-                _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.REALTIME, &ts);
-                return @truncate((@as(u128, @intCast(ts.sec)) << 32) ^ @as(u128, @intCast(ts.nsec)));
-            }
-            return 0;
         }
 
         /// Sums all the elements in a matrix.
@@ -802,7 +790,7 @@ test "SMatrix scale" {
 }
 
 test "SMatrix apply" {
-    var a: SMatrix(f32, 3, 4) = .random(null);
+    var a: SMatrix(f32, 3, 4) = .random(1234);
 
     const f = struct {
         fn f(x: f32) f32 {
@@ -820,7 +808,7 @@ test "SMatrix apply" {
 }
 
 test "SMatrix norm" {
-    var matrix: SMatrix(f32, 3, 4) = .random(null);
+    var matrix: SMatrix(f32, 3, 4) = .random(5678);
     try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.times(matrix).sum()));
 
     matrix.at(2, 3).* = 1000000;
