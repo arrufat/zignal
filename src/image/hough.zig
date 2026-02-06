@@ -67,30 +67,40 @@ pub const HoughTransform = struct {
     }
 
     /// Performs the Hough Transform on a binary edge image.
+    /// Optimized with pure integer arithmetic in the inner loop.
     pub fn compute(self: Self, edges: Image(u8), box: Rectangle(u32), accumulator: Image(u32)) void {
         assert(box.width() == self.size and box.height() == self.size);
         assert(accumulator.rows == self.size and accumulator.cols == self.size);
 
         const area = box.intersect(edges.getRectangle()) orelse return;
-        const center_x = @as(f64, @floatFromInt(self.size - 1)) / 2.0;
-        const center_y = @as(f64, @floatFromInt(self.size - 1)) / 2.0;
+
+        // Precompute constants for integer math
+        // We use x_rel * 2.0 and y_rel * 2.0 in the formula.
+        // x_rel = c - box.l - (size - 1)/2.0
+        // x_rel * 2.0 = 2*c - 2*box.l - size + 1
+
+        const size_minus_one: i32 = @intCast(self.size - 1);
+        const box_t: i32 = @intCast(box.t);
+        const box_l: i32 = @intCast(box.l);
+
         const offset = @as(i32, @intFromFloat(((1 << 16) * @as(f64, @floatFromInt(self.even_size)) / 4.0) + 0.5));
 
         var r = area.t;
         while (r < area.b) : (r += 1) {
-            const y_rel = @as(f64, @floatFromInt(r - box.t)) - center_y;
+            // y_val represents (y_rel * 2.0)
+            const y_val = 2 * (@as(i32, @intCast(r)) - box_t) - size_minus_one;
+
             var c = area.l;
             while (c < area.r) : (c += 1) {
                 if (edges.at(r, c).* == 0) continue;
-                const x_rel = @as(f64, @floatFromInt(c - box.l)) - center_x;
 
+                // x_val represents (x_rel * 2.0)
+                const x_val = 2 * (@as(i32, @intCast(c)) - box_l) - size_minus_one;
+
+                // Inner loop uses only integer arithmetic (multiplication + addition)
                 for (0..self.size) |t| {
-                    const rho = @as(i32, @intFromFloat(x_rel * 2.0)) * self.cos_table[t] + 
-                                @as(i32, @intFromFloat(y_rel * 2.0)) * self.sin_table[t];
-                    // rho is scaled by 2, tables are scaled by 1<<16. Total scale: 1<<17.
-                    // We need result in [0, size).
-                    // Original dlib logic: radius = (p.y() - cent.y()) * sqrt(2) + 0.5;
-                    // Our tables include /sqrt_2.
+                    const rho = x_val * self.cos_table[t] + y_val * self.sin_table[t];
+
                     const rr = ((rho >> 1) + (offset << 1)) >> 16;
                     if (rr >= 0 and rr < self.size) {
                         accumulator.at(@intCast(rr), t).* += 1;
@@ -103,13 +113,13 @@ pub const HoughTransform = struct {
     /// Finds strong lines in the accumulator using NMS.
     pub fn findLines(
         self: Self,
+        allocator: Allocator,
         accumulator: Image(u32),
         threshold: u32,
         angle_nms_thresh: f32,
         radius_nms_thresh: f32,
-        allocator: Allocator,
     ) ![]Line {
-        var lines = try std.ArrayList(Line).initCapacity(allocator, 128);
+        var lines: std.ArrayList(Line) = try .initCapacity(allocator, 128);
         defer lines.deinit(allocator);
 
         if (accumulator.rows < 3 or accumulator.cols < 3) return &[_]Line{};
@@ -138,26 +148,29 @@ pub const HoughTransform = struct {
         }
 
         std.mem.sort(Line, lines.items, {}, struct {
-            fn lessThan(_: void, a: Line, b: Line) bool { return a.score > b.score; }
+            fn lessThan(_: void, a: Line, b: Line) bool {
+                return a.score > b.score;
+            }
         }.lessThan);
 
         var final_lines = try std.ArrayList(Line).initCapacity(allocator, lines.items.len);
         errdefer final_lines.deinit(allocator);
-        
+
         for (lines.items) |candidate| {
             var too_close = false;
             for (final_lines.items) |existing| {
                 const da = @abs(existing.angle - candidate.angle);
                 const dr = @abs(existing.radius - candidate.radius);
-                if ((da < angle_nms_thresh and dr < radius_nms_thresh) or 
-                    ((180.0 - da) < angle_nms_thresh and @abs(existing.radius + candidate.radius) < radius_nms_thresh)) {
+                if ((da < angle_nms_thresh and dr < radius_nms_thresh) or
+                    ((180.0 - da) < angle_nms_thresh and @abs(existing.radius + candidate.radius) < radius_nms_thresh))
+                {
                     too_close = true;
                     break;
                 }
             }
             if (!too_close) try final_lines.append(allocator, candidate);
         }
-        
+
         return final_lines.toOwnedSlice(allocator);
     }
 
@@ -177,14 +190,14 @@ pub const HoughTransform = struct {
         const theta_rad = (props.angle + 90.0) * math.pi / 180.0;
         const cos_t = @cos(theta_rad);
         const sin_t = @sin(theta_rad);
-        
+
         const p_center = Point(2, f32).init(.{ props.radius * cos_t, props.radius * sin_t });
         const dir = Point(2, f32).init(.{ -sin_t, cos_t });
         const huge = @as(f32, @floatFromInt(self.size)) * 2.0;
 
-        var p1 = Point(2, f32).init(.{ center + p_center.x() + dir.x() * huge, center + p_center.y() + dir.y() * huge });
-        var p2 = Point(2, f32).init(.{ center + p_center.x() - dir.x() * huge, center + p_center.y() - dir.y() * huge });
-        clipLine(Rectangle(f32){ .l = 0, .t = 0, .r = @floatFromInt(self.size), .b = @floatFromInt(self.size) }, &p1, &p2);
+        var p1: Point(2, f32) = .init(.{ center + p_center.x() + dir.x() * huge, center + p_center.y() + dir.y() * huge });
+        var p2: Point(2, f32) = .init(.{ center + p_center.x() - dir.x() * huge, center + p_center.y() - dir.y() * huge });
+        clipLine(.{ .l = 0, .t = 0, .r = @floatFromInt(self.size), .b = @floatFromInt(self.size) }, &p1, &p2);
 
         return .{ .angle = props.angle, .radius = props.radius, .score = score, .p1 = p1, .p2 = p2 };
     }
@@ -198,11 +211,17 @@ fn clipLine(rect: Rectangle(f32), p1: *Point(2, f32), p2: *Point(2, f32)) void {
     const p = [4]f32{ -dx, dx, -dy, dy };
     const q = [4]f32{ p1.x() - rect.l, rect.r - p1.x(), p1.y() - rect.t, rect.b - p1.y() };
     for (0..4) |i| {
-        if (p[i] == 0) { if (q[i] < 0) return; } 
-        else {
+        if (p[i] == 0) {
+            if (q[i] < 0) return;
+        } else {
             const r = q[i] / p[i];
-            if (p[i] < 0) { if (r > t1) return; if (r > t0) t0 = r; } 
-            else { if (r < t0) return; if (r < t1) t1 = r; }
+            if (p[i] < 0) {
+                if (r > t1) return;
+                if (r > t0) t0 = r;
+            } else {
+                if (r < t0) return;
+                if (r < t1) t1 = r;
+            }
         }
     }
     if (t0 > t1) return;
@@ -219,14 +238,14 @@ test "HoughTransform: detect horizontal line" {
     edges.fill(0);
     for (0..size) |c| edges.at(32, c).* = 255;
 
-    var hough = try HoughTransform.init(allocator, size);
+    var hough: HoughTransform = try .init(allocator, size);
     defer hough.deinit();
-    var accumulator = try Image(u32).init(allocator, size, size);
+    var accumulator: Image(u32) = try .init(allocator, size, size);
     defer accumulator.deinit(allocator);
     accumulator.fill(0);
 
-    hough.compute(edges, Rectangle(u32){ .l = 0, .t = 0, .r = size, .b = size }, accumulator);
-    const lines = try hough.findLines(accumulator, 30, 10.0, 5.0, allocator);
+    hough.compute(edges, .{ .l = 0, .t = 0, .r = size, .b = size }, accumulator);
+    const lines = try hough.findLines(allocator, accumulator, 30, 10.0, 5.0);
     defer allocator.free(lines);
 
     try std.testing.expect(lines.len >= 1);
