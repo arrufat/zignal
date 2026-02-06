@@ -37,6 +37,7 @@ pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const ShenCastan = @import("image/ShenCastan.zig");
+pub const HoughTransform = @import("image/hough.zig").HoughTransform;
 pub const Histogram = @import("image/histogram.zig").Histogram;
 pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
@@ -1249,4 +1250,5 @@ test {
     _ = @import("image/tests/psnr.zig");
     _ = @import("image/tests/shen_castan.zig");
     _ = @import("image/tests/binary.zig");
+    _ = @import("image/hough.zig");
 }
