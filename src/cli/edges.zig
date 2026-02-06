@@ -112,7 +112,7 @@ fn processImage(
     defer out_img.deinit(gpa);
 
     std.log.debug("Applying {s} edge detection...", .{@tagName(algo)});
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
 
     switch (algo) {
         .sobel => {
@@ -140,7 +140,8 @@ fn processImage(
         },
     }
 
-    const duration_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const duration_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Edge detection took {d:.3} ms", .{@as(f64, @floatFromInt(duration_ns)) / std.time.ns_per_ms});
 
     if (target) |tgt| {

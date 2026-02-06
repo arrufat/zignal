@@ -4,6 +4,7 @@
 //! which is supported by various terminal emulators for displaying graphics.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
@@ -109,19 +110,12 @@ pub const Profile = struct {
 };
 
 inline fn monotonicNs() u64 {
-    const instant = std.time.Instant.now() catch {
-        return 0;
-    };
-
-    if (@TypeOf(instant.timestamp) == u64) {
-        return instant.timestamp;
+    if (comptime builtin.os.tag == .linux) {
+        var ts: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
+        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
-
-    const ts = instant.timestamp;
-    const seconds: u128 = @intCast(ts.sec);
-    const nanoseconds: u128 = @intCast(ts.nsec);
-    const total = seconds * @as(u128, std.time.ns_per_s) + nanoseconds;
-    return @truncate(total);
+    return 0;
 }
 
 // ========== Main Entry Point ==========
@@ -661,14 +655,16 @@ const ColorLookupTable = struct {
     }
 
     const cache = struct {
-        var mutex = std.Thread.Mutex{};
+        var lock_val = std.atomic.Value(u32).init(0);
         var fixed_6x7x6: ?ColorLookupTable = null;
         var fixed_vga16: ?ColorLookupTable = null;
         var fixed_web216: ?ColorLookupTable = null;
 
         fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
-            cache.mutex.lock();
-            defer cache.mutex.unlock();
+            while (lock_val.swap(1, .acquire) != 0) {
+                std.Thread.yield() catch {};
+            }
+            defer lock_val.store(0, .release);
 
             if (cache_field.*) |cached| {
                 return cached;
@@ -705,14 +701,16 @@ const AdaptiveHistogramPool = struct {
         node: *Node,
     };
 
-    var mutex = std.Thread.Mutex{};
+    var lock_val = std.atomic.Value(u32).init(0);
     var available: ?*Node = null;
 
     fn acquire() !Handle {
-        mutex.lock();
+        while (lock_val.swap(1, .acquire) != 0) {
+            std.Thread.yield() catch {};
+        }
         if (available) |node| {
             available = node.next;
-            mutex.unlock();
+            lock_val.store(0, .release);
 
             node.generation +%= 1;
             if (node.generation == 0) {
@@ -727,7 +725,7 @@ const AdaptiveHistogramPool = struct {
                 .node = node,
             };
         }
-        mutex.unlock();
+        lock_val.store(0, .release);
 
         // Allocate new buffer
         const allocator = std.heap.page_allocator;
@@ -756,10 +754,12 @@ const AdaptiveHistogramPool = struct {
     }
 
     fn release(handle: Handle) void {
-        mutex.lock();
-        defer mutex.unlock();
+        while (lock_val.swap(1, .acquire) != 0) {
+            std.Thread.yield() catch {};
+        }
         handle.node.next = available;
         available = handle.node;
+        lock_val.store(0, .release);
     }
 };
 
