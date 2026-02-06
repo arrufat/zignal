@@ -50,7 +50,7 @@ pub const HoughTransform = struct {
         // We use fixed-point arithmetic with 16-bit shift
         const scale: f64 = 1 << 16;
         const sqrt_2 = math.sqrt(2.0);
-        
+
         // Center of the square box (0,0, size-1, size-1)
         const center_x = @as(f64, @floatFromInt(size - 1)) / 2.0;
         const center_y = @as(f64, @floatFromInt(size - 1)) / 2.0;
@@ -113,13 +113,13 @@ pub const HoughTransform = struct {
         const area = box.intersect(img_rect) orelse return;
 
         const max_n8 = (self.size / 8) * 8;
-        
+
         // Iterate over the valid area
         var r = area.t;
         while (r < area.b) : (r += 1) {
             // y_sin row pointer
             const y_idx = (r - box.t) * self.size;
-            
+
             var c = area.l;
             while (c < area.r) : (c += 1) {
                 if (edges.at(r, c).* == 0) continue;
@@ -145,7 +145,7 @@ pub const HoughTransform = struct {
                     const rr3 = (self.x_cos_theta[x_idx + t] + self.y_sin_theta[y_idx + t]) >> 16;
                     accumulator.at(@intCast(rr3), t).* += 1;
                     t += 1;
-                    
+
                     const rr4 = (self.x_cos_theta[x_idx + t] + self.y_sin_theta[y_idx + t]) >> 16;
                     accumulator.at(@intCast(rr4), t).* += 1;
                     t += 1;
@@ -180,7 +180,7 @@ pub const HoughTransform = struct {
         self: Self,
         accumulator: Image(u32),
         threshold: u32,
-        angle_nms_thresh: f32,  // in degrees
+        angle_nms_thresh: f32, // in degrees
         radius_nms_thresh: f32, // in pixels
         allocator: Allocator,
     ) ![]HoughLine {
@@ -198,8 +198,8 @@ pub const HoughTransform = struct {
 
                 // 3x3 local maximum check
                 var is_local_max = true;
-                check_neighbors: for (r - 1 .. r + 2) |nr| {
-                    for (c - 1 .. c + 2) |nc| {
+                check_neighbors: for (r - 1..r + 2) |nr| {
+                    for (c - 1..c + 2) |nc| {
                         // Skip self
                         if (nr == r and nc == c) continue;
                         if (accumulator.at(nr, nc).* > votes) {
@@ -211,29 +211,26 @@ pub const HoughTransform = struct {
 
                 if (is_local_max) {
                     const props = self.getLineProperties(Point(2, f32).init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }));
-                    
+
                     // Calculate endpoints for the line segment
                     // We define the segment by clipping the line to the box
-                    const center_pt = Point(2, f32).init(.{ 
-                        @as(f32, @floatFromInt(self.size - 1)) / 2.0, 
-                        @as(f32, @floatFromInt(self.size - 1)) / 2.0 
-                    });
-                    
+                    const center_pt = Point(2, f32).init(.{ @as(f32, @floatFromInt(self.size - 1)) / 2.0, @as(f32, @floatFromInt(self.size - 1)) / 2.0 });
+
                     const theta_rad = props.angle * math.pi / 180.0;
                     const cos_t = @cos(theta_rad);
                     const sin_t = @sin(theta_rad);
-                    
+
                     // Vector along the line direction (-sin, cos)
                     const dir_x = -sin_t;
                     const dir_y = cos_t;
-                    
+
                     // Point on the line closest to center
                     const p_center_x = props.radius * cos_t;
                     const p_center_y = props.radius * sin_t;
-                    
+
                     // Extend far in both directions
                     const huge_dist = @as(f32, @floatFromInt(self.size)) * 2.0;
-                    
+
                     var p1 = Point(2, f32).init(.{
                         center_pt.items[0] + p_center_x + dir_x * huge_dist,
                         center_pt.items[1] + p_center_y + dir_y * huge_dist,
@@ -242,7 +239,7 @@ pub const HoughTransform = struct {
                         center_pt.items[0] + p_center_x - dir_x * huge_dist,
                         center_pt.items[1] + p_center_y - dir_y * huge_dist,
                     });
-                    
+
                     const box_rect = Rectangle(f32){ .l = 0, .t = 0, .r = @floatFromInt(self.size), .b = @floatFromInt(self.size) };
                     clipLine(box_rect, &p1, &p2);
 
@@ -268,7 +265,7 @@ pub const HoughTransform = struct {
         var final_lines = try std.ArrayList(HoughLine).initCapacity(allocator, lines.items.len);
         // We will return this as a slice, so we don't defer deinit here unless we error.
         errdefer final_lines.deinit(allocator);
-        
+
         for (lines.items) |candidate| {
             var too_close = false;
             for (final_lines.items) |existing| {
@@ -280,7 +277,7 @@ pub const HoughTransform = struct {
                     too_close = true;
                     break;
                 }
-                
+
                 // Check wrap-around proximity (e.g. 179 deg vs 1 deg)
                 if ((180.0 - da) < angle_nms_thresh and @abs(existing.radius + candidate.radius) < radius_nms_thresh) {
                     too_close = true;
@@ -292,7 +289,7 @@ pub const HoughTransform = struct {
                 try final_lines.append(allocator, candidate);
             }
         }
-        
+
         return final_lines.toOwnedSlice(allocator);
     }
 
@@ -300,7 +297,7 @@ pub const HoughTransform = struct {
     fn getLineProperties(self: Self, p: Point(2, f32)) struct { angle: f32, radius: f32 } {
         const center_val = @as(f32, @floatFromInt(self.size - 1)) / 2.0;
         const sqrt_2 = math.sqrt(2.0);
-        
+
         const theta_idx = p.items[0];
         const rho_idx = p.items[1];
 
@@ -310,18 +307,18 @@ pub const HoughTransform = struct {
         var radius_offset = rho_idx - center_val;
 
         const angle = 180.0 * theta_offset / @as(f32, @floatFromInt(self.even_size));
-        // Inverse of: radius = radius_real * sqrt_2 + 0.5 + even_size/4 * scale? 
+        // Inverse of: radius = radius_real * sqrt_2 + 0.5 + even_size/4 * scale?
         // Wait, looking at dlib:
         // double theta = p.x() - cent.x();
         // radius = p.y() - cent.y();
         // angle = 180 * theta / even_size;
         // radius = radius * sqrt_2 + 0.5; <-- This seems to be converting FROM centered hough coords TO something else?
-        
+
         // Let's re-read dlib's get_line_properties carefully.
         // It returns radius and angle.
         // It says: radius = (p.y() - cent.y()) * sqrt_2 + 0.5
         // This 'radius' is the distance from the center of the image.
-        
+
         radius_offset = radius_offset * sqrt_2 + 0.5;
 
         return .{ .angle = angle, .radius = radius_offset };
@@ -333,19 +330,14 @@ fn clipLine(rect: Rectangle(f32), p1: *Point(2, f32), p2: *Point(2, f32)) void {
     // Cohen-Sutherland algorithm or similar could be used.
     // For brevity, using a simplified approach since we know the box is axis aligned.
     // We'll use a standard Liang-Barsky implementation for efficiency.
-    
+
     var t0: f32 = 0.0;
     var t1: f32 = 1.0;
     const dx = p2.items[0] - p1.items[0];
     const dy = p2.items[1] - p1.items[1];
-    
+
     const p = [4]f32{ -dx, dx, -dy, dy };
-    const q = [4]f32{ 
-        p1.items[0] - rect.l, 
-        rect.r - p1.items[0], 
-        p1.items[1] - rect.t, 
-        rect.b - p1.items[1] 
-    };
+    const q = [4]f32{ p1.items[0] - rect.l, rect.r - p1.items[0], p1.items[1] - rect.t, rect.b - p1.items[1] };
 
     for (0..4) |i| {
         if (p[i] == 0) {
@@ -410,15 +402,15 @@ test "HoughTransform: detect horizontal line" {
     const best_line = lines[0];
 
     // Horizontal line should have angle near 90 degrees (if theta 0 is vertical) or 0/180
-    // dlib logic: 
+    // dlib logic:
     // theta is angle of normal vector.
     // Horizontal line: normal is vertical (90 deg or 270 deg).
     // Let's check what angle we get.
-    
+
     // In our coordinate system:
     // theta = 0 -> normal is (1, 0) -> vertical line
     // theta = 90 -> normal is (0, 1) -> horizontal line
-    
+
     // So we expect angle around 0 (dlib convention shifts theta by 90 degrees).
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), best_line.angle, 2.0);
 }

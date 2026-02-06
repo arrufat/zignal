@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) void {
         "edge_detection",
         "blur_box_vs_gaussian",
         "trace_edges",
+        "hough_transform",
     };
 
     // Build exec_examples with run steps and check compilation
