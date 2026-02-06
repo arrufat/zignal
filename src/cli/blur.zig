@@ -127,7 +127,7 @@ fn processImage(
 
     std.log.info("Applying {s} blur...", .{@tagName(blur_type)});
 
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
 
     switch (blur_type) {
         .box => {
@@ -201,7 +201,8 @@ fn processImage(
         },
     }
 
-    const blur_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const blur_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Blur operation took {d:.3} ms", .{@as(f64, @floatFromInt(blur_ns)) / std.time.ns_per_ms});
 
     if (target) |tgt| {

@@ -96,9 +96,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         .force_opaque = true, // Force visual result to be opaque
     };
 
-    var timer = try std.time.Timer.start();
+    const start_time = std.Io.Clock.awake.now(io);
     const result = try img1.diff(img2, diff_img, diff_opts);
-    const diff_ns = timer.read();
+    const end_time = std.Io.Clock.awake.now(io);
+    const diff_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Diff computation took {d:.3} ms", .{@as(f64, @floatFromInt(diff_ns)) / std.time.ns_per_ms});
 
     // If using binary mode, stats.max() will be 255 if any diff found, or 0.

@@ -91,7 +91,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                 defer image.deinit(gpa);
 
                 std.log.debug("Computing statistics...", .{});
-                var timer = try std.time.Timer.start();
+                const start_time = std.Io.Clock.awake.now(io);
                 var r_stats: zignal.RunningStats(f64) = .init();
                 var g_stats: zignal.RunningStats(f64) = .init();
                 var b_stats: zignal.RunningStats(f64) = .init();
@@ -101,7 +101,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     g_stats.add(pixel.g);
                     b_stats.add(pixel.b);
                 }
-                const stats_ns = timer.read();
+                const end_time = std.Io.Clock.awake.now(io);
+                const stats_ns = start_time.durationTo(end_time).toNanoseconds();
                 std.log.debug("Statistics computed in {d:.3} ms", .{@as(f64, @floatFromInt(stats_ns)) / std.time.ns_per_ms});
 
                 try writer.print("\n{s: <8} {s: >8} {s: >8} {s: >10} {s: >10}\n", .{ "Channel", "Min", "Max", "Mean", "StdDev" });
