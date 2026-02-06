@@ -1559,8 +1559,7 @@ const matrix_random_doc =
     \\
     \\## Examples
     \\```python
-    \\m = Matrix.random(10, 5)  # Random 10x5 matrix
-    \\m = Matrix.random(10, 5, seed=42)  # Reproducible random matrix
+    \\m = Matrix.random(10, 5, seed=42)  # Random 10x5 matrix with seed
     \\```
 ;
 
@@ -1568,7 +1567,7 @@ fn matrix_random(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     const Params = struct {
         rows: c_int,
         cols: c_int,
-        seed: ?u64 = null,
+        seed: u64,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
