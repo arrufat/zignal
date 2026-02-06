@@ -1552,7 +1552,7 @@ const matrix_random_doc =
     \\## Parameters
     \\- `rows` (int): Number of rows
     \\- `cols` (int): Number of columns
-    \\- `seed` (int, optional): Random seed for reproducibility
+    \\- `seed` (int): Random seed for reproducibility
     \\
     \\## Returns
     \\Matrix: Matrix filled with random float64 values
@@ -2191,7 +2191,7 @@ pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&matrix_random),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_CLASS,
         .doc = matrix_random_doc,
-        .params = "cls, rows: int, cols: int, seed: int | None = None",
+        .params = "cls, rows: int, cols: int, seed: int",
         .returns = "Matrix",
     },
     .{
