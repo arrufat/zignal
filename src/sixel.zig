@@ -110,12 +110,34 @@ pub const Profile = struct {
 };
 
 inline fn monotonicNs() u64 {
-    if (comptime builtin.os.tag == .linux) {
-        var ts: std.os.linux.timespec = undefined;
-        _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
-        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+    switch (builtin.os.tag) {
+        .linux => {
+            var ts: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
+            return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+        },
+        .windows => {
+            const kernel32 = struct {
+                extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
+            };
+            return kernel32.GetTickCount64() * std.time.ns_per_ms;
+        },
+        .macos => {
+            const mach = struct {
+                const mach_timebase_info_data_t = extern struct {
+                    numer: u32,
+                    denom: u32,
+                };
+                extern "c" fn mach_absolute_time() u64;
+                extern "c" fn mach_timebase_info(info: *mach_timebase_info_data_t) c_int;
+            };
+            var info: mach.mach_timebase_info_data_t = undefined;
+            _ = mach.mach_timebase_info(&info);
+            const time = mach.mach_absolute_time();
+            return (time * info.numer) / info.denom;
+        },
+        else => return 0,
     }
-    return 0;
 }
 
 // ========== Main Entry Point ==========
