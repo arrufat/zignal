@@ -36,7 +36,7 @@ pub const HoughTransform = struct {
     /// Initializes the Hough Transform with 1D lookup tables.
     /// `size` defines the resolution of the Hough space (size x size).
     pub fn init(allocator: Allocator, size: u32) !Self {
-        assert(size > 0);
+        if (size <= 1) return error.InvalidArgument;
         const even_size = if (size % 2 == 0) size else size - 1;
 
         const cos_table = try allocator.alloc(i32, size);
@@ -276,4 +276,10 @@ test "HoughTransform: detect horizontal line" {
 
     try std.testing.expect(lines.len >= 1);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), lines[0].angle, 2.0);
+}
+
+test "HoughTransform: invalid size" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.InvalidArgument, HoughTransform.init(allocator, 0));
+    try std.testing.expectError(error.InvalidArgument, HoughTransform.init(allocator, 1));
 }
