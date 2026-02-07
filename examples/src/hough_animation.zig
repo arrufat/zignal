@@ -147,7 +147,7 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
 
     // Draw detected line
     if (max_val > 0) {
-        const lines = hough.findLines(allocator, accumulator, max_val, 0, 0) catch |err| {
+        const lines = hough.findLines(allocator, accumulator, @max(1, max_val / 2), 5.0, 5.0) catch |err| {
             std.log.err("Failed to find lines: {s}", .{@errorName(err)});
             return;
         };

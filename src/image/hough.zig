@@ -148,7 +148,8 @@ pub const HoughTransform = struct {
         angle_nms_thresh: f32,
         radius_nms_thresh: f32,
     ) ![]Line {
-        var lines = try std.ArrayList(Line).initCapacity(allocator, 128);
+        const capacity = math.clamp((accumulator.rows * accumulator.cols) / 100, 32, 1024);
+        var lines = try std.ArrayList(Line).initCapacity(allocator, capacity);
         defer lines.deinit(allocator);
 
         if (accumulator.rows < 3 or accumulator.cols < 3) return try allocator.alloc(Line, 0);
