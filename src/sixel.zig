@@ -662,7 +662,7 @@ const ColorLookupTable = struct {
 
         fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
             while (lock_val.swap(1, .acquire) != 0) {
-                std.Thread.yield() catch {};
+                std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
             }
             defer lock_val.store(0, .release);
 
@@ -706,7 +706,7 @@ const AdaptiveHistogramPool = struct {
 
     fn acquire() !Handle {
         while (lock_val.swap(1, .acquire) != 0) {
-            std.Thread.yield() catch {};
+            std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
         }
         if (available) |node| {
             available = node.next;
@@ -755,7 +755,7 @@ const AdaptiveHistogramPool = struct {
 
     fn release(handle: Handle) void {
         while (lock_val.swap(1, .acquire) != 0) {
-            std.Thread.yield() catch {};
+            std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
         }
         handle.node.next = available;
         available = handle.node;
