@@ -35,6 +35,7 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const clamp = meta.clamp;
+const BorderMode = @import("border.zig").BorderMode;
 const channel_ops = @import("channel_ops.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
 
@@ -74,19 +75,20 @@ pub const Interpolation = union(enum) {
 /// - x: Horizontal coordinate (0 to cols-1)
 /// - y: Vertical coordinate (0 to rows-1)
 /// - method: The interpolation method to use
+/// - border: The border handling mode to apply
 ///
 /// Returns the interpolated pixel value or null if the coordinates are out of bounds
-pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation) ?T {
+pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
     if (!std.math.isFinite(x) or !std.math.isFinite(y)) return null;
     const range_limit = @as(f32, @floatFromInt(std.math.maxInt(isize) / 2));
     if (@abs(x) > range_limit or @abs(y) > range_limit) return null;
     return switch (method) {
-        .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y),
-        .bilinear => interpolateBilinear(T, self, x, y),
-        .bicubic => interpolateBicubic(T, self, x, y),
-        .catmull_rom => interpolateCatmullRom(T, self, x, y),
-        .lanczos => interpolateLanczos(T, self, x, y),
-        .mitchell => |m| interpolateMitchell(T, self, x, y, m.b, m.c),
+        .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y, border),
+        .bilinear => interpolateBilinear(T, self, x, y, border),
+        .bicubic => interpolateBicubic(T, self, x, y, border),
+        .catmull_rom => interpolateCatmullRom(T, self, x, y, border),
+        .lanczos => interpolateLanczos(T, self, x, y, border),
+        .mitchell => |m| interpolateMitchell(T, self, x, y, m.b, m.c, border),
     };
 }
 
@@ -216,7 +218,7 @@ fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interp
         const src_y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
         for (0..out.cols) |c| {
             const src_x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
-            if (interpolate(T, self, src_x, src_y, method)) |val| {
+            if (interpolate(T, self, src_x, src_y, method, .mirror)) |val| {
                 out.at(r, c).* = val;
             } else {
                 // Fallback for failed interpolation (e.g., boundary conditions)
@@ -320,31 +322,48 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
 // Generic Interpolation Functions
 // ============================================================================
 
-fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    const col = resolveIndex(@intFromFloat(@round(x)), @intCast(self.cols), .mirror) orelse return null;
-    const row = resolveIndex(@intFromFloat(@round(y)), @intCast(self.rows), .mirror) orelse return null;
+fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
+    const col = resolveIndex(@intFromFloat(@round(x)), @intCast(self.cols), border) orelse return null;
+    const row = resolveIndex(@intFromFloat(@round(y)), @intCast(self.rows), border) orelse return null;
 
     return self.at(row, col).*;
 }
 
-fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
+fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
     const left: isize = @intFromFloat(@floor(x));
     const top: isize = @intFromFloat(@floor(y));
     const right = left + 1;
     const bottom = top + 1;
 
-    const r0 = resolveIndex(top, @intCast(self.rows), .mirror) orelse return null;
-    const r1 = resolveIndex(bottom, @intCast(self.rows), .mirror) orelse return null;
-    const c0 = resolveIndex(left, @intCast(self.cols), .mirror) orelse return null;
-    const c1 = resolveIndex(right, @intCast(self.cols), .mirror) orelse return null;
+    const r0_opt = resolveIndex(top, @intCast(self.rows), border);
+    const r1_opt = resolveIndex(bottom, @intCast(self.rows), border);
+    const c0_opt = resolveIndex(left, @intCast(self.cols), border);
+    const c1_opt = resolveIndex(right, @intCast(self.cols), border);
+
+    const getPixel = struct {
+        fn get(img: Image(T), r: ?usize, c: ?usize) T {
+            if (r) |rr| {
+                if (c) |cc| {
+                    return img.at(rr, cc).*;
+                }
+            }
+            return std.mem.zeroes(T);
+        }
+    }.get;
+
+    // Original behavior: if any neighbor is out of bounds with .mirror, return null.
+    // For .zero, we continue with zeroes.
+    if (border == .mirror) {
+        if (r0_opt == null or r1_opt == null or c0_opt == null or c1_opt == null) return null;
+    }
+
+    const tl: T = getPixel(self, r0_opt, c0_opt);
+    const tr: T = getPixel(self, r0_opt, c1_opt);
+    const bl: T = getPixel(self, r1_opt, c0_opt);
+    const br: T = getPixel(self, r1_opt, c1_opt);
 
     const lr_frac: f32 = x - as(f32, left);
     const tb_frac: f32 = y - as(f32, top);
-
-    const tl: T = self.at(r0, c0).*;
-    const tr: T = self.at(r0, c1).*;
-    const bl: T = self.at(r1, c0).*;
-    const br: T = self.at(r1, c1).*;
 
     const scale = 256;
     const fx: i32 = @intFromFloat(@round(lr_frac * scale));
@@ -406,20 +425,20 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
     return temp;
 }
 
-fn interpolateBicubic(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, bicubicKernel, .{});
+fn interpolateBicubic(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
+    return interpolateWithKernel(T, self, x, y, 2, bicubicKernel, .{}, border);
 }
 
-fn interpolateCatmullRom(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, catmullRomKernel, .{});
+fn interpolateCatmullRom(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
+    return interpolateWithKernel(T, self, x, y, 2, catmullRomKernel, .{}, border);
 }
 
-fn interpolateLanczos(comptime T: type, self: Image(T), x: f32, y: f32) ?T {
-    return interpolateWithKernel(T, self, x, y, 3, lanczos3KernelLut, .{});
+fn interpolateLanczos(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
+    return interpolateWithKernel(T, self, x, y, 3, lanczos3KernelLut, .{}, border);
 }
 
-fn interpolateMitchell(comptime T: type, self: Image(T), x: f32, y: f32, m_b: f32, m_c: f32) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, mitchellKernel, .{ m_b, m_c });
+fn interpolateMitchell(comptime T: type, self: Image(T), x: f32, y: f32, m_b: f32, m_c: f32, border: BorderMode) ?T {
+    return interpolateWithKernel(T, self, x, y, 2, mitchellKernel, .{ m_b, m_c }, border);
 }
 
 /// Generic kernel-based interpolation function
@@ -431,6 +450,7 @@ fn interpolateWithKernel(
     comptime window_radius: usize,
     kernel_fn: anytype,
     kernel_params: anytype,
+    border: BorderMode,
 ) ?T {
     const ix: isize = @intFromFloat(@floor(x));
     const iy: isize = @intFromFloat(@floor(y));
@@ -468,10 +488,10 @@ fn interpolateWithKernel(
 
             inline for (0..window_size) |j| {
                 const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
-                if (resolveIndex(row_idx, @intCast(self.rows), .mirror)) |pixel_y| {
+                if (resolveIndex(row_idx, @intCast(self.rows), border)) |pixel_y| {
                     inline for (0..window_size) |i| {
                         const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
-                        if (resolveIndex(col_idx, @intCast(self.cols), .mirror)) |pixel_x| {
+                        if (resolveIndex(col_idx, @intCast(self.cols), border)) |pixel_x| {
                             const pixel = self.at(pixel_y, pixel_x).*;
                             const weight = x_weights[i] * y_weights[j];
                             sum += as(f32, pixel) * weight;
@@ -491,10 +511,10 @@ fn interpolateWithKernel(
 
             inline for (0..window_size) |j| {
                 const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
-                if (resolveIndex(row_idx, @intCast(self.rows), .mirror)) |pixel_y| {
+                if (resolveIndex(row_idx, @intCast(self.rows), border)) |pixel_y| {
                     inline for (0..window_size) |i| {
                         const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
-                        if (resolveIndex(col_idx, @intCast(self.cols), .mirror)) |pixel_x| {
+                        if (resolveIndex(col_idx, @intCast(self.cols), border)) |pixel_x| {
                             const pixel = self.at(pixel_y, pixel_x).*;
                             const weight = x_weights[i] * y_weights[j];
                             inline for (fields, 0..) |f, f_idx| {

@@ -39,13 +39,13 @@ test "nearest neighbor interpolation - exact pixels" {
     defer img.deinit(allocator);
 
     // Test exact pixel positions - should return exact values
-    const val1 = img.interpolate(0, 0, .nearest_neighbor);
+    const val1 = img.interpolate(0, 0, .nearest_neighbor, .mirror);
     try expectEqual(img.at(0, 0).*, val1.?);
 
-    const val2 = img.interpolate(5, 5, .nearest_neighbor);
+    const val2 = img.interpolate(5, 5, .nearest_neighbor, .mirror);
     try expectEqual(img.at(5, 5).*, val2.?);
 
-    const val3 = img.interpolate(9, 9, .nearest_neighbor);
+    const val3 = img.interpolate(9, 9, .nearest_neighbor, .mirror);
     try expectEqual(img.at(9, 9).*, val3.?);
 }
 
@@ -56,16 +56,16 @@ test "nearest neighbor interpolation - rounding" {
 
     // Test rounding behavior
     // At (0.4, 0.4) should round to (0, 0)
-    const val1 = img.interpolate(0.4, 0.4, .nearest_neighbor);
+    const val1 = img.interpolate(0.4, 0.4, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 0), val1.?);
 
     // At (0.6, 0.6) should round to (1, 1)
     // Checkerboard: (1, 1) has value 0 because (1+1)%2 == 0
-    const val2 = img.interpolate(0.6, 0.6, .nearest_neighbor);
+    const val2 = img.interpolate(0.6, 0.6, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 0), val2.?);
 
     // At (1.5, 0.5) should round to (2, 1)
-    const val3 = img.interpolate(1.5, 0.5, .nearest_neighbor);
+    const val3 = img.interpolate(1.5, 0.5, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 255), val3.?);
 }
 
@@ -75,10 +75,10 @@ test "bilinear interpolation - exact pixels" {
     defer img.deinit(allocator);
 
     // At exact pixel positions, bilinear should return exact values
-    const val1 = img.interpolate(0, 0, .bilinear);
+    const val1 = img.interpolate(0, 0, .bilinear, .mirror);
     try expectEqual(img.at(0, 0).*, val1.?);
 
-    const val2 = img.interpolate(5, 5, .bilinear);
+    const val2 = img.interpolate(5, 5, .bilinear, .mirror);
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
@@ -99,11 +99,11 @@ test "bilinear interpolation - midpoints" {
     img.at(2, 2).* = 200;
 
     // At midpoint between (0,0) and (0,1), should be average
-    const val = img.interpolate(0.5, 0, .bilinear);
+    const val = img.interpolate(0.5, 0, .bilinear, .mirror);
     try expectEqual(@as(u8, 50), val.?);
 
     // At center of four pixels
-    const center = img.interpolate(0.5, 0.5, .bilinear);
+    const center = img.interpolate(0.5, 0.5, .bilinear, .mirror);
     try expectEqual(@as(u8, 50), center.?); // Average of 0, 100, 0, 100
 }
 
@@ -113,10 +113,10 @@ test "bicubic interpolation - exact pixels" {
     defer img.deinit(allocator);
 
     // Test positions away from edges (bicubic needs 4x4 neighborhood)
-    const val1 = img.interpolate(2, 2, .bicubic);
+    const val1 = img.interpolate(2, 2, .bicubic, .mirror);
     try expectEqual(img.at(2, 2).*, val1.?);
 
-    const val2 = img.interpolate(5, 5, .bicubic);
+    const val2 = img.interpolate(5, 5, .bicubic, .mirror);
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
@@ -126,10 +126,10 @@ test "catmull-rom interpolation - exact pixels" {
     defer img.deinit(allocator);
 
     // Test positions away from edges
-    const val1 = img.interpolate(2, 2, .catmull_rom);
+    const val1 = img.interpolate(2, 2, .catmull_rom, .mirror);
     try expectEqual(img.at(2, 2).*, val1.?);
 
-    const val2 = img.interpolate(5, 5, .catmull_rom);
+    const val2 = img.interpolate(5, 5, .catmull_rom, .mirror);
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
@@ -139,10 +139,10 @@ test "lanczos interpolation - exact pixels" {
     defer img.deinit(allocator);
 
     // Test positions away from edges (Lanczos needs 6x6 neighborhood)
-    const val1 = img.interpolate(3, 3, .lanczos);
+    const val1 = img.interpolate(3, 3, .lanczos, .mirror);
     try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(3, 3).*)), @as(f32, @floatFromInt(val1.?)), 1.0);
 
-    const val2 = img.interpolate(5, 5, .lanczos);
+    const val2 = img.interpolate(5, 5, .lanczos, .mirror);
     try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(5, 5).*)), @as(f32, @floatFromInt(val2.?)), 1.0);
 }
 
@@ -152,12 +152,12 @@ test "mitchell interpolation - default parameters" {
     defer img.deinit(allocator);
 
     // Test with default Mitchell parameters (B=1/3, C=1/3)
-    const val1 = img.interpolate(2, 2, .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } });
+    const val1 = img.interpolate(2, 2, .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } }, .mirror);
     // Mitchell at exact pixels should be very close but may have slight differences
     try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(2, 2).*)), @as(f32, @floatFromInt(val1.?)), 1.0);
 
     // Test simplified syntax
-    const val2 = img.interpolate(5, 5, .{ .mitchell = .default });
+    const val2 = img.interpolate(5, 5, .{ .mitchell = .default }, .mirror);
     try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(5, 5).*)), @as(f32, @floatFromInt(val2.?)), 1.0);
 }
 
@@ -167,15 +167,15 @@ test "mitchell interpolation - custom parameters" {
     defer img.deinit(allocator);
 
     // Test B-spline parameters (B=1, C=0)
-    const val_bspline = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 1.0, .c = 0.0 } });
+    const val_bspline = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 1.0, .c = 0.0 } }, .mirror);
     try std.testing.expect(val_bspline != null);
 
     // Test Catmull-Rom-like parameters (B=0, C=0.5)
-    const val_catmull = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 0.0, .c = 0.5 } });
+    const val_catmull = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 0.0, .c = 0.5 } }, .mirror);
     try std.testing.expect(val_catmull != null);
 
     // Test sharp parameters (B=0, C=0.75)
-    const val_sharp = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 0.0, .c = 0.75 } });
+    const val_sharp = img.interpolate(5.5, 5.5, .{ .mitchell = .{ .b = 0.0, .c = 0.75 } }, .mirror);
     try std.testing.expect(val_sharp != null);
 }
 
@@ -185,14 +185,14 @@ test "boundary conditions - nearest neighbor" {
     defer img.deinit(allocator);
 
     // Nearest neighbor should work at all boundaries due to mirror reflection
-    try std.testing.expect(img.interpolate(-0.4, 0, .nearest_neighbor) != null); // Rounds to (0, 0)
-    try std.testing.expect(img.interpolate(9.4, 9.4, .nearest_neighbor) != null); // Rounds to (9, 9)
+    try std.testing.expect(img.interpolate(-0.4, 0, .nearest_neighbor, .mirror) != null); // Rounds to (0, 0)
+    try std.testing.expect(img.interpolate(9.4, 9.4, .nearest_neighbor, .mirror) != null); // Rounds to (9, 9)
 
     // Out of bounds - should reflect back into range
-    try std.testing.expect(img.interpolate(-1, 0, .nearest_neighbor) != null);
-    try std.testing.expect(img.interpolate(0, -1, .nearest_neighbor) != null);
-    try std.testing.expect(img.interpolate(10, 0, .nearest_neighbor) != null);
-    try std.testing.expect(img.interpolate(0, 10, .nearest_neighbor) != null);
+    try std.testing.expect(img.interpolate(-1, 0, .nearest_neighbor, .mirror) != null);
+    try std.testing.expect(img.interpolate(0, -1, .nearest_neighbor, .mirror) != null);
+    try std.testing.expect(img.interpolate(10, 0, .nearest_neighbor, .mirror) != null);
+    try std.testing.expect(img.interpolate(0, 10, .nearest_neighbor, .mirror) != null);
 }
 
 test "boundary conditions - bilinear" {
@@ -201,10 +201,10 @@ test "boundary conditions - bilinear" {
     defer img.deinit(allocator);
 
     // Bilinear should work everywhere due to mirror reflection
-    try std.testing.expect(img.interpolate(0, 0, .bilinear) != null);
-    try std.testing.expect(img.interpolate(8.9, 8.9, .bilinear) != null);
-    try std.testing.expect(img.interpolate(9.1, 9.1, .bilinear) != null);
-    try std.testing.expect(img.interpolate(-0.1, 0, .bilinear) != null);
+    try std.testing.expect(img.interpolate(0, 0, .bilinear, .mirror) != null);
+    try std.testing.expect(img.interpolate(8.9, 8.9, .bilinear, .mirror) != null);
+    try std.testing.expect(img.interpolate(9.1, 9.1, .bilinear, .mirror) != null);
+    try std.testing.expect(img.interpolate(-0.1, 0, .bilinear, .mirror) != null);
 }
 
 test "boundary conditions - bicubic" {
@@ -213,10 +213,10 @@ test "boundary conditions - bicubic" {
     defer img.deinit(allocator);
 
     // Bicubic should work everywhere due to mirror reflection
-    try std.testing.expect(img.interpolate(1, 1, .bicubic) != null);
-    try std.testing.expect(img.interpolate(7.9, 7.9, .bicubic) != null);
-    try std.testing.expect(img.interpolate(0.5, 0.5, .bicubic) != null);
-    try std.testing.expect(img.interpolate(8.1, 8.1, .bicubic) != null);
+    try std.testing.expect(img.interpolate(1, 1, .bicubic, .mirror) != null);
+    try std.testing.expect(img.interpolate(7.9, 7.9, .bicubic, .mirror) != null);
+    try std.testing.expect(img.interpolate(0.5, 0.5, .bicubic, .mirror) != null);
+    try std.testing.expect(img.interpolate(8.1, 8.1, .bicubic, .mirror) != null);
 }
 
 test "boundary conditions - lanczos" {
@@ -225,10 +225,10 @@ test "boundary conditions - lanczos" {
     defer img.deinit(allocator);
 
     // Lanczos should work everywhere due to mirror reflection
-    try std.testing.expect(img.interpolate(2, 2, .lanczos) != null);
-    try std.testing.expect(img.interpolate(6.9, 6.9, .lanczos) != null);
-    try std.testing.expect(img.interpolate(1.5, 1.5, .lanczos) != null);
-    try std.testing.expect(img.interpolate(7.1, 7.1, .lanczos) != null);
+    try std.testing.expect(img.interpolate(2, 2, .lanczos, .mirror) != null);
+    try std.testing.expect(img.interpolate(6.9, 6.9, .lanczos, .mirror) != null);
+    try std.testing.expect(img.interpolate(1.5, 1.5, .lanczos, .mirror) != null);
+    try std.testing.expect(img.interpolate(7.1, 7.1, .lanczos, .mirror) != null);
 }
 
 test "RGB image interpolation" {
@@ -251,11 +251,11 @@ test "RGB image interpolation" {
 
     // Test nearest neighbor with RGB
     // (1.6, 1.4) rounds to (2, 1)
-    const val_nn = img.interpolate(1.6, 1.4, .nearest_neighbor);
+    const val_nn = img.interpolate(1.6, 1.4, .nearest_neighbor, .mirror);
     try expectEqualDeep(img.at(1, 2).*, val_nn.?);
 
     // Test bilinear with RGB
-    const val_bl = img.interpolate(0.5, 0.5, .bilinear);
+    const val_bl = img.interpolate(0.5, 0.5, .bilinear, .mirror);
     try std.testing.expect(val_bl != null);
     // Should be average of four corner pixels
     try expectEqual(@as(u8, 43), val_bl.?.r); // Average of 0, 85, 0, 85
@@ -263,7 +263,7 @@ test "RGB image interpolation" {
     try expectEqual(@as(u8, 128), val_bl.?.b); // All are 128
 
     // Test Mitchell with RGB
-    const val_mitchell = img.interpolate(1.5, 1.5, .{ .mitchell = .default });
+    const val_mitchell = img.interpolate(1.5, 1.5, .{ .mitchell = .default }, .mirror);
     try std.testing.expect(val_mitchell != null);
 }
 
@@ -321,7 +321,7 @@ test "catmull-rom no overshoot property" {
     while (r < 3.5) : (r += 0.1) {
         var c: f32 = 1.5;
         while (c < 3.5) : (c += 0.1) {
-            if (img.interpolate(c, r, .catmull_rom)) |val| {
+            if (img.interpolate(c, r, .catmull_rom, .mirror)) |val| {
                 // Catmull-Rom should not overshoot the value range
                 try std.testing.expect(val >= 50);
                 try std.testing.expect(val <= 200);
@@ -343,12 +343,12 @@ test "float image interpolation" {
     }
 
     // Test bilinear with floats
-    const val = img.interpolate(1.5, 1.5, .bilinear);
+    const val = img.interpolate(1.5, 1.5, .bilinear, .mirror);
     try std.testing.expect(val != null);
     try expectApproxEqAbs(@as(f32, 0.75), val.?, 0.001);
 
     // Test bicubic with floats
-    const val_cubic = img.interpolate(1.5, 1.5, .bicubic);
+    const val_cubic = img.interpolate(1.5, 1.5, .bicubic, .mirror);
     try std.testing.expect(val_cubic != null);
 }
 
@@ -365,7 +365,7 @@ test "clamping stress test - sharp edge with bicubic" {
     }
 
     // Interpolate near the edge where bicubic would overshoot
-    const val = img.interpolate(3.1, 2.5, .bicubic);
+    const val = img.interpolate(3.1, 2.5, .bicubic, .mirror);
     try std.testing.expect(val != null);
     // Without clamping, this could go above 255 or below 0
     try std.testing.expect(val.? >= 0);
@@ -376,7 +376,7 @@ test "clamping stress test - sharp edge with bicubic" {
     while (y < 4.5) : (y += 0.2) {
         var x: f32 = 2.5;
         while (x < 3.5) : (x += 0.1) {
-            if (img.interpolate(x, y, .bicubic)) |v| {
+            if (img.interpolate(x, y, .bicubic, .mirror)) |v| {
                 try std.testing.expect(v >= 0 and v <= 255);
             }
         }
@@ -411,7 +411,7 @@ test "clamping stress test - all kernel methods" {
         while (y < 6.0) : (y += 0.3) {
             var x: f32 = 2.0;
             while (x < 6.0) : (x += 0.3) {
-                if (img.interpolate(x, y, method)) |val| {
+                if (img.interpolate(x, y, method, .mirror)) |val| {
                     try std.testing.expect(val >= 0 and val <= 255);
                 }
             }
@@ -432,19 +432,19 @@ test "bilinear exact linear interpolation" {
 
     // Test exact linear interpolation at various points
     // At (0.5, 0) should be exactly between (0,0) and (1,0)
-    const val1 = img.interpolate(0.5, 0, .bilinear);
+    const val1 = img.interpolate(0.5, 0, .bilinear, .mirror);
     try expectEqual(@as(u8, 50), val1.?); // (0 + 100) / 2
 
     // At (0, 0.5) should be exactly between (0,0) and (0,1)
-    const val2 = img.interpolate(0, 0.5, .bilinear);
+    const val2 = img.interpolate(0, 0.5, .bilinear, .mirror);
     try expectEqual(@as(u8, 25), val2.?); // (0 + 50) / 2
 
     // At (0.5, 0.5) should be average of all four
-    const val3 = img.interpolate(0.5, 0.5, .bilinear);
+    const val3 = img.interpolate(0.5, 0.5, .bilinear, .mirror);
     try expectEqual(@as(u8, 75), val3.?); // (0 + 100 + 50 + 150) / 4
 
     // Test linearity: f(0.25) should be 0.75*f(0) + 0.25*f(1)
-    const val4 = img.interpolate(0.25, 0, .bilinear);
+    const val4 = img.interpolate(0.25, 0, .bilinear, .mirror);
     try expectEqual(@as(u8, 25), val4.?); // 0.75 * 0 + 0.25 * 100
 }
 
@@ -459,8 +459,8 @@ test "nearest neighbor discontinuity" {
     img.at(1, 1).* = 200;
 
     // Test discontinuity at boundary
-    const val_before = img.interpolate(0.49, 0, .nearest_neighbor);
-    const val_after = img.interpolate(0.51, 0, .nearest_neighbor);
+    const val_before = img.interpolate(0.49, 0, .nearest_neighbor, .mirror);
+    const val_after = img.interpolate(0.51, 0, .nearest_neighbor, .mirror);
 
     try expectEqual(@as(u8, 0), val_before.?); // rounds to (0, 0)
     try expectEqual(@as(u8, 255), val_after.?); // rounds to (1, 0)
@@ -483,12 +483,12 @@ test "interpolation symmetry" {
     }
 
     // Test symmetry for bilinear
-    const val1 = img.interpolate(1.5, 2, .bilinear);
-    const val2 = img.interpolate(2.5, 2, .bilinear);
+    const val1 = img.interpolate(1.5, 2, .bilinear, .mirror);
+    const val2 = img.interpolate(2.5, 2, .bilinear, .mirror);
     try expectEqual(val1, val2);
 
-    const val3 = img.interpolate(2, 1.5, .bilinear);
-    const val4 = img.interpolate(2, 2.5, .bilinear);
+    const val3 = img.interpolate(2, 1.5, .bilinear, .mirror);
+    const val4 = img.interpolate(2, 2.5, .bilinear, .mirror);
     try expectEqual(val3, val4);
 }
 
@@ -512,9 +512,9 @@ test "mitchell parameter effects" {
     const pos_x: f32 = 2.5;
     const pos_y: f32 = 1.8; // Position that will show more difference
 
-    const val_default = img.interpolate(pos_x, pos_y, .{ .mitchell = .default });
-    const val_bspline = img.interpolate(pos_x, pos_y, .{ .mitchell = .{ .b = 1.0, .c = 0.0 } });
-    const val_sharp = img.interpolate(pos_x, pos_y, .{ .mitchell = .{ .b = 0.0, .c = 0.75 } });
+    const val_default = img.interpolate(pos_x, pos_y, .{ .mitchell = .default }, .mirror);
+    const val_bspline = img.interpolate(pos_x, pos_y, .{ .mitchell = .{ .b = 1.0, .c = 0.0 } }, .mirror);
+    const val_sharp = img.interpolate(pos_x, pos_y, .{ .mitchell = .{ .b = 0.0, .c = 0.75 } }, .mirror);
 
     // B-spline (B=1, C=0) should be blurrier (closer to average)
     // Sharp (B=0, C=0.75) should have more contrast
@@ -541,7 +541,7 @@ test "lanczos weight normalization" {
     }
 
     // For constant image, any interpolation should return the same constant
-    const val = img.interpolate(4.3, 4.7, .lanczos);
+    const val = img.interpolate(4.3, 4.7, .lanczos, .mirror);
     try std.testing.expect(val != null);
     // Weight normalization ensures this property
     try expectEqual(@as(u8, 128), val.?);
@@ -573,12 +573,12 @@ test "extreme value edge cases" {
         // At exact pixel, should preserve extreme value
         if (method == .lanczos) {
             // Lanczos at position (2,2)
-            const val = img.interpolate(2, 2, method);
+            const val = img.interpolate(2, 2, method, .mirror);
             if (val) |v| {
                 try expectApproxEqAbs(@as(f32, 0), @as(f32, @floatFromInt(v)), 1.0);
             }
         } else if (method == .nearest_neighbor or method == .bilinear) {
-            const val = img.interpolate(0, 0, method);
+            const val = img.interpolate(0, 0, method, .mirror);
             try expectEqual(@as(u8, 0), val.?);
         }
     }
@@ -592,12 +592,12 @@ test "single pixel image handling" {
     img.at(0, 0).* = 42;
 
     // All methods should work with 1x1 image due to mirror reflection
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .nearest_neighbor).?);
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bilinear).?);
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bicubic).?);
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .catmull_rom).?);
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .lanczos).?);
-    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .{ .mitchell = .default }).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .nearest_neighbor, .mirror).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bilinear, .mirror).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .bicubic, .mirror).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .catmull_rom, .mirror).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .lanczos, .mirror).?);
+    try expectEqual(@as(u8, 42), img.interpolate(0, 0, .{ .mitchell = .default }, .mirror).?);
 }
 
 test "RGB clamping stress test" {
@@ -622,7 +622,7 @@ test "RGB clamping stress test" {
     while (y < 2.9) : (y += 0.2) {
         var x: f32 = 1.1;
         while (x < 2.9) : (x += 0.2) {
-            if (img.interpolate(x, y, .bicubic)) |val| {
+            if (img.interpolate(x, y, .bicubic, .mirror)) |val| {
                 try std.testing.expect(val.r >= 0 and val.r <= 255);
                 try std.testing.expect(val.g >= 0 and val.g <= 255);
                 try std.testing.expect(val.b >= 0 and val.b <= 255);
