@@ -1849,11 +1849,20 @@ inline fn applyGammaCorrection(value: u8, header: Header) u8 {
 
 /// Extract grayscale pixel from Adam7 pass data with optional transparency
 fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, transparency: ?[]const u8) T {
+    var pixel_alpha: u8 = 255;
     const pixel_value: u8 = switch (header.bit_depth) {
-        8 => if (header.color_type == .grayscale_alpha) src_row[pass_x * 2] else src_row[pass_x],
+        8 => if (header.color_type == .grayscale_alpha) blk: {
+            if (pass_x * 2 + 1 < src_row.len) {
+                pixel_alpha = src_row[pass_x * 2 + 1];
+            }
+            break :blk src_row[pass_x * 2];
+        } else src_row[pass_x],
         16 => blk: {
             const offset = if (header.color_type == .grayscale_alpha) pass_x * 4 else pass_x * 2;
             if (offset + 1 >= src_row.len) break :blk 0;
+            if (header.color_type == .grayscale_alpha and offset + 3 < src_row.len) {
+                pixel_alpha = @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8);
+            }
             break :blk @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8);
         },
         1, 2, 4 => blk: {
@@ -1871,22 +1880,25 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
         else => 0,
     };
 
-    // Check for transparency
-    const is_transparent = if (transparency) |trans_data| blk: {
-        if (header.color_type == .grayscale and trans_data.len >= 2) {
-            const transparent_value = if (header.is16Bit())
-                @as(u8, @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8))
-            else
-                trans_data[1]; // For 8-bit and sub-byte, use lower byte
-            break :blk pixel_value == transparent_value;
+    // Check for transparency (only for grayscale without alpha)
+    if (header.color_type == .grayscale) {
+        if (transparency) |trans_data| {
+            if (trans_data.len >= 2) {
+                const transparent_value = if (header.is16Bit())
+                    @as(u8, @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8))
+                else
+                    trans_data[1]; // For 8-bit and sub-byte, use lower byte
+                if (pixel_value == transparent_value) {
+                    pixel_alpha = 0;
+                }
+            }
         }
-        break :blk false;
-    } else false;
+    }
 
     return switch (T) {
         u8 => pixel_value,
         Rgb => .{ .r = pixel_value, .g = pixel_value, .b = pixel_value },
-        Rgba => .{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = if (is_transparent) 0 else 255 },
+        Rgba => .{ .r = pixel_value, .g = pixel_value, .b = pixel_value, .a = pixel_alpha },
         else => @compileError("Unsupported pixel type"),
     };
 }
@@ -3247,4 +3259,65 @@ test "PNG Header helpers" {
     try std.testing.expect(h3.hasAlpha());
     try std.testing.expect(!h3.is16Bit());
     try std.testing.expect(h3.isGrayscale());
+}
+
+test "PNG grayscale-alpha pixel extraction" {
+    const header: Header = .{
+        .width = 4,
+        .height = 4,
+        .bit_depth = 8,
+        .color_type = .grayscale_alpha,
+    };
+
+    const gs_alpha_src = [_]u8{ 128, 64, 255, 127 }; // (gray=128, alpha=64), (gray=255, alpha=127)
+
+    // Test pixel 0
+    const pixel0 = extractGrayscalePixel(Rgba, &gs_alpha_src, 0, header, null);
+    try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 64 }, pixel0);
+
+    // Test pixel 1
+    const pixel1 = extractGrayscalePixel(Rgba, &gs_alpha_src, 1, header, null);
+    try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 127 }, pixel1);
+}
+
+test "PNG grayscale-alpha 16-bit pixel extraction" {
+    const header: Header = .{
+        .width = 4,
+        .height = 4,
+        .bit_depth = 16,
+        .color_type = .grayscale_alpha,
+    };
+
+    // 16-bit values are big-endian in PNG
+    // Pixel 0: Gray=0x1234, Alpha=0x5678
+    // Pixel 1: Gray=0xABCD, Alpha=0xEF01
+    const gs_alpha_src = [_]u8{
+        0x12, 0x34, 0x56, 0x78,
+        0xAB, 0xCD, 0xEF, 0x01,
+    };
+
+    const pixel0 = extractGrayscalePixel(Rgba, &gs_alpha_src, 0, header, null);
+    try std.testing.expectEqual(Rgba{ .r = 0x12, .g = 0x12, .b = 0x12, .a = 0x56 }, pixel0);
+
+    const pixel1 = extractGrayscalePixel(Rgba, &gs_alpha_src, 1, header, null);
+    try std.testing.expectEqual(Rgba{ .r = 0xAB, .g = 0xAB, .b = 0xAB, .a = 0xEF }, pixel1);
+}
+
+test "PNG grayscale with transparency chunk (tRNS)" {
+    const header: Header = .{
+        .width = 4,
+        .height = 4,
+        .bit_depth = 8,
+        .color_type = .grayscale,
+    };
+
+    const gs_src = [_]u8{ 128, 255 };
+    const trans_data = [_]u8{ 0, 128 };
+    const trans_slice: []const u8 = &trans_data;
+
+    const pixel0 = extractGrayscalePixel(Rgba, &gs_src, 0, header, trans_slice);
+    try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 0 }, pixel0);
+
+    const pixel1 = extractGrayscalePixel(Rgba, &gs_src, 1, header, trans_slice);
+    try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 }, pixel1);
 }
