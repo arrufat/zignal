@@ -170,6 +170,15 @@
       faceLandmarker = landmarker;
       toggleButton.disabled = false;
 
+      let rgbaPtr = null;
+      let outPtr = null;
+      let landmarksPtr = null;
+      let extraPtr = null;
+      let lastRows = 0;
+      let lastCols = 0;
+      let lastOutRows = 0;
+      let lastOutCols = 0;
+
       let align = function () {
         displayImageSize();
         const rows = canvasWebcam.height;
@@ -182,11 +191,19 @@
         const outCols = canvasFace.width;
         const outSize = outRows * outCols * 4; // RGBA
 
-        // We need to allocate all memory at once before mapping it
-        const rgbaPtr = wasm_exports.alloc(rgbaSize);
-        const outPtr = wasm_exports.alloc(outSize);
-        const landmarksPtr = wasm_exports.alloc(landmarksSize);
-        const extraPtr = wasm_exports.alloc(extraSize);
+        // Allocate memory only if dimensions change or it's the first run
+        if (rows !== lastRows || cols !== lastCols || outRows !== lastOutRows || outCols !== lastOutCols) {
+            rgbaPtr = wasm_exports.alloc(rgbaSize) >>> 0;
+            outPtr = wasm_exports.alloc(outSize) >>> 0;
+            landmarksPtr = wasm_exports.alloc(landmarksSize) >>> 0;
+            extraPtr = wasm_exports.alloc(extraSize) >>> 0;
+            
+            lastRows = rows;
+            lastCols = cols;
+            lastOutRows = outRows;
+            lastOutCols = outCols;
+        }
+
         // Now we can proceed to map all the memory to JavaScript
         let rgba = new Uint8ClampedArray(wasm_exports.memory.buffer, rgbaPtr, rgbaSize);
         let landmarks = new Float32Array(wasm_exports.memory.buffer, landmarksPtr, landmarksCount * 2);
@@ -218,10 +235,7 @@
         const out = ctx2.getImageData(0, 0, outCols, outRows);
         out.data.set(outImg);
         ctx2.putImageData(out, 0, 0);
-        wasm_exports.free(rgbaPtr, rgbaSize);
-        wasm_exports.free(outPtr, outSize);
-        wasm_exports.free(landmarksPtr, landmarksSize);
-        wasm_exports.free(extraPtr, extraSize);
+        // Do not free memory to reuse buffers in the next frame
       };
       processFn = align;
     });
