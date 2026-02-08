@@ -249,7 +249,7 @@ pub fn fromImageProfiled(
                     const src_x = @as(f32, @floatFromInt(col_idx)) * inv_scale;
 
                     const rgb_value = blk: {
-                        if (image.interpolate(src_x, src_y, options.interpolation)) |pixel| {
+                        if (image.interpolate(src_x, src_y, options.interpolation, .mirror)) |pixel| {
                             break :blk convertColor(Rgb, pixel);
                         }
 
