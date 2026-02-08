@@ -23,7 +23,7 @@ const png = @import("png.zig");
 const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
 
-// Import image sub-modules (private for internal use)
+pub const BorderMode = @import("image/border.zig").BorderMode;
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
@@ -41,7 +41,6 @@ pub const HoughTransform = @import("image/hough.zig").HoughTransform;
 pub const Histogram = @import("image/histogram.zig").Histogram;
 pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
-pub const BorderMode = convolution.BorderMode;
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 const Blending = @import("blending.zig").Blending;
@@ -532,10 +531,9 @@ pub fn Image(comptime T: type) type {
 
         /// Performs interpolation at position x, y using the specified method.
         /// Returns `null` if the coordinates are outside valid bounds for the chosen method.
-        pub fn interpolate(self: Self, x: f32, y: f32, method: Interpolation) ?T {
-            return interpolation.interpolate(T, self, x, y, method);
+        pub fn interpolate(self: Self, x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
+            return interpolation.interpolate(T, self, x, y, method, border);
         }
-
         /// Resizes an image to fit in out, using the specified interpolation method.
         /// The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.

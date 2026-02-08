@@ -228,7 +228,7 @@ pub fn Transform(comptime T: type) type {
                     const src_x = rotated_dx + center.x();
                     const src_y = rotated_dy + center.y();
 
-                    rotated.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method)) |val| val else std.mem.zeroes(T);
+                    rotated.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method, .mirror)) |val| val else std.mem.zeroes(T);
                 }
             }
 
@@ -317,7 +317,7 @@ pub fn Transform(comptime T: type) type {
                     const src_x = cx + cos_a * dx - sin_a * dy;
                     const src_y = cy + sin_a * dx + cos_a * dy;
 
-                    out.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method)) |val| val else std.mem.zeroes(T);
+                    out.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method, .mirror)) |val| val else std.mem.zeroes(T);
                 }
             }
         }
@@ -418,7 +418,7 @@ pub fn Transform(comptime T: type) type {
                     const src_y = if (source.rows == 1) 0 else norm_y * (frows - 1);
 
                     // Sample from source
-                    if (interpolate(SourcePixelType, source, src_x, src_y, method)) |src_val| {
+                    if (interpolate(SourcePixelType, source, src_x, src_y, method, .mirror)) |src_val| {
                         // Type-specific handling with compile-time optimization
                         const dest_pixel = self.at(r, c);
                         assignPixel(dest_pixel, src_val, blend_mode);
@@ -548,7 +548,7 @@ pub fn Transform(comptime T: type) type {
                     const src_point = transform.project(out_point);
 
                     // Sample from source image with interpolation
-                    const value = interpolation.interpolate(T, self, src_point.x(), src_point.y(), method) orelse std.mem.zeroes(T);
+                    const value = interpolation.interpolate(T, self, src_point.x(), src_point.y(), method, .mirror) orelse std.mem.zeroes(T);
 
                     // Write to output image
                     out.at(r, c).* = value;
