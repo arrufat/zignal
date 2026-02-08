@@ -86,7 +86,7 @@ pub fn extractAlignedFace(
             const src_point = transform.project(out_point);
 
             // Sample from source image with interpolation
-            out.at(r, c).* = image.interpolate(src_point.x(), src_point.y(), .bilinear) orelse std.mem.zeroes(T);
+            out.at(r, c).* = image.interpolate(src_point.x(), src_point.y(), .bilinear, .zero) orelse std.mem.zeroes(T);
         }
     }
 
