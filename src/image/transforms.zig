@@ -9,9 +9,11 @@ const Allocator = std.mem.Allocator;
 const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
+const assignPixel = @import("../image.zig").assignPixel;
+const BorderMode = @import("border.zig").BorderMode;
+const computeCoords = @import("border.zig").computeCoords;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
-const assignPixel = @import("../image.zig").assignPixel;
 
 /// Rotation bounds result
 pub const RotationBounds = struct { rows: u32, cols: u32 };
@@ -164,9 +166,8 @@ pub fn Transform(comptime T: type) type {
         /// - `allocator`: The allocator to use for the rotated image's data.
         /// - `angle`: The rotation angle in radians.
         /// - `method`: The interpolation method to use for sampling pixels.
-        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation) !Self {
-            const interpolation = @import("interpolation.zig");
-
+        /// - `border`: The border handling mode to apply.
+        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
             // Compute optimal bounds
             const bounds = rotateBounds(self, angle);
             const actual_rows = bounds.rows;
@@ -228,7 +229,7 @@ pub fn Transform(comptime T: type) type {
                     const src_x = rotated_dx + center.x();
                     const src_y = rotated_dy + center.y();
 
-                    rotated.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method, .mirror)) |val| val else std.mem.zeroes(T);
+                    rotated.at(r, c).* = if (interpolate(T, self, src_x, src_y, method, border)) |val| val else std.mem.zeroes(T);
                 }
             }
 
@@ -250,7 +251,7 @@ pub fn Transform(comptime T: type) type {
             const chip_cols: u32 = @intFromFloat(@round(rectangle.width()));
 
             const chip = try Self.init(allocator, chip_rows, chip_cols);
-            copyRect(self, chip_top, chip_left, chip);
+            copyRect(self, chip_top, chip_left, chip, .zero);
             return chip;
         }
 
@@ -262,14 +263,13 @@ pub fn Transform(comptime T: type) type {
         /// - `out`: Pre-allocated destination image that defines the output size. The extracted content is
         ///          resampled to exactly fill this image using `method`.
         /// - `method`: Interpolation method used when sampling from the source.
+        /// - `border`: The border handling mode to apply.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation) void {
-            const interpolation = @import("interpolation.zig");
-
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation, border: BorderMode) void {
             if (out.rows == 0 or out.cols == 0) return;
 
             const frows: f32 = @floatFromInt(out.rows);
@@ -286,7 +286,7 @@ pub fn Transform(comptime T: type) type {
                 // Use the same logic as crop
                 const rect_top: i32 = @intFromFloat(@round(rect.t));
                 const rect_left: i32 = @intFromFloat(@round(rect.l));
-                copyRect(self, rect_top, rect_left, out);
+                copyRect(self, rect_top, rect_left, out, border);
                 return;
             }
 
@@ -317,7 +317,7 @@ pub fn Transform(comptime T: type) type {
                     const src_x = cx + cos_a * dx - sin_a * dy;
                     const src_y = cy + sin_a * dx + cos_a * dy;
 
-                    out.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method, .mirror)) |val| val else std.mem.zeroes(T);
+                    out.at(r, c).* = if (interpolate(T, self, src_x, src_y, method, border)) |val| val else std.mem.zeroes(T);
                 }
             }
         }
@@ -506,12 +506,19 @@ pub fn Transform(comptime T: type) type {
 
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
         /// Used by both `crop` and `extract` (in fast-path).
-        fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self) void {
+        fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self, border: BorderMode) void {
             for (0..out.rows) |r| {
                 const ir: i32 = @intCast(r);
                 for (0..out.cols) |c| {
                     const ic: i32 = @intCast(c);
-                    out.at(r, c).* = if (self.atOrNull(ir + rect_top, ic + rect_left)) |val| val.* else std.mem.zeroes(T);
+                    const src_row = ir + rect_top;
+                    const src_col = ic + rect_left;
+
+                    if (computeCoords(src_row, src_col, @intCast(self.rows), @intCast(self.cols), border)) |coords| {
+                        out.at(r, c).* = self.at(coords.row, coords.col).*;
+                    } else {
+                        out.at(r, c).* = std.mem.zeroes(T);
+                    }
                 }
             }
         }

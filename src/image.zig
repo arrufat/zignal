@@ -572,14 +572,15 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use for the rotated image's data.
         /// - `angle`: The rotation angle in radians.
         /// - `method`: The interpolation method to use for sampling pixels.
+        /// - `border`: The border handling mode to apply.
         ///
         /// Example usage:
         /// ```zig
-        /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear);
+        /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear, .zero);
         /// defer rotated.deinit(allocator);
         /// ```
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation) !Self {
-            return Transform(T).rotate(self, allocator, angle, method);
+        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
+            return Transform(T).rotate(self, allocator, angle, method, border);
         }
 
         /// Crops a rectangular region from the image.
@@ -609,13 +610,14 @@ pub fn Image(comptime T: type) type {
         /// - `out`: Pre-allocated destination image that defines the output size. The extracted content is
         ///          resampled to exactly fill this image using `method`.
         /// - `method`: Interpolation method used when sampling from the source.
+        /// - `border`: The border handling mode to apply.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation) void {
-            return Transform(T).extract(self, rect, angle, out, method);
+        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation, border: BorderMode) void {
+            return Transform(T).extract(self, rect, angle, out, method, border);
         }
 
         /// Inserts a source image into this image at the specified rectangle with rotation.
