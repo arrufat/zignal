@@ -9,10 +9,11 @@ const Allocator = std.mem.Allocator;
 const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
+const assignPixel = @import("../image.zig").assignPixel;
+const BorderMode = @import("border.zig").BorderMode;
+const computeCoords = @import("border.zig").computeCoords;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
-const BorderMode = @import("border.zig").BorderMode;
-const assignPixel = @import("../image.zig").assignPixel;
 
 /// Rotation bounds result
 pub const RotationBounds = struct { rows: u32, cols: u32 };
@@ -506,7 +507,6 @@ pub fn Transform(comptime T: type) type {
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
         /// Used by both `crop` and `extract` (in fast-path).
         fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self, border: BorderMode) void {
-            const computeCoords = @import("border.zig").computeCoords;
             for (0..out.rows) |r| {
                 const ir: i32 = @intCast(r);
                 for (0..out.cols) |c| {
