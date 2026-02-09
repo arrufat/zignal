@@ -176,22 +176,22 @@ test "rotate orthogonal fast paths" {
     image.at(2, 3).* = 12;
 
     // Test 0 degree rotation
-    var rotated_0 = try image.rotate(std.testing.allocator, 0, .bilinear);
+    var rotated_0 = try image.rotate(std.testing.allocator, 0, .bilinear, .mirror);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
-    var rotated_90 = try image.rotate(std.testing.allocator, std.math.pi / 2.0, .bilinear);
+    var rotated_90 = try image.rotate(std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
-    var rotated_180 = try image.rotate(std.testing.allocator, std.math.pi, .bilinear);
+    var rotated_180 = try image.rotate(std.testing.allocator, std.math.pi, .bilinear, .mirror);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
-    var rotated_270 = try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear);
+    var rotated_270 = try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -220,7 +220,7 @@ test "rotate arbitrary angle" {
     }
 
     // Test 45 degree rotation
-    var rotated = try image.rotate(std.testing.allocator, std.math.pi / 4.0, .bilinear);
+    var rotated = try image.rotate(std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content

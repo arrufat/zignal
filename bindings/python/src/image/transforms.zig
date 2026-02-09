@@ -243,6 +243,7 @@ pub const image_rotate_doc =
     \\## Parameters
     \\- `angle` (float): Rotation angle in radians counter-clockwise.
     \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
+    \\- `border` (`BorderMode`, optional): Border handling mode. Default is `BorderMode.MIRROR`.
     \\
     \\## Examples
     \\```python
@@ -257,6 +258,9 @@ pub const image_rotate_doc =
     \\
     \\# Rotate -30 degrees with Lanczos (slower, higher quality)
     \\rotated = img.rotate(math.radians(-30), Interpolation.LANCZOS)
+    \\
+    \\# Rotate 45 degrees with zero padding
+    \\rotated = img.rotate(math.radians(45), border=BorderMode.ZERO)
     \\```
 ;
 
@@ -268,12 +272,14 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const Params = struct {
         angle: f64,
         method: c_long = 1,
+        border: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
     const method_value = params.method;
+    const border_obj = params.border;
 
     const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         python.setValueError("Invalid interpolation method", .{});
@@ -281,9 +287,19 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     };
     const method = tagToInterpolation(tag_rotate);
 
-    return self.py_image.?.dispatch(.{ angle, method }, struct {
-        fn apply(img: anytype, a: f64, m: Interpolation) ?*c.PyObject {
-            const out = img.rotate(allocator, @floatCast(a), m) catch {
+    var border: zignal.BorderMode = .mirror;
+    if (border_obj) |obj| {
+        if (obj != c.Py_None()) {
+            border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch {
+                python.setValueError("Invalid border_mode", .{});
+                return null;
+            };
+        }
+    }
+
+    return self.py_image.?.dispatch(.{ angle, method, border }, struct {
+        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
+            const out = img.rotate(allocator, @floatCast(a), m, b) catch {
                 python.setMemoryError("image rotate");
                 return null;
             };

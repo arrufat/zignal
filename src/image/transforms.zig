@@ -11,6 +11,7 @@ const Rectangle = @import("../geometry.zig").Rectangle;
 const Image = @import("../image.zig").Image;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
+const BorderMode = @import("border.zig").BorderMode;
 const assignPixel = @import("../image.zig").assignPixel;
 
 /// Rotation bounds result
@@ -164,9 +165,8 @@ pub fn Transform(comptime T: type) type {
         /// - `allocator`: The allocator to use for the rotated image's data.
         /// - `angle`: The rotation angle in radians.
         /// - `method`: The interpolation method to use for sampling pixels.
-        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation) !Self {
-            const interpolation = @import("interpolation.zig");
-
+        /// - `border`: The border handling mode to apply.
+        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
             // Compute optimal bounds
             const bounds = rotateBounds(self, angle);
             const actual_rows = bounds.rows;
@@ -228,7 +228,7 @@ pub fn Transform(comptime T: type) type {
                     const src_x = rotated_dx + center.x();
                     const src_y = rotated_dy + center.y();
 
-                    rotated.at(r, c).* = if (interpolation.interpolate(T, self, src_x, src_y, method, .mirror)) |val| val else std.mem.zeroes(T);
+                    rotated.at(r, c).* = if (interpolate(T, self, src_x, src_y, method, border)) |val| val else std.mem.zeroes(T);
                 }
             }
 

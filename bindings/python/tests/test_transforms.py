@@ -82,3 +82,28 @@ class TestTransforms:
 
         warped = img.warp(sim, method=zignal.Interpolation.BICUBIC)
         assert warped is not None
+
+    def test_rotate_with_border(self):
+        import math
+        img = zignal.Image(10, 10, dtype=zignal.Rgb)
+        img.fill(zignal.Rgb(255, 255, 255))
+
+        # Rotate 45 degrees
+        # Default border (mirror)
+        rotated_mirror = img.rotate(math.radians(45))
+        assert rotated_mirror is not None
+        assert rotated_mirror.rows > 10
+        assert rotated_mirror.cols > 10
+
+        # Zero border
+        rotated_zero = img.rotate(math.radians(45), border=zignal.BorderMode.ZERO)
+        assert rotated_zero is not None
+
+        # Nearest neighbor and replicate border
+        rotated_replicate = img.rotate(
+            math.radians(45),
+            method=zignal.Interpolation.NEAREST_NEIGHBOR,
+            border=zignal.BorderMode.REPLICATE
+        )
+        assert rotated_replicate is not None
+

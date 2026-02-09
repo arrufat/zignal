@@ -572,14 +572,15 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use for the rotated image's data.
         /// - `angle`: The rotation angle in radians.
         /// - `method`: The interpolation method to use for sampling pixels.
+        /// - `border`: The border handling mode to apply.
         ///
         /// Example usage:
         /// ```zig
-        /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear);
+        /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear, .zero);
         /// defer rotated.deinit(allocator);
         /// ```
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation) !Self {
-            return Transform(T).rotate(self, allocator, angle, method);
+        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
+            return Transform(T).rotate(self, allocator, angle, method, border);
         }
 
         /// Crops a rectangular region from the image.
