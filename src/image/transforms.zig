@@ -514,8 +514,9 @@ pub fn Transform(comptime T: type) type {
                     const src_row = ir + rect_top;
                     const src_col = ic + rect_left;
 
-                    if (computeCoords(src_row, src_col, @intCast(self.rows), @intCast(self.cols), border)) |coords| {
-                        out.at(r, c).* = self.at(coords.row, coords.col).*;
+                    const coords = if (self.rows > 0 and self.cols > 0) computeCoords(src_row, src_col, @intCast(self.rows), @intCast(self.cols), border) else null;
+                    if (coords) |cds| {
+                        out.at(r, c).* = self.at(cds.row, cds.col).*;
                     } else {
                         out.at(r, c).* = std.mem.zeroes(T);
                     }

@@ -85,6 +85,7 @@ class TestTransforms:
 
     def test_rotate_with_border(self):
         import math
+
         img = zignal.Image(10, 10, dtype=zignal.Rgb)
         img.fill(zignal.Rgb(255, 255, 255))
 
@@ -108,7 +109,7 @@ class TestTransforms:
         rotated_replicate = img.rotate(
             math.radians(45),
             method=zignal.Interpolation.NEAREST_NEIGHBOR,
-            border=zignal.BorderMode.REPLICATE
+            border=zignal.BorderMode.REPLICATE,
         )
         assert rotated_replicate is not None
         # Corner should be white (replicated)
@@ -117,6 +118,7 @@ class TestTransforms:
 
     def test_extract_with_border(self):
         import math
+
         img = zignal.Image(10, 10, dtype=zignal.Rgb)
         img.fill(zignal.Rgb(255, 255, 255))
         rect = zignal.Rectangle(-5, -5, 5, 5)
@@ -147,19 +149,17 @@ class TestTransforms:
 
     def test_rotate_angle_validation(self):
         import math
+
         img = zignal.Image(10, 10, dtype=zignal.Rgb)
-        
+
         # NaN should raise ValueError
         with pytest.raises(ValueError, match="Angle must be a finite number"):
-            img.rotate(float('nan'))
-            
+            img.rotate(float("nan"))
+
         # Infinity should raise ValueError
         with pytest.raises(ValueError, match="Angle must be a finite number"):
-            img.rotate(float('inf'))
-            
+            img.rotate(float("inf"))
+
         # Out of f32 range should raise ValueError
         with pytest.raises(ValueError, match="Angle must be a finite number"):
             img.rotate(1e39)
-
-
-

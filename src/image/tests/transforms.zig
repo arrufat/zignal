@@ -405,3 +405,22 @@ test "insert applies blending when requested" {
     dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.normal);
     try expectEqualDeep(expected, dest.at(0, 0).*);
 }
+
+test "extract from empty image regression" {
+    const allocator = std.testing.allocator;
+    var empty = try Image(u8).init(allocator, 0, 0);
+    defer empty.deinit(allocator);
+
+    var out = try Image(u8).init(allocator, 2, 2);
+    defer out.deinit(allocator);
+
+    const rect = Rectangle(f32).init(0, 0, 2, 2);
+
+    // Should not panic with REPLICATE
+    empty.extract(rect, 0.0, out, .nearest_neighbor, .replicate);
+    try expectEqual(@as(u8, 0), out.at(0, 0).*);
+
+    // Should not panic with WRAP
+    empty.extract(rect, 0.0, out, .nearest_neighbor, .wrap);
+    try expectEqual(@as(u8, 0), out.at(0, 0).*);
+}
