@@ -30,9 +30,9 @@ fn tagToInterpolation(tag: InterpTag) Interpolation {
     };
 }
 
-fn validateAngle(angle: f64) bool {
-    if (!std.math.isFinite(angle) or angle < -std.math.floatMax(f32) or angle > std.math.floatMax(f32)) {
-        python.setValueError("Angle must be a finite number within f32 range", .{});
+fn validateF32(val: f64, name: []const u8) bool {
+    if (std.math.isNan(val) or std.math.isInf(val) or val < -3.402823466e+38 or val > 3.402823466e+38) {
+        python.setValueError("{s} must be a finite number within f32 range", .{name});
         return false;
     }
     return true;
@@ -117,6 +117,7 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         if (scale == -1.0 and c.PyErr_Occurred() != null) {
             return null;
         }
+        if (!validateF32(scale, "Scale factor")) return null;
         const scale_pos = python.validatePositive(f64, scale, "Scale factor") catch return null;
 
         const result = image_scale(self, @floatCast(scale_pos), method) catch |err| {
@@ -292,7 +293,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
 
-    if (!validateAngle(angle)) return null;
+    if (!validateF32(angle, "Angle")) return null;
 
     return self.py_image.?.dispatch(.{ angle, method, border }, struct {
         fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
@@ -591,7 +592,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
 
-    if (!validateAngle(angle)) return null;
+    if (!validateF32(angle, "Angle")) return null;
 
     // Determine output size
     var out_rows: u32 = @intFromFloat(@round(rect.height()));
@@ -718,7 +719,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         }
     }
 
-    if (!validateAngle(angle)) return null;
+    if (!validateF32(angle, "Angle")) return null;
 
     // Variant-aware in-place insert
     switch (self.py_image.?.data) {

@@ -163,3 +163,22 @@ class TestTransforms:
         # Out of f32 range should raise ValueError
         with pytest.raises(ValueError, match="Angle must be a finite number"):
             img.rotate(1e39)
+
+    def test_resize_scale_validation(self):
+        img = zignal.Image(10, 10, dtype=zignal.Rgb)
+
+        # NaN should raise ValueError
+        with pytest.raises(ValueError, match="Scale factor must be a finite number"):
+            img.resize(float("nan"))
+
+        # Infinity should raise ValueError
+        with pytest.raises(ValueError, match="Scale factor must be a finite number"):
+            img.resize(float("inf"))
+
+        # Out of f32 range should raise ValueError
+        with pytest.raises(ValueError, match="Scale factor must be a finite number"):
+            img.resize(1e39)
+
+        # Negative scale should raise ValueError (from validatePositive)
+        with pytest.raises(ValueError, match="Scale factor must be"):
+            img.resize(-1.0)
