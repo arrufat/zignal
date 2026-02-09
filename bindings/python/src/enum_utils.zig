@@ -194,3 +194,18 @@ pub fn longToUnionTag(comptime U: type, value: c_long) !TagOf(U) {
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;
 }
+
+/// Convert a c_long integer to a Zig enum value
+pub fn longToEnum(comptime E: type, value: c_long) !E {
+    const EI = getEnumInfo(E);
+    inline for (EI.fields) |field| {
+        if (value == field.value) {
+            return @enumFromInt(field.value);
+        }
+    }
+    var buf: [128]u8 = undefined;
+    const name = zignal.meta.getSimpleTypeName(E);
+    const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
+    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
+    return error.InvalidValue;
+}

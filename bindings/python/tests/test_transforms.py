@@ -89,13 +89,13 @@ class TestTransforms:
         img.fill(zignal.Rgb(255, 255, 255))
 
         # Rotate 45 degrees
-        # Default border (mirror)
-        rotated_mirror = img.rotate(math.radians(45))
-        assert rotated_mirror is not None
-        assert rotated_mirror.rows > 10
-        assert rotated_mirror.cols > 10
+        # Default border (ZERO)
+        rotated_default = img.rotate(math.radians(45))
+        assert rotated_default is not None
+        assert rotated_default.rows > 10
+        assert rotated_default.cols > 10
 
-        # Zero border
+        # Zero border explicit
         rotated_zero = img.rotate(math.radians(45), border=zignal.BorderMode.ZERO)
         assert rotated_zero is not None
 
@@ -106,4 +106,35 @@ class TestTransforms:
             border=zignal.BorderMode.REPLICATE
         )
         assert rotated_replicate is not None
+
+    def test_extract_with_border(self):
+        import math
+        img = zignal.Image(10, 10, dtype=zignal.Rgb)
+        img.fill(zignal.Rgb(255, 255, 255))
+        rect = zignal.Rectangle(-5, -5, 5, 5)
+
+        # Extract with default border (ZERO)
+        extracted_default = img.extract(rect)
+        assert extracted_default is not None
+        # Should be black (0,0,0) in top-left region as default is ZERO
+        tl = extracted_default[0, 0]
+        assert (tl.r, tl.g, tl.b) == (0, 0, 0)
+
+        # Extract with explicit mirror border
+        extracted_mirror = img.extract(rect, border=zignal.BorderMode.MIRROR)
+        assert extracted_mirror is not None
+        # Should NOT be black (it mirrors the white content)
+        tl = extracted_mirror[0, 0]
+        # Mirroring at -5 for size 10 image (0..9):
+        # -1 -> 1, -2 -> 2, ... -5 -> 5?
+        # Let's just check it's not black, assuming white background
+        assert (tl.r, tl.g, tl.b) == (255, 255, 255)
+
+        # Extract with replicate border
+        extracted_replicate = img.extract(rect, border=zignal.BorderMode.REPLICATE)
+        assert extracted_replicate is not None
+        # Should be white (255,255,255) as it replicates the edge
+        tl = extracted_replicate[0, 0]
+        assert (tl.r, tl.g, tl.b) == (255, 255, 255)
+
 

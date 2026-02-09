@@ -243,24 +243,21 @@ pub const image_rotate_doc =
     \\## Parameters
     \\- `angle` (float): Rotation angle in radians counter-clockwise.
     \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
-    \\- `border` (`BorderMode`, optional): Border handling mode. Default is `BorderMode.MIRROR`.
+    \\- `border` (`BorderMode`, optional): Border handling mode. Default is `BorderMode.ZERO`.
     \\
     \\## Examples
     \\```python
     \\import math
     \\img = Image.load("photo.png")
     \\
-    \\# Rotate 45 degrees with default bilinear interpolation
+    \\# Rotate 45 degrees with default bilinear interpolation and zero padding
     \\rotated = img.rotate(math.radians(45))
     \\
-    \\# Rotate 90 degrees with nearest neighbor (faster, lower quality)
+    \\# Rotate 90 degrees with nearest neighbor
     \\rotated = img.rotate(math.radians(90), Interpolation.NEAREST_NEIGHBOR)
     \\
-    \\# Rotate -30 degrees with Lanczos (slower, higher quality)
-    \\rotated = img.rotate(math.radians(-30), Interpolation.LANCZOS)
-    \\
-    \\# Rotate 45 degrees with zero padding
-    \\rotated = img.rotate(math.radians(45), border=BorderMode.ZERO)
+    \\# Rotate with mirror border
+    \\rotated = img.rotate(math.radians(45), border=BorderMode.MIRROR)
     \\```
 ;
 
@@ -272,14 +269,14 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const Params = struct {
         angle: f64,
         method: c_long = 1,
-        border: ?*c.PyObject = null,
+        border: c_long = 0,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
     const method_value = params.method;
-    const border_obj = params.border;
+    const border_value = params.border;
 
     const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
         python.setValueError("Invalid interpolation method", .{});
@@ -287,15 +284,10 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     };
     const method = tagToInterpolation(tag_rotate);
 
-    var border: zignal.BorderMode = .mirror;
-    if (border_obj) |obj| {
-        if (obj != c.Py_None()) {
-            border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch {
-                python.setValueError("Invalid border_mode", .{});
-                return null;
-            };
-        }
-    }
+    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch {
+        python.setValueError("Invalid border mode", .{});
+        return null;
+    };
 
     return self.py_image.?.dispatch(.{ angle, method, border }, struct {
         fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
@@ -549,6 +541,7 @@ pub const image_extract_doc =
     \\  - If int: output is a square of side `size`
     \\  - If tuple: output size as (rows, cols)
     \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
+    \\- `border` (BorderMode, optional): Border handling mode. Default: ZERO
     \\
     \\## Examples
     \\```python
@@ -559,14 +552,11 @@ pub const image_extract_doc =
     \\# Extract without rotation
     \\extracted = img.extract(rect)
     \\
-    \\# Extract with 45-degree rotation
+    \\# Extract with 45-degree rotation and zero padding
     \\rotated = img.extract(rect, angle=math.radians(45))
     \\
-    \\# Extract and resize to specific dimensions
-    \\resized = img.extract(rect, size=(50, 75))
-    \\
-    \\# Extract to a 64x64 square
-    \\square = img.extract(rect, size=64)
+    \\# Extract with mirror border
+    \\rotated = img.extract(rect, angle=math.radians(45), border=BorderMode.MIRROR)
     \\```
 ;
 
@@ -580,6 +570,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         angle: f64 = 0.0,
         size: ?*c.PyObject = null,
         method: c_long = 1,
+        border: c_long = 0,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -588,6 +579,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const angle = params.angle;
     const size_obj = params.size;
     const method_value = params.method;
+    const border_value = params.border;
 
     // Parse the Rectangle object
     const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
@@ -597,6 +589,11 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         return null;
     };
     const method = tagToInterpolation(tag_extract);
+
+    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch {
+        python.setValueError("Invalid border mode", .{});
+        return null;
+    };
 
     // Determine output size
     var out_rows: u32 = @intFromFloat(@round(rect.height()));
@@ -641,13 +638,13 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method }, struct {
-        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation) ?*c.PyObject {
+    return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method, border }, struct {
+        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).init(allocator, orows, ocols) catch {
                 c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
                 return null;
             };
-            img.extract(r, @floatCast(a), out, m);
+            img.extract(r, @floatCast(a), out, m, b);
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
