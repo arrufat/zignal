@@ -106,7 +106,7 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     }
 
-    const tag_resize = enum_utils.longToUnionTag(Interpolation, method_value) catch return null;
+    const tag_resize = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_resize);
 
     // Check if argument is a number (scale) or tuple (dimensions)
@@ -185,7 +185,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         return null;
     }
 
-    const tag_letterbox = enum_utils.longToUnionTag(Interpolation, method_value) catch return null;
+    const tag_letterbox = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_letterbox);
 
     // Check if argument is a number (square) or tuple (dimensions)
@@ -274,7 +274,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const method_value = params.method;
     const border_value = params.border;
 
-    const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch return null;
+    const tag_rotate = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_rotate);
 
     const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
@@ -337,7 +337,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const shape_obj = params.shape;
     const method_value = params.method;
 
-    const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch return null;
+    const tag_warp = enum_utils.longToEnum(Interpolation, @intCast(method_value)) catch return null;
     const method = tagToInterpolation(tag_warp);
 
     // Determine output dimensions
@@ -576,7 +576,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // Parse the Rectangle object
     const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
-    const tag_extract = enum_utils.longToUnionTag(Interpolation, method_value) catch return null;
+    const tag_extract = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_extract);
 
     const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
@@ -701,7 +701,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     // Parse the Rectangle object
     const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
-    const tag_insert = enum_utils.longToUnionTag(Interpolation, method_value) catch return null;
+    const tag_insert = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_insert);
 
     var blend_mode: Blending = .none;

@@ -180,31 +180,25 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     return error.InvalidValue;
 }
 
-/// Convert a c_long integer to the tag of a union(enum)
-pub fn longToUnionTag(comptime U: type, value: c_long) !TagOf(U) {
-    const EI = getEnumInfo(U);
-    inline for (EI.fields) |field| {
-        if (value == field.value) {
-            return @enumFromInt(field.value);
-        }
-    }
-    var buf: [128]u8 = undefined;
-    const name = zignal.meta.getSimpleTypeName(U);
-    const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
-    c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
-    return error.InvalidValue;
+/// Internal: resolve the underlying enum type for T (either T itself if enum, or its tag type if union)
+fn ResolvedEnum(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .@"enum" => T,
+        .@"union" => TagOf(T),
+        else => @compileError("Type " ++ @typeName(T) ++ " is not an enum or union(enum)"),
+    };
 }
 
-/// Convert a c_long integer to a Zig enum value
-pub fn longToEnum(comptime E: type, value: c_long) !E {
-    const EI = getEnumInfo(E);
+/// Convert a c_long integer to a Zig enum value (or union tag)
+pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
+    const EI = getEnumInfo(T);
     inline for (EI.fields) |field| {
         if (value == field.value) {
             return @enumFromInt(field.value);
         }
     }
     var buf: [128]u8 = undefined;
-    const name = zignal.meta.getSimpleTypeName(E);
+    const name = zignal.meta.getSimpleTypeName(T);
     const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;
