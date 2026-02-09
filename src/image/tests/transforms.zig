@@ -176,22 +176,22 @@ test "rotate orthogonal fast paths" {
     image.at(2, 3).* = 12;
 
     // Test 0 degree rotation
-    var rotated_0 = try image.rotate(std.testing.allocator, 0, .bilinear);
+    var rotated_0 = try image.rotate(std.testing.allocator, 0, .bilinear, .mirror);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
-    var rotated_90 = try image.rotate(std.testing.allocator, std.math.pi / 2.0, .bilinear);
+    var rotated_90 = try image.rotate(std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
-    var rotated_180 = try image.rotate(std.testing.allocator, std.math.pi, .bilinear);
+    var rotated_180 = try image.rotate(std.testing.allocator, std.math.pi, .bilinear, .mirror);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
-    var rotated_270 = try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear);
+    var rotated_270 = try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -220,7 +220,7 @@ test "rotate arbitrary angle" {
     }
 
     // Test 45 degree rotation
-    var rotated = try image.rotate(std.testing.allocator, std.math.pi / 4.0, .bilinear);
+    var rotated = try image.rotate(std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content
@@ -248,7 +248,7 @@ test "extract rotated rectangle basic and 90deg" {
     defer out0.deinit(allocator);
 
     // Angle 0: should match the submatrix directly
-    image.extract(rect, 0.0, out0, .nearest_neighbor);
+    image.extract(rect, 0.0, out0, .nearest_neighbor, .mirror);
 
     try expectEqual(@as(u8, 11), out0.at(0, 0).*);
     try expectEqual(@as(u8, 12), out0.at(0, 1).*);
@@ -264,7 +264,7 @@ test "extract rotated rectangle basic and 90deg" {
     var out90: Image(u8) = try .init(allocator, 3, 3);
     defer out90.deinit(allocator);
 
-    image.extract(rect, std.math.pi / 2.0, out90, .nearest_neighbor);
+    image.extract(rect, std.math.pi / 2.0, out90, .nearest_neighbor, .mirror);
 
     try expectEqual(@as(u8, 13), out90.at(0, 0).*);
     try expectEqual(@as(u8, 23), out90.at(0, 1).*);
@@ -294,13 +294,13 @@ test "extract single-pixel axis handling centers correctly" {
     // 1x1 output should sample rectangle center -> source (2,2) => 22
     var out1: Image(u8) = try .init(allocator, 1, 1);
     defer out1.deinit(allocator);
-    image.extract(rect, 0.0, out1, .nearest_neighbor);
+    image.extract(rect, 0.0, out1, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 22), out1.at(0, 0).*);
 
     // 1x3: rows==1 should sample center row (y=2), cols span left-to-right
     var out_row1: Image(u8) = try .init(allocator, 1, 3);
     defer out_row1.deinit(allocator);
-    image.extract(rect, 0.0, out_row1, .nearest_neighbor);
+    image.extract(rect, 0.0, out_row1, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 21), out_row1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_row1.at(0, 1).*);
     try expectEqual(@as(u8, 23), out_row1.at(0, 2).*);
@@ -308,7 +308,7 @@ test "extract single-pixel axis handling centers correctly" {
     // 3x1: cols==1 should sample center col (x=2), rows span top-to-bottom
     var out_col1: Image(u8) = try .init(allocator, 3, 1);
     defer out_col1.deinit(allocator);
-    image.extract(rect, 0.0, out_col1, .nearest_neighbor);
+    image.extract(rect, 0.0, out_col1, .nearest_neighbor, .mirror);
     try expectEqual(@as(u8, 12), out_col1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_col1.at(1, 0).*);
     try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
@@ -342,7 +342,7 @@ test "insert and extract inverse relationship" {
         // Extract region
         var extracted = try Image(u8).init(allocator, tc.size, tc.size);
         defer extracted.deinit(allocator);
-        source.extract(tc.rect, tc.angle, extracted, tc.method);
+        source.extract(tc.rect, tc.angle, extracted, tc.method, .mirror);
 
         // Insert back into blank canvas
         var canvas = try Image(u8).init(allocator, 64, 64);
@@ -404,4 +404,23 @@ test "insert applies blending when requested" {
     const expected = base.blend(overlay, color.Blending.normal);
     dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.normal);
     try expectEqualDeep(expected, dest.at(0, 0).*);
+}
+
+test "extract from empty image regression" {
+    const allocator = std.testing.allocator;
+    var empty = try Image(u8).init(allocator, 0, 0);
+    defer empty.deinit(allocator);
+
+    var out = try Image(u8).init(allocator, 2, 2);
+    defer out.deinit(allocator);
+
+    const rect = Rectangle(f32).init(0, 0, 2, 2);
+
+    // Should not panic with REPLICATE
+    empty.extract(rect, 0.0, out, .nearest_neighbor, .replicate);
+    try expectEqual(@as(u8, 0), out.at(0, 0).*);
+
+    // Should not panic with WRAP
+    empty.extract(rect, 0.0, out, .nearest_neighbor, .wrap);
+    try expectEqual(@as(u8, 0), out.at(0, 0).*);
 }

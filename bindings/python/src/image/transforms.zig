@@ -1,5 +1,7 @@
 //! Geometric transformations for Image objects
 
+const std = @import("std");
+
 const zignal = @import("zignal");
 const Interpolation = zignal.Interpolation;
 const Blending = zignal.Blending;
@@ -28,18 +30,19 @@ fn tagToInterpolation(tag: InterpTag) Interpolation {
     };
 }
 
-fn mapScaleError(err: anyerror) anyerror {
-    return switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        else => error.OutOfMemory,
-    };
+fn validateF32(val: f64, name: []const u8) bool {
+    if (std.math.isNan(val) or std.math.isInf(val) or val < -3.402823466e+38 or val > 3.402823466e+38) {
+        python.setValueError("{s} must be a finite number within f32 range", .{name});
+        return false;
+    }
+    return true;
 }
 
 fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObject {
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ scale, method }, struct {
         fn apply(img: anytype, s: f32, m: Interpolation) !*ImageObject {
-            const out = img.scale(allocator, s, m) catch |err| return mapScaleError(err);
+            const out = try img.scale(allocator, s, m);
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -104,10 +107,7 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         return null;
     }
 
-    const tag_resize = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_resize = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_resize);
 
     // Check if argument is a number (scale) or tuple (dimensions)
@@ -117,9 +117,13 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         if (scale == -1.0 and c.PyErr_Occurred() != null) {
             return null;
         }
+        if (!validateF32(scale, "Scale factor")) return null;
         const scale_pos = python.validatePositive(f64, scale, "Scale factor") catch return null;
 
-        const result = image_scale(self, @floatCast(scale_pos), method) catch return null;
+        const result = image_scale(self, @floatCast(scale_pos), method) catch |err| {
+            python.mapZigError(err, "image scale");
+            return null;
+        };
         return @ptrCast(result);
     } else if (c.PyTuple_Check(shape_or_scale) != 0) {
         // It's a tuple of dimensions
@@ -146,7 +150,10 @@ pub fn image_resize(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         const rows_pos = python.validatePositive(u32, rows, "Rows") catch return null;
         const cols_pos = python.validatePositive(u32, cols, "Cols") catch return null;
 
-        const result = image_reshape(self, rows_pos, cols_pos, method) catch return null;
+        const result = image_reshape(self, rows_pos, cols_pos, method) catch |err| {
+            python.mapZigError(err, "image reshape");
+            return null;
+        };
         return @ptrCast(result);
     } else {
         python.setTypeError("number or tuple", shape_or_scale);
@@ -186,10 +193,7 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         return null;
     }
 
-    const tag_letterbox = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_letterbox = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_letterbox);
 
     // Check if argument is a number (square) or tuple (dimensions)
@@ -200,7 +204,10 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
             return null;
         }
         const size_pos = python.validatePositive(u32, square_size, "Size") catch return null;
-        const result = image_letterbox_square(self, size_pos, method) catch return null;
+        const result = image_letterbox_square(self, size_pos, method) catch |err| {
+            python.mapZigError(err, "letterbox");
+            return null;
+        };
         return @ptrCast(result);
     } else if (c.PyTuple_Check(size) != 0) {
         // It's a tuple for dimensions
@@ -227,7 +234,10 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         const rows_pos = python.validatePositive(u32, rows, "Rows") catch return null;
         const cols_pos = python.validatePositive(u32, cols, "Cols") catch return null;
 
-        const result = image_letterbox_shape(self, rows_pos, cols_pos, method) catch return null;
+        const result = image_letterbox_shape(self, rows_pos, cols_pos, method) catch |err| {
+            python.mapZigError(err, "letterbox");
+            return null;
+        };
         return @ptrCast(result);
     } else {
         c.PyErr_SetString(c.PyExc_TypeError, "letterbox() argument must be an integer (square) or tuple (rows, cols)");
@@ -243,20 +253,21 @@ pub const image_rotate_doc =
     \\## Parameters
     \\- `angle` (float): Rotation angle in radians counter-clockwise.
     \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
+    \\- `border` (`BorderMode`, optional): Border handling mode. Default is `BorderMode.ZERO`.
     \\
     \\## Examples
     \\```python
     \\import math
     \\img = Image.load("photo.png")
     \\
-    \\# Rotate 45 degrees with default bilinear interpolation
+    \\# Rotate 45 degrees with default bilinear interpolation and zero padding
     \\rotated = img.rotate(math.radians(45))
     \\
-    \\# Rotate 90 degrees with nearest neighbor (faster, lower quality)
+    \\# Rotate 90 degrees with nearest neighbor
     \\rotated = img.rotate(math.radians(90), Interpolation.NEAREST_NEIGHBOR)
     \\
-    \\# Rotate -30 degrees with Lanczos (slower, higher quality)
-    \\rotated = img.rotate(math.radians(-30), Interpolation.LANCZOS)
+    \\# Rotate with mirror border
+    \\rotated = img.rotate(math.radians(45), border=BorderMode.MIRROR)
     \\```
 ;
 
@@ -268,22 +279,25 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const Params = struct {
         angle: f64,
         method: c_long = 1,
+        border: c_long = 0,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
     const method_value = params.method;
+    const border_value = params.border;
 
-    const tag_rotate = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_rotate = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_rotate);
 
-    return self.py_image.?.dispatch(.{ angle, method }, struct {
-        fn apply(img: anytype, a: f64, m: Interpolation) ?*c.PyObject {
-            const out = img.rotate(allocator, @floatCast(a), m) catch {
+    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
+
+    if (!validateF32(angle, "Angle")) return null;
+
+    return self.py_image.?.dispatch(.{ angle, method, border }, struct {
+        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
+            const out = img.rotate(allocator, @floatCast(a), m, b) catch {
                 python.setMemoryError("image rotate");
                 return null;
             };
@@ -334,10 +348,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const shape_obj = params.shape;
     const method_value = params.method;
 
-    const tag_warp = enum_utils.longToUnionTag(Interpolation, @intCast(method_value)) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_warp = enum_utils.longToEnum(Interpolation, @intCast(method_value)) catch return null;
     const method = tagToInterpolation(tag_warp);
 
     // Determine output dimensions
@@ -383,8 +394,8 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
+                    python.mapZigError(err, "warp image");
                     return null;
                 };
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
@@ -399,8 +410,8 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
+                    python.mapZigError(err, "warp image");
                     return null;
                 };
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
@@ -412,8 +423,8 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{ @floatCast(transform.matrix[2][0]), @floatCast(transform.matrix[2][1]), @floatCast(transform.matrix[2][2]) },
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch {
-                    c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to warp image");
+                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
+                    python.mapZigError(err, "warp image");
                     return null;
                 };
             } else {
@@ -442,8 +453,8 @@ pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            var out = img.dupe(allocator) catch {
-                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+            var out = img.dupe(allocator) catch |err| {
+                python.mapZigError(err, "flip image");
                 return null;
             };
             out.flipLeftRight();
@@ -468,8 +479,8 @@ pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            var out = img.dupe(allocator) catch {
-                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+            var out = img.dupe(allocator) catch |err| {
+                python.mapZigError(err, "flip image");
                 return null;
             };
             out.flipTopBottom();
@@ -512,8 +523,8 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     return self.py_image.?.dispatch(.{rect}, struct {
         fn apply(img: anytype, r: zignal.Rectangle(f32)) ?*c.PyObject {
-            const out = img.crop(allocator, r) catch {
-                python.setMemoryError("cropped image");
+            const out = img.crop(allocator, r) catch |err| {
+                python.mapZigError(err, "crop image");
                 return null;
             };
             return @ptrCast(moveImageToPython(out) orelse return null);
@@ -533,6 +544,7 @@ pub const image_extract_doc =
     \\  - If int: output is a square of side `size`
     \\  - If tuple: output size as (rows, cols)
     \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
+    \\- `border` (BorderMode, optional): Border handling mode. Default: ZERO
     \\
     \\## Examples
     \\```python
@@ -543,14 +555,11 @@ pub const image_extract_doc =
     \\# Extract without rotation
     \\extracted = img.extract(rect)
     \\
-    \\# Extract with 45-degree rotation
+    \\# Extract with 45-degree rotation and zero padding
     \\rotated = img.extract(rect, angle=math.radians(45))
     \\
-    \\# Extract and resize to specific dimensions
-    \\resized = img.extract(rect, size=(50, 75))
-    \\
-    \\# Extract to a 64x64 square
-    \\square = img.extract(rect, size=64)
+    \\# Extract with mirror border
+    \\rotated = img.extract(rect, angle=math.radians(45), border=BorderMode.MIRROR)
     \\```
 ;
 
@@ -564,6 +573,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         angle: f64 = 0.0,
         size: ?*c.PyObject = null,
         method: c_long = 1,
+        border: c_long = 0,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -572,15 +582,17 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const angle = params.angle;
     const size_obj = params.size;
     const method_value = params.method;
+    const border_value = params.border;
 
     // Parse the Rectangle object
     const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
-    const tag_extract = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_extract = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_extract);
+
+    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
+
+    if (!validateF32(angle, "Angle")) return null;
 
     // Determine output size
     var out_rows: u32 = @intFromFloat(@round(rect.height()));
@@ -625,13 +637,13 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method }, struct {
-        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation) ?*c.PyObject {
-            const out = @TypeOf(img.*).init(allocator, orows, ocols) catch {
-                c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
+    return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method, border }, struct {
+        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
+            const out = @TypeOf(img.*).init(allocator, orows, ocols) catch |err| {
+                python.mapZigError(err, "extract image");
                 return null;
             };
-            img.extract(r, @floatCast(a), out, m);
+            img.extract(r, @floatCast(a), out, m, b);
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -697,21 +709,17 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     // Parse the Rectangle object
     const rect = python.parse(zignal.Rectangle(f32), rect_obj) catch return null;
 
-    const tag_insert = enum_utils.longToUnionTag(Interpolation, method_value) catch {
-        python.setValueError("Invalid interpolation method", .{});
-        return null;
-    };
+    const tag_insert = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_insert);
 
     var blend_mode: Blending = .none;
     if (blend_obj) |obj| {
         if (obj != c.Py_None()) {
-            blend_mode = enum_utils.pyToEnum(Blending, obj) catch {
-                python.setValueError("Invalid blend_mode", .{});
-                return null;
-            };
+            blend_mode = enum_utils.pyToEnum(Blending, obj) catch return null;
         }
     }
+
+    if (!validateF32(angle, "Angle")) return null;
 
     // Variant-aware in-place insert
     switch (self.py_image.?.data) {
@@ -723,16 +731,16 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             switch (src_pimg.data) {
                 .gray => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgb => |img| {
-                    var src_converted = img.convert(u8, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(u8, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
                     dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgba => |img| {
-                    var src_converted = img.convert(u8, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(u8, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -747,8 +755,8 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(Rgb, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(Rgb, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -756,8 +764,8 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 },
                 .rgb => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgba => |img| {
-                    var src_converted = img.convert(Rgb, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(Rgb, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
@@ -772,16 +780,16 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(Rgba, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(Rgba, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
                     dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgb => |img| {
-                    var src_converted = img.convert(Rgba, allocator) catch {
-                        python.setMemoryError("source image conversion");
+                    var src_converted = img.convert(Rgba, allocator) catch |err| {
+                        python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
