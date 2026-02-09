@@ -137,4 +137,21 @@ class TestTransforms:
         tl = extracted_replicate[0, 0]
         assert (tl.r, tl.g, tl.b) == (255, 255, 255)
 
+    def test_rotate_angle_validation(self):
+        import math
+        img = zignal.Image(10, 10, dtype=zignal.Rgb)
+        
+        # NaN should raise ValueError
+        with pytest.raises(ValueError, match="Angle must be a finite number"):
+            img.rotate(float('nan'))
+            
+        # Infinity should raise ValueError
+        with pytest.raises(ValueError, match="Angle must be a finite number"):
+            img.rotate(float('inf'))
+            
+        # Out of f32 range should raise ValueError
+        with pytest.raises(ValueError, match="Angle must be a finite number"):
+            img.rotate(1e39)
+
+
 

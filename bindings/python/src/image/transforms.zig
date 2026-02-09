@@ -1,5 +1,7 @@
 //! Geometric transformations for Image objects
 
+const std = @import("std");
+
 const zignal = @import("zignal");
 const Interpolation = zignal.Interpolation;
 const Blending = zignal.Blending;
@@ -288,6 +290,11 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         python.setValueError("Invalid border mode", .{});
         return null;
     };
+
+    if (!std.math.isFinite(angle) or angle < -std.math.floatMax(f32) or angle > std.math.floatMax(f32)) {
+        python.setValueError("Angle must be a finite number within f32 range", .{});
+        return null;
+    }
 
     return self.py_image.?.dispatch(.{ angle, method, border }, struct {
         fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
@@ -595,6 +602,11 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         return null;
     };
 
+    if (!std.math.isFinite(angle) or angle < -std.math.floatMax(f32) or angle > std.math.floatMax(f32)) {
+        python.setValueError("Angle must be a finite number within f32 range", .{});
+        return null;
+    }
+
     // Determine output size
     var out_rows: u32 = @intFromFloat(@round(rect.height()));
     var out_cols: u32 = @intFromFloat(@round(rect.width()));
@@ -724,6 +736,11 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 return null;
             };
         }
+    }
+
+    if (!std.math.isFinite(angle) or angle < -std.math.floatMax(f32) or angle > std.math.floatMax(f32)) {
+        python.setValueError("Angle must be a finite number within f32 range", .{});
+        return null;
     }
 
     // Variant-aware in-place insert
