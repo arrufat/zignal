@@ -94,10 +94,15 @@ class TestTransforms:
         assert rotated_default is not None
         assert rotated_default.rows > 10
         assert rotated_default.cols > 10
+        # Corner should be black
+        px = rotated_default[0, 0]
+        assert (px.r, px.g, px.b) == (0, 0, 0)
 
         # Zero border explicit
         rotated_zero = img.rotate(math.radians(45), border=zignal.BorderMode.ZERO)
         assert rotated_zero is not None
+        px = rotated_zero[0, 0]
+        assert (px.r, px.g, px.b) == (0, 0, 0)
 
         # Nearest neighbor and replicate border
         rotated_replicate = img.rotate(
@@ -106,6 +111,9 @@ class TestTransforms:
             border=zignal.BorderMode.REPLICATE
         )
         assert rotated_replicate is not None
+        # Corner should be white (replicated)
+        px = rotated_replicate[0, 0]
+        assert (px.r, px.g, px.b) == (255, 255, 255)
 
     def test_extract_with_border(self):
         import math
