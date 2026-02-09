@@ -36,32 +36,9 @@ pub fn computeCoords(
     cols: isize,
     border: BorderMode,
 ) ?struct { row: usize, col: usize } {
-    switch (border) {
-        .zero => {
-            if (row < 0 or col < 0 or row >= rows or col >= cols) {
-                return null;
-            }
-            return .{ .row = @intCast(row), .col = @intCast(col) };
-        },
-        .replicate => {
-            const r = @max(0, @min(row, rows - 1));
-            const c = @max(0, @min(col, cols - 1));
-            return .{ .row = @intCast(r), .col = @intCast(c) };
-        },
-        .mirror => {
-            if (rows <= 0 or cols <= 0) return null;
-            if (rows == 1 and cols == 1) return .{ .row = 0, .col = 0 };
-
-            const r = resolveIndex(row, rows, .mirror).?;
-            const c = resolveIndex(col, cols, .mirror).?;
-            return .{ .row = r, .col = c };
-        },
-        .wrap => {
-            const r = @mod(row, rows);
-            const c = @mod(col, cols);
-            return .{ .row = @intCast(r), .col = @intCast(c) };
-        },
-    }
+    const r = resolveIndex(row, rows, border) orelse return null;
+    const c = resolveIndex(col, cols, border) orelse return null;
+    return .{ .row = r, .col = c };
 }
 
 /// Convenience function to resolve a single dimension index with border handling.
