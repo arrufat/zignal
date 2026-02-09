@@ -154,6 +154,23 @@ pub fn parse(comptime T: type, py_obj: ?*c.PyObject) !T {
             }
             return @floatCast(val);
         },
+        .@"enum" => |enum_info| {
+            // Try to parse as integer
+            const val = c.PyLong_AsLongLong(py_obj);
+            if (val == -1 and c.PyErr_Occurred() != null) {
+                return ConversionError.not_integer;
+            }
+
+            // Check if value matches any enum field
+            inline for (enum_info.fields) |field| {
+                if (val == field.value) {
+                    return @enumFromInt(field.value);
+                }
+            }
+
+            c.PyErr_SetString(c.PyExc_ValueError, "Invalid enum value");
+            return ConversionError.integer_out_of_range;
+        },
         .@"struct" => {
             // Point(2, T)
             if (T == Point(2, f32)) return parsePointTuple(f32, py_obj);
