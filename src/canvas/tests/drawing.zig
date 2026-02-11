@@ -489,3 +489,15 @@ test "bezier curve smoothness" {
     }
     try expect(black_pixel_count > 50); // Should have a reasonable number of pixels
 }
+
+test "fillCircleSoft handles out of bounds coordinates" {
+    const allocator = testing.allocator;
+    var img = try Image(u8).init(allocator, 400, 400);
+    defer img.deinit(allocator);
+    img.fill(0);
+
+    const canvas = Canvas(u8).init(allocator, img);
+    const l: Point(2, f32) = .init(.{ -500, 200 });
+    const r: Point(2, f32) = .init(.{ 900, 200 });
+    canvas.drawLine(l, r, @as(u8, 255), 5, .soft);
+}
