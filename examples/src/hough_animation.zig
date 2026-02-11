@@ -73,9 +73,9 @@ fn jet(v: f32) Rgba {
     }
 
     return Rgba{
-        .r = @intFromFloat(@max(0, @min(255, r * 255))),
-        .g = @intFromFloat(@max(0, @min(255, g * 255))),
-        .b = @intFromFloat(@max(0, @min(255, b * 255))),
+        .r = @intFromFloat(std.math.clamp(r * 255, 0, 255)),
+        .g = @intFromFloat(std.math.clamp(g * 255, 0, 255)),
+        .b = @intFromFloat(std.math.clamp(b * 255, 0, 255)),
         .a = 255,
     };
 }
@@ -116,20 +116,20 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
     img.fill(0);
     const allocator = std.heap.wasm_allocator;
     var canvas_gray = Canvas(u8).init(allocator, img);
-    canvas_gray.drawLine(l, r, @as(u8, 255), 1, .fast);
+    canvas_gray.drawLine(l, r, @as(u8, 255), 5, .soft);
 
     // 3. Compute Hough
     accumulator.fill(0);
     const offset_x = 50;
     const offset_y = 50;
-    const box = Rectangle(u32){
+    const box = Rectangle(f32){
         .l = offset_x,
         .t = offset_y,
         .r = offset_x + hough_size,
         .b = offset_y + hough_size,
     };
 
-    hough.compute(img, box, accumulator);
+    hough.compute(img, box.as(u32), accumulator);
 
     // 4. Find Max
     var max_val: u32 = 0;
@@ -140,10 +140,10 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
     }
 
     // 5. Output Result Image (Copy input + Draw overlays)
-    const result_img = Image(Rgba).initFromSlice(size, size, img_ptr[0 .. size * size]);
+    const result_img: Image(Rgba) = .initFromSlice(size, size, img_ptr[0 .. size * size]);
     img.convertInto(Rgba, result_img);
 
-    var canvas = Canvas(Rgba).init(allocator, result_img);
+    const canvas: Canvas(Rgba) = .init(allocator, result_img);
 
     // Draw detected line
     if (max_val > 0) {
@@ -155,17 +155,17 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
 
         if (lines.len > 0) {
             const line = lines[0];
-            const p1 = Point(2, f32).init(.{ line.p1.x() + offset_x, line.p1.y() + offset_y });
-            const p2 = Point(2, f32).init(.{ line.p2.x() + offset_x, line.p2.y() + offset_y });
-            canvas.drawLine(p1, p2, Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, 2, .soft);
+            const p1: Point(2, f32) = .init(.{ line.p1.x() + offset_x, line.p1.y() + offset_y });
+            const p2: Point(2, f32) = .init(.{ line.p2.x() + offset_x, line.p2.y() + offset_y });
+            canvas.drawLine(p1, p2, Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, 3, .soft);
         }
     }
 
     // Draw box
-    const tl = Point(2, f32).init(.{ @as(f32, @floatFromInt(box.l)), @as(f32, @floatFromInt(box.t)) });
-    const tr = Point(2, f32).init(.{ @as(f32, @floatFromInt(box.r)), @as(f32, @floatFromInt(box.t)) });
-    const br = Point(2, f32).init(.{ @as(f32, @floatFromInt(box.r)), @as(f32, @floatFromInt(box.b)) });
-    const bl = Point(2, f32).init(.{ @as(f32, @floatFromInt(box.l)), @as(f32, @floatFromInt(box.b)) });
+    const tl = box.topLeft();
+    const tr = box.topRight();
+    const br = box.bottomRight();
+    const bl = box.bottomLeft();
 
     const green = Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 };
     canvas.drawLine(tl, tr, green, 1, .fast);
