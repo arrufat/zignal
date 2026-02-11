@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
+const clamp = std.math.clamp;
 
 const convertColor = @import("../color.zig").convertColor;
 const isColor = @import("../color.zig").isColor;
@@ -62,7 +63,7 @@ pub fn Canvas(comptime T: type) type {
         /// Clamps a floating-point coordinate to image bounds and converts to u32 .
         /// Returns the clamped coordinate as a u32  index.
         inline fn clampToImageBounds(coord: f32, max_size: u32) u32 {
-            return @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(max_size)), coord)));
+            return @intFromFloat(clamp(coord, 0, @as(f32, @floatFromInt(max_size))));
         }
 
         /// Clamps a rectangle to image bounds and returns integer pixel coordinates.
@@ -547,7 +548,7 @@ pub fn Canvas(comptime T: type) type {
                     // Optimized distance calculation
                     const dpx = px - p1.x();
                     const dpy = py - p1.y();
-                    const t = @max(0, @min(1, (dpx * dx + dpy * dy) * inv_length_sq));
+                    const t = clamp((dpx * dx + dpy * dy) * inv_length_sq, 0, 1);
                     const closest_x = p1.x() + t * dx;
                     const closest_y = p1.y() + t * dy;
                     const dist_x = px - closest_x;
@@ -864,7 +865,7 @@ pub fn Canvas(comptime T: type) type {
                             alpha = @min(alpha, dist - (inner_radius - antialias_edge_offset));
                         }
 
-                        alpha = @max(0, @min(1, alpha));
+                        alpha = clamp(alpha, 0, 1);
 
                         if (alpha > 0) {
                             self.setPixel(.init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), c2.fade(alpha));
@@ -1117,7 +1118,7 @@ pub fn Canvas(comptime T: type) type {
                                 if (x > right_edge - 1) {
                                     alpha = @min(alpha, right_edge - (x - antialias_edge_offset));
                                 }
-                                alpha = @max(0, @min(1, alpha));
+                                alpha = clamp(alpha, 0, 1);
 
                                 if (alpha > 0) {
                                     self.setPixel(.init(.{ x, y }), c2.fade(alpha));
@@ -1201,10 +1202,12 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: u32 = @intFromFloat(@round(@max(0, center.x() - radius)));
-            const top: u32 = @intFromFloat(@round(@max(0, center.y() - radius)));
-            const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + radius)));
-            const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + radius)));
+            const left: u32 = @intFromFloat(clamp(@round(center.x() - radius), 0, fcols));
+            const top: u32 = @intFromFloat(clamp(@round(center.y() - radius), 0, frows));
+            const right: u32 = @intFromFloat(clamp(@round(center.x() + radius), 0, fcols));
+            const bottom: u32 = @intFromFloat(clamp(@round(center.y() + radius), 0, frows));
+
+            if (left >= right or top >= bottom) return;
 
             for (top..bottom) |r| {
                 const y = as(f32, r) - center.y();
@@ -1317,7 +1320,7 @@ pub fn Canvas(comptime T: type) type {
             const circ_coverage = if (dist <= radius - 1.0)
                 1.0
             else if (dist < radius + 1.0)
-                @max(0, @min(1, radius - dist + 0.5))
+                clamp(radius - dist + 0.5, 0, 1)
             else
                 0.0;
 
@@ -1654,7 +1657,7 @@ pub fn Canvas(comptime T: type) type {
         ///
         /// Returns control points for cubic Bézier: cp1 (outgoing from p0), cp2 (incoming to p1).
         fn calculateSmoothControlPoints(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), tension: f32) struct { cp1: Point(2, f32), cp2: Point(2, f32) } {
-            const tension_factor = 1 - @max(0, @min(1, tension));
+            const tension_factor = 1 - clamp(tension, 0, 1);
             return .{
                 .cp1 = .init(.{
                     p0.x() + (p1.x() - p0.x()) * tension_factor,
@@ -1846,8 +1849,8 @@ pub fn Canvas(comptime T: type) type {
                                                         const py0 = row_f;
                                                         const py1 = row_f + 1;
 
-                                                        const overlap_x = @max(0, @min(x1, px1) - @max(x0, px0));
-                                                        const overlap_y = @max(0, @min(y1, py1) - @max(y0, py0));
+                                                        const overlap_x = clamp(@min(x1, px1) - @max(x0, px0), 0, 1);
+                                                        const overlap_y = clamp(@min(y1, py1) - @max(y0, py0), 0, 1);
                                                         total_coverage += overlap_x * overlap_y;
                                                     }
                                                 }

@@ -116,15 +116,9 @@ pub fn Rectangle(comptime T: type) type {
         }
 
         /// Returns true if the point is inside the rectangle.
-        /// Can be called with a Point(2, T) or with x and y coordinates.
-        pub fn contains(self: Self, args: anytype) bool {
-            const ArgsType = @TypeOf(args);
-            const coords = switch (@typeInfo(ArgsType)) {
-                .@"struct" => |s| if (s.is_tuple) .{ args[0], args[1] } else .{ args.x(), args.y() },
-                else => @compileError("contains expects a Point(2, T) or a tuple .{x, y}"),
-            };
-            const x = meta.as(T, coords[0]);
-            const y = meta.as(T, coords[1]);
+        pub fn contains(self: Self, point: Point(2, T)) bool {
+            const x = point.x();
+            const y = point.y();
 
             switch (@typeInfo(T)) {
                 .float => {
@@ -138,41 +132,41 @@ pub fn Rectangle(comptime T: type) type {
             return true;
         }
 
-        /// Returns the center of the rectangle as an (x, y) tuple.
-        pub fn center(self: Self) std.meta.Tuple(&.{ T, T }) {
+        /// Returns the center of the rectangle.
+        pub fn center(self: Self) Point(2, T) {
             switch (@typeInfo(T)) {
                 .int => {
                     const half_width = @divTrunc(self.r - self.l, 2);
                     const half_height = @divTrunc(self.b - self.t, 2);
-                    return .{ self.l + half_width, self.t + half_height };
+                    return .init(.{ self.l + half_width, self.t + half_height });
                 },
                 .float => {
                     const half_width = (self.r - self.l) / 2;
                     const half_height = (self.b - self.t) / 2;
-                    return .{ self.l + half_width, self.t + half_height };
+                    return .init(.{ self.l + half_width, self.t + half_height });
                 },
                 else => @compileError("Unsupported type " ++ @typeName(T) ++ " for Rectangle"),
             }
         }
 
-        /// Returns the top-left corner as an (x, y) tuple.
-        pub fn topLeft(self: Self) std.meta.Tuple(&.{ T, T }) {
-            return .{ self.l, self.t };
+        /// Returns the top-left corner.
+        pub fn topLeft(self: Self) Point(2, T) {
+            return .init(.{ self.l, self.t });
         }
 
-        /// Returns the top-right corner as an (x, y) tuple.
-        pub fn topRight(self: Self) std.meta.Tuple(&.{ T, T }) {
-            return .{ self.r, self.t };
+        /// Returns the top-right corner.
+        pub fn topRight(self: Self) Point(2, T) {
+            return .init(.{ self.r, self.t });
         }
 
-        /// Returns the bottom-left corner as an (x, y) tuple.
-        pub fn bottomLeft(self: Self) std.meta.Tuple(&.{ T, T }) {
-            return .{ self.l, self.b };
+        /// Returns the bottom-left corner.
+        pub fn bottomLeft(self: Self) Point(2, T) {
+            return .init(.{ self.l, self.b });
         }
 
-        /// Returns the bottom-right corner as an (x, y) tuple.
-        pub fn bottomRight(self: Self) std.meta.Tuple(&.{ T, T }) {
-            return .{ self.r, self.b };
+        /// Returns the bottom-right corner.
+        pub fn bottomRight(self: Self) Point(2, T) {
+            return .init(.{ self.r, self.b });
         }
 
         /// Grows the given rectangle by expanding its borders by `amount`.
@@ -307,7 +301,7 @@ pub fn Rectangle(comptime T: type) type {
         /// - intersection.area / self.area ≥ coverage_thresh
         /// - intersection.area / other.area ≥ coverage_thresh
         /// Set `iou_thresh = 0` and `coverage_thresh = 0` to test simple intersection.
-        /// Use `contains` for directional containment checks.
+        /// Use `covers` for directional containment checks.
         pub fn overlaps(self: Self, other: Self, iou_thresh: f64, coverage_thresh: f64) bool {
             assert(iou_thresh >= 0 and iou_thresh <= 1);
             assert(coverage_thresh >= 0 and coverage_thresh <= 1);
@@ -387,14 +381,14 @@ pub fn Rectangle(comptime T: type) type {
 }
 
 test "Rectangle" {
-    const irect = Rectangle(isize){ .l = 0, .t = 0, .r = 640, .b = 480 };
+    const irect: Rectangle(isize) = .{ .l = 0, .t = 0, .r = 640, .b = 480 };
     try expectEqual(irect.width(), 640);
     try expectEqual(irect.height(), 480);
-    const frect = Rectangle(f64){ .l = 0, .t = 0, .r = 640, .b = 480 };
+    const frect: Rectangle(f64) = .{ .l = 0, .t = 0, .r = 640, .b = 480 };
     try expectEqual(frect.width(), 640);
     try expectEqual(frect.height(), 480);
-    try expectEqual(frect.contains(.{ 320, 240 }), true);
-    try expectEqual(irect.contains(.{ 640, 480 }), false);
+    try expectEqual(frect.contains(.init(.{ 320, 240 })), true);
+    try expectEqual(irect.contains(.init(.{ 640, 480 })), false);
     try expectEqualDeep(frect.as(isize), irect);
 }
 
@@ -493,82 +487,82 @@ test "Rectangle iou and overlaps" {
 }
 
 test "Rectangle contains rejects NaN" {
-    const rect = Rectangle(f32){ .l = -10.0, .t = -10.0, .r = 10.0, .b = 10.0 };
+    const rect: Rectangle(f32) = .{ .l = -10.0, .t = -10.0, .r = 10.0, .b = 10.0 };
     const nan = std.math.nan(f32);
-    try expectEqual(false, rect.contains(.{ nan, 0.0 }));
-    try expectEqual(false, rect.contains(.{ 0.0, nan }));
+    try expectEqual(false, rect.contains(.init(.{ nan, 0.0 })));
+    try expectEqual(false, rect.contains(.init(.{ 0.0, nan })));
 }
 
 test "Rectangle helpers" {
     const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
-    const rect = Rectangle(i32){ .l = 10, .t = 20, .r = 30, .b = 50 };
-    try expectEqual(rect.center(), .{ 20, 35 });
-    try expectEqual(rect.topLeft(), .{ 10, 20 });
-    try expectEqual(rect.topRight(), .{ 30, 20 });
-    try expectEqual(rect.bottomLeft(), .{ 10, 50 });
-    try expectEqual(rect.bottomRight(), .{ 30, 50 });
+    const rect: Rectangle(f32) = .{ .l = 10, .t = 20, .r = 30, .b = 50 };
+    try expectEqual(rect.center(), Point(2, f32).init(.{ 20, 35 }));
+    try expectEqual(rect.topLeft(), Point(2, f32).init(.{ 10, 20 }));
+    try expectEqual(rect.topRight(), Point(2, f32).init(.{ 30, 20 }));
+    try expectEqual(rect.bottomLeft(), Point(2, f32).init(.{ 10, 50 }));
+    try expectEqual(rect.bottomRight(), Point(2, f32).init(.{ 30, 50 }));
 
     const moved = rect.translate(5, -5);
-    try expectEqualDeep(moved, Rectangle(i32){ .l = 15, .t = 15, .r = 35, .b = 45 });
+    try expectEqualDeep(moved, Rectangle(f32){ .l = 15, .t = 15, .r = 35, .b = 45 });
 
     const moved_again = rect.translate(-5, 5);
-    try expectEqualDeep(moved_again, Rectangle(i32){ .l = 5, .t = 25, .r = 25, .b = 55 });
+    try expectEqualDeep(moved_again, Rectangle(f32){ .l = 5, .t = 25, .r = 25, .b = 55 });
 
-    const bounds = Rectangle(i32){ .l = 0, .t = 0, .r = 25, .b = 40 };
+    const bounds: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 25, .b = 40 };
     const clipped = rect.clip(bounds);
-    try expectEqualDeep(clipped, Rectangle(i32){ .l = 10, .t = 20, .r = 25, .b = 40 });
+    try expectEqualDeep(clipped, Rectangle(f32){ .l = 10, .t = 20, .r = 25, .b = 40 });
 
-    const outside = Rectangle(i32){ .l = 100, .t = 100, .r = 120, .b = 120 };
+    const outside: Rectangle(f32) = .{ .l = 100, .t = 100, .r = 120, .b = 120 };
     const clipped_empty = outside.clip(bounds);
     try expectEqual(true, clipped_empty.isEmpty());
 
-    const inner = Rectangle(i32){ .l = 12, .t = 22, .r = 18, .b = 30 };
+    const inner: Rectangle(f32) = .{ .l = 12, .t = 22, .r = 18, .b = 30 };
     try expectEqual(rect.covers(inner), true);
     try expectEqual(inner.covers(rect), false);
 
-    const overlapping = Rectangle(i32){ .l = 25, .t = 45, .r = 40, .b = 60 };
+    const overlapping: Rectangle(f32) = .{ .l = 25, .t = 45, .r = 40, .b = 60 };
     try expectEqual(rect.overlaps(overlapping, 0.0, 0.0), true);
     try expectEqual(rect.overlaps(outside, 0.0, 0.0), false);
 
     try expectApproxEqAbs(rect.diagonal(), std.math.hypot(20.0, 30.0), 1e-9);
 
-    const frect = Rectangle(f32){ .l = 0.0, .t = 0.0, .r = 2.0, .b = 2.0 };
-    try expectEqual(frect.center(), .{ 1.0, 1.0 });
-    const float_bounds = Rectangle(f32){ .l = -1.0, .t = -1.0, .r = 4.0, .b = 4.0 };
+    const frect: Rectangle(f32) = .{ .l = 0.0, .t = 0.0, .r = 2.0, .b = 2.0 };
+    try expectEqual(frect.center(), Point(2, f32).init(.{ 1.0, 1.0 }));
+    const float_bounds: Rectangle(f32) = .{ .l = -1.0, .t = -1.0, .r = 4.0, .b = 4.0 };
     try expectEqual(false, frect.clip(float_bounds).isEmpty());
-    try expectEqual(frect.covers(Rectangle(f32){ .l = 0.5, .t = 0.5, .r = 1.5, .b = 1.5 }), true);
+    try expectEqual(frect.covers(.{ .l = 0.5, .t = 0.5, .r = 1.5, .b = 1.5 }), true);
 }
 
 test "Rectangle merge" {
-    const rect1 = Rectangle(i32){ .l = 0, .t = 0, .r = 10, .b = 10 };
-    const rect2 = Rectangle(i32){ .l = 20, .t = 20, .r = 30, .b = 30 };
+    const rect1: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 10, .b = 10 };
+    const rect2: Rectangle(i32) = .{ .l = 20, .t = 20, .r = 30, .b = 30 };
     const merged = rect1.merge(rect2);
     try expectEqualDeep(merged, Rectangle(i32){ .l = 0, .t = 0, .r = 30, .b = 30 });
 
-    const empty = Rectangle(i32){ .l = 0, .t = 0, .r = 0, .b = 0 };
+    const empty: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 0, .b = 0 };
     try expectEqualDeep(rect1.merge(empty), rect1);
     try expectEqualDeep(empty.merge(rect1), rect1);
 }
 
 test "Rectangle perimeter and aspect ratio" {
-    const rect = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 50 };
+    const rect: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 100, .b = 50 };
     try expectEqual(rect.perimeter(), 300);
     try std.testing.expectApproxEqAbs(rect.aspectRatio(), 2.0, 1e-9);
 
-    const square = Rectangle(f32){ .l = 0, .t = 0, .r = 10.0, .b = 10.0 };
+    const square: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 10.0, .b = 10.0 };
     try expectEqual(square.perimeter(), 40.0);
     try std.testing.expectApproxEqAbs(square.aspectRatio(), 1.0, 1e-9);
 
-    const line = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 0 };
+    const line: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 100, .b = 0 };
     try std.testing.expect(line.aspectRatio() == std.math.inf(f64));
 
-    const point = Rectangle(i32){ .l = 0, .t = 0, .r = 0, .b = 0 };
+    const point: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 0, .b = 0 };
     try std.testing.expect(std.math.isNan(point.aspectRatio()));
 }
 
 test "Rectangle reorder" {
-    const flipped = Rectangle(i32){ .l = 100, .t = 100, .r = 0, .b = 0 };
+    const flipped: Rectangle(i32) = .{ .l = 100, .t = 100, .r = 0, .b = 0 };
     try expectEqual(flipped.isEmpty(), true);
     try expectEqual(flipped.width(), 0);
 
@@ -579,9 +573,9 @@ test "Rectangle reorder" {
 }
 
 test "Rectangle contains with Point" {
-    const rect = Rectangle(f32){ .l = 0, .t = 0, .r = 10, .b = 10 };
-    const p_in = Point(2, f32).init(.{ 5.0, 5.0 });
-    const p_out = Point(2, f32).init(.{ 15.0, 5.0 });
+    const rect: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 10, .b = 10 };
+    const p_in: Point(2, f32) = .init(.{ 5.0, 5.0 });
+    const p_out: Point(2, f32) = .init(.{ 15.0, 5.0 });
 
     try expectEqual(rect.contains(p_in), true);
     try expectEqual(rect.contains(p_out), false);

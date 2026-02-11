@@ -160,7 +160,7 @@ fn rectangle_center(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     _ = args;
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const p = rect.center();
-    return c.Py_BuildValue("(dd)", p[0], p[1]);
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
 }
 
 const rectangle_corner_doc =
@@ -171,28 +171,28 @@ fn rectangle_top_left(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     _ = args;
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const p = rect.topLeft();
-    return c.Py_BuildValue("(dd)", p[0], p[1]);
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
 }
 
 fn rectangle_top_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const p = rect.topRight();
-    return c.Py_BuildValue("(dd)", p[0], p[1]);
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
 }
 
 fn rectangle_bottom_left(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const p = rect.bottomLeft();
-    return c.Py_BuildValue("(dd)", p[0], p[1]);
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
 }
 
 fn rectangle_bottom_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = args;
     const rect = python.parse(Rectangle, self_obj) catch return null;
     const p = rect.bottomRight();
-    return c.Py_BuildValue("(dd)", p[0], p[1]);
+    return c.Py_BuildValue("(dd)", p.x(), p.y());
 }
 
 const rectangle_grow_doc =
