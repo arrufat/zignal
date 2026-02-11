@@ -2488,19 +2488,19 @@ fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_
             const src_y_f = (@as(f32, @floatFromInt(dst_y)) + 0.5) * scale_y - 0.5;
 
             // Get integer and fractional parts
-            const x0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(src_x_f)))));
-            const y0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(src_y_f)))));
-            const x1 = @min(7, x0 + 1);
-            const y1 = @min(7, y0 + 1);
+            const x0: usize = @intFromFloat(std.math.clamp(@floor(src_x_f), 0, 7));
+            const y0: usize = @intFromFloat(std.math.clamp(@floor(src_y_f), 0, 7));
+            const x1: usize = @min(7, x0 + 1);
+            const y1: usize = @min(7, y0 + 1);
 
             const fx = src_x_f - @as(f32, @floatFromInt(x0));
             const fy = src_y_f - @as(f32, @floatFromInt(y0));
 
             // Get the four surrounding pixels
-            const p00 = @as(f32, @floatFromInt(src_block[@as(usize, @intCast(y0)) * 8 + @as(usize, @intCast(x0))]));
-            const p10 = @as(f32, @floatFromInt(src_block[@as(usize, @intCast(y0)) * 8 + @as(usize, @intCast(x1))]));
-            const p01 = @as(f32, @floatFromInt(src_block[@as(usize, @intCast(y1)) * 8 + @as(usize, @intCast(x0))]));
-            const p11 = @as(f32, @floatFromInt(src_block[@as(usize, @intCast(y1)) * 8 + @as(usize, @intCast(x1))]));
+            const p00: f32 = @floatFromInt(src_block[y0 * 8 + x0]);
+            const p10: f32 = @floatFromInt(src_block[y0 * 8 + x1]);
+            const p01: f32 = @floatFromInt(src_block[y1 * 8 + x0]);
+            const p11: f32 = @floatFromInt(src_block[y1 * 8 + x1]);
 
             // Bilinear interpolation
             const interp_x0 = std.math.lerp(p00, p10, fx);
@@ -2809,26 +2809,26 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                         const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Horizontal interpolation for chroma
-                        const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
-                        const cx0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_x_f)))));
-                        const cx1 = @min(7, cx0 + 1);
-                        const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
+                        const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
+                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cx1: usize = @min(7, cx0 + 1);
+                        const fx: f32 = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
-                        const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
-                        const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
+                        const chroma_idx = py * 8 + cx0;
+                        const chroma_idx_next = py * 8 + cx1;
 
-                        const cb0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]));
-                        const cb1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]));
-                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
+                        const cb0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]);
+                        const cb1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]);
+                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb0, cb1, fx)));
 
-                        const cr0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]));
-                        const cr1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]));
-                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
+                        const cr0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]);
+                        const cr1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]);
+                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr0, cr1, fx)));
 
                         const ycbcr: Ycbcr = .{
-                            .y = @intCast(@min(255, @max(0, Y))),
-                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
-                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                            .y = @intCast(std.math.clamp(Y, 0, 255)),
+                            .cb = @intCast(std.math.clamp(Cb + 128, 0, 255)),
+                            .cr = @intCast(std.math.clamp(Cr + 128, 0, 255)),
                         };
                         const rgb = ycbcr.to(.rgb);
 
@@ -2864,26 +2864,26 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                         const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Horizontal interpolation for 4:1 chroma
-                        const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.25 - 0.5;
-                        const cx0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_x_f)))));
-                        const cx1 = @min(7, cx0 + 1);
-                        const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
+                        const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.25 - 0.5;
+                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cx1: usize = @min(7, cx0 + 1);
+                        const fx: f32 = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
-                        const chroma_idx = py * 8 + @as(usize, @intCast(cx0));
-                        const chroma_idx_next = py * 8 + @as(usize, @intCast(cx1));
+                        const chroma_idx = py * 8 + cx0;
+                        const chroma_idx_next = py * 8 + cx1;
 
-                        const cb0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]));
-                        const cb1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]));
-                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb0, cb1, fx))));
+                        const cb0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]);
+                        const cb1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]);
+                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb0, cb1, fx)));
 
-                        const cr0 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]));
-                        const cr1 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]));
-                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr0, cr1, fx))));
+                        const cr0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]);
+                        const cr1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]);
+                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr0, cr1, fx)));
 
                         const ycbcr: Ycbcr = .{
-                            .y = @intCast(@min(255, @max(0, Y))),
-                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
-                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                            .y = @intCast(std.math.clamp(Y, 0, 255)),
+                            .cb = @intCast(std.math.clamp(Cb + 128, 0, 255)),
+                            .cr = @intCast(std.math.clamp(Cr + 128, 0, 255)),
                         };
                         const rgb = ycbcr.to(.rgb);
 
@@ -2924,42 +2924,42 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                         const Y = state.block_storage.?[y_block_index][0][pixel_idx];
 
                         // Bilinear interpolation for chroma upsampling
-                        const chroma_y_f = (@as(f32, @floatFromInt(v * 8 + py)) + 0.5) * 0.5 - 0.5;
-                        const chroma_x_f = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
+                        const chroma_y_f: f32 = (@as(f32, @floatFromInt(v * 8 + py)) + 0.5) * 0.5 - 0.5;
+                        const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
 
-                        const cy0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_y_f)))));
-                        const cx0 = @max(0, @min(7, @as(i32, @intFromFloat(@floor(chroma_x_f)))));
-                        const cy1 = @min(7, cy0 + 1);
-                        const cx1 = @min(7, cx0 + 1);
+                        const cy0: usize = @intFromFloat(std.math.clamp(@floor(chroma_y_f), 0, 7));
+                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cy1: usize = @min(7, cy0 + 1);
+                        const cx1: usize = @min(7, cx0 + 1);
 
-                        const fy = chroma_y_f - @as(f32, @floatFromInt(cy0));
-                        const fx = chroma_x_f - @as(f32, @floatFromInt(cx0));
+                        const fy: f32 = chroma_y_f - @as(f32, @floatFromInt(cy0));
+                        const fx: f32 = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
                         // Get the four surrounding chroma values for Cb
-                        const cb00 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cb10 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
-                        const cb01 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cb11 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][1][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cb00: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][cy0 * 8 + cx0]);
+                        const cb10: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][cy0 * 8 + cx1]);
+                        const cb01: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][cy1 * 8 + cx0]);
+                        const cb11: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][cy1 * 8 + cx1]);
 
                         // Get the four surrounding chroma values for Cr
-                        const cr00 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cr10 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy0)) * 8 + @as(usize, @intCast(cx1))]));
-                        const cr01 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx0))]));
-                        const cr11 = @as(f32, @floatFromInt(state.block_storage.?[chroma_block_index][2][@as(usize, @intCast(cy1)) * 8 + @as(usize, @intCast(cx1))]));
+                        const cr00: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][cy0 * 8 + cx0]);
+                        const cr10: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][cy0 * 8 + cx1]);
+                        const cr01: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][cy1 * 8 + cx0]);
+                        const cr11: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][cy1 * 8 + cx1]);
 
                         // Bilinear interpolation
                         const cb_interp_x0 = std.math.lerp(cb00, cb10, fx);
                         const cb_interp_x1 = std.math.lerp(cb01, cb11, fx);
-                        const Cb = @as(i32, @intFromFloat(@round(std.math.lerp(cb_interp_x0, cb_interp_x1, fy))));
+                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb_interp_x0, cb_interp_x1, fy)));
 
                         const cr_interp_x0 = std.math.lerp(cr00, cr10, fx);
                         const cr_interp_x1 = std.math.lerp(cr01, cr11, fx);
-                        const Cr = @as(i32, @intFromFloat(@round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy))));
+                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy)));
 
                         const ycbcr: Ycbcr = .{
-                            .y = @intCast(@min(255, @max(0, Y))),
-                            .cb = @intCast(@min(255, @max(0, Cb + 128))),
-                            .cr = @intCast(@min(255, @max(0, Cr + 128))),
+                            .y = @intCast(std.math.clamp(Y, 0, 255)),
+                            .cb = @intCast(std.math.clamp(Cb + 128, 0, 255)),
+                            .cr = @intCast(std.math.clamp(Cr + 128, 0, 255)),
                         };
                         const rgb = ycbcr.to(.rgb);
 
