@@ -52,7 +52,13 @@ pub fn Transform(comptime T: type) type {
             const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
-            if (out.rows == 0 or out.cols == 0 or self.rows == 0 or self.cols == 0) {
+            if (out.rows == 0 or out.cols == 0) {
+                return .init(0, 0, 0, 0);
+            }
+
+            // If source is empty, fill output with zeros to prevent uninitialized memory leaks
+            if (self.rows == 0 or self.cols == 0) {
+                out.fill(std.mem.zeroes(T));
                 return .init(0, 0, 0, 0);
             }
 
