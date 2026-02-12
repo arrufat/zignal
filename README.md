@@ -73,6 +73,7 @@ zig-out/bin/zignal <command> [options]
 - [Contrast enhancement](https://arrufat.github.io/zignal/examples/contrast-enhancement.html) - Autocontrast and histogram equalization side-by-side
 - [White balance](https://arrufat.github.io/zignal/examples/white-balance.html) - Automatic color correction
 - [Feature matching](https://arrufat.github.io/zignal/examples/feature_matching.html) - ORB feature detection and matching between images
+- [Hough transform animation](https://arrufat.github.io/zignal/examples/hough-animation.html) - Real-time visualization of line detection
 - [Metrics analyzer](https://arrufat.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
 
 ## Features
