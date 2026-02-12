@@ -105,13 +105,13 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 /// - Scale=1: Uses memcpy for same-size copies
 /// - 2x upscaling: Specialized fast path for bilinear
 /// - RGB/RGBA images: Channel separation for optimized processing
-pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) !void {
+pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         if (self.data.ptr == out.data.ptr) return;
 
         if (self.isContiguous() and out.isContiguous()) {
-            const total = try std.math.mul(usize, self.rows, self.cols);
+            const total = @as(usize, self.rows) * self.cols;
             @memcpy(out.data[0..total], self.data[0..total]);
         } else {
             for (0..self.rows) |r| {
@@ -142,7 +142,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
             defer for (channels) |channel| allocator.free(channel);
 
             // Allocate output channels
-            const out_plane_size = try std.math.mul(usize, out.rows, out.cols);
+            const out_plane_size = @as(usize, out.rows) * out.cols;
             var out_channels: [channels.len][]u8 = undefined;
             var allocated_count: usize = 0;
             errdefer {

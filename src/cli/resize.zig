@@ -141,7 +141,7 @@ fn processImage(
     defer out.deinit(gpa);
 
     const start_time = std.Io.Clock.awake.now(io);
-    try img.resize(gpa, out, filter);
+    img.resize(gpa, out, filter);
     const end_time = std.Io.Clock.awake.now(io);
     const resize_ns = start_time.durationTo(end_time).toNanoseconds();
     std.log.debug("Resize operation took {d:.3} ms", .{@as(f64, @floatFromInt(resize_ns)) / std.time.ns_per_ms});
