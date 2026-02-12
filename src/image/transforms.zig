@@ -48,26 +48,23 @@ pub fn Transform(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(u32) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
             const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
             if (out.rows == 0 or out.cols == 0) {
-                return error.InvalidDimensions;
+                return .init(0, 0, 0, 0);
             }
 
-            // Ensure output has a contiguous buffer of the requested size
-            if (out.isContiguous() and out.data.len > 0) {
-                const new_size = try std.math.mul(usize, out.rows, out.cols);
-                out.data = try allocator.realloc(out.data, new_size);
-                out.stride = out.cols;
-            } else {
-                out.* = try .init(allocator, out.rows, out.cols);
+            // If source is empty, fill output with zeros to prevent uninitialized memory leaks
+            if (self.rows == 0 or self.cols == 0) {
+                out.fill(std.mem.zeroes(T));
+                return .init(0, 0, 0, 0);
             }
 
             // Early return if dimensions match - just copy and return full rectangle
             if (self.rows == out.rows and self.cols == out.cols) {
-                self.copy(out.*);
+                self.copy(out);
                 return out.getRectangle();
             }
 
@@ -77,7 +74,7 @@ pub fn Transform(comptime T: type) type {
 
             // If scale factors are exactly equal, aspect ratios match - skip letterboxing
             if (rows_scale == cols_scale) {
-                try interpolation.resize(T, allocator, self, out.*, method);
+                interpolation.resize(T, allocator, self, out, method);
                 return out.getRectangle();
             }
 
@@ -104,7 +101,7 @@ pub fn Transform(comptime T: type) type {
             const output_view = out.view(content_rect);
 
             // Resize the image into the view
-            try interpolation.resize(T, allocator, self, output_view, method);
+            interpolation.resize(T, allocator, self, output_view, method);
 
             // Zero only the padding bands
             out.setBorder(content_rect, std.mem.zeroes(T));
