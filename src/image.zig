@@ -392,10 +392,11 @@ pub fn Image(comptime T: type) type {
         pub fn copy(self: Self, dst: Self) void {
             assert(self.hasSameShape(dst));
             if (self.data.ptr == dst.data.ptr) {
-                return; // Same underlying data, nothing to copy
+                return;
             }
-            if (!self.isContiguous() or !dst.isContiguous()) {
-                // Row-by-row copy for views
+            if (self.isContiguous() and dst.isContiguous()) {
+                @memcpy(dst.data, self.data);
+            } else {
                 for (0..self.rows) |r| {
                     const src_row_start = r * self.stride;
                     const dst_row_start = r * dst.stride;
@@ -404,9 +405,6 @@ pub fn Image(comptime T: type) type {
                         self.data[src_row_start .. src_row_start + self.cols],
                     );
                 }
-            } else {
-                // Fast copy for non-views
-                @memcpy(dst.data, self.data);
             }
         }
 
@@ -534,11 +532,12 @@ pub fn Image(comptime T: type) type {
         pub fn interpolate(self: Self, x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
             return interpolation.interpolate(T, self, x, y, method, border);
         }
+
         /// Resizes an image to fit in out, using the specified interpolation method.
         /// The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) !void {
-            try interpolation.resize(T, allocator, self, out, method);
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) void {
+            interpolation.resize(T, allocator, self, out, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
@@ -552,15 +551,15 @@ pub fn Image(comptime T: type) type {
 
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
-            const scaled = try Self.init(allocator, new_rows, new_cols);
-            try self.resize(allocator, scaled, method);
+            const scaled: Self = try .init(allocator, new_rows, new_cols);
+            self.resize(allocator, scaled, method);
             return scaled;
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: *Self, method: Interpolation) !Rectangle(u32) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
             return Transform(T).letterbox(self, allocator, out, method);
         }
 

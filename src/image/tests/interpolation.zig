@@ -285,7 +285,7 @@ test "resize preserves value range" {
     defer dst.deinit(allocator);
 
     // Test resize with bilinear interpolation
-    try src.resize(allocator, dst, .bilinear);
+    src.resize(allocator, dst, .bilinear);
 
     // Check that all interpolated values are within the original range
     var min_val: u8 = 255;
@@ -306,7 +306,7 @@ test "resize preserves value range" {
 
 test "catmull-rom no overshoot property" {
     const allocator = std.testing.allocator;
-    var img = try Image(u8).init(allocator, 5, 5);
+    var img: Image(u8) = try .init(allocator, 5, 5);
     defer img.deinit(allocator);
 
     // Create an image with values between 50 and 200
