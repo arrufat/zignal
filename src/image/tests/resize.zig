@@ -29,7 +29,7 @@ test "letterbox maintains aspect ratio with padding" {
         var output: Image(u8) = try .init(allocator, 6, 6);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .bilinear);
+        const rect = src.letterbox(allocator, output, .bilinear);
 
         try expectEqual(@as(usize, 6), rect.width());
         try expectEqual(@as(usize, 3), rect.height());
@@ -71,7 +71,7 @@ test "letterbox maintains aspect ratio with padding" {
         var output: Image(Rgb) = try .init(allocator, 4, 12);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .nearest_neighbor);
+        const rect = src.letterbox(allocator, output, .nearest_neighbor);
 
         try expectEqual(@as(usize, 1), rect.width());
         try expectEqual(@as(usize, 4), rect.height());
@@ -102,10 +102,14 @@ test "letterbox edge cases" {
         defer src.deinit(allocator);
 
         const output: Image(u8) = .initFromSlice(0, 10, &[_]u8{});
-        try expectError(error.InvalidDimensions, src.letterbox(allocator, output, .nearest_neighbor));
+        const rect1 = src.letterbox(allocator, output, .nearest_neighbor);
+        try expectEqual(@as(usize, 0), rect1.width());
+        try expectEqual(@as(usize, 0), rect1.height());
 
         const output2: Image(u8) = .initFromSlice(10, 0, &[_]u8{});
-        try expectError(error.InvalidDimensions, src.letterbox(allocator, output2, .nearest_neighbor));
+        const rect2 = src.letterbox(allocator, output2, .nearest_neighbor);
+        try expectEqual(@as(usize, 0), rect2.width());
+        try expectEqual(@as(usize, 0), rect2.height());
     }
 
     // Test same aspect ratio - no padding needed
@@ -124,7 +128,7 @@ test "letterbox edge cases" {
         var output: Image(f32) = try .init(allocator, 8, 12);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .bicubic);
+        const rect = src.letterbox(allocator, output, .bicubic);
 
         // Should fill entire output
         try expectEqual(@as(usize, 12), rect.width());
@@ -142,7 +146,7 @@ test "letterbox edge cases" {
         var output: Image(u8) = try .init(allocator, 10, 10);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .nearest_neighbor);
+        const rect = src.letterbox(allocator, output, .nearest_neighbor);
 
         // 1x1 scaled to fit 10x10 = 10x10
         try expectEqual(@as(usize, 10), rect.width());
@@ -187,7 +191,7 @@ test "letterbox interpolation methods comparison" {
         var output: Image(u8) = try .init(allocator, 10, 10);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, method);
+        const rect = src.letterbox(allocator, output, method);
 
         // Should scale to 10x10 (no padding for square to square)
         try expectEqual(@as(usize, 10), rect.width());
@@ -210,7 +214,7 @@ test "letterbox extreme aspect ratios" {
         var output: Image(u8) = try .init(allocator, 64, 64);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .bilinear);
+        const rect = src.letterbox(allocator, output, .bilinear);
 
         // Should maintain aspect ratio
         const scale = @min(@as(f32, 64.0 / 2.0), @as(f32, 64.0 / 32.0));
@@ -236,7 +240,7 @@ test "letterbox extreme aspect ratios" {
         var output: Image(u8) = try .init(allocator, 64, 64);
         defer output.deinit(allocator);
 
-        const rect = try src.letterbox(allocator, output, .bicubic);
+        const rect = src.letterbox(allocator, output, .bicubic);
 
         // Should maintain aspect ratio
         const scale = @min(@as(f32, 64.0 / 32.0), @as(f32, 64.0 / 2.0));
