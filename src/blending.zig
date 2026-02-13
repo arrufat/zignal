@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
@@ -22,8 +23,8 @@ pub const Blending = enum {
 
 /// Helper to calculate the alpha of the resulting color.
 /// Inputs are normalized alpha values (0.0 - 1.0).
-fn compositeAlpha(base_a: anytype, overlay_a: anytype) @TypeOf(base_a) {
-    const F = @TypeOf(base_a);
+fn compositeAlpha(comptime F: type, base_a: F, overlay_a: F) F {
+    comptime assert(@typeInfo(F) == .float);
     return overlay_a + base_a * (@as(F, 1.0) - overlay_a);
 }
 
@@ -39,6 +40,7 @@ fn compositePixel(
     overlay_a: F,
     result_a: F,
 ) F {
+    comptime assert(@typeInfo(F) == .float);
     if (result_a == 0) return 0;
     return (blend_val * overlay_a + base_val * base_a * (@as(F, 1.0) - overlay_a)) / result_a;
 }
@@ -62,7 +64,7 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
     // Hidden base color should not influence blending
     if (base_f.a <= 0) return overlay;
 
-    const result_a = compositeAlpha(base_f.a, overlay_f.a);
+    const result_a = compositeAlpha(F, base_f.a, overlay_f.a);
     if (result_a <= 0) return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
     var blended: Rgba(F) = undefined;
@@ -126,9 +128,9 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
             blended.b = @abs(base_f.b - overlay_f.b);
         },
         .exclusion => {
-            blended.r = exclusionChannel(base_f.r, overlay_f.r);
-            blended.g = exclusionChannel(base_f.g, overlay_f.g);
-            blended.b = exclusionChannel(base_f.b, overlay_f.b);
+            blended.r = exclusionChannel(F, base_f.r, overlay_f.r);
+            blended.g = exclusionChannel(F, base_f.g, overlay_f.g);
+            blended.b = exclusionChannel(F, base_f.b, overlay_f.b);
         },
     }
 
@@ -145,6 +147,7 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
 // Channel implementations
 
 fn overlayChannel(comptime F: type, base: F, blend: F) F {
+    comptime assert(@typeInfo(F) == .float);
     if (base < 0.5) {
         return 2.0 * base * blend;
     } else {
@@ -153,6 +156,7 @@ fn overlayChannel(comptime F: type, base: F, blend: F) F {
 }
 
 fn softLightChannel(comptime F: type, base: F, blend: F) F {
+    comptime assert(@typeInfo(F) == .float);
     if (blend <= 0.5) {
         return base - (1.0 - 2.0 * blend) * base * (1.0 - base);
     } else {
@@ -162,6 +166,7 @@ fn softLightChannel(comptime F: type, base: F, blend: F) F {
 }
 
 fn colorDodgeChannel(comptime F: type, base: F, blend: F) F {
+    comptime assert(@typeInfo(F) == .float);
     if (base == 0) return 0;
     if (blend >= 1.0) return 1.0;
     const result = base / (1.0 - blend);
@@ -169,13 +174,15 @@ fn colorDodgeChannel(comptime F: type, base: F, blend: F) F {
 }
 
 fn colorBurnChannel(comptime F: type, base: F, blend: F) F {
+    comptime assert(@typeInfo(F) == .float);
     if (base >= 1.0) return 1.0;
     if (blend <= 0.0) return 0.0;
     const result = 1.0 - (1.0 - base) / blend;
     return @max(0.0, result);
 }
 
-fn exclusionChannel(base: anytype, blend: anytype) @TypeOf(base) {
+fn exclusionChannel(comptime F: type, base: F, blend: F) F {
+    comptime assert(@typeInfo(F) == .float);
     return base + blend - 2.0 * base * blend;
 }
 
