@@ -189,8 +189,8 @@ fn exclusionChannel(comptime F: type, base: F, blend: F) F {
 // Tests
 
 test "blend normal mode" {
-    const base = Rgba(u8){ .r = 100, .g = 100, .b = 100, .a = 255 };
-    const blend = Rgba(u8){ .r = 200, .g = 200, .b = 200, .a = 128 };
+    const base: Rgba(u8) = .{ .r = 100, .g = 100, .b = 100, .a = 255 };
+    const blend: Rgba(u8) = .{ .r = 200, .g = 200, .b = 200, .a = 128 };
 
     const result = blendColors(u8, base, blend, .normal);
 
@@ -223,8 +223,8 @@ test "blend screen mode" {
 }
 
 test "blend with transparent" {
-    const base = Rgba(u8){ .r = 100, .g = 100, .b = 100, .a = 255 };
-    const transparent = Rgba(u8){ .r = 200, .g = 200, .b = 200, .a = 0 };
+    const base: Rgba(u8) = .{ .r = 100, .g = 100, .b = 100, .a = 255 };
+    const transparent: Rgba(u8) = .{ .r = 200, .g = 200, .b = 200, .a = 0 };
 
     const result = blendColors(u8, base, transparent, .normal);
 
@@ -237,8 +237,8 @@ test "blend with transparent" {
 
 test "blend semi-transparent colors" {
     // Test Porter-Duff compositing with two semi-transparent colors
-    const base = Rgba(u8){ .r = 100, .g = 100, .b = 100, .a = 128 }; // ~50% opacity
-    const overlay = Rgba(u8){ .r = 200, .g = 200, .b = 200, .a = 128 }; // ~50% opacity
+    const base: Rgba(u8) = .{ .r = 100, .g = 100, .b = 100, .a = 128 }; // ~50% opacity
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 200, .b = 200, .a = 128 }; // ~50% opacity
 
     const result = blendColors(u8, base, overlay, .normal);
 
@@ -251,8 +251,8 @@ test "blend semi-transparent colors" {
 
 test "blend with transparent base" {
     // Test blending onto a fully transparent base
-    const base = Rgba(u8){ .r = 0, .g = 0, .b = 0, .a = 0 }; // Fully transparent
-    const overlay = Rgba(u8){ .r = 200, .g = 150, .b = 100, .a = 180 }; // ~70% opacity
+    const base: Rgba(u8) = .{ .r = 0, .g = 0, .b = 0, .a = 0 }; // Fully transparent
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 150, .b = 100, .a = 180 }; // ~70% opacity
 
     const result = blendColors(u8, base, overlay, .normal);
 
@@ -267,8 +267,8 @@ test "blend with transparent base" {
 
 test "blend modes with alpha" {
     // Test that blend modes work correctly with semi-transparent colors
-    const base = Rgba(u8){ .r = 100, .g = 100, .b = 100, .a = 200 }; // ~78% opacity
-    const overlay = Rgba(u8){ .r = 50, .g = 50, .b = 50, .a = 100 }; // ~39% opacity
+    const base: Rgba(u8) = .{ .r = 100, .g = 100, .b = 100, .a = 200 }; // ~78% opacity
+    const overlay: Rgba(u8) = .{ .r = 50, .g = 50, .b = 50, .a = 100 }; // ~39% opacity
 
     // Test multiply with alpha
     const multiply_result = blendColors(u8, base, overlay, .multiply);
@@ -289,8 +289,8 @@ test "blend modes with alpha" {
 }
 
 test "blend ignores hidden base color when fully transparent" {
-    const base = Rgba(u8){ .r = 25, .g = 75, .b = 125, .a = 0 };
-    const overlay = Rgba(u8){ .r = 200, .g = 150, .b = 100, .a = 180 };
+    const base: Rgba(u8) = .{ .r = 25, .g = 75, .b = 125, .a = 0 };
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 150, .b = 100, .a = 180 };
 
     const multiply_result = blendColors(u8, base, overlay, .multiply);
     try expectEqual(multiply_result.r, overlay.r);
@@ -312,8 +312,8 @@ test "blend ignores hidden base color when fully transparent" {
 }
 
 test "blend f64 support" {
-    const base = Rgba(f64){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
-    const overlay = Rgba(f64){ .r = 1.0, .g = 1.0, .b = 1.0, .a = 0.5 };
+    const base: Rgba(f64) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const overlay: Rgba(f64) = .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 0.5 };
 
     const result = blendColors(f64, base, overlay, .normal);
 
@@ -339,8 +339,8 @@ test "color burn edge cases" {
 
 test "blend none mode" {
     // Should just return the overlay (replace)
-    const base = Rgba(u8){ .r = 100, .g = 100, .b = 100, .a = 255 };
-    const overlay = Rgba(u8){ .r = 200, .g = 200, .b = 200, .a = 255 };
+    const base: Rgba(u8) = .{ .r = 100, .g = 100, .b = 100, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 200, .b = 200, .a = 255 };
     const result = blendColors(u8, base, overlay, .none);
     try expectEqual(result.r, overlay.r);
     try expectEqual(result.g, overlay.g);
@@ -349,14 +349,14 @@ test "blend none mode" {
 
 test "blend overlay mode" {
     // If base < 0.5: 2 * base * blend
-    const base_dark = Rgba(f32){ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
-    const overlay = Rgba(f32){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const base_dark: Rgba(f32) = .{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
+    const overlay: Rgba(f32) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
     const result_dark = blendColors(f32, base_dark, overlay, .overlay);
     // 2 * 0.25 * 0.5 = 0.25
     try expectEqual(result_dark.r, 0.25);
 
     // If base >= 0.5: 1 - 2 * (1 - base) * (1 - blend)
-    const base_light = Rgba(f32){ .r = 0.75, .g = 0.75, .b = 0.75, .a = 1.0 };
+    const base_light: Rgba(f32) = .{ .r = 0.75, .g = 0.75, .b = 0.75, .a = 1.0 };
     const result_light = blendColors(f32, base_light, overlay, .overlay);
     // 1 - 2 * (0.25) * (0.5) = 1 - 0.25 = 0.75
     try expectEqual(result_light.r, 0.75);
@@ -365,8 +365,8 @@ test "blend overlay mode" {
 test "blend hard_light mode" {
     // Hard light is overlay with base and overlay swapped
     // If overlay < 0.5: 2 * overlay * base
-    const base = Rgba(f32){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
-    const overlay_dark = Rgba(f32){ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
+    const base: Rgba(f32) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const overlay_dark: Rgba(f32) = .{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
     const result_dark = blendColors(f32, base, overlay_dark, .hard_light);
     // 2 * 0.25 * 0.5 = 0.25
     try expectEqual(result_dark.r, 0.25);
@@ -374,16 +374,16 @@ test "blend hard_light mode" {
 
 test "blend soft_light mode" {
     // If blend <= 0.5: base - (1 - 2*blend) * base * (1 - base)
-    const base = Rgba(f32){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
-    const overlay_dark = Rgba(f32){ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
+    const base: Rgba(f32) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const overlay_dark: Rgba(f32) = .{ .r = 0.25, .g = 0.25, .b = 0.25, .a = 1.0 };
     const result = blendColors(f32, base, overlay_dark, .soft_light);
     // 0.5 - (1 - 0.5) * 0.5 * 0.5 = 0.5 - 0.5 * 0.25 = 0.5 - 0.125 = 0.375
     try expectEqual(result.r, 0.375);
 }
 
 test "blend darken mode" {
-    const base = Rgba(u8){ .r = 100, .g = 200, .b = 100, .a = 255 };
-    const overlay = Rgba(u8){ .r = 200, .g = 100, .b = 100, .a = 255 };
+    const base: Rgba(u8) = .{ .r = 100, .g = 200, .b = 100, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 100, .b = 100, .a = 255 };
     const result = blendColors(u8, base, overlay, .darken);
     try expectEqual(result.r, 100);
     try expectEqual(result.g, 100);
@@ -391,8 +391,8 @@ test "blend darken mode" {
 }
 
 test "blend lighten mode" {
-    const base = Rgba(u8){ .r = 100, .g = 200, .b = 100, .a = 255 };
-    const overlay = Rgba(u8){ .r = 200, .g = 100, .b = 100, .a = 255 };
+    const base: Rgba(u8) = .{ .r = 100, .g = 200, .b = 100, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 100, .b = 100, .a = 255 };
     const result = blendColors(u8, base, overlay, .lighten);
     try expectEqual(result.r, 200);
     try expectEqual(result.g, 200);
@@ -400,8 +400,8 @@ test "blend lighten mode" {
 }
 
 test "blend difference mode" {
-    const base = Rgba(u8){ .r = 200, .g = 100, .b = 50, .a = 255 };
-    const overlay = Rgba(u8){ .r = 50, .g = 200, .b = 200, .a = 255 };
+    const base: Rgba(u8) = .{ .r = 200, .g = 100, .b = 50, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 50, .g = 200, .b = 200, .a = 255 };
     const result = blendColors(u8, base, overlay, .difference);
     try expectEqual(result.r, 150);
     try expectEqual(result.g, 100);
@@ -410,8 +410,8 @@ test "blend difference mode" {
 
 test "blend exclusion mode" {
     // base + blend - 2 * base * blend
-    const base = Rgba(f32){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
-    const overlay = Rgba(f32){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const base: Rgba(f32) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const overlay: Rgba(f32) = .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
     const result = blendColors(f32, base, overlay, .exclusion);
     // 0.5 + 0.5 - 2 * 0.25 = 1.0 - 0.5 = 0.5
     try expectEqual(result.r, 0.5);
