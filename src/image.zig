@@ -28,6 +28,7 @@ const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
 const binary = @import("image/binary.zig");
+const meta = @import("meta.zig");
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
@@ -43,6 +44,7 @@ pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
+pub const Colormap = @import("image/colormaps.zig").Colormap;
 const Blending = @import("blending.zig").Blending;
 
 /// Assigns `sample` into `dest`, applying blending when requested and converting
@@ -1232,6 +1234,74 @@ pub fn Image(comptime T: type) type {
             }
             return hist;
         }
+
+        /// Applies a colormap to the image, converting it to an RGB image.
+        /// If min_val or max_val are null in the map configuration, they are computed from the image content.
+        /// Uses luminance for multi-channel input images.
+        pub fn applyColormap(
+            self: Self,
+            allocator: Allocator,
+            map: Colormap,
+        ) !Image(Rgb) {
+            const colormaps = @import("image/colormaps.zig");
+
+            // Determine range
+            var min_val: f64 = 0;
+            var max_val: f64 = 0;
+
+            const range_opts = switch (map) {
+                .jet => |r| r,
+                .heat => |r| r,
+                .turbo => |r| r,
+                .viridis => |r| r,
+            };
+
+            if (range_opts.min == null or range_opts.max == null) {
+                // Find min/max
+                var min_v: f64 = std.math.floatMax(f64);
+                var max_v: f64 = -std.math.floatMax(f64);
+
+                // For empty image, use 0-1 range to avoid issues
+                if (self.size() == 0) {
+                    min_v = 0;
+                    max_v = 1;
+                } else {
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const val = if (comptime meta.isScalar(T)) meta.as(f64, self.at(r, c).*) else convertColor(f64, self.at(r, c).*);
+                            min_v = @min(min_v, val);
+                            max_v = @max(max_v, val);
+                        }
+                    }
+                }
+                min_val = range_opts.min orelse min_v;
+                max_val = range_opts.max orelse max_v;
+            } else {
+                min_val = range_opts.min.?;
+                max_val = range_opts.max.?;
+            }
+
+            // Ensure max >= min to avoid division by zero
+            if (max_val <= min_val) {
+                max_val = min_val + 1.0;
+            }
+
+            var out: Image(Rgb) = try .init(allocator, self.rows, self.cols);
+
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    const val = if (comptime meta.isScalar(T)) meta.as(f64, self.at(r, c).*) else convertColor(f64, self.at(r, c).*);
+                    const color = switch (map) {
+                        .jet => colormaps.jet(val, min_val, max_val),
+                        .heat => colormaps.heat(val, min_val, max_val),
+                        .turbo => colormaps.turbo(val, min_val, max_val),
+                        .viridis => colormaps.viridis(val, min_val, max_val),
+                    };
+                    out.at(r, c).* = color;
+                }
+            }
+            return out;
+        }
     };
 }
 
@@ -1250,4 +1320,5 @@ test {
     _ = @import("image/tests/shen_castan.zig");
     _ = @import("image/tests/binary.zig");
     _ = @import("image/hough.zig");
+    _ = @import("image/colormaps.zig");
 }
