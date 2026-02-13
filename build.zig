@@ -88,6 +88,7 @@ pub fn build(b: *Build) void {
         .{ .name = "font", .path = "src/font.zig" },
         .{ .name = "features", .path = "src/features.zig" },
         .{ .name = "optimization", .path = "src/optimization.zig" },
+        .{ .name = "meta", .path = "src/meta.zig" },
     };
 
     for (modules) |module| {
