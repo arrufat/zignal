@@ -1178,6 +1178,14 @@ pub const image_methods_metadata = blk: {
             .returns = "Image",
         },
         .{
+            .name = "apply_colormap",
+            .meth = @ptrCast(&filtering.image_apply_colormap),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_apply_colormap_doc,
+            .params = "self, colormap: Colormap",
+            .returns = "Image",
+        },
+        .{
             .name = "threshold_otsu",
             .meth = @ptrCast(&binary.image_threshold_otsu),
             .flags = c.METH_NOARGS,

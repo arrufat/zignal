@@ -11,11 +11,71 @@ const moveImageToPython = @import("../image.zig").moveImageToPython;
 const ImageObject = @import("../image.zig").ImageObject;
 const getImageType = @import("../image.zig").getImageType;
 const enum_utils = @import("../enum_utils.zig");
+const colormaps = @import("../colormaps.zig");
 const python = @import("../python.zig");
 const allocator = python.ctx.allocator;
 const c = python.c;
 
 // Filtering functions
+pub const image_apply_colormap_doc =
+    \\Apply a colormap to the image.
+    \\
+    \\Converts a grayscale or color image to a visualized RGB image using a colormap.
+    \\If min/max values are not provided in the colormap configuration, they are
+    \\automatically computed from the image content.
+    \\
+    \\## Parameters
+    \\- `colormap` (Colormap): Colormap configuration (e.g., `Colormap.jet()`).
+    \\
+    \\## Returns
+    \\- `Image`: A new RGB image.
+    \\
+    \\## Examples
+    \\```python
+    \\from zignal import Image, Colormap
+    \\
+    \\img = Image.load("depth.png")
+    \\
+    \\# Auto-range jet
+    \\vis = img.apply_colormap(Colormap.jet())
+    \\
+    \\# Fixed range turbo
+    \\vis = img.apply_colormap(Colormap.turbo(min=0.0, max=10.0))
+    \\```
+;
+
+pub fn image_apply_colormap(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
+    const Params = struct { colormap: ?*c.PyObject };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const colormap_obj = params.colormap orelse {
+        python.setValueError("Missing colormap argument", .{});
+        return null;
+    };
+
+    if (c.PyObject_IsInstance(colormap_obj, @ptrCast(&colormaps.ColormapType)) != 1) {
+        python.setTypeError("zignal.Colormap", colormap_obj);
+        return null;
+    }
+
+    const map_obj: *colormaps.ColormapObject = @ptrCast(colormap_obj);
+    const map = colormaps.toZigColormap(map_obj);
+
+    return self.py_image.?.dispatch(.{map}, struct {
+        fn apply(img: anytype, m: zignal.Colormap) ?*c.PyObject {
+            const colored = img.applyColormap(allocator, m) catch |err| {
+                python.setZigError(err);
+                return null;
+            };
+            return @ptrCast(moveImageToPython(colored) orelse return null);
+        }
+    }.apply);
+}
+
 pub const image_box_blur_doc =
     \\Apply a box blur to the image.
     \\

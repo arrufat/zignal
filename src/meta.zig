@@ -230,3 +230,14 @@ test "meta.clamp" {
     // Float to Float
     try expect(clamp(f32, 1.5) == 1.5);
 }
+
+/// Normalizes a value from [min, max] to [0, 1] and clamps it.
+/// Returns 0 if max <= min to avoid division by zero.
+/// Returns 0 if value, min, or max are NaN to avoid undefined behavior/panics.
+/// Only supports floating point types.
+pub fn normalize(comptime T: type, value: T, min: T, max: T) T {
+    if (@typeInfo(T) != .float) @compileError("normalize requires floating point type");
+    if (std.math.isNan(value) or std.math.isNan(min) or std.math.isNan(max)) return 0;
+    if (max <= min) return 0;
+    return std.math.clamp((value - min) / (max - min), 0, 1);
+}
