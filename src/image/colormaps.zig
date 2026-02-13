@@ -526,3 +526,13 @@ test "colormaps" {
         try testing.expectEqual(Rgb{ .r = 128, .g = 0, .b = 0 }, jet_clamped.at(0, 255).*);
     }
 }
+
+test "nan safety" {
+    const nan = std.math.nan(f64);
+    
+    // These calls should not panic
+    _ = jet(nan, 0, 1);
+    _ = heat(nan, 0, 1);
+    _ = turbo(nan, 0, 1);
+    _ = viridis(nan, 0, 1);
+}
