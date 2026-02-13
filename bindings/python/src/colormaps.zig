@@ -112,7 +112,8 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
             } else {
                 obj.min = c.PyFloat_AsDouble(min_obj);
                 if (c.PyErr_Occurred() != null) {
-                    c.Py_DECREF(@ptrCast(obj));
+                    // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
+                    c.Py_DECREF(@as(?*c.PyObject, @ptrCast(obj)));
                     return null;
                 }
                 obj.has_min = true;
@@ -127,7 +128,8 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
             } else {
                 obj.max = c.PyFloat_AsDouble(max_obj);
                 if (c.PyErr_Occurred() != null) {
-                    c.Py_DECREF(@ptrCast(obj));
+                    // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
+                    c.Py_DECREF(@as(?*c.PyObject, @ptrCast(obj)));
                     return null;
                 }
                 obj.has_max = true;
