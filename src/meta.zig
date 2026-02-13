@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Converts between numeric types: .@"enum", .int and .float.
-pub inline fn as(comptime T: type, from: anytype) T {
+pub fn as(comptime T: type, from: anytype) T {
     return switch (@typeInfo(@TypeOf(from))) {
         .@"enum" => {
             switch (@typeInfo(T)) {
@@ -29,7 +29,7 @@ pub inline fn as(comptime T: type, from: anytype) T {
 }
 
 /// Returns true if and only if T represents a scalar type.
-pub inline fn isScalar(comptime T: type) bool {
+pub fn isScalar(comptime T: type) bool {
     return switch (@typeInfo(T)) {
         .comptime_int, .int, .comptime_float, .float => true,
         else => false,
@@ -38,14 +38,14 @@ pub inline fn isScalar(comptime T: type) bool {
 
 /// Returns true if and only if T is a packed struct.
 /// Useful for determining memory layout and conversion strategies.
-pub inline fn isPacked(comptime T: type) bool {
+pub fn isPacked(comptime T: type) bool {
     const type_info = @typeInfo(T);
     return type_info == .@"struct" and type_info.@"struct".layout == .@"packed";
 }
 
 /// Strips all type names to their unqualified base names.
 /// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
-pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
+pub fn getSimpleTypeName(comptime T: type) []const u8 {
     const full_name = @typeName(T);
     if (std.mem.findLast(u8, full_name, ".")) |dot_index| {
         return full_name[dot_index + 1 ..];
@@ -55,7 +55,7 @@ pub inline fn getSimpleTypeName(comptime T: type) []const u8 {
 
 /// Strips generic type parameters from a simple type name.
 /// e.g., "Rgb(u8)" -> "Rgb"
-pub inline fn getGenericBaseName(comptime T: type) []const u8 {
+pub fn getGenericBaseName(comptime T: type) []const u8 {
     const name = getSimpleTypeName(T);
     if (std.mem.findScalar(u8, name, '(')) |idx| {
         return name[0..idx];
@@ -65,7 +65,7 @@ pub inline fn getGenericBaseName(comptime T: type) []const u8 {
 
 /// Converts a comptime string to lowercase.
 /// e.g., "RGB" -> "rgb", "OkLab" -> "oklab"
-pub inline fn comptimeLowercase(comptime input: []const u8) []const u8 {
+pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
     comptime var result: [input.len]u8 = undefined;
     inline for (input, 0..) |char, i| {
         result[i] = std.ascii.toLower(char);
@@ -90,7 +90,7 @@ pub fn allFieldsAreU8(comptime T: type) bool {
 /// const clamped_u8 = meta.clamp(u8, -5); // Returns 0
 /// const clamped_i16 = meta.clamp(i16, 40000); // Returns 32767
 /// ```
-pub inline fn clamp(comptime T: type, value: anytype) T {
+pub fn clamp(comptime T: type, value: anytype) T {
     switch (@typeInfo(T)) {
         .int => |int_info| {
             const ValueType = @TypeOf(value);
@@ -174,7 +174,7 @@ pub fn hasAlphaChannel(comptime T: type) bool {
 /// const is_rgba = meta.isRgba(Rgba); // true
 /// const not_rgba = meta.isRgba(Rgb); // false
 /// ```
-pub inline fn isRgba(comptime T: type) bool {
+pub fn isRgba(comptime T: type) bool {
     return isRgb(T) and hasAlphaChannel(T);
 }
 
@@ -207,4 +207,26 @@ pub fn safeCast(comptime T: type, value: anytype) !T {
         },
         else => @compileError("safeCast only supports numeric target types"),
     }
+}
+
+test "meta.clamp" {
+    const expect = std.testing.expect;
+
+    // Int to Int
+    try expect(clamp(u8, 256) == 255);
+    try expect(clamp(u8, -1) == 0);
+    try expect(clamp(u8, 100) == 100);
+
+    // Float to Int
+    try expect(clamp(u8, 100.4) == 100);
+    try expect(clamp(u8, 100.6) == 101); // Rounding
+    try expect(clamp(u8, -10.0) == 0);
+    try expect(clamp(u8, 300.0) == 255);
+
+    // Signed Int
+    try expect(clamp(i8, -130) == -128);
+    try expect(clamp(i8, 130) == 127);
+
+    // Float to Float
+    try expect(clamp(f32, 1.5) == 1.5);
 }
