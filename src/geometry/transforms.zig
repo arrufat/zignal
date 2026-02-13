@@ -82,7 +82,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             }
             const s_values = result.s;
             const tol = s_values.at(0, 0).* * std.math.floatEps(T) * @as(T, @floatFromInt(s_values.rows));
-            var effective_rank: usize = 0;
+            var effective_rank: u32 = 0;
             for (0..s_values.rows) |i| {
                 if (s_values.at(i, 0).* > tol) {
                     effective_rank += 1;
@@ -269,12 +269,12 @@ pub fn ProjectiveTransform(comptime T: type) type {
             const s = &result.s;
             self.matrix = blk: {
                 var min: T = s.at(0, 0).*;
-                var idx: usize = 0;
+                var idx: u32 = 0;
                 for (1..s.rows) |i| {
                     const val = s.at(i, 0).*;
                     if (val < min) {
                         min = val;
-                        idx = i;
+                        idx = @intCast(i);
                     }
                 }
                 break :blk u.col(idx).reshape(3, 3);
