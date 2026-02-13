@@ -15,6 +15,7 @@ const canvas_module = @import("canvas.zig");
 const main_module = @import("main.zig");
 const matrix_module = @import("matrix.zig");
 const motion_blur_module = @import("motion_blur.zig");
+const colormaps_module = @import("colormaps.zig");
 const fdm_module = @import("fdm.zig");
 const pca_module = @import("pca.zig");
 const rectangle_module = @import("rectangle.zig");
@@ -502,6 +503,18 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     // Generate MotionBlur classes
     try generateMotionBlurClasses(&stub);
 
+    // Generate Colormap classes
+    const colormap_properties = stub_metadata.extractPropertyInfo(&colormaps_module.colormap_properties_metadata);
+    const colormap_doc = std.mem.span(colormaps_module.ColormapType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "Colormap",
+        .doc = colormap_doc,
+        .methods = &colormaps_module.colormap_methods_metadata,
+        .properties = &colormap_properties,
+        .bases = &.{},
+        .special_methods = &colormaps_module.colormap_special_methods_metadata,
+    });
+
     // Generate all color classes
     inline for (color_registry.color_types) |ColorType| {
         try generateColorClass(&stub, ColorType);
@@ -698,6 +711,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Blending as Blending,
         \\    DrawMode as DrawMode,
         \\    MotionBlur as MotionBlur,
+        \\    Colormap as Colormap,
         \\    OptimizationPolicy as OptimizationPolicy,
         \\    Assignment as Assignment,
         \\    FeatureDistributionMatching as FeatureDistributionMatching,

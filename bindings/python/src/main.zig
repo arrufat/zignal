@@ -5,6 +5,7 @@ const bitmap_font = @import("bitmap_font.zig");
 const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
+const colormaps = @import("colormaps.zig");
 const convex_hull = @import("convex_hull.zig");
 const fdm = @import("fdm.zig");
 const image = @import("image.zig");
@@ -130,6 +131,13 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register MotionBlur classes
     motion_blur.registerMotionBlur(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register MotionBlur: {}", .{err});
+        c.Py_DECREF(m);
+        return null;
+    };
+
+    // Register Colormap classes
+    colormaps.registerColormap(@ptrCast(m)) catch |err| {
+        std.log.err("Failed to register Colormap: {}", .{err});
         c.Py_DECREF(m);
         return null;
     };
