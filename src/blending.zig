@@ -1,6 +1,7 @@
 const std = @import("std");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
+
 const Rgba = @import("color.zig").Rgba;
 
 pub const Blending = enum {
@@ -21,23 +22,25 @@ pub const Blending = enum {
 
 /// Helper to calculate the alpha of the resulting color.
 /// Inputs are normalized alpha values (0.0 - 1.0).
-fn compositeAlpha(base_a: f32, overlay_a: f32) f32 {
-    return overlay_a + base_a * (1.0 - overlay_a);
+fn compositeAlpha(base_a: anytype, overlay_a: anytype) @TypeOf(base_a) {
+    const F = @TypeOf(base_a);
+    return overlay_a + base_a * (@as(F, 1.0) - overlay_a);
 }
 
 /// Helper to composite a blended color channel (result of blend mode) with the base color
 /// using standard alpha compositing (Source Over).
-/// All inputs are normalized f32 (0.0 - 1.0).
+/// All inputs are normalized (0.0 - 1.0).
 /// Formula: C_out = (B(Cb, Cs) * as + Cb * ab * (1 - as)) / ar
 fn compositePixel(
-    base_val: f32,
-    base_a: f32,
-    blend_val: f32,
-    overlay_a: f32,
-    result_a: f32,
-) f32 {
+    comptime F: type,
+    base_val: F,
+    base_a: F,
+    blend_val: F,
+    overlay_a: F,
+    result_a: F,
+) F {
     if (result_a == 0) return 0;
-    return (blend_val * overlay_a + base_val * base_a * (1.0 - overlay_a)) / result_a;
+    return (blend_val * overlay_a + base_val * base_a * (@as(F, 1.0) - overlay_a)) / result_a;
 }
 
 /// Blends two RGBA colors using the specified blend mode.
@@ -49,8 +52,10 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
         .int => if (T != u8) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
         else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
     }
-    const base_f = if (T == u8) base.as(f32) else base;
-    const overlay_f = if (T == u8) overlay.as(f32) else overlay;
+    const F = if (T == u8) f32 else T;
+    const base_f = if (T == u8) base.as(F) else base;
+    const overlay_f = if (T == u8) overlay.as(F) else overlay;
+
     // Early return for fully transparent overlay
     if (overlay_f.a <= 0) return base;
 
@@ -60,7 +65,7 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
     const result_a = compositeAlpha(base_f.a, overlay_f.a);
     if (result_a <= 0) return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
-    var blended: Rgba(f32) = undefined;
+    var blended: Rgba(F) = undefined;
 
     switch (mode) {
         .none => return overlay,
@@ -80,30 +85,30 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
             blended.b = 1.0 - (1.0 - base_f.b) * (1.0 - overlay_f.b);
         },
         .overlay => {
-            blended.r = overlayChannel(base_f.r, overlay_f.r);
-            blended.g = overlayChannel(base_f.g, overlay_f.g);
-            blended.b = overlayChannel(base_f.b, overlay_f.b);
+            blended.r = overlayChannel(F, base_f.r, overlay_f.r);
+            blended.g = overlayChannel(F, base_f.g, overlay_f.g);
+            blended.b = overlayChannel(F, base_f.b, overlay_f.b);
         },
         .soft_light => {
-            blended.r = softLightChannel(base_f.r, overlay_f.r);
-            blended.g = softLightChannel(base_f.g, overlay_f.g);
-            blended.b = softLightChannel(base_f.b, overlay_f.b);
+            blended.r = softLightChannel(F, base_f.r, overlay_f.r);
+            blended.g = softLightChannel(F, base_f.g, overlay_f.g);
+            blended.b = softLightChannel(F, base_f.b, overlay_f.b);
         },
         .hard_light => {
             // Hard light is overlay with base and overlay swapped
-            blended.r = overlayChannel(overlay_f.r, base_f.r);
-            blended.g = overlayChannel(overlay_f.g, base_f.g);
-            blended.b = overlayChannel(overlay_f.b, base_f.b);
+            blended.r = overlayChannel(F, overlay_f.r, base_f.r);
+            blended.g = overlayChannel(F, overlay_f.g, base_f.g);
+            blended.b = overlayChannel(F, overlay_f.b, base_f.b);
         },
         .color_dodge => {
-            blended.r = colorDodgeChannel(base_f.r, overlay_f.r);
-            blended.g = colorDodgeChannel(base_f.g, overlay_f.g);
-            blended.b = colorDodgeChannel(base_f.b, overlay_f.b);
+            blended.r = colorDodgeChannel(F, base_f.r, overlay_f.r);
+            blended.g = colorDodgeChannel(F, base_f.g, overlay_f.g);
+            blended.b = colorDodgeChannel(F, base_f.b, overlay_f.b);
         },
         .color_burn => {
-            blended.r = colorBurnChannel(base_f.r, overlay_f.r);
-            blended.g = colorBurnChannel(base_f.g, overlay_f.g);
-            blended.b = colorBurnChannel(base_f.b, overlay_f.b);
+            blended.r = colorBurnChannel(F, base_f.r, overlay_f.r);
+            blended.g = colorBurnChannel(F, base_f.g, overlay_f.g);
+            blended.b = colorBurnChannel(F, base_f.b, overlay_f.b);
         },
         .darken => {
             blended.r = @min(base_f.r, overlay_f.r);
@@ -127,19 +132,19 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
         },
     }
 
-    const out = Rgba(if (T == u8) f32 else T){
-        .r = compositePixel(base_f.r, base_f.a, blended.r, overlay_f.a, result_a),
-        .g = compositePixel(base_f.g, base_f.a, blended.g, overlay_f.a, result_a),
-        .b = compositePixel(base_f.b, base_f.a, blended.b, overlay_f.a, result_a),
+    const out = Rgba(F){
+        .r = compositePixel(F, base_f.r, base_f.a, blended.r, overlay_f.a, result_a),
+        .g = compositePixel(F, base_f.g, base_f.a, blended.g, overlay_f.a, result_a),
+        .b = compositePixel(F, base_f.b, base_f.a, blended.b, overlay_f.a, result_a),
         .a = result_a,
     };
 
     return if (T == u8) out.as(T) else out;
 }
 
-// Channel implementations (f32)
+// Channel implementations
 
-fn overlayChannel(base: f32, blend: f32) f32 {
+fn overlayChannel(comptime F: type, base: F, blend: F) F {
     if (base < 0.5) {
         return 2.0 * base * blend;
     } else {
@@ -147,7 +152,7 @@ fn overlayChannel(base: f32, blend: f32) f32 {
     }
 }
 
-fn softLightChannel(base: f32, blend: f32) f32 {
+fn softLightChannel(comptime F: type, base: F, blend: F) F {
     if (blend <= 0.5) {
         return base - (1.0 - 2.0 * blend) * base * (1.0 - base);
     } else {
@@ -156,19 +161,21 @@ fn softLightChannel(base: f32, blend: f32) f32 {
     }
 }
 
-fn colorDodgeChannel(base: f32, blend: f32) f32 {
+fn colorDodgeChannel(comptime F: type, base: F, blend: F) F {
+    if (base == 0) return 0;
     if (blend >= 1.0) return 1.0;
     const result = base / (1.0 - blend);
     return @min(1.0, result);
 }
 
-fn colorBurnChannel(base: f32, blend: f32) f32 {
+fn colorBurnChannel(comptime F: type, base: F, blend: F) F {
+    if (base >= 1.0) return 1.0;
     if (blend <= 0.0) return 0.0;
     const result = 1.0 - (1.0 - base) / blend;
     return @max(0.0, result);
 }
 
-fn exclusionChannel(base: f32, blend: f32) f32 {
+fn exclusionChannel(base: anytype, blend: anytype) @TypeOf(base) {
     return base + blend - 2.0 * base * blend;
 }
 
@@ -295,4 +302,30 @@ test "blend ignores hidden base color when fully transparent" {
     try expectEqual(exclusion_result.g, overlay.g);
     try expectEqual(exclusion_result.b, overlay.b);
     try expectEqual(exclusion_result.a, overlay.a);
+}
+
+test "blend f64 support" {
+    const base = Rgba(f64){ .r = 0.5, .g = 0.5, .b = 0.5, .a = 1.0 };
+    const overlay = Rgba(f64){ .r = 1.0, .g = 1.0, .b = 1.0, .a = 0.5 };
+
+    const result = blendColors(f64, base, overlay, .normal);
+
+    try expectEqual(result.r, 0.75);
+    try expectEqual(result.a, 1.0);
+}
+
+test "color dodge edge cases" {
+    const F = f32;
+    // B=0, S=1 -> result=0 (W3C standard)
+    try expectEqual(colorDodgeChannel(F, 0.0, 1.0), 0.0);
+    // B=0.5, S=1 -> result=1
+    try expectEqual(colorDodgeChannel(F, 0.5, 1.0), 1.0);
+}
+
+test "color burn edge cases" {
+    const F = f32;
+    // B=1, S=0 -> result=1 (W3C standard)
+    try expectEqual(colorBurnChannel(F, 1.0, 0.0), 1.0);
+    // B=0.5, S=0 -> result=0
+    try expectEqual(colorBurnChannel(F, 0.5, 0.0), 0.0);
 }
