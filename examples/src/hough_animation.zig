@@ -41,45 +41,6 @@ fn rotatePoint(center: Point(2, f32), p: Point(2, f32), angle: f32) Point(2, f32
     });
 }
 
-// Convert grayscale/heatmap value to Jet colormap RGB
-// Matches dlib's colormap_jet implementation for better contrast
-fn jet(v: f32) Rgba {
-    const gray = v * 8.0;
-    const s = 0.5;
-    var r: f32 = 0;
-    var g: f32 = 0;
-    var b: f32 = 0;
-
-    if (gray <= 1.0) {
-        r = 0;
-        g = 0;
-        b = (gray + 1.0) * s;
-    } else if (gray <= 3.0) {
-        r = 0;
-        g = (gray - 1.0) * s;
-        b = 1.0;
-    } else if (gray <= 5.0) {
-        r = (gray - 3.0) * s;
-        g = 1.0;
-        b = (5.0 - gray) * s;
-    } else if (gray <= 7.0) {
-        r = 1.0;
-        g = (7.0 - gray) * s;
-        b = 0;
-    } else {
-        r = (9.0 - gray) * s;
-        g = 0;
-        b = 0;
-    }
-
-    return Rgba{
-        .r = @intFromFloat(std.math.clamp(r * 255, 0, 255)),
-        .g = @intFromFloat(std.math.clamp(g * 255, 0, 255)),
-        .b = @intFromFloat(std.math.clamp(b * 255, 0, 255)),
-        .a = 255,
-    };
-}
-
 pub export fn init() void {
     if (initialized) return;
     const allocator = std.heap.wasm_allocator;
@@ -131,13 +92,8 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
 
     hough.compute(img, box.as(u32), accumulator);
 
-    // 4. Find Max
-    var max_val: u32 = 0;
-    for (0..hough_size) |row| {
-        for (0..hough_size) |col| {
-            max_val = @max(max_val, accumulator.at(row, col).*);
-        }
-    }
+    // 4. Find Max (needed for line detection threshold)
+    const max_val = std.mem.max(u32, accumulator.data);
 
     // 5. Output Result Image (Copy input + Draw overlays)
     const result_img: Image(Rgba) = .initFromSlice(size, size, img_ptr[0 .. size * size]);
@@ -178,8 +134,9 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
     if (max_val > 0) {
         for (0..hough_size) |row| {
             for (0..hough_size) |col| {
-                const norm = @as(f32, @floatFromInt(accumulator.at(row, col).*)) / @as(f32, @floatFromInt(max_val));
-                acc_img.at(row, col).* = jet(norm);
+                const val = @as(f64, @floatFromInt(accumulator.at(row, col).*));
+                const rgb = zignal.colormaps.viridis(val, 0, @as(f64, @floatFromInt(max_val)));
+                acc_img.at(row, col).* = zignal.convertColor(Rgba, rgb);
             }
         }
     } else {
