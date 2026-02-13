@@ -10,6 +10,7 @@
 const std = @import("std");
 const math = std.math;
 const testing = std.testing;
+const meta = @import("../meta.zig");
 
 const Image = @import("../image.zig").Image;
 
@@ -36,19 +37,12 @@ pub const Colormap = union(enum) {
     };
 };
 
-/// Internal helper to clamp and normalize a value to [0, 1] based on a range.
-fn putInRange(min_v: f64, max_v: f64, val: f64) f64 {
-    if (max_v <= min_v) return 0.0;
-    const t = (val - min_v) / (max_v - min_v);
-    return math.clamp(t, 0.0, 1.0);
-}
-
 /// Maps a scalar value to a color using the "jet" colormap.
 /// Logic ported from dlib.
 pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
     // scale the value into the range [0, 8]
     // dlib uses 8 * put_in_range(0, 1, ...) which effectively clamps then scales.
-    const gray = 8.0 * putInRange(min_val, max_val, value);
+    const gray = 8.0 * meta.normalize(f64, value, min_val, max_val);
     const s = 1.0 / 2.0;
 
     var r: u8 = 0;
@@ -83,7 +77,7 @@ pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Maps a scalar value to a color using the "heat" colormap.
 /// Logic ported from dlib.
 pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
-    const gray = putInRange(min_val, max_val, value);
+    const gray = meta.normalize(f64, value, min_val, max_val);
 
     const r = @as(u8, @intFromFloat(@round(@min(gray / 0.4, 1.0) * 255.0)));
     var g: u8 = 0;
@@ -102,7 +96,7 @@ pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Maps a scalar value to a color using the "turbo" colormap.
 /// Uses a 256-entry lookup table.
 pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
-    const t = putInRange(min_val, max_val, value);
+    const t = meta.normalize(f64, value, min_val, max_val);
     const index: usize = @intFromFloat(@round(t * 255.0));
     const color = turbo_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };
@@ -111,7 +105,7 @@ pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Maps a scalar value to a color using the "viridis" colormap.
 /// Uses a 256-entry lookup table.
 pub fn viridis(value: f64, min_val: f64, max_val: f64) Rgb {
-    const t = putInRange(min_val, max_val, value);
+    const t = meta.normalize(f64, value, min_val, max_val);
     const index: usize = @intFromFloat(@round(t * 255.0));
     const color = viridis_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };

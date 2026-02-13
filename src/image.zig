@@ -13,7 +13,6 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const assert = std.debug.assert;
 
-const Gray = @import("color.zig").Gray;
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
 const convertColor = @import("color.zig").convertColor;
@@ -1267,7 +1266,7 @@ pub fn Image(comptime T: type) type {
                     max_v = 1;
                 } else {
                     for (self.data) |pixel| {
-                        const val = convertColor(Gray(f64), pixel).y;
+                        const val = convertColor(f64, pixel);
                         if (val < min_v) min_v = val;
                         if (val > max_v) max_v = val;
                     }
@@ -1288,7 +1287,7 @@ pub fn Image(comptime T: type) type {
 
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
-                    const val = convertColor(Gray(f64), self.at(r, c).*).y;
+                    const val = convertColor(f64, self.at(r, c).*);
                     const color = switch (map) {
                         .jet => colormaps.jet(val, min_val, max_val),
                         .heat => colormaps.heat(val, min_val, max_val),
