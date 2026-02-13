@@ -72,6 +72,7 @@ pub const ShenCastan = @import("image.zig").ShenCastan;
 pub const HoughTransform = @import("image.zig").HoughTransform;
 pub const BinaryKernel = @import("image.zig").BinaryKernel;
 pub const Colormap = @import("image.zig").Colormap;
+pub const colormaps = @import("image/colormaps.zig");
 
 // Terminal graphics protocols
 pub const terminal = @import("terminal.zig");
