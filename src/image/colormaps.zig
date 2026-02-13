@@ -40,9 +40,45 @@ pub const Colormap = union(enum) {
 /// Maps a scalar value to a color using the "jet" colormap.
 /// Logic ported from dlib.
 pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
-    // scale the value into the range [0, 8]
-    // dlib uses 8 * put_in_range(0, 1, ...) which effectively clamps then scales.
-    const gray = 8.0 * meta.normalize(f64, value, min_val, max_val);
+    const t = meta.normalize(f64, value, min_val, max_val);
+    const index: usize = @intFromFloat(@round(t * 255.0));
+    const color = jet_lut[index];
+    return .{ .r = color[0], .g = color[1], .b = color[2] };
+}
+
+/// Maps a scalar value to a color using the "heat" colormap.
+/// Logic ported from dlib.
+pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
+    const t = meta.normalize(f64, value, min_val, max_val);
+    const index: usize = @intFromFloat(@round(t * 255.0));
+    const color = heat_lut[index];
+    return .{ .r = color[0], .g = color[1], .b = color[2] };
+}
+
+/// Maps a scalar value to a color using the "turbo" colormap.
+/// Uses a 256-entry lookup table generated at comptime.
+pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
+    const t = meta.normalize(f64, value, min_val, max_val);
+    const index: usize = @intFromFloat(@round(t * 255.0));
+    const color = turbo_lut[index];
+    return .{ .r = color[0], .g = color[1], .b = color[2] };
+}
+
+/// Maps a scalar value to a color using the "viridis" colormap.
+/// Uses a 256-entry lookup table.
+pub fn viridis(value: f64, min_val: f64, max_val: f64) Rgb {
+    const t = meta.normalize(f64, value, min_val, max_val);
+    const index: usize = @intFromFloat(@round(t * 255.0));
+    const color = viridis_lut[index];
+    return .{ .r = color[0], .g = color[1], .b = color[2] };
+}
+
+// ============================================================================
+// LUT Generation
+// ============================================================================
+
+fn jetEval(t: f64) [3]u8 {
+    const gray = 8.0 * t;
     const s = 1.0 / 2.0;
 
     var r: u8 = 0;
@@ -70,305 +106,74 @@ pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
         g = 0;
         b = 0;
     }
-
-    return .{ .r = r, .g = g, .b = b };
+    return .{ r, g, b };
 }
 
-/// Maps a scalar value to a color using the "heat" colormap.
-/// Logic ported from dlib.
-pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
-    const gray = meta.normalize(f64, value, min_val, max_val);
+const jet_lut = blk: {
+    @setEvalBranchQuota(5000);
+    var lut: [256][3]u8 = undefined;
+    for (0..256) |i| {
+        lut[i] = jetEval(@as(f64, @floatFromInt(i)) / 255.0);
+    }
+    break :blk lut;
+};
 
-    const r = @as(u8, @intFromFloat(@round(@min(gray / 0.4, 1.0) * 255.0)));
+fn heatEval(t: f64) [3]u8 {
+    const r = @as(u8, @intFromFloat(@round(@min(t / 0.4, 1.0) * 255.0)));
     var g: u8 = 0;
     var b: u8 = 0;
 
-    if (gray > 0.4) {
-        g = @intFromFloat(@round(@min((gray - 0.4) / 0.4, 1.0) * 255.0));
+    if (t > 0.4) {
+        g = @intFromFloat(@round(@min((t - 0.4) / 0.4, 1.0) * 255.0));
     }
-    if (gray > 0.8) {
-        b = @intFromFloat(@round(@min((gray - 0.8) / 0.2, 1.0) * 255.0));
+    if (t > 0.8) {
+        b = @intFromFloat(@round(@min((t - 0.8) / 0.2, 1.0) * 255.0));
     }
-
-    return .{ .r = r, .g = g, .b = b };
+    return .{ r, g, b };
 }
 
-/// Maps a scalar value to a color using the "turbo" colormap.
-/// Uses a 256-entry lookup table.
-pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
-    const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
-    const color = turbo_lut[index];
-    return .{ .r = color[0], .g = color[1], .b = color[2] };
-}
+const heat_lut = blk: {
+    @setEvalBranchQuota(5000);
+    var lut: [256][3]u8 = undefined;
+    for (0..256) |i| {
+        lut[i] = heatEval(@as(f64, @floatFromInt(i)) / 255.0);
+    }
+    break :blk lut;
+};
 
-/// Maps a scalar value to a color using the "viridis" colormap.
-/// Uses a 256-entry lookup table.
-pub fn viridis(value: f64, min_val: f64, max_val: f64) Rgb {
-    const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
-    const color = viridis_lut[index];
-    return .{ .r = color[0], .g = color[1], .b = color[2] };
+fn turboEval(t: f64) [3]u8 {
+    // Polynomial approximation coefficients from Google
+    // https://gist.github.com/mikhailov-work/0d177465a8151be6ede748bc5b38297f
+    const r_coeffs = @Vector(6, f64){ 0.13572138, 4.61539260, -42.66032258, 132.13108234, -152.94239396, 59.28637943 };
+    const g_coeffs = @Vector(6, f64){ 0.09140261, 2.19418839, 4.84296658, -14.18503333, 4.27729857, 2.82956604 };
+    const b_coeffs = @Vector(6, f64){ 0.10667330, 12.64194608, -60.58204836, 110.36276771, -89.90310912, 27.34824973 };
+
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const t4 = t3 * t;
+    const t5 = t4 * t;
+    const v = @Vector(6, f64){ 1.0, t, t2, t3, t4, t5 };
+
+    // dot product equivalent
+    const r_val = @reduce(.Add, v * r_coeffs);
+    const g_val = @reduce(.Add, v * g_coeffs);
+    const b_val = @reduce(.Add, v * b_coeffs);
+
+    return .{
+        @intFromFloat(@round(math.clamp(r_val, 0.0, 1.0) * 255.0)),
+        @intFromFloat(@round(math.clamp(g_val, 0.0, 1.0) * 255.0)),
+        @intFromFloat(@round(math.clamp(b_val, 0.0, 1.0) * 255.0)),
+    };
 }
 
 // Generated using matplotlib.colormaps['turbo']
-const turbo_lut = [_][3]u8{
-    .{ 48, 18, 59 },
-    .{ 50, 21, 67 },
-    .{ 51, 24, 74 },
-    .{ 52, 27, 81 },
-    .{ 53, 30, 88 },
-    .{ 54, 33, 95 },
-    .{ 55, 36, 102 },
-    .{ 56, 39, 109 },
-    .{ 57, 42, 115 },
-    .{ 58, 45, 121 },
-    .{ 59, 47, 128 },
-    .{ 60, 50, 134 },
-    .{ 61, 53, 139 },
-    .{ 62, 56, 145 },
-    .{ 63, 59, 151 },
-    .{ 63, 62, 156 },
-    .{ 64, 64, 162 },
-    .{ 65, 67, 167 },
-    .{ 65, 70, 172 },
-    .{ 66, 73, 177 },
-    .{ 66, 75, 181 },
-    .{ 67, 78, 186 },
-    .{ 68, 81, 191 },
-    .{ 68, 84, 195 },
-    .{ 68, 86, 199 },
-    .{ 69, 89, 203 },
-    .{ 69, 92, 207 },
-    .{ 69, 94, 211 },
-    .{ 70, 97, 214 },
-    .{ 70, 100, 218 },
-    .{ 70, 102, 221 },
-    .{ 70, 105, 224 },
-    .{ 70, 107, 227 },
-    .{ 71, 110, 230 },
-    .{ 71, 113, 233 },
-    .{ 71, 115, 235 },
-    .{ 71, 118, 238 },
-    .{ 71, 120, 240 },
-    .{ 71, 123, 242 },
-    .{ 70, 125, 244 },
-    .{ 70, 128, 246 },
-    .{ 70, 130, 248 },
-    .{ 70, 133, 250 },
-    .{ 70, 135, 251 },
-    .{ 69, 138, 252 },
-    .{ 69, 140, 253 },
-    .{ 68, 143, 254 },
-    .{ 67, 145, 254 },
-    .{ 66, 148, 255 },
-    .{ 65, 150, 255 },
-    .{ 64, 153, 255 },
-    .{ 62, 155, 254 },
-    .{ 61, 158, 254 },
-    .{ 59, 160, 253 },
-    .{ 58, 163, 252 },
-    .{ 56, 165, 251 },
-    .{ 55, 168, 250 },
-    .{ 53, 171, 248 },
-    .{ 51, 173, 247 },
-    .{ 49, 175, 245 },
-    .{ 47, 178, 244 },
-    .{ 46, 180, 242 },
-    .{ 44, 183, 240 },
-    .{ 42, 185, 238 },
-    .{ 40, 188, 235 },
-    .{ 39, 190, 233 },
-    .{ 37, 192, 231 },
-    .{ 35, 195, 228 },
-    .{ 34, 197, 226 },
-    .{ 32, 199, 223 },
-    .{ 31, 201, 221 },
-    .{ 30, 203, 218 },
-    .{ 28, 205, 216 },
-    .{ 27, 208, 213 },
-    .{ 26, 210, 210 },
-    .{ 26, 212, 208 },
-    .{ 25, 213, 205 },
-    .{ 24, 215, 202 },
-    .{ 24, 217, 200 },
-    .{ 24, 219, 197 },
-    .{ 24, 221, 194 },
-    .{ 24, 222, 192 },
-    .{ 24, 224, 189 },
-    .{ 25, 226, 187 },
-    .{ 25, 227, 185 },
-    .{ 26, 228, 182 },
-    .{ 28, 230, 180 },
-    .{ 29, 231, 178 },
-    .{ 31, 233, 175 },
-    .{ 32, 234, 172 },
-    .{ 34, 235, 170 },
-    .{ 37, 236, 167 },
-    .{ 39, 238, 164 },
-    .{ 42, 239, 161 },
-    .{ 44, 240, 158 },
-    .{ 47, 241, 155 },
-    .{ 50, 242, 152 },
-    .{ 53, 243, 148 },
-    .{ 56, 244, 145 },
-    .{ 60, 245, 142 },
-    .{ 63, 246, 138 },
-    .{ 67, 247, 135 },
-    .{ 70, 248, 132 },
-    .{ 74, 248, 128 },
-    .{ 78, 249, 125 },
-    .{ 82, 250, 122 },
-    .{ 85, 250, 118 },
-    .{ 89, 251, 115 },
-    .{ 93, 252, 111 },
-    .{ 97, 252, 108 },
-    .{ 101, 253, 105 },
-    .{ 105, 253, 102 },
-    .{ 109, 254, 98 },
-    .{ 113, 254, 95 },
-    .{ 117, 254, 92 },
-    .{ 121, 254, 89 },
-    .{ 125, 255, 86 },
-    .{ 128, 255, 83 },
-    .{ 132, 255, 81 },
-    .{ 136, 255, 78 },
-    .{ 139, 255, 75 },
-    .{ 143, 255, 73 },
-    .{ 146, 255, 71 },
-    .{ 150, 254, 68 },
-    .{ 153, 254, 66 },
-    .{ 156, 254, 64 },
-    .{ 159, 253, 63 },
-    .{ 161, 253, 61 },
-    .{ 164, 252, 60 },
-    .{ 167, 252, 58 },
-    .{ 169, 251, 57 },
-    .{ 172, 251, 56 },
-    .{ 175, 250, 55 },
-    .{ 177, 249, 54 },
-    .{ 180, 248, 54 },
-    .{ 183, 247, 53 },
-    .{ 185, 246, 53 },
-    .{ 188, 245, 52 },
-    .{ 190, 244, 52 },
-    .{ 193, 243, 52 },
-    .{ 195, 241, 52 },
-    .{ 198, 240, 52 },
-    .{ 200, 239, 52 },
-    .{ 203, 237, 52 },
-    .{ 205, 236, 52 },
-    .{ 208, 234, 52 },
-    .{ 210, 233, 53 },
-    .{ 212, 231, 53 },
-    .{ 215, 229, 53 },
-    .{ 217, 228, 54 },
-    .{ 219, 226, 54 },
-    .{ 221, 224, 55 },
-    .{ 223, 223, 55 },
-    .{ 225, 221, 55 },
-    .{ 227, 219, 56 },
-    .{ 229, 217, 56 },
-    .{ 231, 215, 57 },
-    .{ 233, 213, 57 },
-    .{ 235, 211, 57 },
-    .{ 236, 209, 58 },
-    .{ 238, 207, 58 },
-    .{ 239, 205, 58 },
-    .{ 241, 203, 58 },
-    .{ 242, 201, 58 },
-    .{ 244, 199, 58 },
-    .{ 245, 197, 58 },
-    .{ 246, 195, 58 },
-    .{ 247, 193, 58 },
-    .{ 248, 190, 57 },
-    .{ 249, 188, 57 },
-    .{ 250, 186, 57 },
-    .{ 251, 184, 56 },
-    .{ 251, 182, 55 },
-    .{ 252, 179, 54 },
-    .{ 252, 177, 54 },
-    .{ 253, 174, 53 },
-    .{ 253, 172, 52 },
-    .{ 254, 169, 51 },
-    .{ 254, 167, 50 },
-    .{ 254, 164, 49 },
-    .{ 254, 161, 48 },
-    .{ 254, 158, 47 },
-    .{ 254, 155, 45 },
-    .{ 254, 153, 44 },
-    .{ 254, 150, 43 },
-    .{ 254, 147, 42 },
-    .{ 254, 144, 41 },
-    .{ 253, 141, 39 },
-    .{ 253, 138, 38 },
-    .{ 252, 135, 37 },
-    .{ 252, 132, 35 },
-    .{ 251, 129, 34 },
-    .{ 251, 126, 33 },
-    .{ 250, 123, 31 },
-    .{ 249, 120, 30 },
-    .{ 249, 117, 29 },
-    .{ 248, 114, 28 },
-    .{ 247, 111, 26 },
-    .{ 246, 108, 25 },
-    .{ 245, 105, 24 },
-    .{ 244, 102, 23 },
-    .{ 243, 99, 21 },
-    .{ 242, 96, 20 },
-    .{ 241, 93, 19 },
-    .{ 240, 91, 18 },
-    .{ 239, 88, 17 },
-    .{ 237, 85, 16 },
-    .{ 236, 83, 15 },
-    .{ 235, 80, 14 },
-    .{ 234, 78, 13 },
-    .{ 232, 75, 12 },
-    .{ 231, 73, 12 },
-    .{ 229, 71, 11 },
-    .{ 228, 69, 10 },
-    .{ 226, 67, 10 },
-    .{ 225, 65, 9 },
-    .{ 223, 63, 8 },
-    .{ 221, 61, 8 },
-    .{ 220, 59, 7 },
-    .{ 218, 57, 7 },
-    .{ 216, 55, 6 },
-    .{ 214, 53, 6 },
-    .{ 212, 51, 5 },
-    .{ 210, 49, 5 },
-    .{ 208, 47, 5 },
-    .{ 206, 45, 4 },
-    .{ 204, 43, 4 },
-    .{ 202, 42, 4 },
-    .{ 200, 40, 3 },
-    .{ 197, 38, 3 },
-    .{ 195, 37, 3 },
-    .{ 193, 35, 2 },
-    .{ 190, 33, 2 },
-    .{ 188, 32, 2 },
-    .{ 185, 30, 2 },
-    .{ 183, 29, 2 },
-    .{ 180, 27, 1 },
-    .{ 178, 26, 1 },
-    .{ 175, 24, 1 },
-    .{ 172, 23, 1 },
-    .{ 169, 22, 1 },
-    .{ 167, 20, 1 },
-    .{ 164, 19, 1 },
-    .{ 161, 18, 1 },
-    .{ 158, 16, 1 },
-    .{ 155, 15, 1 },
-    .{ 152, 14, 1 },
-    .{ 149, 13, 1 },
-    .{ 146, 11, 1 },
-    .{ 142, 10, 1 },
-    .{ 139, 9, 2 },
-    .{ 136, 8, 2 },
-    .{ 133, 7, 2 },
-    .{ 129, 6, 2 },
-    .{ 126, 5, 2 },
-    .{ 122, 4, 3 },
+const turbo_lut = blk: {
+    @setEvalBranchQuota(5000);
+    var lut: [256][3]u8 = undefined;
+    for (0..256) |i| {
+        lut[i] = turboEval(@as(f64, @floatFromInt(i)) / 255.0);
+    }
+    break :blk lut;
 };
 
 // Generated using matplotlib.colormaps['viridis']
@@ -678,17 +483,19 @@ test "colormaps" {
         var turbo_img = try gradient.applyColormap(allocator, .{ .turbo = .{} });
         defer turbo_img.deinit(allocator);
 
-        // 0 -> Roughly R=48, G=18, B=59 (from LUT)
+        // 0 -> Roughly R=35, G=23, B=27 (from Polynomial)
+        // coefficients[0] * 255
         const p0 = turbo_img.at(0, 0).*;
-        try testing.expectApproxEqAbs(@as(f32, 48.0), @as(f32, @floatFromInt(p0.r)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 18.0), @as(f32, @floatFromInt(p0.g)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 59.0), @as(f32, @floatFromInt(p0.b)), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 35.0), @as(f32, @floatFromInt(p0.r)), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 23.0), @as(f32, @floatFromInt(p0.g)), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 27.0), @as(f32, @floatFromInt(p0.b)), 1.0);
 
-        // 255 -> Roughly R=122, G=4, B=3 (from LUT)
+        // 255 -> Roughly R=144, G=13, B=0 (from Polynomial)
         const p255 = turbo_img.at(0, 255).*;
-        try testing.expectApproxEqAbs(@as(f32, 122.0), @as(f32, @floatFromInt(p255.r)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 4.0), @as(f32, @floatFromInt(p255.g)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 3.0), @as(f32, @floatFromInt(p255.b)), 1.0);
+        // We use a larger tolerance for the end because summing coefficients might have error accumulation
+        try testing.expectApproxEqAbs(@as(f32, 144.0), @as(f32, @floatFromInt(p255.r)), 2.0);
+        try testing.expectApproxEqAbs(@as(f32, 13.0), @as(f32, @floatFromInt(p255.g)), 2.0);
+        try testing.expectApproxEqAbs(@as(f32, 0.0), @as(f32, @floatFromInt(p255.b)), 2.0);
     }
 
     // Viridis
