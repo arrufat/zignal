@@ -25,7 +25,7 @@ pub const Blending = enum {
 /// Inputs are normalized alpha values (0.0 - 1.0).
 fn compositeAlpha(comptime F: type, base_a: F, overlay_a: F) F {
     comptime assert(@typeInfo(F) == .float);
-    return overlay_a + base_a * (@as(F, 1.0) - overlay_a);
+    return overlay_a + base_a * (1.0 - overlay_a);
 }
 
 /// Helper to composite a blended color channel (result of blend mode) with the base color
@@ -42,7 +42,7 @@ fn compositePixel(
 ) F {
     comptime assert(@typeInfo(F) == .float);
     if (result_a == 0) return 0;
-    return (blend_val * overlay_a + base_val * base_a * (@as(F, 1.0) - overlay_a)) / result_a;
+    return (blend_val * overlay_a + base_val * base_a * (1.0 - overlay_a)) / result_a;
 }
 
 /// Blends two RGBA colors using the specified blend mode.
