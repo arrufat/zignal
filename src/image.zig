@@ -28,6 +28,7 @@ const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
 const binary = @import("image/binary.zig");
+const meta = @import("meta.zig");
 const Transform = @import("image/transforms.zig").Transform;
 const interpolation = @import("image/interpolation.zig");
 const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
@@ -1266,7 +1267,7 @@ pub fn Image(comptime T: type) type {
                     max_v = 1;
                 } else {
                     for (self.data) |pixel| {
-                        const val = convertColor(f64, pixel);
+                        const val = if (comptime meta.isScalar(T)) meta.as(f64, pixel) else convertColor(f64, pixel);
                         if (val < min_v) min_v = val;
                         if (val > max_v) max_v = val;
                     }
@@ -1287,7 +1288,7 @@ pub fn Image(comptime T: type) type {
 
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
-                    const val = convertColor(f64, self.at(r, c).*);
+                    const val = if (comptime meta.isScalar(T)) meta.as(f64, self.at(r, c).*) else convertColor(f64, self.at(r, c).*);
                     const color = switch (map) {
                         .jet => colormaps.jet(val, min_val, max_val),
                         .heat => colormaps.heat(val, min_val, max_val),
