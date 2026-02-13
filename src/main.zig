@@ -1,9 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const builtin = @import("builtin");
-
-const zignal = @import("zignal");
 
 const cli_args = @import("cli/args.zig");
 
