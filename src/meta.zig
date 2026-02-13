@@ -4,10 +4,10 @@ const std = @import("std");
 pub fn as(comptime T: type, from: anytype) T {
     return switch (@typeInfo(@TypeOf(from))) {
         .@"enum" => {
-            switch (@typeInfo(T)) {
+            return switch (@typeInfo(T)) {
                 .int => @intFromEnum(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
-            }
+            };
         },
         .int, .comptime_int => {
             return switch (@typeInfo(T)) {
