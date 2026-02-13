@@ -1266,10 +1266,12 @@ pub fn Image(comptime T: type) type {
                     min_v = 0;
                     max_v = 1;
                 } else {
-                    for (self.data) |pixel| {
-                        const val = if (comptime meta.isScalar(T)) meta.as(f64, pixel) else convertColor(f64, pixel);
-                        if (val < min_v) min_v = val;
-                        if (val > max_v) max_v = val;
+                    for (0..self.rows) |r| {
+                        for (0..self.cols) |c| {
+                            const val = if (comptime meta.isScalar(T)) meta.as(f64, self.at(r, c).*) else convertColor(f64, self.at(r, c).*);
+                            min_v = @min(min_v, val);
+                            max_v = @max(max_v, val);
+                        }
                     }
                 }
                 min_val = range_opts.min orelse min_v;

@@ -529,10 +529,34 @@ test "colormaps" {
 
 test "nan safety" {
     const nan = std.math.nan(f64);
-    
+
     // These calls should not panic
     _ = jet(nan, 0, 1);
     _ = heat(nan, 0, 1);
     _ = turbo(nan, 0, 1);
     _ = viridis(nan, 0, 1);
+}
+
+test "colormap on view" {
+    const allocator = testing.allocator;
+
+    // Underlying image: 10x10, mostly 0, one 255
+    var img = try Image(u8).init(allocator, 10, 10);
+    defer img.deinit(allocator);
+    img.fill(0);
+    img.at(0, 0).* = 255;
+
+    // View: 2x2 region where all pixels are 128
+    var v = img.view(.{ .l = 4, .t = 4, .r = 6, .b = 6 });
+    v.fill(128);
+
+    // Applying colormap to the view should auto-detect min=128, max=128
+    // If it was bugged and used [0, 255] from the underlying buffer,
+    // 128 would map to 0.5 (Greenish).
+    // If fixed, it auto-ranges to [128, 129], mapping 128 to 0.0 (Dark Blue).
+    var vis = try v.applyColormap(allocator, .{ .jet = .{} });
+    defer vis.deinit(allocator);
+
+    // Jet at 0.0 -> (0, 0, 128)
+    try testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 128 }, vis.at(0, 0).*);
 }
