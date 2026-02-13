@@ -24,17 +24,17 @@ pub fn main(init: std.process.Init) !void {
 
     var resized: Image(Rgba) = try .init(init.gpa, image.rows / 2, image.cols / 2);
     defer resized.deinit(init.gpa);
-    try image.resize(init.gpa, resized, .nearest_neighbor);
+    image.resize(init.gpa, resized, .nearest_neighbor);
     try resized.save(init.io, init.gpa, "image-demo-resized-nearest.png");
-    try image.resize(init.gpa, resized, .bilinear);
+    image.resize(init.gpa, resized, .bilinear);
     try resized.save(init.io, init.gpa, "image-demo-resized-bilinear.png");
-    try image.resize(init.gpa, resized, .bicubic);
+    image.resize(init.gpa, resized, .bicubic);
     try resized.save(init.io, init.gpa, "image-demo-resized-bicubic.png");
-    try image.resize(init.gpa, resized, .catmull_rom);
+    image.resize(init.gpa, resized, .catmull_rom);
     try resized.save(init.io, init.gpa, "image-demo-resized-catmull-rom.png");
-    try image.resize(init.gpa, resized, .{ .mitchell = .default });
+    image.resize(init.gpa, resized, .{ .mitchell = .default });
     try resized.save(init.io, init.gpa, "image-demo-resized-mitchell.png");
-    try image.resize(init.gpa, resized, .lanczos);
+    image.resize(init.gpa, resized, .lanczos);
     try resized.save(init.io, init.gpa, "image-demo-resized-lanczos.png");
     std.debug.print("{f}\n", .{image});
     std.debug.print("{f}\n", .{image.display(init.io, .{ .auto = .{} })});
