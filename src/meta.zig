@@ -2,30 +2,30 @@ const std = @import("std");
 
 /// Converts between numeric types: .@"enum", .int and .float.
 pub inline fn as(comptime T: type, from: anytype) T {
-    switch (@typeInfo(@TypeOf(from))) {
+    return switch (@typeInfo(@TypeOf(from))) {
         .@"enum" => {
             switch (@typeInfo(T)) {
-                .int => return @intFromEnum(from),
+                .int => @intFromEnum(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             }
         },
         .int, .comptime_int => {
-            switch (@typeInfo(T)) {
-                .@"enum" => return @enumFromInt(from),
-                .int => return @intCast(from),
-                .float => return @floatFromInt(from),
+            return switch (@typeInfo(T)) {
+                .@"enum" => @enumFromInt(from),
+                .int => @intCast(from),
+                .float => @floatFromInt(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
-            }
+            };
         },
         .float, .comptime_float => {
-            switch (@typeInfo(T)) {
-                .float => return @floatCast(from),
-                .int => return @intFromFloat(@round(from)),
+            return switch (@typeInfo(T)) {
+                .float => @floatCast(from),
+                .int => @intFromFloat(@round(from)),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
-            }
+            };
         },
         else => @compileError(@typeName(@TypeOf(from)) ++ " is not supported."),
-    }
+    };
 }
 
 /// Returns true if and only if T represents a scalar type.
@@ -34,11 +34,6 @@ pub inline fn isScalar(comptime T: type) bool {
         .comptime_int, .int, .comptime_float, .float => true,
         else => false,
     };
-}
-
-/// Returns true if and only if T represents a struct type.
-pub inline fn isStruct(comptime T: type) bool {
-    return @typeInfo(T) == .@"struct";
 }
 
 /// Returns true if and only if T is a packed struct.
