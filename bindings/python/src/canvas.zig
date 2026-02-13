@@ -3,21 +3,21 @@ const std = @import("std");
 const zignal = @import("zignal");
 pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
-const Rgba = zignal.Rgba(u8);
-const Rgb = zignal.Rgb(u8);
 const Blending = zignal.Blending;
 const BitmapFont = zignal.BitmapFont;
 const Rectangle = zignal.Rectangle;
 
 const color_utils = @import("color_utils.zig");
+const enum_utils = @import("enum_utils.zig");
+const PyImage = @import("PyImage.zig");
 const python = @import("python.zig");
 const allocator = python.ctx.allocator;
 pub const registerType = python.register;
 const c = python.c;
-const PyImage = @import("PyImage.zig");
 const stub_metadata = @import("stub_metadata.zig");
-const enum_utils = @import("enum_utils.zig");
 
+const Rgba = zignal.Rgba(u8);
+const Rgb = zignal.Rgb(u8);
 /// A variant canvas type that mirrors PyImage structure.
 pub const PyCanvas = struct {
     pub const Variant = union(PyImage.DType) {

@@ -17,12 +17,12 @@ const transforms = @import("image/transforms.zig");
 const makeRgbaProxy = @import("pixel_proxy.zig").makeRgbaProxy;
 const makeRgbProxy = @import("pixel_proxy.zig").makeRgbProxy;
 const pixel_iterator = @import("pixel_iterator.zig");
+const PyImage = @import("PyImage.zig");
 const python = @import("python.zig");
 const ctx = python.ctx;
 const allocator = ctx.allocator;
 pub const registerType = python.register;
 const c = python.c;
-const PyImage = @import("PyImage.zig");
 const stub_metadata = @import("stub_metadata.zig");
 
 const Rgba = zignal.Rgba(u8);

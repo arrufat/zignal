@@ -42,7 +42,6 @@
 //! - Extraction: `row()`, `col()`, `subMatrix()`
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Io = std.Io;
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
