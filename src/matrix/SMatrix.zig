@@ -391,7 +391,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Sets the sub-matrix at position row, col to sub_matrix.
-        pub fn setSubMatrix(self: *Self, row_idx: usize, col_idx: usize, matrix: anytype) void {
+        pub fn setSubMatrix(self: *Self, row_idx: u32, col_idx: u32, matrix: anytype) void {
             assert(matrix.rows + row_idx <= rows);
             assert(matrix.cols + col_idx <= cols);
             for (0..matrix.rows) |r| {
@@ -499,7 +499,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                         var accumulator: T = 0;
 
                         // SIMD loop - process vec_len elements at once
-                        var k: usize = 0;
+                        var k: u32 = 0;
                         while (k + vec_len <= a_cols) : (k += vec_len) {
                             var a_vec: VecType = undefined;
                             var b_vec: VecType = undefined;
@@ -553,10 +553,10 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         /// Returns a new matrix which is a copy of the specified rectangular region of `self`.
         pub fn subMatrix(
             self: Self,
-            comptime row_begin: usize,
-            comptime col_begin: usize,
-            comptime row_end: usize,
-            comptime col_end: usize,
+            comptime row_begin: u32,
+            comptime col_begin: u32,
+            comptime row_end: u32,
+            comptime col_end: u32,
         ) SMatrix(T, row_end - row_begin, col_end - col_begin) {
             comptime assert(row_begin < row_end);
             comptime assert(col_begin < col_end);
@@ -572,7 +572,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Returns the elements in the column as a column Matrix.
-        pub fn col(self: Self, col_idx: usize) SMatrix(T, rows, 1) {
+        pub fn col(self: Self, col_idx: u32) SMatrix(T, rows, 1) {
             assert(col_idx < cols);
             var result: SMatrix(T, rows, 1) = .{};
             for (0..rows) |r| {
@@ -582,7 +582,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Returns the elements in the row as a row Matrix.
-        pub fn row(self: Self, row_idx: usize) SMatrix(T, 1, cols) {
+        pub fn row(self: Self, row_idx: u32) SMatrix(T, 1, cols) {
             assert(row_idx < rows);
             var result: SMatrix(T, 1, cols) = .{};
             for (0..cols) |c| {
@@ -613,7 +613,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Converts a column matrix into a Point with the specified dimension.
-        pub fn toPoint(self: Self, comptime dim: usize) Point(dim, T) {
+        pub fn toPoint(self: Self, comptime dim: u32) Point(dim, T) {
             comptime assert(rows >= dim and cols == 1);
             var components: [dim]T = undefined;
             inline for (0..dim) |i| {
@@ -945,8 +945,8 @@ test "SMatrix operations: add, sub, scale, transpose" {
 
     try expectEqual(@as(f32, 2.0), static_scaled.at(0, 0).*);
     try expectEqual(@as(f32, 12.0), static_scaled.at(1, 2).*);
-    try expectEqual(@as(usize, 3), static_transposed.rows);
-    try expectEqual(@as(usize, 2), static_transposed.cols);
+    try expectEqual(@as(u32, 3), static_transposed.rows);
+    try expectEqual(@as(u32, 2), static_transposed.cols);
     try expectEqual(@as(f32, 1.0), static_transposed.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), static_transposed.at(0, 1).*);
     try expectEqual(@as(f32, 1.5), static_added.at(0, 0).*); // 1.0 + 0.5
@@ -965,8 +965,8 @@ test "SMatrix gram and covariance matrices" {
 
     // Test Gram matrix (X * X^T) - should be 3×3
     const gram_result = data.gram();
-    try expectEqual(@as(usize, 3), gram_result.rows);
-    try expectEqual(@as(usize, 3), gram_result.cols);
+    try expectEqual(@as(u32, 3), gram_result.rows);
+    try expectEqual(@as(u32, 3), gram_result.cols);
 
     // Verify gram matrix values
     // First row: [1*1+2*2, 1*3+2*4, 1*5+2*6] = [5, 11, 17]
@@ -976,8 +976,8 @@ test "SMatrix gram and covariance matrices" {
 
     // Test Covariance matrix (X^T * X) - should be 2×2
     const cov_result = data.covariance();
-    try expectEqual(@as(usize, 2), cov_result.rows);
-    try expectEqual(@as(usize, 2), cov_result.cols);
+    try expectEqual(@as(u32, 2), cov_result.rows);
+    try expectEqual(@as(u32, 2), cov_result.cols);
 
     // Verify covariance matrix values
     // First row: [1*1+3*3+5*5, 1*2+3*4+5*6] = [35, 44]
@@ -1023,15 +1023,15 @@ test "SMatrix GEMM operations" {
 
     // Test Gram matrix using GEMM: A * A^T
     const gram = a.gemm(false, a, true, 1.0, 0.0, null);
-    try expectEqual(@as(usize, 2), gram.rows);
-    try expectEqual(@as(usize, 2), gram.cols);
+    try expectEqual(@as(u32, 2), gram.rows);
+    try expectEqual(@as(u32, 2), gram.cols);
     try expectEqual(@as(f32, 14.0), gram.at(0, 0).*); // 1*1 + 2*2 + 3*3
     try expectEqual(@as(f32, 32.0), gram.at(0, 1).*); // 1*4 + 2*5 + 3*6
 
     // Test covariance using GEMM: A^T * A
     const cov = a.gemm(true, a, false, 1.0, 0.0, null);
-    try expectEqual(@as(usize, 3), cov.rows);
-    try expectEqual(@as(usize, 3), cov.cols);
+    try expectEqual(@as(u32, 3), cov.rows);
+    try expectEqual(@as(u32, 3), cov.cols);
     try expectEqual(@as(f32, 17.0), cov.at(0, 0).*); // 1*1 + 4*4
     try expectEqual(@as(f32, 22.0), cov.at(0, 1).*); // 1*2 + 4*5
 
