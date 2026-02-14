@@ -1321,4 +1321,5 @@ test {
     _ = @import("image/tests/binary.zig");
     _ = @import("image/hough.zig");
     _ = @import("image/colormaps.zig");
+    _ = @import("image/border.zig");
 }
