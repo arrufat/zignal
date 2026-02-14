@@ -39,7 +39,7 @@ font_ascent: ?i16 = null,
 ///
 /// Supports:
 /// - BDF (Bitmap Distribution Format)
-/// - PCF (Portable Compiled Format) - future
+/// - PCF (Portable Compiled Format)
 ///
 /// Parameters:
 /// - allocator: Memory allocator
