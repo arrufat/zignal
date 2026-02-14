@@ -702,11 +702,18 @@ fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
     // Note: bitmap_count might not always match glyph_count exactly in some PCF files
     // Some fonts may have padding or extra bitmap slots
 
-    // For fixed reader, we can't easily get remaining bytes,
-    // but we have already validated table bounds, so we can trust image_size
+    // Determine correct size based on format padding
+    // The 4 values in bitmap_sizes correspond to padding 1, 2, 4, 8 bytes
+    const flags = FormatFlags.decode(format);
+    const data_size = switch (flags.glyph_pad) {
+        0 => result.bitmap_sizes.image_width,
+        1 => result.bitmap_sizes.image_height,
+        2 => result.bitmap_sizes.image_size,
+        3 => result.bitmap_sizes.bitmap_count,
+    };
 
-    // Read bitmap data - use the actual image size, not total remaining
-    result.bitmap_data = try allocator.alloc(u8, result.bitmap_sizes.image_size);
+    // Read bitmap data
+    result.bitmap_data = try allocator.alloc(u8, data_size);
     try reader.readSliceAll(result.bitmap_data);
 
     return result;
@@ -1086,7 +1093,7 @@ fn writeBitmapsTable(
     const stored_sizes = [_]u32{
         pad_sizes[0],
         pad_sizes[1],
-        pad_sizes[0],
+        pad_sizes[2],
         pad_sizes[3],
     };
 
