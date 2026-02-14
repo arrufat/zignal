@@ -1130,14 +1130,12 @@ pub const JpegState = struct {
     }
 
     pub fn deinit(self: *JpegState) void {
+        self.allocator.free(self.scan_components);
         for (&self.dc_tables) |*table| {
             if (table.*) |*t| t.deinit();
         }
         for (&self.ac_tables) |*table| {
             if (table.*) |*t| t.deinit();
-        }
-        if (self.scan_components.len > 0) {
-            self.allocator.free(self.scan_components);
         }
         if (self.block_storage) |storage| {
             self.allocator.free(storage);

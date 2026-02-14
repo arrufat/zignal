@@ -174,8 +174,8 @@ pub fn Edges(comptime T: type) type {
             t_low = opts.low_rel * t_high;
 
             // Optional non-maximum suppression along gradient direction
-            var edges_nms = Image(u8).empty;
-            defer if (edges_nms.data.len > 0) edges_nms.deinit(allocator);
+            var edges_nms: Image(u8) = .empty;
+            defer edges_nms.deinit(allocator);
             const edges_for_thresh: Image(u8) = blk: {
                 if (opts.use_nms) {
                     edges_nms = try Image(u8).init(allocator, self.rows, self.cols);

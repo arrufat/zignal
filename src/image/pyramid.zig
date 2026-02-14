@@ -76,16 +76,16 @@ pub fn ImagePyramid(comptime T: type) type {
                 // Use adaptive sigma based on scale factor
                 const sigma = blur_sigma * @sqrt(scale * scale - 1.0);
                 var blurred: Image(T) = .empty;
-                defer if (blurred.rows > 0) blurred.deinit(allocator);
+                defer blurred.deinit(allocator);
 
                 // Apply Gaussian blur if sigma > 0.5
                 if (sigma > 0.5) {
-                    blurred = try Image(T).initLike(allocator, source);
+                    blurred = try .initLike(allocator, source);
                     try source.gaussianBlur(allocator, sigma, blurred);
                 }
 
                 // Allocate and resize to create the new level
-                levels[i] = try Image(T).init(allocator, new_rows, new_cols);
+                levels[i] = try .init(allocator, new_rows, new_cols);
 
                 // Use bilinear interpolation for downsampling from original or blurred
                 const source_to_use = if (blurred.rows > 0) blurred else source;

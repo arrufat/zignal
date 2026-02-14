@@ -89,12 +89,8 @@ pub fn Pca(comptime T: type) type {
 
         /// Free allocated memory
         pub fn deinit(self: *Self) void {
-            if (self.mean.len > 0) {
-                self.allocator.free(self.mean);
-            }
-            if (self.eigenvalues.len > 0) {
-                self.allocator.free(self.eigenvalues);
-            }
+            self.allocator.free(self.mean);
+            self.allocator.free(self.eigenvalues);
             if (self.num_components > 0) {
                 self.components.deinit();
             }
