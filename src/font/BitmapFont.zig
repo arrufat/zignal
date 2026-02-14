@@ -61,7 +61,7 @@ pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFil
     const font_format = try FontFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
         .bdf => bdf.load(io, allocator, file_path, filter),
-        .pcf => bdf.load(io, allocator, file_path, filter),
+        .pcf => pcf.load(io, allocator, file_path, filter),
     };
 }
 
@@ -312,16 +312,16 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
     };
 }
 
-/// Saves the font to a file in BDF format.
-/// Returns an error if the file path doesn't end in `.bdf` or `.bdf.gz` (case-insensitive).
+/// Saves the font to a file.
+/// Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats.
+/// The format is determined by the file extension.
 pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u8) !void {
-    const valid_extension = std.ascii.endsWithIgnoreCase(file_path, ".bdf") or
-        std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz");
-
-    if (!valid_extension) {
-        return error.UnsupportedFontFormat;
+    if (std.ascii.endsWithIgnoreCase(file_path, ".bdf") or std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz")) {
+        return bdf.save(io, allocator, self, file_path);
+    } else if (std.ascii.endsWithIgnoreCase(file_path, ".pcf") or std.ascii.endsWithIgnoreCase(file_path, ".pcf.gz")) {
+        return pcf.save(io, allocator, self, file_path);
     }
-    try bdf.save(io, allocator, self, file_path);
+    return error.UnsupportedFontFormat;
 }
 
 /// Displays the font information: name, dimensions, and character range.

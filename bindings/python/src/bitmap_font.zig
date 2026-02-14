@@ -108,6 +108,47 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return instance;
 }
 
+// Method: save
+const bitmap_font_save_doc =
+    \\Save the font to a file.
+    \\
+    \\Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats.
+    \\The format is determined by the file extension.
+    \\
+    \\## Parameters
+    \\- `path` (str): Path to save the font file
+    \\
+    \\## Examples
+    \\```python
+    \\# Convert BDF to PCF
+    \\font = BitmapFont.load("original.bdf")
+    \\font.save("converted.pcf.gz")
+    \\```
+;
+
+fn bitmap_font_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = python.safeCast(BitmapFontObject, self_obj);
+    const font = self.font orelse {
+        python.setRuntimeError("Font not initialized", .{});
+        return null;
+    };
+
+    const Params = struct {
+        path: [*c]const u8,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const file_path = std.mem.span(params.path);
+
+    font.save(ctx.io, allocator, file_path) catch |err| {
+        python.setErrorWithPath(err, file_path);
+        return null;
+    };
+
+    return python.none();
+}
+
 // Class method: font8x8 (default font)
 const bitmap_font_font8x8_doc =
     \\Get the built-in default 8x8 bitmap font with all available characters.
@@ -171,6 +212,14 @@ pub const bitmap_font_methods_metadata = [_]python.MethodWithMetadata{
         .doc = bitmap_font_load_doc,
         .params = "cls, path: str",
         .returns = "BitmapFont",
+    },
+    .{
+        .name = "save",
+        .meth = @ptrCast(&bitmap_font_save),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = bitmap_font_save_doc,
+        .params = "self, path: str",
+        .returns = "None",
     },
     .{
         .name = "font8x8",
