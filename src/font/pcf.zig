@@ -1684,24 +1684,6 @@ test "PCF save and load roundtrip" {
     // Save
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-
-    const file_path = try Io.Dir.path.join(testing.allocator, &.{ ".", "test.pcf" });
-    defer testing.allocator.free(file_path);
-
-    // We need Io instance. Tests usually use std.fs or Io mock?
-    // In other tests, Io seems to be used as a namespace.
-    // But `save` takes `io: Io`.
-    // In `bdf.zig` tests: `try font.save(testing.io, ...)`?
-    // Let's check `bdf.zig` tests again.
-    // `try font.save(testing.io, testing.allocator, test_path);`
-    // So `testing.io` exists!
-
-    // Wait, `tmp_dir` logic in `bdf.zig` test:
-    // `const full_path = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", testing.allocator);`
-    // `testing.io` must be available.
-
-    // Path must be absolute or relative to CWD. `tmp_dir` is somewhere else.
-    // We need the full path to the tmp file.
     const tmp_path = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
     defer testing.allocator.free(tmp_path);
     const full_path = try Io.Dir.path.join(testing.allocator, &.{ tmp_path, "test.pcf" });
