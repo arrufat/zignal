@@ -4,6 +4,7 @@
 //! image processing operations like convolution and order statistic filters.
 
 const std = @import("std");
+const clamp = std.math.clamp;
 
 /// Border handling modes for operations that access pixels outside image bounds
 pub const BorderMode = enum {
@@ -52,31 +53,22 @@ pub fn computeCoords(
 /// Returns:
 /// - Adjusted index within bounds, or null if should be treated as zero
 pub fn resolveIndex(idx: isize, length: isize, border: BorderMode) ?usize {
-    // Optimization: Fast path for indices within bounds
-    if (idx >= 0 and idx < length) return @intCast(idx);
-
-    switch (border) {
+    return if (idx >= 0 and idx < length)
+        @intCast(idx)
+    else switch (border) {
         // For zero padding, out of bounds means 0 value (represented by null index)
-        .zero => return null,
-        .replicate => {
-            if (length == 0) return null;
-            const clamped = std.math.clamp(idx, 0, length - 1);
-            return @intCast(clamped);
-        },
-        .mirror => {
-            if (length <= 0) return null;
-            if (length == 1) return 0;
+        .zero => null,
+        .replicate => if (length == 0) null else @intCast(clamp(idx, 0, length - 1)),
+        .mirror => blk: {
+            if (length <= 0) break :blk null;
+            if (length == 1) break :blk 0;
             const period = 2 * (length - 1);
             const m = @mod(idx, period);
             const i = if (m < 0) m + period else m;
-            return @intCast(if (i >= length) period - i else i);
+            break :blk @intCast(if (i >= length) period - i else i);
         },
-        .wrap => {
-            if (length == 0) return null;
-            const wrapped = @mod(idx, length);
-            return @intCast(wrapped);
-        },
-    }
+        .wrap => if (length == 0) null else @intCast(@mod(idx, length)),
+    };
 }
 
 test "resolveIndex basic" {
