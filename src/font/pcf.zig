@@ -1044,11 +1044,7 @@ fn writeMetricsTable(allocator: Allocator, glyphs: []const GlyphEntry) ![]u8 {
     const buffer = try allocator.alloc(u8, total);
     var writer = Io.Writer.fixed(buffer);
 
-    try writer.writeInt(u32, (1 << 8), .little);
-
-    // Reset writer to start
-    writer = Io.Writer.fixed(buffer);
-    try writer.writeInt(u32, 0, .little); // Format
+    try writer.writeInt(u32, 0, .little); // Format: uncompressed metrics
     try writer.writeInt(u32, @intCast(glyphs.len), .little);
 
     for (glyphs) |glyph| {
