@@ -52,7 +52,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             const alias = out.isAliased(image);
 
             var temp_out: Image(T) = .empty;
-            defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
+            defer temp_out.deinit(allocator);
 
             var target: Image(T) = out;
             if (alias) {
@@ -118,7 +118,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
             const alias = out.isAliased(image);
             var temp_out: Image(T) = .empty;
-            defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
+            defer temp_out.deinit(allocator);
 
             var target: Image(T) = out;
             if (alias) {
@@ -168,11 +168,11 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
             const alias = out.isAliased(image);
             var temp_out: Image(T) = .empty;
-            defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
+            defer temp_out.deinit(allocator);
 
             var target: Image(T) = out;
             if (alias) {
-                temp_out = try Image(T).initLike(allocator, image);
+                temp_out = try .initLike(allocator, image);
                 target = temp_out;
             }
 
@@ -242,11 +242,11 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             const alias = out.isAliased(image);
 
             var temp_out: Image(u8) = .empty;
-            defer if (temp_out.data.len != 0) temp_out.deinit(allocator);
+            defer temp_out.deinit(allocator);
 
             var target: Image(u8) = out;
             if (alias) {
-                temp_out = try Image(u8).initLike(allocator, image);
+                temp_out = try .initLike(allocator, image);
                 target = temp_out;
             }
 

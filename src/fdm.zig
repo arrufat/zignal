@@ -59,19 +59,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
         /// Free allocated memory
         pub fn deinit(self: *Self) void {
-            if (self.target_cov_u.rows > 0) {
-                self.target_cov_u.deinit();
-            }
-            self.* = Self.init(self.allocator);
+            self.target_cov_u.deinit();
+            self.* = .init(self.allocator);
         }
 
         /// Set the target image whose distribution will be matched.
         /// This computes and stores the target statistics for reuse.
         pub fn setTarget(self: *Self, target_image: Image(T)) !void {
-            // Clean up previous target data if any
-            if (self.has_target and self.target_cov_u.rows > 0) {
-                self.target_cov_u.deinit();
-            }
+            self.target_cov_u.deinit();
 
             var stats = CovarianceStats(3, f64).init();
 
