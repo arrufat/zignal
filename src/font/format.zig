@@ -17,14 +17,12 @@ pub const FontFormat = enum {
 
     /// Detect font format from the first few bytes of data
     pub fn detectFromBytes(data: []const u8) ?FontFormat {
-        // BDF signature (text format, check for "STARTFONT")
         if (data.len >= bdf_signature.len) {
             if (std.mem.startsWith(u8, data, bdf_signature)) {
                 return .bdf;
             }
         }
 
-        // PCF signature (binary format)
         if (data.len >= pcf_signature.len) {
             if (std.mem.eql(u8, data[0..pcf_signature.len], pcf_signature)) {
                 return .pcf;
