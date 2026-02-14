@@ -9,8 +9,10 @@ const Allocator = std.mem.Allocator;
 
 const LoadFilter = @import("../font.zig").LoadFilter;
 const Rectangle = @import("../geometry.zig").Rectangle;
+const bdf = @import("bdf.zig");
 const FontFormat = @import("format.zig").FontFormat;
 const GlyphData = @import("GlyphData.zig");
+const pcf = @import("pcf.zig");
 
 const BitmapFont = @This();
 
@@ -58,8 +60,8 @@ font_ascent: ?i16 = null,
 pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
     const font_format = try FontFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
-        .bdf => @import("bdf.zig").load(io, allocator, file_path, filter),
-        .pcf => @import("pcf.zig").load(io, allocator, file_path, filter),
+        .bdf => bdf.load(io, allocator, file_path, filter),
+        .pcf => bdf.load(io, allocator, file_path, filter),
     };
 }
 
@@ -319,7 +321,7 @@ pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u
     if (!valid_extension) {
         return error.UnsupportedFontFormat;
     }
-    try @import("bdf.zig").save(io, allocator, self, file_path);
+    try bdf.save(io, allocator, self, file_path);
 }
 
 /// Displays the font information: name, dimensions, and character range.
