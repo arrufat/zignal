@@ -456,10 +456,10 @@ fn parseProperties(allocator: std.mem.Allocator, data: []const u8, table: TableE
     }
 
     // Skip padding to align to 4 bytes if needed
-    if ((prop_count & 3) != 0) {
-        const padding = 4 - (prop_count & 3);
-        try reader.discardAll(padding);
-    }
+    // Each property info entry is 9 bytes
+    const prop_data_size = prop_count * 9;
+    const padding = (4 - (prop_data_size & 3)) & 3;
+    try reader.discardAll(padding);
 
     // Read string pool size
     const string_size = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
@@ -1217,7 +1217,7 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
     }
 
     const prop_data_size = prop_entries.len * 9;
-    const padding = if ((prop_entries.len & 3) != 0) 4 - (prop_entries.len & 3) else 0;
+    const padding = (4 - (prop_data_size & 3)) & 3;
 
     const total_size = 4 + 4 + prop_data_size + padding + 4 + string_pool.items.len;
     const buffer = try allocator.alloc(u8, total_size);
