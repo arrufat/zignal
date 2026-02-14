@@ -150,9 +150,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            if (self.items.len > 0) {
-                self.allocator.free(self.items);
-            }
+            self.allocator.free(self.items);
         }
 
         /// Cast the underlying items of the matrix from T to U.
