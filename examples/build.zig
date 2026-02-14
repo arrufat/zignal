@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
         "blur_box_vs_gaussian",
         "trace_edges",
         "colormaps_demo",
+        "bdf_to_pcf",
     };
 
     // Build exec_examples with run steps and check compilation
