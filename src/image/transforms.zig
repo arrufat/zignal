@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
+const Point = @import("../geometry/Point.zig").Point;
 const Image = @import("../image.zig").Image;
 const assignPixel = @import("../image.zig").assignPixel;
 const BorderMode = @import("border.zig").BorderMode;
@@ -30,17 +31,18 @@ pub fn Transform(comptime T: type) type {
         /// Flips an image from left to right (mirror effect).
         pub fn flipLeftRight(self: Self) void {
             for (0..self.rows) |r| {
-                for (0..self.cols / 2) |c| {
-                    std.mem.swap(T, self.at(r, c), self.at(r, self.cols - c - 1));
-                }
+                const start = r * self.stride;
+                std.mem.reverse(T, self.data[start .. start + self.cols]);
             }
         }
 
         /// Flips an image from top to bottom (upside down effect).
         pub fn flipTopBottom(self: Self) void {
             for (0..self.rows / 2) |r| {
-                for (0..self.cols) |c| {
-                    std.mem.swap(T, self.at(r, c), self.at(self.rows - r - 1, c));
+                const top_row = self.data[r * self.stride ..][0..self.cols];
+                const bot_row = self.data[(self.rows - r - 1) * self.stride ..][0..self.cols];
+                for (top_row, bot_row) |*t, *b| {
+                    std.mem.swap(T, t, b);
                 }
             }
         }
@@ -504,6 +506,44 @@ pub fn Transform(comptime T: type) type {
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
         /// Used by both `crop` and `extract` (in fast-path).
         fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self, border: BorderMode) void {
+            // Optimization for zero border (common case for crop)
+            if (border == .zero) {
+                // Calculate intersection
+                const src_r_min = @max(0, rect_top);
+                const src_r_max = @min(@as(i32, @intCast(self.rows)), rect_top + @as(i32, @intCast(out.rows)));
+                const src_c_min = @max(0, rect_left);
+                const src_c_max = @min(@as(i32, @intCast(self.cols)), rect_left + @as(i32, @intCast(out.cols)));
+
+                // Check valid intersection
+                if (src_r_min < src_r_max and src_c_min < src_c_max) {
+                    // If intersection doesn't cover the whole output, fill with zeros first
+                    const covers_all = (@as(u32, @intCast(src_r_max - src_r_min)) == out.rows) and (@as(u32, @intCast(src_c_max - src_c_min)) == out.cols);
+                    if (!covers_all) {
+                        out.fill(std.mem.zeroes(T));
+                    }
+
+                    const dst_r_offset = -rect_top;
+                    const dst_c_offset = -rect_left;
+
+                    const len: usize = @intCast(src_c_max - src_c_min);
+                    var r = src_r_min;
+                    while (r < src_r_max) : (r += 1) {
+                        const src_row_idx: usize = @intCast(r);
+                        const dst_row_idx: usize = @intCast(r + dst_r_offset);
+
+                        const src_start = src_row_idx * self.stride + @as(usize, @intCast(src_c_min));
+                        const dst_start = dst_row_idx * out.stride + @as(usize, @intCast(src_c_min + dst_c_offset));
+
+                        @memcpy(out.data[dst_start .. dst_start + len], self.data[src_start .. src_start + len]);
+                    }
+                    return;
+                } else {
+                    // No intersection, just zero everything
+                    out.fill(std.mem.zeroes(T));
+                    return;
+                }
+            }
+
             for (0..out.rows) |r| {
                 const ir: i32 = @intCast(r);
                 for (0..out.cols) |c| {
@@ -523,7 +563,6 @@ pub fn Transform(comptime T: type) type {
         /// Applies a geometric transform to the image using backward mapping.
         /// For each pixel in the output, applies the transform to find the corresponding source pixel.
         pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: u32, out_cols: u32) !void {
-            const Point = @import("../geometry/Point.zig").Point;
             const interpolation = @import("interpolation.zig");
 
             // Check if output needs allocation or reallocation
