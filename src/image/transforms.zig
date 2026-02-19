@@ -516,7 +516,7 @@ pub fn Transform(comptime T: type) type {
                 // Check valid intersection
                 if (src_r_min < src_r_max and src_c_min < src_c_max) {
                     // If intersection doesn't cover the whole output, fill with zeros first
-                    const covers_all = (src_r_max - src_r_min == out.rows) and (src_c_max - src_c_min == out.cols);
+                    const covers_all = (@as(u32, @intCast(src_r_max - src_r_min)) == out.rows) and (@as(u32, @intCast(src_c_max - src_c_min)) == out.cols);
                     if (!covers_all) {
                         out.fill(std.mem.zeroes(T));
                     }
