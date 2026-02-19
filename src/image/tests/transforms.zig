@@ -424,3 +424,34 @@ test "extract from empty image regression" {
     empty.extract(rect, 0.0, out, .nearest_neighbor, .wrap);
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 }
+
+test "flipLeftRight" {
+    var data = [_]u8{
+        1, 2, 3,
+        4, 5, 6,
+    };
+    var image = Image(u8).initFromSlice(2, 3, &data);
+
+    image.flipLeftRight();
+    const expected = [_]u8{
+        3, 2, 1,
+        6, 5, 4,
+    };
+    try expectEqualDeep(expected, data);
+}
+
+test "flipTopBottom" {
+    var data = [_]u8{
+        1, 2,
+        3, 4,
+        5, 6,
+    };
+    var image = Image(u8).initFromSlice(3, 2, &data);
+    image.flipTopBottom();
+    const expected = [_]u8{
+        5, 6,
+        3, 4,
+        1, 2,
+    };
+    try expectEqualDeep(expected, data);
+}
