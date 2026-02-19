@@ -38,10 +38,10 @@ pub fn Transform(comptime T: type) type {
         /// Flips an image from top to bottom (upside down effect).
         pub fn flipTopBottom(self: Self) void {
             for (0..self.rows / 2) |r| {
-                const top_idx = r * self.stride;
-                const bot_idx = (self.rows - r - 1) * self.stride;
-                for (0..self.cols) |c| {
-                    std.mem.swap(T, &self.data[top_idx + c], &self.data[bot_idx + c]);
+                const top_row = self.data[r * self.stride ..][0..self.cols];
+                const bot_row = self.data[(self.rows - r - 1) * self.stride ..][0..self.cols];
+                for (top_row, bot_row) |*t, *b| {
+                    std.mem.swap(T, t, b);
                 }
             }
         }
