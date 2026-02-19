@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
+const Point = @import("../geometry/Point.zig").Point;
 const Image = @import("../image.zig").Image;
 const assignPixel = @import("../image.zig").assignPixel;
 const BorderMode = @import("border.zig").BorderMode;
@@ -524,14 +525,14 @@ pub fn Transform(comptime T: type) type {
                     const dst_r_offset = -rect_top;
                     const dst_c_offset = -rect_left;
 
+                    const len: usize = @intCast(src_c_max - src_c_min);
                     var r = src_r_min;
                     while (r < src_r_max) : (r += 1) {
-                        const src_row_idx = @as(usize, @intCast(r));
-                        const dst_row_idx = @as(usize, @intCast(r + dst_r_offset));
+                        const src_row_idx: usize = @intCast(r);
+                        const dst_row_idx: usize = @intCast(r + dst_r_offset);
 
                         const src_start = src_row_idx * self.stride + @as(usize, @intCast(src_c_min));
                         const dst_start = dst_row_idx * out.stride + @as(usize, @intCast(src_c_min + dst_c_offset));
-                        const len = @as(usize, @intCast(src_c_max - src_c_min));
 
                         @memcpy(out.data[dst_start .. dst_start + len], self.data[src_start .. src_start + len]);
                     }
@@ -562,7 +563,6 @@ pub fn Transform(comptime T: type) type {
         /// Applies a geometric transform to the image using backward mapping.
         /// For each pixel in the output, applies the transform to find the corresponding source pixel.
         pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: u32, out_cols: u32) !void {
-            const Point = @import("../geometry/Point.zig").Point;
             const interpolation = @import("interpolation.zig");
 
             // Check if output needs allocation or reallocation
