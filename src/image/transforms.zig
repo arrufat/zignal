@@ -30,17 +30,18 @@ pub fn Transform(comptime T: type) type {
         /// Flips an image from left to right (mirror effect).
         pub fn flipLeftRight(self: Self) void {
             for (0..self.rows) |r| {
-                for (0..self.cols / 2) |c| {
-                    std.mem.swap(T, self.at(r, c), self.at(r, self.cols - c - 1));
-                }
+                const start = r * self.stride;
+                std.mem.reverse(T, self.data[start .. start + self.cols]);
             }
         }
 
         /// Flips an image from top to bottom (upside down effect).
         pub fn flipTopBottom(self: Self) void {
             for (0..self.rows / 2) |r| {
+                const top_idx = r * self.stride;
+                const bot_idx = (self.rows - r - 1) * self.stride;
                 for (0..self.cols) |c| {
-                    std.mem.swap(T, self.at(r, c), self.at(self.rows - r - 1, c));
+                    std.mem.swap(T, &self.data[top_idx + c], &self.data[bot_idx + c]);
                 }
             }
         }
@@ -504,6 +505,44 @@ pub fn Transform(comptime T: type) type {
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
         /// Used by both `crop` and `extract` (in fast-path).
         fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self, border: BorderMode) void {
+            // Optimization for zero border (common case for crop)
+            if (border == .zero) {
+                // Calculate intersection
+                const src_r_min = @max(0, rect_top);
+                const src_r_max = @min(@as(i32, @intCast(self.rows)), rect_top + @as(i32, @intCast(out.rows)));
+                const src_c_min = @max(0, rect_left);
+                const src_c_max = @min(@as(i32, @intCast(self.cols)), rect_left + @as(i32, @intCast(out.cols)));
+
+                // Check valid intersection
+                if (src_r_min < src_r_max and src_c_min < src_c_max) {
+                    // If intersection doesn't cover the whole output, fill with zeros first
+                    const covers_all = (src_r_max - src_r_min == out.rows) and (src_c_max - src_c_min == out.cols);
+                    if (!covers_all) {
+                        out.fill(std.mem.zeroes(T));
+                    }
+
+                    const dst_r_offset = -rect_top;
+                    const dst_c_offset = -rect_left;
+
+                    var r = src_r_min;
+                    while (r < src_r_max) : (r += 1) {
+                        const src_row_idx = @as(usize, @intCast(r));
+                        const dst_row_idx = @as(usize, @intCast(r + dst_r_offset));
+
+                        const src_start = src_row_idx * self.stride + @as(usize, @intCast(src_c_min));
+                        const dst_start = dst_row_idx * out.stride + @as(usize, @intCast(src_c_min + dst_c_offset));
+                        const len = @as(usize, @intCast(src_c_max - src_c_min));
+
+                        @memcpy(out.data[dst_start .. dst_start + len], self.data[src_start .. src_start + len]);
+                    }
+                    return;
+                } else {
+                    // No intersection, just zero everything
+                    out.fill(std.mem.zeroes(T));
+                    return;
+                }
+            }
+
             for (0..out.rows) |r| {
                 const ir: i32 = @intCast(r);
                 for (0..out.cols) |c| {
