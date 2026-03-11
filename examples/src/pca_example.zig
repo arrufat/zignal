@@ -175,7 +175,7 @@ pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
-    const io = Io.Threaded.global_single_threaded.ioBasic();
+    const io = Io.Threaded.global_single_threaded.io();
 
     const canvas_size = 400;
     const num_points = 200;

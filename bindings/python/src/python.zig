@@ -8,7 +8,7 @@ pub const ctx = struct {
     io: Io,
     allocator: std.mem.Allocator,
 }{
-    .io = Io.Threaded.global_single_threaded.ioBasic(),
+    .io = Io.Threaded.global_single_threaded.io(),
     .allocator = std.heap.c_allocator,
 };
 
