@@ -19,7 +19,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    const io = Io.Threaded.global_single_threaded.ioBasic();
+    const io = Io.Threaded.global_single_threaded.io();
 
     // Create a 512x512 image for the logo
     var image: Image(Rgb) = try .init(allocator, 512, 512);
