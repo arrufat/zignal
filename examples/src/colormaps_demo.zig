@@ -11,7 +11,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Setup IO context
-    const io = Io.Threaded.global_single_threaded.ioBasic();
+    const io = Io.Threaded.global_single_threaded.io();
 
     const cols = 512;
     const rows = 512;
