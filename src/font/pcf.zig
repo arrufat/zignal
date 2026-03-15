@@ -1430,6 +1430,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
         var compressor = try flate.Compress.init(&c_aw.writer, compress_buffer, .gzip, .level_1);
         try compressor.writer.writeAll(final_data);
         try compressor.writer.flush(); // Ensure everything is written
+        try compressor.finish();
 
         const compressed_bytes = try c_aw.toOwnedSlice();
         defer gpa.free(compressed_bytes);

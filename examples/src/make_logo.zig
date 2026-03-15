@@ -16,7 +16,7 @@ const Oklab = zignal.Oklab(f64);
 const Oklch = zignal.Oklch(f64);
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     const io = Io.Threaded.global_single_threaded.io();

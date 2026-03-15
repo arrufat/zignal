@@ -1343,6 +1343,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     var compressor: flate.Compress = try .init(&aw.writer, buffer, .zlib, options.compress_options);
     try compressor.writer.writeAll(filtered_data);
     try compressor.writer.flush(); // Ensure all data is written
+    try compressor.finish();
 
     const compressed_data = try aw.toOwnedSlice();
     defer gpa.free(compressed_data);
