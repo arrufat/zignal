@@ -414,7 +414,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     const transform = ProjectiveTransform(f64){ .matrix = matrix };
     const inverse_transform = transform.inverse() orelse {
         const none = c.Py_None();
-        c.Py_INCREF(none);
+        c.Py_IncRef(none);
         return none;
     };
 

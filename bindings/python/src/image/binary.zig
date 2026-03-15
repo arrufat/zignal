@@ -105,7 +105,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     const binary_obj = moveImageToPython(out) orelse return null;
     const tuple = c.PyTuple_New(2) orelse {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(binary_obj)));
+        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(binary_obj)));
         python.setMemoryError("return tuple");
         return null;
     };
@@ -113,7 +113,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     _ = c.PyTuple_SetItem(tuple, 0, @ptrCast(binary_obj));
     const threshold_obj = python.create(threshold);
     if (threshold_obj == null) {
-        c.Py_DECREF(tuple);
+        c.Py_DecRef(tuple);
         return null;
     }
     _ = c.PyTuple_SetItem(tuple, 1, threshold_obj);

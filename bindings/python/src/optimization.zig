@@ -95,7 +95,7 @@ fn assignment_get_assignments(self_obj: ?*c.PyObject, closure: ?*anyopaque) call
                 python.none();
 
             if (item == null) {
-                c.Py_DECREF(list);
+                c.Py_DecRef(list);
                 return null;
             }
             // PyList_SetItem steals the reference
@@ -239,7 +239,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
 
     // Allocate and store the result
     assignment.assignment_ptr = allocator.create(optimization.Assignment) catch {
-        c.Py_DECREF(assignment_obj);
+        c.Py_DecRef(assignment_obj);
         var temp_result = result;
         temp_result.deinit();
         python.setMemoryError("Assignment");

@@ -16,14 +16,13 @@ const Oklab = zignal.Oklab(f64);
 const Oklch = zignal.Oklch(f64);
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const io = Io.Threaded.global_single_threaded.io();
 
     // Create a 512x512 image for the logo
     var image: Image(Rgb) = try .init(allocator, 512, 512);
-    defer image.deinit(allocator);
 
     // Create canvas for drawing
     var canvas = Canvas(Rgb).init(allocator, image);
@@ -72,7 +71,6 @@ fn drawSignalWaves(canvas: *Canvas(Rgb), allocator: std.mem.Allocator) !void {
     // Create points for sine waves that flow across the image
     const n_points = 150;
     var wave_points = try allocator.alloc(zignal.Point(2, f32), n_points);
-    defer allocator.free(wave_points);
 
     // Draw three waves representing RGB / LMS cone responses in human vision
     // L (Long wavelength) - Red cones (~565nm peak, ~64% of cones)

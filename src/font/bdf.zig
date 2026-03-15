@@ -888,7 +888,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
 
         var gzip_compressor: flate.Compress = try .init(&aw.writer, buffer, .gzip, .level_1);
         try gzip_compressor.writer.writeAll(bdf_content.items);
-        try gzip_compressor.writer.flush();
+        try gzip_compressor.finish();
 
         const compressed_data = try aw.toOwnedSlice();
         defer gpa.free(compressed_data);

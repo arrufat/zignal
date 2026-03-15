@@ -39,7 +39,7 @@ const circle_offsets = [16][2]i8{
 pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
     assert(image.rows > 7 and image.cols > 7); // Need at least 7x7 for radius 3
 
-    var keypoints: ArrayList(KeyPoint) = .{};
+    var keypoints: ArrayList(KeyPoint) = .empty;
     errdefer keypoints.deinit(allocator);
 
     // Skip border pixels (radius 3)
@@ -164,7 +164,7 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
         return try allocator.alloc(KeyPoint, 0);
     }
 
-    var suppressed: ArrayList(KeyPoint) = .{};
+    var suppressed: ArrayList(KeyPoint) = .empty;
     errdefer suppressed.deinit(allocator);
 
     // Create a grid for spatial binning (faster than O(n²) comparison)
@@ -200,7 +200,7 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
     }
 
     for (grid) |*cell| {
-        cell.* = .{};
+        cell.* = .empty;
     }
 
     // Bin keypoints into grid

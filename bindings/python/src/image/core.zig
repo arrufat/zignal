@@ -629,7 +629,7 @@ pub fn image_canvas(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     _ = args; // No arguments expected
     // Create Canvas by calling its constructor with this Image object
     const args_tuple = c.Py_BuildValue("(O)", self_obj.?) orelse return null;
-    defer c.Py_DECREF(args_tuple);
+    defer c.Py_DecRef(args_tuple);
     const canvas_py = c.PyObject_CallObject(@ptrCast(&canvas.CanvasType), args_tuple) orelse return null;
     return canvas_py;
 }
@@ -911,7 +911,7 @@ pub fn image_get_dtype(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
         .rgb => @ptrCast(&color_bindings.rgb),
         .rgba => @ptrCast(&color_bindings.rgba),
     };
-    c.Py_INCREF(dtype_obj);
+    c.Py_IncRef(dtype_obj);
     return dtype_obj;
 }
 

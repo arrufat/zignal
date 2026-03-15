@@ -247,7 +247,7 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
     const features_per_level = try self.computeFeaturesPerLevel(allocator);
     defer allocator.free(features_per_level);
 
-    var all_keypoints: ArrayList(KeyPoint) = .{};
+    var all_keypoints: ArrayList(KeyPoint) = .empty;
     defer all_keypoints.deinit(allocator);
 
     // Detect features at each pyramid level

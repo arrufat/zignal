@@ -41,7 +41,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
         // Helper function to delegate method calls to the underlying color object
         fn delegateToColorMethod(self_obj: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
             const color_raw = itemMethodImpl(self_obj) orelse return null;
-            defer c.Py_DECREF(color_raw);
+            defer c.Py_DecRef(color_raw);
             return python.callMethod(color_raw, method_name, args);
         }
 
@@ -52,7 +52,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
         fn dealloc(self_obj: [*c]c.PyObject) callconv(.c) void {
             const self: *ProxyObjectType = @ptrCast(self_obj);
-            if (self.parent) |parent| c.Py_DECREF(parent);
+            if (self.parent) |parent| c.Py_DecRef(parent);
             c.PyObject_Free(self);
         }
 
@@ -385,7 +385,7 @@ pub fn makeRgbProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t) 
     proxy.parent = parent;
     proxy.row = row;
     proxy.col = col;
-    if (parent != null) c.Py_INCREF(parent);
+    if (parent != null) c.Py_IncRef(parent);
     return proxy_obj;
 }
 
@@ -396,6 +396,6 @@ pub fn makeRgbaProxy(parent: ?*c.PyObject, row: c.Py_ssize_t, col: c.Py_ssize_t)
     proxy.parent = parent;
     proxy.row = row;
     proxy.col = col;
-    if (parent != null) c.Py_INCREF(parent);
+    if (parent != null) c.Py_IncRef(parent);
     return proxy_obj;
 }
