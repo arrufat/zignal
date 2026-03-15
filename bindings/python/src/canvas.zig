@@ -258,20 +258,20 @@ fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     const image: *image_module.ImageObject = @ptrCast(params.image.?);
 
     // Keep reference to parent Image to prevent garbage collection
-    c.Py_INCREF(params.image.?);
+    c.Py_IncRef(params.image.?);
     self.image_ref = params.image;
 
     // Initialize based on image format
     if (image.py_image) |pimg| {
         const py_canvas = allocator.create(PyCanvas) catch {
-            c.Py_DECREF(params.image.?);
+            c.Py_DecRef(params.image.?);
             python.setMemoryError("PyCanvas");
             return -1;
         };
         py_canvas.* = PyCanvas.initFromPyImage(allocator, pimg);
         self.py_canvas = py_canvas;
     } else {
-        c.Py_DECREF(params.image.?);
+        c.Py_DecRef(params.image.?);
         python.setValueError("Image not initialized", .{});
         return -1;
     }
@@ -289,7 +289,7 @@ fn canvas_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 
     // Release reference to parent Image
     if (self.image_ref) |ref| {
-        c.Py_XDECREF(ref);
+        c.Py_DecRef(ref);
     }
 
     python.typeOf(self_obj).*.tp_free.?(self_obj);
@@ -894,7 +894,7 @@ fn canvas_get_image(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?
     python.ensureInitialized(self, "image_ref", "Canvas not initialized") catch return null;
 
     const img_ref = self.image_ref.?;
-    c.Py_INCREF(img_ref);
+    c.Py_IncRef(img_ref);
     return img_ref;
 }
 

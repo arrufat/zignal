@@ -83,7 +83,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     inline for (type_table) |entry| {
         python.register(@ptrCast(m), entry.name, entry.ty) catch |err| {
             std.log.err("Failed to register {s}: {}", .{ entry.name, err });
-            c.Py_DECREF(m);
+            c.Py_DecRef(m);
             return null;
         };
     }
@@ -108,7 +108,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     inline for (enum_registrations) |reg| {
         enum_utils.registerEnum(reg.type, @ptrCast(m), reg.doc) catch |err| {
             std.log.err("Failed to register {s}: {}", .{ @typeName(reg.type), err });
-            c.Py_DECREF(m);
+            c.Py_DecRef(m);
             return null;
         };
     }
@@ -120,7 +120,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register all color types from the registry
     color.registerAllColorTypes(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register color types: {}", .{err});
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     };
 
@@ -131,14 +131,14 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Register MotionBlur classes
     motion_blur.registerMotionBlur(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register MotionBlur: {}", .{err});
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     };
 
     // Register Colormap classes
     colormaps.registerColormap(@ptrCast(m)) catch |err| {
         std.log.err("Failed to register Colormap: {}", .{err});
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     };
 
@@ -148,25 +148,25 @@ pub export fn PyInit__zignal() ?*c.PyObject {
 
     // Register RgbPixelProxy type (internal, not exposed in public API)
     if (c.PyType_Ready(&pixel_proxy.RgbPixelProxyType) < 0) {
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     }
 
     // Register RgbaPixelProxy type (internal, not exposed in public API)
     if (c.PyType_Ready(&pixel_proxy.RgbaPixelProxyType) < 0) {
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     }
 
     // Add __version__ as a module attribute from build options
     const version_str = python.create(zignal.version);
     if (version_str == null) {
-        c.Py_DECREF(m);
+        c.Py_DecRef(m);
         return null;
     }
     if (c.PyModule_AddObject(m, "__version__", version_str) < 0) {
-        c.Py_DECREF(version_str);
-        c.Py_DECREF(m);
+        c.Py_DecRef(version_str);
+        c.Py_DecRef(m);
         return null;
     }
 

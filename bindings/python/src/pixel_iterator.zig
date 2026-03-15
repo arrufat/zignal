@@ -31,13 +31,13 @@ const pixel_iterator_doc =
 
 fn pixel_iterator_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     const self: *PixelIteratorObject = @ptrCast(self_obj.?);
-    if (self.image_ref) |ref| c.Py_XDECREF(ref);
+    if (self.image_ref) |ref| c.Py_DecRef(ref);
     python.typeOf(self_obj).*.tp_free.?(self_obj);
 }
 
 fn pixel_iterator_iter(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = self_obj.?;
-    c.Py_INCREF(self);
+    c.Py_IncRef(self);
     return self;
 }
 
@@ -118,7 +118,7 @@ pub fn new(image_obj: ?*c.PyObject) ?*c.PyObject {
     if (c.PyType_Ready(&PixelIteratorType) < 0) return null;
     const it_obj: ?*PixelIteratorObject = @ptrCast(c.PyType_GenericAlloc(&PixelIteratorType, 0));
     if (it_obj == null) return null;
-    if (image_obj) |img| c.Py_INCREF(img);
+    if (image_obj) |img| c.Py_IncRef(img);
     it_obj.?.image_ref = image_obj;
     it_obj.?.index = 0;
     return @ptrCast(it_obj);

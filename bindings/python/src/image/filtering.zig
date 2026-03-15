@@ -1121,6 +1121,6 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     }
 
     // Return None (Python convention for in-place operations)
-    c.Py_INCREF(c.Py_None());
+    c.Py_IncRef(c.Py_None());
     return c.Py_None();
 }
