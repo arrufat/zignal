@@ -6,9 +6,9 @@ const Image = zignal.Image;
 
 const Rgb = zignal.Rgb(u8);
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     // Setup IO context
     const io = Io.Threaded.global_single_threaded.io();
@@ -20,7 +20,6 @@ pub fn main() !void {
 
     // Create a grayscale image with a pattern
     var gray: Image(u8) = try .init(allocator, rows, cols);
-    defer gray.deinit(allocator);
 
     for (0..rows) |r| {
         for (0..cols) |c| {
@@ -46,7 +45,6 @@ pub fn main() !void {
     for (maps) |entry| {
         std.debug.print("Applying colormap: {s}...\n", .{entry.name});
         var colored = try gray.applyColormap(allocator, entry.map);
-        defer colored.deinit(allocator);
         try colored.save(io, allocator, entry.name);
     }
 

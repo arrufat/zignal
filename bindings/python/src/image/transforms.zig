@@ -797,6 +797,6 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         },
     }
     const none = c.Py_None();
-    c.Py_INCREF(none);
+    c.Py_IncRef(none);
     return none;
 }

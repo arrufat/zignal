@@ -30,7 +30,7 @@ fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
         python.setValueError("NumPy is not installed. Please install it with: pip install numpy", .{});
         return null;
     };
-    defer c.Py_DECREF(np_module);
+    defer c.Py_DecRef(np_module);
 
     const extra_raw = c.PyMem_Malloc(@sizeOf(BufferExtra)) orelse {
         python.setMemoryError("buffer metadata");
@@ -64,24 +64,24 @@ fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
         .suboffsets = null,
         .internal = extra_raw,
     };
-    c.Py_INCREF(self_obj);
+    c.Py_IncRef(self_obj);
 
     const memview = c.PyMemoryView_FromBuffer(&buffer) orelse {
-        c.Py_DECREF(self_obj);
+        c.Py_DecRef(self_obj);
         return null;
     };
     cleanup_extra = false;
 
     const np_asarray = c.PyObject_GetAttrString(np_module, "asarray") orelse {
-        c.Py_DECREF(memview);
+        c.Py_DecRef(memview);
         return null;
     };
-    defer c.Py_DECREF(np_asarray);
+    defer c.Py_DecRef(np_asarray);
 
     const args_tuple = c.Py_BuildValue("(N)", memview) orelse {
         return null;
     };
-    defer c.Py_DECREF(args_tuple);
+    defer c.Py_DecRef(args_tuple);
 
     const array = c.PyObject_CallObject(np_asarray, args_tuple) orelse {
         return null;
@@ -154,12 +154,12 @@ fn imageFromNumpyHelper(
         .stride = row_stride_pixels,
     };
 
-    c.Py_INCREF(array_obj.?);
+    c.Py_IncRef(array_obj.?);
     self.numpy_ref = array_obj;
 
     const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DECREF(@as(*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@as(*c.PyObject, @ptrCast(self)));
         python.setMemoryError("image");
         return null;
     };

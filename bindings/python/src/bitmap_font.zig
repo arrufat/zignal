@@ -86,7 +86,7 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     // Allocate font on heap
     const font_ptr = allocator.create(BitmapFont) catch {
-        c.Py_DECREF(instance);
+        c.Py_DecRef(instance);
         python.setMemoryError("font");
         return null;
     };
@@ -98,7 +98,7 @@ fn bitmap_font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         // Clean up on error
         allocator.destroy(font_ptr);
         self.font = null; // Clear the pointer
-        c.Py_DECREF(instance);
+        c.Py_DecRef(instance);
 
         // Set appropriate Python exception based on error
         python.setErrorWithPath(err, path_slice);
@@ -171,14 +171,14 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
 
         // Allocate font on heap and create with all characters
         const font_ptr = allocator.create(BitmapFont) catch {
-            c.Py_DECREF(instance);
+            c.Py_DecRef(instance);
             c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate font");
             return null;
         };
 
         font_ptr.* = zignal.font.font8x8.create(allocator, .all) catch {
             allocator.destroy(font_ptr);
-            c.Py_DECREF(instance);
+            c.Py_DecRef(instance);
             c.PyErr_SetString(c.PyExc_RuntimeError, "Failed to create font8x8 with all characters");
             return null;
         };
@@ -187,7 +187,7 @@ fn bitmap_font8x8(type_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
         cached_font8x8 = instance; // keep a strong ref for the lifetime of the module
     }
     // Return a new reference to the cached singleton
-    c.Py_INCREF(cached_font8x8);
+    c.Py_IncRef(cached_font8x8);
     return cached_font8x8;
 }
 
