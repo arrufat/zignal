@@ -113,7 +113,7 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
                 obj.min = c.PyFloat_AsDouble(min_obj);
                 if (c.PyErr_Occurred() != null) {
                     // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
-                    c.Py_DECREF(@as(?*c.PyObject, @ptrCast(obj)));
+                    c.Py_DecRef(@as(?*c.PyObject, @ptrCast(obj)));
                     return null;
                 }
                 obj.has_min = true;
@@ -129,7 +129,7 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
                 obj.max = c.PyFloat_AsDouble(max_obj);
                 if (c.PyErr_Occurred() != null) {
                     // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
-                    c.Py_DECREF(@as(?*c.PyObject, @ptrCast(obj)));
+                    c.Py_DecRef(@as(?*c.PyObject, @ptrCast(obj)));
                     return null;
                 }
                 obj.has_max = true;
@@ -183,7 +183,7 @@ fn get_min(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObje
     if (self.has_min) {
         return python.create(self.min);
     } else {
-        c.Py_INCREF(c.Py_None());
+        c.Py_IncRef(c.Py_None());
         return c.Py_None();
     }
 }
@@ -194,7 +194,7 @@ fn get_max(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObje
     if (self.has_max) {
         return python.create(self.max);
     } else {
-        c.Py_INCREF(c.Py_None());
+        c.Py_IncRef(c.Py_None());
         return c.Py_None();
     }
 }
@@ -340,9 +340,9 @@ pub fn registerColormap(module: *c.PyObject) !void {
         return error.TypeInitFailed;
     }
 
-    c.Py_INCREF(@as(?*c.PyObject, @ptrCast(&ColormapType)));
+    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(&ColormapType)));
     if (c.PyModule_AddObject(module, "Colormap", @ptrCast(&ColormapType)) < 0) {
-        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(&ColormapType)));
+        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(&ColormapType)));
         return error.ModuleAddFailed;
     }
 }

@@ -51,7 +51,7 @@ pub const BruteForceMatcher = struct {
             return try allocator.alloc(Match, 0);
         }
 
-        var matches: ArrayList(Match) = .{};
+        var matches: ArrayList(Match) = .empty;
         defer matches.deinit(allocator);
 
         // For each query descriptor, find best matches in train set
@@ -145,7 +145,7 @@ pub const BruteForceMatcher = struct {
             std.mem.sort(Match, distances, {}, Match.compareDistance);
 
             // Keep top k matches that pass distance threshold
-            var k_matches: ArrayList(Match) = .{};
+            var k_matches: ArrayList(Match) = .empty;
             errdefer k_matches.deinit(allocator);
             for (distances[0..@min(k, distances.len)]) |m| {
                 if (m.distance <= @as(f32, @floatFromInt(self.max_distance))) {

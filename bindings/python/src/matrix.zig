@@ -218,7 +218,7 @@ fn matrixDeinit(self: *MatrixObject) void {
 
     // Decref numpy array if we hold a reference
     if (self.numpy_ref) |ref| {
-        c.Py_DECREF(ref);
+        c.Py_DecRef(ref);
     }
 }
 
@@ -283,13 +283,13 @@ fn matrix_shape_getter(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c
 
     const rows_obj = python.create(ptr.rows) orelse return null;
     const cols_obj = python.create(ptr.cols) orelse {
-        c.Py_DECREF(rows_obj);
+        c.Py_DecRef(rows_obj);
         return null;
     };
 
     const tuple = c.PyTuple_New(2) orelse {
-        c.Py_DECREF(rows_obj);
-        c.Py_DECREF(cols_obj);
+        c.Py_DecRef(rows_obj);
+        c.Py_DecRef(cols_obj);
         return null;
     };
 
@@ -324,7 +324,7 @@ fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
         python.setImportError("NumPy is not installed. Please install it with: pip install numpy", .{});
         return null;
     };
-    defer c.Py_DECREF(np_module);
+    defer c.Py_DecRef(np_module);
 
     // Create a memoryview from our matrix data
     var buffer = c.Py_buffer{
@@ -349,35 +349,35 @@ fn matrix_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
 
     // Create memoryview
     const memview = c.PyMemoryView_FromBuffer(&buffer) orelse return null;
-    defer c.Py_DECREF(memview);
+    defer c.Py_DecRef(memview);
 
     // Get numpy.frombuffer function
     const frombuffer = c.PyObject_GetAttrString(np_module, "frombuffer") orelse return null;
-    defer c.Py_DECREF(frombuffer);
+    defer c.Py_DecRef(frombuffer);
 
     // Call numpy.frombuffer with dtype='float64'
     const dtype_str = python.create("float64") orelse return null;
-    defer c.Py_DECREF(dtype_str);
+    defer c.Py_DecRef(dtype_str);
 
     const flat_array = c.PyObject_CallFunctionObjArgs(frombuffer, memview, dtype_str, @as(?*c.PyObject, null)) orelse return null;
-    defer c.Py_DECREF(flat_array);
+    defer c.Py_DecRef(flat_array);
 
     const rows_obj = python.create(ptr.rows) orelse return null;
     const cols_obj = python.create(ptr.cols) orelse {
-        c.Py_DECREF(rows_obj);
+        c.Py_DecRef(rows_obj);
         return null;
     };
 
     const shape_tuple = c.PyTuple_New(2) orelse {
-        c.Py_DECREF(rows_obj);
-        c.Py_DECREF(cols_obj);
+        c.Py_DecRef(rows_obj);
+        c.Py_DecRef(cols_obj);
         return null;
     };
 
     _ = c.PyTuple_SetItem(shape_tuple, 0, rows_obj);
     _ = c.PyTuple_SetItem(shape_tuple, 1, cols_obj);
 
-    defer c.Py_DECREF(shape_tuple);
+    defer c.Py_DecRef(shape_tuple);
 
     return python.callMethodBorrowingArgs(flat_array, "reshape", shape_tuple);
 }
@@ -460,7 +460,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // Create Matrix that references the numpy data
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
         python.setMemoryError("Matrix");
         return null;
     };
@@ -485,13 +485,13 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         self.?.owns_memory = false;
 
         // Increment reference to numpy array to keep it alive
-        c.Py_INCREF(array_obj);
+        c.Py_IncRef(array_obj);
     } else {
         // Fallback: copy unaligned data to an aligned buffer
         matrix_ptr.* = Matrix(f64).init(allocator, @intCast(rows), @intCast(cols)) catch {
             allocator.destroy(matrix_ptr);
             // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-            c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
+            c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
             python.setMemoryError("Matrix");
             return null;
         };
@@ -739,7 +739,7 @@ fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
 
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
         // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
         python.setMemoryError("Matrix");
         return null;
     };
@@ -768,7 +768,7 @@ fn allocOwnedMatrix(type_obj: ?*c.PyObject) ?OwnedMatrixAlloc {
     matrix_obj.owns_memory = false;
 
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        c.Py_DECREF(raw_self);
+        c.Py_DecRef(raw_self);
         python.setMemoryError("Matrix");
         return null;
     };
@@ -789,7 +789,7 @@ fn cleanupOwnedMatrix(allocation: OwnedMatrixAlloc, matrix_initialized: bool) vo
     allocation.matrix_obj.matrix_ptr = null;
     allocation.matrix_obj.owns_memory = false;
 
-    c.Py_DECREF(allocation.py_obj);
+    c.Py_DecRef(allocation.py_obj);
 }
 
 fn matrixDimensionGetter(comptime dim: enum { rows, cols }) *const anyopaque {
@@ -1685,27 +1685,27 @@ fn matrix_lu_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 
     // Add matrices
     const l_obj = matrixToObject(lu_result.l.dupe(allocator) catch {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         python.setMemoryError("Matrix copy");
         return null;
     }) orelse {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         return null;
     };
     const u_obj = matrixToObject(lu_result.u.dupe(allocator) catch {
-        c.Py_DECREF(l_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(l_obj);
+        c.Py_DecRef(result_dict);
         python.setMemoryError("Matrix copy");
         return null;
     }) orelse {
-        c.Py_DECREF(l_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(l_obj);
+        c.Py_DecRef(result_dict);
         return null;
     };
     const p_list = python.listFromSlice(u32, lu_result.p.indices) orelse {
-        c.Py_DECREF(l_obj);
-        c.Py_DECREF(u_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(l_obj);
+        c.Py_DecRef(u_obj);
+        c.Py_DecRef(result_dict);
         return null;
     };
 
@@ -1714,18 +1714,18 @@ fn matrix_lu_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     _ = c.PyDict_SetItemString(result_dict, "p", p_list);
 
     const sign_obj = python.create(lu_result.sign) orelse {
-        c.Py_DECREF(l_obj);
-        c.Py_DECREF(u_obj);
-        c.Py_DECREF(p_list);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(l_obj);
+        c.Py_DecRef(u_obj);
+        c.Py_DecRef(p_list);
+        c.Py_DecRef(result_dict);
         return null;
     };
     _ = c.PyDict_SetItemString(result_dict, "sign", sign_obj);
-    c.Py_DECREF(sign_obj);
+    c.Py_DecRef(sign_obj);
 
-    c.Py_DECREF(l_obj);
-    c.Py_DECREF(u_obj);
-    c.Py_DECREF(p_list);
+    c.Py_DecRef(l_obj);
+    c.Py_DecRef(u_obj);
+    c.Py_DecRef(p_list);
 
     return result_dict;
 }
@@ -1759,21 +1759,21 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 
     // Add matrices
     const q_obj = matrixToObject(qr_result.q.dupe(allocator) catch {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         python.setMemoryError("Matrix copy");
         return null;
     }) orelse {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         return null;
     };
     const r_obj = matrixToObject(qr_result.r.dupe(allocator) catch {
-        c.Py_DECREF(q_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(q_obj);
+        c.Py_DecRef(result_dict);
         python.setMemoryError("Matrix copy");
         return null;
     }) orelse {
-        c.Py_DECREF(q_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(q_obj);
+        c.Py_DecRef(result_dict);
         return null;
     };
 
@@ -1781,37 +1781,37 @@ fn matrix_qr_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
     _ = c.PyDict_SetItemString(result_dict, "r", r_obj);
 
     const rank_obj = python.create(qr_result.rank) orelse {
-        c.Py_DECREF(q_obj);
-        c.Py_DECREF(r_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(q_obj);
+        c.Py_DecRef(r_obj);
+        c.Py_DecRef(result_dict);
         return null;
     };
     _ = c.PyDict_SetItemString(result_dict, "rank", rank_obj);
-    c.Py_DECREF(rank_obj);
+    c.Py_DecRef(rank_obj);
 
     // Convert permutation to Python list
     const perm_list = python.listFromSlice(u32, qr_result.perm.indices) orelse {
-        c.Py_DECREF(q_obj);
-        c.Py_DECREF(r_obj);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(q_obj);
+        c.Py_DecRef(r_obj);
+        c.Py_DecRef(result_dict);
         return null;
     };
     _ = c.PyDict_SetItemString(result_dict, "perm", perm_list);
 
     // Convert col_norms to Python list
     const col_norms_list = python.listFromSlice(f64, qr_result.col_norms) orelse {
-        c.Py_DECREF(q_obj);
-        c.Py_DECREF(r_obj);
-        c.Py_DECREF(perm_list);
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(q_obj);
+        c.Py_DecRef(r_obj);
+        c.Py_DecRef(perm_list);
+        c.Py_DecRef(result_dict);
         return null;
     };
     _ = c.PyDict_SetItemString(result_dict, "col_norms", col_norms_list);
 
-    c.Py_DECREF(q_obj);
-    c.Py_DECREF(r_obj);
-    c.Py_DECREF(perm_list);
-    c.Py_DECREF(col_norms_list);
+    c.Py_DecRef(q_obj);
+    c.Py_DecRef(r_obj);
+    c.Py_DecRef(perm_list);
+    c.Py_DecRef(col_norms_list);
 
     return result_dict;
 }
@@ -1873,57 +1873,57 @@ fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     // Add U matrix (or None)
     if (compute_uv_bool) {
         const u_obj = matrixToObject(svd_result.u.dupe(allocator) catch {
-            c.Py_DECREF(result_dict);
+            c.Py_DecRef(result_dict);
             python.setMemoryError("Matrix copy");
             return null;
         });
         if (u_obj == null) {
-            c.Py_DECREF(result_dict);
+            c.Py_DecRef(result_dict);
             return null;
         }
         _ = c.PyDict_SetItemString(result_dict, "u", u_obj);
-        c.Py_DECREF(u_obj);
+        c.Py_DecRef(u_obj);
     } else {
         _ = c.PyDict_SetItemString(result_dict, "u", c.Py_None());
     }
 
     // Add S matrix (always computed)
     const s_obj = matrixToObject(svd_result.s.dupe(allocator) catch {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         python.setMemoryError("Matrix copy");
         return null;
     });
     if (s_obj == null) {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         return null;
     }
     _ = c.PyDict_SetItemString(result_dict, "s", s_obj);
-    c.Py_DECREF(s_obj);
+    c.Py_DecRef(s_obj);
 
     // Add V matrix (or None)
     if (compute_uv_bool) {
         const v_obj = matrixToObject(svd_result.v.dupe(allocator) catch {
-            c.Py_DECREF(result_dict);
+            c.Py_DecRef(result_dict);
             python.setMemoryError("Matrix copy");
             return null;
         });
         if (v_obj == null) {
-            c.Py_DECREF(result_dict);
+            c.Py_DecRef(result_dict);
             return null;
         }
         _ = c.PyDict_SetItemString(result_dict, "v", v_obj);
-        c.Py_DECREF(v_obj);
+        c.Py_DecRef(v_obj);
     } else {
         _ = c.PyDict_SetItemString(result_dict, "v", c.Py_None());
     }
 
     // Add convergence status
     const converged_obj = python.create(svd_result.converged) orelse {
-        c.Py_DECREF(result_dict);
+        c.Py_DecRef(result_dict);
         return null;
     };
     _ = c.PyDict_SetItemString(result_dict, "converged", converged_obj);
-    c.Py_DECREF(converged_obj);
+    c.Py_DecRef(converged_obj);
 
     return result_dict;
 }

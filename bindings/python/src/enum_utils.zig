@@ -30,13 +30,13 @@ pub fn registerEnum(
 ) !void {
     // Import enum.IntEnum
     const enum_module = c.PyImport_ImportModule("enum") orelse return error.ImportFailed;
-    defer c.Py_DECREF(enum_module);
+    defer c.Py_DecRef(enum_module);
     const int_enum = c.PyObject_GetAttrString(enum_module, "IntEnum") orelse return error.AttributeFailed;
-    defer c.Py_DECREF(int_enum);
+    defer c.Py_DecRef(int_enum);
 
     // Build values dict: { UPPERCASE_NAME: int_value }
     const values = c.PyDict_New() orelse return error.DictCreationFailed;
-    defer c.Py_DECREF(values);
+    defer c.Py_DecRef(values);
 
     const EI = getEnumInfo(E);
     inline for (EI.fields) |field| {
@@ -49,52 +49,52 @@ pub fn registerEnum(
         up[n] = 0; // NUL terminate
 
         const py_val = python.create(field.value) orelse return error.ValueCreationFailed;
-        defer c.Py_DECREF(py_val);
+        defer c.Py_DecRef(py_val);
         if (c.PyDict_SetItemString(values, @ptrCast(&up[0]), py_val) < 0) return error.DictSetFailed;
     }
 
     // Create IntEnum(Name, values) using simple type name
     const name = zignal.meta.getSimpleTypeName(E);
     const name_uni = python.create(name) orelse return error.TupleCreationFailed;
-    defer c.Py_DECREF(name_uni);
+    defer c.Py_DecRef(name_uni);
     const args = c.PyTuple_Pack(2, name_uni, values) orelse return error.TupleCreationFailed;
-    defer c.Py_DECREF(args);
+    defer c.Py_DecRef(args);
     const enum_obj = c.PyObject_CallObject(int_enum, args) orelse return error.EnumCreationFailed;
 
     // Set docstring
     const doc_str = python.create(doc) orelse {
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(enum_obj);
         return error.DocStringFailed;
     };
     if (c.PyObject_SetAttrString(enum_obj, "__doc__", doc_str) < 0) {
-        c.Py_DECREF(doc_str);
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(doc_str);
+        c.Py_DecRef(enum_obj);
         return error.DocStringSetFailed;
     }
-    c.Py_DECREF(doc_str);
+    c.Py_DecRef(doc_str);
 
     // Set __module__ to top-level package for docs
     const module_name = python.create("zignal") orelse {
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(enum_obj);
         return error.ModuleNameFailed;
     };
     if (c.PyObject_SetAttrString(enum_obj, "__module__", module_name) < 0) {
-        c.Py_DECREF(module_name);
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(module_name);
+        c.Py_DecRef(enum_obj);
         return error.ModuleSetFailed;
     }
-    c.Py_DECREF(module_name);
+    c.Py_DecRef(module_name);
 
     // Add to module (steals reference)
     var name_buf: [128]u8 = undefined;
     if (name.len >= name_buf.len) {
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(enum_obj);
         return error.NameTooLong;
     }
     @memcpy(name_buf[0..name.len], name);
     name_buf[name.len] = 0;
     if (c.PyModule_AddObject(module, @ptrCast(&name_buf[0]), enum_obj) < 0) {
-        c.Py_DECREF(enum_obj);
+        c.Py_DecRef(enum_obj);
         return error.ModuleAddFailed;
     }
 }
@@ -112,7 +112,7 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
             c.PyErr_SetString(c.PyExc_TypeError, "Enum must be an integer or IntEnum member");
             return error.InvalidType;
         }
-        defer c.Py_DECREF(value_attr);
+        defer c.Py_DecRef(value_attr);
         v = c.PyLong_AsLong(value_attr);
         if (v == -1 and c.PyErr_Occurred() != null) {
             c.PyErr_SetString(c.PyExc_TypeError, "Failed to extract enum value");
@@ -159,7 +159,7 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
             c.PyErr_SetString(c.PyExc_TypeError, "Enum must be an integer or IntEnum member");
             return error.InvalidType;
         }
-        defer c.Py_DECREF(value_attr);
+        defer c.Py_DecRef(value_attr);
         v = c.PyLong_AsLong(value_attr);
         if (v == -1 and c.PyErr_Occurred() != null) {
             c.PyErr_SetString(c.PyExc_TypeError, "Failed to extract enum value");

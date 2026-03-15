@@ -28,7 +28,7 @@ pub fn clearError() void {
 /// Automatically clears any pending Python exception (useful when returning from a failed check/parse).
 pub fn notImplemented() ?*c.PyObject {
     clearError();
-    c.Py_INCREF(c.Py_NotImplemented());
+    c.Py_IncRef(c.Py_NotImplemented());
     return c.Py_NotImplemented();
 }
 
@@ -37,9 +37,9 @@ pub fn register(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.
     if (c.PyType_Ready(type_obj) < 0) return error.TypeInitFailed;
 
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    c.Py_INCREF(@as(?*c.PyObject, @ptrCast(type_obj)));
+    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(type_obj)));
     if (c.PyModule_AddObject(module, name.ptr, @ptrCast(type_obj)) < 0) {
-        c.Py_DECREF(@as(?*c.PyObject, @ptrCast(type_obj)));
+        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(type_obj)));
         return error.TypeAddFailed;
     }
 }
@@ -52,7 +52,7 @@ pub fn typeOf(obj: ?*c.PyObject) callconv(.c) *c.PyTypeObject {
 /// Helper to return Python None
 pub fn none() ?*c.PyObject {
     const val = c.Py_None();
-    c.Py_INCREF(val);
+    c.Py_IncRef(val);
     return val;
 }
 
@@ -60,7 +60,7 @@ pub fn none() ?*c.PyObject {
 fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
     const rectangle = @import("rectangle.zig");
     const new_args = c.Py_BuildValue("(dddd)", rect.l, rect.t, rect.r, rect.b) orelse return null;
-    defer c.Py_DECREF(new_args);
+    defer c.Py_DecRef(new_args);
     return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), new_args);
 }
 
@@ -193,7 +193,7 @@ const ArgsTupleHandle = struct {
 
     pub fn deinit(self: ArgsTupleHandle) void {
         if (self.owned and self.tuple != null) {
-            c.Py_DECREF(self.tuple.?);
+            c.Py_DecRef(self.tuple.?);
         }
     }
 };
@@ -216,7 +216,7 @@ pub fn callMethodBorrowingArgs(target: ?*c.PyObject, method_name: [*c]const u8, 
 
     const method_ptr = c.PyObject_GetAttrString(target.?, method_name);
     if (method_ptr == null) return null;
-    defer c.Py_DECREF(method_ptr);
+    defer c.Py_DecRef(method_ptr);
 
     return c.PyObject_CallObject(method_ptr, args.?);
 }
@@ -381,7 +381,7 @@ pub fn getterTuple2FieldsWhere(
             if (!Predicate(self)) return none();
             const a = create(@field(self, field0)) orelse return null;
             const b = create(@field(self, field1)) orelse {
-                c.Py_DECREF(a);
+                c.Py_DecRef(a);
                 return null;
             };
             const tup = c.Py_BuildValue("(NN)", a, b);
@@ -405,7 +405,7 @@ pub fn getterTuple2FromArrayField(
             const arr = @field(self, array_field);
             const a = create(arr[idx0]) orelse return null;
             const b = create(arr[idx1]) orelse {
-                c.Py_DECREF(a);
+                c.Py_DecRef(a);
                 return null;
             };
             return c.Py_BuildValue("(NN)", a, b);
@@ -434,7 +434,7 @@ pub fn getterMatrixNested(
             while (i < rows) : (i += 1) {
                 const row_list = c.PyList_New(@intCast(cols));
                 if (row_list == null) {
-                    c.Py_DECREF(outer);
+                    c.Py_DecRef(outer);
                     return null;
                 }
 
@@ -442,8 +442,8 @@ pub fn getterMatrixNested(
                 while (j < cols) : (j += 1) {
                     const val_obj = create(mat[i][j]);
                     if (val_obj == null) {
-                        c.Py_DECREF(row_list);
-                        c.Py_DECREF(outer);
+                        c.Py_DecRef(row_list);
+                        c.Py_DecRef(outer);
                         return null;
                     }
                     // PyList_SetItem steals reference to val_obj
@@ -519,7 +519,7 @@ fn toArrayList(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
         const val = blk: {
             const item = c.PySequence_GetItem(seq_obj, @intCast(i)); // New reference
             if (item == null) return error.PythonError;
-            defer c.Py_DECREF(item);
+            defer c.Py_DecRef(item);
             break :blk try parse(T, item);
         };
         list.appendAssumeCapacity(val);
@@ -820,7 +820,7 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime ap
         const result = @call(.auto, apply, .{ point_ctx, point.x(), point.y() });
         const x_obj = create(result[0]) orelse return null;
         const y_obj = create(result[1]) orelse {
-            c.Py_DECREF(x_obj);
+            c.Py_DecRef(x_obj);
             return null;
         };
         return c.PyTuple_Pack(2, x_obj, y_obj);
@@ -835,17 +835,17 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime ap
         for (points, 0..) |point, i| {
             const result = @call(.auto, apply, .{ point_ctx, point.x(), point.y() });
             const x_obj = create(result[0]) orelse {
-                c.Py_DECREF(result_list);
+                c.Py_DecRef(result_list);
                 return null;
             };
             const y_obj = create(result[1]) orelse {
-                c.Py_DECREF(x_obj);
-                c.Py_DECREF(result_list);
+                c.Py_DecRef(x_obj);
+                c.Py_DecRef(result_list);
                 return null;
             };
             const tuple = c.PyTuple_Pack(2, x_obj, y_obj) orelse {
                 // PyTuple_Pack decrements references on failure.
-                c.Py_DECREF(result_list);
+                c.Py_DecRef(result_list);
                 return null;
             };
             _ = c.PyList_SetItem(result_list, @intCast(i), tuple);
@@ -1447,7 +1447,7 @@ pub fn listFromSliceCustom(
     for (slice, 0..) |item, idx| {
         const py_item = converter(item, idx);
         if (py_item == null) {
-            c.Py_DECREF(list);
+            c.Py_DecRef(list);
             return null;
         }
         _ = c.PyList_SetItem(list, @intCast(idx), py_item);

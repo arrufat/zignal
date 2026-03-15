@@ -89,7 +89,7 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
         if (c.PyErr_Occurred() != null) c.PyErr_Clear();
         return null;
     }
-    defer c.Py_DECREF(method);
+    defer c.Py_DecRef(method);
 
     const target_type_obj: *c.PyTypeObject = switch (T) {
         u8 => &color.gray,
@@ -100,11 +100,11 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
 
     const args = c.PyTuple_New(1);
     if (args == null) return error.InvalidColor;
-    defer c.Py_DECREF(args);
+    defer c.Py_DecRef(args);
 
     // PyTuple_SetItem steals a reference, so INCREF first.
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    c.Py_INCREF(@as(?*c.PyObject, @ptrCast(target_type_obj)));
+    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(target_type_obj)));
     if (c.PyTuple_SetItem(args, 0, @ptrCast(target_type_obj)) < 0) {
         return error.InvalidColor;
     }
@@ -114,7 +114,7 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
         // Leave the Python exception set by the conversion method.
         return error.InvalidColor;
     }
-    defer c.Py_DECREF(converted);
+    defer c.Py_DecRef(converted);
 
     return switch (T) {
         u8 => blk: {
@@ -137,7 +137,7 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
 fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
     const attr = c.PyObject_GetAttrString(obj, name);
     if (attr == null) return null;
-    defer c.Py_DECREF(attr);
+    defer c.Py_DecRef(attr);
 
     return python.parse(c_long, attr) catch null;
 }

@@ -319,12 +319,12 @@ fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
 
     // Release reference to NumPy array if we have one
     if (self.numpy_ref) |ref| {
-        c.Py_XDECREF(ref);
+        c.Py_DecRef(ref);
     }
 
     // Release reference to parent Image if this is a view
     if (self.parent_ref) |ref| {
-        c.Py_XDECREF(ref);
+        c.Py_DecRef(ref);
     }
 
     python.typeOf(self_obj).*.tp_free.?(self_obj);
@@ -1397,7 +1397,7 @@ pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
     const pnew = PyImage.createFrom(allocator, owned_img, .owned) orelse {
         var tmp = owned_img;
         tmp.deinit(allocator);
-        c.Py_DECREF(py_obj);
+        c.Py_DecRef(py_obj);
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate image data");
         return null;
     };
@@ -1419,7 +1419,7 @@ pub fn wrapPyImage(pimg: *PyImage, parent: ?*c.PyObject) ?*c.PyObject {
     new_self.py_image = pimg;
     new_self.numpy_ref = null;
     if (parent) |p| {
-        c.Py_INCREF(p);
+        c.Py_IncRef(p);
         new_self.parent_ref = p;
     } else {
         new_self.parent_ref = null;

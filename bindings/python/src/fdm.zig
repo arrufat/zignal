@@ -107,7 +107,7 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     };
 
     const none = c.Py_None();
-    c.Py_INCREF(none);
+    c.Py_IncRef(none);
     return none;
 }
 
@@ -170,7 +170,7 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     // Success
 
     const none = c.Py_None();
-    c.Py_INCREF(none);
+    c.Py_IncRef(none);
     return none;
 }
 
@@ -254,7 +254,7 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     };
 
     const none = c.Py_None();
-    c.Py_INCREF(none);
+    c.Py_IncRef(none);
     return none;
 }
 
@@ -301,7 +301,7 @@ fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     };
 
     const none = c.Py_None();
-    c.Py_INCREF(none);
+    c.Py_IncRef(none);
     return none;
 }
 

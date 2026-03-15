@@ -113,7 +113,7 @@ fn running_stats_extend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         c.PyErr_SetString(c.PyExc_TypeError, "values must be an iterable of numbers");
         return null;
     }
-    defer c.Py_DECREF(iter);
+    defer c.Py_DecRef(iter);
 
     while (true) {
         const item = c.PyIter_Next(iter);
@@ -124,10 +124,10 @@ fn running_stats_extend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
             break;
         }
         const value = python.parse(f64, item) catch {
-            c.Py_DECREF(item);
+            c.Py_DecRef(item);
             return null;
         };
-        c.Py_DECREF(item);
+        c.Py_DecRef(item);
 
         stats_ptr.add(value);
     }
@@ -217,7 +217,7 @@ fn running_stats_combine(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
 
     const result = c.PyObject_CallObject(@ptrCast(&RunningStatsType), null) orelse return null;
     const result_ptr = python.unwrap(RunningStatsObject, "stats_ptr", result, "RunningStats") orelse {
-        c.Py_DECREF(result);
+        c.Py_DecRef(result);
         return null;
     };
     result_ptr.* = combined;
