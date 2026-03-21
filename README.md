@@ -4,7 +4,6 @@
 [![PyPI version](https://badge.fury.io/py/zignal-processing.svg)](https://badge.fury.io/py/zignal-processing)
 
 Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](https://dlib.net).
-**Originally developed at [B Factory, Inc](https://www.bfactory.ai/), it is now an independent open-source project.**
 
 ## Status
 
@@ -99,7 +98,8 @@ This library is used by [Ameli](https://ameli.co.kr/) for their makeup virtual t
 ## Sponsors
 
 Special thanks to **[B Factory, Inc](https://www.bfactory.ai/)**, the **Founding Sponsor** of Zignal.
-They originally developed this library and graciously transferred ownership to the community to ensure its long-term maintenance and growth.
+I originally developed this library internally for our virtual makeup try-on system, and B Factory
+graciously transferred ownership to the community to ensure its long-term maintenance and growth.
 
 <br></br>
 [![Star History Chart](https://api.star-history.com/svg?repos=arrufat/zignal&type=Date)](https://www.star-history.com/#arrufat/zignal&Date)
