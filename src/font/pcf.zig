@@ -1361,7 +1361,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     const accel_table = try writeAcceleratorsTable(gpa, glyph_data.entries, font_ascent, font_descent);
     defer gpa.free(accel_table);
 
-    var tables = [_]TableBuffer{
+    const tables = [_]TableBuffer{
         .{ .table_type = (1 << 0), .format = 0, .data = properties_table },
         .{ .table_type = (1 << 1), .format = 0, .data = accel_table },
         .{ .table_type = (1 << 2), .format = 0, .data = metrics_table },

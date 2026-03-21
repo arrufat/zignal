@@ -942,7 +942,7 @@ fn applyOrderedDither(
             // Scalar unrolled loop for non-packed structures
             while (cols >= 8 and c <= cols - 8) : (c += 8) {
                 inline for (0..8) |k| {
-                    var pixel = row_slice[c + k];
+                    const pixel = row_slice[c + k];
                     const offset = offsets[k];
 
                     const r5 = meta.clamp(u8, @as(i32, pixel.r) + offset) >> (8 - color_quantize_bits);
@@ -957,7 +957,7 @@ fn applyOrderedDither(
 
         // Handle remaining pixels
         while (c < cols) : (c += 1) {
-            var pixel = row_slice[c];
+            const pixel = row_slice[c];
             const offset = offsets[c & 7];
 
             const r5 = meta.clamp(u8, @as(i32, pixel.r) + offset) >> (8 - color_quantize_bits);
