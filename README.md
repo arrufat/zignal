@@ -3,12 +3,22 @@
 [![docs](https://github.com/arrufat/zignal/actions/workflows/documentation.yml/badge.svg)](https://github.com/arrufat/zignal/actions/workflows/documentation.yml)
 [![PyPI version](https://badge.fury.io/py/zignal-processing.svg)](https://badge.fury.io/py/zignal-processing)
 
-Zignal is a zero-dependency image processing library heavily inspired by the amazing [dlib](https://dlib.net).
+Zignal is a zero-dependency image processing library inspired by [dlib](https://dlib.net).
+
+## Features
+
+- **Core Math:** Matrices (`SMatrix`, `Matrix`, SVD), PCA, ND Geometry (SIMD Points, affine/projective transforms, convex hull), Statistics, Optimization.
+- **Computer Vision:** Feature detection and matching (FAST, ORB), Edge detection (Shen-Castan), Hough Transform, Feature Distribution Matching (style transfer).
+- **Image Processing:** Spatial transforms (resize, crop, rotate), morphology, convolution filters (blur, sharpen), thresholding, advanced Color Spaces (Lab, Oklab, Oklch, Xyb, Lms, etc.), Perlin noise generation.
+- **I/O & Graphics:** Pure-Zig PNG/JPEG codecs, Canvas API (antialiasing, Bézier curves), Bitmap/PCF Fonts, Colormaps, Terminal graphics (Kitty/Sixel).
+- **Platform Support:** Native Zig, first-class Python bindings, and WASM compilation for the web.
 
 ## Status
 
-Zignal is under active development and powers production workloads at [Ameli](https://ameli.co.kr/).
+Zignal is under active development and powers production workloads at [Ameli](https://ameli.co.kr/) for their makeup virtual try-on.
 The API continues to evolve, so expect occasional breaking changes between minor releases.
+
+<img src="https://github.com/arrufat/zignal/blob/master/assets/liza.jpg" width=400>
 
 ## Installation
 
@@ -74,26 +84,6 @@ zig-out/bin/zignal <command> [options]
 - [Feature matching](https://arrufat.github.io/zignal/examples/feature_matching.html) - ORB feature detection and matching between images
 - [Hough transform animation](https://arrufat.github.io/zignal/examples/hough-animation.html) - Real-time visualization of line detection
 - [Metrics analyzer](https://arrufat.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
-
-## Features
-
-- **PCA** - Principal Component Analysis
-- **Color spaces** - RGB, HSL, HSV, Lab, XYZ, Oklab, Oklch conversions
-- **Matrix operations** - Linear algebra functions and SVD
-- **Geometry** - Points, rectangles, transforms, convex hull
-- **Image I/O** - Load and save PNG/JPEG images with in-house codecs
-- **Image processing** - Resize, rotate, crop, blur, sharpen, threshold, morphology
-- **Canvas API** - Lines, circles, polygons, Bézier curves with antialiasing
-- **Fonts** - Bitmap font rendering, BDF/PCF loading, and Unicode range filters
-- **Compression** - DEFLATE, zlib, gzip, and LZ77 bitstream primitives
-- **Terminal graphics** - Kitty and sixel with capability detection utilities
-- **Optimization** - Hungarian assignment solver for cost/profit matrices
-
-## Motivation
-
-<img src="https://github.com/arrufat/zignal/blob/master/assets/liza.jpg" width=400>
-
-This library is used by [Ameli](https://ameli.co.kr/) for their makeup virtual try on.
 
 ## Sponsors
 
