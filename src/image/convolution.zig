@@ -424,7 +424,7 @@ pub fn convolveSeparable(
                     defer if (contiguous_u8_buffer.len > 0) allocator.free(contiguous_u8_buffer);
 
                     // Temp buffer (shared for all channels)
-                    var temp_plane_data: []i32 = if (num_alloc_channels > 0)
+                    const temp_plane_data: []i32 = if (num_alloc_channels > 0)
                         try allocator.alloc(i32, plane_size)
                     else
                         &.{};

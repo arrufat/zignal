@@ -593,7 +593,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
 
         /// Converts this SMatrix to a dynamic Matrix
         pub fn toMatrix(self: Self, allocator: std.mem.Allocator) !@import("Matrix.zig").Matrix(T) {
-            var result = try @import("Matrix.zig").Matrix(T).init(allocator, rows, cols);
+            const result = try @import("Matrix.zig").Matrix(T).init(allocator, rows, cols);
             @memcpy(result.items, @as(*const [rows * cols]T, @ptrCast(&self.items)));
             return result;
         }
