@@ -16,6 +16,15 @@ pub const BorderMode = enum {
     mirror,
     /// Wrap around (circular)
     wrap,
+
+    /// Whether this border mode preserves uniform regions (i.e. border pixels
+    /// are sourced from the image itself, not replaced with a fixed value).
+    pub fn preservesUniform(self: BorderMode) bool {
+        return switch (self) {
+            .replicate, .mirror, .wrap => true,
+            .zero => false,
+        };
+    }
 };
 
 /// Computes border-adjusted coordinates for a given position and border mode.
