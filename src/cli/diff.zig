@@ -47,7 +47,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
 
     if (parsed.positionals.len != 2) {
-        std.log.err("Expected exactly two input images.", .{});
+        std.log.err("expected exactly two input images.", .{});
         try args.printHelp(writer, help);
         return;
     }
@@ -60,14 +60,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     // Load images
     std.log.debug("Loading first image: {s}", .{path1});
     var img1 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path1) catch |err| {
-        std.log.err("Failed to load image '{s}': {}", .{ path1, err });
+        std.log.err("failed to load image '{s}': {t}", .{ path1, err });
         return;
     };
     defer img1.deinit(gpa);
 
     std.log.debug("Loading second image: {s}", .{path2});
     var img2 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path2) catch |err| {
-        std.log.err("Failed to load image '{s}': {}", .{ path2, err });
+        std.log.err("failed to load image '{s}': {t}", .{ path2, err });
         return;
     };
     defer img2.deinit(gpa);
