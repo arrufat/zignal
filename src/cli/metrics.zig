@@ -26,7 +26,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
 
     if (parsed.positionals.len < 2) {
-        std.log.err("Not enough arguments. Need at least two images (reference and target).", .{});
+        std.log.err("not enough arguments, need at least two images (reference and target).", .{});
         try args.printHelp(writer, help);
         return;
     }
@@ -45,13 +45,13 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         // Load target image
         std.log.debug("Loading target image: {s}", .{path});
         var img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
-            std.log.err("Failed to load image '{s}': {t}", .{ path, err });
+            std.log.err("failed to load image '{s}': {t}", .{ path, err });
             continue;
         };
         defer img.deinit(gpa);
 
         if (img.rows != ref_img.rows or img.cols != ref_img.cols) {
-            std.log.err("Dimension mismatch for {s}: Reference {d}x{d} vs Target {d}x{d}", .{
+            std.log.err("dimension mismatch for {s}: reference {d}x{d} vs target {d}x{d}", .{
                 path, ref_img.cols, ref_img.rows, img.cols, img.rows,
             });
             continue;
