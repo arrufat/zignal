@@ -124,7 +124,7 @@ pub fn main(init: std.process.Init) !void {
         // Apply box blur passes
         const start_box = std.Io.Clock.awake.now(init.io);
         var source: *const Image = &original;
-        var scratch = [_]*Image{ &temp_a, &temp_b };
+        const scratch = [_]*Image{ &temp_a, &temp_b };
         var scratch_index: usize = 0;
         var last_result: *Image = &temp_a;
 
