@@ -387,7 +387,7 @@ pub fn Rgba(comptime T: type) type {
         .int => if (T != u8) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
         else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
     }
-    return extern struct {
+    return packed struct {
         pub const space: ColorSpace = .rgba;
         r: T,
         g: T,
