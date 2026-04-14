@@ -1410,9 +1410,9 @@ pub const JpegState = struct {
             pos += total_codes;
 
             // Build Huffman table
-            var code_map = std.AutoArrayHashMap(HuffmanCode, u8).init(self.allocator);
+            var code_map: std.AutoArrayHashMapUnmanaged(HuffmanCode, u8) = .empty;
             errdefer {
-                code_map.deinit();
+                code_map.deinit(self.allocator);
                 self.allocator.free(huffval);
             }
 
@@ -1432,7 +1432,7 @@ pub const JpegState = struct {
 
                     const byte = huffval[huffval_index];
                     huffval_index += 1;
-                    try code_map.put(.{ .length_minus_one = @as(u4, @intCast(i)), .code = code }, byte);
+                    try code_map.put(self.allocator, .{ .length_minus_one = @as(u4, @intCast(i)), .code = code }, byte);
 
                     // Build fast lookup table for codes <= 9 bits
                     if (i + 1 <= 9) {
@@ -1589,13 +1589,13 @@ const HuffmanTable = struct {
     // Number of codes for each bit length (1-16)
     code_counts: [16]u8,
     // Hash map for full lookup
-    code_map: std.AutoArrayHashMap(HuffmanCode, u8),
+    code_map: std.AutoArrayHashMapUnmanaged(HuffmanCode, u8),
     // Fast lookup table for short codes
     fast_table: [512]u8, // 2^9 entries
     fast_size: [512]u5,
 
     pub fn deinit(self: *HuffmanTable) void {
-        self.code_map.deinit();
+        self.code_map.deinit(self.allocator);
     }
 };
 
