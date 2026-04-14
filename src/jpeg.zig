@@ -1132,10 +1132,10 @@ pub const JpegState = struct {
     pub fn deinit(self: *JpegState) void {
         self.allocator.free(self.scan_components);
         for (&self.dc_tables) |*table| {
-            if (table.*) |*t| t.deinit();
+            if (table.*) |*t| t.deinit(self.allocator);
         }
         for (&self.ac_tables) |*table| {
-            if (table.*) |*t| t.deinit();
+            if (table.*) |*t| t.deinit(self.allocator);
         }
         if (self.block_storage) |storage| {
             self.allocator.free(storage);
@@ -1451,7 +1451,6 @@ pub const JpegState = struct {
             }
 
             const table = HuffmanTable{
-                .allocator = self.allocator,
                 .code_counts = bits,
                 .code_map = code_map,
                 .fast_table = fast_table,
@@ -1464,12 +1463,12 @@ pub const JpegState = struct {
             // Store table
             if (table_class == 0) {
                 if (self.dc_tables[table_id]) |*old_table| {
-                    old_table.deinit();
+                    old_table.deinit(self.allocator);
                 }
                 self.dc_tables[table_id] = table;
             } else {
                 if (self.ac_tables[table_id]) |*old_table| {
-                    old_table.deinit();
+                    old_table.deinit(self.allocator);
                 }
                 self.ac_tables[table_id] = table;
             }
@@ -1585,7 +1584,6 @@ pub const JpegState = struct {
 
 // Huffman table for decoding
 const HuffmanTable = struct {
-    allocator: Allocator,
     // Number of codes for each bit length (1-16)
     code_counts: [16]u8,
     // Hash map for full lookup
@@ -1594,8 +1592,8 @@ const HuffmanTable = struct {
     fast_table: [512]u8, // 2^9 entries
     fast_size: [512]u5,
 
-    pub fn deinit(self: *HuffmanTable) void {
-        self.code_map.deinit(self.allocator);
+    pub fn deinit(self: *HuffmanTable, allocator: Allocator) void {
+        self.code_map.deinit(allocator);
     }
 };
 
