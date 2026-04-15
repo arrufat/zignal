@@ -124,6 +124,8 @@ pub fn build(b: *Build) void {
 
     // Python bindings
     const py_bindings_step = b.step("python-bindings", "Build the python bindings");
+    const os_tag = target.result.os.tag;
+
     const py_module = b.addLibrary(.{
         .name = "zignal",
         .linkage = .dynamic,
@@ -135,13 +137,9 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
+    linkPython(b, py_module, target, optimize, "python3");
 
-    // Link Python for shared library
-    const target_info = target.result;
-    linkPython(b, py_module, "python3", target.result);
-
-    // Determine output file extension based on target platform
-    const extension = switch (target_info.os.tag) {
+    const extension = switch (os_tag) {
         .windows => ".pyd",
         .macos => ".dylib",
         else => ".so",
@@ -158,9 +156,7 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-
-    // Link Python for executable
-    linkPython(b, stub_generator, "python3-embed", target_info);
+    linkPython(b, stub_generator, target, .Debug, "python3-embed");
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -184,7 +180,7 @@ pub fn build(b: *Build) void {
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
 
     // Copy CLI tool to python package
-    const cli_ext = if (target_info.os.tag == .windows) ".exe" else "";
+    const cli_ext = if (os_tag == .windows) ".exe" else "";
     const cli_name = b.fmt("zignal{s}", .{cli_ext});
     _ = wf.addCopyFile(exe.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
 
@@ -258,38 +254,52 @@ fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     return b.runAllowFail(full_args.items, &code, .ignore);
 }
 
-/// Helper function to link Python to an artifact
-/// @param artifact: The build artifact (library or executable) to link Python to
-/// @param python_lib: The Python library name ("python3" for shared libs, "python3-embed" for executables)
-/// @param target_info: Target platform information for platform-specific linking
-fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, target_info: std.Target) void {
-    const os_tag = target_info.os.tag;
-    artifact.root_module.link_libc = true;
+/// Translate Python.h via the build system, import it as `c`, and wire up
+/// linking against libpython. `python_lib` is the default pkg-config/system
+/// library name ("python3" for extension modules, "python3-embed" for
+/// embedding executables) and can be overridden with `PYTHON_LIB_NAME`.
+fn linkPython(
+    b: *Build,
+    artifact: *Build.Step.Compile,
+    target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    python_lib: []const u8,
+) void {
+    const root = artifact.root_module;
+    const os_tag = target.result.os.tag;
+
+    const tc = b.addTranslateC(.{
+        .root_source_file = b.path("bindings/python/src/c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
-        artifact.root_module.addIncludePath(.{ .cwd_relative = python_include });
+        tc.addIncludePath(.{ .cwd_relative = python_include });
+    } else {
+        // Let pkg-config discover the Python include path. This also emits
+        // link flags, but linkSystemLibrary below is the source of truth for
+        // linking and duplicates are harmless.
+        tc.linkSystemLibrary(python_lib, .{});
     }
+    root.addImport("c", tc.createModule());
 
-    // Common logic to add library path if provided
+    root.link_libc = true;
     if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
         validatePath(libs_dir, "PYTHON_LIBS_DIR");
-        artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+        root.addLibraryPath(.{ .cwd_relative = libs_dir });
     }
-
-    // Determine the library name to link against
-    const lib_name_to_link = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| blk: {
-        validateLibName(lib_name, "PYTHON_LIB_NAME");
+    const lib_name = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |name| blk: {
+        validateLibName(name, "PYTHON_LIB_NAME");
         // On Windows, strip the .lib extension
-        if (os_tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
-            break :blk lib_name[0 .. lib_name.len - ".lib".len];
+        if (os_tag == .windows and std.mem.endsWith(u8, name, ".lib")) {
+            break :blk name[0 .. name.len - ".lib".len];
         }
-        break :blk lib_name;
+        break :blk name;
     } else python_lib;
+    root.linkSystemLibrary(lib_name, .{});
 
-    artifact.root_module.linkSystemLibrary(lib_name_to_link, .{});
-    if (os_tag == .macos) {
-        artifact.root_module.addRPathSpecial("@loader_path");
-    }
+    if (os_tag == .macos) root.addRPathSpecial("@loader_path");
 }
 
 fn validatePath(path: []const u8, env_name: []const u8) void {

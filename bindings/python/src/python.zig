@@ -12,10 +12,7 @@ pub const ctx = struct {
     .allocator = std.heap.c_allocator,
 };
 
-pub const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+pub const c = @import("c");
 
 /// Clear the Python error indicator if one is set.
 pub fn clearError() void {
