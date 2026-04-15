@@ -124,6 +124,10 @@ pub fn build(b: *Build) void {
 
     // Python bindings
     const py_bindings_step = b.step("python-bindings", "Build the python bindings");
+    const target_info = target.result;
+
+    // Translate Python.h into a Zig module for the shared library (links libpython3).
+    const py_translate_c = translatePython(b, target, optimize, "python3", target_info);
     const py_module = b.addLibrary(.{
         .name = "zignal",
         .linkage = .dynamic,
@@ -132,13 +136,15 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
-            .imports = &.{.{ .name = "zignal", .module = zignal }},
+            .imports = &.{
+                .{ .name = "zignal", .module = zignal },
+                .{ .name = "c", .module = py_translate_c.createModule() },
+            },
         }),
     });
 
-    // Link Python for shared library
-    const target_info = target.result;
-    linkPython(b, py_module, "python3", target.result);
+    // Artifact-level Python config (library search path, macOS rpath).
+    configurePythonArtifact(b, py_module, target_info);
 
     // Determine output file extension based on target platform
     const extension = switch (target_info.os.tag) {
@@ -149,18 +155,22 @@ pub fn build(b: *Build) void {
 
     // Python type stub generation
     const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
+    // Executable statically embeds libpython via python3-embed.
+    const stub_translate_c = translatePython(b, target, .Debug, "python3-embed", target_info);
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
         .root_module = b.createModule(.{
             .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
             .target = target,
             .optimize = .Debug,
-            .imports = &.{.{ .name = "zignal", .module = zignal }},
+            .imports = &.{
+                .{ .name = "zignal", .module = zignal },
+                .{ .name = "c", .module = stub_translate_c.createModule() },
+            },
         }),
     });
 
-    // Link Python for executable
-    linkPython(b, stub_generator, "python3-embed", target_info);
+    configurePythonArtifact(b, stub_generator, target_info);
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -258,36 +268,51 @@ fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     return b.runAllowFail(full_args.items, &code, .ignore);
 }
 
-/// Helper function to link Python to an artifact
-/// @param artifact: The build artifact (library or executable) to link Python to
-/// @param python_lib: The Python library name ("python3" for shared libs, "python3-embed" for executables)
-/// @param target_info: Target platform information for platform-specific linking
-fn linkPython(b: *Build, artifact: *Build.Step.Compile, python_lib: []const u8, target_info: std.Target) void {
-    const os_tag = target_info.os.tag;
-    artifact.root_module.link_libc = true;
+/// Build a translate-c step that exposes Python's C API as a Zig module.
+/// Also arranges for the appropriate libpython variant to be linked into any
+/// artifact that imports the resulting module.
+fn translatePython(
+    b: *Build,
+    target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    python_lib: []const u8,
+    target_info: std.Target,
+) *Build.Step.TranslateC {
+    const tc = b.addTranslateC(.{
+        .root_source_file = b.path("bindings/python/src/c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
-        artifact.root_module.addIncludePath(.{ .cwd_relative = python_include });
+        tc.addIncludePath(.{ .cwd_relative = python_include });
     }
 
-    // Common logic to add library path if provided
-    if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
-        validatePath(libs_dir, "PYTHON_LIBS_DIR");
-        artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
-    }
-
-    // Determine the library name to link against
     const lib_name_to_link = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| blk: {
         validateLibName(lib_name, "PYTHON_LIB_NAME");
         // On Windows, strip the .lib extension
-        if (os_tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
+        if (target_info.os.tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
             break :blk lib_name[0 .. lib_name.len - ".lib".len];
         }
         break :blk lib_name;
     } else python_lib;
 
-    artifact.root_module.linkSystemLibrary(lib_name_to_link, .{});
-    if (os_tag == .macos) {
+    // pkg-config discovery of libpython cflags also provides include paths
+    // when PYTHON_INCLUDE_DIR is not set, and the system lib propagates to
+    // the consumer artifact's link step.
+    tc.linkSystemLibrary(lib_name_to_link, .{});
+    return tc;
+}
+
+/// Apply artifact-level Python configuration that can't live on the translate-c
+/// module: explicit library search path and macOS rpath for loading libpython.
+fn configurePythonArtifact(b: *Build, artifact: *Build.Step.Compile, target_info: std.Target) void {
+    if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
+        validatePath(libs_dir, "PYTHON_LIBS_DIR");
+        artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+    }
+    if (target_info.os.tag == .macos) {
         artifact.root_module.addRPathSpecial("@loader_path");
     }
 }
