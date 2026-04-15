@@ -124,10 +124,8 @@ pub fn build(b: *Build) void {
 
     // Python bindings
     const py_bindings_step = b.step("python-bindings", "Build the python bindings");
-    const target_info = target.result;
+    const os_tag = target.result.os.tag;
 
-    // Translate Python.h into a Zig module for the shared library (links libpython3).
-    const py_translate_c = translatePython(b, target, optimize, "python3", target_info);
     const py_module = b.addLibrary(.{
         .name = "zignal",
         .linkage = .dynamic,
@@ -136,18 +134,12 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .Debug,
-            .imports = &.{
-                .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = py_translate_c.createModule() },
-            },
+            .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
+    linkPython(b, py_module, target, optimize, "python3");
 
-    // Artifact-level Python config (library search path, macOS rpath).
-    configurePythonArtifact(b, py_module, target_info);
-
-    // Determine output file extension based on target platform
-    const extension = switch (target_info.os.tag) {
+    const extension = switch (os_tag) {
         .windows => ".pyd",
         .macos => ".dylib",
         else => ".so",
@@ -155,22 +147,16 @@ pub fn build(b: *Build) void {
 
     // Python type stub generation
     const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
-    // Executable statically embeds libpython via python3-embed.
-    const stub_translate_c = translatePython(b, target, .Debug, "python3-embed", target_info);
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
         .root_module = b.createModule(.{
             .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
             .target = target,
             .optimize = .Debug,
-            .imports = &.{
-                .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = stub_translate_c.createModule() },
-            },
+            .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-
-    configurePythonArtifact(b, stub_generator, target_info);
+    linkPython(b, stub_generator, target, .Debug, "python3-embed");
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -194,7 +180,7 @@ pub fn build(b: *Build) void {
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
 
     // Copy CLI tool to python package
-    const cli_ext = if (target_info.os.tag == .windows) ".exe" else "";
+    const cli_ext = if (os_tag == .windows) ".exe" else "";
     const cli_name = b.fmt("zignal{s}", .{cli_ext});
     _ = wf.addCopyFile(exe.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
 
@@ -268,53 +254,52 @@ fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     return b.runAllowFail(full_args.items, &code, .ignore);
 }
 
-/// Build a translate-c step that exposes Python's C API as a Zig module.
-/// Also arranges for the appropriate libpython variant to be linked into any
-/// artifact that imports the resulting module.
-fn translatePython(
+/// Translate Python.h via the build system, import it as `c`, and wire up
+/// linking against libpython. `python_lib` is the default pkg-config/system
+/// library name ("python3" for extension modules, "python3-embed" for
+/// embedding executables) and can be overridden with `PYTHON_LIB_NAME`.
+fn linkPython(
     b: *Build,
+    artifact: *Build.Step.Compile,
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     python_lib: []const u8,
-    target_info: std.Target,
-) *Build.Step.TranslateC {
+) void {
+    const root = artifact.root_module;
+    const os_tag = target.result.os.tag;
+
     const tc = b.addTranslateC(.{
         .root_source_file = b.path("bindings/python/src/c.h"),
         .target = target,
         .optimize = optimize,
     });
-
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
         tc.addIncludePath(.{ .cwd_relative = python_include });
+    } else {
+        // Let pkg-config discover the Python include path. This also emits
+        // link flags, but linkSystemLibrary below is the source of truth for
+        // linking and duplicates are harmless.
+        tc.linkSystemLibrary(python_lib, .{});
     }
+    root.addImport("c", tc.createModule());
 
-    const lib_name_to_link = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |lib_name| blk: {
-        validateLibName(lib_name, "PYTHON_LIB_NAME");
-        // On Windows, strip the .lib extension
-        if (target_info.os.tag == .windows and std.mem.endsWith(u8, lib_name, ".lib")) {
-            break :blk lib_name[0 .. lib_name.len - ".lib".len];
-        }
-        break :blk lib_name;
-    } else python_lib;
-
-    // pkg-config discovery of libpython cflags also provides include paths
-    // when PYTHON_INCLUDE_DIR is not set, and the system lib propagates to
-    // the consumer artifact's link step.
-    tc.linkSystemLibrary(lib_name_to_link, .{});
-    return tc;
-}
-
-/// Apply artifact-level Python configuration that can't live on the translate-c
-/// module: explicit library search path and macOS rpath for loading libpython.
-fn configurePythonArtifact(b: *Build, artifact: *Build.Step.Compile, target_info: std.Target) void {
+    root.link_libc = true;
     if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
         validatePath(libs_dir, "PYTHON_LIBS_DIR");
-        artifact.root_module.addLibraryPath(.{ .cwd_relative = libs_dir });
+        root.addLibraryPath(.{ .cwd_relative = libs_dir });
     }
-    if (target_info.os.tag == .macos) {
-        artifact.root_module.addRPathSpecial("@loader_path");
-    }
+    const lib_name = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |name| blk: {
+        validateLibName(name, "PYTHON_LIB_NAME");
+        // On Windows, strip the .lib extension
+        if (os_tag == .windows and std.mem.endsWith(u8, name, ".lib")) {
+            break :blk name[0 .. name.len - ".lib".len];
+        }
+        break :blk name;
+    } else python_lib;
+    root.linkSystemLibrary(lib_name, .{});
+
+    if (os_tag == .macos) root.addRPathSpecial("@loader_path");
 }
 
 fn validatePath(path: []const u8, env_name: []const u8) void {
