@@ -82,7 +82,7 @@ pub const HoughTransform = struct {
         const size_minus_one: i32 = @intCast(self.size - 1);
         const box_t: i32 = @intCast(box.t);
         const box_l: i32 = @intCast(box.l);
-        const offset: i32 = @trunc(((1 << 16) * @as(f64, @floatFromInt(self.even_size)) / 4.0) + 0.5);
+        const offset: i32 = @round(((1 << 16) * @as(f64, @floatFromInt(self.even_size)) / 4.0));
 
         // Use a local slice for faster access and to avoid bounds checks in the hot loop
         const cos_table = self.cos_table;

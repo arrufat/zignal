@@ -547,7 +547,7 @@ fn magnitudeBits(value: i32, mag: u5) u32 {
 
 // LLM DCT constants in 13-bit fixed point (CONST_BITS = 13)
 inline fn FIX(comptime x: f32) i32 {
-    return @trunc(x * (1 << 13) + 0.5);
+    return @round(x * (1 << 13));
 }
 
 const FIX_0_298631336: i32 = FIX(0.298631336);
@@ -1719,9 +1719,9 @@ fn yCbCrToRgbBlock(_: *JpegState, y_block: *[64]i32, cb_block: *const [64]i32, c
         g_vec = std.math.clamp(g_vec, vec_0, vec_255);
         b_vec = std.math.clamp(b_vec, vec_0, vec_255);
 
-        const r_u8: @Vector(8, u8) = @trunc(r_vec);
-        const g_u8: @Vector(8, u8) = @trunc(g_vec);
-        const b_u8: @Vector(8, u8) = @trunc(b_vec);
+        const r_u8: @Vector(8, u8) = @round(r_vec);
+        const g_u8: @Vector(8, u8) = @round(g_vec);
+        const b_u8: @Vector(8, u8) = @round(b_vec);
 
         var r_array: [8]u8 = undefined;
         var g_array: [8]u8 = undefined;
@@ -2283,7 +2283,7 @@ pub const JpegError = error{
 // IDCT implementation based on stb_image
 fn f2f(comptime x: f32) i32 {
     // 4096 = 1 << 12
-    return @trunc(x * 4096 + 0.5);
+    return @round(x * 4096);
 }
 
 fn idct1D(s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32, s6: i32, s7: i32) struct { i32, i32, i32, i32, i32, i32, i32, i32 } {

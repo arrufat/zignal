@@ -35,7 +35,7 @@ pub fn Enhancement(comptime T: type) type {
                             const val = image.at(r, c).*;
                             const clamped = @max(min_val, @min(max_val, val));
                             const normalized = @as(f32, @floatFromInt(clamped - min_val)) / @as(f32, @floatFromInt(range));
-                            image.at(r, c).* = @trunc(normalized * 255.0);
+                            image.at(r, c).* = @round(normalized * 255.0);
                         }
                     }
                 },
@@ -59,7 +59,7 @@ pub fn Enhancement(comptime T: type) type {
                                         const clamped = @max(min, @min(max, val));
                                         const range = if (max > min) max - min else 1;
                                         const normalized = @as(f32, @floatFromInt(clamped - min)) / @as(f32, @floatFromInt(range));
-                                        return @trunc(normalized * 255.0);
+                                        return @round(normalized * 255.0);
                                     }
                                 }.apply;
 
