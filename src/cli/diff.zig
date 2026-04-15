@@ -107,7 +107,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     // However, users usually want to know the *raw* max difference, but we only have stats of the *processed* image.
     // For now, reporting the max pixel value in the diff image is consistent with what is shown.
 
-    std.log.info("Max difference found: {d}", .{@as(u32, @intFromFloat(result.stats.max()))});
+    std.log.info("Max difference found: {d}", .{@as(u32, @trunc(result.stats.max()))});
     std.log.info("Pixels differing > {d}: {d}", .{ threshold, result.diff_count });
 
     if (parsed.options.output) |output_path| {

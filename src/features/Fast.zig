@@ -169,8 +169,8 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
 
     // Create a grid for spatial binning (faster than O(n²) comparison)
     const grid_size = 20; // pixels per grid cell
-    const max_row = @as(usize, @intFromFloat(keypoints[0].y));
-    const max_col = @as(usize, @intFromFloat(keypoints[0].x));
+    const max_row: usize = @trunc(keypoints[0].y);
+    const max_col: usize = @trunc(keypoints[0].x);
     var min_row = max_row;
     var min_col = max_col;
     var grid_rows: usize = 0;
@@ -178,8 +178,8 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
 
     // Find bounds
     for (keypoints) |kp| {
-        const r = @as(usize, @intFromFloat(kp.y));
-        const c = @as(usize, @intFromFloat(kp.x));
+        const r: usize = @trunc(kp.y);
+        const c: usize = @trunc(kp.x);
         min_row = @min(min_row, r);
         min_col = @min(min_col, c);
         grid_rows = @max(grid_rows, r);
@@ -205,8 +205,8 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
 
     // Bin keypoints into grid
     for (keypoints) |kp| {
-        const r = (@as(usize, @intFromFloat(kp.y)) - min_row) / grid_size;
-        const c = (@as(usize, @intFromFloat(kp.x)) - min_col) / grid_size;
+        const r: usize = (@as(usize, @trunc(kp.y)) - min_row) / grid_size;
+        const c: usize = (@as(usize, @trunc(kp.x)) - min_col) / grid_size;
         const idx = r * grid_cols + c;
         try grid[idx].append(allocator, kp);
     }

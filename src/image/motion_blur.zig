@@ -143,9 +143,9 @@ pub fn MotionBlurOps(comptime T: type) type {
                                         sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
                                     {
                                         // Bilinear interpolation
-                                        const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                        const x0: usize = @floor(sample_x);
                                         const x1 = @min(x0 + 1, image.cols - 1);
-                                        const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                        const y0: usize = @floor(sample_y);
                                         const y1 = @min(y0 + 1, image.rows - 1);
 
                                         const fx = sample_x - @as(f32, @floatFromInt(x0));
@@ -168,7 +168,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                 const result = if (count > 0) sum / count else as(f32, image.at(r, c).*);
                                 out.at(r, c).* = switch (@typeInfo(T)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
+                                    .int => @trunc(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
                                     .float => as(T, result),
                                     else => unreachable,
                                 };
@@ -201,9 +201,9 @@ pub fn MotionBlurOps(comptime T: type) type {
                                             sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
                                         {
                                             // Bilinear interpolation
-                                            const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                            const x0: usize = @floor(sample_x);
                                             const x1 = @min(x0 + 1, image.cols - 1);
-                                            const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                            const y0: usize = @floor(sample_y);
                                             const y1 = @min(y0 + 1, image.rows - 1);
 
                                             const fx = sample_x - @as(f32, @floatFromInt(x0));
@@ -226,7 +226,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                     const channel_result = if (count > 0) sum / count else as(f32, @field(image.at(r, c).*, field.name));
                                     @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                        .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                        .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
                                         .float => as(field.type, channel_result),
                                         else => @compileError("Unsupported field type"),
                                     };
@@ -275,7 +275,7 @@ pub fn MotionBlurOps(comptime T: type) type {
             // Calculate number of samples based on strength
             const base_samples = 8;
             const max_additional_samples = 24;
-            const num_samples = base_samples + @as(usize, @intFromFloat(clamped_strength * @as(f32, @floatFromInt(max_additional_samples))));
+            const num_samples: usize = base_samples + @as(usize, @trunc(clamped_strength * @as(f32, @floatFromInt(max_additional_samples))));
 
             switch (@typeInfo(T)) {
                 .int, .float => {
@@ -326,9 +326,9 @@ pub fn MotionBlurOps(comptime T: type) type {
                                     sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
                                 {
                                     // Bilinear interpolation
-                                    const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                    const x0: usize = @floor(sample_x);
                                     const x1 = @min(x0 + 1, image.cols - 1);
-                                    const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                    const y0: usize = @floor(sample_y);
                                     const y1 = @min(y0 + 1, image.rows - 1);
 
                                     const fx_interp = sample_x - @as(f32, @floatFromInt(x0));
@@ -350,7 +350,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                             const result = if (count > 0) sum / @as(f32, @floatFromInt(count)) else as(f32, image.at(r, c).*);
                             out.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @intFromFloat(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
+                                .int => @trunc(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
                                 .float => as(T, result),
                                 else => unreachable,
                             };
@@ -409,9 +409,9 @@ pub fn MotionBlurOps(comptime T: type) type {
                                         sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
                                     {
                                         // Bilinear interpolation
-                                        const x0 = @as(usize, @intFromFloat(@floor(sample_x)));
+                                        const x0: usize = @floor(sample_x);
                                         const x1 = @min(x0 + 1, image.cols - 1);
-                                        const y0 = @as(usize, @intFromFloat(@floor(sample_y)));
+                                        const y0: usize = @floor(sample_y);
                                         const y1 = @min(y0 + 1, image.rows - 1);
 
                                         const fx_interp = sample_x - @as(f32, @floatFromInt(x0));
@@ -433,7 +433,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                 const channel_result = if (count > 0) sum / @as(f32, @floatFromInt(count)) else as(f32, @field(image.at(r, c).*, field.name));
                                 @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                    .int => @intFromFloat(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                    .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
                                     .float => as(field.type, channel_result),
                                     else => @compileError("Unsupported field type"),
                                 };

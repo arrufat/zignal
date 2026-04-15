@@ -93,8 +93,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         },
         .square => {
             const sqrt = std.math.sqrt(@as(f32, @floatFromInt(img_count)));
-            cols = @intFromFloat(@ceil(sqrt));
-            rows = @intFromFloat(@ceil(@as(f32, @floatFromInt(img_count)) / @as(f32, @floatFromInt(cols))));
+            cols = @ceil(sqrt);
+            rows = @ceil(@as(f32, @floatFromInt(img_count)) / @as(f32, @floatFromInt(cols)));
         },
         .grid => {
             if (parsed.options.rows == null or parsed.options.cols == null) {
@@ -157,10 +157,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             cell_h = @intCast(reference_img.?.rows);
         } else if (cell_w != 0 and cell_h == 0) {
             // Scale height proportionally
-            cell_h = @intFromFloat(@round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f));
+            cell_h = @round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f);
         } else if (cell_w == 0 and cell_h != 0) {
             // Scale width proportionally
-            cell_w = @intFromFloat(@round((@as(f32, @floatFromInt(cell_h)) / ref_h_f) * ref_w_f));
+            cell_w = @round((@as(f32, @floatFromInt(cell_h)) / ref_h_f) * ref_w_f);
         }
     }
 

@@ -363,7 +363,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                         c.PyErr_SetString(c.PyExc_ValueError, "Alpha float value for integer colors must be between 0.0 and 1.0");
                         return null;
                     }
-                    alpha = @intFromFloat(@round(val * 255.0));
+                    alpha = @round(val * 255.0);
                 } else if (c.PyLong_Check(@as(*c.PyObject, @ptrCast(alpha_obj.?))) != 0) {
                     const val = c.PyLong_AsLong(@ptrCast(alpha_obj.?));
                     if (val < 0 or val > 255) {

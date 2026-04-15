@@ -592,8 +592,8 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     if (!validateF32(angle, "Angle")) return null;
 
     // Determine output size
-    var out_rows: u32 = @intFromFloat(@round(rect.height()));
-    var out_cols: u32 = @intFromFloat(@round(rect.width()));
+    var out_rows: u32 = @round(rect.height());
+    var out_cols: u32 = @round(rect.width());
 
     if (size_obj != null and size_obj != c.Py_None()) {
         // Accept either an integer (square) or a tuple (rows, cols)

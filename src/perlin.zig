@@ -60,9 +60,9 @@ pub fn perlin(T: type, x: T, y: T, z: T, opts: PerlinOptions(T)) T {
 fn noise(T: type, x: T, y: T, z: T) T {
     assert(@typeInfo(T) == .float);
     // Find unit cube that contains the point.
-    const x_i: u8 = @intCast(@as(isize, @intFromFloat(@floor(x))) & 255);
-    const y_i: u8 = @intCast(@as(isize, @intFromFloat(@floor(y))) & 255);
-    const z_i: u8 = @intCast(@as(isize, @intFromFloat(@floor(z))) & 255);
+    const x_i: u8 = @intCast(@as(isize, @floor(x)) & 255);
+    const y_i: u8 = @intCast(@as(isize, @floor(y)) & 255);
+    const z_i: u8 = @intCast(@as(isize, @floor(z)) & 255);
 
     // Find relative x, y, z of the point in the cube.
     const x_r = x - @floor(x);

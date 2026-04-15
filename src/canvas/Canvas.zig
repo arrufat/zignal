@@ -63,7 +63,7 @@ pub fn Canvas(comptime T: type) type {
         /// Clamps a floating-point coordinate to image bounds and converts to u32 .
         /// Returns the clamped coordinate as a u32  index.
         inline fn clampToImageBounds(coord: f32, max_size: u32) u32 {
-            return @intFromFloat(clamp(coord, 0, @as(f32, @floatFromInt(max_size))));
+            return @trunc(clamp(coord, 0, @as(f32, @floatFromInt(max_size))));
         }
 
         /// Clamps a rectangle to image bounds and returns integer pixel coordinates.
@@ -173,9 +173,9 @@ pub fn Canvas(comptime T: type) type {
             if (y < 0 or y >= frows) return;
             if (x2 < 0 or x1 >= fcols) return;
 
-            const row: u32 = @intFromFloat(y);
-            const start: u32 = @intFromFloat(@max(0, @floor(x1)));
-            const end: u32 = @intFromFloat(@min(fcols - 1, @ceil(x2)));
+            const row: u32 = @trunc(y);
+            const start: u32 = @trunc(@max(0, @floor(x1)));
+            const end: u32 = @trunc(@min(fcols - 1, @ceil(x2)));
 
             if (start > end) return;
 
@@ -238,10 +238,10 @@ pub fn Canvas(comptime T: type) type {
         /// Produces pixel-perfect lines with hard edges and no antialiasing.
         /// Optimal for grid-aligned graphics and when performance is critical.
         fn drawLineBresenham(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype) void {
-            var x1: i32 = @intFromFloat(p1.x());
-            var y1: i32 = @intFromFloat(p1.y());
-            const x2: i32 = @intFromFloat(p2.x());
-            const y2: i32 = @intFromFloat(p2.y());
+            var x1: i32 = @trunc(p1.x());
+            var y1: i32 = @trunc(p1.y());
+            const x2: i32 = @trunc(p2.x());
+            const y2: i32 = @trunc(p2.y());
 
             const pixel_color = convertColor(T, color);
 
@@ -471,8 +471,8 @@ pub fn Canvas(comptime T: type) type {
                     const x_start = x1 - half_width;
                     const x_end = x1 + half_width;
                     if (needs_alpha_blend) {
-                        const px_start = @as(u32, @intFromFloat(@max(0, @floor(x_start))));
-                        const px_end = @as(u32, @intFromFloat(@min(fcols - 1, @ceil(x_end))));
+                        const px_start: u32 = @trunc(@max(0, @floor(x_start)));
+                        const px_end: u32 = @trunc(@min(fcols - 1, @ceil(x_end)));
                         if (px_start > px_end) continue;
                         var px = px_start;
                         while (px <= px_end) : (px += 1) {
@@ -578,8 +578,8 @@ pub fn Canvas(comptime T: type) type {
         pub fn setPixel(self: Self, point: Point(2, f32), color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
-            const row: i32 = @intFromFloat(@floor(point.y()));
-            const col: i32 = @intFromFloat(@floor(point.x()));
+            const row: i32 = @floor(point.y());
+            const col: i32 = @floor(point.x());
             if (self.atOrNull(row, col)) |pixel| {
                 const mode: Blending = if (comptime ColorType == Rgba)
                     if (color.a != 255) .normal else .none
@@ -604,8 +604,8 @@ pub fn Canvas(comptime T: type) type {
 
             if (src_rect.isEmpty()) return;
 
-            const origin_x = @as(i32, @intFromFloat(@round(position.x())));
-            const origin_y = @as(i32, @intFromFloat(@round(position.y())));
+            const origin_x: i32 = @round(position.x());
+            const origin_y: i32 = @round(position.y());
 
             // Simple blit loop with type-based blending
             for (src_rect.t..src_rect.b) |src_r| {
@@ -807,10 +807,10 @@ pub fn Canvas(comptime T: type) type {
                 const solid_color = convertColor(T, color);
 
                 // Calculate bounding box
-                const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-                const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-                const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-                const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+                const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
+                const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
+                const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
+                const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
 
                 for (top..bottom) |r| {
                     const y = @as(f32, @floatFromInt(r)) - center.y();
@@ -838,10 +838,10 @@ pub fn Canvas(comptime T: type) type {
             const outer_radius = radius + line_width / 2.0;
 
             // Calculate bounding box
-            const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-            const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-            const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-            const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+            const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
+            const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
+            const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
+            const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
 
             const c2 = convertColor(Rgba, color);
 
@@ -925,10 +925,10 @@ pub fn Canvas(comptime T: type) type {
                 const outer_radius = radius + line_width / 2.0;
 
                 // Calculate bounding box
-                const left: u32 = @intFromFloat(@round(@max(0, center.x() - outer_radius - 1)));
-                const top: u32 = @intFromFloat(@round(@max(0, center.y() - outer_radius - 1)));
-                const right: u32 = @intFromFloat(@round(@min(fcols, center.x() + outer_radius + 1)));
-                const bottom: u32 = @intFromFloat(@round(@min(frows, center.y() + outer_radius + 1)));
+                const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
+                const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
+                const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
+                const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
 
                 if (left >= right or top >= bottom) return;
 
@@ -957,7 +957,7 @@ pub fn Canvas(comptime T: type) type {
             const arc_length = @abs(angle_span) * radius;
 
             // Determine number of segments based on arc length
-            const segments = @max(@as(u32, 8), @as(u32, @intFromFloat(@ceil(arc_length / 5.0))));
+            const segments: u32 = @max(8, @as(u32, @ceil(arc_length / 5.0)));
             const angle_step = angle_span / @as(f32, @floatFromInt(segments));
 
             // Stack allocation for reasonable arc sizes
@@ -1202,10 +1202,10 @@ pub fn Canvas(comptime T: type) type {
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: u32 = @intFromFloat(clamp(@round(center.x() - radius), 0, fcols));
-            const top: u32 = @intFromFloat(clamp(@round(center.y() - radius), 0, frows));
-            const right: u32 = @intFromFloat(clamp(@round(center.x() + radius), 0, fcols));
-            const bottom: u32 = @intFromFloat(clamp(@round(center.y() + radius), 0, frows));
+            const left: u32 = @trunc(clamp(@round(center.x() - radius), 0, fcols));
+            const top: u32 = @trunc(clamp(@round(center.y() - radius), 0, frows));
+            const right: u32 = @trunc(clamp(@round(center.x() + radius), 0, fcols));
+            const bottom: u32 = @trunc(clamp(@round(center.y() + radius), 0, frows));
 
             if (left >= right or top >= bottom) return;
 
@@ -1355,10 +1355,10 @@ pub fn Canvas(comptime T: type) type {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
             const bounds: Rectangle(u32) = .{
-                .l = @intFromFloat(@round(@max(0, center.x() - radius - 1))),
-                .t = @intFromFloat(@round(@max(0, center.y() - radius - 1))),
-                .r = @intFromFloat(@round(@min(fcols, center.x() + radius + 1))),
-                .b = @intFromFloat(@round(@min(frows, center.y() + radius + 1))),
+                .l = @round(@max(0, center.x() - radius - 1)),
+                .t = @round(@max(0, center.y() - radius - 1)),
+                .r = @round(@min(fcols, center.x() + radius + 1)),
+                .b = @round(@min(frows, center.y() + radius + 1)),
             };
             if (bounds.isEmpty()) return;
 
@@ -1494,7 +1494,7 @@ pub fn Canvas(comptime T: type) type {
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
+                const segments: u32 = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @trunc(estimated_length / pixels_per_segment))));
                 total_points += segments;
             }
 
@@ -1519,7 +1519,7 @@ pub fn Canvas(comptime T: type) type {
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
 
                 const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
+                const segments: u32 = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @trunc(estimated_length / pixels_per_segment))));
 
                 // Tessellate directly into our buffer
                 const segment_buffer = points_buffer[write_idx .. write_idx + segments];
@@ -1605,7 +1605,7 @@ pub fn Canvas(comptime T: type) type {
             evalArgs: anytype,
             buffer: []Point(2, f32),
         ) u32 {
-            const segments = @max(min_segments, @min(max_segments, @as(u32, @intFromFloat(estimated_length / pixels_per_segment))));
+            const segments: u32 = @max(min_segments, @min(max_segments, @as(u32, @trunc(estimated_length / pixels_per_segment))));
             const actual_segments = @min(segments, buffer.len);
 
             for (0..actual_segments) |i| {
@@ -1784,10 +1784,10 @@ pub fn Canvas(comptime T: type) type {
                                             const y_end_f = @ceil(base_y + scale);
 
                                             // Clip to the valid rectangle
-                                            const x_start = @as(u32, @intFromFloat(@max(x_start_f, clip_rect.l)));
-                                            const y_start = @as(u32, @intFromFloat(@max(y_start_f, clip_rect.t)));
-                                            const x_end = @as(u32, @intFromFloat(@min(x_end_f, clip_rect.r)));
-                                            const y_end = @as(u32, @intFromFloat(@min(y_end_f, clip_rect.b)));
+                                            const x_start: u32 = @trunc(@max(x_start_f, clip_rect.l));
+                                            const y_start: u32 = @trunc(@max(y_start_f, clip_rect.t));
+                                            const x_end: u32 = @trunc(@min(x_end_f, clip_rect.r));
+                                            const y_end: u32 = @trunc(@min(y_end_f, clip_rect.b));
 
                                             // Fill the pixel block
                                             if (x_start < x_end and y_start < y_end) {
@@ -1815,7 +1815,7 @@ pub fn Canvas(comptime T: type) type {
                                         const dest_x = x + dx + @as(f32, @floatFromInt(glyph_info.x_offset)) * scale;
                                         const dest_y = y + dy + @as(f32, @floatFromInt(glyph_info.y_offset)) * scale;
 
-                                        if (self.atOrNull(@intFromFloat(dest_y), @intFromFloat(dest_x))) |_| {
+                                        if (self.atOrNull(@trunc(dest_y), @trunc(dest_x))) |_| {
                                             // Calculate which part of the source we're sampling
                                             const src_x = dx / scale;
                                             const src_y = dy / scale;
@@ -1839,8 +1839,8 @@ pub fn Canvas(comptime T: type) type {
                                             while (row_f <= row_end_f) : (row_f += 1) {
                                                 var col_f = col_start_f;
                                                 while (col_f <= col_end_f) : (col_f += 1) {
-                                                    const row_idx = @as(u32, @intFromFloat(row_f));
-                                                    const col_idx = @as(u32, @intFromFloat(col_f));
+                                                    const row_idx: u32 = @trunc(row_f);
+                                                    const col_idx: u32 = @trunc(col_f);
 
                                                     if (getGlyphBit(char_data, row_idx, col_idx, glyph_bytes_per_row) != 0) {
                                                         // Calculate how much this pixel contributes

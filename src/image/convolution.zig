@@ -92,7 +92,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 inline for (0..kernel_width) |kx| {
                     const val = as(f32, kernel[kr][kx]);
                     result[idx] = if (T == u8)
-                        @intFromFloat(@round(val * 256.0))
+                        @round(val * 256.0)
                     else
                         val;
                     idx += 1;
@@ -292,7 +292,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
 fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_int) ![]i32 {
     const result = try allocator.alloc(i32, kernel.len);
     for (kernel, 0..) |k, i| {
-        result[i] = @intFromFloat(@round(k * scale));
+        result[i] = @round(k * scale);
     }
     return result;
 }
