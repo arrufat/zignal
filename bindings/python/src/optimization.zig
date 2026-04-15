@@ -69,7 +69,7 @@ fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
     if (self.assignment_ptr) |ptr| {
         var buffer: [256]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "Assignment(assignments={} items, total_cost={d:.2})", .{ ptr.assignments.len, ptr.total_cost }) catch {
+        const slice = std.fmt.bufPrintSentinel(&buffer, "Assignment(assignments={} items, total_cost={d:.2})", .{ ptr.assignments.len, ptr.total_cost }, 0) catch {
             return python.create("Assignment(error formatting)");
         };
         return python.create(slice);

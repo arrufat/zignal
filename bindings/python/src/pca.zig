@@ -240,7 +240,7 @@ fn pca_project(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
             },
             error.DimensionMismatch => {
                 var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrintZ(&buf, "Vector dimension ({}) doesn't match fitted data dimension ({})", .{ list_size, pca.dim }) catch "Dimension mismatch";
+                const msg = std.fmt.bufPrintSentinel(&buf, "Vector dimension ({}) doesn't match fitted data dimension ({})", .{ list_size, pca.dim }, 0) catch "Dimension mismatch";
                 python.setValueError("{s}", .{msg});
                 return null;
             },
@@ -313,7 +313,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
             error.DimensionMismatch => {
                 const pca = self.pca_ptr.?;
                 var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrintZ(&buf, "Data dimension ({}) doesn't match fitted data dimension ({})", .{ matrix_struct.matrix_ptr.?.cols, pca.dim }) catch "Dimension mismatch";
+                const msg = std.fmt.bufPrintSentinel(&buf, "Data dimension ({}) doesn't match fitted data dimension ({})", .{ matrix_struct.matrix_ptr.?.cols, pca.dim }, 0) catch "Dimension mismatch";
                 python.setValueError("{s}", .{msg});
                 return null;
             },
@@ -418,7 +418,7 @@ fn pca_reconstruct(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
             },
             error.InvalidCoefficients => {
                 var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrintZ(&buf, "Number of coefficients ({}) doesn't match number of components ({})", .{ list_size, pca.num_components }) catch "Invalid coefficients";
+                const msg = std.fmt.bufPrintSentinel(&buf, "Number of coefficients ({}) doesn't match number of components ({})", .{ list_size, pca.num_components }, 0) catch "Invalid coefficients";
                 python.setValueError("{s}", .{msg});
                 return null;
             },

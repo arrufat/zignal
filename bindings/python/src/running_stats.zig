@@ -43,11 +43,11 @@ fn running_stats_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.stats_ptr) |ptr| {
         const stats = ptr.*;
         var buffer: [256]u8 = undefined;
-        const repr = std.fmt.bufPrintZ(&buffer, "RunningStats(n={d}, mean={d:.6}, std_dev={d:.6})", .{
+        const repr = std.fmt.bufPrintSentinel(&buffer, "RunningStats(n={d}, mean={d:.6}, std_dev={d:.6})", .{
             stats.currentN(),
             stats.mean(),
             stats.stdDev(),
-        }) catch "RunningStats(...)";
+        }, 0) catch "RunningStats(...)";
         return python.create(repr);
     }
 
