@@ -53,7 +53,7 @@ fn rectangle_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = python.safeCast(RectangleObject, self_obj);
 
     var buffer: [128]u8 = undefined;
-    const formatted = std.fmt.bufPrintZ(&buffer, "Rectangle({d:.2}, {d:.2}, {d:.2}, {d:.2})", .{ self.left, self.top, self.right, self.bottom }) catch return null;
+    const formatted = std.fmt.bufPrintSentinel(&buffer, "Rectangle({d:.2}, {d:.2}, {d:.2}, {d:.2})", .{ self.left, self.top, self.right, self.bottom }, 0) catch return null;
     return python.create(formatted);
 }
 

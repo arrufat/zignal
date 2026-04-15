@@ -231,7 +231,7 @@ fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.matrix_ptr) |ptr| {
         // Create a string representation
         var buffer: [256]u8 = undefined;
-        const slice = std.fmt.bufPrintZ(&buffer, "Matrix({} x {}, float64)", .{ ptr.rows, ptr.cols }) catch {
+        const slice = std.fmt.bufPrintSentinel(&buffer, "Matrix({} x {}, float64)", .{ ptr.rows, ptr.cols }, 0) catch {
             return python.create("Matrix(error formatting)");
         };
         return python.create(slice);

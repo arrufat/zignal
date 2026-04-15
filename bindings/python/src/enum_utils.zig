@@ -133,7 +133,7 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     if (!matched) {
         var buf: [128]u8 = undefined;
         const name = zignal.meta.getSimpleTypeName(E);
-        const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
+        const msg = std.fmt.bufPrintSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
         c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
         return error.InvalidValue;
     }
@@ -175,7 +175,7 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     }
     var buf: [128]u8 = undefined;
     const name = zignal.meta.getSimpleTypeName(U);
-    const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
+    const msg = std.fmt.bufPrintSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;
 }
@@ -199,7 +199,7 @@ pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
     }
     var buf: [128]u8 = undefined;
     const name = zignal.meta.getSimpleTypeName(T);
-    const msg = std.fmt.bufPrintZ(&buf, "Invalid {s} value", .{name}) catch "Invalid enum value";
+    const msg = std.fmt.bufPrintSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;
 }

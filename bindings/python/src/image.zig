@@ -340,7 +340,7 @@ fn image_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             .rgb => "Rgb",
             .rgba => "Rgba",
         };
-        const formatted = std.fmt.bufPrintZ(&buffer, "Image({d}x{d}, dtype={s})", .{ pimg.rows(), pimg.cols(), fmt_name }) catch return null;
+        const formatted = std.fmt.bufPrintSentinel(&buffer, "Image({d}x{d}, dtype={s})", .{ pimg.rows(), pimg.cols(), fmt_name }, 0) catch return null;
         return python.create(formatted);
     } else {
         return python.create("Image(uninitialized)");
