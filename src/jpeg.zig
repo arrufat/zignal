@@ -1410,7 +1410,7 @@ pub const JpegState = struct {
             pos += total_codes;
 
             // Build Huffman table
-            var code_map: std.AutoArrayHashMapUnmanaged(HuffmanCode, u8) = .empty;
+            var code_map: std.array_hash_map.Auto(HuffmanCode, u8) = .empty;
             errdefer {
                 code_map.deinit(self.allocator);
                 self.allocator.free(huffval);
@@ -1587,7 +1587,7 @@ const HuffmanTable = struct {
     // Number of codes for each bit length (1-16)
     code_counts: [16]u8,
     // Hash map for full lookup
-    code_map: std.AutoArrayHashMapUnmanaged(HuffmanCode, u8),
+    code_map: std.array_hash_map.Auto(HuffmanCode, u8),
     // Fast lookup table for short codes
     fast_table: [512]u8, // 2^9 entries
     fast_size: [512]u5,
