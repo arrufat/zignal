@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.10.0] - 2026-04-15
+
+### Major Changes
+- **Zig 0.16.0 Migration**: Full codebase update to support Zig 0.16.0.
+  - Replaced all deprecated `@intFromFloat` calls with `@round`, `@floor`, `@ceil`, or `@trunc`.
+  - Leveraged new result type coercion for rounding built-ins to simplify type casting.
+  - Updated `std.Io` and `std.Build` API usage to match latest standard library changes.
+  - Transitioned to unmanaged containers requiring explicit allocators.
+- **Dimension Standardization**: Standardized image and matrix dimensions/indices to `u32` across the library. (#292, #295, #321)
+
+### Features
+- **CLI Subcommands**: Added a robust CLI with `blur`, `edges`, `metrics`, `stats`, `resize`, `tile`, `fdm`, `info`, and `version` commands using declarative argument parsing. (#291, #294, #308, #312, #314, #317)
+- **Hough Transform**: Implemented Hough transform for line detection with optimized integer arithmetic and 1D lookup tables. (#326)
+- **Edge Vectorization**: Added `Tracer` for converting edge maps into vectorized paths.
+- **Advanced Interpolation**: Added Mitchell and Lanczos3 resizing methods with LUT optimizations. (#299, #300)
+- **Cholesky Decomposition**: Added high-performance Cholesky decomposition for symmetric positive-definite matrices. (#322)
+- **Colormap Support**: Added built-in colormaps (Heat, Jet, etc.) for data visualization. (#336)
+- **PCF Font Writing**: Added support for writing fonts in PCF format. (#337)
+- **Sixel RLE**: Implemented run-length encoding in the Sixel encoder for smaller output sizes. (#302)
+- **Image Difference**: Added utility to compute visual and statistical differences between images. (#309)
+- **Generic Blending**: Expanded blending modes to support generic float pixel types. (#335)
+
+### Breaking Changes
+- **Interpolation API**: Sampling methods now require an explicit `BorderMode`. (#329)
+- **Rectangle API**: Updated `Rectangle` methods to take `Point` types instead of individual coordinates. (#333)
+- **Random Matrices**: Matrix generation now requires an explicit `seed` for reproducibility.
+
+### Performance
+- **SIMD Optimizations**: Vectorized IDCT, color conversion, and convolution inner loops. (#307, #341)
+- **Fast CRC**: Implemented slice-by-8 CRC calculation for PNG encoding/decoding. (#304)
+- **Memory Optimization**: Removed redundant allocator field from `HuffmanTable`, reducing memory footprint per table instance.
+
+### Improvements
+- **Rounding Accuracy**: Improved numerical precision by replacing manual truncation-based rounding with the `@round` built-in.
+- **Infallible Operations**: Made `resize` and `letterbox` infallible by handling edge cases internally. (#334)
+- **Border Handling**: Improved rotation and interpolation to consistently respect border modes. (#329, #331)
+
+### Fixes
+- **PNG Alpha**: Correctly extract alpha channel for grayscale images. (#330)
+- **JPEG Robustness**: Improved restart marker handling and MCG decoding stability.
+- **Negative Rounding**: Fixed incorrect rounding logic for negative values in fixed-point constants.
+
 ## [0.9.0] - 2025-12-15
 
 ### Features
