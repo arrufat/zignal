@@ -1,5 +1,25 @@
 # Python Bindings Changelog
 
+## [0.10.0] - 2026-04-15
+
+### Added
+- **Native CLI**: Exposed the native Zignal CLI via the Python package (`python -m zignal`). (#293)
+- **Color Conversion in Parsing**: Allow automatic colorspace conversion when passing color strings or objects. (#247)
+- **Zig 0.16.0 Support**: Updated internal implementation to use Zig 0.16.0 features and APIs.
+
+### Changed
+- **Matrix.random**: Now requires an explicit `seed` argument for reproducible results.
+- **Improved Precision**: Internal color remapping and JPEG decoding now use more accurate rounding semantics.
+
+### Fixed
+- **Pixel Iterator Lifetime**: Resolved reference management issues when returning pixel proxies, preventing potential GC-related crashes.
+- **Matrix Errors**: Arithmetic helpers now correctly propagate matrix errors before performing new operations.
+
+### Internal
+- Unified object allocation and creation helpers. (#325)
+- Centralized binding metadata and C API generation. (#324)
+- Removed deprecated `@intFromFloat` and redundant `@as` casts in binding source code.
+
 ## [0.9.0] - 2025-12-15
 
 ### Added
