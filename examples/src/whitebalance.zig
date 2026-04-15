@@ -36,7 +36,7 @@ fn estimateIlluminant(image: Image(Rgba), color: Rgb, fraction: f64) RgbGains {
     var sum_g: f64 = 0;
     var sum_b: f64 = 0;
     // Compute the average color per channel
-    const sep: usize = @intFromFloat(@as(f32, @floatFromInt(image.rows)) * fraction);
+    const sep: usize = @trunc(@as(f32, @floatFromInt(image.rows)) * fraction);
     const size: f64 = @floatFromInt(image.cols * image.rows);
 
     // Process original pixels up to separation point
@@ -144,9 +144,9 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
             const g_clamped = @max(0.0, @min(1.0, g_new));
             const b_clamped = @max(0.0, @min(1.0, b_new));
 
-            pixels[i + j].r = @intFromFloat(@round(r_clamped * 255.0));
-            pixels[i + j].g = @intFromFloat(@round(g_clamped * 255.0));
-            pixels[i + j].b = @intFromFloat(@round(b_clamped * 255.0));
+            pixels[i + j].r = @round(r_clamped * 255.0);
+            pixels[i + j].g = @round(g_clamped * 255.0);
+            pixels[i + j].b = @round(b_clamped * 255.0);
         }
     }
 

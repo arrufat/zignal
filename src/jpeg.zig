@@ -547,7 +547,7 @@ fn magnitudeBits(value: i32, mag: u5) u32 {
 
 // LLM DCT constants in 13-bit fixed point (CONST_BITS = 13)
 inline fn FIX(comptime x: f32) i32 {
-    return @as(i32, @intFromFloat(x * (1 << 13) + 0.5));
+    return @trunc(x * (1 << 13) + 0.5);
 }
 
 const FIX_0_298631336: i32 = FIX(0.298631336);
@@ -693,7 +693,7 @@ fn buildQuantRecipLLM(divisors_out: *[64]u32, qtbl: *const [64]u8) void {
         const q = @as(f64, @floatFromInt(qtbl[idx]));
         const scale = 8.0; // Overall factor of 8 from the DCT
         const recip_f = (@as(f64, @floatFromInt(1 << RECIP_SHIFT))) / (q * scale);
-        const recip_u: u32 = @intFromFloat(@round(@max(0.0, @min(4_294_967_295.0, recip_f))));
+        const recip_u: u32 = @round(@max(0.0, @min(4_294_967_295.0, recip_f)));
         divisors_out[idx] = recip_u;
     }
 }
@@ -1719,9 +1719,9 @@ fn yCbCrToRgbBlock(_: *JpegState, y_block: *[64]i32, cb_block: *const [64]i32, c
         g_vec = std.math.clamp(g_vec, vec_0, vec_255);
         b_vec = std.math.clamp(b_vec, vec_0, vec_255);
 
-        const r_u8: @Vector(8, u8) = @intFromFloat(r_vec);
-        const g_u8: @Vector(8, u8) = @intFromFloat(g_vec);
-        const b_u8: @Vector(8, u8) = @intFromFloat(b_vec);
+        const r_u8: @Vector(8, u8) = @trunc(r_vec);
+        const g_u8: @Vector(8, u8) = @trunc(g_vec);
+        const b_u8: @Vector(8, u8) = @trunc(b_vec);
 
         var r_array: [8]u8 = undefined;
         var g_array: [8]u8 = undefined;
@@ -2283,7 +2283,7 @@ pub const JpegError = error{
 // IDCT implementation based on stb_image
 fn f2f(comptime x: f32) i32 {
     // 4096 = 1 << 12
-    return @intFromFloat(x * 4096 + 0.5);
+    return @trunc(x * 4096 + 0.5);
 }
 
 fn idct1D(s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32, s6: i32, s7: i32) struct { i32, i32, i32, i32, i32, i32, i32, i32 } {
@@ -2484,8 +2484,8 @@ fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_
             const src_y_f = (@as(f32, @floatFromInt(dst_y)) + 0.5) * scale_y - 0.5;
 
             // Get integer and fractional parts
-            const x0: usize = @intFromFloat(std.math.clamp(@floor(src_x_f), 0, 7));
-            const y0: usize = @intFromFloat(std.math.clamp(@floor(src_y_f), 0, 7));
+            const x0: usize = @trunc(std.math.clamp(@floor(src_x_f), 0, 7));
+            const y0: usize = @trunc(std.math.clamp(@floor(src_y_f), 0, 7));
             const x1: usize = @min(7, x0 + 1);
             const y1: usize = @min(7, y0 + 1);
 
@@ -2504,7 +2504,7 @@ fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_
             const result = std.math.lerp(interp_x0, interp_x1, fy);
 
             const dst_idx = dst_y * dst_width + dst_x;
-            output[dst_idx] = @intFromFloat(@round(result));
+            output[dst_idx] = @round(result);
         }
     }
 }
@@ -2806,7 +2806,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
                         // Horizontal interpolation for chroma
                         const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
-                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cx0: usize = @trunc(std.math.clamp(@floor(chroma_x_f), 0, 7));
                         const cx1: usize = @min(7, cx0 + 1);
                         const fx: f32 = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
@@ -2815,11 +2815,11 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
                         const cb0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]);
                         const cb1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]);
-                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb0, cb1, fx)));
+                        const Cb: i32 = @round(std.math.lerp(cb0, cb1, fx));
 
                         const cr0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]);
                         const cr1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]);
-                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr0, cr1, fx)));
+                        const Cr: i32 = @round(std.math.lerp(cr0, cr1, fx));
 
                         const ycbcr: Ycbcr = .{
                             .y = @intCast(std.math.clamp(Y, 0, 255)),
@@ -2861,7 +2861,7 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
                         // Horizontal interpolation for 4:1 chroma
                         const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.25 - 0.5;
-                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cx0: usize = @trunc(std.math.clamp(@floor(chroma_x_f), 0, 7));
                         const cx1: usize = @min(7, cx0 + 1);
                         const fx: f32 = chroma_x_f - @as(f32, @floatFromInt(cx0));
 
@@ -2870,11 +2870,11 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
                         const cb0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx]);
                         const cb1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][1][chroma_idx_next]);
-                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb0, cb1, fx)));
+                        const Cb: i32 = @round(std.math.lerp(cb0, cb1, fx));
 
                         const cr0: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx]);
                         const cr1: f32 = @floatFromInt(state.block_storage.?[chroma_block_index][2][chroma_idx_next]);
-                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr0, cr1, fx)));
+                        const Cr: i32 = @round(std.math.lerp(cr0, cr1, fx));
 
                         const ycbcr: Ycbcr = .{
                             .y = @intCast(std.math.clamp(Y, 0, 255)),
@@ -2923,8 +2923,8 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                         const chroma_y_f: f32 = (@as(f32, @floatFromInt(v * 8 + py)) + 0.5) * 0.5 - 0.5;
                         const chroma_x_f: f32 = (@as(f32, @floatFromInt(h * 8 + px)) + 0.5) * 0.5 - 0.5;
 
-                        const cy0: usize = @intFromFloat(std.math.clamp(@floor(chroma_y_f), 0, 7));
-                        const cx0: usize = @intFromFloat(std.math.clamp(@floor(chroma_x_f), 0, 7));
+                        const cy0: usize = @trunc(std.math.clamp(@floor(chroma_y_f), 0, 7));
+                        const cx0: usize = @trunc(std.math.clamp(@floor(chroma_x_f), 0, 7));
                         const cy1: usize = @min(7, cy0 + 1);
                         const cx1: usize = @min(7, cx0 + 1);
 
@@ -2946,11 +2946,11 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
                         // Bilinear interpolation
                         const cb_interp_x0 = std.math.lerp(cb00, cb10, fx);
                         const cb_interp_x1 = std.math.lerp(cb01, cb11, fx);
-                        const Cb: i32 = @intFromFloat(@round(std.math.lerp(cb_interp_x0, cb_interp_x1, fy)));
+                        const Cb: i32 = @round(std.math.lerp(cb_interp_x0, cb_interp_x1, fy));
 
                         const cr_interp_x0 = std.math.lerp(cr00, cr10, fx);
                         const cr_interp_x1 = std.math.lerp(cr01, cr11, fx);
-                        const Cr: i32 = @intFromFloat(@round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy)));
+                        const Cr: i32 = @round(std.math.lerp(cr_interp_x0, cr_interp_x1, fy));
 
                         const ycbcr: Ycbcr = .{
                             .y = @intCast(std.math.clamp(Y, 0, 255)),

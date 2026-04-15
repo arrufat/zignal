@@ -106,7 +106,7 @@ pub fn solveAssignmentProblem(
         for (0..n_cols) |j| {
             const base_val = cost_matrix.at(i, j).*;
             const abs_val = @abs(as(f64, base_val));
-            padding_value += @intFromFloat(@ceil(abs_val * @as(f64, @floatFromInt(scale_factor))));
+            padding_value += @ceil(abs_val * @as(f64, @floatFromInt(scale_factor)));
         }
     }
 
@@ -118,7 +118,7 @@ pub fn solveAssignmentProblem(
                 work[i * n + j] = switch (@typeInfo(T)) {
                     .float => blk: {
                         const val = base_val * @as(T, @floatFromInt(multiplier));
-                        break :blk @intFromFloat(@round(val * @as(T, @floatFromInt(scale_factor))));
+                        break :blk @round(val * @as(T, @floatFromInt(scale_factor)));
                     },
                     .int => @as(i64, base_val) * multiplier,
                     else => @compileError("Unsupported type for cost matrix"),
