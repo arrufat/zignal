@@ -159,16 +159,16 @@ pub fn resizePlaneBilinearU8(
     // Process each output pixel
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y_i = @as(isize, @intFromFloat(@floor(src_y_f)));
-        const fy = @as(i32, @intFromFloat((src_y_f - @floor(src_y_f)) * sf));
+        const src_y_i: isize = @floor(src_y_f);
+        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * sf);
 
         const y0 = resolveIndex(src_y_i, @intCast(src_rows), .mirror).?;
         const y1 = resolveIndex(src_y_i + 1, @intCast(src_rows), .mirror).?;
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x_i = @as(isize, @intFromFloat(@floor(src_x_f)));
-            const fx = @as(i32, @intFromFloat((src_x_f - @floor(src_x_f)) * sf));
+            const src_x_i: isize = @floor(src_x_f);
+            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * sf);
 
             const x0 = resolveIndex(src_x_i, @intCast(src_cols), .mirror).?;
             const x1 = resolveIndex(src_x_i + 1, @intCast(src_cols), .mirror).?;
@@ -203,11 +203,11 @@ pub fn resizePlaneNearestU8(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @max(0, @min(src_rows - 1, @as(u32, @intFromFloat(@round(src_y_f)))));
+        const src_y = @max(0, @min(src_rows - 1, @as(u32, @round(src_y_f))));
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @max(0, @min(src_cols - 1, @as(u32, @intFromFloat(@round(src_x_f)))));
+            const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
             dst[r * dst_cols + c] = src[@as(usize, src_y) * src_cols + src_x];
         }
     }
@@ -248,13 +248,13 @@ pub fn resizePlaneBicubicU8(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @as(isize, @intFromFloat(@floor(src_y_f)));
-        const fy = @as(i32, @intFromFloat((src_y_f - @floor(src_y_f)) * SCALE));
+        const src_y: isize = @floor(src_y_f);
+        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @as(isize, @intFromFloat(@floor(src_x_f)));
-            const fx = @as(i32, @intFromFloat((src_x_f - @floor(src_x_f)) * SCALE));
+            const src_x: isize = @floor(src_x_f);
+            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * SCALE);
 
             var sum: i32 = 0;
             var weight_sum: i32 = 0;
@@ -323,13 +323,13 @@ pub fn resizePlaneCatmullRomU8(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @as(isize, @intFromFloat(@floor(src_y_f)));
-        const fy = @as(i32, @intFromFloat((src_y_f - @floor(src_y_f)) * SCALE));
+        const src_y: isize = @floor(src_y_f);
+        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @as(isize, @intFromFloat(@floor(src_x_f)));
-            const fx = @as(i32, @intFromFloat((src_x_f - @floor(src_x_f)) * SCALE));
+            const src_x: isize = @floor(src_x_f);
+            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * SCALE);
 
             var sum: i32 = 0;
             var weight_sum: i32 = 0;
@@ -399,13 +399,13 @@ pub fn resizePlaneMitchellU8(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @as(isize, @intFromFloat(@floor(src_y_f)));
-        const fy = @as(i32, @intFromFloat((src_y_f - @floor(src_y_f)) * s));
+        const src_y: isize = @floor(src_y_f);
+        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * s);
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @as(isize, @intFromFloat(@floor(src_x_f)));
-            const fx = @as(i32, @intFromFloat((src_x_f - @floor(src_x_f)) * s));
+            const src_x: isize = @floor(src_x_f);
+            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * s);
 
             var sum: i32 = 0;
             var weight_sum: i32 = 0;
@@ -459,12 +459,12 @@ pub fn resizePlaneLanczosU8(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @as(isize, @intFromFloat(@floor(src_y_f)));
+        const src_y: isize = @floor(src_y_f);
         const fy = src_y_f - @floor(src_y_f);
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @as(isize, @intFromFloat(@floor(src_x_f)));
+            const src_x: isize = @floor(src_x_f);
             const fx = src_x_f - @floor(src_x_f);
 
             var sum: f32 = 0;
@@ -510,11 +510,11 @@ pub fn resizePlaneF32(
 
             for (0..dst_rows) |r| {
                 const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-                const src_y = @max(0, @min(src_rows - 1, @as(u32, @intFromFloat(@round(src_y_f)))));
+                const src_y = @max(0, @min(src_rows - 1, @as(u32, @round(src_y_f))));
 
                 for (0..dst_cols) |c| {
                     const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-                    const src_x = @max(0, @min(src_cols - 1, @as(u32, @intFromFloat(@round(src_x_f)))));
+                    const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
                     dst[r * dst_cols + c] = src[@as(usize, src_y) * src_cols + src_x];
                 }
             }
@@ -525,13 +525,13 @@ pub fn resizePlaneF32(
 
             for (0..dst_rows) |r| {
                 const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-                const src_y = @as(u32, @intFromFloat(@floor(src_y_f)));
+                const src_y: u32 = @floor(src_y_f);
                 const src_y_next = resolveIndex(@intCast(src_y + 1), @intCast(src_rows), .mirror).?;
                 const fy = src_y_f - @floor(src_y_f);
 
                 for (0..dst_cols) |c| {
                     const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-                    const src_x = @as(u32, @intFromFloat(@floor(src_x_f)));
+                    const src_x: u32 = @floor(src_x_f);
                     const src_x_next = resolveIndex(@intCast(src_x + 1), @intCast(src_cols), .mirror).?;
                     const fx = src_x_f - @floor(src_x_f);
 
@@ -579,12 +579,12 @@ fn resizePlaneBicubicF32(
 
     for (0..dst_rows) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @as(isize, @intFromFloat(@floor(src_y_f)));
+        const src_y: isize = @floor(src_y_f);
         const fy = src_y_f - @floor(src_y_f);
 
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @as(isize, @intFromFloat(@floor(src_x_f)));
+            const src_x: isize = @floor(src_x_f);
             const fx = src_x_f - @floor(src_x_f);
 
             var sum: f32 = 0;

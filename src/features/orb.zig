@@ -417,7 +417,7 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
 
         // Calculate desired features for this level
         const desired_float = n_features_f * (1.0 - factor) / (1.0 - factor_to_n) * scale_factor_level;
-        const desired_clamped = @min(@as(usize, @intFromFloat(@round(desired_float))), remaining);
+        const desired_clamped: usize = @min(@as(usize, @round(desired_float)), remaining);
 
         // Ensure at least some features per level (except possibly last level)
         // Reduced minimum to allow more flexible distribution, but never exceed remaining budget
@@ -483,8 +483,8 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
     const half_patch = self.patch_size / 2;
     const radius = @as(f32, @floatFromInt(half_patch));
     const radius_sq = radius * radius;
-    const x = @as(isize, @intFromFloat(kp.x));
-    const y = @as(isize, @intFromFloat(kp.y));
+    const x: isize = @trunc(kp.x);
+    const y: isize = @trunc(kp.y);
 
     var m00: f32 = 0; // Zeroth moment
     var m10: f32 = 0; // First moment in x
@@ -564,8 +564,8 @@ fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
     const half_window = window_size / 2;
     const k = 0.04; // Harris detector constant
 
-    const x = @as(isize, @intFromFloat(kp.x));
-    const y = @as(isize, @intFromFloat(kp.y));
+    const x: isize = @trunc(kp.x);
+    const y: isize = @trunc(kp.y);
 
     var Ixx: f32 = 0;
     var Iyy: f32 = 0;
@@ -611,8 +611,8 @@ fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
 
 /// Sample a pixel with bounds checking
 fn samplePixel(image: Image(u8), x: f32, y: f32) u8 {
-    const ix = @as(isize, @intFromFloat(@round(x)));
-    const iy = @as(isize, @intFromFloat(@round(y)));
+    const ix: isize = @round(x);
+    const iy: isize = @round(y);
 
     if (ix < 0 or ix >= image.cols or iy < 0 or iy >= image.rows) {
         return 0;
@@ -627,7 +627,7 @@ fn computeAdaptiveThreshold(self: Orb, level: usize) u8 {
     const attenuation = 1.0 / level_scale;
     const base_threshold = @as(f32, @floatFromInt(self.fast_threshold));
     const scaled_threshold = std.math.clamp(base_threshold * attenuation, @as(f32, 5.0), @as(f32, 255.0));
-    return @as(u8, @intFromFloat(@round(scaled_threshold)));
+    return @round(scaled_threshold);
 }
 
 // Tests

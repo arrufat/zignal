@@ -171,8 +171,8 @@ pub fn fromImageProfiled(
     var height = image.rows;
     const scale = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
     if (@abs(scale - 1.0) > 1e-5) {
-        width = @intFromFloat(@as(f32, @floatFromInt(width)) * scale);
-        height = @intFromFloat(@as(f32, @floatFromInt(height)) * scale);
+        width = @trunc(@as(f32, @floatFromInt(width)) * scale);
+        height = @trunc(@as(f32, @floatFromInt(height)) * scale);
     }
 
     // Prepare palette based on mode
@@ -255,12 +255,12 @@ pub fn fromImageProfiled(
 
                         // Fallback to clamped nearest-neighbor sample to avoid leaving pixels uninitialized.
                         const clamped_col: isize = clamp(
-                            @as(isize, @intFromFloat(@round(src_x))),
+                            @as(isize, @round(src_x)),
                             0,
                             @as(isize, @intCast(image.cols - 1)),
                         );
                         const clamped_row: isize = clamp(
-                            @as(isize, @intFromFloat(@round(src_y))),
+                            @as(isize, @round(src_y)),
                             0,
                             @as(isize, @intCast(image.rows - 1)),
                         );

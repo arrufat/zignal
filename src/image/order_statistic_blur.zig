@@ -369,7 +369,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             fn compute(self: *const @This(), hist: *const Histogram(u8), window_area: usize) Error!u8 {
                 const total_f = @as(f64, @floatFromInt(window_area));
                 const trimmed_total = @floor(self.trim_fraction * total_f);
-                const trimmed_each = @as(usize, @intFromFloat(trimmed_total));
+                const trimmed_each: usize = @trunc(trimmed_total);
                 const trim_each = @min(trimmed_each, window_area / 2);
 
                 var total_sum: u64 = 0;

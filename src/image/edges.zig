@@ -70,7 +70,7 @@ pub fn Edges(comptime T: type) type {
                         // Scale by 1/4 to match typical Sobel output range
                         // Max theoretical magnitude is ~1442, so /4 maps to ~360 max
                         const scaled = magnitude / 4.0;
-                        out.at(r, c).* = @intFromFloat(@max(0, @min(255, scaled)));
+                        out.at(r, c).* = @trunc(@max(0, @min(255, scaled)));
                     }
                 }
             }
@@ -149,7 +149,7 @@ pub fn Edges(comptime T: type) type {
                     var g = gradients.at(rr, cc).*;
                     if (g < 0) g = 0;
                     if (g > 255) g = 255;
-                    const bin: usize = @intFromFloat(@round(g));
+                    const bin: usize = @round(g);
                     hist[bin] += 1;
                     total += 1;
                 }
@@ -163,7 +163,7 @@ pub fn Edges(comptime T: type) type {
                 }
                 return;
             }
-            const target: usize = @intFromFloat(@floor(@as(f32, @floatFromInt(total)) * opts.high_ratio));
+            const target: usize = @floor(@as(f32, @floatFromInt(total)) * opts.high_ratio);
             var cum: usize = 0;
             var idx: usize = 0;
             while (idx < 256 and cum < target) : (idx += 1) {
@@ -673,7 +673,7 @@ fn nonMaxSuppressEdges(
 /// Uses separable convolution for efficiency.
 fn blurGaussian(src: Image(f32), sigma: f32, dst: Image(f32), allocator: Allocator) !void {
     // Calculate kernel size (3 sigma on each side)
-    const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
+    const radius: usize = @ceil(3.0 * sigma);
     const kernel_size = 2 * radius + 1;
 
     // Generate 1D Gaussian kernel

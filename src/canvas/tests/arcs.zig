@@ -47,8 +47,8 @@ test "arc drawing - basic angles" {
     while (dy < check_radius * 2) : (dy += 1) {
         var dx: usize = 0;
         while (dx < check_radius * 2) : (dx += 1) {
-            const x = @as(usize, @intFromFloat(@round(expected_x))) + dx - check_radius;
-            const y = @as(usize, @intFromFloat(@round(expected_y))) + dy - check_radius;
+            const x: usize = @as(usize, @round(expected_x)) + dx - check_radius;
+            const y: usize = @as(usize, @round(expected_y)) + dy - check_radius;
             if (x < width and y < height) {
                 const pixel = img.at(y, x);
                 if (pixel.r == 0 and pixel.g == 0 and pixel.b == 0) {
@@ -88,7 +88,7 @@ test "arc drawing - full circle optimization" {
     }
 
     // Should have approximately 2πr pixels for a circle outline
-    const expected = @as(usize, @intFromFloat(2 * std.math.pi * radius));
+    const expected: usize = @trunc(2 * std.math.pi * radius);
     try expect(black_count > expected * 3 / 4); // Allow some tolerance
     try expect(black_count < expected * 5 / 4);
 }
@@ -161,20 +161,20 @@ test "fillArc - pie slices" {
     }
 
     // Quarter circle area should be approximately πr²/4
-    const expected_area = @as(usize, @intFromFloat(std.math.pi * radius * radius / 4));
+    const expected_area: usize = @trunc(std.math.pi * radius * radius / 4);
     try expect(black_count > expected_area * 3 / 4); // Allow tolerance
     try expect(black_count < expected_area * 5 / 4);
 
     // Verify the filled area is in the correct quadrant
     // Points in the first quadrant (x > center.x, y > center.y) should be filled
-    const sample_x = @as(usize, @intFromFloat(center.x() + radius / 2));
-    const sample_y = @as(usize, @intFromFloat(center.y() + radius / 2));
+    const sample_x: usize = @trunc(center.x() + radius / 2);
+    const sample_y: usize = @trunc(center.y() + radius / 2);
     const sample_pixel = img.at(sample_y, sample_x);
     try expect(sample_pixel.r == 0 and sample_pixel.g == 0 and sample_pixel.b == 0);
 
     // Points in the opposite quadrant should not be filled
-    const opposite_x = @as(usize, @intFromFloat(center.x() - radius / 2));
-    const opposite_y = @as(usize, @intFromFloat(center.y() - radius / 2));
+    const opposite_x: usize = @trunc(center.x() - radius / 2);
+    const opposite_y: usize = @trunc(center.y() - radius / 2);
     const opposite_pixel = img.at(opposite_y, opposite_x);
     try expect(opposite_pixel.r == 255 and opposite_pixel.g == 255 and opposite_pixel.b == 255);
 }

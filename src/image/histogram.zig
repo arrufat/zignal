@@ -41,7 +41,7 @@ pub fn Histogram(comptime T: type) type {
             /// Calculate the mean value from the histogram
             pub fn mean(self: Self) u8 {
                 const mean_val = stats.mean(&self.values);
-                return @intFromFloat(@round(mean_val));
+                return @round(mean_val);
             }
 
             /// Calculate the median value from the histogram
@@ -193,9 +193,9 @@ pub fn Histogram(comptime T: type) type {
             /// Calculate the mean value for each channel
             pub fn mean(self: Self) Rgb {
                 return .{
-                    .r = @intFromFloat(@round(stats.mean(&self.r))),
-                    .g = @intFromFloat(@round(stats.mean(&self.g))),
-                    .b = @intFromFloat(@round(stats.mean(&self.b))),
+                    .r = @round(stats.mean(&self.r)),
+                    .g = @round(stats.mean(&self.g)),
+                    .b = @round(stats.mean(&self.b)),
                 };
             }
 
@@ -336,10 +336,10 @@ pub fn Histogram(comptime T: type) type {
             /// Calculate the mean value for each channel
             pub fn mean(self: Self) Rgba {
                 return .{
-                    .r = @intFromFloat(@round(stats.mean(&self.r))),
-                    .g = @intFromFloat(@round(stats.mean(&self.g))),
-                    .b = @intFromFloat(@round(stats.mean(&self.b))),
-                    .a = @intFromFloat(@round(stats.mean(&self.a))),
+                    .r = @round(stats.mean(&self.r)),
+                    .g = @round(stats.mean(&self.g)),
+                    .b = @round(stats.mean(&self.b)),
+                    .a = @round(stats.mean(&self.a)),
                 };
             }
 
@@ -595,7 +595,8 @@ const stats = struct {
         const total_minus_one = total - 1;
         const rank_f = p * @as(f64, @floatFromInt(total_minus_one));
         const rank_floor = std.math.floor(rank_f + 1e-12);
-        const rank = std.math.clamp(@as(usize, @intFromFloat(rank_floor)), 0, total_minus_one);
+        const rank_trunc: usize = @trunc(rank_floor);
+        const rank = std.math.clamp(rank_trunc, 0, total_minus_one);
 
         var cumulative: usize = 0;
 

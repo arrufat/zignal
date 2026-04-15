@@ -669,10 +669,10 @@ fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectan
     }
     return switch (@typeInfo(T)) {
         .int => .init(
-            @intFromFloat(left),
-            @intFromFloat(top),
-            @intFromFloat(right),
-            @intFromFloat(bottom),
+            @trunc(left),
+            @trunc(top),
+            @trunc(right),
+            @trunc(bottom),
         ),
         .float => .init(
             @floatCast(left),
@@ -710,10 +710,10 @@ fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T)
     const info = @typeInfo(T);
     return switch (info) {
         .int => .init(
-            @intFromFloat(rect.left),
-            @intFromFloat(rect.top),
-            @intFromFloat(rect.right),
-            @intFromFloat(rect.bottom),
+            @trunc(rect.left),
+            @trunc(rect.top),
+            @trunc(rect.right),
+            @trunc(rect.bottom),
         ),
         .float => .init(
             @floatCast(rect.left),

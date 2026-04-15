@@ -155,8 +155,8 @@ pub fn createHorizontalComposite(
     );
 
     // Calculate dimensions for each sub-image
-    const w = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(ref_img.cols)) * scale_factor)));
-    const h = @as(u32, @intFromFloat(@round(@as(f32, @floatFromInt(ref_img.rows)) * scale_factor)));
+    const w: u32 = @round(@as(f32, @floatFromInt(ref_img.cols)) * scale_factor);
+    const h: u32 = @round(@as(f32, @floatFromInt(ref_img.rows)) * scale_factor);
 
     // Safety check for zero dimensions
     const final_w = if (w == 0) 1 else w;

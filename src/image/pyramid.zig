@@ -56,8 +56,8 @@ pub fn ImagePyramid(comptime T: type) type {
             for (1..n_levels) |i| {
                 // Calculate dimensions for this level
                 const scale = std.math.pow(f32, scale_factor, @as(f32, @floatFromInt(i)));
-                const new_rows = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(source.rows)) / scale)));
-                const new_cols = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(source.cols)) / scale)));
+                const new_rows: u32 = @max(1, @as(u32, @trunc(@as(f32, @floatFromInt(source.rows)) / scale)));
+                const new_cols: u32 = @max(1, @as(u32, @trunc(@as(f32, @floatFromInt(source.cols)) / scale)));
 
                 // Skip if image becomes too small
                 if (new_rows < 8 or new_cols < 8) {

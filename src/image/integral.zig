@@ -313,7 +313,7 @@ pub fn Integral(comptime T: type) type {
                                 @field(dst.at(r, c).*, f.name) = switch (@typeInfo(f.type)) {
                                     .int => blk: {
                                         const sharpened_val = 2 * as(f32, original) - blurred;
-                                        break :blk @intFromFloat(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
+                                        break :blk @trunc(@max(std.math.minInt(f.type), @min(std.math.maxInt(f.type), @round(sharpened_val))));
                                     },
                                     .float => as(f.type, 2 * as(f32, original) - blurred),
                                     else => @compileError("Can't compute sharpen with struct fields of type " ++ @typeName(f.type) ++ "."),

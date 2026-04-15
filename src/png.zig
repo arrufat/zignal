@@ -1318,7 +1318,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     } else if (options.gamma) |g| {
         // gAMA chunk - must come before PLTE and IDAT
         // Store gamma * 100000 as big-endian u32
-        const gamma_int: u32 = @intFromFloat(g * 100000.0);
+        const gamma_int: u32 = @trunc(g * 100000.0);
         var gama_data: [4]u8 = undefined;
         std.mem.writeInt(u32, &gama_data, gamma_int, .big);
         try writer.writeChunk("gAMA".*, &gama_data);
@@ -2697,7 +2697,7 @@ test "PNG encode with color management chunks" {
             found_gama = true;
             try std.testing.expectEqual(@as(u32, 4), chunk_length);
             const gamma_int = std.mem.readInt(u32, gamma_png[offset + 8 .. offset + 12][0..4], .big);
-            const expected_gamma_int: u32 = @intFromFloat((1.0 / 2.2) * 100000.0);
+            const expected_gamma_int: u32 = @trunc((1.0 / 2.2) * 100000.0);
             try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(gamma_int)), @as(f32, @floatFromInt(expected_gamma_int)), 1.0);
             break;
         }
