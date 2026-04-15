@@ -37,11 +37,11 @@ fn bitmap_font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.font) |font| {
         // Create a formatted string with the font name
         var buffer: [256]u8 = undefined;
-        const repr_str = std.fmt.bufPrintZ(&buffer, "BitmapFont(name=\"{s}\", width={d}, height={d})", .{
+        const repr_str = std.fmt.bufPrintSentinel(&buffer, "BitmapFont(name=\"{s}\", width={d}, height={d})", .{
             font.name,
             font.char_width,
             font.char_height,
-        }) catch {
+        }, 0) catch {
             // Fall back to simple representation if formatting fails
             return python.create("BitmapFont()");
         };

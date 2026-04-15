@@ -70,20 +70,23 @@ fn motion_blur_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     var buf: [256]u8 = undefined;
 
     const str = switch (self.blur_type) {
-        .linear => std.fmt.bufPrintZ(
+        .linear => std.fmt.bufPrintSentinel(
             &buf,
             "MotionBlur.linear(angle={d:.4}, distance={d})",
             .{ self.angle, self.distance },
+            0,
         ) catch return null,
-        .radial_zoom => std.fmt.bufPrintZ(
+        .radial_zoom => std.fmt.bufPrintSentinel(
             &buf,
             "MotionBlur.radial_zoom(center=({d:.3}, {d:.3}), strength={d:.3})",
             .{ self.center_x, self.center_y, self.strength },
+            0,
         ) catch return null,
-        .radial_spin => std.fmt.bufPrintZ(
+        .radial_spin => std.fmt.bufPrintSentinel(
             &buf,
             "MotionBlur.radial_spin(center=({d:.3}, {d:.3}), strength={d:.3})",
             .{ self.center_x, self.center_y, self.strength },
+            0,
         ) catch return null,
     };
 

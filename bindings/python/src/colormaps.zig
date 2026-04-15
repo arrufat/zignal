@@ -78,10 +78,11 @@ fn colormap_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const min_part = if (self.has_min) std.fmt.bufPrint(&min_str, "{d}", .{self.min}) catch "..." else "None";
     const max_part = if (self.has_max) std.fmt.bufPrint(&max_str, "{d}", .{self.max}) catch "..." else "None";
 
-    const str = std.fmt.bufPrintZ(
+    const str = std.fmt.bufPrintSentinel(
         &buf,
         "Colormap.{s}(min={s}, max={s})",
         .{ type_name, min_part, max_part },
+        0,
     ) catch return null;
 
     return python.create(str);

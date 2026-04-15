@@ -134,7 +134,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                                     const max_val = std.math.maxInt(field.type);
 
                                     var buffer: [256]u8 = undefined;
-                                    const msg = std.fmt.bufPrintZ(&buffer, "Value is out of range for {s} (valid range: {} to {})", .{ @typeName(field.type), min_val, max_val }) catch "Value out of range";
+                                    const msg = std.fmt.bufPrintSentinel(&buffer, "Value is out of range for {s} (valid range: {} to {})", .{ @typeName(field.type), min_val, max_val }, 0) catch "Value out of range";
 
                                     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                                     return -1;
@@ -746,10 +746,10 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             var buffer: [128]u8 = undefined;
             const formatted = switch (fields.len) {
-                1 => std.fmt.bufPrintZ(&buffer, "{s}({s}={})", .{ name, fields[0].name, self.field0 }) catch return null,
-                2 => std.fmt.bufPrintZ(&buffer, "{s}({s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1 }) catch return null,
-                3 => std.fmt.bufPrintZ(&buffer, "{s}({s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2 }) catch return null,
-                4 => std.fmt.bufPrintZ(&buffer, "{s}({s}={}, {s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2, fields[3].name, self.field3 }) catch return null,
+                1 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={})", .{ name, fields[0].name, self.field0 }, 0) catch return null,
+                2 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1 }, 0) catch return null,
+                3 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2 }, 0) catch return null,
+                4 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2, fields[3].name, self.field3 }, 0) catch return null,
                 else => unreachable,
             };
 
