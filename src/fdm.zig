@@ -186,14 +186,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     for (source_img.data) |*pixel| {
                         const val = @as(f64, @floatFromInt(pixel.*)) / 255.0;
                         const result = clamp(val * scale + offset, 0, 1);
-                        pixel.* = @as(u8, @intFromFloat(@round(255.0 * result)));
+                        pixel.* = @round(255.0 * result);
                     }
                 } else {
                     for (source_img.data) |*pixel| {
                         // Color image, target is grayscale: convert to gray then match
                         const val = @as(f64, @floatFromInt(convertColor(u8, pixel.*))) / 255.0;
                         const result = clamp(val * scale + offset, 0, 1);
-                        const res_u8 = @as(u8, @intFromFloat(@round(255.0 * result)));
+                        const res_u8: u8 = @round(255.0 * result);
                         pixel.* = .{ .r = res_u8, .g = res_u8, .b = res_u8 };
                     }
                 }
@@ -266,9 +266,9 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     res[1] = r * w.at(0, 1).* + g * w.at(1, 1).* + b * w.at(2, 1).* + bias[1];
                     res[2] = r * w.at(0, 2).* + g * w.at(1, 2).* + b * w.at(2, 2).* + bias[2];
 
-                    pixel.r = @intFromFloat(@round(255.0 * clamp(res[0], 0, 1)));
-                    pixel.g = @intFromFloat(@round(255.0 * clamp(res[1], 0, 1)));
-                    pixel.b = @intFromFloat(@round(255.0 * clamp(res[2], 0, 1)));
+                    pixel.r = @round(255.0 * clamp(res[0], 0, 1));
+                    pixel.g = @round(255.0 * clamp(res[1], 0, 1));
+                    pixel.b = @round(255.0 * clamp(res[2], 0, 1));
                 }
             }
         }

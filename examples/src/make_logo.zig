@@ -178,7 +178,7 @@ fn drawDecorativeElements(canvas: *Canvas(Rgb)) void {
 }
 
 fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32, pixel_size: f32, base_color: Rgb, pattern_seed: u64) void {
-    const pixels_per_side = @as(usize, @intFromFloat(size / pixel_size));
+    const pixels_per_side: usize = @trunc(size / pixel_size);
 
     for (0..pixels_per_side) |i| {
         for (0..pixels_per_side) |j| {
@@ -256,7 +256,7 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
 
             // Convert back to RGB then to RGBA with alpha
             const adjusted_rgb = adjusted_oklab.to(.rgb).as(u8);
-            const alpha = @as(u8, @intFromFloat(@min(255, intensity * 255)));
+            const alpha: u8 = @trunc(@min(255, intensity * 255));
             const color_with_alpha = adjusted_rgb.withAlpha(alpha);
 
             const rect: zignal.Rectangle(f32) = .init(x, y, x + pixel_size - 1, y + pixel_size - 1);

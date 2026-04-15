@@ -105,7 +105,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     if (@typeInfo(SrcType) == .float and DestType == u8) {
         // Use f64 for precision with smaller floats, but SrcType if it's larger.
         const P = if (@typeInfo(SrcType).float.bits < 64) f64 else SrcType;
-        return @intFromFloat(@round(clamp(@as(P, source), 0.0, 1.0) * @as(P, 255.0)));
+        return @round(clamp(@as(P, source), 0.0, 1.0) * @as(P, 255.0));
     }
     if (@typeInfo(SrcType) == .float and @typeInfo(DestType) == .float) return @floatCast(source);
 
@@ -304,9 +304,9 @@ pub fn Rgb(comptime T: type) type {
 
         /// Converts RGB to 24-bit hexadecimal representation (0xRRGGBB format).
         pub fn hex(self: Rgb(T)) u24 {
-            const r: u8 = if (T == u8) self.r else @intFromFloat(@round(clamp(self.r, 0, 1) * 255));
-            const g: u8 = if (T == u8) self.g else @intFromFloat(@round(clamp(self.g, 0, 1) * 255));
-            const b: u8 = if (T == u8) self.b else @intFromFloat(@round(clamp(self.b, 0, 1) * 255));
+            const r: u8 = if (T == u8) self.r else @round(clamp(self.r, 0, 1) * 255);
+            const g: u8 = if (T == u8) self.g else @round(clamp(self.g, 0, 1) * 255);
+            const b: u8 = if (T == u8) self.b else @round(clamp(self.b, 0, 1) * 255);
             return (@as(u24, r) << 16) | (@as(u24, g) << 8) | @as(u24, b);
         }
 
@@ -364,9 +364,9 @@ pub fn Rgb(comptime T: type) type {
                 },
                 else => switch (U) {
                     u8 => .{
-                        .r = @intFromFloat(@round(255 * clamp(self.r, 0, 1))),
-                        .g = @intFromFloat(@round(255 * clamp(self.g, 0, 1))),
-                        .b = @intFromFloat(@round(255 * clamp(self.b, 0, 1))),
+                        .r = @round(255 * clamp(self.r, 0, 1)),
+                        .g = @round(255 * clamp(self.g, 0, 1)),
+                        .b = @round(255 * clamp(self.b, 0, 1)),
                     },
                     else => .{
                         .r = @floatCast(self.r),
@@ -420,10 +420,10 @@ pub fn Rgba(comptime T: type) type {
 
         /// Converts RGBA to 32-bit hexadecimal representation (0xRRGGBBAA format).
         pub fn hex(self: Rgba(T)) u32 {
-            const r: u8 = if (T == u8) self.r else @intFromFloat(@round(clamp(self.r, 0, 1) * 255));
-            const g: u8 = if (T == u8) self.g else @intFromFloat(@round(clamp(self.g, 0, 1) * 255));
-            const b: u8 = if (T == u8) self.b else @intFromFloat(@round(clamp(self.b, 0, 1) * 255));
-            const a: u8 = if (T == u8) self.a else @intFromFloat(@round(clamp(self.a, 0, 1) * 255));
+            const r: u8 = if (T == u8) self.r else @round(clamp(self.r, 0, 1) * 255);
+            const g: u8 = if (T == u8) self.g else @round(clamp(self.g, 0, 1) * 255);
+            const b: u8 = if (T == u8) self.b else @round(clamp(self.b, 0, 1) * 255);
+            const a: u8 = if (T == u8) self.a else @round(clamp(self.a, 0, 1) * 255);
             return (@as(u32, r) << 24) | (@as(u32, g) << 16) | (@as(u32, b) << 8) | @as(u32, a);
         }
 
@@ -437,7 +437,7 @@ pub fn Rgba(comptime T: type) type {
         pub fn fade(self: Rgba(T), alpha: f32) Rgba(T) {
             const scale = clamp(alpha, 0, 1);
             if (T == u8) {
-                const new_a: u8 = @intFromFloat(@as(f32, @floatFromInt(self.a)) * scale);
+                const new_a: u8 = @trunc(@as(f32, @floatFromInt(self.a)) * scale);
                 return .{ .r = self.r, .g = self.g, .b = self.b, .a = new_a };
             } else {
                 const s: T = @as(T, scale);
@@ -484,10 +484,10 @@ pub fn Rgba(comptime T: type) type {
                 },
                 else => switch (U) {
                     u8 => .{
-                        .r = @intFromFloat(@round(255 * clamp(self.r, 0, 1))),
-                        .g = @intFromFloat(@round(255 * clamp(self.g, 0, 1))),
-                        .b = @intFromFloat(@round(255 * clamp(self.b, 0, 1))),
-                        .a = @intFromFloat(@round(255 * clamp(self.a, 0, 1))),
+                        .r = @round(255 * clamp(self.r, 0, 1)),
+                        .g = @round(255 * clamp(self.g, 0, 1)),
+                        .b = @round(255 * clamp(self.b, 0, 1)),
+                        .a = @round(255 * clamp(self.a, 0, 1)),
                     },
                     else => .{
                         .r = @floatCast(self.r),
@@ -541,7 +541,7 @@ pub fn Gray(comptime T: type) type {
                     else => .{ .y = @as(U, @floatFromInt(self.y)) / 255 },
                 },
                 else => switch (U) {
-                    u8 => .{ .y = @intFromFloat(@round(255 * clamp(self.y, 0, 1))) },
+                    u8 => .{ .y = @round(255 * clamp(self.y, 0, 1)) },
                     else => .{ .y = @floatCast(self.y) },
                 },
             };
@@ -952,9 +952,9 @@ pub fn Ycbcr(comptime T: type) type {
                 },
                 else => switch (U) {
                     u8 => .{
-                        .y = @intFromFloat(@round(255 * clamp(self.y, 0, 1))),
-                        .cb = @intFromFloat(@round(255 * clamp(self.cb + 0.5, 0, 1))),
-                        .cr = @intFromFloat(@round(255 * clamp(self.cr + 0.5, 0, 1))),
+                        .y = @round(255 * clamp(self.y, 0, 1)),
+                        .cb = @round(255 * clamp(self.cb + 0.5, 0, 1)),
+                        .cr = @round(255 * clamp(self.cr + 0.5, 0, 1)),
                     },
                     else => .{
                         .y = @floatCast(self.y),
@@ -1021,9 +1021,9 @@ fn rgbToGray(comptime T: type, rgb: Rgb(T)) Gray(T) {
         const b: i32 = rgb.b;
         const scale = 1 << 16;
         const offset = 1 << 15;
-        const yr: i32 = @intFromFloat(@round(luma_r * scale));
-        const yg: i32 = @intFromFloat(@round(luma_g * scale));
-        const yb: i32 = @intFromFloat(@round(luma_b * scale));
+        const yr: i32 = @round(luma_r * scale);
+        const yg: i32 = @round(luma_g * scale);
+        const yb: i32 = @round(luma_b * scale);
         return .{ .y = @intCast(clamp((yr * r + yg * g + yb * b + offset) >> 16, 0, 255)) };
     } else {
         comptime assert(@typeInfo(T) == .float);
@@ -1105,7 +1105,7 @@ fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
     const l = @max(0, @min(1, hsl.l / 100));
 
     const hue_sector: T = h / 60.0;
-    const sector: usize = @intFromFloat(hue_sector);
+    const sector: usize = @trunc(hue_sector);
     const fractional: T = hue_sector - @as(T, @floatFromInt(sector));
 
     const hue_factors = [_][3]T{
@@ -1175,7 +1175,7 @@ fn hsvToRgb(comptime T: type, hsv: Hsv(T)) Rgb(T) {
     }
 
     const sector = hue * 6;
-    const index: i32 = @intFromFloat(sector);
+    const index: i32 = @trunc(sector);
     const fractional = sector - @as(T, @floatFromInt(index));
     const p = val * (1 - sat);
     const q = val * (1 - (sat * fractional));

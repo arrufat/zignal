@@ -17,7 +17,7 @@ pub fn Enhancement(comptime T: type) type {
             }
 
             const total_pixels = image.rows * image.cols;
-            const cutoff_pixels = @as(usize, @intFromFloat(@as(f32, @floatFromInt(total_pixels)) * cutoff));
+            const cutoff_pixels: usize = @trunc(@as(f32, @floatFromInt(total_pixels)) * cutoff);
 
             switch (@typeInfo(T)) {
                 .int => {
@@ -35,7 +35,7 @@ pub fn Enhancement(comptime T: type) type {
                             const val = image.at(r, c).*;
                             const clamped = @max(min_val, @min(max_val, val));
                             const normalized = @as(f32, @floatFromInt(clamped - min_val)) / @as(f32, @floatFromInt(range));
-                            image.at(r, c).* = @intFromFloat(normalized * 255.0);
+                            image.at(r, c).* = @round(normalized * 255.0);
                         }
                     }
                 },
@@ -59,7 +59,7 @@ pub fn Enhancement(comptime T: type) type {
                                         const clamped = @max(min, @min(max, val));
                                         const range = if (max > min) max - min else 1;
                                         const normalized = @as(f32, @floatFromInt(clamped - min)) / @as(f32, @floatFromInt(range));
-                                        return @intFromFloat(normalized * 255.0);
+                                        return @round(normalized * 255.0);
                                     }
                                 }.apply;
 

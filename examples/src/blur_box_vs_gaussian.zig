@@ -45,7 +45,7 @@ fn boxesForGaussian(sigma: f32, passes: usize, buffer: []usize) ![]usize {
     var wl = @floor(w_ideal);
 
     // Make wl odd
-    const wl_int_even_check: i64 = @intFromFloat(wl);
+    const wl_int_even_check: i64 = @trunc(wl);
     if (@mod(wl_int_even_check, @as(i64, 2)) == 0) {
         wl -= 1.0;
     }
@@ -62,12 +62,12 @@ fn boxesForGaussian(sigma: f32, passes: usize, buffer: []usize) ![]usize {
         m = 0;
     }
 
-    var m_int: isize = @intFromFloat(m);
+    var m_int: isize = @trunc(m);
     if (m_int < 0) m_int = 0;
     if (m_int > passes) m_int = @intCast(passes);
 
-    const wl_int = @max(@as(isize, 1), @as(isize, @intFromFloat(wl)));
-    const wu_int = @max(@as(isize, 1), @as(isize, @intFromFloat(wu)));
+    const wl_int: isize = @max(1, @as(isize, @trunc(wl)));
+    const wu_int: isize = @max(1, @as(isize, @trunc(wu)));
 
     // First m passes use wl, remaining passes use wu
     for (0..passes) |i| {

@@ -171,7 +171,7 @@ fn processImage(
             }
 
             const angle_rad = std.math.degreesToRadians(angle_deg);
-            try img.motionBlur(gpa, .{ .linear = .{ .angle = angle_rad, .distance = @intFromFloat(dist) } }, out);
+            try img.motionBlur(gpa, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } }, out);
         },
         .motion_zoom, .motion_spin => {
             const cx = options.center_x orelse 0.5;

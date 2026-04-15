@@ -41,7 +41,7 @@ pub const Colormap = union(enum) {
 /// Logic ported from dlib.
 pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
     const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
+    const index: usize = @round(t * 255.0);
     const color = jet_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };
 }
@@ -50,7 +50,7 @@ pub fn jet(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Logic ported from dlib.
 pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
     const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
+    const index: usize = @round(t * 255.0);
     const color = heat_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };
 }
@@ -59,7 +59,7 @@ pub fn heat(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Uses a 256-entry lookup table generated at comptime.
 pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
     const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
+    const index: usize = @round(t * 255.0);
     const color = turbo_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };
 }
@@ -68,7 +68,7 @@ pub fn turbo(value: f64, min_val: f64, max_val: f64) Rgb {
 /// Uses a 256-entry lookup table.
 pub fn viridis(value: f64, min_val: f64, max_val: f64) Rgb {
     const t = meta.normalize(f64, value, min_val, max_val);
-    const index: usize = @intFromFloat(@round(t * 255.0));
+    const index: usize = @round(t * 255.0);
     const color = viridis_lut[index];
     return .{ .r = color[0], .g = color[1], .b = color[2] };
 }
@@ -88,21 +88,21 @@ fn jetEval(t: f64) [3]u8 {
     if (gray <= 1) {
         r = 0;
         g = 0;
-        b = @intFromFloat(@round((gray + 1) * s * 255.0));
+        b = @round((gray + 1) * s * 255.0);
     } else if (gray <= 3) {
         r = 0;
-        g = @intFromFloat(@round((gray - 1) * s * 255.0));
+        g = @round((gray - 1) * s * 255.0);
         b = 255;
     } else if (gray <= 5) {
-        r = @intFromFloat(@round((gray - 3) * s * 255.0));
+        r = @round((gray - 3) * s * 255.0);
         g = 255;
-        b = @intFromFloat(@round((5 - gray) * s * 255.0));
+        b = @round((5 - gray) * s * 255.0);
     } else if (gray <= 7) {
         r = 255;
-        g = @intFromFloat(@round((7 - gray) * s * 255.0));
+        g = @round((7 - gray) * s * 255.0);
         b = 0;
     } else {
-        r = @intFromFloat(@round((9 - gray) * s * 255.0));
+        r = @round((9 - gray) * s * 255.0);
         g = 0;
         b = 0;
     }
@@ -119,15 +119,15 @@ const jet_lut = blk: {
 };
 
 fn heatEval(t: f64) [3]u8 {
-    const r = @as(u8, @intFromFloat(@round(@min(t / 0.4, 1.0) * 255.0)));
+    const r: u8 = @round(@min(t / 0.4, 1.0) * 255.0);
     var g: u8 = 0;
     var b: u8 = 0;
 
     if (t > 0.4) {
-        g = @intFromFloat(@round(@min((t - 0.4) / 0.4, 1.0) * 255.0));
+        g = @round(@min((t - 0.4) / 0.4, 1.0) * 255.0);
     }
     if (t > 0.8) {
-        b = @intFromFloat(@round(@min((t - 0.8) / 0.2, 1.0) * 255.0));
+        b = @round(@min((t - 0.8) / 0.2, 1.0) * 255.0);
     }
     return .{ r, g, b };
 }
@@ -160,9 +160,9 @@ fn turboEval(t: f64) [3]u8 {
     const b_val = @reduce(.Add, v * b_coeffs);
 
     return .{
-        @intFromFloat(@round(math.clamp(r_val, 0.0, 1.0) * 255.0)),
-        @intFromFloat(@round(math.clamp(g_val, 0.0, 1.0) * 255.0)),
-        @intFromFloat(@round(math.clamp(b_val, 0.0, 1.0) * 255.0)),
+        @round(math.clamp(r_val, 0.0, 1.0) * 255.0),
+        @round(math.clamp(g_val, 0.0, 1.0) * 255.0),
+        @round(math.clamp(b_val, 0.0, 1.0) * 255.0),
     };
 }
 

@@ -292,7 +292,7 @@ fn lanczos3KernelLut(x: f32) f32 {
 
     const step = 1024.0 / 3.0;
     const pos = ax * step;
-    const idx: usize = @intFromFloat(pos);
+    const idx: usize = @trunc(pos);
     const frac = pos - @as(f32, @floatFromInt(idx));
 
     return lanczos3_lut[idx] * (1.0 - frac) + lanczos3_lut[idx + 1] * frac;
@@ -323,15 +323,15 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
 // ============================================================================
 
 fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    const col = resolveIndex(@intFromFloat(@round(x)), @intCast(self.cols), border) orelse return null;
-    const row = resolveIndex(@intFromFloat(@round(y)), @intCast(self.rows), border) orelse return null;
+    const col = resolveIndex(@round(x), @intCast(self.cols), border) orelse return null;
+    const row = resolveIndex(@round(y), @intCast(self.rows), border) orelse return null;
 
     return self.at(row, col).*;
 }
 
 fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    const left: isize = @intFromFloat(@floor(x));
-    const top: isize = @intFromFloat(@floor(y));
+    const left: isize = @floor(x);
+    const top: isize = @floor(y);
     const right = left + 1;
     const bottom = top + 1;
 
@@ -366,8 +366,8 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border:
     const tb_frac: f32 = y - as(f32, top);
 
     const scale = 256;
-    const fx: i32 = @intFromFloat(@round(lr_frac * scale));
-    const fy: i32 = @intFromFloat(@round(tb_frac * scale));
+    const fx: i32 = @round(lr_frac * scale);
+    const fy: i32 = @round(tb_frac * scale);
 
     const lerpInt = struct {
         fn lerp(comptime P: type, p_tl: P, p_tr: P, p_bl: P, p_br: P, p_fx: i32, p_fy: i32) P {
@@ -452,8 +452,8 @@ fn interpolateWithKernel(
     kernel_params: anytype,
     border: BorderMode,
 ) ?T {
-    const ix: isize = @intFromFloat(@floor(x));
-    const iy: isize = @intFromFloat(@floor(y));
+    const ix: isize = @floor(x);
+    const iy: isize = @floor(y);
     const fx = x - as(f32, ix);
     const fy = y - as(f32, iy);
 

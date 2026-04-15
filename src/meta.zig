@@ -20,7 +20,7 @@ pub fn as(comptime T: type, from: anytype) T {
         .float, .comptime_float => {
             return switch (@typeInfo(T)) {
                 .float => @floatCast(from),
-                .int => @intFromFloat(@round(from)),
+                .int => @round(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             };
         },
@@ -107,7 +107,7 @@ pub fn clamp(comptime T: type, value: anytype) T {
                     else
                         @as(f64, @floatFromInt(std.math.minInt(T)));
                     const max = @as(f64, @floatFromInt(std.math.maxInt(T)));
-                    return @intFromFloat(std.math.clamp(@round(as(f64, value)), min, max));
+                    return @trunc(std.math.clamp(@round(as(f64, value)), min, max));
                 },
                 else => @compileError("clamp only supports numeric inputs, got: " ++ @typeName(ValueType)),
             }
@@ -194,7 +194,7 @@ pub fn safeCast(comptime T: type, value: anytype) !T {
                     if (rounded < min_limit or rounded > max_limit) return error.Overflow;
                     // Special check for negative zero or small negative floats casting to unsigned
                     if (int_info.signedness == .unsigned and rounded < 0) return error.Overflow;
-                    return @intFromFloat(rounded);
+                    return @trunc(rounded);
                 },
                 else => @compileError("safeCast only supports numeric inputs"),
             }

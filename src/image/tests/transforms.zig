@@ -357,11 +357,10 @@ test "insert and extract inverse relationship" {
 
         var total_error: u32 = 0;
         var pixel_count: u32 = 0;
-
-        const start_r = @as(usize, @intFromFloat(cy - check_size / 2));
-        const end_r = @as(usize, @intFromFloat(cy + check_size / 2));
-        const start_c = @as(usize, @intFromFloat(cx - check_size / 2));
-        const end_c = @as(usize, @intFromFloat(cx + check_size / 2));
+        const start_r: usize = @trunc(cy - check_size / 2);
+        const end_r: usize = @trunc(cy + check_size / 2);
+        const start_c: usize = @trunc(cx - check_size / 2);
+        const end_c: usize = @trunc(cx + check_size / 2);
 
         for (start_r..end_r) |r| {
             for (start_c..end_c) |c| {

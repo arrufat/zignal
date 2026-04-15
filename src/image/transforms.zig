@@ -84,8 +84,8 @@ pub fn Transform(comptime T: type) type {
             const aspect_scale = @min(rows_scale, cols_scale);
 
             // Calculate dimensions of the scaled image (ensure at least 1 pixel)
-            const scaled_rows: u32 = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.rows))));
-            const scaled_cols: u32 = @intFromFloat(@round(aspect_scale * @as(f32, @floatFromInt(self.cols))));
+            const scaled_rows: u32 = @round(aspect_scale * @as(f32, @floatFromInt(self.rows)));
+            const scaled_cols: u32 = @round(aspect_scale * @as(f32, @floatFromInt(self.cols)));
 
             // Calculate offset to center the image
             const offset_row = (out.rows -| scaled_rows) / 2;
@@ -153,8 +153,8 @@ pub fn Transform(comptime T: type) type {
             const new_w = w * cos_abs + h * sin_abs;
             const new_h = h * cos_abs + w * sin_abs;
             return .{
-                .cols = @intFromFloat(@ceil(new_w)),
-                .rows = @intFromFloat(@ceil(new_h)),
+                .cols = @ceil(new_w),
+                .rows = @ceil(new_h),
             };
         }
 
@@ -244,10 +244,10 @@ pub fn Transform(comptime T: type) type {
         /// - `allocator`: The allocator to use for the cropped image's data.
         /// - `rectangle`: The `Rectangle(f32)` defining the region to crop. Coordinates will be rounded.
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
-            const chip_top: i32 = @intFromFloat(@round(rectangle.t));
-            const chip_left: i32 = @intFromFloat(@round(rectangle.l));
-            const chip_rows: u32 = @intFromFloat(@round(rectangle.height()));
-            const chip_cols: u32 = @intFromFloat(@round(rectangle.width()));
+            const chip_top: i32 = @round(rectangle.t);
+            const chip_left: i32 = @round(rectangle.l);
+            const chip_rows: u32 = @round(rectangle.height());
+            const chip_cols: u32 = @round(rectangle.width());
 
             const chip = try Self.init(allocator, chip_rows, chip_cols);
             copyRect(self, chip_top, chip_left, chip, .zero);
@@ -283,8 +283,8 @@ pub fn Transform(comptime T: type) type {
                 @abs(height - frows) < epsilon)
             {
                 // Use the same logic as crop
-                const rect_top: i32 = @intFromFloat(@round(rect.t));
-                const rect_left: i32 = @intFromFloat(@round(rect.l));
+                const rect_top: i32 = @round(rect.t);
+                const rect_left: i32 = @round(rect.l);
                 copyRect(self, rect_top, rect_left, out, border);
                 return;
             }
@@ -355,8 +355,8 @@ pub fn Transform(comptime T: type) type {
                 @abs(rect_width - fcols) < epsilon and
                 @abs(rect_height - frows) < epsilon)
             {
-                const dst_top: i32 = @intFromFloat(@round(rect.t));
-                const dst_left: i32 = @intFromFloat(@round(rect.l));
+                const dst_top: i32 = @round(rect.t);
+                const dst_left: i32 = @round(rect.l);
                 for (0..source.rows) |r| {
                     const y: i32 = dst_top + @as(i32, @intCast(r));
                     for (0..source.cols) |c| {
@@ -387,10 +387,10 @@ pub fn Transform(comptime T: type) type {
             const bound_hw = half_width * abs_cos + half_height * abs_sin;
             const bound_hh = half_width * abs_sin + half_height * abs_cos;
 
-            const min_r = if (cy - bound_hh < 0) 0 else @as(u32, @intFromFloat(@floor(cy - bound_hh)));
-            const max_r = @min(@as(u32, self.rows), @as(u32, @intFromFloat(@ceil(cy + bound_hh))) + 1);
-            const min_c = if (cx - bound_hw < 0) 0 else @as(u32, @intFromFloat(@floor(cx - bound_hw)));
-            const max_c = @min(@as(u32, self.cols), @as(u32, @intFromFloat(@ceil(cx + bound_hw))) + 1);
+            const min_r: u32 = if (cy - bound_hh < 0) 0 else @as(u32, @floor(cy - bound_hh));
+            const max_r: u32 = @min(self.rows, @as(u32, @ceil(cy + bound_hh)) + 1);
+            const min_c: u32 = if (cx - bound_hw < 0) 0 else @as(u32, @floor(cx - bound_hw));
+            const max_c: u32 = @min(self.cols, @as(u32, @ceil(cx + bound_hw)) + 1);
 
             // Only iterate over potentially affected pixels
             for (min_r..max_r) |r| {

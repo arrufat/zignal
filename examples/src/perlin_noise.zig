@@ -57,7 +57,7 @@ pub export fn generate(rgba_ptr: [*]Rgba, rows: u32, cols: u32) void {
         const y: f32 = @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(image.rows));
         for (0..image.cols) |c| {
             const x: f32 = @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(image.cols));
-            const val: u8 = @intFromFloat(
+            const val: u8 = @trunc(
                 @max(0, @min(255, @round(
                     255 * (opts.amplitude / 2 * (perlin(f32, x, y, 0, opts) + opts.amplitude)),
                 ))),

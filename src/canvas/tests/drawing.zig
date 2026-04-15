@@ -48,10 +48,10 @@ test "line endpoints are connected" {
         // Check 3x3 area around endpoints
         for (0..3) |dy| {
             for (0..3) |dx| {
-                const y1 = @as(i32, @intFromFloat(tc.p1.y())) + @as(i32, @intCast(dy)) - 1;
-                const x1 = @as(i32, @intFromFloat(tc.p1.x())) + @as(i32, @intCast(dx)) - 1;
-                const y2 = @as(i32, @intFromFloat(tc.p2.y())) + @as(i32, @intCast(dy)) - 1;
-                const x2 = @as(i32, @intFromFloat(tc.p2.x())) + @as(i32, @intCast(dx)) - 1;
+                const y1: i32 = @as(i32, @trunc(tc.p1.y())) + @as(i32, @intCast(dy)) - 1;
+                const x1: i32 = @as(i32, @trunc(tc.p1.x())) + @as(i32, @intCast(dx)) - 1;
+                const y2: i32 = @as(i32, @trunc(tc.p2.y())) + @as(i32, @intCast(dy)) - 1;
+                const x2: i32 = @as(i32, @trunc(tc.p2.x())) + @as(i32, @intCast(dx)) - 1;
 
                 if (y1 >= 0 and y1 < height and x1 >= 0 and x1 < width) {
                     const idx1 = @as(usize, @intCast(y1)) * width + @as(usize, @intCast(x1));
@@ -169,10 +169,10 @@ test "filled circle has correct radius" {
         }
 
         // Most pixels inside radius should be filled
-        const inside_total = @as(usize, @intFromFloat(std.math.pi * (radius - 1) * (radius - 1)));
+        const inside_total: usize = @trunc(std.math.pi * (radius - 1) * (radius - 1));
         // Allow 15% tolerance for small circles due to discretization
         const tolerance_factor: f32 = if (radius <= 10) 0.85 else 0.9;
-        const expected_count = @as(usize, @intFromFloat(@as(f32, @floatFromInt(inside_total)) * tolerance_factor));
+        const expected_count: usize = @trunc(@as(f32, @floatFromInt(inside_total)) * tolerance_factor);
         try expect(inside_count >= expected_count);
     }
 }
@@ -212,7 +212,7 @@ test "circle outline has correct thickness" {
                 const y = center.y() + r * @sin(angle);
 
                 if (x >= 0 and x < width and y >= 0 and y < height) {
-                    const idx = @as(usize, @intFromFloat(y)) * width + @as(usize, @intFromFloat(x));
+                    const idx: usize = @as(usize, @trunc(y)) * width + @as(usize, @trunc(x));
                     if (img.data[idx].r == 0) {
                         black_pixels += 1;
                     }
@@ -382,8 +382,8 @@ test "polygon fill respects convexity" {
     };
 
     for (test_points) |tp| {
-        const x = @as(usize, @intFromFloat(tp.p.x()));
-        const y = @as(usize, @intFromFloat(tp.p.y()));
+        const x: usize = @trunc(tp.p.x());
+        const y: usize = @trunc(tp.p.y());
         if (x < width and y < height) {
             const idx = y * width + x;
             const is_black = img.data[idx].r == 0;
@@ -462,10 +462,10 @@ test "bezier curve smoothness" {
     // Check 3x3 area around endpoints
     for (0..3) |dy| {
         for (0..3) |dx| {
-            const y0 = @as(i32, @intFromFloat(p0.y())) + @as(i32, @intCast(dy)) - 1;
-            const x0 = @as(i32, @intFromFloat(p0.x())) + @as(i32, @intCast(dx)) - 1;
-            const y3 = @as(i32, @intFromFloat(p3.y())) + @as(i32, @intCast(dy)) - 1;
-            const x3 = @as(i32, @intFromFloat(p3.x())) + @as(i32, @intCast(dx)) - 1;
+            const y0: i32 = @as(i32, @trunc(p0.y())) + @as(i32, @intCast(dy)) - 1;
+            const x0: i32 = @as(i32, @trunc(p0.x())) + @as(i32, @intCast(dx)) - 1;
+            const y3: i32 = @as(i32, @trunc(p3.y())) + @as(i32, @intCast(dy)) - 1;
+            const x3: i32 = @as(i32, @trunc(p3.x())) + @as(i32, @intCast(dx)) - 1;
 
             if (y0 >= 0 and y0 < height and x0 >= 0 and x0 < width) {
                 const idx0 = @as(usize, @intCast(y0)) * width + @as(usize, @intCast(x0));

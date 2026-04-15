@@ -548,8 +548,8 @@ pub fn Image(comptime T: type) type {
         pub fn scale(self: Self, allocator: Allocator, factor: f32, method: Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
-            const new_rows: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(self.rows)) * factor));
-            const new_cols: u32 = @intFromFloat(@round(@as(f32, @floatFromInt(self.cols)) * factor));
+            const new_rows: u32 = @round(@as(f32, @floatFromInt(self.rows)) * factor);
+            const new_cols: u32 = @round(@as(f32, @floatFromInt(self.cols)) * factor);
 
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
@@ -1018,7 +1018,7 @@ pub fn Image(comptime T: type) type {
             if (sigma < 0) return error.InvalidSigma;
 
             // Calculate kernel size (3 sigma on each side)
-            const radius = @as(usize, @intFromFloat(@ceil(3.0 * sigma)));
+            const radius: usize = @ceil(3.0 * sigma);
             const kernel_size = 2 * radius + 1;
 
             // Generate 1D Gaussian kernel

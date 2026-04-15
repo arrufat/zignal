@@ -70,10 +70,10 @@ const FormatFlags = struct {
     // Helper to decode format flags from u32
     pub fn decode(format: u32) FormatFlags {
         return FormatFlags{
-            .glyph_pad = @as(u2, @truncate(format & glyph_pad_mask)),
+            .glyph_pad = @truncate(format & glyph_pad_mask),
             .byte_order_msb = (format & byte_order_mask) != 0,
             .bit_order_msb = (format & bit_order_mask) != 0,
-            .scan_unit = @as(u2, @truncate((format & scan_unit_mask) >> scan_unit_shift)),
+            .scan_unit = @truncate((format & scan_unit_mask) >> scan_unit_shift),
             .compressed_metrics = (format & compressed_metrics_mask) != 0,
             .accel_w_inkbounds = (format & accel_w_inkbounds_mask) != 0,
             .ink_bounds = (format & ink_bounds_mask) != 0,
@@ -861,7 +861,7 @@ fn convertToBitmapFont(
             return PcfError.InvalidBitmapData;
         }
         const format_flags = FormatFlags.decode(bitmap_info.format);
-        const pad_bits = @as(u2, @truncate(bitmap_info.format & 0x3));
+        const pad_bits: u2 = @truncate(bitmap_info.format & 0x3);
         const glyph_pad = @as(GlyphPadding, @enumFromInt(pad_bits));
 
         try convertGlyphBitmap(
