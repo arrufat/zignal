@@ -150,9 +150,9 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // Poisoned matrices from failed chains have items.len == 0 and an
-            // undefined pointer; freeing that would be UB. Skip empty slices.
-            if (self.items.len == 0) return;
+            // Poisoned matrices from failed chains have an undefined pointer;
+            // freeing that would be UB. Valid 0x0 matrices are safe to free.
+            if (self.err != null) return;
             self.allocator.free(self.items);
         }
 
@@ -982,12 +982,14 @@ pub fn Matrix(comptime T: type) type {
         /// Mean (average) of all elements
         pub fn mean(self: Self) T {
             assert(self.err == null);
+            assert(self.items.len > 0);
             return self.sum() / @as(T, @floatFromInt(self.items.len));
         }
 
         /// Variance: E[(X - μ)²]
         pub fn variance(self: Self) T {
             assert(self.err == null);
+            assert(self.items.len > 0);
             const mu = self.mean();
             var sum_sq_diff: T = 0;
             for (self.items) |val| {
@@ -1007,6 +1009,7 @@ pub fn Matrix(comptime T: type) type {
         /// Minimum element
         pub fn min(self: Self) T {
             assert(self.err == null);
+            assert(self.items.len > 0);
             var min_val = self.items[0];
             for (self.items[1..]) |val| {
                 if (val < min_val) {
@@ -1019,6 +1022,7 @@ pub fn Matrix(comptime T: type) type {
         /// Maximum element
         pub fn max(self: Self) T {
             assert(self.err == null);
+            assert(self.items.len > 0);
             var max_val = self.items[0];
             for (self.items[1..]) |val| {
                 if (val > max_val) {
