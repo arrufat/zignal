@@ -16,7 +16,7 @@ test "Matrix gram and covariance matrices" {
     data.at(2, 1).* = 6.0;
 
     // Test Gram matrix (X * X^T) - should be 3×3
-    const gram_result = try data.gram().eval();
+    const gram_result = try data.gram();
 
     try expectEqual(@as(usize, 3), gram_result.rows);
     try expectEqual(@as(usize, 3), gram_result.cols);
@@ -28,7 +28,7 @@ test "Matrix gram and covariance matrices" {
     try expectEqual(@as(f64, 17.0), gram_result.at(0, 2).*);
 
     // Test Covariance matrix (X^T * X) - should be 2×2
-    const cov_result = try data.covariance().eval();
+    const cov_result = try data.covariance();
 
     try expectEqual(@as(usize, 2), cov_result.rows);
     try expectEqual(@as(usize, 2), cov_result.cols);
@@ -63,7 +63,7 @@ test "Matrix GEMM operations" {
     });
 
     // Test basic matrix multiplication: A * B using dot() method
-    const dot_result = try a.dot(b).eval();
+    const dot_result = try a.dot(b);
 
     try expectEqual(@as(f32, 58.0), dot_result.at(0, 0).*); // 1*7 + 2*9 + 3*11
     try expectEqual(@as(f32, 64.0), dot_result.at(0, 1).*); // 1*8 + 2*10 + 3*12
@@ -71,7 +71,7 @@ test "Matrix GEMM operations" {
     try expectEqual(@as(f32, 154.0), dot_result.at(1, 1).*); // 4*8 + 5*10 + 6*12
 
     // Test basic matrix multiplication: A * B using gemm() method
-    const result1 = try a.gemm(false, b, false, 1.0, 0.0, null).eval();
+    const result1 = try a.gemm(false, b, false, 1.0, 0.0, null);
 
     try expectEqual(@as(f32, 58.0), result1.at(0, 0).*); // 1*7 + 2*9 + 3*11
     try expectEqual(@as(f32, 64.0), result1.at(0, 1).*); // 1*8 + 2*10 + 3*12
@@ -79,19 +79,19 @@ test "Matrix GEMM operations" {
     try expectEqual(@as(f32, 154.0), result1.at(1, 1).*); // 4*8 + 5*10 + 6*12
 
     // Test scaled multiplication: 2 * A * B
-    const result2 = try a.gemm(false, b, false, 2.0, 0.0, null).eval();
+    const result2 = try a.gemm(false, b, false, 2.0, 0.0, null);
 
     try expectEqual(@as(f32, 116.0), result2.at(0, 0).*); // 2 * 58
     try expectEqual(@as(f32, 128.0), result2.at(0, 1).*); // 2 * 64
 
     // Test accumulation: A * B + C
-    const result3 = try a.gemm(false, b, false, 1.0, 1.0, c).eval();
+    const result3 = try a.gemm(false, b, false, 1.0, 1.0, c);
 
     try expectEqual(@as(f32, 59.0), result3.at(0, 0).*); // 58 + 1
     try expectEqual(@as(f32, 65.0), result3.at(0, 1).*); // 64 + 1
 
     // Test Gram matrix using GEMM: A * A^T
-    const gram = try a.gemm(false, a, true, 1.0, 0.0, null).eval();
+    const gram = try a.gemm(false, a, true, 1.0, 0.0, null);
 
     try expectEqual(@as(usize, 2), gram.rows);
     try expectEqual(@as(usize, 2), gram.cols);
@@ -99,7 +99,7 @@ test "Matrix GEMM operations" {
     try expectEqual(@as(f32, 32.0), gram.at(0, 1).*); // 1*4 + 2*5 + 3*6
 
     // Test covariance using GEMM: A^T * A
-    const cov = try a.gemm(true, a, false, 1.0, 0.0, null).eval();
+    const cov = try a.gemm(true, a, false, 1.0, 0.0, null);
 
     try expectEqual(@as(usize, 3), cov.rows);
     try expectEqual(@as(usize, 3), cov.cols);
@@ -127,7 +127,7 @@ test "Matrix SIMD case 2: A^T * B with same matrix (covariance)" {
     data.at(3, 2).* = 12.0;
 
     // Test covariance using Matrix (should use SIMD)
-    const simd_result = try data.covariance().eval();
+    const simd_result = try data.covariance();
 
     // Compute expected result manually
     var expected: Matrix(f32) = try .init(arena.allocator(), 3, 3);
@@ -157,7 +157,7 @@ test "Matrix SIMD case 2: A^T * B with same matrix (covariance)" {
     }
 
     // Also test direct GEMM call with same matrix
-    const direct_result = try data.gemm(true, data, false, 1.0, 0.0, null).eval();
+    const direct_result = try data.gemm(true, data, false, 1.0, 0.0, null);
 
     // Verify direct GEMM gives same result
     for (0..3) |i| {
@@ -189,7 +189,7 @@ test "Matrix GEMM all transpose cases with same matrix" {
     square_a.at(1, 1).* = 4.0;
 
     // Case 1: A * A (SIMD same-matrix handling)
-    const result1 = try square_a.gemm(false, square_a, false, 1.0, 0.0, null).eval();
+    const result1 = try square_a.gemm(false, square_a, false, 1.0, 0.0, null);
 
     // Expected: A * A = [[1*1+2*3, 1*2+2*4], [3*1+4*3, 3*2+4*4]] = [[7, 10], [15, 22]]
     try expectEqual(@as(usize, 2), result1.rows);
@@ -200,7 +200,7 @@ test "Matrix GEMM all transpose cases with same matrix" {
     try expectEqual(@as(f32, 22.0), result1.at(1, 1).*); // 3*2 + 4*4
 
     // Case 2: A^T * A (covariance - SIMD same-matrix handling)
-    const result2 = try a.gemm(true, a, false, 1.0, 0.0, null).eval();
+    const result2 = try a.gemm(true, a, false, 1.0, 0.0, null);
 
     // Expected: A^T * A (3x2 -> 2x2 result)
     // A^T = [[1,3,5], [2,4,6]]
@@ -213,7 +213,7 @@ test "Matrix GEMM all transpose cases with same matrix" {
     try expectEqual(@as(f32, 56.0), result2.at(1, 1).*); // 2*2 + 4*4 + 6*6
 
     // Case 3: A * A^T (gram matrix - SIMD same-matrix handling)
-    const result3 = try a.gemm(false, a, true, 1.0, 0.0, null).eval();
+    const result3 = try a.gemm(false, a, true, 1.0, 0.0, null);
 
     // Expected: A * A^T (3x2 -> 3x3 result)
     // A * A^T = [[1*1+2*2, 1*3+2*4, 1*5+2*6], [3*1+4*2, 3*3+4*4, 3*5+4*6], [5*1+6*2, 5*3+6*4, 5*5+6*6]]
@@ -231,7 +231,7 @@ test "Matrix GEMM all transpose cases with same matrix" {
     try expectEqual(@as(f32, 61.0), result3.at(2, 2).*); // 5*5 + 6*6
 
     // Case 4: A^T * A^T (both transposed - SIMD same-matrix handling)
-    const result4 = try square_a.gemm(true, square_a, true, 1.0, 0.0, null).eval();
+    const result4 = try square_a.gemm(true, square_a, true, 1.0, 0.0, null);
 
     // Expected: A^T * A^T where A^T = [[1,3], [2,4]]
     // A^T * A^T = [[1*1+3*2, 1*3+3*4], [2*1+4*2, 2*3+4*4]] = [[7, 15], [10, 22]]
@@ -258,7 +258,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     }
 
     // Test Case 1: A * A (should use SIMD same-matrix optimization)
-    const result1 = try test_matrix.gemm(false, test_matrix, false, 1.0, 0.0, null).eval();
+    const result1 = try test_matrix.gemm(false, test_matrix, false, 1.0, 0.0, null);
 
     // Verify Case 1: A * A (uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result1.rows);
@@ -268,7 +268,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     try expectEqual(@as(f32, 405.0), result1.at(8, 8).*); // Row 8 * Col 8
 
     // Test Case 2: A^T * A (covariance)
-    const result2 = try test_matrix.gemm(true, test_matrix, false, 1.0, 0.0, null).eval();
+    const result2 = try test_matrix.gemm(true, test_matrix, false, 1.0, 0.0, null);
 
     // Verify Case 2: A^T * A (covariance, uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result2.rows);
@@ -277,7 +277,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     try expectEqual(@as(f32, 285.0), result2.at(8, 8).*); // Same for all diagonal elements
 
     // Test Case 3: A * A^T (gram matrix)
-    const result3 = try test_matrix.gemm(false, test_matrix, true, 1.0, 0.0, null).eval();
+    const result3 = try test_matrix.gemm(false, test_matrix, true, 1.0, 0.0, null);
 
     // Verify Case 3: A * A^T (gram matrix, uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result3.rows);
@@ -287,7 +287,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     try expectEqual(@as(f32, 729.0), result3.at(8, 8).*); // 9² * 9 elements
 
     // Test Case 4: A^T * A^T
-    const result4 = try test_matrix.gemm(true, test_matrix, true, 1.0, 0.0, null).eval();
+    const result4 = try test_matrix.gemm(true, test_matrix, true, 1.0, 0.0, null);
 
     // Verify Case 4: A^T * A^T (uses SIMD same-matrix optimization)
     try expectEqual(@as(usize, 9), result4.rows);
@@ -319,7 +319,7 @@ test "Matrix GEMM double transpose respects operands" {
     }
 
     // Forces SIMD path: a_rows * a_cols * b_cols = 3 * 40 * 5 = 600 >= 512
-    const simd_result = try a.gemm(true, b, true, 1.0, 0.0, null).eval();
+    const simd_result = try a.gemm(true, b, true, 1.0, 0.0, null);
 
     const expected = blk: {
         var temp = try Matrix(f64).init(arena.allocator(), a.cols, b.rows);
