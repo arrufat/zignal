@@ -74,6 +74,11 @@ pub fn Chain(comptime T: type) type {
         ///
         /// Calling `toOwned()` on a chain with zero ops returns a duplicate
         /// of the input (since the caller didn't transfer ownership of it).
+        ///
+        /// Mirrors `std.ArrayList.toOwnedSlice`: after the move, the chain
+        /// is reset to an empty (0×0) state so further calls don't UAF the
+        /// moved buffer. Calling chainable ops on a moved chain will either
+        /// error on a dimension check or operate on the empty matrix.
         pub fn toOwned(self: *Self) MatrixError!Matrix(T) {
             if (self.err) |e| {
                 self.deinit();
@@ -84,6 +89,12 @@ pub fn Chain(comptime T: type) type {
                 return self.current.dupe(self.allocator);
             }
             const out = self.current;
+            // Reset self.current to an empty matrix. The items slice is
+            // truncated to length 0 so the (now stale) pointer is never
+            // dereferenced even if the caller has freed the returned buffer.
+            self.current.items = self.current.items[0..0];
+            self.current.rows = 0;
+            self.current.cols = 0;
             self.owns_current = false;
             return out;
         }
@@ -301,6 +312,26 @@ test "Chain: zero-op chain returns a duplicate" {
     // Mutating r must not affect a.
     r.at(0, 0).* = 0;
     try std.testing.expectEqual(@as(f64, 7.0), a.at(0, 0).*);
+}
+
+test "Chain: post-toOwned state is safe to reuse and deinit" {
+    const allocator = std.testing.allocator;
+    var a: Matrix(f64) = try .initAll(allocator, 2, 2, 1.0);
+    defer a.deinit();
+
+    var p = a.chain();
+    defer p.deinit();
+    var first = try p.scale(2.0).toOwned();
+    // Free the result; the chain must not retain a live pointer into it.
+    first.deinit();
+
+    // A second toOwned() on the moved chain returns a 0×0 matrix from the
+    // reset empty state — not a UAF on `first`'s freed buffer.
+    var second = try p.toOwned();
+    defer second.deinit();
+    try std.testing.expectEqual(@as(u32, 0), second.rows);
+    try std.testing.expectEqual(@as(u32, 0), second.cols);
+    // p.deinit() runs via defer; must also be safe on the empty state.
 }
 
 test "Chain: abandoned chain (no toOwned) leaks nothing" {
