@@ -610,9 +610,9 @@ var matrix_as_mapping = c.PyMappingMethods{
 fn dispatchMatrixOp(
     left: ?*c.PyObject,
     right: ?*c.PyObject,
-    mat_mat_op: fn (*Matrix(f64), *Matrix(f64)) Matrix(f64),
-    mat_scalar_op: fn (*Matrix(f64), f64) Matrix(f64),
-    scalar_mat_op: ?fn (f64, *Matrix(f64)) Matrix(f64),
+    mat_mat_op: fn (*Matrix(f64), *Matrix(f64)) MatrixResult,
+    mat_scalar_op: fn (*Matrix(f64), f64) MatrixResult,
+    scalar_mat_op: ?fn (f64, *Matrix(f64)) MatrixResult,
 ) ?*c.PyObject {
     const left_is_mat = c.PyObject_IsInstance(left, @ptrCast(&MatrixType)) == 1;
     const right_is_mat = c.PyObject_IsInstance(right, @ptrCast(&MatrixType)) == 1;
@@ -646,33 +646,36 @@ fn dispatchMatrixOp(
     return python.notImplemented();
 }
 
-fn op_add(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+const MatrixError = zignal.MatrixError;
+const MatrixResult = MatrixError!Matrix(f64);
+
+fn op_add(a: *Matrix(f64), b: *Matrix(f64)) MatrixResult {
     return a.add(b.*);
 }
-fn op_add_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+fn op_add_scalar(a: *Matrix(f64), s: f64) MatrixResult {
     return a.offset(s);
 }
-fn op_radd_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
+fn op_radd_scalar(s: f64, a: *Matrix(f64)) MatrixResult {
     return a.offset(s);
 }
-fn op_sub(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+fn op_sub(a: *Matrix(f64), b: *Matrix(f64)) MatrixResult {
     return a.sub(b.*);
 }
-fn op_sub_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+fn op_sub_scalar(a: *Matrix(f64), s: f64) MatrixResult {
     return a.offset(-s);
 }
-fn op_rsub_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
-    var negated = a.scale(-1.0);
+fn op_rsub_scalar(s: f64, a: *Matrix(f64)) MatrixResult {
+    var negated = try a.scale(-1.0);
     defer negated.deinit();
     return negated.offset(s);
 }
-fn op_mul(a: *Matrix(f64), b: *Matrix(f64)) Matrix(f64) {
+fn op_mul(a: *Matrix(f64), b: *Matrix(f64)) MatrixResult {
     return a.times(b.*);
 }
-fn op_mul_scalar(a: *Matrix(f64), s: f64) Matrix(f64) {
+fn op_mul_scalar(a: *Matrix(f64), s: f64) MatrixResult {
     return a.scale(s);
 }
-fn op_rmul_scalar(s: f64, a: *Matrix(f64)) Matrix(f64) {
+fn op_rmul_scalar(s: f64, a: *Matrix(f64)) MatrixResult {
     return a.scale(s);
 }
 
@@ -728,11 +731,11 @@ fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 }
 
 // Helper function to convert Zig Matrix to Python MatrixObject
-fn matrixToObject(matrix: Matrix(f64)) ?*c.PyObject {
-    if (matrix.err) |e| {
+fn matrixToObject(matrix_or_err: MatrixResult) ?*c.PyObject {
+    const matrix = matrix_or_err catch |e| {
         python.mapZigError(e, "Matrix");
         return null;
-    }
+    };
 
     const self: ?*MatrixObject = @ptrCast(c.PyType_GenericAlloc(@ptrCast(&MatrixType), 0));
     if (self == null) return null;

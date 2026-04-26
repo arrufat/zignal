@@ -5,10 +5,13 @@
 // Re-export all matrix functionality
 pub const SMatrix = @import("matrix/SMatrix.zig").SMatrix;
 pub const Matrix = @import("matrix/Matrix.zig").Matrix;
+pub const MatrixError = @import("matrix/Matrix.zig").MatrixError;
+pub const Chain = @import("matrix/Chain.zig").Chain;
 
 test {
     _ = @import("matrix/SMatrix.zig");
     _ = @import("matrix/Matrix.zig");
+    _ = @import("matrix/Chain.zig");
     _ = @import("matrix/svd.zig");
     _ = @import("matrix/svd_static.zig");
     _ = @import("matrix/formatting.zig");

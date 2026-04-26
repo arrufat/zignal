@@ -1,8 +1,6 @@
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
-const matrix_module = @import("Matrix.zig");
-const Matrix = matrix_module.Matrix;
-const MatrixError = matrix_module.MatrixError;
+const Matrix = @import("Matrix.zig").Matrix;
 
 test "Matrix apply method" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
@@ -18,7 +16,7 @@ test "Matrix apply method" {
     mat.at(1, 2).* = 36.0;
 
     // Test apply with no arguments (sqrt)
-    var result1 = try mat.apply(std.math.sqrt, .{}).eval();
+    var result1 = try mat.apply(std.math.sqrt, .{});
     defer result1.deinit();
 
     try expectEqual(@as(f64, 1.0), result1.at(0, 0).*);
@@ -34,7 +32,7 @@ test "Matrix apply method" {
             return std.math.pow(f64, x, n);
         }
     }.f;
-    var result2 = try result1.apply(pow2, .{@as(f64, 2.0)}).eval();
+    var result2 = try result1.apply(pow2, .{@as(f64, 2.0)});
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);
@@ -51,7 +49,7 @@ test "Matrix apply method" {
         }
     }.f;
 
-    var result3 = try result1.apply(reciprocal, .{}).eval();
+    var result3 = try result1.apply(reciprocal, .{});
     defer result3.deinit();
 
     try expectEqual(@as(f64, 1.0), result3.at(0, 0).*);
@@ -119,32 +117,17 @@ test "Matrix norms" {
     try expectEqual(@as(f64, 5.0), mat.trace());
 }
 
-test "Matrix poisoned chain: deinit safe and !T queries surface err" {
+test "Matrix dimension errors surface at the failing op" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const a: Matrix(f64) = try .init(alloc, 2, 3);
-    @memset(a.items, 1.0);
-    const b: Matrix(f64) = try .init(alloc, 4, 5);
-    @memset(b.items, 1.0);
+    const a: Matrix(f64) = try .initAll(alloc, 2, 3, 1.0);
+    const b: Matrix(f64) = try .initAll(alloc, 4, 5, 1.0);
 
-    // add() with mismatched dims produces a poisoned matrix without unwrapping.
-    var poisoned = a.add(b);
-    try std.testing.expectEqual(@as(MatrixError, error.DimensionMismatch), poisoned.err.?);
-
-    // deinit on a poisoned matrix must not free the undefined pointer.
-    poisoned.deinit();
-
-    // eval() on a fresh poisoned matrix surfaces the deferred error.
-    var poisoned2 = a.add(b);
-    try std.testing.expectError(error.DimensionMismatch, poisoned2.eval());
-    poisoned2.deinit();
-
-    // Already-`!T` query ops surface the deferred error rather than asserting.
-    var poisoned3 = a.add(b);
-    try std.testing.expectError(error.DimensionMismatch, poisoned3.elementNorm(2.0));
-    poisoned3.deinit();
+    try std.testing.expectError(error.DimensionMismatch, a.add(b));
+    try std.testing.expectError(error.DimensionMismatch, a.sub(b));
+    try std.testing.expectError(error.DimensionMismatch, a.times(b));
 }
 
 test "Matrix offset and pow" {
@@ -159,7 +142,7 @@ test "Matrix offset and pow" {
     mat.at(1, 1).* = 4.0;
 
     // Test offset
-    var result1 = try mat.offset(5.0).eval();
+    var result1 = try mat.offset(5.0);
     defer result1.deinit();
 
     try expectEqual(@as(f64, 6.0), result1.at(0, 0).*);
@@ -168,7 +151,7 @@ test "Matrix offset and pow" {
     try expectEqual(@as(f64, 9.0), result1.at(1, 1).*);
 
     // Test pow
-    var result2 = try mat.pow(2.0).eval();
+    var result2 = try mat.pow(2.0);
     defer result2.deinit();
 
     try expectEqual(@as(f64, 1.0), result2.at(0, 0).*);

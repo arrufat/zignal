@@ -12,10 +12,10 @@ test "Matrix inverse - small matrices" {
     mat2.at(1, 0).* = 2.0;
     mat2.at(1, 1).* = 6.0;
 
-    const inv2 = try mat2.inverse().eval();
+    const inv2 = try mat2.inverse();
 
     // Verify A * A^(-1) = I
-    const identity2 = try mat2.dot(inv2).eval();
+    const identity2 = try mat2.dot(inv2);
 
     const eps = 1e-10;
     try std.testing.expect(@abs(identity2.at(0, 0).* - 1.0) < eps);
@@ -35,10 +35,10 @@ test "Matrix inverse - small matrices" {
     mat3.at(2, 1).* = 6.0;
     mat3.at(2, 2).* = 0.0;
 
-    const inv3 = try mat3.inverse().eval();
+    const inv3 = try mat3.inverse();
 
     // Verify A * A^(-1) = I
-    const identity3 = try mat3.dot(inv3).eval();
+    const identity3 = try mat3.dot(inv3);
 
     for (0..3) |i| {
         for (0..3) |j| {
@@ -72,10 +72,10 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
     mat4.at(3, 2).* = 0.0;
     mat4.at(3, 3).* = 4.0;
 
-    const inv4 = try mat4.inverse().eval();
+    const inv4 = try mat4.inverse();
 
     // Verify A * A^(-1) = I
-    const identity4 = try mat4.dot(inv4).eval();
+    const identity4 = try mat4.dot(inv4);
 
     const eps = 1e-10;
     for (0..4) |i| {
@@ -98,10 +98,10 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
         }
     }
 
-    const inv5 = try mat5.inverse().eval();
+    const inv5 = try mat5.inverse();
 
     // Verify A * A^(-1) = I
-    const identity5 = try mat5.dot(inv5).eval();
+    const identity5 = try mat5.dot(inv5);
 
     for (0..5) |i| {
         for (0..5) |j| {
@@ -122,7 +122,7 @@ test "Matrix inverse - singular matrix error" {
     sing2.at(1, 0).* = 2.0;
     sing2.at(1, 1).* = 4.0; // Second row is multiple of first
 
-    try std.testing.expectError(error.Singular, sing2.inverse().eval());
+    try std.testing.expectError(error.Singular, sing2.inverse());
 
     // Test singular 4x4 matrix (uses Gauss-Jordan)
     var sing4: Matrix(f64) = try .init(arena.allocator(), 4, 4);
@@ -144,7 +144,7 @@ test "Matrix inverse - singular matrix error" {
     sing4.at(3, 2).* = 11.0;
     sing4.at(3, 3).* = 12.0;
 
-    try std.testing.expectError(error.Singular, sing4.inverse().eval());
+    try std.testing.expectError(error.Singular, sing4.inverse());
 }
 
 test "Matrix pseudo-inverse handles tall and wide matrices" {
@@ -168,11 +168,15 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     tall.at(3, 2).* = 2.0;
 
     var tall_rank: u32 = undefined;
-    var tall_pinv = try tall.pseudoInverse(.{ .effective_rank = &tall_rank }).eval();
+    var tall_pinv = try tall.pseudoInverse(.{ .effective_rank = &tall_rank });
     defer tall_pinv.deinit();
-    var tall_recon = try tall.dot(tall_pinv).dot(tall).eval();
+    var tall_recon_chain = tall.chain();
+    defer tall_recon_chain.deinit();
+    var tall_recon = try tall_recon_chain.dot(tall_pinv).dot(tall).toOwned();
     defer tall_recon.deinit();
-    var tall_pinv_recon = try tall_pinv.dot(tall).dot(tall_pinv).eval();
+    var tall_pinv_recon_chain = tall_pinv.chain();
+    defer tall_pinv_recon_chain.deinit();
+    var tall_pinv_recon = try tall_pinv_recon_chain.dot(tall).dot(tall_pinv).toOwned();
     defer tall_pinv_recon.deinit();
 
     const tol = 1e-9;
@@ -207,11 +211,15 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     wide.at(2, 4).* = 0.25;
 
     var wide_rank: u32 = undefined;
-    var wide_pinv = try wide.pseudoInverse(.{ .effective_rank = &wide_rank }).eval();
+    var wide_pinv = try wide.pseudoInverse(.{ .effective_rank = &wide_rank });
     defer wide_pinv.deinit();
-    var wide_recon = try wide.dot(wide_pinv).dot(wide).eval();
+    var wide_recon_chain = wide.chain();
+    defer wide_recon_chain.deinit();
+    var wide_recon = try wide_recon_chain.dot(wide_pinv).dot(wide).toOwned();
     defer wide_recon.deinit();
-    var wide_pinv_recon = try wide_pinv.dot(wide).dot(wide_pinv).eval();
+    var wide_pinv_recon_chain = wide_pinv.chain();
+    defer wide_pinv_recon_chain.deinit();
+    var wide_pinv_recon = try wide_pinv_recon_chain.dot(wide).dot(wide_pinv).toOwned();
     defer wide_pinv_recon.deinit();
 
     try std.testing.expectEqual(wide.cols, wide_pinv.rows);
@@ -239,7 +247,7 @@ test "Matrix pseudo-inverse zero matrix" {
     defer zero.deinit();
 
     var rank: u32 = 1234;
-    var pinv = try zero.pseudoInverse(.{ .effective_rank = &rank }).eval();
+    var pinv = try zero.pseudoInverse(.{ .effective_rank = &rank });
     defer pinv.deinit();
 
     try std.testing.expectEqual(@as(u32, 2), pinv.rows);
