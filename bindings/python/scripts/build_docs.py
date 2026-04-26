@@ -21,6 +21,11 @@ def main():
     if subprocess.call(["zig", "build", "python-bindings"]) != 0:
         sys.exit("Error: Failed to build Python bindings.")
 
+    # 1b. Generate type stubs (decoupled from python-bindings; see build.zig).
+    print("Generating Python type stubs...")
+    if subprocess.call(["zig", "build", "python-stubs"]) != 0:
+        sys.exit("Error: Failed to generate Python type stubs.")
+
     # 2. Type Check with ty
     print("Validating type stubs with ty...")
     try:
