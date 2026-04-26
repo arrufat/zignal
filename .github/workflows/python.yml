@@ -50,6 +50,10 @@ jobs:
         cd bindings/python
         uv sync --all-extras --dev
 
+    - name: Generate Python type stubs
+      shell: bash
+      run: zig build python-stubs
+
     - name: Build and Repair Wheel
       shell: bash
       run: |
