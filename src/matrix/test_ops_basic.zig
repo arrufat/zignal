@@ -18,11 +18,13 @@ test "complex operation chaining" {
     const dynamic_a = try static_a.toMatrix(arena.allocator());
     const dynamic_b = try static_b.toMatrix(arena.allocator());
 
-    const dynamic_result = try dynamic_a
+    var p = dynamic_a.chain();
+    defer p.deinit();
+    const dynamic_result = try p
         .dot(dynamic_b)
         .transpose()
         .scale(0.5)
-        .eval();
+        .toOwned();
 
     // Verify both approaches give identical results
     for (0..2) |r| {
@@ -46,13 +48,13 @@ test "row and column extraction with Matrix" {
     // Test Matrix row/col extraction
     const dynamic_matrix = try test_matrix.toMatrix(arena.allocator());
 
-    const dynamic_row = try dynamic_matrix.row(1).eval();
+    const dynamic_row = try dynamic_matrix.row(1);
     try expectEqual(@as(usize, 1), dynamic_row.rows);
     try expectEqual(@as(usize, 2), dynamic_row.cols);
     try expectEqual(@as(f32, 3.0), dynamic_row.at(0, 0).*);
     try expectEqual(@as(f32, 4.0), dynamic_row.at(0, 1).*);
 
-    const dynamic_col = try dynamic_matrix.col(1).eval();
+    const dynamic_col = try dynamic_matrix.col(1);
     try expectEqual(@as(usize, 3), dynamic_col.rows);
     try expectEqual(@as(usize, 1), dynamic_col.cols);
     try expectEqual(@as(f32, 2.0), dynamic_col.at(0, 0).*);
@@ -85,18 +87,18 @@ test "Matrix operations: add, sub, scale, transpose" {
     const dynamic_matrix = try static_matrix.toMatrix(arena.allocator());
 
     // Test scale
-    const dynamic_scaled = try dynamic_matrix.scale(2.0).eval();
+    const dynamic_scaled = try dynamic_matrix.scale(2.0);
 
     // Test transpose
-    const dynamic_transposed = try dynamic_matrix.transpose().eval();
+    const dynamic_transposed = try dynamic_matrix.transpose();
 
     // Test add
     const add_matrix: Matrix(f32) = try .initAll(arena.allocator(), 2, 3, 1.0);
-    const dynamic_added = try dynamic_matrix.add(add_matrix).eval();
+    const dynamic_added = try dynamic_matrix.add(add_matrix);
 
     // Test subtract
     const dynamic_operand = try static_operand.toMatrix(arena.allocator());
-    const dynamic_subtracted = try dynamic_matrix.sub(dynamic_operand).eval();
+    const dynamic_subtracted = try dynamic_matrix.sub(dynamic_operand);
 
     // Verify results match
     for (0..2) |r| {

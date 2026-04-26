@@ -79,7 +79,7 @@ test "Matrix LU decomposition" {
     defer p_mat.deinit();
 
     // Compute P * A
-    var pa_from_mat = try p_mat.dot(mat).eval();
+    var pa_from_mat = try p_mat.dot(mat);
     defer pa_from_mat.deinit();
 
     // Re-verify that rows of PA match rows of L*U (or permuted rows of A)
@@ -247,7 +247,7 @@ test "Matrix QR decomposition" {
     defer p_mat.deinit();
 
     // Compute A * P
-    var ap_from_mat = try mat.dot(p_mat).eval();
+    var ap_from_mat = try mat.dot(p_mat);
     defer ap_from_mat.deinit();
 
     // Re-verify that columns of AP match permuted columns of A
@@ -517,7 +517,7 @@ test "Matrix Cholesky decomposition" {
     mat.at(2, 1).* = 3.0;
     mat.at(2, 2).* = 6.0;
 
-    var chol = try mat.cholesky().eval();
+    var chol = try mat.cholesky();
     defer chol.deinit();
 
     // Check L
@@ -537,9 +537,9 @@ test "Matrix Cholesky decomposition" {
     }
 
     // Verify L * L^T = A
-    var lt = chol.transpose();
+    var lt = try chol.transpose();
     defer lt.deinit();
-    var recon = try chol.dot(lt).eval();
+    var recon = try chol.dot(lt);
     defer recon.deinit();
 
     for (0..3) |i| {
@@ -555,5 +555,5 @@ test "Matrix Cholesky decomposition" {
     non_spd.at(1, 0).* = 2.0;
     non_spd.at(1, 1).* = 1.0; // Det = 1 - 4 = -3, not positive definite
 
-    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky().eval());
+    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky());
 }

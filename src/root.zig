@@ -85,6 +85,8 @@ pub const jpeg = @import("jpeg.zig");
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
+pub const MatrixError = matrix.MatrixError;
+pub const Chain = matrix.Chain;
 pub const meta = @import("meta.zig");
 
 const perlin_mod = @import("perlin.zig");
