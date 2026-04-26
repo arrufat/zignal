@@ -298,7 +298,7 @@ pub fn Pca(comptime T: type) type {
             }
 
             // Compute centered * components
-            return try centered_matrix.gemm(false, self.components, false, 1.0, 0.0, null).eval();
+            return centered_matrix.gemm(false, self.components, false, 1.0, 0.0, null);
         }
 
         /// Get the mean vector
@@ -325,7 +325,7 @@ pub fn Pca(comptime T: type) type {
 
             // Use GEMM directly: scale * (X^T * X) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var cov_matrix = try data_matrix.gemm(true, data_matrix.*, false, scale, 0.0, null).eval();
+            var cov_matrix = try data_matrix.gemm(true, data_matrix.*, false, scale, 0.0, null);
             defer cov_matrix.deinit();
 
             const n = cov_matrix.rows;
@@ -381,7 +381,7 @@ pub fn Pca(comptime T: type) type {
 
             // Use GEMM directly: scale * (X * X^T) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var gram_matrix = try data_matrix.gemm(false, data_matrix.*, true, scale, 0.0, null).eval();
+            var gram_matrix = try data_matrix.gemm(false, data_matrix.*, true, scale, 0.0, null);
             defer gram_matrix.deinit();
 
             const n = gram_matrix.rows;

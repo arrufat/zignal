@@ -1,37 +1,30 @@
 //! Dynamic matrix with runtime dimensions
 //!
-//! ## Chainable Operations
+//! ## Single operations
 //!
-//! Matrix operations can be chained together for expressive linear algebra:
-//! ```zig
-//! const result = try matrix.transpose().inverse().scale(2.0).eval();
-//! ```
-//!
-//! Each operation executes immediately and returns a new Matrix. Errors are
-//! stored internally and checked when you call `.eval()` at the end of the chain.
-//!
-//! ## Memory Management
-//!
-//! **Important**: When chaining multiple operations, each operation creates a new
-//! matrix. For optimal memory usage, use an ArenaAllocator:
+//! Each operation that produces a new matrix returns `MatrixError!Matrix(T)`.
+//! Use standard Zig error handling:
 //!
 //! ```zig
-//! var arena = std.heap.ArenaAllocator.init(allocator);
-//! defer arena.deinit();
-//!
-//! var matrix = try Matrix(f64).init(arena.allocator(), 10, 10);
-//! // ... initialize matrix ...
-//!
-//! // Chain operations - intermediate matrices are managed by arena
-//! const result = try matrix
-//!     .transpose()
-//!     .dot(other_matrix)
-//!     .inverse()
-//!     .eval();
+//! const product = try a.dot(b);
+//! defer product.deinit();
 //! ```
 //!
-//! With an arena allocator, all intermediate matrices created during the chain
-//! are automatically freed when the arena is destroyed, preventing memory leaks.
+//! ## Chained operations
+//!
+//! For multi-step chains, use `chain()` to obtain a `Chain(T)`. The
+//! `Chain` frees each intermediate as the next op runs, so peak memory is
+//! at most two matrices regardless of chain length.
+//!
+//! ```zig
+//! var p = matrix.chain();
+//! defer p.deinit();
+//! const result = try p.transpose().dot(other).inverse().toOwned();
+//! defer result.deinit();
+//! ```
+//!
+//! `defer p.deinit()` is safe whether or not `toOwned()` ran — `toOwned`
+//! transfers ownership of the final matrix to the caller and clears the chain.
 //!
 //! ## Available Operations
 //!
@@ -52,6 +45,7 @@ const meta = @import("../meta.zig");
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_module = @import("svd.zig");
+const Chain = @import("Chain.zig").Chain;
 
 /// Matrix-specific errors
 pub const MatrixError = error{
@@ -114,7 +108,6 @@ pub fn Matrix(comptime T: type) type {
         rows: u32,
         cols: u32,
         allocator: std.mem.Allocator,
-        err: ?MatrixError = null,
 
         pub const PseudoInverseOptions = struct {
             /// Optional absolute tolerance used to discard very small singular values.
@@ -150,15 +143,17 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // Poisoned matrices from failed chains have an undefined pointer;
-            // freeing that would be UB. Valid 0x0 matrices are safe to free.
-            if (self.err != null) return;
             self.allocator.free(self.items);
+        }
+
+        /// Lift this matrix into a `Chain(T)` for fluent chaining of multiple ops.
+        /// The matrix is borrowed — callers retain ownership and must still `deinit` it.
+        pub fn chain(self: Self) Chain(T) {
+            return Chain(T).from(self);
         }
 
         /// Cast the underlying items of the matrix from T to U.
         pub fn as(self: Self, allocator: std.mem.Allocator, comptime U: type) !Matrix(U) {
-            if (self.err) |e| return Matrix(U).errorMatrix(allocator, e);
             var result: Matrix(U) = try .init(allocator, self.rows, self.cols);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
@@ -171,16 +166,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Create a duplicate of this matrix with the specified allocator.
         /// The caller owns the returned matrix and must call deinit() on it.
-        ///
-        /// Error propagation: if this matrix carries a deferred error (`self.err != null`),
-        /// the duplicate will also carry the same error and no allocation is performed.
-        /// This preserves failure state across chains.
-        ///
-        /// Example:
-        /// var copy = try matrix.dupe(allocator);
-        /// defer copy.deinit();
         pub fn dupe(self: Self, allocator: std.mem.Allocator) !Self {
-            if (self.err) |e| return errorMatrix(allocator, e);
             const result = try Self.init(allocator, self.rows, self.cols);
             @memcpy(result.items, self.items);
             return result;
@@ -229,18 +215,11 @@ pub fn Matrix(comptime T: type) type {
         // ===== Chainable operations (return Self) =====
 
         /// Add another matrix element-wise
-        pub fn add(self: Self, other: Self) Self {
-            if (self.err != null) return self;
-            if (other.err != null) return other;
-
+        pub fn add(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
-                return errorMatrix(self.allocator, error.DimensionMismatch);
+                return error.DimensionMismatch;
             }
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = self.items[i] + other.items[i];
             }
@@ -248,18 +227,11 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Subtract another matrix element-wise
-        pub fn sub(self: Self, other: Self) Self {
-            if (self.err != null) return self;
-            if (other.err != null) return other;
-
+        pub fn sub(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
-                return errorMatrix(self.allocator, error.DimensionMismatch);
+                return error.DimensionMismatch;
             }
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = self.items[i] - other.items[i];
             }
@@ -267,13 +239,8 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Scale all elements by a value
-        pub fn scale(self: Self, value: T) Self {
-            if (self.err != null) return self;
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn scale(self: Self, value: T) MatrixError!Self {
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = self.items[i] * value;
             }
@@ -281,13 +248,8 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Transpose the matrix
-        pub fn transpose(self: Self) Self {
-            if (self.err != null) return self;
-
-            var result = Matrix(T).init(self.allocator, self.cols, self.rows) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn transpose(self: Self) MatrixError!Self {
+            var result = try Matrix(T).init(self.allocator, self.cols, self.rows);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.at(c, r).* = self.at(r, c).*;
@@ -297,18 +259,11 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Perform element-wise multiplication
-        pub fn times(self: Self, other: Self) Self {
-            if (self.err != null) return self;
-            if (other.err != null) return other;
-
+        pub fn times(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
-                return errorMatrix(self.allocator, error.DimensionMismatch);
+                return error.DimensionMismatch;
             }
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = self.items[i] * other.items[i];
             }
@@ -316,34 +271,26 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Matrix multiplication (dot product) - changes dimensions
-        pub fn dot(self: Self, other: Self) Self {
+        pub fn dot(self: Self, other: Self) MatrixError!Self {
             return self.gemm(false, other, false, 1.0, 0.0, null);
         }
 
         /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
         /// and Gauss-Jordan elimination for larger matrices
-        pub fn inverse(self: Self) Self {
-            if (self.err != null) return self;
-
-            if (self.rows != self.cols) {
-                return errorMatrix(self.allocator, error.NotSquare);
-            }
+        pub fn inverse(self: Self) MatrixError!Self {
+            if (self.rows != self.cols) return error.NotSquare;
 
             const n = self.rows;
 
             // Use analytical formulas for small matrices (more efficient)
             if (n <= 3) {
-                const det = self.determinant() catch |e| {
-                    return errorMatrix(self.allocator, e);
-                };
+                const det = try self.determinant();
 
                 if (@abs(det) < std.math.floatEps(T)) {
-                    return errorMatrix(self.allocator, error.Singular);
+                    return error.Singular;
                 }
 
-                var inv = Matrix(T).init(self.allocator, n, n) catch |e| {
-                    return errorMatrix(self.allocator, e);
-                };
+                var inv = try Matrix(T).init(self.allocator, n, n);
 
                 switch (n) {
                     1 => inv.at(0, 0).* = 1 / det,
@@ -378,53 +325,39 @@ pub fn Matrix(comptime T: type) type {
         /// Works for rectangular matrices and gracefully handles rank deficiency
         /// by discarding singular values below the provided tolerance. The optional
         /// `effective_rank` pointer receives the number of singular values kept.
-        pub fn pseudoInverse(self: Self, options: PseudoInverseOptions) Self {
-            if (self.err != null) return self;
-
-            if (self.rows == 0 or self.cols == 0) {
-                return errorMatrix(self.allocator, error.DimensionMismatch);
-            }
+        pub fn pseudoInverse(self: Self, options: PseudoInverseOptions) MatrixError!Self {
+            if (self.rows == 0 or self.cols == 0) return error.DimensionMismatch;
 
             if (self.rows >= self.cols) {
                 return self.pseudoInverseTall(options);
             }
 
-            var transposed = self.transpose();
-            if (transposed.err != null) return transposed;
+            var transposed = try self.transpose();
             defer transposed.deinit();
 
-            var pinv_transposed = transposed.pseudoInverseTall(options);
-            if (pinv_transposed.err != null) return pinv_transposed;
+            var pinv_transposed = try transposed.pseudoInverseTall(options);
+            defer pinv_transposed.deinit();
 
-            const result = pinv_transposed.transpose();
-            pinv_transposed.deinit();
-            return result;
+            return pinv_transposed.transpose();
         }
 
-        fn pseudoInverseTall(self: Self, options: PseudoInverseOptions) Self {
-            if (self.err != null) return self;
+        fn pseudoInverseTall(self: Self, options: PseudoInverseOptions) MatrixError!Self {
             std.debug.assert(self.rows >= self.cols);
 
             const allocator = self.allocator;
             const svd_options = SvdOptions{ .with_u = true, .with_v = true, .mode = .skinny_u };
 
-            var svd_result = self.svd(allocator, svd_options) catch |e| {
-                return errorMatrix(allocator, e);
-            };
+            var svd_result = try self.svd(allocator, svd_options);
             defer svd_result.deinit();
 
-            if (svd_result.converged != 0) {
-                return errorMatrix(allocator, error.NotConverged);
-            }
+            if (svd_result.converged != 0) return error.NotConverged;
 
             const singular_count = svd_result.s.rows;
             const sigma_max: T = if (singular_count > 0) svd_result.s.at(0, 0).* else 0;
             if (sigma_max == 0) {
                 const zero_rows = self.cols;
                 const zero_cols = self.rows;
-                const zero = Matrix(T).initAll(allocator, zero_rows, zero_cols, 0) catch |e| {
-                    return errorMatrix(allocator, e);
-                };
+                const zero = try Matrix(T).initAll(allocator, zero_rows, zero_cols, 0);
                 if (options.effective_rank) |rank_ptr| {
                     rank_ptr.* = 0;
                 }
@@ -434,9 +367,7 @@ pub fn Matrix(comptime T: type) type {
             const default_tol: T = sigma_max * @as(T, @floatFromInt(max_dim)) * std.math.floatEps(T);
             const tol = options.tolerance orelse default_tol;
 
-            var sigma_inv = Matrix(T).initAll(allocator, singular_count, singular_count, 0) catch |e| {
-                return errorMatrix(allocator, e);
-            };
+            var sigma_inv = try Matrix(T).initAll(allocator, singular_count, singular_count, 0);
             defer sigma_inv.deinit();
 
             var effective_rank: u32 = 0;
@@ -452,12 +383,10 @@ pub fn Matrix(comptime T: type) type {
                 rank_ptr.* = effective_rank;
             }
 
-            var u_t = svd_result.u.transpose();
-            if (u_t.err != null) return u_t;
+            var u_t = try svd_result.u.transpose();
             defer u_t.deinit();
 
-            var v_sigma = svd_result.v.dot(sigma_inv);
-            if (v_sigma.err != null) return v_sigma;
+            var v_sigma = try svd_result.v.dot(sigma_inv);
             defer v_sigma.deinit();
 
             return v_sigma.dot(u_t);
@@ -465,15 +394,11 @@ pub fn Matrix(comptime T: type) type {
 
         /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
         /// This is a general method that works for any size square matrix
-        fn inverseGaussJordan(self: Self) Self {
-            if (self.err != null) return self;
-
+        fn inverseGaussJordan(self: Self) MatrixError!Self {
             const n = self.rows;
 
             // Create augmented matrix [A | I]
-            var augmented = Matrix(T).init(self.allocator, n, 2 * n) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
+            var augmented = try Matrix(T).init(self.allocator, n, 2 * n);
             defer augmented.deinit();
 
             // Copy original matrix to left half and identity to right half
@@ -499,9 +424,7 @@ pub fn Matrix(comptime T: type) type {
                 }
 
                 // Check for singular matrix
-                if (max_val < std.math.floatEps(T) * 10) {
-                    return errorMatrix(self.allocator, error.Singular);
-                }
+                if (max_val < std.math.floatEps(T) * 10) return error.Singular;
 
                 // Swap rows if needed
                 if (max_row != pivot_col) {
@@ -530,9 +453,7 @@ pub fn Matrix(comptime T: type) type {
             }
 
             // Extract inverse from right half of augmented matrix
-            var inv = Matrix(T).init(self.allocator, n, n) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
+            var inv = try Matrix(T).init(self.allocator, n, n);
 
             for (0..n) |i| {
                 for (0..n) |j| {
@@ -544,75 +465,50 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Extract a submatrix - changes dimensions
-        pub fn subMatrix(self: Self, row_begin: u32, col_begin: u32, row_count: u32, col_count: u32) Self {
-            if (self.err != null) return self;
-
+        pub fn subMatrix(self: Self, row_begin: u32, col_begin: u32, row_count: u32, col_count: u32) MatrixError!Self {
             if (row_begin + row_count > self.rows or col_begin + col_count > self.cols) {
-                return errorMatrix(self.allocator, error.OutOfBounds);
+                return error.OutOfBounds;
             }
-
-            var result = Matrix(T).init(self.allocator, row_count, col_count) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+            var result = try Matrix(T).init(self.allocator, row_count, col_count);
             for (0..row_count) |r| {
                 for (0..col_count) |c| {
                     result.at(r, c).* = self.at(row_begin + r, col_begin + c).*;
                 }
             }
-
             return result;
         }
 
         /// Extract a column - changes dimensions
-        pub fn col(self: Self, col_idx: u32) Self {
-            if (self.err != null) return self;
-
-            if (col_idx >= self.cols) {
-                return errorMatrix(self.allocator, error.OutOfBounds);
-            }
-
-            var result = Matrix(T).init(self.allocator, self.rows, 1) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn col(self: Self, col_idx: u32) MatrixError!Self {
+            if (col_idx >= self.cols) return error.OutOfBounds;
+            var result = try Matrix(T).init(self.allocator, self.rows, 1);
             for (0..self.rows) |r| {
                 result.at(r, 0).* = self.at(r, col_idx).*;
             }
-
             return result;
         }
 
         /// Extract a row - changes dimensions
-        pub fn row(self: Self, row_idx: u32) Self {
-            if (self.err != null) return self;
-
-            if (row_idx >= self.rows) {
-                return errorMatrix(self.allocator, error.OutOfBounds);
-            }
-
-            var result = Matrix(T).init(self.allocator, 1, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn row(self: Self, row_idx: u32) MatrixError!Self {
+            if (row_idx >= self.rows) return error.OutOfBounds;
+            var result = try Matrix(T).init(self.allocator, 1, self.cols);
             for (0..self.cols) |c| {
                 result.at(0, c).* = self.at(row_idx, c).*;
             }
-
             return result;
         }
 
         /// Compute Gram matrix: X * X^T
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
-        pub fn gram(self: Self) Self {
+        pub fn gram(self: Self) MatrixError!Self {
             return self.gemm(false, self, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
-        pub fn covariance(self: Self) Self {
+        pub fn covariance(self: Self) MatrixError!Self {
             return self.gemm(true, self, false, 1.0, 0.0, null);
         }
 
@@ -696,14 +592,7 @@ pub fn Matrix(comptime T: type) type {
             alpha: T,
             beta: T,
             c: ?Self,
-        ) Self {
-            if (self.err != null) return self;
-            if (other.err != null) return other;
-
-            if (c) |c_mat| {
-                if (c_mat.err != null) return c_mat;
-            }
-
+        ) MatrixError!Self {
             // Determine dimensions after potential transposition
             const a_rows = if (trans_a) self.cols else self.rows;
             const a_cols = if (trans_a) self.rows else self.cols;
@@ -711,19 +600,15 @@ pub fn Matrix(comptime T: type) type {
             const b_cols = if (trans_b) other.rows else other.cols;
 
             // Verify matrix multiplication compatibility
-            if (a_cols != b_rows) {
-                return errorMatrix(self.allocator, error.DimensionMismatch);
-            }
+            if (a_cols != b_rows) return error.DimensionMismatch;
 
-            var result = Matrix(T).init(self.allocator, a_rows, b_cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
+            var result = try Matrix(T).init(self.allocator, a_rows, b_cols);
+            errdefer result.deinit();
 
             // Initialize with scaled C matrix if provided
             if (c) |c_mat| {
                 if (c_mat.rows != a_rows or c_mat.cols != b_cols) {
-                    result.deinit();
-                    return errorMatrix(self.allocator, error.DimensionMismatch);
+                    return error.DimensionMismatch;
                 }
                 if (beta != 0) {
                     for (0..a_rows) |i| {
@@ -759,10 +644,7 @@ pub fn Matrix(comptime T: type) type {
                             std.mem.eql(T, self.items, other.items))
                         {
                             // For A * A, we need to transpose A for the second operand
-                            var a_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
-                                result.deinit();
-                                return errorMatrix(self.allocator, e);
-                            };
+                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
                             defer a_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -772,10 +654,7 @@ pub fn Matrix(comptime T: type) type {
                             simdGemmKernel(VecType, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for cache-friendly row-major access
-                            var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
-                                result.deinit();
-                                return errorMatrix(self.allocator, e);
-                            };
+                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
                             defer b_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -786,10 +665,7 @@ pub fn Matrix(comptime T: type) type {
                         }
                     } else if (trans_a and !trans_b) {
                         // Case 2: A^T * B - transpose A for cache-friendly row-major access
-                        var a_transposed = Matrix(T).init(self.allocator, a_rows, a_cols) catch |e| {
-                            result.deinit();
-                            return errorMatrix(self.allocator, e);
-                        };
+                        var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
                         defer a_transposed.deinit();
                         // Transpose A: a_transposed[i,j] = A[j,i]
                         for (0..a_cols) |k| {
@@ -806,10 +682,7 @@ pub fn Matrix(comptime T: type) type {
                             simdGemmKernel(VecType, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for row-wise access
-                            var b_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
-                                result.deinit();
-                                return errorMatrix(self.allocator, e);
-                            };
+                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
                             defer b_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -827,10 +700,7 @@ pub fn Matrix(comptime T: type) type {
                             std.mem.eql(T, self.items, other.items))
                         {
                             // For A * A^T, we need to transpose A for the second operand
-                            var a_transposed = Matrix(T).init(self.allocator, b_cols, a_cols) catch |e| {
-                                result.deinit();
-                                return errorMatrix(self.allocator, e);
-                            };
+                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
                             defer a_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -844,10 +714,7 @@ pub fn Matrix(comptime T: type) type {
                         }
                     } else if (trans_a and trans_b) {
                         // Case 4: A^T * B^T - transpose A so rows are contiguous, reuse B rows directly
-                        var a_transposed = Matrix(T).init(self.allocator, a_rows, a_cols) catch |e| {
-                            result.deinit();
-                            return errorMatrix(self.allocator, e);
-                        };
+                        var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
                         defer a_transposed.deinit();
                         for (0..a_rows) |i| {
                             for (0..a_cols) |j| {
@@ -880,30 +747,25 @@ pub fn Matrix(comptime T: type) type {
 
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
-        pub fn scaledDot(self: Self, other: Self, alpha: T) Self {
+        pub fn scaledDot(self: Self, other: Self, alpha: T) MatrixError!Self {
             return self.gemm(false, other, false, alpha, 0.0, null);
         }
 
         /// Matrix multiplication with transpose: A * B^T
         /// Convenience method for common GEMM use case
-        pub fn dotTranspose(self: Self, other: Self) Self {
+        pub fn dotTranspose(self: Self, other: Self) MatrixError!Self {
             return self.gemm(false, other, true, 1.0, 0.0, null);
         }
 
         /// Transpose matrix multiplication: A^T * B
         /// Convenience method for common GEMM use case
-        pub fn transposeDot(self: Self, other: Self) Self {
+        pub fn transposeDot(self: Self, other: Self) MatrixError!Self {
             return self.gemm(true, other, false, 1.0, 0.0, null);
         }
 
         /// Apply a function to all matrix elements with optional arguments
-        pub fn apply(self: Self, comptime func: anytype, args: anytype) Self {
-            if (self.err != null) return self;
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn apply(self: Self, comptime func: anytype, args: anytype) MatrixError!Self {
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = @call(.auto, func, .{self.items[i]} ++ args);
             }
@@ -911,13 +773,8 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Add scalar to all elements
-        pub fn offset(self: Self, value: T) Self {
-            if (self.err != null) return self;
-
-            var result = Matrix(T).init(self.allocator, self.rows, self.cols) catch |e| {
-                return errorMatrix(self.allocator, e);
-            };
-
+        pub fn offset(self: Self, value: T) MatrixError!Self {
+            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
             for (0..result.items.len) |i| {
                 result.items[i] = self.items[i] + value;
             }
@@ -925,7 +782,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Raise all elements to power n (convenience method)
-        pub fn pow(self: Self, n: T) Self {
+        pub fn pow(self: Self, n: T) MatrixError!Self {
             const powN = struct {
                 fn f(x: T, exponent: T) T {
                     return std.math.pow(T, x, exponent);
@@ -939,28 +796,10 @@ pub fn Matrix(comptime T: type) type {
                 @compileError(context ++ " requires floating-point elements");
         }
 
-        /// Terminal operation - evaluates the chain and returns result or error
-        pub fn eval(self: Self) MatrixError!Self {
-            if (self.err) |e| return e;
-            return self;
-        }
-
-        /// Helper to create an error matrix
-        fn errorMatrix(allocator: std.mem.Allocator, err: MatrixError) Self {
-            return Self{
-                .items = @as([*]align(simd_alignment) T, undefined)[0..0],
-                .rows = 0,
-                .cols = 0,
-                .allocator = allocator,
-                .err = err,
-            };
-        }
-
         // ===== Query operations (return values, not Self) =====
 
         /// Sums all the elements in a matrix.
         pub fn sum(self: Self) T {
-            assert(self.err == null);
             var accum: T = 0;
             for (self.items) |val| {
                 accum += val;
@@ -971,7 +810,7 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
             ensureFloat("frobeniusNorm");
-            assert(self.err == null);
+
             var squared_sum: T = 0;
             for (self.items) |val| {
                 squared_sum += val * val;
@@ -981,14 +820,12 @@ pub fn Matrix(comptime T: type) type {
 
         /// Mean (average) of all elements
         pub fn mean(self: Self) T {
-            assert(self.err == null);
             assert(self.items.len > 0);
             return self.sum() / @as(T, @floatFromInt(self.items.len));
         }
 
         /// Variance: E[(X - μ)²]
         pub fn variance(self: Self) T {
-            assert(self.err == null);
             assert(self.items.len > 0);
             const mu = self.mean();
             var sum_sq_diff: T = 0;
@@ -1002,13 +839,12 @@ pub fn Matrix(comptime T: type) type {
         /// Standard deviation: sqrt(variance)
         pub fn stdDev(self: Self) T {
             ensureFloat("stdDev");
-            assert(self.err == null);
+
             return @sqrt(self.variance());
         }
 
         /// Minimum element
         pub fn min(self: Self) T {
-            assert(self.err == null);
             assert(self.items.len > 0);
             var min_val = self.items[0];
             for (self.items[1..]) |val| {
@@ -1021,7 +857,6 @@ pub fn Matrix(comptime T: type) type {
 
         /// Maximum element
         pub fn max(self: Self) T {
-            assert(self.err == null);
             assert(self.items.len > 0);
             var max_val = self.items[0];
             for (self.items[1..]) |val| {
@@ -1035,7 +870,7 @@ pub fn Matrix(comptime T: type) type {
         /// Entrywise L1 norm: sum of absolute values of all elements
         pub fn l1Norm(self: Self) T {
             ensureFloat("l1Norm");
-            assert(self.err == null);
+
             var sum_abs: T = 0;
             for (self.items) |val| {
                 sum_abs += @abs(val);
@@ -1046,7 +881,7 @@ pub fn Matrix(comptime T: type) type {
         /// Max norm (L-infinity): maximum absolute value
         pub fn maxNorm(self: Self) T {
             ensureFloat("maxNorm");
-            assert(self.err == null);
+
             var max_abs: T = 0;
             for (self.items) |val| {
                 const abs_val = @abs(val);
@@ -1060,7 +895,7 @@ pub fn Matrix(comptime T: type) type {
         /// Minimum absolute value among all elements.
         pub fn minNorm(self: Self) T {
             ensureFloat("minNorm");
-            assert(self.err == null);
+
             if (self.items.len == 0) return 0;
             var min_abs = @abs(self.items[0]);
             for (self.items[1..]) |val| {
@@ -1075,7 +910,7 @@ pub fn Matrix(comptime T: type) type {
         /// Counts non-zero elements.
         pub fn sparseNorm(self: Self) T {
             ensureFloat("sparseNorm");
-            assert(self.err == null);
+
             var count: T = 0;
             for (self.items) |val| {
                 if (val != 0) count += 1;
@@ -1086,7 +921,7 @@ pub fn Matrix(comptime T: type) type {
         /// Entrywise ℓᵖ norm with optional runtime exponent.
         pub fn elementNorm(self: Self, p: T) MatrixError!T {
             ensureFloat("elementNorm");
-            if (self.err) |e| return e;
+
             if (std.math.isInf(p)) {
                 if (p > 0) {
                     return self.maxNorm();
@@ -1119,12 +954,11 @@ pub fn Matrix(comptime T: type) type {
 
         fn leadingSingularValue(self: Self, allocator: std.mem.Allocator) !T {
             ensureFloat("leadingSingularValue");
-            if (self.err) |e| return e;
+
             if (self.rows == 0 or self.cols == 0) return 0;
 
             if (self.rows < self.cols) {
-                var transposed = self.transpose();
-                if (transposed.err) |err| return err;
+                var transposed = try self.transpose();
                 defer transposed.deinit();
                 return transposed.leadingSingularValue(allocator);
             }
@@ -1139,7 +973,7 @@ pub fn Matrix(comptime T: type) type {
 
         fn sumSingularP(self: Self, allocator: std.mem.Allocator, exponent: T) !T {
             ensureFloat("schattenNorm");
-            if (self.err) |e| return e;
+
             if (self.rows == 0 or self.cols == 0) return 0;
 
             if (self.rows >= self.cols) {
@@ -1155,8 +989,7 @@ pub fn Matrix(comptime T: type) type {
                 return accum;
             }
 
-            var transposed = self.transpose();
-            if (transposed.err) |err| return err;
+            var transposed = try self.transpose();
             defer transposed.deinit();
             return transposed.sumSingularP(allocator, exponent);
         }
@@ -1164,7 +997,7 @@ pub fn Matrix(comptime T: type) type {
         /// Schatten p-norm of the matrix.
         pub fn schattenNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
             ensureFloat("schattenNorm");
-            if (self.err) |e| return e;
+
             if (std.math.isInf(p)) {
                 if (p > 0) {
                     return self.leadingSingularValue(allocator);
@@ -1197,7 +1030,7 @@ pub fn Matrix(comptime T: type) type {
         /// Induced operator norms with p ∈ {1, 2, ∞}.
         pub fn inducedNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
             ensureFloat("inducedNorm");
-            if (self.err) |e| return e;
+
             if (p == 1) {
                 var max_sum: T = 0;
                 for (0..self.cols) |c| {
@@ -1230,7 +1063,6 @@ pub fn Matrix(comptime T: type) type {
 
         /// Trace: sum of diagonal elements (square matrices only)
         pub fn trace(self: Self) T {
-            assert(self.err == null);
             assert(self.rows == self.cols);
             var sum_diag: T = 0;
             for (0..self.rows) |i| {
@@ -1261,7 +1093,6 @@ pub fn Matrix(comptime T: type) type {
         /// Compute LU decomposition with partial pivoting
         /// Returns L, U matrices and permutation vector such that PA = LU
         pub fn lu(self: Self) !LuResult {
-            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             const n = self.rows;
             if (n != self.cols) return error.NotSquare;
@@ -1365,13 +1196,12 @@ pub fn Matrix(comptime T: type) type {
 
         /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
         /// Returns L such that A = L * L^T where L is lower triangular.
-        /// This is a chainable operation.
-        pub fn cholesky(self: Self) Self {
-            if (self.err != null) return self;
+        pub fn cholesky(self: Self) MatrixError!Self {
             ensureFloat("cholesky");
-            if (self.rows != self.cols) return errorMatrix(self.allocator, error.NotSquare);
+            if (self.rows != self.cols) return error.NotSquare;
             const n = self.rows;
-            var l = Matrix(T).init(self.allocator, n, n) catch |e| return errorMatrix(self.allocator, e);
+            var l = try Matrix(T).init(self.allocator, n, n);
+            errdefer l.deinit();
             @memset(l.items, 0);
             for (0..n) |i| {
                 for (0..i + 1) |j| {
@@ -1379,10 +1209,7 @@ pub fn Matrix(comptime T: type) type {
                     for (0..j) |k| accum += l.at(i, k).* * l.at(j, k).*;
                     if (i == j) {
                         const val = self.at(i, i).* - accum;
-                        if (val <= 0) {
-                            l.deinit();
-                            return errorMatrix(self.allocator, error.NotPositiveDefinite);
-                        }
+                        if (val <= 0) return error.NotPositiveDefinite;
                         l.at(i, i).* = @sqrt(val);
                     } else {
                         const val = self.at(i, j).* - accum;
@@ -1396,7 +1223,6 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the determinant of the matrix using analytical formulas for small matrices
         /// and LU decomposition for larger matrices
         pub fn determinant(self: Self) !T {
-            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             if (self.rows != self.cols) return error.NotSquare;
             if (self.rows == 0) return error.DimensionMismatch;
@@ -1452,7 +1278,6 @@ pub fn Matrix(comptime T: type) type {
         /// Returns Q, R matrices and permutation such that A*P = Q*R where Q is orthogonal and R is upper triangular
         /// Also computes the numerical rank of the matrix
         pub fn qr(self: Self) !QrResult {
-            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             const m = self.rows;
             const n = self.cols;
@@ -1608,7 +1433,6 @@ pub fn Matrix(comptime T: type) type {
         /// The rank is determined by counting non-zero diagonal elements in R
         /// above a tolerance based on machine precision and matrix norm
         pub fn rank(self: Self) !u32 {
-            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             // Compute QR decomposition with column pivoting
             var qr_result = try self.qr();
@@ -1636,7 +1460,6 @@ pub fn Matrix(comptime T: type) type {
         ///
         /// Requires rows >= cols. See `SvdOptions` for configuration details.
         pub fn svd(self: Self, allocator: std.mem.Allocator, options: SvdOptions) !SvdResult(T) {
-            if (self.err) |e| return e;
             comptime assert(@typeInfo(T) == .float);
             if (self.rows < self.cols) return error.DimensionMismatch;
             return svd_module.svd(T, allocator, self, options);
@@ -1688,47 +1511,34 @@ test "Matrix as" {
 }
 
 // Tests for dynamic Matrix functionality
-test "matrix propagates chained errors" {
+test "matrix surfaces errors at the source op" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    const alloc = arena.allocator();
 
-    var singular = try Matrix(f64).init(arena.allocator(), 2, 2);
+    var singular = try Matrix(f64).init(alloc, 2, 2);
     defer singular.deinit();
-
     singular.at(0, 0).* = 1;
     singular.at(0, 1).* = 2;
     singular.at(1, 0).* = 2;
     singular.at(1, 1).* = 4;
 
-    var invalid = singular.inverse();
-    defer invalid.deinit();
+    // Singular inverse surfaces error directly — no deferred state.
+    try expectError(MatrixError.Singular, singular.inverse());
 
-    var valid: Matrix(f64) = try .initAll(arena.allocator(), 2, 2, 1.0);
-    defer valid.deinit();
+    // Dimension mismatch surfaces from the failing op directly.
+    var a = try Matrix(f64).initAll(alloc, 2, 3, 1.0);
+    defer a.deinit();
+    var b = try Matrix(f64).initAll(alloc, 3, 2, 1.0);
+    defer b.deinit();
+    try expectError(MatrixError.DimensionMismatch, a.add(b));
+    try expectError(MatrixError.DimensionMismatch, a.sub(b));
+    try expectError(MatrixError.DimensionMismatch, a.times(b));
 
-    var left_error = invalid.add(valid);
-    defer left_error.deinit();
-    try expectError(MatrixError.Singular, left_error.eval());
-
-    var right_error = valid.add(invalid);
-    defer right_error.deinit();
-    try expectError(MatrixError.Singular, right_error.eval());
-
-    var sub_error = valid.sub(invalid);
-    defer sub_error.deinit();
-    try expectError(MatrixError.Singular, sub_error.eval());
-
-    var times_error = valid.times(invalid);
-    defer times_error.deinit();
-    try expectError(MatrixError.Singular, times_error.eval());
-
-    var gemm_other_error = valid.gemm(false, invalid, false, 1.0, 0.0, null);
-    defer gemm_other_error.deinit();
-    try expectError(MatrixError.Singular, gemm_other_error.eval());
-
-    var gemm_c_error = valid.gemm(false, valid, false, 1.0, 1.0, invalid);
-    defer gemm_c_error.deinit();
-    try expectError(MatrixError.Singular, gemm_c_error.eval());
+    // Chains short-circuit at the failing step and free intermediates.
+    var p = a.chain();
+    defer p.deinit();
+    try expectError(MatrixError.DimensionMismatch, p.add(b).scale(2.0).toOwned());
 }
 
 test "matrix elementNorm invalid exponent" {

@@ -145,7 +145,15 @@ pub fn build(b: *Build) void {
         else => ".so",
     };
 
-    // Python type stub generation
+    // Python type stub generation.
+    //
+    // `python-stubs` is its own step rather than a hard dependency of
+    // `python-bindings`. The .pyi files are checked into the package, so
+    // the runtime extension can build and run tests without regenerating
+    // them — useful when the stub generator (a native executable) hits
+    // upstream toolchain issues like zig#22875 (zig's lld can't yet handle
+    // the .sframe relocations in /usr/lib/crt1.o shipped by gcc >= 15.2).
+    // Run `zig build python-stubs` explicitly to refresh the .pyi files.
     const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
@@ -170,8 +178,9 @@ pub fn build(b: *Build) void {
     const install_cli = b.addInstallArtifact(exe, .{});
     py_bindings_step.dependOn(&install_cli.step);
 
-    // Make python-bindings depend on stub generation so stubs are always up to date
-    py_bindings_step.dependOn(&run_stub_generator.step);
+    // python-bindings only depends on the runtime extension. Stub regeneration
+    // is its own `python-stubs` step (see comment at the stub_generator
+    // declaration above for context).
     py_bindings_step.dependOn(&install_py_module.step);
 
     // Also copy the built extension into the source package directory for local development
