@@ -150,6 +150,9 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            // Poisoned matrices from failed chains have an undefined pointer;
+            // freeing that would be UB. Valid 0x0 matrices are safe to free.
+            if (self.err != null) return;
             self.allocator.free(self.items);
         }
 
@@ -957,6 +960,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Sums all the elements in a matrix.
         pub fn sum(self: Self) T {
+            assert(self.err == null);
             var accum: T = 0;
             for (self.items) |val| {
                 accum += val;
@@ -967,6 +971,7 @@ pub fn Matrix(comptime T: type) type {
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
             ensureFloat("frobeniusNorm");
+            assert(self.err == null);
             var squared_sum: T = 0;
             for (self.items) |val| {
                 squared_sum += val * val;
@@ -976,11 +981,15 @@ pub fn Matrix(comptime T: type) type {
 
         /// Mean (average) of all elements
         pub fn mean(self: Self) T {
+            assert(self.err == null);
+            assert(self.items.len > 0);
             return self.sum() / @as(T, @floatFromInt(self.items.len));
         }
 
         /// Variance: E[(X - μ)²]
         pub fn variance(self: Self) T {
+            assert(self.err == null);
+            assert(self.items.len > 0);
             const mu = self.mean();
             var sum_sq_diff: T = 0;
             for (self.items) |val| {
@@ -993,11 +1002,14 @@ pub fn Matrix(comptime T: type) type {
         /// Standard deviation: sqrt(variance)
         pub fn stdDev(self: Self) T {
             ensureFloat("stdDev");
+            assert(self.err == null);
             return @sqrt(self.variance());
         }
 
         /// Minimum element
         pub fn min(self: Self) T {
+            assert(self.err == null);
+            assert(self.items.len > 0);
             var min_val = self.items[0];
             for (self.items[1..]) |val| {
                 if (val < min_val) {
@@ -1009,6 +1021,8 @@ pub fn Matrix(comptime T: type) type {
 
         /// Maximum element
         pub fn max(self: Self) T {
+            assert(self.err == null);
+            assert(self.items.len > 0);
             var max_val = self.items[0];
             for (self.items[1..]) |val| {
                 if (val > max_val) {
@@ -1021,6 +1035,7 @@ pub fn Matrix(comptime T: type) type {
         /// Entrywise L1 norm: sum of absolute values of all elements
         pub fn l1Norm(self: Self) T {
             ensureFloat("l1Norm");
+            assert(self.err == null);
             var sum_abs: T = 0;
             for (self.items) |val| {
                 sum_abs += @abs(val);
@@ -1031,6 +1046,7 @@ pub fn Matrix(comptime T: type) type {
         /// Max norm (L-infinity): maximum absolute value
         pub fn maxNorm(self: Self) T {
             ensureFloat("maxNorm");
+            assert(self.err == null);
             var max_abs: T = 0;
             for (self.items) |val| {
                 const abs_val = @abs(val);
@@ -1044,6 +1060,7 @@ pub fn Matrix(comptime T: type) type {
         /// Minimum absolute value among all elements.
         pub fn minNorm(self: Self) T {
             ensureFloat("minNorm");
+            assert(self.err == null);
             if (self.items.len == 0) return 0;
             var min_abs = @abs(self.items[0]);
             for (self.items[1..]) |val| {
@@ -1058,6 +1075,7 @@ pub fn Matrix(comptime T: type) type {
         /// Counts non-zero elements.
         pub fn sparseNorm(self: Self) T {
             ensureFloat("sparseNorm");
+            assert(self.err == null);
             var count: T = 0;
             for (self.items) |val| {
                 if (val != 0) count += 1;
@@ -1068,6 +1086,7 @@ pub fn Matrix(comptime T: type) type {
         /// Entrywise ℓᵖ norm with optional runtime exponent.
         pub fn elementNorm(self: Self, p: T) MatrixError!T {
             ensureFloat("elementNorm");
+            if (self.err) |e| return e;
             if (std.math.isInf(p)) {
                 if (p > 0) {
                     return self.maxNorm();
@@ -1100,6 +1119,7 @@ pub fn Matrix(comptime T: type) type {
 
         fn leadingSingularValue(self: Self, allocator: std.mem.Allocator) !T {
             ensureFloat("leadingSingularValue");
+            if (self.err) |e| return e;
             if (self.rows == 0 or self.cols == 0) return 0;
 
             if (self.rows < self.cols) {
@@ -1119,6 +1139,7 @@ pub fn Matrix(comptime T: type) type {
 
         fn sumSingularP(self: Self, allocator: std.mem.Allocator, exponent: T) !T {
             ensureFloat("schattenNorm");
+            if (self.err) |e| return e;
             if (self.rows == 0 or self.cols == 0) return 0;
 
             if (self.rows >= self.cols) {
@@ -1143,6 +1164,7 @@ pub fn Matrix(comptime T: type) type {
         /// Schatten p-norm of the matrix.
         pub fn schattenNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
             ensureFloat("schattenNorm");
+            if (self.err) |e| return e;
             if (std.math.isInf(p)) {
                 if (p > 0) {
                     return self.leadingSingularValue(allocator);
@@ -1175,6 +1197,7 @@ pub fn Matrix(comptime T: type) type {
         /// Induced operator norms with p ∈ {1, 2, ∞}.
         pub fn inducedNorm(self: Self, allocator: std.mem.Allocator, p: T) !T {
             ensureFloat("inducedNorm");
+            if (self.err) |e| return e;
             if (p == 1) {
                 var max_sum: T = 0;
                 for (0..self.cols) |c| {
@@ -1207,6 +1230,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Trace: sum of diagonal elements (square matrices only)
         pub fn trace(self: Self) T {
+            assert(self.err == null);
             assert(self.rows == self.cols);
             var sum_diag: T = 0;
             for (0..self.rows) |i| {
