@@ -182,7 +182,7 @@ pub fn build(b: *Build) void {
     py_bindings_step.dependOn(&install_py_module.step);
 
     // Also copy the built extension into the source package directory for local development
-    const pkg_dir = b.pathJoin(&.{ b.build_root.path.?, "bindings/python/zignal" });
+    const pkg_dir = b.pathFromRoot("bindings/python/zignal");
     const wf = b.addWriteFiles();
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.pathJoin(&.{ pkg_dir, b.fmt("_zignal{s}", .{extension}) }));
 
