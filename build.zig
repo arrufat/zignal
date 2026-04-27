@@ -137,7 +137,7 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, py_module, target, optimize, "python3");
+    linkPython(b, py_module, "python3");
 
     const extension = switch (os_tag) {
         .windows => ".pyd",
@@ -165,7 +165,7 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, stub_generator, target, .Debug, "python3-embed");
+    linkPython(b, stub_generator, "python3-embed");
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -179,20 +179,16 @@ pub fn build(b: *Build) void {
     const install_cli = b.addInstallArtifact(exe, .{});
     py_bindings_step.dependOn(&install_cli.step);
 
-    // python-bindings only depends on the runtime extension. Stub regeneration
-    // is its own `python-stubs` step (see comment at the stub_generator
-    // declaration above for context).
     py_bindings_step.dependOn(&install_py_module.step);
 
     // Also copy the built extension into the source package directory for local development
     const pkg_dir = b.pathJoin(&.{ b.build_root.path.?, "bindings/python/zignal" });
     const wf = b.addWriteFiles();
-    _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
+    _ = wf.addCopyFile(py_module.getEmittedBin(), b.pathJoin(&.{ pkg_dir, b.fmt("_zignal{s}", .{extension}) }));
 
     // Copy CLI tool to python package
     const cli_ext = if (os_tag == .windows) ".exe" else "";
-    const cli_name = b.fmt("zignal{s}", .{cli_ext});
-    _ = wf.addCopyFile(exe.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
+    _ = wf.addCopyFile(exe.getEmittedBin(), b.pathJoin(&.{ pkg_dir, b.fmt("zignal{s}", .{cli_ext}) }));
 
     py_bindings_step.dependOn(&wf.step);
 }
@@ -223,23 +219,14 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     // Check if we're exactly on a tagged release
     _ = runGit(b, &.{ "describe", "--tags", "--exact-match" }) catch {
         // Not on a tag, need to create a dev version
-        const git_hash_raw = runGit(b, &.{ "rev-parse", "--short", "HEAD" }) catch return zignal_version;
-        const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
-        // Get the commit count - either from base tag or total
-        const commit_count = blk: {
-            // Try to find the most recent base version tag (ending with .0)
-            const base_tag_raw = runGit(b, &.{ "describe", "--tags", "--match=*.0", "--abbrev=0" }) catch {
-                // No .0 tags found, fall back to total commit count
-                const git_count_raw = runGit(b, &.{ "rev-list", "--count", "HEAD" }) catch return zignal_version;
-                break :blk std.mem.trim(u8, git_count_raw, " \n\r");
-            };
-
-            const base_tag = std.mem.trim(u8, base_tag_raw, " \n\r");
-            // Count commits since the base tag
-            const count_cmd = b.fmt("{s}..HEAD", .{base_tag});
-            const git_count_raw = runGit(b, &.{ "rev-list", "--count", count_cmd }) catch return zignal_version;
-            break :blk std.mem.trim(u8, git_count_raw, " \n\r");
-        };
+        const commit_hash = runGit(b, &.{ "rev-parse", "--short", "HEAD" }) catch return zignal_version;
+        // Count commits since the most recent base tag (ending with .0), or total if none.
+        const base_tag = runGit(b, &.{ "describe", "--tags", "--match=*.0", "--abbrev=0" }) catch null;
+        const count_args: []const []const u8 = if (base_tag) |bt|
+            &.{ "rev-list", "--count", b.fmt("{s}..HEAD", .{bt}) }
+        else
+            &.{ "rev-list", "--count", "HEAD" };
+        const commit_count = runGit(b, count_args) catch return zignal_version;
 
         return .{
             .major = zignal_version.major,
@@ -253,15 +240,13 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     return zignal_version;
 }
 
-/// Helper function to run git commands and return stdout
+/// Helper function to run git commands and return trimmed stdout
 fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     var code: u8 = undefined;
-    const dir = b.pathFromRoot(".");
-    var full_args: std.ArrayList([]const u8) = .empty;
-    defer full_args.deinit(b.allocator);
-    try full_args.appendSlice(b.allocator, &.{ "git", "-C", dir });
-    try full_args.appendSlice(b.allocator, args);
-    return b.runAllowFail(full_args.items, &code, .ignore);
+    const prefix = [_][]const u8{ "git", "-C", b.pathFromRoot(".") };
+    const full_args = try std.mem.concat(b.allocator, []const u8, &.{ &prefix, args });
+    const stdout = try b.runAllowFail(full_args, &code, .ignore);
+    return std.mem.trim(u8, stdout, " \n\r");
 }
 
 /// Translate Python.h via the build system, import it as `c`, and wire up
@@ -271,17 +256,15 @@ fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
 fn linkPython(
     b: *Build,
     artifact: *Build.Step.Compile,
-    target: Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
     python_lib: []const u8,
 ) void {
     const root = artifact.root_module;
-    const os_tag = target.result.os.tag;
+    const os_tag = root.resolved_target.?.result.os.tag;
 
     const tc = b.addTranslateC(.{
         .root_source_file = b.path("bindings/python/src/c.h"),
-        .target = target,
-        .optimize = optimize,
+        .target = root.resolved_target.?,
+        .optimize = root.optimize.?,
     });
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
