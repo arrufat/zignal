@@ -54,7 +54,7 @@ jobs:
       shell: bash
       run: |
         cd bindings/python
-        uv run python scripts/run_zig.py python-stubs
+        uv run python setup.py --zig python-stubs
 
     - name: Build and Repair Wheel
       shell: bash

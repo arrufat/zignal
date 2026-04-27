@@ -154,6 +154,15 @@ def get_project_version():
 
 
 if __name__ == "__main__":
+    # `python setup.py --zig <args>` dispatches to `zig build <args>` with
+    # PYTHON_INCLUDE_DIR / PYTHON_LIBS_DIR / PYTHON_LIB_NAME populated. Used by
+    # CI and local dev to run `python-stubs` (or any zig step needing Python.h)
+    # without going through the wheel build, since build.zig has no pkg-config
+    # fallback on Windows.
+    if len(sys.argv) > 1 and sys.argv[1] == "--zig":
+        env = {**os.environ, **python_build_env()}
+        sys.exit(subprocess.call(["zig", "build", *sys.argv[2:]], cwd=PROJECT_ROOT, env=env))
+
     setup(
         version=get_project_version(),
         packages=find_packages(exclude=["tests", "tests.*"]),
