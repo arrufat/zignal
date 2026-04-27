@@ -52,7 +52,9 @@ jobs:
 
     - name: Generate Python type stubs
       shell: bash
-      run: zig build python-stubs
+      run: |
+        cd bindings/python
+        uv run python scripts/run_zig.py python-stubs
 
     - name: Build and Repair Wheel
       shell: bash

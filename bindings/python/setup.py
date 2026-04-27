@@ -26,6 +26,39 @@ from setuptools.dist import Distribution
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
+def python_build_env() -> dict[str, str]:
+    """Env vars that point zig's translate-c at the active Python's headers/libs.
+
+    Mirrors the discovery `linkPython` in build.zig expects — needed on Windows
+    (no pkg-config) and useful elsewhere when Python isn't on the system path.
+    """
+    env: dict[str, str] = {"PYTHON_INCLUDE_DIR": sysconfig.get_path("include")}
+
+    if sys.platform == "win32":
+        libs = Path(sysconfig.get_path("stdlib")).parent / "libs"
+        if libs.exists():
+            env["PYTHON_LIBS_DIR"] = str(libs)
+            env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}{sys.version_info.minor}.lib"
+        return env
+
+    if (libdir := sysconfig.get_config_var("LIBDIR")) and Path(libdir).exists():
+        env["PYTHON_LIBS_DIR"] = libdir
+        if sys.platform == "linux":
+            env["LD_LIBRARY_PATH"] = libdir
+
+    if sys.platform == "darwin":
+        env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    else:
+        libname = os.path.basename(
+            sysconfig.get_config_var("LDLIBRARY")
+            or sysconfig.get_config_var("LIBRARY")
+            or f"python{sys.version_info.major}.{sys.version_info.minor}"
+        )
+        env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
+
+    return env
+
+
 class ZigExtension(Extension):
     """Extension that will be built with Zig."""
 
@@ -43,32 +76,7 @@ class ZigBuildExt(build_ext):
         if not isinstance(ext, ZigExtension):
             return super().build_extension(ext)
 
-        env = {**os.environ, "PYTHON_INCLUDE_DIR": sysconfig.get_path("include")}
-
-        if sys.platform == "win32":
-            libs = Path(sysconfig.get_path("stdlib")).parent / "libs"
-            if libs.exists():
-                env.update(
-                    {
-                        "PYTHON_LIBS_DIR": str(libs),
-                        "PYTHON_LIB_NAME": f"python{sys.version_info.major}{sys.version_info.minor}.lib",
-                    }
-                )
-        else:
-            if (libdir := sysconfig.get_config_var("LIBDIR")) and Path(libdir).exists():
-                env["PYTHON_LIBS_DIR"] = libdir
-                if sys.platform == "linux":
-                    env["LD_LIBRARY_PATH"] = libdir
-
-            if sys.platform == "darwin":
-                env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
-            else:
-                libname = os.path.basename(
-                    sysconfig.get_config_var("LDLIBRARY")
-                    or sysconfig.get_config_var("LIBRARY")
-                    or f"python{sys.version_info.major}.{sys.version_info.minor}"
-                )
-                env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
+        env = {**os.environ, **python_build_env()}
 
         cmd = [
             "zig",
