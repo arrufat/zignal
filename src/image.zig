@@ -282,15 +282,12 @@ pub fn Image(comptime T: type) type {
         /// `.png`, `.jpg`/`.jpeg`, or `.bmp` (case-insensitive).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            if (std.ascii.endsWithIgnoreCase(file_path, ".png")) {
-                try png.save(T, io, allocator, self, file_path);
-            } else if (std.ascii.endsWithIgnoreCase(file_path, ".jpg") or std.ascii.endsWithIgnoreCase(file_path, ".jpeg")) {
-                try jpeg.save(T, io, allocator, self, file_path);
-            } else if (std.ascii.endsWithIgnoreCase(file_path, ".bmp")) {
-                try bmp.save(T, io, allocator, self, file_path);
-            } else {
-                return error.UnsupportedImageFormat;
-            }
+            const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            return switch (fmt) {
+                .png => png.save(T, io, allocator, self, file_path),
+                .jpeg => jpeg.save(T, io, allocator, self, file_path),
+                .bmp => bmp.save(T, io, allocator, self, file_path),
+            };
         }
 
         /// Returns the total number of pixels in the image (rows * cols).
