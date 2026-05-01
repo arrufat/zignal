@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const bmp = @import("../bmp.zig");
+const gif = @import("../gif.zig");
 const jpeg = @import("../jpeg.zig");
 const png = @import("../png.zig");
 
@@ -13,6 +14,7 @@ pub const ImageFormat = enum {
     png,
     jpeg,
     bmp,
+    gif,
 
     /// Detect image format from the first few bytes of data
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
@@ -34,6 +36,13 @@ pub const ImageFormat = enum {
         if (data.len >= 2) {
             if (std.mem.eql(u8, data[0..2], &bmp.signature)) {
                 return .bmp;
+            }
+        }
+
+        // GIF signature: "GIF87a" or "GIF89a" (6 bytes)
+        if (data.len >= 6 and std.mem.eql(u8, data[0..3], &gif.signature)) {
+            if (std.mem.eql(u8, data[3..6], "87a") or std.mem.eql(u8, data[3..6], "89a")) {
+                return .gif;
             }
         }
 
@@ -65,6 +74,7 @@ pub const ImageFormat = enum {
         if (matches(file_path, ".png")) return .png;
         if (matches(file_path, ".jpg") or matches(file_path, ".jpeg")) return .jpeg;
         if (matches(file_path, ".bmp")) return .bmp;
+        if (matches(file_path, ".gif")) return .gif;
         return null;
     }
 };

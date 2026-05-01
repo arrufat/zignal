@@ -6,6 +6,7 @@ const zignal = @import("zignal");
 const png = zignal.png;
 const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
+const gif = zignal.gif;
 
 const args = @import("args.zig");
 
@@ -94,6 +95,18 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                         }
                         if (info.hasAlpha()) {
                             try writer.print("Alpha:       yes\n", .{});
+                        }
+                    },
+                    .gif => {
+                        const info = gif.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+
+                        try writer.print("Format:      GIF\n", .{});
+                        try writer.print("Version:     {s}\n", .{@tagName(info.version)});
+                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try writer.print("Frames:      {d}\n", .{info.frame_count});
+                        try writer.print("Loop count:  {s}\n", .{if (info.loop_count == 0) "infinite" else "finite"});
+                        if (info.has_global_color_table) {
+                            try writer.print("Palette:     {d} entries (global)\n", .{info.global_color_table_size});
                         }
                     },
                 }
