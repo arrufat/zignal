@@ -5,6 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 const png = zignal.png;
 const jpeg = zignal.jpeg;
+const bmp = zignal.bmp;
 
 const args = @import("args.zig");
 
@@ -78,6 +79,22 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                         try writer.print("Channels:    {d}\n", .{info.num_components});
                         try writer.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
                         try writer.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
+                    },
+                    .bmp => {
+                        const info = bmp.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+
+                        try writer.print("Format:      BMP\n", .{});
+                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                        try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
+                        try writer.print("Compression: {s}\n", .{@tagName(info.compression)});
+                        try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_kind)});
+                        try writer.print("Top-down:    {s}\n", .{if (info.top_down) "yes" else "no"});
+                        if (info.palette_entries > 0) {
+                            try writer.print("Palette:     {d} entries\n", .{info.palette_entries});
+                        }
+                        if (info.hasAlpha()) {
+                            try writer.print("Alpha:       yes\n", .{});
+                        }
                     },
                 }
             } else {

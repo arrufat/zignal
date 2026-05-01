@@ -2,7 +2,7 @@
 //!
 //! This module provides a unified interface to image processing functionality.
 //! The main Image struct supports generic pixel types and provides operations for:
-//! - Loading and saving images (PNG, JPEG)
+//! - Loading and saving images (PNG, JPEG, BMP)
 //! - Terminal display with multiple formats (SGR, Braille, Sixel, Kitty)
 //! - Geometric transforms (resize, rotate, crop, flip)
 //! - Filters (blur, sharpen, edge detection)
@@ -18,6 +18,7 @@ const Rgba = @import("color.zig").Rgba(u8);
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
+const bmp = @import("bmp.zig");
 const jpeg = @import("jpeg.zig");
 const png = @import("png.zig");
 const metrics = @import("image/metrics.zig");
@@ -254,6 +255,7 @@ pub fn Image(comptime T: type) type {
             return switch (image_format) {
                 .png => png.load(T, io, allocator, file_path, .{}),
                 .jpeg => jpeg.load(T, io, allocator, file_path, .{}),
+                .bmp => bmp.load(T, io, allocator, file_path, .{}),
             };
         }
 
@@ -272,19 +274,20 @@ pub fn Image(comptime T: type) type {
             return switch (image_format) {
                 .png => png.loadFromBytes(T, allocator, data, .{}),
                 .jpeg => jpeg.loadFromBytes(T, allocator, data, .{}),
+                .bmp => bmp.loadFromBytes(T, allocator, data, .{}),
             };
         }
 
-        /// Saves the image to a file in PNG format.
-        /// Returns an error if the file path doesn't end in `.png` or `.PNG`.
+        /// Saves the image to a file. Format is selected from the file extension:
+        /// `.png`, `.jpg`/`.jpeg`, or `.bmp` (case-insensitive).
+        /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            if (std.ascii.endsWithIgnoreCase(file_path, ".png")) {
-                try png.save(T, io, allocator, self, file_path);
-            } else if (std.ascii.endsWithIgnoreCase(file_path, ".jpg") or std.ascii.endsWithIgnoreCase(file_path, ".jpeg")) {
-                try jpeg.save(T, io, allocator, self, file_path);
-            } else {
-                return error.UnsupportedImageFormat;
-            }
+            const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            return switch (fmt) {
+                .png => png.save(T, io, allocator, self, file_path),
+                .jpeg => jpeg.save(T, io, allocator, self, file_path),
+                .bmp => bmp.save(T, io, allocator, self, file_path),
+            };
         }
 
         /// Returns the total number of pixels in the image (rows * cols).

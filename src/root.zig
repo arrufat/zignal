@@ -81,6 +81,7 @@ pub const kitty = @import("kitty.zig");
 
 pub const png = @import("png.zig");
 pub const jpeg = @import("jpeg.zig");
+pub const bmp = @import("bmp.zig");
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
