@@ -6,9 +6,9 @@
 //! clear_code + 1` ends the stream.
 //!
 //! The decoder is chunked: callers feed sub-block payloads via `decodeChunk`
-//! and the decoder maintains its bit accumulator across calls.
-//!
-//! Step 7 adds the encoder.
+//! and the decoder maintains its bit accumulator across calls. The encoder
+//! consumes a flat slice of palette indices and emits raw LZW bytes; the GIF
+//! caller wraps those in 0xFF-max sub-blocks.
 
 const std = @import("std");
 const expect = std.testing.expect;

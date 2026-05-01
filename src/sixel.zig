@@ -511,10 +511,12 @@ const PaletteLutCache = struct {
     var fixed_web216: ?ColorLookupTable = null;
 
     fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
-        while (lock_val.swap(1, .acquire) != 0) {
-            std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
+        if (!builtin.single_threaded) {
+            while (lock_val.swap(1, .acquire) != 0) {
+                std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
+            }
         }
-        defer lock_val.store(0, .release);
+        defer if (!builtin.single_threaded) lock_val.store(0, .release);
 
         if (cache_field.*) |cached| {
             return cached;

@@ -1,13 +1,16 @@
-//! Pure Zig GIF decoder and (eventually) encoder.
+//! Pure Zig GIF codec.
 //!
-//! Step 3 deliverable: signature, version, decode limits, header, and a
-//! `getInfo` that walks the block stream to count frames and extract the
-//! NETSCAPE2.0 loop count without decoding LZW data.
+//! Public surface mirrors the other codecs in this repo (`png`, `jpeg`, `bmp`):
+//! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`), `NativeImage`,
+//! `getInfo`, `decode`, `toNativeImage`, `loadFromBytes`, `load`, `EncodeOptions`,
+//! `encode`, `save`. Multi-frame access is via `loadAnimated` / `loadAnimatedFromBytes`,
+//! which return an `AnimatedImage(T)` of fully-composed frames (disposal, transparency,
+//! and interlace are absorbed inside the codec).
 //!
-//! Subsequent steps add LZW decoding (Step 4), single-frame decode (Step 5),
-//! multi-frame decode + disposal composition (Step 6), and encoding (Steps 7–9).
+//! Encoder is single-frame for v1; animated encoding lands later.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const expect = std.testing.expect;
@@ -16,10 +19,12 @@ const expectEqual = std.testing.expectEqual;
 
 const Image = @import("image.zig").Image;
 const AnimatedImage = @import("image.zig").AnimatedImage;
+const convertColor = @import("color.zig").convertColor;
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
+const Rectangle = @import("geometry.zig").Rectangle;
 
-pub const lzw = @import("gif/lzw.zig");
+const lzw = @import("gif/lzw.zig");
 
 test {
     _ = lzw;
@@ -89,6 +94,20 @@ const ext_label_comment: u8 = 0xFE;
 const ext_label_plain_text: u8 = 0x01;
 const ext_label_application: u8 = 0xFF;
 
+// LSD packed-byte bit masks.
+const lsd_flag_global_color_table: u8 = 0x80;
+const lsd_color_resolution_default: u8 = 0x70; // 8 bits per channel
+const lsd_size_log_mask: u8 = 0x07;
+
+// Image Descriptor packed-byte bit masks.
+const id_flag_local_color_table: u8 = 0x80;
+const id_flag_interlace: u8 = 0x40;
+const id_size_log_mask: u8 = 0x07;
+
+// Graphic Control Extension packed-byte fields.
+const gce_disposal_mask: u8 = 0x07;
+const gce_flag_transparent: u8 = 0x01;
+
 const netscape_id_auth = "NETSCAPE2.0".*;
 
 // ---------------------------------------------------------------------------
@@ -124,8 +143,8 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         return error.ImageTooLarge;
     }
 
-    const has_gct = (lsd_packed & 0x80) != 0;
-    const gct_size_log: u3 = @intCast(lsd_packed & 0x07);
+    const has_gct = (lsd_packed & lsd_flag_global_color_table) != 0;
+    const gct_size_log: u3 = @intCast(lsd_packed & lsd_size_log_mask);
     const gct_size: u16 = if (has_gct) (@as(u16, 2) << gct_size_log) else 0;
 
     if (has_gct) {
@@ -136,19 +155,16 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     var frame_count: u32 = 0;
     var loop_count: u16 = 0;
 
-    // Walk blocks.
     while (true) {
         const introducer = try reader.takeByte();
         switch (introducer) {
             block_trailer => break,
             block_image_descriptor => {
-                // Image Descriptor: 9 bytes after the introducer (left, top, width,
-                // height, packed). We only care about the packed byte for LCT info.
                 _ = try reader.discard(.limited(8)); // left, top, width, height
                 const img_packed = try reader.takeByte();
-                const has_lct = (img_packed & 0x80) != 0;
+                const has_lct = (img_packed & id_flag_local_color_table) != 0;
                 if (has_lct) {
-                    const lct_size_log: u3 = @intCast(img_packed & 0x07);
+                    const lct_size_log: u3 = @intCast(img_packed & id_size_log_mask);
                     const lct_entries: u32 = @as(u32, 2) << lct_size_log;
                     _ = try reader.discard(.limited(lct_entries * 3));
                 }
@@ -257,24 +273,23 @@ pub const GraphicControlExtension = struct {
 };
 
 /// Single decoded frame: position + dimensions + per-pixel palette indices
-/// in display order (de-interlaced if the source was interlaced).
+/// in display order (de-interlaced if the source was interlaced). Each frame
+/// owns its palette (a copy of the LCT, or of the global table).
 pub const FrameRecord = struct {
     left: u16,
     top: u16,
     width: u16,
     height: u16,
-    /// Palette in effect for this frame. Either a borrow of the global table
-    /// or an owned local color table; `palette_owned` discriminates.
-    palette: []const Rgb,
-    palette_owned: bool,
+    /// Palette in effect for this frame. Owned.
+    palette: []Rgb,
     /// `width * height` palette indices in display order. Owned.
     indices: []u8,
     /// Per-frame timing/transparency from the preceding GCE, if any.
     gce: ?GraphicControlExtension,
 };
 
-/// Parsed GIF state. Frames hold raw decoded indices — `loadAnimated`
-/// (Step 6) composes them into fully-rendered images via disposal logic.
+/// Parsed GIF state. Frames hold raw decoded indices —
+/// `loadAnimated`/`loadAnimatedFromBytes` compose them into fully-rendered images.
 pub const GifState = struct {
     header: Header,
     /// Owned. Null if the file had no Global Color Table.
@@ -285,7 +300,7 @@ pub const GifState = struct {
     pub fn deinit(self: *GifState, gpa: Allocator) void {
         if (self.global_palette) |p| gpa.free(p);
         for (self.frames) |*f| {
-            if (f.palette_owned) gpa.free(@constCast(f.palette));
+            gpa.free(f.palette);
             gpa.free(f.indices);
         }
         gpa.free(self.frames);
@@ -336,7 +351,7 @@ const Cursor = struct {
 
 /// Parses a GIF byte buffer into a `GifState`. The state's frames hold raw
 /// palette indices; composition into Images happens via `loadFromBytes`
-/// (single-frame) or `loadAnimated*` (multi-frame, Step 6).
+/// (single-frame) or `loadAnimated*` (multi-frame).
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
     if (exceeds(usize, limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
 
@@ -367,8 +382,8 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
         return error.ImageTooLarge;
     }
 
-    const has_gct = (lsd_packed & 0x80) != 0;
-    const gct_size_log: u3 = @intCast(lsd_packed & 0x07);
+    const has_gct = (lsd_packed & lsd_flag_global_color_table) != 0;
+    const gct_size_log: u3 = @intCast(lsd_packed & lsd_size_log_mask);
     const gct_size: u16 = if (has_gct) (@as(u16, 2) << gct_size_log) else 0;
 
     var global_palette: ?[]Rgb = null;
@@ -386,7 +401,7 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     var frames: std.ArrayList(FrameRecord) = .empty;
     errdefer {
         for (frames.items) |*f| {
-            if (f.palette_owned) gpa.free(@constCast(f.palette));
+            gpa.free(f.palette);
             gpa.free(f.indices);
         }
         frames.deinit(gpa);
@@ -453,8 +468,8 @@ fn parseGce(c: *Cursor) !GraphicControlExtension {
     const terminator = try c.takeByte();
     if (terminator != 0) return error.InvalidGraphicControlExtension;
     return .{
-        .disposal = @enumFromInt((packed_byte >> 2) & 0x07),
-        .has_transparent = (packed_byte & 0x01) != 0,
+        .disposal = @enumFromInt((packed_byte >> 2) & gce_disposal_mask),
+        .has_transparent = (packed_byte & gce_flag_transparent) != 0,
         .delay_cs = delay,
         .transparent_index = transparent,
     };
@@ -520,29 +535,28 @@ fn parseImageBlock(
     total_pixels.* +|= num_pixels;
     if (exceeds(u64, limits.max_total_pixels, total_pixels.*)) return error.ImageTooLarge;
 
-    const has_lct = (img_packed & 0x80) != 0;
-    const interlaced = (img_packed & 0x40) != 0;
+    const has_lct = (img_packed & id_flag_local_color_table) != 0;
+    const interlaced = (img_packed & id_flag_interlace) != 0;
 
-    var palette: []const Rgb = &.{};
-    var palette_owned = false;
-    errdefer if (palette_owned) gpa.free(@constCast(palette));
-
-    if (has_lct) {
-        const lct_size_log: u3 = @intCast(img_packed & 0x07);
-        const lct_entries: u16 = @as(u16, 2) << lct_size_log;
-        const lct = try gpa.alloc(Rgb, lct_entries);
-        palette_owned = true;
-        const raw = try c.takeSlice(@as(usize, lct_entries) * 3);
-        var i: usize = 0;
-        while (i < lct_entries) : (i += 1) {
-            lct[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
+    const palette: []Rgb = blk: {
+        if (has_lct) {
+            const lct_size_log: u3 = @intCast(img_packed & id_size_log_mask);
+            const lct_entries: u16 = @as(u16, 2) << lct_size_log;
+            const lct = try gpa.alloc(Rgb, lct_entries);
+            errdefer gpa.free(lct);
+            const raw = try c.takeSlice(@as(usize, lct_entries) * 3);
+            var i: usize = 0;
+            while (i < lct_entries) : (i += 1) {
+                lct[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
+            }
+            break :blk lct;
         }
-        palette = lct;
-    } else if (global_palette) |g| {
-        palette = g;
-    } else {
-        return error.MissingGlobalColorTable;
-    }
+        const gp = global_palette orelse return error.MissingGlobalColorTable;
+        const copy = try gpa.alloc(Rgb, gp.len);
+        @memcpy(copy, gp);
+        break :blk copy;
+    };
+    errdefer gpa.free(palette);
 
     const min_code_size_byte = try c.takeByte();
     if (min_code_size_byte < 2 or min_code_size_byte > 8) return error.InvalidLzwCode;
@@ -595,67 +609,42 @@ fn parseImageBlock(
         .width = width,
         .height = height,
         .palette = palette,
-        .palette_owned = palette_owned,
         .indices = indices_out,
         .gce = pending_gce,
     };
 }
 
 // ---------------------------------------------------------------------------
-// Single-frame composition (Step 5)
+// Single-frame composition
 // ---------------------------------------------------------------------------
 
-/// Composes the first frame onto a screen-sized canvas filled with palette[bg]
-/// (or transparent if the frame has a transparent index and the requested type
-/// has alpha). Returns an Rgb image; conversion to T is done by `loadFromBytes`.
-fn composeFirstFrameRgb(allocator: Allocator, state: GifState) !Image(Rgb) {
+/// Composes frame 0 onto a screen-sized canvas, returning an `Image(T)`.
+/// For `T == Rgba` transparent indices preserve `alpha=0`; for any other `T`
+/// the canvas starts at `palette[bg]` so transparent pixels show the GIF's
+/// declared background color.
+fn composeFirstFrame(comptime T: type, allocator: Allocator, state: GifState) !Image(T) {
     if (state.frames.len == 0) return error.MissingPixelData;
     const frame = state.frames[0];
 
-    // Background fill: palette[bg] if available, else opaque black.
-    const bg_color: Rgb = blk: {
+    const bg: Rgba = if (T == Rgba) .{ .r = 0, .g = 0, .b = 0, .a = 0 } else blk: {
         if (state.global_palette) |gp| {
             if (state.header.background_color_index < gp.len) {
-                break :blk gp[state.header.background_color_index];
+                const c = gp[state.header.background_color_index];
+                break :blk .{ .r = c.r, .g = c.g, .b = c.b, .a = 255 };
             }
         }
-        break :blk .{ .r = 0, .g = 0, .b = 0 };
+        break :blk .{ .r = 0, .g = 0, .b = 0, .a = 255 };
     };
 
-    var img = try Image(Rgb).init(allocator, state.header.height, state.header.width);
-    errdefer img.deinit(allocator);
+    var canvas = try Image(Rgba).init(allocator, state.header.height, state.header.width);
+    errdefer canvas.deinit(allocator);
+    @memset(canvas.data, bg);
 
-    // Initialize canvas to background.
-    @memset(img.data, bg_color);
+    try compositeFrameOntoCanvas(&canvas, frame);
 
-    // Composite frame pixels.
-    const has_trans = if (frame.gce) |g| g.has_transparent else false;
-    const trans_idx = if (frame.gce) |g| g.transparent_index else 0;
-    const palette = frame.palette;
-
-    const frame_w: usize = @intCast(frame.width);
-    const frame_h: usize = @intCast(frame.height);
-    const left: usize = @intCast(frame.left);
-    const top: usize = @intCast(frame.top);
-
-    var fy: usize = 0;
-    while (fy < frame_h) : (fy += 1) {
-        const dst_y = top + fy;
-        if (dst_y >= img.rows) break;
-        const dst_row_off = dst_y * img.stride;
-        const src_row_off = fy * frame_w;
-        var fx: usize = 0;
-        while (fx < frame_w) : (fx += 1) {
-            const dst_x = left + fx;
-            if (dst_x >= img.cols) break;
-            const idx = frame.indices[src_row_off + fx];
-            if (has_trans and idx == trans_idx) continue;
-            if (idx >= palette.len) return error.InvalidPaletteIndex;
-            img.data[dst_row_off + dst_x] = palette[idx];
-        }
-    }
-
-    return img;
+    if (T == Rgba) return canvas;
+    defer canvas.deinit(allocator);
+    return canvas.convert(T, allocator);
 }
 
 /// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
@@ -671,38 +660,22 @@ pub const NativeImage = union(enum) {
 pub fn toNativeImage(allocator: Allocator, state: GifState) !NativeImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
-
     if (has_transparency) {
-        var anim = try composeAnimated(Rgba, allocator, state);
-        defer {
-            // Free all frames except 0 (we're stealing 0).
-            for (anim.frames[1..]) |*f| f.deinit(allocator);
-            allocator.free(anim.frames);
-            allocator.free(anim.delays_cs);
-        }
-        const frame0 = anim.frames[0];
-        return .{ .rgba = frame0 };
+        return .{ .rgba = try composeFirstFrame(Rgba, allocator, state) };
     }
-
-    const rgb = try composeFirstFrameRgb(allocator, state);
-    return .{ .rgb = rgb };
+    return .{ .rgb = try composeFirstFrame(Rgb, allocator, state) };
 }
 
 /// Loads a GIF from in-memory bytes. Returns frame 0 only — see
-/// `loadAnimatedFromBytes` (Step 6) for full multi-frame access.
+/// `loadAnimatedFromBytes` for full multi-frame access.
 pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit(allocator);
-
-    var rgb_image = try composeFirstFrameRgb(allocator, state);
-
-    if (T == Rgb) return rgb_image;
-    defer rgb_image.deinit(allocator);
-    return rgb_image.convert(T, allocator);
+    return composeFirstFrame(T, allocator, state);
 }
 
 // ---------------------------------------------------------------------------
-// Multi-frame composition (Step 6)
+// Multi-frame composition
 // ---------------------------------------------------------------------------
 
 /// Composes all frames into an `AnimatedImage(T)`. Each output frame is the
@@ -711,16 +684,23 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
 fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !AnimatedImage(T) {
     const screen_w: u32 = state.header.width;
     const screen_h: u32 = state.header.height;
-    const total_pixels: usize = @as(usize, screen_w) * @as(usize, screen_h);
 
-    // Persistent canvas in Rgba — alpha tracks transparency for `restore_to_background`.
     var canvas = try Image(Rgba).init(allocator, screen_h, screen_w);
     defer canvas.deinit(allocator);
     @memset(canvas.data, .{ .r = 0, .g = 0, .b = 0, .a = 0 });
 
-    // Snapshot used by `restore_to_previous` disposal.
-    const snapshot = try allocator.alloc(Rgba, total_pixels);
-    defer allocator.free(snapshot);
+    // `restore_to_previous` snapshot — only allocated if some frame needs it.
+    const needs_snapshot = blk: {
+        for (state.frames) |f| {
+            if (f.gce) |g| if (g.disposal == .restore_to_previous) break :blk true;
+        }
+        break :blk false;
+    };
+    const snapshot: ?[]Rgba = if (needs_snapshot)
+        try allocator.alloc(Rgba, @as(usize, screen_w) * @as(usize, screen_h))
+    else
+        null;
+    defer if (snapshot) |s| allocator.free(s);
 
     const frames_out = try allocator.alloc(Image(T), state.frames.len);
     var frames_init: usize = 0;
@@ -733,30 +713,23 @@ fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !Ani
     errdefer allocator.free(delays_out);
 
     var prev_disposal: DisposalMethod = .unspecified;
-    var prev_left: u16 = 0;
-    var prev_top: u16 = 0;
-    var prev_w: u16 = 0;
-    var prev_h: u16 = 0;
+    var prev_rect: Rectangle(u32) = .init(0, 0, 0, 0);
 
     for (state.frames, 0..) |frame, i| {
-        // Apply previous frame's disposal.
         switch (prev_disposal) {
-            .restore_to_background => fillCanvasRect(&canvas, prev_left, prev_top, prev_w, prev_h, .{ .r = 0, .g = 0, .b = 0, .a = 0 }),
-            .restore_to_previous => @memcpy(canvas.data, snapshot),
+            .restore_to_background => canvas.view(prev_rect).fill(.{ .r = 0, .g = 0, .b = 0, .a = 0 }),
+            .restore_to_previous => if (snapshot) |s| @memcpy(canvas.data, s),
             else => {},
         }
 
-        // If this frame requests rtp, snapshot the canvas before drawing.
         if (frame.gce) |g| {
             if (g.disposal == .restore_to_previous) {
-                @memcpy(snapshot, canvas.data);
+                @memcpy(snapshot.?, canvas.data);
             }
         }
 
-        // Composite frame onto canvas.
         try compositeFrameOntoCanvas(&canvas, frame);
 
-        // Snapshot canvas → frame i (Image(Rgba)), then convert to T.
         var rgba_frame = try Image(Rgba).init(allocator, screen_h, screen_w);
         @memcpy(rgba_frame.data, canvas.data);
 
@@ -769,12 +742,8 @@ fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !Ani
         frames_init = i + 1;
 
         delays_out[i] = if (frame.gce) |g| g.delay_cs else 0;
-
         prev_disposal = if (frame.gce) |g| g.disposal else .unspecified;
-        prev_left = frame.left;
-        prev_top = frame.top;
-        prev_w = frame.width;
-        prev_h = frame.height;
+        prev_rect = .init(frame.left, frame.top, frame.left +| frame.width, frame.top +| frame.height);
     }
 
     return .{
@@ -789,43 +758,28 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
     const trans_idx = if (frame.gce) |g| g.transparent_index else 0;
     const palette = frame.palette;
 
-    const fw: usize = @intCast(frame.width);
-    const fh: usize = @intCast(frame.height);
     const left: usize = @intCast(frame.left);
     const top: usize = @intCast(frame.top);
+    if (left >= canvas.cols or top >= canvas.rows) return;
+
+    // Clip the frame rect to the canvas once instead of per-pixel.
+    const fw: usize = @intCast(frame.width);
+    const fh: usize = @intCast(frame.height);
+    const clip_w = @min(fw, canvas.cols - left);
+    const clip_h = @min(fh, canvas.rows - top);
 
     var fy: usize = 0;
-    while (fy < fh) : (fy += 1) {
-        const dst_y = top + fy;
-        if (dst_y >= canvas.rows) break;
-        const dst_off = dst_y * canvas.stride;
+    while (fy < clip_h) : (fy += 1) {
+        const dst_off = (top + fy) * canvas.stride + left;
         const src_off = fy * fw;
         var fx: usize = 0;
-        while (fx < fw) : (fx += 1) {
-            const dst_x = left + fx;
-            if (dst_x >= canvas.cols) break;
+        while (fx < clip_w) : (fx += 1) {
             const idx = frame.indices[src_off + fx];
             if (has_trans and idx == trans_idx) continue;
             if (idx >= palette.len) return error.InvalidPaletteIndex;
             const c = palette[idx];
-            canvas.data[dst_off + dst_x] = .{ .r = c.r, .g = c.g, .b = c.b, .a = 255 };
+            canvas.data[dst_off + fx] = .{ .r = c.r, .g = c.g, .b = c.b, .a = 255 };
         }
-    }
-}
-
-fn fillCanvasRect(canvas: *Image(Rgba), left: u16, top: u16, w: u16, h: u16, value: Rgba) void {
-    const rect_left: usize = @intCast(left);
-    const rect_top: usize = @intCast(top);
-    const rect_w: usize = @intCast(w);
-    const rect_h: usize = @intCast(h);
-
-    var ry: usize = 0;
-    while (ry < rect_h) : (ry += 1) {
-        const dy = rect_top + ry;
-        if (dy >= canvas.rows) break;
-        const off = dy * canvas.stride + rect_left;
-        const span = @min(rect_w, canvas.cols - rect_left);
-        @memset(canvas.data[off .. off + span], value);
     }
 }
 
@@ -838,27 +792,31 @@ pub fn loadAnimatedFromBytes(comptime T: type, allocator: Allocator, data: []con
     return composeAnimated(T, allocator, state);
 }
 
+fn readGifFile(io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) ![]u8 {
+    const read_limit = if (limits.max_gif_bytes == 0) std.math.maxInt(usize) else limits.max_gif_bytes;
+    return Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+}
+
 /// Loads all frames from a GIF file into an `AnimatedImage(T)`.
 pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    const read_limit = if (limits.max_gif_bytes == 0) std.math.maxInt(usize) else limits.max_gif_bytes;
-    const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const data = try readGifFile(io, allocator, file_path, limits);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, allocator, data, limits);
 }
 
 /// Loads a GIF from a file path. Returns frame 0 only.
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const read_limit = if (limits.max_gif_bytes == 0) std.math.maxInt(usize) else limits.max_gif_bytes;
-    const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const data = try readGifFile(io, allocator, file_path, limits);
     defer allocator.free(data);
     return loadFromBytes(T, allocator, data, limits);
 }
 
 // ---------------------------------------------------------------------------
-// Single-frame encode (Step 8)
+// Single-frame encode
 // ---------------------------------------------------------------------------
 
 const quantize = @import("image/quantize.zig");
+const dither = @import("image/dither.zig");
 
 /// Single-frame GIF encode options.
 pub const EncodeOptions = struct {
@@ -869,17 +827,8 @@ pub const EncodeOptions = struct {
     max_colors: u16 = 256,
     /// Apply Floyd–Steinberg dithering before mapping to palette.
     dither: bool = false,
-    /// Per-frame delay in centiseconds. Currently emitted via GCE only when
-    /// non-zero; reserved for forward compatibility with animated encode.
-    delay_cs: u16 = 0,
 
     pub const default: EncodeOptions = .{};
-};
-
-const linear_gray_palette: [256]Rgb = blk: {
-    var pal: [256]Rgb = undefined;
-    for (&pal, 0..) |*p, i| p.* = .{ .r = @intCast(i), .g = @intCast(i), .b = @intCast(i) };
-    break :blk pal;
 };
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
@@ -905,7 +854,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
         try mapImageToPalette(T, allocator, image, palette, indices, options.dither);
     } else if (T == u8) {
         // u8 → 256-entry linear gray palette; indices are the pixel values.
-        @memcpy(&palette_buf, &linear_gray_palette);
+        @memcpy(&palette_buf, &quantize.linear_gray_256);
         palette = palette_buf[0..256];
         // Image(u8) might have non-contiguous stride; copy row by row.
         if (image.isContiguous()) {
@@ -954,8 +903,8 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     try writeU16Le(&out, allocator, width);
     try writeU16Le(&out, allocator, height);
     var lsd_packed: u8 = 0;
-    lsd_packed |= 0x80; // global color table flag
-    lsd_packed |= 0x70; // color resolution = 7 (8 bits per channel)
+    lsd_packed |= lsd_flag_global_color_table;
+    lsd_packed |= lsd_color_resolution_default;
     lsd_packed |= @as(u8, declared_size_log);
     try out.append(allocator, lsd_packed);
     try out.append(allocator, 0); // background color index
@@ -966,19 +915,8 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     var pad_i: usize = palette.len;
     while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(allocator, &.{ 0, 0, 0 });
 
-    // Optional GCE for delay (none for v1 single-frame; reserved for animated encode).
-    if (options.delay_cs != 0) {
-        try out.append(allocator, 0x21);
-        try out.append(allocator, 0xF9);
-        try out.append(allocator, 0x04);
-        try out.append(allocator, 0x00); // packed: no transparency, disposal=0
-        try writeU16Le(&out, allocator, options.delay_cs);
-        try out.append(allocator, 0); // transparent index
-        try out.append(allocator, 0); // sub-block terminator
-    }
-
     // Image Descriptor.
-    try out.append(allocator, 0x2C);
+    try out.append(allocator, block_image_descriptor);
     try writeU16Le(&out, allocator, 0); // left
     try writeU16Le(&out, allocator, 0); // top
     try writeU16Le(&out, allocator, width);
@@ -988,7 +926,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     // LZW data.
     try out.append(allocator, @as(u8, min_code_size));
 
-    var encoder = try @import("gif/lzw.zig").Encoder.init(allocator, min_code_size);
+    var encoder = try lzw.Encoder.init(allocator, min_code_size);
     defer encoder.deinit(allocator);
 
     var lzw_bytes: std.ArrayList(u8) = .empty;
@@ -1007,7 +945,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     try out.append(allocator, 0); // sub-block terminator
 
     // Trailer.
-    try out.append(allocator, 0x3B);
+    try out.append(allocator, block_trailer);
 
     return out.toOwnedSlice(allocator);
 }
@@ -1018,7 +956,8 @@ inline fn writeU16Le(out: *std.ArrayList(u8), allocator: Allocator, v: u16) !voi
 }
 
 /// Maps each pixel to the nearest palette index, with optional Floyd–Steinberg
-/// dithering. For `T == Rgb` and contiguous images the slow path is avoided.
+/// dithering. The dither path round-trips through `Image(Rgb)`; the no-dither
+/// path converts per-pixel.
 fn mapImageToPalette(
     comptime T: type,
     allocator: Allocator,
@@ -1030,11 +969,8 @@ fn mapImageToPalette(
     const lut = quantize.ColorLookupTable.init(palette);
 
     if (use_dither) {
-        // Convert to working Rgb buffer, dither in place, capture indices.
         var work = try image.convert(Rgb, allocator);
         defer work.deinit(allocator);
-        const dither = @import("image/dither.zig");
-        // Apply Floyd–Steinberg into the working image, then look up indices.
         dither.applyFloydSteinberg(work, palette, lut);
         var i: usize = 0;
         while (i < image.rows) : (i += 1) {
@@ -1048,14 +984,13 @@ fn mapImageToPalette(
         return;
     }
 
-    // No dither: convert each pixel to Rgb and look up.
     var i: usize = 0;
     while (i < image.rows) : (i += 1) {
         const dst_off = i * image.cols;
         var j: usize = 0;
         while (j < image.cols) : (j += 1) {
             const px = image.at(i, j).*;
-            const rgb = @import("color.zig").convertColor(Rgb, px);
+            const rgb = convertColor(Rgb, px);
             indices[dst_off + j] = lut.lookup(rgb);
         }
     }
@@ -1105,8 +1040,8 @@ const TestBuilder = struct {
         try self.appendU16(gpa, opts.height);
         var packed_byte: u8 = 0;
         if (opts.gct_size_log) |s| {
-            packed_byte |= 0x80; // global color table flag
-            packed_byte |= 0x70; // color resolution = 7 (8 bits per channel)
+            packed_byte |= lsd_flag_global_color_table;
+            packed_byte |= lsd_color_resolution_default;
             packed_byte |= s;
         }
         try self.appendByte(gpa, packed_byte);
@@ -1166,7 +1101,7 @@ const TestBuilder = struct {
         var s: u3 = 0;
         while ((@as(u16, 2) << s) < gct.len and s < 7) : (s += 1) {}
         const declared: u16 = @as(u16, 2) << s;
-        const packed_byte: u8 = 0x80 | 0x70 | @as(u8, s);
+        const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
         try self.appendByte(gpa, packed_byte);
         try self.appendByte(gpa, 0); // bg
         try self.appendByte(gpa, 0); // aspect
@@ -1175,11 +1110,22 @@ const TestBuilder = struct {
         try self.list.appendNTimes(gpa, 0, pad * 3);
     }
 
-    fn appendGce(self: *TestBuilder, gpa: Allocator) !void {
+    const GceOpts = struct {
+        disposal: u3 = 0,
+        delay_cs: u16 = 0,
+        has_transparent: bool = false,
+        transparent_index: u8 = 0,
+    };
+
+    fn appendGce(self: *TestBuilder, gpa: Allocator, opts: GceOpts) !void {
         try self.appendByte(gpa, block_extension_introducer);
         try self.appendByte(gpa, ext_label_graphic_control);
         try self.appendByte(gpa, 0x04); // block size (always 4)
-        try self.appendBytes(gpa, &.{ 0x00, 0x00, 0x00, 0x00 }); // packed, delay_lo, delay_hi, transparent_index
+        const trans_flag: u8 = if (opts.has_transparent) gce_flag_transparent else 0;
+        const packed_byte: u8 = (@as(u8, opts.disposal) << 2) | trans_flag;
+        try self.appendByte(gpa, packed_byte);
+        try self.appendU16(gpa, opts.delay_cs);
+        try self.appendByte(gpa, opts.transparent_index);
         try self.appendByte(gpa, 0); // sub-block terminator
     }
 
@@ -1254,7 +1200,7 @@ test "getInfo — GIF89a with 1 frame and GCE" {
     defer b.deinit(gpa);
 
     try b.appendHeader(gpa, .{ .gct_size_log = 1 }); // 4-entry GCT
-    try b.appendGce(gpa);
+    try b.appendGce(gpa, .{});
     try b.appendImageDescriptor(gpa, .{});
     try b.appendTrailer(gpa);
 
@@ -1341,7 +1287,7 @@ test "getInfo — frame count exceeds limit" {
 }
 
 // ---------------------------------------------------------------------------
-// Decode tests (Step 5)
+// Decode tests
 // ---------------------------------------------------------------------------
 
 const test_palette_4 = [_]Rgb{
@@ -1436,21 +1382,8 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-frame tests (Step 6)
+// Multi-frame tests
 // ---------------------------------------------------------------------------
-
-fn appendGceWithDelay(b: *TestBuilder, gpa: Allocator, disposal: u3, delay_cs: u16, has_trans: bool, trans_idx: u8) !void {
-    try b.appendByte(gpa, block_extension_introducer);
-    try b.appendByte(gpa, ext_label_graphic_control);
-    try b.appendByte(gpa, 0x04);
-    const trans_flag: u8 = if (has_trans) 0x01 else 0x00;
-    const packed_byte: u8 = (@as(u8, disposal) << 2) | trans_flag;
-    try b.appendByte(gpa, packed_byte);
-    try b.appendByte(gpa, @intCast(delay_cs & 0xFF));
-    try b.appendByte(gpa, @intCast((delay_cs >> 8) & 0xFF));
-    try b.appendByte(gpa, trans_idx);
-    try b.appendByte(gpa, 0); // sub-block terminator
-}
 
 test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     const gpa = std.testing.allocator;
@@ -1460,11 +1393,11 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4);
 
     // Frame 0: red (idx 1), delay 5cs.
-    try appendGceWithDelay(&b, gpa, 1, 5, false, 0);
+    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 5 });
     try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
 
     // Frame 1: green (idx 2), delay 10cs.
-    try appendGceWithDelay(&b, gpa, 1, 10, false, 0);
+    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 10 });
     // LZW for indices [2]: Clear=4, 2, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100, 3..5 = 010, 6..8 = 101
     //   byte 0 = 0,0,1, 0,1,0, 1,0 = 0b01010100 = 0x54
@@ -1497,11 +1430,11 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
     //   bits: 100 001 001 101
     //     byte 0 (bits 0..7) = 0,0,1,1,0,0,1,0 = 0x4C
     //     byte 1 (bits 8..11) = 0,1,0,1 + pad = 0,1,0,1,0,0,0,0 = 0x0A
-    try appendGceWithDelay(&b, gpa, 2, 0, false, 0);
+    try b.appendGce(gpa, .{ .disposal = 2 });
     try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
 
     // Frame 1: 1x1 green at (0,0). LZW [2] = [0x54, 0x01].
-    try appendGceWithDelay(&b, gpa, 0, 0, false, 0);
+    try b.appendGce(gpa, .{});
     try b.appendImageWithLzw(gpa, .{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
     try b.appendTrailer(gpa);
@@ -1526,7 +1459,7 @@ test "loadAnimated — transparent index → alpha=0 on Rgba" {
     // 2x1 frame, indices [0, 1]. Mark idx 0 transparent.
     try b.appendHeaderWithGct(gpa, 2, 1, &test_palette_4);
 
-    try appendGceWithDelay(&b, gpa, 1, 0, true, 0);
+    try b.appendGce(gpa, .{ .disposal = 1, .has_transparent = true });
     // LZW for indices [0, 1]: Clear=4, 0, 1, EOI=5 (all 3 bits).
     //   bits: 100 000 001 101
     //     byte 0 = 0,0,1,0,0,0,1,0 = 0x44
@@ -1545,7 +1478,7 @@ test "loadAnimated — transparent index → alpha=0 on Rgba" {
 }
 
 // ---------------------------------------------------------------------------
-// Encode tests (Step 8)
+// Encode tests
 // ---------------------------------------------------------------------------
 
 test "encode — caller-supplied palette, exact round-trip" {

@@ -7,6 +7,7 @@
 //! - Fixed palette generators: 6x7x6 (252 colors), web-safe 216, VGA-16.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
@@ -187,13 +188,23 @@ pub const HistogramPool = struct {
     var lock_val = std.atomic.Value(u32).init(0);
     var available: ?*Node = null;
 
-    pub fn acquire() !Handle {
+    inline fn lock() void {
+        if (builtin.single_threaded) return;
         while (lock_val.swap(1, .acquire) != 0) {
             std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
         }
+    }
+
+    inline fn unlock() void {
+        if (builtin.single_threaded) return;
+        lock_val.store(0, .release);
+    }
+
+    pub fn acquire() !Handle {
+        lock();
         if (available) |node| {
             available = node.next;
-            lock_val.store(0, .release);
+            unlock();
 
             node.generation +%= 1;
             if (node.generation == 0) {
@@ -208,7 +219,7 @@ pub const HistogramPool = struct {
                 .node = node,
             };
         }
-        lock_val.store(0, .release);
+        unlock();
 
         const allocator = std.heap.page_allocator;
         const required_len: usize = @as(usize, 1) << (3 * color_quantize_bits);
@@ -236,12 +247,10 @@ pub const HistogramPool = struct {
     }
 
     pub fn release(handle: Handle) void {
-        while (lock_val.swap(1, .acquire) != 0) {
-            std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
-        }
+        lock();
         handle.node.next = available;
         available = handle.node;
-        lock_val.store(0, .release);
+        unlock();
     }
 };
 
@@ -575,6 +584,13 @@ pub fn web216Palette(palette: []Rgb) void {
         }
     }
 }
+
+/// 256-entry linear grayscale palette: `palette[i] = (i, i, i)`.
+pub const linear_gray_256: [256]Rgb = blk: {
+    var pal: [256]Rgb = undefined;
+    for (&pal, 0..) |*p, i| p.* = .{ .r = @intCast(i), .g = @intCast(i), .b = @intCast(i) };
+    break :blk pal;
+};
 
 /// Standard VGA 16-color palette.
 pub const vga16_palette = [16]Rgb{
