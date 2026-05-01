@@ -910,14 +910,286 @@ fn mapImageToPalette(
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const data = try encode(T, allocator, image, .default);
     defer allocator.free(data);
+    try writeFile(io, file_path, data);
+}
 
+fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
     const file = if (Io.Dir.path.isAbsolute(file_path))
         try Io.Dir.createFileAbsolute(io, file_path, .{})
     else
         try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
-
     try file.writeStreamingAll(io, data);
+}
+
+// ---------------------------------------------------------------------------
+// Animated encode
+// ---------------------------------------------------------------------------
+
+/// Animated GIF encode options.
+pub const AnimatedEncodeOptions = struct {
+    /// If non-null, every frame uses this palette as a Global Color Table; no
+    /// per-frame Local Color Table is emitted. Length must be 2..256. When
+    /// null, each frame gets its own LCT via per-frame median-cut.
+    palette: ?[]const Rgb = null,
+    /// Cap on per-frame median-cut color count. Ignored when `palette` is set.
+    max_colors: u16 = 256,
+    /// Apply Floyd–Steinberg dithering before mapping each frame to its palette.
+    dither: bool = false,
+
+    pub const default: AnimatedEncodeOptions = .{};
+};
+
+/// Encodes an `AnimatedImage(T)` as an animated GIF. Each frame is emitted at
+/// full screen size with disposal=unspecified; the decoder's full-frame
+/// composition is the inverse of this encoder. For `T == Rgba`, pixels with
+/// `alpha < 128` are mapped to a reserved transparent palette index.
+pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), options: AnimatedEncodeOptions) ![]u8 {
+    if (anim.frames.len == 0) return error.NoFrames;
+    if (anim.frames.len != anim.delays_cs.len) return error.InconsistentDelays;
+
+    const screen_w_u32 = anim.frames[0].cols;
+    const screen_h_u32 = anim.frames[0].rows;
+    if (screen_w_u32 == 0 or screen_h_u32 == 0) return error.InvalidDimensions;
+    if (screen_w_u32 > 65535 or screen_h_u32 > 65535) return error.ImageTooLarge;
+    for (anim.frames[1..]) |f| {
+        if (f.cols != screen_w_u32 or f.rows != screen_h_u32) return error.InconsistentFrameDimensions;
+    }
+    const screen_w: u16 = @intCast(screen_w_u32);
+    const screen_h: u16 = @intCast(screen_h_u32);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+
+    try out.appendSlice(gpa, "GIF89a");
+    try writeU16Le(&out, gpa, screen_w);
+    try writeU16Le(&out, gpa, screen_h);
+
+    const has_global_palette = options.palette != null;
+    var global_size_log: u3 = 0;
+    if (options.palette) |custom| {
+        if (custom.len < 2 or custom.len > 256) return error.PaletteTooSmall;
+        while ((@as(u16, 2) << global_size_log) < custom.len and global_size_log < 7) : (global_size_log += 1) {}
+    }
+
+    var lsd_packed: u8 = 0;
+    if (has_global_palette) {
+        lsd_packed |= lsd_flag_global_color_table;
+        lsd_packed |= lsd_color_resolution_default;
+        lsd_packed |= @as(u8, global_size_log);
+    }
+    try out.append(gpa, lsd_packed);
+    try out.append(gpa, 0); // background color index
+    try out.append(gpa, 0); // pixel aspect ratio
+
+    if (options.palette) |custom| {
+        const declared: u16 = @as(u16, 2) << global_size_log;
+        for (custom) |c| try out.appendSlice(gpa, &.{ c.r, c.g, c.b });
+        var pad_i: usize = custom.len;
+        while (pad_i < declared) : (pad_i += 1) try out.appendSlice(gpa, &.{ 0, 0, 0 });
+    }
+
+    // NETSCAPE2.0 application extension carrying the loop count. Always emit
+    // for animations so the loop_count is explicit.
+    if (anim.frames.len >= 2) {
+        try out.append(gpa, block_extension_introducer);
+        try out.append(gpa, ext_label_application);
+        try out.append(gpa, 0x0B);
+        try out.appendSlice(gpa, "NETSCAPE2.0");
+        try out.append(gpa, 0x03);
+        try out.append(gpa, 0x01);
+        try writeU16Le(&out, gpa, anim.loop_count);
+        try out.append(gpa, 0);
+    }
+
+    for (anim.frames, anim.delays_cs) |frame, delay_cs| {
+        try emitAnimatedFrame(T, gpa, frame, delay_cs, has_global_palette, options, &out);
+    }
+
+    try out.append(gpa, block_trailer);
+    return out.toOwnedSlice(gpa);
+}
+
+/// Saves an `AnimatedImage(T)` as an animated GIF.
+pub fn saveAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), file_path: []const u8) !void {
+    const data = try encodeAnimated(T, gpa, anim, .default);
+    defer gpa.free(data);
+    try writeFile(io, file_path, data);
+}
+
+fn emitAnimatedFrame(
+    comptime T: type,
+    gpa: Allocator,
+    frame: Image(T),
+    delay_cs: u16,
+    has_global_palette: bool,
+    options: AnimatedEncodeOptions,
+    out: *std.ArrayList(u8),
+) !void {
+    const num_pixels: usize = @as(usize, frame.cols) * @as(usize, frame.rows);
+
+    // Detect alpha=0 pixels for Rgba inputs so we can map them to a reserved
+    // transparent palette index (and emit the GCE flag).
+    const has_transparent: bool = blk: {
+        if (T != Rgba) break :blk false;
+        var ri: usize = 0;
+        while (ri < frame.rows) : (ri += 1) {
+            const off = ri * frame.stride;
+            for (frame.data[off .. off + frame.cols]) |p| {
+                if (p.a < 128) break :blk true;
+            }
+        }
+        break :blk false;
+    };
+
+    // Build the frame's palette and per-pixel index buffer.
+    var palette_buf: [256]Rgb = undefined;
+    var palette: []const Rgb = palette_buf[0..0];
+    const indices = try gpa.alloc(u8, num_pixels);
+    defer gpa.free(indices);
+
+    var transparent_index: u8 = 0;
+
+    if (has_global_palette) {
+        const custom = options.palette.?;
+        @memcpy(palette_buf[0..custom.len], custom);
+        palette = palette_buf[0..custom.len];
+        if (has_transparent) {
+            // Caller-provided palette + transparency: reserve last entry; if
+            // there's no slack, refuse rather than overwrite a real color.
+            if (custom.len >= 256) return error.PaletteTooLarge;
+            palette_buf[custom.len] = .{ .r = 0, .g = 0, .b = 0 };
+            palette = palette_buf[0 .. custom.len + 1];
+            transparent_index = @intCast(custom.len);
+        }
+        try mapFrameToPalette(T, gpa, frame, palette, indices, options.dither, has_transparent, transparent_index);
+    } else {
+        const reserve: u16 = if (has_transparent) 1 else 0;
+        const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256) - reserve);
+        const palette_size = quantize.medianCut(T, gpa, frame, &palette_buf, max_colors) catch |err| switch (err) {
+            error.NoPaletteColors => return error.NoPaletteColors,
+            else => |e| return e,
+        };
+        var size = palette_size;
+        if (size < 2) {
+            palette_buf[1] = palette_buf[0];
+            size = 2;
+        }
+        if (has_transparent) {
+            palette_buf[size] = .{ .r = 0, .g = 0, .b = 0 };
+            transparent_index = @intCast(size);
+            size += 1;
+        }
+        palette = palette_buf[0..size];
+        try mapFrameToPalette(T, gpa, frame, palette, indices, options.dither, has_transparent, transparent_index);
+    }
+
+    // min_code_size + power-of-two LCT padding (only if emitting an LCT).
+    var min_code_size: u4 = 2;
+    while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
+    const declared_size_log: u3 = @intCast(min_code_size - 1);
+    const declared_entries: u16 = @as(u16, 2) << declared_size_log;
+
+    // Graphic Control Extension (always emit so delay_cs is explicit).
+    try out.append(gpa, block_extension_introducer);
+    try out.append(gpa, ext_label_graphic_control);
+    try out.append(gpa, 0x04);
+    const gce_packed: u8 = if (has_transparent) gce_flag_transparent else 0;
+    try out.append(gpa, gce_packed);
+    try writeU16Le(out, gpa, delay_cs);
+    try out.append(gpa, transparent_index);
+    try out.append(gpa, 0);
+
+    // Image Descriptor.
+    try out.append(gpa, block_image_descriptor);
+    try writeU16Le(out, gpa, 0); // left
+    try writeU16Le(out, gpa, 0); // top
+    try writeU16Le(out, gpa, @intCast(frame.cols));
+    try writeU16Le(out, gpa, @intCast(frame.rows));
+    var id_packed: u8 = 0;
+    if (!has_global_palette) {
+        id_packed |= id_flag_local_color_table;
+        id_packed |= @as(u8, declared_size_log);
+    }
+    try out.append(gpa, id_packed);
+
+    // Local Color Table.
+    if (!has_global_palette) {
+        for (palette) |c| try out.appendSlice(gpa, &.{ c.r, c.g, c.b });
+        var pad_i: usize = palette.len;
+        while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(gpa, &.{ 0, 0, 0 });
+    }
+
+    // LZW data.
+    try out.append(gpa, @as(u8, min_code_size));
+    var encoder = try lzw.Encoder.init(gpa, min_code_size);
+    defer encoder.deinit(gpa);
+
+    var lzw_bytes: std.ArrayList(u8) = .empty;
+    defer lzw_bytes.deinit(gpa);
+    try encoder.encodeAll(gpa, indices, &lzw_bytes);
+
+    var idx: usize = 0;
+    while (idx < lzw_bytes.items.len) {
+        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
+        try out.append(gpa, @intCast(chunk_len));
+        try out.appendSlice(gpa, lzw_bytes.items[idx .. idx + chunk_len]);
+        idx += chunk_len;
+    }
+    try out.append(gpa, 0);
+}
+
+/// Like `mapImageToPalette` but skips alpha<128 pixels for `T == Rgba`,
+/// emitting `transparent_index` for them. The dither path still operates on
+/// the full image and the transparency check is applied to the post-dither
+/// indices (which is fine — alpha is preserved through `image.convert`).
+fn mapFrameToPalette(
+    comptime T: type,
+    gpa: Allocator,
+    image: Image(T),
+    palette: []const Rgb,
+    indices: []u8,
+    use_dither: bool,
+    has_transparent: bool,
+    transparent_index: u8,
+) !void {
+    const lookup_palette = if (has_transparent) palette[0 .. palette.len - 1] else palette;
+    const lut = quantize.ColorLookupTable.init(lookup_palette);
+
+    if (use_dither) {
+        var work = try image.convert(Rgb, gpa);
+        defer work.deinit(gpa);
+        dither.applyFloydSteinberg(work, lookup_palette, lut);
+        var i: usize = 0;
+        while (i < image.rows) : (i += 1) {
+            const dst_off = i * image.cols;
+            const src_off = i * work.stride;
+            var j: usize = 0;
+            while (j < image.cols) : (j += 1) {
+                if (T == Rgba and image.at(i, j).a < 128) {
+                    indices[dst_off + j] = transparent_index;
+                } else {
+                    indices[dst_off + j] = lut.lookup(work.data[src_off + j]);
+                }
+            }
+        }
+        return;
+    }
+
+    var i: usize = 0;
+    while (i < image.rows) : (i += 1) {
+        const dst_off = i * image.cols;
+        var j: usize = 0;
+        while (j < image.cols) : (j += 1) {
+            const px = image.at(i, j).*;
+            if (T == Rgba and px.a < 128) {
+                indices[dst_off + j] = transparent_index;
+            } else {
+                const rgb = convertColor(Rgb, px);
+                indices[dst_off + j] = lut.lookup(rgb);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1508,6 +1780,119 @@ test "encode — getInfo on encoded output is consistent" {
     try expectEqual(@as(u32, 8), info.height);
     try expectEqual(Version.gif89a, info.version);
     try expectEqual(@as(u32, 1), info.frame_count);
+}
+
+// ---------------------------------------------------------------------------
+// Animated encode tests
+// ---------------------------------------------------------------------------
+
+fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), delays: []const u16, loop: u16) !AnimatedImage(T) {
+    const frames = try gpa.alloc(Image(T), frame_data.len);
+    @memcpy(frames, frame_data);
+    const delays_out = try gpa.alloc(u16, delays.len);
+    @memcpy(delays_out, delays);
+    return .{ .frames = frames, .delays_cs = delays_out, .loop_count = loop };
+}
+
+test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
+    const gpa = std.testing.allocator;
+
+    const f0 = try Image(Rgb).init(gpa, 2, 2);
+    @memset(f0.data, .{ .r = 255, .g = 0, .b = 0 });
+    const f1 = try Image(Rgb).init(gpa, 2, 2);
+    @memset(f1.data, .{ .r = 0, .g = 255, .b = 0 });
+
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 5, 10 }, 3);
+    defer anim.deinit(gpa);
+
+    const data = try encodeAnimated(Rgb, gpa, anim, .{});
+    defer gpa.free(data);
+
+    var decoded = try loadAnimatedFromBytes(Rgba, gpa, data, .{});
+    defer decoded.deinit(gpa);
+
+    try expectEqual(@as(usize, 2), decoded.frameCount());
+    try expectEqual(@as(u16, 3), decoded.loop_count);
+    try expectEqual(@as(u16, 5), decoded.delays_cs[0]);
+    try expectEqual(@as(u16, 10), decoded.delays_cs[1]);
+    try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, decoded.frame(0).at(0, 0).*);
+    try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, decoded.frame(1).at(0, 0).*);
+}
+
+test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
+    const gpa = std.testing.allocator;
+
+    const f0 = try Image(Rgba).init(gpa, 1, 2);
+    f0.at(0, 0).* = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    f0.at(0, 1).* = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    const f1 = try Image(Rgba).init(gpa, 1, 2);
+    f1.at(0, 0).* = .{ .r = 0, .g = 255, .b = 0, .a = 255 };
+    f1.at(0, 1).* = .{ .r = 0, .g = 0, .b = 255, .a = 255 };
+
+    var anim = try buildAnimated(Rgba, gpa, &.{ f0, f1 }, &.{ 0, 0 }, 0);
+    defer anim.deinit(gpa);
+
+    const data = try encodeAnimated(Rgba, gpa, anim, .{});
+    defer gpa.free(data);
+
+    var decoded = try loadAnimatedFromBytes(Rgba, gpa, data, .{});
+    defer decoded.deinit(gpa);
+
+    try expectEqual(@as(u8, 0), decoded.frame(0).at(0, 0).a);
+    try expectEqual(@as(u8, 255), decoded.frame(0).at(0, 1).a);
+    try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, decoded.frame(1).at(0, 0).*);
+    try expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, decoded.frame(1).at(0, 1).*);
+}
+
+test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame LCT" {
+    const gpa = std.testing.allocator;
+
+    const f0 = try Image(Rgb).init(gpa, 1, 1);
+    f0.at(0, 0).* = .{ .r = 255, .g = 0, .b = 0 };
+    const f1 = try Image(Rgb).init(gpa, 1, 1);
+    f1.at(0, 0).* = .{ .r = 0, .g = 0, .b = 255 };
+
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 5, 5 }, 0);
+    defer anim.deinit(gpa);
+
+    const palette = [_]Rgb{
+        .{ .r = 0, .g = 0, .b = 0 },
+        .{ .r = 255, .g = 0, .b = 0 },
+        .{ .r = 0, .g = 255, .b = 0 },
+        .{ .r = 0, .g = 0, .b = 255 },
+    };
+    const data = try encodeAnimated(Rgb, gpa, anim, .{ .palette = &palette });
+    defer gpa.free(data);
+
+    var reader = Io.Reader.fixed(data);
+    const info = try getInfo(&reader, .{});
+    try expect(info.has_global_color_table);
+    try expectEqual(@as(u16, 4), info.global_color_table_size);
+    try expectEqual(@as(u32, 2), info.frame_count);
+
+    var decoded = try loadAnimatedFromBytes(Rgb, gpa, data, .{});
+    defer decoded.deinit(gpa);
+    try expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, decoded.frame(0).at(0, 0).*);
+    try expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, decoded.frame(1).at(0, 0).*);
+}
+
+test "encodeAnimated — empty animation rejected" {
+    const gpa = std.testing.allocator;
+    const anim: AnimatedImage(Rgb) = .{ .frames = &.{}, .delays_cs = &.{}, .loop_count = 0 };
+    try expectError(error.NoFrames, encodeAnimated(Rgb, gpa, anim, .{}));
+}
+
+test "encodeAnimated — mismatched frame dimensions rejected" {
+    const gpa = std.testing.allocator;
+    const f0 = try Image(Rgb).init(gpa, 2, 2);
+    @memset(f0.data, .{ .r = 0, .g = 0, .b = 0 });
+    const f1 = try Image(Rgb).init(gpa, 3, 3);
+    @memset(f1.data, .{ .r = 0, .g = 0, .b = 0 });
+
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 0, 0 }, 0);
+    defer anim.deinit(gpa);
+
+    try expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, gpa, anim, .{}));
 }
 
 test "loadFromBytes — missing global color table without LCT" {

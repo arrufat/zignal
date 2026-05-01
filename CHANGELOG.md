@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+- **BMP Codec** (#348): Native Zig BMP reader and writer with no third-party dependencies.
+  - Decoder covers BITMAPCOREHEADER (OS/2 v1) / BITMAPINFOHEADER / V4 / V5 (with v2/v3 tolerated as INFOHEADER variants), 1/4/8/16/24/32 bpp, BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS / BI_RLE4 / BI_RLE8 compressions, and both bottom-up and top-down row order.
+  - Encoder writes 24bpp BI_RGB for `Image(Rgb)`, 32bpp BI_BITFIELDS with canonical RGBA masks for `Image(Rgba)`, and optional 8bpp linear-gray indexed for `Image(u8)` (via `EncodeOptions.use_palette_for_grayscale`).
+  - Wired into `Image(T).load`/`save` for `.bmp` extension, the CLI `info` command, and the Python bindings (`Image.load("foo.bmp")` / `Image.save("foo.bmp")`).
+- **GIF Codec**: Native Zig GIF reader and writer with no third-party dependencies.
+  - Decoder covers GIF87a/89a, 1/4/8-bit indexed, all four disposal methods (`unspecified`, `do_not_dispose`, `restore_to_background`, `restore_to_previous`), interlaced images, and the NETSCAPE2.0 application extension for loop counts.
+  - Multi-frame access via `gif.loadAnimated` / `gif.loadAnimatedFromBytes` returns an `AnimatedImage(T)` of fully-composed frames — disposal, transparency, and de-interlace are absorbed inside the codec.
+  - Encoder writes single-frame GIFs (`gif.encode` / `gif.save`) with built-in median-cut quantization and optional Floyd–Steinberg dithering, plus animated GIFs (`gif.encodeAnimated` / `gif.saveAnimated`) with per-frame LCT or a caller-supplied global palette and transparent-index handling for `Image(Rgba)` inputs.
+  - Wired into `Image(T).load`/`save` for `.gif` extension and into the CLI `info` command (prints version, dimensions, frame count, loop count, palette size).
+  - Python bindings: `Image.load("foo.gif")` and `Image.save("foo.gif")` work for single-frame GIFs.
+- **`AnimatedImage(T)` Container**: New generic container in `src/image/animated.zig` for animated raster formats (GIF today, designed for future APNG/WebP). Holds composed frames, per-frame delays in centiseconds, and loop count.
+- **Reusable Quantization & Dithering**: Extracted color quantization and dithering from `sixel.zig` into shared, public modules `image/quantize.zig` and `image/dither.zig`. Both sixel and the new GIF encoder consume them.
+  - `quantize.medianCut` for adaptive palette generation, `quantize.ColorLookupTable` for fast nearest-color lookup, plus fixed palettes (`linear_gray_256`, `vga16_palette`, `fixed6x7x6Palette`, `web216Palette`).
+  - `dither.Mode` (`none`, `floyd_steinberg`, `atkinson`, `ordered`, `auto`) with `dither.apply`, `dither.applyFloydSteinberg`, `dither.applyAtkinson`, `dither.applyOrdered`.
+
+### Improvements
+- **Single-Threaded Build Robustness**: `quantize.HistogramPool` and sixel's palette LUT cache now skip atomic spinlocks under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding` once any caller exercises `medianCut`).
+
 ## [0.10.0] - 2026-04-15
 
 ### Major Changes
