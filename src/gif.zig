@@ -309,43 +309,6 @@ pub const GifState = struct {
 };
 
 // ---------------------------------------------------------------------------
-// Cursor — tiny in-memory parser helper.
-// ---------------------------------------------------------------------------
-
-const Cursor = struct {
-    data: []const u8,
-    pos: usize = 0,
-
-    inline fn remaining(self: Cursor) usize {
-        return self.data.len - self.pos;
-    }
-
-    fn takeByte(self: *Cursor) !u8 {
-        if (self.pos >= self.data.len) return error.UnexpectedEndOfData;
-        defer self.pos += 1;
-        return self.data[self.pos];
-    }
-
-    fn takeU16(self: *Cursor) !u16 {
-        if (self.remaining() < 2) return error.UnexpectedEndOfData;
-        const v = std.mem.readInt(u16, self.data[self.pos..][0..2], .little);
-        self.pos += 2;
-        return v;
-    }
-
-    fn takeSlice(self: *Cursor, n: usize) ![]const u8 {
-        if (self.remaining() < n) return error.UnexpectedEndOfData;
-        defer self.pos += n;
-        return self.data[self.pos..][0..n];
-    }
-
-    fn skip(self: *Cursor, n: usize) !void {
-        if (self.remaining() < n) return error.UnexpectedEndOfData;
-        self.pos += n;
-    }
-};
-
-// ---------------------------------------------------------------------------
 // decode
 // ---------------------------------------------------------------------------
 
@@ -355,10 +318,9 @@ const Cursor = struct {
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
     if (exceeds(usize, limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
 
-    var c: Cursor = .{ .data = data };
+    var reader: Io.Reader = .fixed(data);
 
-    // Signature + version.
-    const sig = try c.takeSlice(6);
+    const sig = try reader.takeArray(6);
     if (!std.mem.eql(u8, sig[0..3], &signature)) return error.InvalidGifSignature;
     const version: Version = if (std.mem.eql(u8, sig[3..6], "87a"))
         .gif87a
@@ -367,12 +329,11 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     else
         return error.UnsupportedGifVersion;
 
-    // Logical Screen Descriptor.
-    const screen_w = try c.takeU16();
-    const screen_h = try c.takeU16();
-    const lsd_packed = try c.takeByte();
-    const bg_index = try c.takeByte();
-    _ = try c.takeByte(); // pixel aspect ratio
+    const screen_w = try reader.takeInt(u16, .little);
+    const screen_h = try reader.takeInt(u16, .little);
+    const lsd_packed = try reader.takeByte();
+    const bg_index = try reader.takeByte();
+    _ = try reader.takeByte(); // pixel aspect ratio
 
     if (screen_w == 0 or screen_h == 0) return error.InvalidLogicalScreenDescriptor;
     if (exceeds(u32, limits.max_width, screen_w) or exceeds(u32, limits.max_height, screen_h)) {
@@ -390,7 +351,7 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     errdefer if (global_palette) |p| gpa.free(p);
     if (has_gct) {
         const palette = try gpa.alloc(Rgb, gct_size);
-        const raw = try c.takeSlice(@as(usize, gct_size) * 3);
+        const raw = try reader.take(@as(usize, gct_size) * 3);
         var i: usize = 0;
         while (i < gct_size) : (i += 1) {
             palette[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
@@ -412,18 +373,11 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     var total_pixels: u64 = 0;
 
     block_loop: while (true) {
-        const introducer = try c.takeByte();
+        const introducer = try reader.takeByte();
         switch (introducer) {
             block_trailer => break :block_loop,
             block_image_descriptor => {
-                const frame = try parseImageBlock(
-                    gpa,
-                    &c,
-                    limits,
-                    global_palette,
-                    pending_gce,
-                    &total_pixels,
-                );
+                const frame = try parseImageBlock(gpa, &reader, limits, global_palette, pending_gce, &total_pixels);
                 pending_gce = null;
                 try frames.append(gpa, frame);
                 if (exceeds(u32, limits.max_frames, @intCast(frames.items.len))) {
@@ -431,12 +385,11 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
                 }
             },
             block_extension_introducer => {
-                const label = try c.takeByte();
+                const label = try reader.takeByte();
                 switch (label) {
-                    ext_label_graphic_control => pending_gce = try parseGce(&c),
-                    ext_label_application => try parseAppExtensionCursor(&c, &loop_count),
-                    ext_label_comment => try skipSubBlocksCursor(&c),
-                    else => try skipSubBlocksCursor(&c),
+                    ext_label_graphic_control => pending_gce = try parseGce(&reader),
+                    ext_label_application => try parseAppExtension(&reader, &loop_count),
+                    else => try skipSubBlocks(&reader),
                 }
             },
             else => return error.InvalidExtensionLabel,
@@ -459,13 +412,13 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     };
 }
 
-fn parseGce(c: *Cursor) !GraphicControlExtension {
-    const block_size = try c.takeByte();
+fn parseGce(reader: *Io.Reader) !GraphicControlExtension {
+    const block_size = try reader.takeByte();
     if (block_size != 4) return error.InvalidGraphicControlExtension;
-    const packed_byte = try c.takeByte();
-    const delay = try c.takeU16();
-    const transparent = try c.takeByte();
-    const terminator = try c.takeByte();
+    const packed_byte = try reader.takeByte();
+    const delay = try reader.takeInt(u16, .little);
+    const transparent = try reader.takeByte();
+    const terminator = try reader.takeByte();
     if (terminator != 0) return error.InvalidGraphicControlExtension;
     return .{
         .disposal = @enumFromInt((packed_byte >> 2) & gce_disposal_mask),
@@ -475,56 +428,19 @@ fn parseGce(c: *Cursor) !GraphicControlExtension {
     };
 }
 
-fn skipSubBlocksCursor(c: *Cursor) !void {
-    while (true) {
-        const sb_size = try c.takeByte();
-        if (sb_size == 0) return;
-        try c.skip(sb_size);
-    }
-}
-
-fn parseAppExtensionCursor(c: *Cursor, loop_count_out: *u16) !void {
-    const block_size = try c.takeByte();
-    if (block_size != 11) {
-        try c.skip(block_size);
-        try skipSubBlocksCursor(c);
-        return;
-    }
-    const id_auth = try c.takeSlice(11);
-    if (!std.mem.eql(u8, id_auth, &netscape_id_auth)) {
-        try skipSubBlocksCursor(c);
-        return;
-    }
-    while (true) {
-        const sb_size = try c.takeByte();
-        if (sb_size == 0) return;
-        if (sb_size >= 3) {
-            const sub_id = try c.takeByte();
-            if (sub_id == 0x01) {
-                loop_count_out.* = try c.takeU16();
-                if (sb_size > 3) try c.skip(sb_size - 3);
-            } else {
-                try c.skip(sb_size - 1);
-            }
-        } else {
-            try c.skip(sb_size);
-        }
-    }
-}
-
 fn parseImageBlock(
     gpa: Allocator,
-    c: *Cursor,
+    reader: *Io.Reader,
     limits: DecodeLimits,
     global_palette: ?[]Rgb,
     pending_gce: ?GraphicControlExtension,
     total_pixels: *u64,
 ) !FrameRecord {
-    const left = try c.takeU16();
-    const top = try c.takeU16();
-    const width = try c.takeU16();
-    const height = try c.takeU16();
-    const img_packed = try c.takeByte();
+    const left = try reader.takeInt(u16, .little);
+    const top = try reader.takeInt(u16, .little);
+    const width = try reader.takeInt(u16, .little);
+    const height = try reader.takeInt(u16, .little);
+    const img_packed = try reader.takeByte();
 
     if (width == 0 or height == 0) return error.InvalidImageDescriptor;
     if (exceeds(u32, limits.max_width, width) or exceeds(u32, limits.max_height, height)) {
@@ -544,7 +460,7 @@ fn parseImageBlock(
             const lct_entries: u16 = @as(u16, 2) << lct_size_log;
             const lct = try gpa.alloc(Rgb, lct_entries);
             errdefer gpa.free(lct);
-            const raw = try c.takeSlice(@as(usize, lct_entries) * 3);
+            const raw = try reader.take(@as(usize, lct_entries) * 3);
             var i: usize = 0;
             while (i < lct_entries) : (i += 1) {
                 lct[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
@@ -558,13 +474,12 @@ fn parseImageBlock(
     };
     errdefer gpa.free(palette);
 
-    const min_code_size_byte = try c.takeByte();
+    const min_code_size_byte = try reader.takeByte();
     if (min_code_size_byte < 2 or min_code_size_byte > 8) return error.InvalidLzwCode;
     const min_code_size: u4 = @intCast(min_code_size_byte);
 
-    // Decode LZW into pass-ordered indices first; de-interlace into final
-    // display order in a separate buffer if needed. Allocations match the
-    // ownership transferred to the caller via FrameRecord.
+    // LZW pixels go into a pass-ordered buffer first, then de-interlace into
+    // display order in a fresh buffer if the descriptor's interlace bit is set.
     const num_pixels_usize: usize = @intCast(num_pixels);
     var pass_indices = try gpa.alloc(u8, num_pixels_usize);
     errdefer gpa.free(pass_indices);
@@ -572,21 +487,16 @@ fn parseImageBlock(
     var dec = lzw.Decoder.init(min_code_size) catch return error.InvalidLzwCode;
     var written: usize = 0;
 
-    // Walk LZW data sub-blocks, feeding each chunk to the decoder.
     while (true) {
-        const sb_size = try c.takeByte();
+        const sb_size = try reader.takeByte();
         if (sb_size == 0) break;
-        const sb_data = try c.takeSlice(sb_size);
+        const sb_data = try reader.take(sb_size);
 
         const r = try dec.decodeChunk(sb_data, pass_indices[written..]);
         written += r.written;
 
         if (dec.isDone()) {
-            while (true) {
-                const trailing = try c.takeByte();
-                if (trailing == 0) break;
-                try c.skip(trailing);
-            }
+            try skipSubBlocks(reader);
             break;
         }
     }
