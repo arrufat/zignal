@@ -104,7 +104,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                         try writer.print("Version:     {s}\n", .{@tagName(info.version)});
                         try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
                         try writer.print("Frames:      {d}\n", .{info.frame_count});
-                        try writer.print("Loop count:  {s}\n", .{if (info.loop_count == 0) "infinite" else "finite"});
+                        if (info.loop_count == 0) {
+                            try writer.print("Loop count:  infinite\n", .{});
+                        } else {
+                            try writer.print("Loop count:  {d}\n", .{info.loop_count});
+                        }
                         if (info.has_global_color_table) {
                             try writer.print("Palette:     {d} entries (global)\n", .{info.global_color_table_size});
                         }
