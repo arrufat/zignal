@@ -62,6 +62,7 @@ pub const SimilarityTransform = geometry.SimilarityTransform;
 pub const ConvexHull = geometry.ConvexHull;
 
 pub const Image = @import("image.zig").Image;
+pub const AnimatedImage = @import("image.zig").AnimatedImage;
 pub const PixelIterator = @import("image.zig").PixelIterator;
 pub const Interpolation = @import("image.zig").Interpolation;
 pub const ImageFormat = @import("image.zig").ImageFormat;
@@ -73,6 +74,8 @@ pub const HoughTransform = @import("image.zig").HoughTransform;
 pub const BinaryKernel = @import("image.zig").BinaryKernel;
 pub const Colormap = @import("image.zig").Colormap;
 pub const colormaps = @import("image/colormaps.zig");
+pub const quantize = @import("image/quantize.zig");
+pub const dither = @import("image/dither.zig");
 
 // Terminal graphics protocols
 pub const terminal = @import("terminal.zig");
@@ -82,6 +85,7 @@ pub const kitty = @import("kitty.zig");
 pub const png = @import("png.zig");
 pub const jpeg = @import("jpeg.zig");
 pub const bmp = @import("bmp.zig");
+pub const gif = @import("gif.zig");
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;

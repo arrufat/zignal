@@ -19,6 +19,7 @@ const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
 const bmp = @import("bmp.zig");
+const gif = @import("gif.zig");
 const jpeg = @import("jpeg.zig");
 const png = @import("png.zig");
 const metrics = @import("image/metrics.zig");
@@ -38,6 +39,7 @@ pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const ImageFormat = @import("image/format.zig").ImageFormat;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
+pub const AnimatedImage = @import("image/animated.zig").AnimatedImage;
 pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const HoughTransform = @import("image/hough.zig").HoughTransform;
 pub const Histogram = @import("image/histogram.zig").Histogram;
@@ -256,6 +258,7 @@ pub fn Image(comptime T: type) type {
                 .png => png.load(T, io, allocator, file_path, .{}),
                 .jpeg => jpeg.load(T, io, allocator, file_path, .{}),
                 .bmp => bmp.load(T, io, allocator, file_path, .{}),
+                .gif => gif.load(T, io, allocator, file_path, .{}),
             };
         }
 
@@ -275,11 +278,12 @@ pub fn Image(comptime T: type) type {
                 .png => png.loadFromBytes(T, allocator, data, .{}),
                 .jpeg => jpeg.loadFromBytes(T, allocator, data, .{}),
                 .bmp => bmp.loadFromBytes(T, allocator, data, .{}),
+                .gif => gif.loadFromBytes(T, allocator, data, .{}),
             };
         }
 
         /// Saves the image to a file. Format is selected from the file extension:
-        /// `.png`, `.jpg`/`.jpeg`, or `.bmp` (case-insensitive).
+        /// `.png`, `.jpg`/`.jpeg`, `.bmp`, or `.gif` (case-insensitive).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
@@ -287,6 +291,7 @@ pub fn Image(comptime T: type) type {
                 .png => png.save(T, io, allocator, self, file_path),
                 .jpeg => jpeg.save(T, io, allocator, self, file_path),
                 .bmp => bmp.save(T, io, allocator, self, file_path),
+                .gif => gif.save(T, io, allocator, self, file_path),
             };
         }
 
@@ -1311,6 +1316,7 @@ pub fn Image(comptime T: type) type {
 // Run all tests
 test {
     _ = @import("image/PixelIterator.zig");
+    _ = @import("image/animated.zig");
     _ = @import("image/format.zig");
     _ = @import("image/display.zig");
     _ = @import("image/tests/integral.zig");

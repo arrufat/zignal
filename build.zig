@@ -83,6 +83,7 @@ pub fn build(b: *Build) void {
         .{ .name = "fdm", .path = "src/fdm.zig" },
         .{ .name = "jpeg", .path = "src/jpeg.zig" },
         .{ .name = "bmp", .path = "src/bmp.zig" },
+        .{ .name = "gif", .path = "src/gif.zig" },
         .{ .name = "pca", .path = "src/pca.zig" },
         .{ .name = "sixel", .path = "src/sixel.zig" },
         .{ .name = "kitty", .path = "src/kitty.zig" },
