@@ -502,7 +502,10 @@ fn parseImageBlock(
     }
 
     if (!dec.isDone()) return error.InvalidLzwCode;
-    if (written != num_pixels_usize) return error.LzwOutputOverflow;
+    // `written > num_pixels_usize` cannot happen here — the decoder errors out
+    // with `LzwOutputOverflow` mid-stream when the output buffer would overflow.
+    // So `written != num_pixels_usize` is exclusively the EOI-too-early case.
+    if (written != num_pixels_usize) return error.LzwOutputUnderflow;
 
     // De-interlace if necessary.
     const indices_out = if (interlaced) blk: {
