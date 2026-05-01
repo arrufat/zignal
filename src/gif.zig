@@ -728,7 +728,9 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 const quantize = @import("image/quantize.zig");
 const dither = @import("image/dither.zig");
 
-/// Single-frame GIF encode options.
+/// Single-frame GIF encode options. Reused by `encodeAnimated` via the
+/// `AnimatedEncodeOptions` alias — when supplied to the animated encoder,
+/// `palette` becomes the Global Color Table for every frame.
 pub const EncodeOptions = struct {
     /// Pre-computed palette. If null, the encoder runs median-cut on the input.
     /// Length must be 2..256.
@@ -740,6 +742,44 @@ pub const EncodeOptions = struct {
 
     pub const default: EncodeOptions = .{};
 };
+
+/// Smallest `s` such that `(2 << s) >= palette_len`, capped at 7. The packed
+/// byte field on LSD / Image Descriptor encodes color-table size as `s`; the
+/// table itself must be padded to `2 << s` entries.
+fn declaredSizeLog(palette_len: usize) u3 {
+    var s: u3 = 0;
+    while ((@as(u16, 2) << s) < palette_len and s < 7) : (s += 1) {}
+    return s;
+}
+
+/// Emits a color table to `out`, padded with `(0,0,0)` to `declared_entries`.
+fn writeColorTable(out: *std.ArrayList(u8), allocator: Allocator, palette: []const Rgb, declared_entries: u16) !void {
+    for (palette) |c| try out.appendSlice(allocator, &.{ c.r, c.g, c.b });
+    var pad_i: usize = palette.len;
+    while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(allocator, &.{ 0, 0, 0 });
+}
+
+/// Emits the LZW data section of an Image block: `min_code_size` byte +
+/// LZW-compressed indices wrapped in 0xFF-max sub-blocks + terminator.
+fn writeLzwImageData(allocator: Allocator, out: *std.ArrayList(u8), indices: []const u8, min_code_size: u4) !void {
+    try out.append(allocator, @as(u8, min_code_size));
+
+    var encoder = try lzw.Encoder.init(allocator, min_code_size);
+    defer encoder.deinit(allocator);
+
+    var lzw_bytes: std.ArrayList(u8) = .empty;
+    defer lzw_bytes.deinit(allocator);
+    try encoder.encodeAll(allocator, indices, &lzw_bytes);
+
+    var idx: usize = 0;
+    while (idx < lzw_bytes.items.len) {
+        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
+        try out.append(allocator, @intCast(chunk_len));
+        try out.appendSlice(allocator, lzw_bytes.items[idx .. idx + chunk_len]);
+        idx += chunk_len;
+    }
+    try out.append(allocator, 0);
+}
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
 pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
@@ -759,14 +799,12 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 
     if (options.palette) |custom| {
         if (custom.len < 2 or custom.len > 256) return error.PaletteTooSmall;
-        @memcpy(palette_buf[0..custom.len], custom);
-        palette = palette_buf[0..custom.len];
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither);
+        palette = custom;
+        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, null);
     } else if (T == u8) {
         // u8 → 256-entry linear gray palette; indices are the pixel values.
         @memcpy(&palette_buf, &quantize.linear_gray_256);
         palette = palette_buf[0..256];
-        // Image(u8) might have non-contiguous stride; copy row by row.
         if (image.isContiguous()) {
             @memcpy(indices, image.data[0..num_pixels]);
         } else {
@@ -778,85 +816,46 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
             }
         }
     } else {
-        // Auto-quantize via median-cut.
         const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256));
-        const palette_size = quantize.medianCut(T, allocator, image, &palette_buf, max_colors) catch |err| switch (err) {
-            error.NoPaletteColors => return error.NoPaletteColors,
-            else => |e| return e,
-        };
+        const palette_size = try quantize.medianCut(T, allocator, image, &palette_buf, max_colors);
         if (palette_size < 2) {
-            // Pad to 2 entries — GIF requires at least 2 (min_code_size floor).
+            // GIF requires at least 2 entries (min_code_size floor).
             palette_buf[1] = palette_buf[0];
             palette = palette_buf[0..2];
         } else {
             palette = palette_buf[0..palette_size];
         }
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither);
+        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, null);
     }
 
-    // 2) Choose min_code_size. GIF spec: floor of 2.
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
+    const size_log = declaredSizeLog(palette.len);
+    const declared_entries: u16 = @as(u16, 2) << size_log;
 
-    // GIF requires the palette to be padded to a power of two for the table itself.
-    const declared_size_log: u3 = @intCast(min_code_size - 1);
-    const declared_entries: u16 = @as(u16, 2) << declared_size_log;
-
-    // 3) Build output buffer.
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
-    // Header.
     try out.appendSlice(allocator, "GIF89a");
-
-    // Logical Screen Descriptor.
     try writeU16Le(&out, allocator, width);
     try writeU16Le(&out, allocator, height);
-    var lsd_packed: u8 = 0;
-    lsd_packed |= lsd_flag_global_color_table;
-    lsd_packed |= lsd_color_resolution_default;
-    lsd_packed |= @as(u8, declared_size_log);
+    const lsd_packed: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
     try out.append(allocator, lsd_packed);
     try out.append(allocator, 0); // background color index
     try out.append(allocator, 0); // pixel aspect ratio
 
-    // Global Color Table (padded to declared_entries).
-    for (palette) |c| try out.appendSlice(allocator, &.{ c.r, c.g, c.b });
-    var pad_i: usize = palette.len;
-    while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(allocator, &.{ 0, 0, 0 });
+    try writeColorTable(&out, allocator, palette, declared_entries);
 
-    // Image Descriptor.
     try out.append(allocator, block_image_descriptor);
-    try writeU16Le(&out, allocator, 0); // left
-    try writeU16Le(&out, allocator, 0); // top
+    try writeU16Le(&out, allocator, 0);
+    try writeU16Le(&out, allocator, 0);
     try writeU16Le(&out, allocator, width);
     try writeU16Le(&out, allocator, height);
     try out.append(allocator, 0x00); // packed: no LCT, not interlaced
 
-    // LZW data.
-    try out.append(allocator, @as(u8, min_code_size));
+    try writeLzwImageData(allocator, &out, indices, min_code_size);
 
-    var encoder = try lzw.Encoder.init(allocator, min_code_size);
-    defer encoder.deinit(allocator);
-
-    var lzw_bytes: std.ArrayList(u8) = .empty;
-    defer lzw_bytes.deinit(allocator);
-
-    try encoder.encodeAll(allocator, indices, &lzw_bytes);
-
-    // Wrap in 0xFF-max data sub-blocks.
-    var idx: usize = 0;
-    while (idx < lzw_bytes.items.len) {
-        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
-        try out.append(allocator, @intCast(chunk_len));
-        try out.appendSlice(allocator, lzw_bytes.items[idx .. idx + chunk_len]);
-        idx += chunk_len;
-    }
-    try out.append(allocator, 0); // sub-block terminator
-
-    // Trailer.
     try out.append(allocator, block_trailer);
-
     return out.toOwnedSlice(allocator);
 }
 
@@ -866,8 +865,11 @@ inline fn writeU16Le(out: *std.ArrayList(u8), allocator: Allocator, v: u16) !voi
 }
 
 /// Maps each pixel to the nearest palette index, with optional Floyd–Steinberg
-/// dithering. The dither path round-trips through `Image(Rgb)`; the no-dither
-/// path converts per-pixel.
+/// dithering. When `transparent_index` is non-null and `T == Rgba`, pixels with
+/// `alpha < 128` map to `transparent_index` instead of a color match, and the
+/// last palette entry is excluded from the LUT (it's the reserved transparent
+/// slot, set by the caller). The dither path round-trips through `Image(Rgb)`;
+/// the no-dither path converts per-pixel.
 fn mapImageToPalette(
     comptime T: type,
     allocator: Allocator,
@@ -875,20 +877,26 @@ fn mapImageToPalette(
     palette: []const Rgb,
     indices: []u8,
     use_dither: bool,
+    transparent_index: ?u8,
 ) !void {
-    const lut = quantize.ColorLookupTable.init(palette);
+    const lookup_palette = if (transparent_index != null) palette[0 .. palette.len - 1] else palette;
+    const lut = quantize.ColorLookupTable.init(lookup_palette);
 
     if (use_dither) {
         var work = try image.convert(Rgb, allocator);
         defer work.deinit(allocator);
-        dither.applyFloydSteinberg(work, palette, lut);
+        dither.applyFloydSteinberg(work, lookup_palette, lut);
         var i: usize = 0;
         while (i < image.rows) : (i += 1) {
             const dst_off = i * image.cols;
             const src_off = i * work.stride;
             var j: usize = 0;
             while (j < image.cols) : (j += 1) {
-                indices[dst_off + j] = lut.lookup(work.data[src_off + j]);
+                if (T == Rgba and transparent_index != null and image.at(i, j).a < 128) {
+                    indices[dst_off + j] = transparent_index.?;
+                } else {
+                    indices[dst_off + j] = lut.lookup(work.data[src_off + j]);
+                }
             }
         }
         return;
@@ -900,8 +908,11 @@ fn mapImageToPalette(
         var j: usize = 0;
         while (j < image.cols) : (j += 1) {
             const px = image.at(i, j).*;
-            const rgb = convertColor(Rgb, px);
-            indices[dst_off + j] = lut.lookup(rgb);
+            if (T == Rgba and transparent_index != null and px.a < 128) {
+                indices[dst_off + j] = transparent_index.?;
+            } else {
+                indices[dst_off + j] = lut.lookup(convertColor(Rgb, px));
+            }
         }
     }
 }
@@ -926,19 +937,10 @@ fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
 // Animated encode
 // ---------------------------------------------------------------------------
 
-/// Animated GIF encode options.
-pub const AnimatedEncodeOptions = struct {
-    /// If non-null, every frame uses this palette as a Global Color Table; no
-    /// per-frame Local Color Table is emitted. Length must be 2..256. When
-    /// null, each frame gets its own LCT via per-frame median-cut.
-    palette: ?[]const Rgb = null,
-    /// Cap on per-frame median-cut color count. Ignored when `palette` is set.
-    max_colors: u16 = 256,
-    /// Apply Floyd–Steinberg dithering before mapping each frame to its palette.
-    dither: bool = false,
-
-    pub const default: AnimatedEncodeOptions = .{};
-};
+/// Animated GIF encode options. Aliases `EncodeOptions`: `palette` becomes the
+/// Global Color Table when set, otherwise each frame gets its own LCT via
+/// per-frame median-cut.
+pub const AnimatedEncodeOptions = EncodeOptions;
 
 /// Encodes an `AnimatedImage(T)` as an animated GIF. Each frame is emitted at
 /// full screen size with disposal=unspecified; the decoder's full-frame
@@ -966,27 +968,19 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
     try writeU16Le(&out, gpa, screen_h);
 
     const has_global_palette = options.palette != null;
-    var global_size_log: u3 = 0;
+    var lsd_packed: u8 = 0;
     if (options.palette) |custom| {
         if (custom.len < 2 or custom.len > 256) return error.PaletteTooSmall;
-        while ((@as(u16, 2) << global_size_log) < custom.len and global_size_log < 7) : (global_size_log += 1) {}
-    }
-
-    var lsd_packed: u8 = 0;
-    if (has_global_palette) {
-        lsd_packed |= lsd_flag_global_color_table;
-        lsd_packed |= lsd_color_resolution_default;
-        lsd_packed |= @as(u8, global_size_log);
+        const size_log = declaredSizeLog(custom.len);
+        lsd_packed = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
     }
     try out.append(gpa, lsd_packed);
     try out.append(gpa, 0); // background color index
     try out.append(gpa, 0); // pixel aspect ratio
 
     if (options.palette) |custom| {
-        const declared: u16 = @as(u16, 2) << global_size_log;
-        for (custom) |c| try out.appendSlice(gpa, &.{ c.r, c.g, c.b });
-        var pad_i: usize = custom.len;
-        while (pad_i < declared) : (pad_i += 1) try out.appendSlice(gpa, &.{ 0, 0, 0 });
+        const declared: u16 = @as(u16, 2) << declaredSizeLog(custom.len);
+        try writeColorTable(&out, gpa, custom, declared);
     }
 
     // NETSCAPE2.0 application extension carrying the loop count. Always emit
@@ -1042,35 +1036,28 @@ fn emitAnimatedFrame(
         break :blk false;
     };
 
-    // Build the frame's palette and per-pixel index buffer.
+    // Build the frame's palette. The transparent slot (when needed) goes at
+    // the END so the LUT — which `mapImageToPalette` slices off the last
+    // entry — never matches a real color to that index.
     var palette_buf: [256]Rgb = undefined;
     var palette: []const Rgb = palette_buf[0..0];
-    const indices = try gpa.alloc(u8, num_pixels);
-    defer gpa.free(indices);
-
     var transparent_index: u8 = 0;
 
     if (has_global_palette) {
         const custom = options.palette.?;
-        @memcpy(palette_buf[0..custom.len], custom);
-        palette = palette_buf[0..custom.len];
         if (has_transparent) {
-            // Caller-provided palette + transparency: reserve last entry; if
-            // there's no slack, refuse rather than overwrite a real color.
             if (custom.len >= 256) return error.PaletteTooLarge;
+            @memcpy(palette_buf[0..custom.len], custom);
             palette_buf[custom.len] = .{ .r = 0, .g = 0, .b = 0 };
             palette = palette_buf[0 .. custom.len + 1];
             transparent_index = @intCast(custom.len);
+        } else {
+            palette = custom; // borrow — no copy needed when no slot is reserved
         }
-        try mapFrameToPalette(T, gpa, frame, palette, indices, options.dither, has_transparent, transparent_index);
     } else {
         const reserve: u16 = if (has_transparent) 1 else 0;
         const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256) - reserve);
-        const palette_size = quantize.medianCut(T, gpa, frame, &palette_buf, max_colors) catch |err| switch (err) {
-            error.NoPaletteColors => return error.NoPaletteColors,
-            else => |e| return e,
-        };
-        var size = palette_size;
+        var size = try quantize.medianCut(T, gpa, frame, &palette_buf, max_colors);
         if (size < 2) {
             palette_buf[1] = palette_buf[0];
             size = 2;
@@ -1081,14 +1068,16 @@ fn emitAnimatedFrame(
             size += 1;
         }
         palette = palette_buf[0..size];
-        try mapFrameToPalette(T, gpa, frame, palette, indices, options.dither, has_transparent, transparent_index);
     }
 
-    // min_code_size + power-of-two LCT padding (only if emitting an LCT).
+    const indices = try gpa.alloc(u8, num_pixels);
+    defer gpa.free(indices);
+    try mapImageToPalette(T, gpa, frame, palette, indices, options.dither, if (has_transparent) transparent_index else null);
+
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
-    const declared_size_log: u3 = @intCast(min_code_size - 1);
-    const declared_entries: u16 = @as(u16, 2) << declared_size_log;
+    const size_log = declaredSizeLog(palette.len);
+    const declared_entries: u16 = @as(u16, 2) << size_log;
 
     // Graphic Control Extension (always emit so delay_cs is explicit).
     try out.append(gpa, block_extension_introducer);
@@ -1102,94 +1091,22 @@ fn emitAnimatedFrame(
 
     // Image Descriptor.
     try out.append(gpa, block_image_descriptor);
-    try writeU16Le(out, gpa, 0); // left
-    try writeU16Le(out, gpa, 0); // top
+    try writeU16Le(out, gpa, 0);
+    try writeU16Le(out, gpa, 0);
     try writeU16Le(out, gpa, @intCast(frame.cols));
     try writeU16Le(out, gpa, @intCast(frame.rows));
     var id_packed: u8 = 0;
     if (!has_global_palette) {
         id_packed |= id_flag_local_color_table;
-        id_packed |= @as(u8, declared_size_log);
+        id_packed |= @as(u8, size_log);
     }
     try out.append(gpa, id_packed);
 
-    // Local Color Table.
     if (!has_global_palette) {
-        for (palette) |c| try out.appendSlice(gpa, &.{ c.r, c.g, c.b });
-        var pad_i: usize = palette.len;
-        while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(gpa, &.{ 0, 0, 0 });
+        try writeColorTable(out, gpa, palette, declared_entries);
     }
 
-    // LZW data.
-    try out.append(gpa, @as(u8, min_code_size));
-    var encoder = try lzw.Encoder.init(gpa, min_code_size);
-    defer encoder.deinit(gpa);
-
-    var lzw_bytes: std.ArrayList(u8) = .empty;
-    defer lzw_bytes.deinit(gpa);
-    try encoder.encodeAll(gpa, indices, &lzw_bytes);
-
-    var idx: usize = 0;
-    while (idx < lzw_bytes.items.len) {
-        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
-        try out.append(gpa, @intCast(chunk_len));
-        try out.appendSlice(gpa, lzw_bytes.items[idx .. idx + chunk_len]);
-        idx += chunk_len;
-    }
-    try out.append(gpa, 0);
-}
-
-/// Like `mapImageToPalette` but skips alpha<128 pixels for `T == Rgba`,
-/// emitting `transparent_index` for them. The dither path still operates on
-/// the full image and the transparency check is applied to the post-dither
-/// indices (which is fine — alpha is preserved through `image.convert`).
-fn mapFrameToPalette(
-    comptime T: type,
-    gpa: Allocator,
-    image: Image(T),
-    palette: []const Rgb,
-    indices: []u8,
-    use_dither: bool,
-    has_transparent: bool,
-    transparent_index: u8,
-) !void {
-    const lookup_palette = if (has_transparent) palette[0 .. palette.len - 1] else palette;
-    const lut = quantize.ColorLookupTable.init(lookup_palette);
-
-    if (use_dither) {
-        var work = try image.convert(Rgb, gpa);
-        defer work.deinit(gpa);
-        dither.applyFloydSteinberg(work, lookup_palette, lut);
-        var i: usize = 0;
-        while (i < image.rows) : (i += 1) {
-            const dst_off = i * image.cols;
-            const src_off = i * work.stride;
-            var j: usize = 0;
-            while (j < image.cols) : (j += 1) {
-                if (T == Rgba and image.at(i, j).a < 128) {
-                    indices[dst_off + j] = transparent_index;
-                } else {
-                    indices[dst_off + j] = lut.lookup(work.data[src_off + j]);
-                }
-            }
-        }
-        return;
-    }
-
-    var i: usize = 0;
-    while (i < image.rows) : (i += 1) {
-        const dst_off = i * image.cols;
-        var j: usize = 0;
-        while (j < image.cols) : (j += 1) {
-            const px = image.at(i, j).*;
-            if (T == Rgba and px.a < 128) {
-                indices[dst_off + j] = transparent_index;
-            } else {
-                const rgb = convertColor(Rgb, px);
-                indices[dst_off + j] = lut.lookup(rgb);
-            }
-        }
-    }
+    try writeLzwImageData(gpa, out, indices, min_code_size);
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,17 +1196,13 @@ const TestBuilder = struct {
         try self.appendBytes(gpa, "GIF89a");
         try self.appendU16(gpa, w);
         try self.appendU16(gpa, h);
-        // gct_size_log: smallest s such that (2 << s) >= gct.len; clamp to 7.
-        var s: u3 = 0;
-        while ((@as(u16, 2) << s) < gct.len and s < 7) : (s += 1) {}
+        const s = declaredSizeLog(gct.len);
         const declared: u16 = @as(u16, 2) << s;
         const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
         try self.appendByte(gpa, packed_byte);
         try self.appendByte(gpa, 0); // bg
         try self.appendByte(gpa, 0); // aspect
-        for (gct) |e| try self.appendBytes(gpa, &.{ e.r, e.g, e.b });
-        const pad: usize = @as(usize, declared) - gct.len;
-        try self.list.appendNTimes(gpa, 0, pad * 3);
+        try writeColorTable(&self.list, gpa, gct, declared);
     }
 
     const GceOpts = struct {
