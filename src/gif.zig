@@ -728,9 +728,9 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 const quantize = @import("image/quantize.zig");
 const dither = @import("image/dither.zig");
 
-/// Single-frame GIF encode options. Reused by `encodeAnimated` via the
-/// `AnimatedEncodeOptions` alias — when supplied to the animated encoder,
-/// `palette` becomes the Global Color Table for every frame.
+/// GIF encode options used by both `encode` (single-frame) and `encodeAnimated`.
+/// For animated encode, `palette` becomes the Global Color Table when set,
+/// otherwise each frame gets its own LCT via per-frame median-cut.
 pub const EncodeOptions = struct {
     /// Pre-computed palette. If null, the encoder runs median-cut on the input.
     /// Length must be 2..256.
@@ -753,7 +753,7 @@ fn declaredSizeLog(palette_len: usize) u3 {
 }
 
 /// Emits a color table to `out`, padded with `(0,0,0)` to `declared_entries`.
-fn writeColorTable(out: *std.ArrayList(u8), allocator: Allocator, palette: []const Rgb, declared_entries: u16) !void {
+fn writeColorTable(allocator: Allocator, out: *std.ArrayList(u8), palette: []const Rgb, declared_entries: u16) !void {
     for (palette) |c| try out.appendSlice(allocator, &.{ c.r, c.g, c.b });
     var pad_i: usize = palette.len;
     while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(allocator, &.{ 0, 0, 0 });
@@ -837,20 +837,20 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     defer out.deinit(allocator);
 
     try out.appendSlice(allocator, "GIF89a");
-    try writeU16Le(&out, allocator, width);
-    try writeU16Le(&out, allocator, height);
+    try writeU16Le(allocator, &out, width);
+    try writeU16Le(allocator, &out, height);
     const lsd_packed: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
     try out.append(allocator, lsd_packed);
     try out.append(allocator, 0); // background color index
     try out.append(allocator, 0); // pixel aspect ratio
 
-    try writeColorTable(&out, allocator, palette, declared_entries);
+    try writeColorTable(allocator, &out, palette, declared_entries);
 
     try out.append(allocator, block_image_descriptor);
-    try writeU16Le(&out, allocator, 0);
-    try writeU16Le(&out, allocator, 0);
-    try writeU16Le(&out, allocator, width);
-    try writeU16Le(&out, allocator, height);
+    try writeU16Le(allocator, &out, 0);
+    try writeU16Le(allocator, &out, 0);
+    try writeU16Le(allocator, &out, width);
+    try writeU16Le(allocator, &out, height);
     try out.append(allocator, 0x00); // packed: no LCT, not interlaced
 
     try writeLzwImageData(allocator, &out, indices, min_code_size);
@@ -859,7 +859,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     return out.toOwnedSlice(allocator);
 }
 
-inline fn writeU16Le(out: *std.ArrayList(u8), allocator: Allocator, v: u16) !void {
+inline fn writeU16Le(allocator: Allocator, out: *std.ArrayList(u8), v: u16) !void {
     try out.append(allocator, @intCast(v & 0xFF));
     try out.append(allocator, @intCast((v >> 8) & 0xFF));
 }
@@ -937,16 +937,11 @@ fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
 // Animated encode
 // ---------------------------------------------------------------------------
 
-/// Animated GIF encode options. Aliases `EncodeOptions`: `palette` becomes the
-/// Global Color Table when set, otherwise each frame gets its own LCT via
-/// per-frame median-cut.
-pub const AnimatedEncodeOptions = EncodeOptions;
-
 /// Encodes an `AnimatedImage(T)` as an animated GIF. Each frame is emitted at
 /// full screen size with disposal=unspecified; the decoder's full-frame
 /// composition is the inverse of this encoder. For `T == Rgba`, pixels with
 /// `alpha < 128` are mapped to a reserved transparent palette index.
-pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), options: AnimatedEncodeOptions) ![]u8 {
+pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
     if (anim.frames.len == 0) return error.NoFrames;
     if (anim.frames.len != anim.delays_cs.len) return error.InconsistentDelays;
 
@@ -964,8 +959,8 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
     defer out.deinit(gpa);
 
     try out.appendSlice(gpa, "GIF89a");
-    try writeU16Le(&out, gpa, screen_w);
-    try writeU16Le(&out, gpa, screen_h);
+    try writeU16Le(gpa, &out, screen_w);
+    try writeU16Le(gpa, &out, screen_h);
 
     const has_global_palette = options.palette != null;
     var lsd_packed: u8 = 0;
@@ -980,7 +975,7 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
 
     if (options.palette) |custom| {
         const declared: u16 = @as(u16, 2) << declaredSizeLog(custom.len);
-        try writeColorTable(&out, gpa, custom, declared);
+        try writeColorTable(gpa, &out, custom, declared);
     }
 
     // NETSCAPE2.0 application extension carrying the loop count. Always emit
@@ -992,7 +987,7 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
         try out.appendSlice(gpa, "NETSCAPE2.0");
         try out.append(gpa, 0x03);
         try out.append(gpa, 0x01);
-        try writeU16Le(&out, gpa, anim.loop_count);
+        try writeU16Le(gpa, &out, anim.loop_count);
         try out.append(gpa, 0);
     }
 
@@ -1017,7 +1012,7 @@ fn emitAnimatedFrame(
     frame: Image(T),
     delay_cs: u16,
     has_global_palette: bool,
-    options: AnimatedEncodeOptions,
+    options: EncodeOptions,
     out: *std.ArrayList(u8),
 ) !void {
     const num_pixels: usize = @as(usize, frame.cols) * @as(usize, frame.rows);
@@ -1085,16 +1080,16 @@ fn emitAnimatedFrame(
     try out.append(gpa, 0x04);
     const gce_packed: u8 = if (has_transparent) gce_flag_transparent else 0;
     try out.append(gpa, gce_packed);
-    try writeU16Le(out, gpa, delay_cs);
+    try writeU16Le(gpa, out, delay_cs);
     try out.append(gpa, transparent_index);
     try out.append(gpa, 0);
 
     // Image Descriptor.
     try out.append(gpa, block_image_descriptor);
-    try writeU16Le(out, gpa, 0);
-    try writeU16Le(out, gpa, 0);
-    try writeU16Le(out, gpa, @intCast(frame.cols));
-    try writeU16Le(out, gpa, @intCast(frame.rows));
+    try writeU16Le(gpa, out, 0);
+    try writeU16Le(gpa, out, 0);
+    try writeU16Le(gpa, out, @intCast(frame.cols));
+    try writeU16Le(gpa, out, @intCast(frame.rows));
     var id_packed: u8 = 0;
     if (!has_global_palette) {
         id_packed |= id_flag_local_color_table;
@@ -1103,7 +1098,7 @@ fn emitAnimatedFrame(
     try out.append(gpa, id_packed);
 
     if (!has_global_palette) {
-        try writeColorTable(out, gpa, palette, declared_entries);
+        try writeColorTable(gpa, out, palette, declared_entries);
     }
 
     try writeLzwImageData(gpa, out, indices, min_code_size);
@@ -1202,7 +1197,7 @@ const TestBuilder = struct {
         try self.appendByte(gpa, packed_byte);
         try self.appendByte(gpa, 0); // bg
         try self.appendByte(gpa, 0); // aspect
-        try writeColorTable(&self.list, gpa, gct, declared);
+        try writeColorTable(gpa, &self.list, gct, declared);
     }
 
     const GceOpts = struct {
