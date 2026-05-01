@@ -159,10 +159,19 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     // Read with the most generous per-format cap; per-format limits enforced
     // by the decoders below.
-    const read_cap = @max(
-        readLimit(file_png_limits.max_png_bytes),
-        @max(readLimit(file_jpeg_limits.max_jpeg_bytes), @max(readLimit(file_bmp_limits.max_bmp_bytes), readLimit(file_gif_limits.max_gif_bytes))),
-    );
+    const read_cap = blk: {
+        const caps = [_]usize{
+            readLimit(file_png_limits.max_png_bytes),
+            readLimit(file_jpeg_limits.max_jpeg_bytes),
+            readLimit(file_bmp_limits.max_bmp_bytes),
+            readLimit(file_gif_limits.max_gif_bytes),
+        };
+        var max_cap: usize = 0;
+        for (caps) |cap| {
+            max_cap = @max(max_cap, cap);
+        }
+        break :blk max_cap;
+    };
     const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(read_cap)) catch |err| {
         python.setErrorWithPath(err, path_slice);
         return null;
