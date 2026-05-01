@@ -18,7 +18,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: master
 
       - name: Unit tests
         run: zig build test
@@ -55,7 +55,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: master
 
       - name: Build ${{ matrix.platform }}
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast

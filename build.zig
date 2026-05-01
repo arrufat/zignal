@@ -82,6 +82,7 @@ pub fn build(b: *Build) void {
         .{ .name = "png", .path = "src/png.zig" },
         .{ .name = "fdm", .path = "src/fdm.zig" },
         .{ .name = "jpeg", .path = "src/jpeg.zig" },
+        .{ .name = "bmp", .path = "src/bmp.zig" },
         .{ .name = "pca", .path = "src/pca.zig" },
         .{ .name = "sixel", .path = "src/sixel.zig" },
         .{ .name = "kitty", .path = "src/kitty.zig" },
@@ -148,13 +149,11 @@ pub fn build(b: *Build) void {
     // Python type stub generation.
     //
     // `python-stubs` is its own step rather than a hard dependency of
-    // `python-bindings`. The runtime extension can build and run tests
-    // without regenerating stubs — useful when the stub generator (a
-    // native executable) hits upstream toolchain issues like zig#22875
-    // (zig's lld can't yet handle the .sframe relocations in /usr/lib/crt1.o
-    // shipped by gcc >= 15.2). Run `zig build python-stubs` explicitly
-    // to (re)generate the .pyi files. The CI wheel build invokes it
-    // before `python -m build --wheel` so wheels still ship type stubs.
+    // `python-bindings`. The runtime extension can build and run tests without
+    // regenerating stubs — handy when iterating on the bindings. Run
+    // `zig build python-stubs` explicitly to (re)generate the .pyi files. The
+    // CI wheel build invokes it before `python -m build --wheel` so wheels
+    // still ship type stubs.
     const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
