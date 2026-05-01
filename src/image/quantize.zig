@@ -7,7 +7,6 @@
 //! - Fixed palette generators: 6x7x6 (252 colors), web-safe 216, VGA-16.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
@@ -168,95 +167,10 @@ pub const ColorLookupTable = struct {
     }
 };
 
-/// Reusable histogram buffer pool for adaptive palette generation.
-/// Avoids per-call allocation of the 32K-entry counts/stamps arrays.
-pub const HistogramPool = struct {
-    const Node = struct {
-        counts: []u32,
-        stamps: []u32,
-        generation: u32,
-        next: ?*Node = null,
-    };
-
-    pub const Handle = struct {
-        counts: []u32,
-        stamps: []u32,
-        generation: u32,
-        node: *Node,
-    };
-
-    var lock_val = std.atomic.Value(u32).init(0);
-    var available: ?*Node = null;
-
-    inline fn lock() void {
-        if (builtin.single_threaded) return;
-        while (lock_val.swap(1, .acquire) != 0) {
-            std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
-        }
-    }
-
-    inline fn unlock() void {
-        if (builtin.single_threaded) return;
-        lock_val.store(0, .release);
-    }
-
-    pub fn acquire() !Handle {
-        lock();
-        if (available) |node| {
-            available = node.next;
-            unlock();
-
-            node.generation +%= 1;
-            if (node.generation == 0) {
-                @memset(node.stamps, 0);
-                node.generation = 1;
-            }
-
-            return .{
-                .counts = node.counts,
-                .stamps = node.stamps,
-                .generation = node.generation,
-                .node = node,
-            };
-        }
-        unlock();
-
-        const allocator = std.heap.page_allocator;
-        const required_len: usize = @as(usize, 1) << (3 * color_quantize_bits);
-
-        const counts = try allocator.alloc(u32, required_len);
-        errdefer allocator.free(counts);
-        const stamps = try allocator.alloc(u32, required_len);
-        errdefer allocator.free(stamps);
-        @memset(stamps, 0);
-
-        const node = try allocator.create(Node);
-        node.* = .{
-            .counts = counts,
-            .stamps = stamps,
-            .generation = 1,
-            .next = null,
-        };
-
-        return .{
-            .counts = node.counts,
-            .stamps = node.stamps,
-            .generation = node.generation,
-            .node = node,
-        };
-    }
-
-    pub fn release(handle: Handle) void {
-        lock();
-        handle.node.next = available;
-        available = handle.node;
-        unlock();
-    }
-};
-
 /// Generates an adaptive palette using the median-cut algorithm.
 /// Writes up to `max_colors` (and at most `palette.len`) entries into `palette`,
-/// returning the actual count written.
+/// returning the actual count written. Allocates a 32K-entry histogram from
+/// `gpa` per call; freed before returning.
 pub fn medianCut(
     comptime T: type,
     gpa: Allocator,
@@ -271,109 +185,54 @@ pub fn medianCut(
     defer touched_indices.deinit(gpa);
 
     const histogram_len = @as(usize, 1) << (3 * color_quantize_bits);
-    const hist_handle_result = HistogramPool.acquire();
+    const counts = try gpa.alloc(u32, histogram_len);
+    defer gpa.free(counts);
+    @memset(counts, 0);
 
-    if (hist_handle_result) |hist_handle| {
-        defer HistogramPool.release(hist_handle);
-
-        if (image.stride == image.cols) {
-            for (image.data) |pixel| {
-                const rgb = convertColor(Rgb, pixel);
-
-                const r5 = rgb.r >> (8 - color_quantize_bits);
-                const g5 = rgb.g >> (8 - color_quantize_bits);
-                const b5 = rgb.b >> (8 - color_quantize_bits);
-                const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
-                const hist_index: usize = @intCast(key);
-
-                if (hist_handle.stamps[hist_index] != hist_handle.generation) {
-                    hist_handle.stamps[hist_index] = hist_handle.generation;
-                    hist_handle.counts[hist_index] = 0;
-                    try touched_indices.append(gpa, @intCast(hist_index));
-                }
-                hist_handle.counts[hist_index] += 1;
-            }
-        } else {
-            for (0..image.rows) |r| {
-                for (0..image.cols) |c| {
-                    const pixel = image.at(r, c).*;
-                    const rgb = convertColor(Rgb, pixel);
-
-                    const r5 = rgb.r >> (8 - color_quantize_bits);
-                    const g5 = rgb.g >> (8 - color_quantize_bits);
-                    const b5 = rgb.b >> (8 - color_quantize_bits);
-                    const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
-                    const hist_index: usize = @intCast(key);
-
-                    if (hist_handle.stamps[hist_index] != hist_handle.generation) {
-                        hist_handle.stamps[hist_index] = hist_handle.generation;
-                        hist_handle.counts[hist_index] = 0;
-                        try touched_indices.append(gpa, @intCast(hist_index));
-                    }
-                    hist_handle.counts[hist_index] += 1;
-                }
-            }
+    if (image.stride == image.cols) {
+        for (image.data) |pixel| {
+            const rgb = convertColor(Rgb, pixel);
+            const r5 = rgb.r >> (8 - color_quantize_bits);
+            const g5 = rgb.g >> (8 - color_quantize_bits);
+            const b5 = rgb.b >> (8 - color_quantize_bits);
+            const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
+            const hist_index: usize = @intCast(key);
+            if (counts[hist_index] == 0) try touched_indices.append(gpa, @intCast(hist_index));
+            counts[hist_index] += 1;
         }
-
-        try color_list.ensureTotalCapacityPrecise(gpa, touched_indices.items.len);
-        for (touched_indices.items) |key_u16| {
-            const key = @as(usize, key_u16);
-            const count = hist_handle.counts[key];
-            if (count == 0) continue;
-
-            const r5: u8 = @intCast((key >> (2 * color_quantize_bits)) & 0x1F);
-            const g5: u8 = @intCast((key >> color_quantize_bits) & 0x1F);
-            const b5: u8 = @intCast(key & 0x1F);
-
-            const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
-            const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
-            const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
-
-            color_list.appendAssumeCapacity(.{
-                .r = r8,
-                .g = g8,
-                .b = b8,
-                .count = count,
-            });
-        }
-    } else |_| {
-        var counts = try gpa.alloc(u32, histogram_len);
-        defer gpa.free(counts);
-        @memset(counts[0..histogram_len], 0);
-
+    } else {
         for (0..image.rows) |r| {
             for (0..image.cols) |c| {
                 const pixel = image.at(r, c).*;
                 const rgb = convertColor(Rgb, pixel);
-
                 const r5 = rgb.r >> (8 - color_quantize_bits);
                 const g5 = rgb.g >> (8 - color_quantize_bits);
                 const b5 = rgb.b >> (8 - color_quantize_bits);
                 const key = (@as(u16, r5) << (2 * color_quantize_bits)) | (@as(u16, g5) << color_quantize_bits) | @as(u16, b5);
                 const hist_index: usize = @intCast(key);
+                if (counts[hist_index] == 0) try touched_indices.append(gpa, @intCast(hist_index));
                 counts[hist_index] += 1;
             }
         }
+    }
 
-        for (counts, 0..) |count, key_idx| {
-            if (count == 0) continue;
+    try color_list.ensureTotalCapacityPrecise(gpa, touched_indices.items.len);
+    for (touched_indices.items) |key_u16| {
+        const key = @as(usize, key_u16);
+        const r5: u8 = @intCast((key >> (2 * color_quantize_bits)) & 0x1F);
+        const g5: u8 = @intCast((key >> color_quantize_bits) & 0x1F);
+        const b5: u8 = @intCast(key & 0x1F);
 
-            const key: u32 = @intCast(key_idx);
-            const r5: u8 = @intCast((key >> (2 * color_quantize_bits)) & 0x1F);
-            const g5: u8 = @intCast((key >> color_quantize_bits) & 0x1F);
-            const b5: u8 = @intCast(key & 0x1F);
+        const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
+        const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
+        const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
 
-            const r8 = (r5 << (8 - color_quantize_bits)) | (r5 >> (2 * color_quantize_bits - 8));
-            const g8 = (g5 << (8 - color_quantize_bits)) | (g5 >> (2 * color_quantize_bits - 8));
-            const b8 = (b5 << (8 - color_quantize_bits)) | (b5 >> (2 * color_quantize_bits - 8));
-
-            try color_list.append(gpa, .{
-                .r = r8,
-                .g = g8,
-                .b = b8,
-                .count = count,
-            });
-        }
+        color_list.appendAssumeCapacity(.{
+            .r = r8,
+            .g = g8,
+            .b = b8,
+            .count = counts[key],
+        });
     }
 
     const palette_size = @min(@min(color_list.items.len, max_colors), palette.len);

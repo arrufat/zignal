@@ -19,7 +19,7 @@
   - `dither.Mode` (`none`, `floyd_steinberg`, `atkinson`, `ordered`, `auto`) with `dither.apply`, `dither.applyFloydSteinberg`, `dither.applyAtkinson`, `dither.applyOrdered`.
 
 ### Improvements
-- **Single-Threaded Build Robustness**: `quantize.HistogramPool` and sixel's palette LUT cache now skip atomic spinlocks under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding` once any caller exercises `medianCut`).
+- **Single-Threaded Build Robustness**: Sixel's palette LUT cache skips its atomic spinlock under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding`).
 
 ## [0.10.0] - 2026-04-15
 
