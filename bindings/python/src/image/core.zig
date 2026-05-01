@@ -29,6 +29,8 @@ const file_jpeg_limits: zignal.jpeg.DecodeLimits = .{
     .max_jpeg_bytes = 200 * 1024 * 1024,
     .max_marker_bytes = 16 * 1024 * 1024,
 };
+const default_bmp_limits: zignal.bmp.DecodeLimits = .{};
+const file_bmp_limits: zignal.bmp.DecodeLimits = .{ .max_bmp_bytes = 100 * 1024 * 1024 };
 
 // Import the ImageObject type from parent
 inline fn readLimit(max_bytes: usize) usize {
@@ -78,6 +80,19 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
             };
             return wrapNativeImage(native);
         },
+        .bmp => {
+            const kind = "BMP data";
+            var decoded = zignal.bmp.decode(allocator, data, default_bmp_limits) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            defer decoded.deinit(allocator);
+            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
+                setDecodeError(kind, err);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
     }
 }
 
@@ -86,14 +101,15 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
 // ============================================================================
 
 pub const image_load_doc =
-    \\Load an image from file (PNG or JPEG).
+    \\Load an image from file (PNG, JPEG, or BMP).
     \\
     \\The pixel format (Gray, Rgb, or Rgba) is automatically determined from the
     \\file metadata. For PNGs, the format matches the file's color type. For JPEGs,
-    \\grayscale images load as Gray, color images as Rgb.
+    \\grayscale images load as Gray, color images as Rgb. For BMPs, indexed and
+    \\24bpp images load as Rgb; 32bpp images with an alpha channel load as Rgba.
     \\
     \\## Parameters
-    \\- `path` (str): Path to the PNG or JPEG file to load
+    \\- `path` (str): Path to the PNG, JPEG, or BMP file to load
     \\
     \\## Returns
     \\Image: A new Image object with pixels in the format matching the file
@@ -110,6 +126,7 @@ pub const image_load_doc =
     \\img = Image.load("photo.png")     # May be Rgba
     \\img2 = Image.load("grayscale.jpg") # Will be Gray
     \\img3 = Image.load("rgb.png")       # Will be Rgb
+    \\img4 = Image.load("legacy.bmp")    # Rgb or Rgba depending on bit depth
     \\
     \\# Check format after loading
     \\print(img.dtype)  # e.g., Rgba, Rgb, or Gray
@@ -125,77 +142,80 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const path_slice = std.mem.span(params.path);
 
-    // Detect format and load accordingly
-    const is_jpeg = std.mem.endsWith(u8, path_slice, ".jpg") or
-        std.mem.endsWith(u8, path_slice, ".jpeg") or
-        std.mem.endsWith(u8, path_slice, ".JPG") or
-        std.mem.endsWith(u8, path_slice, ".JPEG");
-
-    if (is_jpeg) {
-        // Read file and decode JPEG
-        const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_jpeg_limits.max_jpeg_bytes))) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        defer allocator.free(data);
-
-        var decoded = zignal.jpeg.decode(allocator, data, file_jpeg_limits) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        defer decoded.deinit();
-
-        const native = zignal.jpeg.toNativeImage(allocator, &decoded) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        switch (native) {
-            inline else => |img| {
-                return @ptrCast(moveImageToPython(img) orelse return null);
-            },
-        }
-    }
-
-    // PNG: load native dtype (Gray, RGB, RGBA)
-    if (std.mem.endsWith(u8, path_slice, ".png") or std.mem.endsWith(u8, path_slice, ".PNG")) {
-        const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(readLimit(file_png_limits.max_png_bytes))) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        defer allocator.free(data);
-        var decoded = zignal.png.decode(allocator, data, file_png_limits) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        defer decoded.deinit(allocator);
-        const native = zignal.png.toNativeImage(allocator, decoded) catch |err| {
-            python.setErrorWithPath(err, path_slice);
-            return null;
-        };
-        switch (native) {
-            inline else => |img| {
-                return @ptrCast(moveImageToPython(img) orelse return null);
-            },
-        }
-    }
-
-    // Default: Try to load as RGB
-    const image = Image(Rgb).load(ctx.io, allocator, path_slice) catch |err| {
+    // Read with the most generous per-format cap; per-format limits enforced
+    // by the decoders below.
+    const read_cap = @max(
+        readLimit(file_png_limits.max_png_bytes),
+        @max(readLimit(file_jpeg_limits.max_jpeg_bytes), readLimit(file_bmp_limits.max_bmp_bytes)),
+    );
+    const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(read_cap)) catch |err| {
         python.setErrorWithPath(err, path_slice);
         return null;
     };
-    return @ptrCast(moveImageToPython(image) orelse return null);
+    defer allocator.free(data);
+
+    const detected = ImageFormat.detectFromBytes(data) orelse {
+        python.setErrorWithPath(error.UnsupportedImageFormat, path_slice);
+        return null;
+    };
+
+    return switch (detected) {
+        .png => decodeFile(.png, data, path_slice, file_png_limits),
+        .jpeg => decodeFile(.jpeg, data, path_slice, file_jpeg_limits),
+        .bmp => decodeFile(.bmp, data, path_slice, file_bmp_limits),
+    };
+}
+
+fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, limits: anytype) ?*c.PyObject {
+    switch (format) {
+        .png => {
+            var decoded = zignal.png.decode(allocator, data, limits) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            defer decoded.deinit(allocator);
+            const native = zignal.png.toNativeImage(allocator, decoded) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
+        .jpeg => {
+            var decoded = zignal.jpeg.decode(allocator, data, limits) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            defer decoded.deinit();
+            const native = zignal.jpeg.toNativeImage(allocator, &decoded) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
+        .bmp => {
+            var decoded = zignal.bmp.decode(allocator, data, limits) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            defer decoded.deinit(allocator);
+            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            return wrapNativeImage(native);
+        },
+    }
 }
 
 pub const image_load_from_bytes_doc =
-    \\Load an image from an in-memory bytes-like object (PNG or JPEG).
+    \\Load an image from an in-memory bytes-like object (PNG, JPEG, or BMP).
     \\
     \\Accepts any object that implements the Python buffer protocol, such as
     \\`bytes`, `bytearray`, or `memoryview`. The image format is detected from
     \\the data's file signature, so no file extension is required.
     \\
     \\## Parameters
-    \\- `data` (bytes-like): Raw PNG or JPEG bytes.
+    \\- `data` (bytes-like): Raw PNG, JPEG, or BMP bytes.
     \\
     \\## Returns
     \\Image: A new Image with pixel storage matching the encoded file (Gray, Rgb, or Rgba).
@@ -245,13 +265,14 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
     const data_slice = byte_ptr[0..@intCast(buffer.len)];
 
     const detected = ImageFormat.detectFromBytes(data_slice) orelse {
-        python.setValueError("Unsupported image data: expected PNG or JPEG signature", .{});
+        python.setValueError("Unsupported image data: expected PNG, JPEG, or BMP signature", .{});
         return null;
     };
 
     return switch (detected) {
         .png => loadBytes(.png, data_slice),
         .jpeg => loadBytes(.jpeg, data_slice),
+        .bmp => loadBytes(.bmp, data_slice),
     };
 }
 
@@ -260,13 +281,13 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
 // ============================================================================
 
 pub const image_save_doc =
-    \\Save the image to a file (PNG or JPEG format).
+    \\Save the image to a file (PNG, JPEG, or BMP format).
     \\
-    \\The format is determined by the file extension (.png, .jpg, or .jpeg).
+    \\The format is determined by the file extension (.png, .jpg, .jpeg, or .bmp).
     \\
     \\## Parameters
     \\- `path` (str): Path where the image file will be saved.
-    \\  Must have .png, .jpg, or .jpeg extension.
+    \\  Must have .png, .jpg, .jpeg, or .bmp extension.
     \\
     \\## Raises
     \\- `ValueError`: If the file has an unsupported extension
@@ -279,6 +300,7 @@ pub const image_save_doc =
     \\img = Image.load("input.png")
     \\img.save("output.png")   # Save as PNG
     \\img.save("output.jpg")   # Save as JPEG
+    \\img.save("output.bmp")   # Save as BMP
     \\```
 ;
 
@@ -296,7 +318,7 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         fn apply(img: anytype, path: []const u8) ?*c.PyObject {
             img.save(ctx.io, allocator, path) catch |err| {
                 if (err == error.UnsupportedImageFormat) {
-                    python.setValueError("Unsupported image format. File must have a valid PNG or JPEG extension.", .{});
+                    python.setValueError("Unsupported image format. File must have a valid PNG, JPEG, or BMP extension.", .{});
                     return null;
                 }
                 python.setErrorWithPath(err, path);

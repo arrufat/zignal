@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const bmp = @import("../bmp.zig");
 const jpeg = @import("../jpeg.zig");
 const png = @import("../png.zig");
 
@@ -11,6 +12,7 @@ const png = @import("../png.zig");
 pub const ImageFormat = enum {
     png,
     jpeg,
+    bmp,
 
     /// Detect image format from the first few bytes of data
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
@@ -25,6 +27,13 @@ pub const ImageFormat = enum {
         if (data.len >= 2) {
             if (std.mem.eql(u8, data[0..2], &jpeg.signature)) {
                 return .jpeg;
+            }
+        }
+
+        // BMP signature
+        if (data.len >= 2) {
+            if (std.mem.eql(u8, data[0..2], &bmp.signature)) {
+                return .bmp;
             }
         }
 
