@@ -1,6 +1,6 @@
 //! Pure Zig JPEG state and baseline encoder implementation.
 //! Decoder supports baseline and progressive DCT JPEG images.
-//! Encoder implements baseline (SOF0) JPEG with 4:4:4 sampling and adjustable quality.
+//! Encoder implements baseline (SOF0) JPEG with 4:4:4, 4:2:2, or 4:2:0 chroma subsampling and adjustable quality.
 
 const std = @import("std");
 const assert = std.debug.assert;
