@@ -157,7 +157,7 @@ pub const Decoder = struct {
                 // Grow code_size in lockstep with the encoder: when the slot we
                 // just inserted saturates the current width, the next code in
                 // the stream will be one bit wider.
-                if (self.dict_size == (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
+                if (self.dict_size == (@as(u16, 1) << self.code_size) and self.code_size < max_lzw_bits) {
                     self.code_size += 1;
                 }
             }
@@ -265,7 +265,7 @@ pub const Encoder = struct {
                     self.next_code += 1;
                     // Grow when the just-inserted slot can no longer be referenced at
                     // the current width — i.e., next_code now exceeds (1 << W).
-                    if (self.next_code > (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
+                    if (self.next_code > (@as(u16, 1) << self.code_size) and self.code_size < max_lzw_bits) {
                         self.code_size += 1;
                     }
                 } else {
