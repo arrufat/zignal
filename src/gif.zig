@@ -1416,9 +1416,10 @@ test "loadFromBytes — 2x2 with global palette" {
     defer b.deinit(gpa);
 
     try b.appendHeaderWithGct(gpa, 2, 2, &test_palette_4);
-    // LZW for indices [0, 1, 2, 3]: encoder grows code_size after adding (1,2),
-    // emitting 2,3 at 4 bits → bytes [0x44, 0x64, 0x0A].
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x64, 0x0A });
+    // LZW for indices [0, 1, 2, 3]: encoder grows code_size after the third
+    // user emission saturates the dict (next_code = 9 > 1<<3), so codes 0,1,2
+    // are emitted at 3 bits and 3,EOI at 4 bits → bytes [0x44, 0x34, 0x05].
+    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
     try b.appendTrailer(gpa);
 
     var img = try loadFromBytes(Rgb, gpa, b.list.items, .{});

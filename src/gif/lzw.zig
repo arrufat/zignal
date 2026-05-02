@@ -154,11 +154,10 @@ pub const Decoder = struct {
                 self.suffix[self.dict_size] = first_char;
                 self.dict_size += 1;
 
-                // Grow when the NEXT code to be assigned would not fit at the current
-                // width. Decoder fires one step earlier than `dict_size == (1 << W)`
-                // because the encoder is one ahead in the dict and may emit a code
-                // referring to the slot we're about to add (K[0]wK).
-                if (self.dict_size + 1 == (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
+                // Grow code_size in lockstep with the encoder: when the slot we
+                // just inserted saturates the current width, the next code in
+                // the stream will be one bit wider.
+                if (self.dict_size == (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
                     self.code_size += 1;
                 }
             }
@@ -264,7 +263,9 @@ pub const Encoder = struct {
                 if (self.next_code < max_dict_entries) {
                     self.dict.putAssumeCapacity(key, self.next_code);
                     self.next_code += 1;
-                    if (self.next_code == (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
+                    // Grow when the just-inserted slot can no longer be referenced at
+                    // the current width — i.e., next_code now exceeds (1 << W).
+                    if (self.next_code > (@as(u16, 1) << @as(u4, @intCast(self.code_size))) and self.code_size < max_lzw_bits) {
                         self.code_size += 1;
                     }
                 } else {
@@ -323,9 +324,19 @@ pub fn deinterlace(src: []const u8, dst: []u8, width: usize, height: usize) void
 
 test "LZW decoder — 4-color sequence with code-size growth" {
     // Indices [0, 1, 2, 3], min_code_size = 2.
-    // Encoder emits Clear@3, 0@3, 1@3 (then grows to 4 after add),
-    // then 2@4, 3@4, EOI@4. Total 21 bits → bytes [0x44, 0x64, 0x0A].
-    const in = [_]u8{ 0x44, 0x64, 0x0A };
+    // Encoder emits Clear@3, 0@3, 1@3, 2@3, then grows after the third user
+    // emission saturates dict at slot 8, so 3@4 and EOI@4. Total 4*3 + 2*4 = 20
+    // bits → 3 bytes (4 padding bits at the end).
+    //   bit 0..2  Clear=4 → 0,0,1
+    //   bit 3..5  0       → 0,0,0
+    //   bit 6..8  1       → 1,0,0
+    //   bit 9..11 2       → 0,1,0
+    //   bit 12..15 3      → 1,1,0,0
+    //   bit 16..19 EOI=5  → 1,0,1,0
+    //   byte 0 = 0b00100100 = 0x44
+    //   byte 1 = 0b00110100 = 0x34
+    //   byte 2 = 0b00000101 = 0x05
+    const in = [_]u8{ 0x44, 0x34, 0x05 };
     var dec = try Decoder.init(2);
     var out: [16]u8 = undefined;
     const r = try dec.decodeChunk(&in, &out);
@@ -387,7 +398,7 @@ test "LZW decoder — empty input returns immediately, not done" {
 }
 
 test "LZW decoder — output buffer overflow rejected" {
-    const in = [_]u8{ 0x44, 0x64, 0x0A };
+    const in = [_]u8{ 0x44, 0x34, 0x05 };
     var dec = try Decoder.init(2);
     var out: [2]u8 = undefined;
     try expectError(error.LzwOutputOverflow, dec.decodeChunk(&in, &out));
@@ -402,7 +413,7 @@ test "LZW decoder — chunk boundary mid-code" {
     written_total += r1.written;
     try expect(!dec.isDone());
 
-    const r2 = try dec.decodeChunk(&[_]u8{ 0x64, 0x0A }, out[written_total..]);
+    const r2 = try dec.decodeChunk(&[_]u8{ 0x34, 0x05 }, out[written_total..]);
     written_total += r2.written;
     try expect(dec.isDone());
     try expectEqual(@as(usize, 4), written_total);
