@@ -98,6 +98,7 @@ pub fn isKittySupported(io: Io) !bool {
 /// Compute aspect-preserving scale factor given optional target width/height.
 /// Enforces a maximum dimension of 2048 pixels to avoid excessive terminal memory usage.
 pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) f32 {
+    if (rows == 0 or cols == 0) return 1.0;
     const max_dim: u32 = 2048;
     const cols_f: f32 = @floatFromInt(cols);
     const rows_f: f32 = @floatFromInt(rows);
@@ -463,4 +464,12 @@ test "aspectScale: max_dim caps oversized images" {
 test "aspectScale: max_dim caps user-requested upscale" {
     // 100x100 image, --width 5000 → capped at 2048/100 = 20.48
     try std.testing.expectApproxEqAbs(@as(f32, 20.48), aspectScale(5000, null, 100, 100), 1e-4);
+}
+
+test "aspectScale: zero dimensions return identity (no inf/NaN)" {
+    // Division by zero would produce inf, then NaN on @round(0 * inf), then a
+    // panic on the int cast. Guard returns 1.0 instead.
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(100, null, 0, 100));
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(100, null, 100, 0));
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(null, null, 0, 0));
 }
