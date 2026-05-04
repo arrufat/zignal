@@ -367,7 +367,7 @@ test "getTextBounds with Unicode" {
         .char_height = 8,
         .first_char = 0,
         .last_char = 255,
-        .data = &([_]u8{0} ** (256 * 8)),
+        .data = &@as([256 * 8]u8, @splat(0)),
     };
 
     // "A" is 1 byte, "©" is 2 bytes in UTF-8
@@ -382,7 +382,7 @@ test "getTextBounds with Unicode" {
 test "getTextBoundsTight with Wide Font" {
     const testing = std.testing;
     // 16x8 font, 2 bytes per row
-    var data = [_]u8{0} ** (2 * 8);
+    var data: [2 * 8]u8 = @splat(0);
     // Set a pixel at (10, 2) - this is in the second byte of the 3rd row
     data[2 * 2 + 1] = 1 << 2; // (10-8) = bit 2 of the second byte
 
@@ -406,7 +406,7 @@ test "getTextBoundsTight with Wide Font" {
 test "getTextBoundsTight with Unicode" {
     const testing = std.testing;
     // Create a font where '©' (codepoint 0xA9) has a specific pattern
-    var data = [_]u8{0} ** (256 * 8);
+    var data: [256 * 8]u8 = @splat(0);
     // '©' at index 0xA9
     const offset = 0xA9 * 8;
     data[offset + 2] = 0x18; // 00011000 in row 2
