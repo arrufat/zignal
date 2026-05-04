@@ -65,14 +65,18 @@ pub fn DisplayFormatter(comptime T: type) type {
             defer arena.deinit();
             const allocator = arena.allocator();
 
-            // Prepare scaled image for sgr/braille if needed
-            var image_to_display = self.image;
-            var scaled_image: ?Image(T) = null;
-            defer if (scaled_image) |*img| img.deinit(allocator);
+            // Determine if we can fallback to SGR
+            const can_fallback = self.display_format == .auto;
 
-            // Handle scaling for sgr and braille (sixel/kitty do their own)
-            switch (self.display_format) {
+            // Now render with the appropriate format. Scaling for sgr/braille is done
+            // inside their arms so it also applies when reached via `continue :fmt`
+            // from .auto or as a fallback from sixel/kitty failure.
+            fmt: switch (self.display_format) {
                 .sgr => |options| {
+                    var image_to_display: *const Image(T) = self.image;
+                    var scaled_image: ?Image(T) = null;
+                    defer if (scaled_image) |*img| img.deinit(allocator);
+
                     const scale_factor = terminal.aspectScale(options.width, options.height, self.image.rows, self.image.cols);
                     if (@abs(scale_factor - 1.0) > 0.001) {
                         scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
@@ -80,25 +84,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             image_to_display = img;
                         }
                     }
-                },
-                .braille => |config| {
-                    const scale_factor = terminal.aspectScale(config.width, config.height, self.image.rows, self.image.cols);
-                    if (@abs(scale_factor - 1.0) > 0.001) {
-                        scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
-                        if (scaled_image) |*img| {
-                            image_to_display = img;
-                        }
-                    }
-                },
-                else => {}, // sixel, kitty, and auto handle their own scaling
-            }
 
-            // Determine if we can fallback to SGR
-            const can_fallback = self.display_format == .auto;
-
-            // Now render with the appropriate format
-            fmt: switch (self.display_format) {
-                .sgr => {
                     // Process image in 2-row chunks for half-block characters
                     const row_pairs = (image_to_display.rows + 1) / 2;
 
@@ -125,6 +111,18 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .braille => |config| {
+                    var image_to_display: *const Image(T) = self.image;
+                    var scaled_image: ?Image(T) = null;
+                    defer if (scaled_image) |*img| img.deinit(allocator);
+
+                    const scale_factor = terminal.aspectScale(config.width, config.height, self.image.rows, self.image.cols);
+                    if (@abs(scale_factor - 1.0) > 0.001) {
+                        scaled_image = self.image.scale(allocator, scale_factor, .bilinear) catch null;
+                        if (scaled_image) |*img| {
+                            image_to_display = img;
+                        }
+                    }
+
                     // Braille pattern bit mapping
                     // Dots are numbered 1-8, bits are 0-7
                     const braille_bits = [4][2]u3{
@@ -188,7 +186,10 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .auto => |options| {
-                    if (kitty.isSupported(self.io)) {
+                    const kitty_ok = kitty.isSupported(self.io);
+                    const sixel_ok = if (!kitty_ok) sixel.isSupported(self.io) else false;
+                    std.log.debug("auto: kitty={}, sixel={}", .{ kitty_ok, sixel_ok });
+                    if (kitty_ok) {
                         continue :fmt .{ .kitty = .{
                             .quiet = 1,
                             .image_id = null,
@@ -199,7 +200,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .height = options.height,
                             .interpolation = options.interpolation orelse .bilinear,
                         } };
-                    } else if (sixel.isSupported(self.io)) {
+                    } else if (sixel_ok) {
                         continue :fmt .{ .sixel = .{
                             .palette = .{ .adaptive = .{ .max_colors = 256 } },
                             .dither = .auto,
@@ -228,7 +229,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (sixel_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .{ .sgr = .default };
+                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
                     } else {
                         // Output minimal sixel sequence to indicate failure
                         // This ensures we always output valid sixel when explicitly requested
@@ -249,7 +250,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     if (kitty_data) |data| {
                         try writer.writeAll(data);
                     } else if (can_fallback) {
-                        continue :fmt .{ .sgr = .default };
+                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
                     } else {
                         // Output minimal Kitty sequence to indicate failure
                         // Empty image with delete command
