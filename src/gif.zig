@@ -1341,7 +1341,7 @@ test "getInfo — comment extension is skipped" {
 }
 
 test "getInfo — bad signature rejected" {
-    const data = "FOO89a" ++ ([_]u8{0} ** 7) ++ [_]u8{block_trailer};
+    const data = "FOO89a" ++ @as([7]u8, @splat(0)) ++ [_]u8{block_trailer};
     var reader = buildReader(data);
     try expectError(error.InvalidGifSignature, getInfo(&reader, .{}));
 }

@@ -223,7 +223,7 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
             "  --" ++ flag_name_fmt ++ " <" ++ metavar ++ ">";
 
         const padding_len = padding_target - flag_str.len;
-        const padding = " " ** padding_len;
+        const padding: [padding_len]u8 = @splat(' ');
 
         text = text ++ flag_str ++ padding ++ meta_info.help ++ "\n";
     }

@@ -283,8 +283,8 @@ test "ssim rgb scales with luminance" {
     const Pixel = struct { r: u8, g: u8, b: u8 };
     const width = 12;
     const height = 12;
-    var a_data: [width * height]Pixel = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }} ** (width * height);
-    var b_data: [width * height]Pixel = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }} ** (width * height);
+    var a_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
+    var b_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
 
     for (0..height) |r| {
         for (0..width) |c| {

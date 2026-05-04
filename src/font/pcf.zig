@@ -1371,7 +1371,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
 
     const table_count = tables.len;
     const header_size = 8 + table_count * 16;
-    var offsets = [_]u32{0} ** 5; // table_count
+    var offsets: [5]u32 = @splat(0); // table_count
     var current_offset: usize = header_size;
 
     for (tables, 0..) |table, idx| {
