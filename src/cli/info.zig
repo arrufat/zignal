@@ -150,7 +150,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     });
                 }
             }
-            break :blk void{};
+            break :blk {};
         };
 
         if (result) |_| {

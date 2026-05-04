@@ -323,15 +323,13 @@ const State = struct {
     /// Send a query sequence and read the response
     ///
     /// Sends an escape sequence to the terminal and waits for a response.
-    /// Automatically enters raw mode, clears pending input, and restores
-    /// terminal state after reading the response.
-    ///
     /// Returns the response data or error.NoResponse if no response received.
+    /// Note: enterRawMode uses TCSAFLUSH, which discards any pending input
+    /// before applying the new termios — so no explicit drain is needed here.
+    /// On Windows, drain the input buffer first since console state is global.
     fn query(self: *const State, sequence: []const u8, buffer: []u8, timeout_ms: u64) ![]const u8 {
-        // Enter raw mode
         try self.enterRawMode();
         defer {
-            // Restore terminal state
             switch (self.original_state) {
                 .windows => {},
                 .posix => |termios| {
@@ -342,39 +340,19 @@ const State = struct {
             }
         }
 
-        // Clear any pending input
         if (builtin.os.tag == .windows) {
-            // Consume any pending input
             while (win_api._kbhit() != 0) {
                 _ = win_api._getch();
             }
-        } else {
-            var discard_buf: [response_buffer_size]u8 = undefined;
-            var iov = [_][]u8{discard_buf[0..]};
-            _ = self.stdin.readStreaming(self.io, &iov) catch |err| switch (err) {
-                // VMIN=0/VTIME>0 returns 0 bytes on timeout, which the I/O layer
-                // surfaces as EndOfStream. For a terminal, that just means "nothing
-                // pending" — not an actual EOF.
-                error.EndOfStream => {},
-                error.Canceled => {
-                    self.io.recancel();
-                    return err;
-                },
-                else => return err,
-            };
         }
 
-        // Send query sequence
         self.stdout.writeStreamingAll(self.io, sequence) catch |err| {
             if (err == error.Canceled) self.io.recancel();
             return err;
         };
 
-        // Read response with timeout
         const n = try self.readWithTimeout(buffer, timeout_ms);
-
         if (n == 0) return error.NoResponse;
-
         return buffer[0..n];
     }
 
@@ -434,7 +412,7 @@ const State = struct {
 };
 
 test "aspectScale: only width given upscales" {
-    // 100x100 image, --width 1000 → scale 10x (was incorrectly capped at 1.0)
+    // 100x100 image, --width 1000 → scale 10x
     try std.testing.expectApproxEqAbs(@as(f32, 10.0), aspectScale(1000, null, 100, 100), 1e-6);
 }
 
