@@ -83,7 +83,12 @@ pub fn isKittySupported(io: Io) !bool {
     // This allows us to detect Kitty support by checking which response we get
     const query_seq = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
 
-    const response = try state.query(query_seq, &response_buf, 100);
+    const response = state.query(query_seq, &response_buf, 100) catch |err| {
+        std.log.debug("kitty query: {s}", .{@errorName(err)});
+        return err;
+    };
+
+    std.log.debug("kitty query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
 
     // If we get a graphics query response, Kitty is supported
     // The response will contain "\x1b_G" if Kitty processed the graphics query
@@ -93,22 +98,31 @@ pub fn isKittySupported(io: Io) !bool {
 /// Compute aspect-preserving scale factor given optional target width/height.
 /// Enforces a maximum dimension of 2048 pixels to avoid excessive terminal memory usage.
 pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) f32 {
+    if (rows == 0 or cols == 0) return 1.0;
     const max_dim: u32 = 2048;
+    const cols_f: f32 = @floatFromInt(cols);
+    const rows_f: f32 = @floatFromInt(rows);
 
-    // Use user-provided values or fall back to the image's own dimensions
-    var target_w: u32 = width_opt orelse @intCast(cols);
-    var target_h: u32 = height_opt orelse @intCast(rows);
+    // Compute the scale implied by user-provided constraints.
+    // - both set: fit-to-box (smaller of the two ratios)
+    // - one set: scale by that ratio (the other axis follows aspect)
+    // - neither set: identity, then clamped below by max_dim
+    var scale: f32 = 1.0;
+    if (width_opt) |w| {
+        const target_w: f32 = @floatFromInt(@min(w, max_dim));
+        scale = target_w / cols_f;
+        if (height_opt) |h| {
+            const target_h: f32 = @floatFromInt(@min(h, max_dim));
+            scale = @min(scale, target_h / rows_f);
+        }
+    } else if (height_opt) |h| {
+        const target_h: f32 = @floatFromInt(@min(h, max_dim));
+        scale = target_h / rows_f;
+    }
 
-    // Enforce the cap on the target dimensions
-    target_w = @min(target_w, max_dim);
-    target_h = @min(target_h, max_dim);
-
-    // Calculate scale factors to fit the image into the (possibly capped) target box
-    const scale_x = @as(f32, @floatFromInt(target_w)) / @as(f32, @floatFromInt(cols));
-    const scale_y = @as(f32, @floatFromInt(target_h)) / @as(f32, @floatFromInt(rows));
-
-    // Return the smaller scale to ensure aspect ratio preservation while fitting in the box
-    return @min(scale_x, scale_y);
+    // Independently enforce the max_dim cap on the resulting dimensions.
+    const max_dim_f: f32 = @floatFromInt(max_dim);
+    return @min(scale, @min(max_dim_f / cols_f, max_dim_f / rows_f));
 }
 
 /// Terminal state manager for capability detection
@@ -293,9 +307,15 @@ const State = struct {
         } else {
             // POSIX: Use the existing termios timeout mechanism
             var iov = [_][]u8{buffer};
-            return self.stdin.readStreaming(self.io, &iov) catch |err| {
-                if (err == error.Canceled) self.io.recancel();
-                return err;
+            return self.stdin.readStreaming(self.io, &iov) catch |err| switch (err) {
+                // VMIN=0/VTIME>0 returns 0 bytes on timeout — surfaced as
+                // EndOfStream by the I/O layer. Caller maps 0 bytes to NoResponse.
+                error.EndOfStream => 0,
+                error.Canceled => {
+                    self.io.recancel();
+                    return err;
+                },
+                else => return err,
             };
         }
     }
@@ -303,15 +323,13 @@ const State = struct {
     /// Send a query sequence and read the response
     ///
     /// Sends an escape sequence to the terminal and waits for a response.
-    /// Automatically enters raw mode, clears pending input, and restores
-    /// terminal state after reading the response.
-    ///
     /// Returns the response data or error.NoResponse if no response received.
+    /// Note: enterRawMode uses TCSAFLUSH, which discards any pending input
+    /// before applying the new termios — so no explicit drain is needed here.
+    /// On Windows, drain the input buffer first since console state is global.
     fn query(self: *const State, sequence: []const u8, buffer: []u8, timeout_ms: u64) ![]const u8 {
-        // Enter raw mode
         try self.enterRawMode();
         defer {
-            // Restore terminal state
             switch (self.original_state) {
                 .windows => {},
                 .posix => |termios| {
@@ -322,32 +340,19 @@ const State = struct {
             }
         }
 
-        // Clear any pending input
         if (builtin.os.tag == .windows) {
-            // Consume any pending input
             while (win_api._kbhit() != 0) {
                 _ = win_api._getch();
             }
-        } else {
-            var discard_buf: [response_buffer_size]u8 = undefined;
-            var iov = [_][]u8{discard_buf[0..]};
-            _ = self.stdin.readStreaming(self.io, &iov) catch |err| {
-                if (err == error.Canceled) self.io.recancel();
-                return err;
-            };
         }
 
-        // Send query sequence
         self.stdout.writeStreamingAll(self.io, sequence) catch |err| {
             if (err == error.Canceled) self.io.recancel();
             return err;
         };
 
-        // Read response with timeout
         const n = try self.readWithTimeout(buffer, timeout_ms);
-
         if (n == 0) return error.NoResponse;
-
         return buffer[0..n];
     }
 
@@ -364,9 +369,12 @@ const State = struct {
         switch (method) {
             .param_query => {
                 // Query sixel graphics parameter
-                const response = self.query("\x1b[?2;1;0S", &response_buf, 100) catch {
+                const response = self.query("\x1b[?2;1;0S", &response_buf, 100) catch |err| {
+                    std.log.debug("sixel param_query: {s}", .{@errorName(err)});
                     return false;
                 };
+
+                std.log.debug("sixel param_query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
 
                 // Look for positive response indicating sixel support
                 // Expected format: ESC P 1 $ r <params> ESC \
@@ -374,9 +382,12 @@ const State = struct {
             },
             .device_attributes => {
                 // Send Primary Device Attributes query
-                const response = self.query("\x1b[c", &response_buf, 100) catch {
+                const response = self.query("\x1b[c", &response_buf, 100) catch |err| {
+                    std.log.debug("sixel device_attributes: {s}", .{@errorName(err)});
                     return false;
                 };
+
+                std.log.debug("sixel device_attributes response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
 
                 // Parse response looking for attribute 4 (sixel graphics)
                 // Format: ESC [ ? <attributes> c
@@ -399,3 +410,44 @@ const State = struct {
         }
     }
 };
+
+test "aspectScale: only width given upscales" {
+    // 100x100 image, --width 1000 → scale 10x
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), aspectScale(1000, null, 100, 100), 1e-6);
+}
+
+test "aspectScale: only height given upscales" {
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), aspectScale(null, 400, 100, 100), 1e-6);
+}
+
+test "aspectScale: only width given downscales" {
+    // 800x600 image (rows=600, cols=800), --width 100 → scale 0.125
+    try std.testing.expectApproxEqAbs(@as(f32, 0.125), aspectScale(100, null, 600, 800), 1e-6);
+}
+
+test "aspectScale: both dims fit-to-box" {
+    // 100x100 image, box 800x600 → scale by smaller ratio (6.0)
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), aspectScale(800, 600, 100, 100), 1e-6);
+}
+
+test "aspectScale: neither given returns 1.0 for small images" {
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), aspectScale(null, null, 600, 800), 1e-6);
+}
+
+test "aspectScale: max_dim caps oversized images" {
+    // 4096x4096 image, no constraints → cap at 2048/4096 = 0.5
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), aspectScale(null, null, 4096, 4096), 1e-6);
+}
+
+test "aspectScale: max_dim caps user-requested upscale" {
+    // 100x100 image, --width 5000 → capped at 2048/100 = 20.48
+    try std.testing.expectApproxEqAbs(@as(f32, 20.48), aspectScale(5000, null, 100, 100), 1e-4);
+}
+
+test "aspectScale: zero dimensions return identity (no inf/NaN)" {
+    // Division by zero would produce inf, then NaN on @round(0 * inf), then a
+    // panic on the int cast. Guard returns 1.0 instead.
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(100, null, 0, 100));
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(100, null, 100, 0));
+    try std.testing.expectEqual(@as(f32, 1.0), aspectScale(null, null, 0, 0));
+}
