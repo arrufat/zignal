@@ -832,10 +832,11 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     }
 
     // Determine native format and convert accordingly
+    const has_alpha_channel = png_state.header.color_type == .grayscale_alpha;
     switch (png_state.header.color_type) {
         .grayscale, .grayscale_alpha => {
-            if (png_state.transparency != null) {
-                // Create RGBA image when transparency is present
+            if (has_alpha_channel or png_state.transparency != null) {
+                // Create RGBA image when an alpha channel or tRNS is present.
                 const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
