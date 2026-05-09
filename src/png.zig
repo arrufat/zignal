@@ -552,16 +552,6 @@ fn parseHeader(chunk: Chunk) !Header {
         return error.InvalidDimensions;
     }
 
-    // Prevent resource exhaustion with reasonable size limits
-    const MAX_DIMENSION: u32 = 0x7FFF_FFFF; // PNG spec maximum (2^31 - 1)
-    const MAX_PIXELS = 268435456; // 16K x 16K = 256 MB pixels
-    if (width > MAX_DIMENSION or height > MAX_DIMENSION) {
-        return error.ImageTooLarge;
-    }
-    if (@as(u64, width) * @as(u64, height) > MAX_PIXELS) {
-        return error.ImageTooLarge;
-    }
-
     const color_type: ColorType = switch (color_type_raw) {
         0 => .grayscale,
         2 => .rgb,

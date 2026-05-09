@@ -1174,11 +1174,6 @@ pub const JpegState = struct {
         return error.InvalidHuffmanCode;
     }
 
-    // Legacy alias for compatibility
-    pub fn decodeHuffmanSymbol(self: *JpegState, table: *const HuffmanTable) !u8 {
-        return self.readCode(table);
-    }
-
     // Decode magnitude-coded coefficient (T.81 section F1.2.1)
     pub fn readMagnitudeCoded(self: *JpegState, magnitude: u5) !i32 {
         if (magnitude == 0) return 0;
@@ -2597,7 +2592,7 @@ fn decodeBlockToStorage(state: *JpegState, scan_comp: ScanComponent, block: *[64
 
     // Decode DC coefficient
     const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
-    const dc_symbol = try state.decodeHuffmanSymbol(&dc_table);
+    const dc_symbol = try state.readCode(&dc_table);
 
     if (dc_symbol > 11) return error.InvalidDCCoefficient;
 
@@ -2620,7 +2615,7 @@ fn decodeBlockToStorage(state: *JpegState, scan_comp: ScanComponent, block: *[64
     var k: usize = 1;
 
     while (k < 64) {
-        const ac_symbol = try state.decodeHuffmanSymbol(&ac_table);
+        const ac_symbol = try state.readCode(&ac_table);
 
         if (ac_symbol == 0x00) {
             // End of block

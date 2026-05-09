@@ -863,8 +863,9 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 }
 
 inline fn writeU16Le(allocator: Allocator, out: *std.ArrayList(u8), v: u16) !void {
-    try out.append(allocator, @intCast(v & 0xFF));
-    try out.append(allocator, @intCast((v >> 8) & 0xFF));
+    var buf: [2]u8 = undefined;
+    std.mem.writeInt(u16, &buf, v, .little);
+    try out.appendSlice(allocator, &buf);
 }
 
 /// Maps each pixel to the nearest palette index, with optional Floyd–Steinberg
@@ -1127,8 +1128,9 @@ const TestBuilder = struct {
     }
 
     fn appendU16(self: *TestBuilder, gpa: Allocator, v: u16) !void {
-        try self.list.append(gpa, @intCast(v & 0xFF));
-        try self.list.append(gpa, @intCast((v >> 8) & 0xFF));
+        var buf: [2]u8 = undefined;
+        std.mem.writeInt(u16, &buf, v, .little);
+        try self.list.appendSlice(gpa, &buf);
     }
 
     fn appendHeader(self: *TestBuilder, gpa: Allocator, opts: HeaderOpts) !void {
