@@ -82,10 +82,11 @@ pub const terminal = @import("terminal.zig");
 pub const sixel = @import("sixel.zig");
 pub const kitty = @import("kitty.zig");
 
-pub const png = @import("png.zig");
-pub const jpeg = @import("jpeg.zig");
-pub const bmp = @import("bmp.zig");
-pub const gif = @import("gif.zig");
+const codecs = @import("codecs.zig");
+pub const png = codecs.png;
+pub const jpeg = codecs.jpeg;
+pub const bmp = codecs.bmp;
+pub const gif = codecs.gif;
 
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;

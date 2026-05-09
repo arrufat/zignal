@@ -11,7 +11,7 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("image.zig").Image;
 const Interpolation = @import("image/interpolation.zig").Interpolation;
-const png = @import("png.zig");
+const png = @import("codecs.zig").png;
 const Rgb = @import("color.zig").Rgb(u8);
 const terminal = @import("terminal.zig");
 

@@ -18,10 +18,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
-const Rgb = @import("color.zig").Rgb(u8);
-const Rgba = @import("color.zig").Rgba(u8);
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
+const linear_gray_256 = @import("../image/quantize.zig").linear_gray_256;
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
 
 /// BMP file signature: "BM".
 pub const signature = [_]u8{ 'B', 'M' };
@@ -1010,11 +1011,8 @@ fn encode8BppGray(allocator: Allocator, image: Image(u8), top_down: bool) ![]u8 
         .top_down = top_down,
     });
 
-    // Linear grayscale palette: BGRA per entry (alpha reserved=0).
-    var i: u16 = 0;
-    while (i < 256) : (i += 1) {
-        const v: u8 = @intCast(i);
-        try out.appendSlice(allocator, &.{ v, v, v, 0 });
+    for (linear_gray_256) |c| {
+        try out.appendSlice(allocator, &.{ c.b, c.g, c.r, 0 });
     }
 
     const pixel_start = out.items.len;

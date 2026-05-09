@@ -8,11 +8,11 @@ const ArrayList = std.ArrayList;
 const flate = std.compress.flate;
 const Io = std.Io;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
 
-const Rgb = @import("color.zig").Rgb(u8);
-const Rgba = @import("color.zig").Rgba(u8);
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
 const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
@@ -552,16 +552,6 @@ fn parseHeader(chunk: Chunk) !Header {
         return error.InvalidDimensions;
     }
 
-    // Prevent resource exhaustion with reasonable size limits
-    const MAX_DIMENSION: u32 = 0x7FFF_FFFF; // PNG spec maximum (2^31 - 1)
-    const MAX_PIXELS = 268435456; // 16K x 16K = 256 MB pixels
-    if (width > MAX_DIMENSION or height > MAX_DIMENSION) {
-        return error.ImageTooLarge;
-    }
-    if (@as(u64, width) * @as(u64, height) > MAX_PIXELS) {
-        return error.ImageTooLarge;
-    }
-
     const color_type: ColorType = switch (color_type_raw) {
         0 => .grayscale,
         2 => .rgb,
@@ -842,10 +832,11 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     }
 
     // Determine native format and convert accordingly
+    const has_alpha_channel = png_state.header.color_type == .grayscale_alpha;
     switch (png_state.header.color_type) {
         .grayscale, .grayscale_alpha => {
-            if (png_state.transparency != null) {
-                // Create RGBA image when transparency is present
+            if (has_alpha_channel or png_state.transparency != null) {
+                // Create RGBA image when an alpha channel or tRNS is present.
                 const total_pixels = png_state.header.totalPixels();
                 if (total_pixels > std.math.maxInt(usize)) {
                     return error.ImageTooLarge;
