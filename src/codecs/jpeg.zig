@@ -7,11 +7,11 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
 
-const Rgb = @import("color.zig").Rgb(u8);
-const Ycbcr = @import("color.zig").Ycbcr(u8);
+const Rgb = @import("../color.zig").Rgb(u8);
+const Ycbcr = @import("../color.zig").Ycbcr(u8);
 
 const max_file_size: usize = 100 * 1024 * 1024;
 

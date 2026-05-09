@@ -8,11 +8,11 @@ const ArrayList = std.ArrayList;
 const flate = std.compress.flate;
 const Io = std.Io;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
 
-const Rgb = @import("color.zig").Rgb(u8);
-const Rgba = @import("color.zig").Rgba(u8);
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
 const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square

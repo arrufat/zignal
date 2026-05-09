@@ -18,11 +18,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
-const linear_gray_256 = @import("image/quantize.zig").linear_gray_256;
-const Rgb = @import("color.zig").Rgb(u8);
-const Rgba = @import("color.zig").Rgba(u8);
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
+const linear_gray_256 = @import("../image/quantize.zig").linear_gray_256;
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
 
 /// BMP file signature: "BM".
 pub const signature = [_]u8{ 'B', 'M' };

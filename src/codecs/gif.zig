@@ -17,12 +17,12 @@ const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 
-const Image = @import("image.zig").Image;
-const AnimatedImage = @import("image.zig").AnimatedImage;
-const convertColor = @import("color.zig").convertColor;
-const Rgb = @import("color.zig").Rgb(u8);
-const Rgba = @import("color.zig").Rgba(u8);
-const Rectangle = @import("geometry.zig").Rectangle;
+const Image = @import("../image.zig").Image;
+const AnimatedImage = @import("../image.zig").AnimatedImage;
+const convertColor = @import("../color.zig").convertColor;
+const Rgb = @import("../color.zig").Rgb(u8);
+const Rgba = @import("../color.zig").Rgba(u8);
+const Rectangle = @import("../geometry.zig").Rectangle;
 
 const lzw = @import("gif/lzw.zig");
 
@@ -728,8 +728,8 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 // Single-frame encode
 // ---------------------------------------------------------------------------
 
-const quantize = @import("image/quantize.zig");
-const dither = @import("image/dither.zig");
+const quantize = @import("../image/quantize.zig");
+const dither = @import("../image/dither.zig");
 
 /// GIF encode options used by both `encode` (single-frame) and `encodeAnimated`.
 /// For animated encode, `palette` becomes the Global Color Table when set,
