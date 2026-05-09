@@ -18,10 +18,11 @@ const Rgba = @import("color.zig").Rgba(u8);
 const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
-const bmp = @import("bmp.zig");
-const gif = @import("gif.zig");
-const jpeg = @import("jpeg.zig");
-const png = @import("png.zig");
+const codecs = @import("codecs.zig");
+const bmp = codecs.bmp;
+const gif = codecs.gif;
+const jpeg = codecs.jpeg;
+const png = codecs.png;
 const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
 

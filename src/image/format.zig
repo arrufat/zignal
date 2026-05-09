@@ -4,10 +4,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const bmp = @import("../bmp.zig");
-const gif = @import("../gif.zig");
-const jpeg = @import("../jpeg.zig");
-const png = @import("../png.zig");
+const codecs = @import("../codecs.zig");
+const bmp = codecs.bmp;
+const gif = codecs.gif;
+const jpeg = codecs.jpeg;
+const png = codecs.png;
 
 /// Supported image formats for automatic detection and loading
 pub const ImageFormat = enum {
