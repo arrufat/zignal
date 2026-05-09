@@ -863,9 +863,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 }
 
 inline fn writeU16Le(allocator: Allocator, out: *std.ArrayList(u8), v: u16) !void {
-    var buf: [2]u8 = undefined;
-    std.mem.writeInt(u16, &buf, v, .little);
-    try out.appendSlice(allocator, &buf);
+    try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeTo(u16, v, .little)));
 }
 
 /// Maps each pixel to the nearest palette index, with optional Floyd–Steinberg
@@ -1127,16 +1125,10 @@ const TestBuilder = struct {
         try self.list.appendSlice(gpa, bs);
     }
 
-    fn appendU16(self: *TestBuilder, gpa: Allocator, v: u16) !void {
-        var buf: [2]u8 = undefined;
-        std.mem.writeInt(u16, &buf, v, .little);
-        try self.list.appendSlice(gpa, &buf);
-    }
-
     fn appendHeader(self: *TestBuilder, gpa: Allocator, opts: HeaderOpts) !void {
         try self.appendBytes(gpa, opts.signature);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
+        try writeU16Le(gpa, &self.list, opts.width);
+        try writeU16Le(gpa, &self.list, opts.height);
         var packed_byte: u8 = 0;
         if (opts.gct_size_log) |s| {
             packed_byte |= lsd_flag_global_color_table;
@@ -1155,10 +1147,10 @@ const TestBuilder = struct {
 
     fn appendImageDescriptor(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts) !void {
         try self.appendByte(gpa, block_image_descriptor);
-        try self.appendU16(gpa, opts.left);
-        try self.appendU16(gpa, opts.top);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
+        try writeU16Le(gpa, &self.list, opts.left);
+        try writeU16Le(gpa, &self.list, opts.top);
+        try writeU16Le(gpa, &self.list, opts.width);
+        try writeU16Le(gpa, &self.list, opts.height);
         try self.appendByte(gpa, opts.packed_byte);
         if (opts.lct_size_log) |s| {
             const entries: u32 = @as(u32, 2) << @intCast(s);
@@ -1171,10 +1163,10 @@ const TestBuilder = struct {
 
     fn appendImageWithLzw(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts, lct: ?[]const Rgb, lzw_data: []const u8) !void {
         try self.appendByte(gpa, block_image_descriptor);
-        try self.appendU16(gpa, opts.left);
-        try self.appendU16(gpa, opts.top);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
+        try writeU16Le(gpa, &self.list, opts.left);
+        try writeU16Le(gpa, &self.list, opts.top);
+        try writeU16Le(gpa, &self.list, opts.width);
+        try writeU16Le(gpa, &self.list, opts.height);
         try self.appendByte(gpa, opts.packed_byte);
         if (lct) |entries| {
             for (entries) |e| {
@@ -1194,8 +1186,8 @@ const TestBuilder = struct {
 
     fn appendHeaderWithGct(self: *TestBuilder, gpa: Allocator, w: u16, h: u16, gct: []const Rgb) !void {
         try self.appendBytes(gpa, "GIF89a");
-        try self.appendU16(gpa, w);
-        try self.appendU16(gpa, h);
+        try writeU16Le(gpa, &self.list, w);
+        try writeU16Le(gpa, &self.list, h);
         const s = declaredSizeLog(gct.len);
         const declared: u16 = @as(u16, 2) << s;
         const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
@@ -1219,7 +1211,7 @@ const TestBuilder = struct {
         const trans_flag: u8 = if (opts.has_transparent) gce_flag_transparent else 0;
         const packed_byte: u8 = (@as(u8, opts.disposal) << 2) | trans_flag;
         try self.appendByte(gpa, packed_byte);
-        try self.appendU16(gpa, opts.delay_cs);
+        try writeU16Le(gpa, &self.list, opts.delay_cs);
         try self.appendByte(gpa, opts.transparent_index);
         try self.appendByte(gpa, 0); // sub-block terminator
     }
@@ -1231,7 +1223,7 @@ const TestBuilder = struct {
         try self.appendBytes(gpa, "NETSCAPE2.0");
         try self.appendByte(gpa, 0x03); // sub-block size = 3
         try self.appendByte(gpa, 0x01); // sub-block id
-        try self.appendU16(gpa, loop_count);
+        try writeU16Le(gpa, &self.list, loop_count);
         try self.appendByte(gpa, 0); // terminator
     }
 
@@ -1815,8 +1807,8 @@ test "loadFromBytes — missing global color table without LCT" {
     defer b.deinit(gpa);
 
     try b.appendBytes(gpa, "GIF89a");
-    try b.appendU16(gpa, 1);
-    try b.appendU16(gpa, 1);
+    try writeU16Le(gpa, &b.list, 1);
+    try writeU16Le(gpa, &b.list, 1);
     try b.appendByte(gpa, 0x00); // no GCT
     try b.appendByte(gpa, 0); // bg
     try b.appendByte(gpa, 0); // aspect
