@@ -1117,7 +1117,7 @@ pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: 
 
     // Build argument tuple
     const arg_types: [fields.len]type = @splat(*anyopaque);
-    var arg_tuple: std.meta.Tuple(&arg_types) = undefined;
+    var arg_tuple: @Tuple(&arg_types) = undefined;
     inline for (fields, 0..) |field, i| {
         arg_tuple[i] = @ptrCast(&@field(out.*, field.name));
     }
