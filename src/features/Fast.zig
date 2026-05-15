@@ -76,8 +76,8 @@ pub fn detect(self: Fast, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
 fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
     const center = image.at(row, col).*;
     const threshold = self.threshold;
-    const bright_threshold: u8 = if (center > 255 - threshold) 255 else center + threshold;
-    const dark_threshold: u8 = if (center < threshold) 0 else center - threshold;
+    const bright_threshold = center +| threshold;
+    const dark_threshold = center -| threshold;
 
     // Quick rejection test: check pixels at 0, 4, 8, 12 (cardinal directions)
     // At least 3 must be either all brighter or all darker
