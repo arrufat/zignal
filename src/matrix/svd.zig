@@ -451,7 +451,7 @@ pub fn svd(
         }
     }
 
-    return Result(T){ .u = u, .s = q, .v = v, .converged = retval };
+    return .{ .u = u, .s = q, .v = v, .converged = retval };
 }
 
 test "svd basic" {
