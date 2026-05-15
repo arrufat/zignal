@@ -36,7 +36,7 @@ const circle_offsets = [16][2]i8{
 };
 
 /// Detect FAST corners in the image
-pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
+pub fn detect(self: Fast, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     assert(image.rows > 7 and image.cols > 7); // Need at least 7x7 for radius 3
 
     var keypoints: ArrayList(KeyPoint) = .empty;
@@ -64,7 +64,7 @@ pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 
     // Second pass: non-maximal suppression
     if (self.nonmax_suppression and keypoints.items.len > 0) {
-        const suppressed = try self.suppressNonMaximal(keypoints.items, allocator);
+        const suppressed = try self.suppressNonMaximal(allocator, keypoints.items);
         keypoints.deinit(allocator);
         return suppressed;
     }
@@ -153,7 +153,7 @@ fn cornerScore(self: Fast, image: Image(u8), row: usize, col: usize) u32 {
 }
 
 /// Apply non-maximal suppression to remove redundant corners
-fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Allocator) ![]KeyPoint {
+fn suppressNonMaximal(self: Fast, allocator: Allocator, keypoints: []const KeyPoint) ![]KeyPoint {
     _ = self;
 
     if (keypoints.len == 0) {
@@ -301,7 +301,7 @@ test "FAST detector on synthetic corner" {
         .nonmax_suppression = false,
     };
 
-    const keypoints = try fast.detect(image, allocator);
+    const keypoints = try fast.detect(allocator, image);
     defer allocator.free(keypoints);
 
     // Should detect at least one corner near (10, 10)
@@ -355,10 +355,10 @@ test "FAST non-maximal suppression" {
         .nonmax_suppression = true,
     };
 
-    const keypoints_no_nms = try fast_no_nms.detect(image, allocator);
+    const keypoints_no_nms = try fast_no_nms.detect(allocator, image);
     defer allocator.free(keypoints_no_nms);
 
-    const keypoints_with_nms = try fast_with_nms.detect(image, allocator);
+    const keypoints_with_nms = try fast_with_nms.detect(allocator, image);
     defer allocator.free(keypoints_with_nms);
 
     // Non-maximal suppression should reduce the number of keypoints

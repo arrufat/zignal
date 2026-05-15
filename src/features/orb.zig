@@ -119,7 +119,7 @@ pub const ScoreType = enum {
 };
 
 /// Detect keypoints in the image at multiple scales
-pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
+pub fn detect(self: Orb, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     var pyramid = try ImagePyramid(u8).build(
         allocator,
         image,
@@ -129,11 +129,11 @@ pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
     );
     defer pyramid.deinit();
 
-    return self.detectWithPyramid(pyramid, allocator);
+    return self.detectWithPyramid(allocator, pyramid);
 }
 
 /// Compute descriptors for detected keypoints
-pub fn compute(self: Orb, image: Image(u8), keypoints: []const KeyPoint, allocator: Allocator) ![]BinaryDescriptor {
+pub fn compute(self: Orb, allocator: Allocator, image: Image(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var pyramid = try ImagePyramid(u8).build(
         allocator,
         image,
@@ -143,11 +143,11 @@ pub fn compute(self: Orb, image: Image(u8), keypoints: []const KeyPoint, allocat
     );
     defer pyramid.deinit();
 
-    return self.computeWithPyramid(pyramid, keypoints, allocator);
+    return self.computeWithPyramid(allocator, pyramid, keypoints);
 }
 
 /// Detect keypoints using a pre-built pyramid
-fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator) ![]KeyPoint {
+fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8)) ![]KeyPoint {
     // Calculate how many features to detect per level
     const features_per_level = try self.computeFeaturesPerLevel(allocator);
     defer allocator.free(features_per_level);
@@ -174,7 +174,7 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
             .min_contiguous = 9,
         };
 
-        const corners = try fast_detector.detect(level_image, allocator);
+        const corners = try fast_detector.detect(allocator, level_image);
         defer allocator.free(corners);
 
         // Compute Harris response if requested
@@ -224,7 +224,7 @@ fn detectWithPyramid(self: Orb, pyramid: ImagePyramid(u8), allocator: Allocator)
 }
 
 /// Compute descriptors using a pre-built pyramid
-fn computeWithPyramid(self: Orb, pyramid: ImagePyramid(u8), keypoints: []const KeyPoint, allocator: Allocator) ![]BinaryDescriptor {
+fn computeWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var descriptors = try allocator.alloc(BinaryDescriptor, keypoints.len);
 
     for (keypoints, 0..) |kp, i| {
@@ -252,8 +252,8 @@ fn computeWithPyramid(self: Orb, pyramid: ImagePyramid(u8), keypoints: []const K
 /// Detect keypoints and compute their descriptors
 pub fn detectAndCompute(
     self: Orb,
-    image: Image(u8),
     allocator: Allocator,
+    image: Image(u8),
 ) !struct { keypoints: []KeyPoint, descriptors: []BinaryDescriptor } {
     // Build pyramid once for both detection and description
     var pyramid = try ImagePyramid(u8).build(
@@ -266,11 +266,11 @@ pub fn detectAndCompute(
     defer pyramid.deinit();
 
     // Detect keypoints using the pyramid
-    const keypoints = try self.detectWithPyramid(pyramid, allocator);
+    const keypoints = try self.detectWithPyramid(allocator, pyramid);
     errdefer allocator.free(keypoints);
 
     // Compute descriptors using the same pyramid
-    const descriptors = try self.computeWithPyramid(pyramid, keypoints, allocator);
+    const descriptors = try self.computeWithPyramid(allocator, pyramid, keypoints);
 
     return .{
         .keypoints = keypoints,
@@ -617,7 +617,7 @@ test "ORB detect and compute on synthetic image" {
         .fast_threshold = 10, // Lower threshold for test image
     };
 
-    const result = try orb.detectAndCompute(image, allocator);
+    const result = try orb.detectAndCompute(allocator, image);
     defer allocator.free(result.keypoints);
     defer allocator.free(result.descriptors);
 

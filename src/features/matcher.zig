@@ -43,9 +43,9 @@ pub const BruteForceMatcher = struct {
     /// Match descriptors from query set to train set
     pub fn match(
         self: BruteForceMatcher,
+        allocator: Allocator,
         query_descriptors: []const BinaryDescriptor,
         train_descriptors: []const BinaryDescriptor,
-        allocator: Allocator,
     ) ![]Match {
         if (query_descriptors.len == 0 or train_descriptors.len == 0) {
             return try allocator.alloc(Match, 0);
@@ -108,10 +108,10 @@ pub const BruteForceMatcher = struct {
     /// Find k nearest neighbors for each query descriptor
     pub fn knnMatch(
         self: BruteForceMatcher,
+        allocator: Allocator,
         query_descriptors: []const BinaryDescriptor,
         train_descriptors: []const BinaryDescriptor,
         k: usize,
-        allocator: Allocator,
     ) ![][]Match {
         if (query_descriptors.len == 0 or train_descriptors.len == 0 or k == 0) {
             return try allocator.alloc([]Match, 0);
@@ -164,10 +164,10 @@ pub const BruteForceMatcher = struct {
     /// Find radius neighbors - all matches within a distance threshold
     pub fn radiusMatch(
         self: BruteForceMatcher,
+        allocator: Allocator,
         query_descriptors: []const BinaryDescriptor,
         train_descriptors: []const BinaryDescriptor,
         max_dist: f32,
-        allocator: Allocator,
     ) ![][]Match {
         _ = self; // Currently unused, but kept for API consistency
         if (query_descriptors.len == 0 or train_descriptors.len == 0) {
@@ -299,7 +299,7 @@ test "BruteForceMatcher basic matching" {
         .cross_check = false,
     };
 
-    const matches = try matcher.match(&desc1, &desc2, allocator);
+    const matches = try matcher.match(allocator, &desc1, &desc2);
     defer allocator.free(matches);
 
     // Should find matches
@@ -347,10 +347,10 @@ test "BruteForceMatcher cross-check" {
         .cross_check = true,
     };
 
-    const matches_no_cross = try matcher_no_cross.match(&desc1, &desc2, allocator);
+    const matches_no_cross = try matcher_no_cross.match(allocator, &desc1, &desc2);
     defer allocator.free(matches_no_cross);
 
-    const matches_cross = try matcher_cross.match(&desc1, &desc2, allocator);
+    const matches_cross = try matcher_cross.match(allocator, &desc1, &desc2);
     defer allocator.free(matches_cross);
 
     // Cross-check should produce fewer matches
@@ -379,7 +379,7 @@ test "BruteForceMatcher kNN matching" {
 
     const matcher = BruteForceMatcher{};
 
-    const knn_matches = try matcher.knnMatch(&query, &train, 2, allocator);
+    const knn_matches = try matcher.knnMatch(allocator, &query, &train, 2);
     defer {
         for (knn_matches) |matches| {
             allocator.free(matches);
