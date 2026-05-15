@@ -51,11 +51,11 @@ fn createMatchVisualizationWithParams(
     };
 
     // Detect features in both images
-    const features1 = try orb.detectAndCompute(gray1, allocator);
+    const features1 = try orb.detectAndCompute(allocator, gray1);
     defer allocator.free(features1.keypoints);
     defer allocator.free(features1.descriptors);
 
-    const features2 = try orb.detectAndCompute(gray2, allocator);
+    const features2 = try orb.detectAndCompute(allocator, gray2);
     defer allocator.free(features2.keypoints);
     defer allocator.free(features2.descriptors);
 
@@ -69,7 +69,7 @@ fn createMatchVisualizationWithParams(
         .ratio_threshold = ratio_threshold,
     };
 
-    const matches = try matcher.match(features1.descriptors, features2.descriptors, allocator);
+    const matches = try matcher.match(allocator, features1.descriptors, features2.descriptors);
     defer allocator.free(matches);
 
     std.log.info("Found {} matches between images", .{matches.len});
@@ -293,14 +293,14 @@ pub export fn getMatchStats(
         .fast_threshold = fast_threshold,
     };
 
-    const features1 = orb.detectAndCompute(gray1, allocator) catch {
+    const features1 = orb.detectAndCompute(allocator, gray1) catch {
         for (0..6) |i| stats_ptr[i] = 0;
         return;
     };
     defer allocator.free(features1.keypoints);
     defer allocator.free(features1.descriptors);
 
-    const features2 = orb.detectAndCompute(gray2, allocator) catch {
+    const features2 = orb.detectAndCompute(allocator, gray2) catch {
         stats_ptr[0] = @floatFromInt(features1.keypoints.len);
         for (1..6) |i| stats_ptr[i] = 0;
         return;
@@ -315,7 +315,7 @@ pub export fn getMatchStats(
         .ratio_threshold = ratio_threshold,
     };
 
-    const matches = matcher.match(features1.descriptors, features2.descriptors, allocator) catch {
+    const matches = matcher.match(allocator, features1.descriptors, features2.descriptors) catch {
         stats_ptr[0] = @floatFromInt(features1.keypoints.len);
         stats_ptr[1] = @floatFromInt(features2.keypoints.len);
         for (2..6) |i| stats_ptr[i] = 0;
