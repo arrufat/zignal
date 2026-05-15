@@ -102,9 +102,6 @@ first_level: u8 = 0,
 /// Number of points to compare in BRIEF (2 or 3, we use 2)
 wta_k: u8 = 2,
 
-/// Patch size for BRIEF descriptor
-patch_size: u8 = DEFAULT_PATCH_SIZE,
-
 /// FAST threshold for corner detection
 fast_threshold: u8 = 20,
 
@@ -208,7 +205,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
             }
 
             // Compute orientation using intensity centroid
-            kp.angle = self.computeOrientation(level_image, kp.*);
+            kp.angle = computeOrientation(level_image, kp.*);
             kp.octave = @intCast(level);
 
             // Scale coordinates to original image
@@ -336,43 +333,59 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
     return n_features_per_level;
 }
 
+const PATCH_SIZE: usize = DEFAULT_PATCH_SIZE;
+
+/// Gaussian weight table for the orientation patch, with the circular mask baked in
+/// (entries outside the radius are zero so they contribute nothing to the moments).
+const orientation_weights: [PATCH_SIZE * PATCH_SIZE]f32 = blk: {
+    @setEvalBranchQuota(10_000);
+    var w: [PATCH_SIZE * PATCH_SIZE]f32 = @splat(0);
+    const half: i32 = PATCH_SIZE / 2;
+    const radius_sq: f32 = @floatFromInt(half * half);
+    const denom: f32 = radius_sq / 2.0;
+    for (0..PATCH_SIZE) |v| {
+        const dy: i32 = @as(i32, @intCast(v)) - half;
+        for (0..PATCH_SIZE) |u| {
+            const dx: i32 = @as(i32, @intCast(u)) - half;
+            const dist_sq: f32 = @floatFromInt(dx * dx + dy * dy);
+            if (dist_sq <= radius_sq) {
+                w[v * PATCH_SIZE + u] = @exp(-dist_sq / denom);
+            }
+        }
+    }
+    break :blk w;
+};
+
 /// Helper for computing keypoint moments with optional bounds checking.
 /// Used by computeOrientation to provide an optimized safe-path.
 const MomentComputer = struct {
-    patch_size: usize,
     image: Image(u8),
     x: isize,
     y: isize,
-    radius_sq: f32,
-    safe_margin: isize,
     m00: *f32, // Zeroth moment
     m10: *f32, // First moment in x
     m01: *f32, // First moment in y
 
     fn run(ctx: @This(), comptime check_bounds: bool) void {
-        for (0..ctx.patch_size) |v| {
-            const dy = @as(isize, @intCast(v)) - ctx.safe_margin;
+        const half: isize = PATCH_SIZE / 2;
+        for (0..PATCH_SIZE) |v| {
+            const dy = @as(isize, @intCast(v)) - half;
             const py = ctx.y + dy;
 
             if (check_bounds) {
                 if (py < 0 or py >= ctx.image.rows) continue;
             }
 
-            for (0..ctx.patch_size) |u| {
-                const dx = @as(isize, @intCast(u)) - ctx.safe_margin;
+            for (0..PATCH_SIZE) |u| {
+                const dx = @as(isize, @intCast(u)) - half;
                 const px = ctx.x + dx;
 
                 if (check_bounds) {
                     if (px < 0 or px >= ctx.image.cols) continue;
                 }
 
-                // Apply circular mask
-                const dist_sq = @as(f32, @floatFromInt(dx * dx + dy * dy));
-                if (dist_sq > ctx.radius_sq) continue;
-
-                // Gaussian weight for better stability (optional, can use 1.0 for uniform)
-                const weight = @exp(-dist_sq / (2.0 * ctx.radius_sq / 4.0));
-
+                // weight == 0 for pixels outside the circular mask, so those contribute nothing.
+                const weight = orientation_weights[v * PATCH_SIZE + u];
                 const intensity = @as(f32, @floatFromInt(ctx.image.at(@intCast(py), @intCast(px)).*)) * weight;
                 ctx.m00.* += intensity;
                 ctx.m10.* += intensity * @as(f32, @floatFromInt(dx));
@@ -383,10 +396,8 @@ const MomentComputer = struct {
 };
 
 /// Compute keypoint orientation using intensity centroid with circular mask
-fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
-    const half_patch = self.patch_size / 2;
-    const radius = @as(f32, @floatFromInt(half_patch));
-    const radius_sq = radius * radius;
+fn computeOrientation(image: Image(u8), kp: KeyPoint) f32 {
+    const half_patch: isize = PATCH_SIZE / 2;
     const x: isize = @trunc(kp.x);
     const y: isize = @trunc(kp.y);
 
@@ -394,36 +405,24 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
     var m10: f32 = 0; // First moment in x
     var m01: f32 = 0; // First moment in y
 
-    // Check if patch is fully inside image
-    const safe_margin = @as(isize, @intCast(half_patch));
-    const is_safe = x >= safe_margin and x < @as(isize, @intCast(image.cols)) - safe_margin and
-        y >= safe_margin and y < @as(isize, @intCast(image.rows)) - safe_margin;
+    const is_safe = x >= half_patch and x < @as(isize, @intCast(image.cols)) - half_patch and
+        y >= half_patch and y < @as(isize, @intCast(image.rows)) - half_patch;
 
     const computer = MomentComputer{
-        .patch_size = self.patch_size,
         .image = image,
         .x = x,
         .y = y,
-        .radius_sq = radius_sq,
-        .safe_margin = safe_margin,
         .m00 = &m00,
         .m10 = &m10,
         .m01 = &m01,
     };
 
-    if (is_safe) {
-        computer.run(false);
-    } else {
-        computer.run(true);
-    }
+    if (is_safe) computer.run(false) else computer.run(true);
 
     // Avoid division by zero
     if (m00 < 0.001) return 0;
 
-    // Compute angle from centroid
-    const centroid_x = m10 / m00;
-    const centroid_y = m01 / m00;
-    const angle_rad = std.math.atan2(centroid_y, centroid_x);
+    const angle_rad = std.math.atan2(m01 / m00, m10 / m00);
     return std.math.radiansToDegrees(angle_rad);
 }
 
