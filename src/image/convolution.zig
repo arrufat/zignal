@@ -90,6 +90,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
         const Pixels = PixelIO(T, vec_len);
 
+        /// Flattens a 2D kernel into a 1D array; for `u8` images, values are scaled by `fixed_point_scale` and rounded.
         pub fn flatten(kernel: anytype) [size]KernelScalar {
             const kernel_info = @typeInfo(@TypeOf(kernel));
             const kernel_height = kernel_info.array.len;
@@ -436,7 +437,7 @@ pub fn convolveSeparable(
     }
 }
 
-// Uses i64 accumulators for i32 intermediates to prevent overflow during the second pass.
+/// Uses i64 accumulators for i32 intermediates to prevent overflow during the second pass.
 fn convolveSeparablePlane(
     comptime PixelT: type,
     comptime TempT: type,
