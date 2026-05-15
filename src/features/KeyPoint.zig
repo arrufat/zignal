@@ -85,9 +85,14 @@ pub fn isInBounds(self: KeyPoint, width: usize, height: usize, margin: usize) bo
 
 /// Compute Euclidean distance to another keypoint
 pub fn distance(self: KeyPoint, other: KeyPoint) f32 {
+    return @sqrt(self.distanceSquared(other));
+}
+
+/// Compute squared Euclidean distance — cheaper than `distance` when comparing magnitudes.
+pub fn distanceSquared(self: KeyPoint, other: KeyPoint) f32 {
     const dx = self.x - other.x;
     const dy = self.y - other.y;
-    return @sqrt(dx * dx + dy * dy);
+    return dx * dx + dy * dy;
 }
 
 /// Check if two keypoints overlap based on their size

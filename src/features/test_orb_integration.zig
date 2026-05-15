@@ -28,11 +28,11 @@ test "ORB full pipeline - detection, description, and matching" {
     };
 
     // Detect and compute features for both images
-    const result1 = try orb.detectAndCompute(image1, allocator);
+    const result1 = try orb.detectAndCompute(allocator, image1);
     defer allocator.free(result1.keypoints);
     defer allocator.free(result1.descriptors);
 
-    const result2 = try orb.detectAndCompute(image2, allocator);
+    const result2 = try orb.detectAndCompute(allocator, image2);
     defer allocator.free(result2.keypoints);
     defer allocator.free(result2.descriptors);
 
@@ -49,7 +49,7 @@ test "ORB full pipeline - detection, description, and matching" {
         .cross_check = false,
     };
 
-    const matches = try matcher.match(result1.descriptors, result2.descriptors, allocator);
+    const matches = try matcher.match(allocator, result1.descriptors, result2.descriptors);
     defer allocator.free(matches);
 
     std.debug.print("[Integration Test] Found {} matches\n", .{matches.len});
@@ -91,11 +91,11 @@ test "ORB rotation invariance" {
     };
 
     // Detect features in both
-    const orig_result = try orb.detectAndCompute(original, allocator);
+    const orig_result = try orb.detectAndCompute(allocator, original);
     defer allocator.free(orig_result.keypoints);
     defer allocator.free(orig_result.descriptors);
 
-    const rot_result = try orb.detectAndCompute(rotated, allocator);
+    const rot_result = try orb.detectAndCompute(allocator, rotated);
     defer allocator.free(rot_result.keypoints);
     defer allocator.free(rot_result.descriptors);
 
@@ -105,7 +105,7 @@ test "ORB rotation invariance" {
         .cross_check = true,
     };
 
-    const matches = try matcher.match(orig_result.descriptors, rot_result.descriptors, allocator);
+    const matches = try matcher.match(allocator, orig_result.descriptors, rot_result.descriptors);
     defer allocator.free(matches);
 
     std.debug.print("\n[Rotation Test] Original: {} features, Rotated: {} features, Matches: {}\n", .{ orig_result.keypoints.len, rot_result.keypoints.len, matches.len });
@@ -140,11 +140,11 @@ test "ORB scale invariance" {
     };
 
     // Detect features
-    const orig_result = try orb.detectAndCompute(original, allocator);
+    const orig_result = try orb.detectAndCompute(allocator, original);
     defer allocator.free(orig_result.keypoints);
     defer allocator.free(orig_result.descriptors);
 
-    const scaled_result = try orb.detectAndCompute(scaled, allocator);
+    const scaled_result = try orb.detectAndCompute(allocator, scaled);
     defer allocator.free(scaled_result.keypoints);
     defer allocator.free(scaled_result.descriptors);
 
@@ -194,18 +194,18 @@ test "ORB kNN matching" {
         .fast_threshold = 10,
     };
 
-    const result1 = try orb.detectAndCompute(image1, allocator);
+    const result1 = try orb.detectAndCompute(allocator, image1);
     defer allocator.free(result1.keypoints);
     defer allocator.free(result1.descriptors);
 
-    const result2 = try orb.detectAndCompute(image2, allocator);
+    const result2 = try orb.detectAndCompute(allocator, image2);
     defer allocator.free(result2.keypoints);
     defer allocator.free(result2.descriptors);
 
     // Test kNN matching
     const matcher = BruteForceMatcher{};
 
-    const knn_matches = try matcher.knnMatch(result1.descriptors, result2.descriptors, 2, allocator);
+    const knn_matches = try matcher.knnMatch(allocator, result1.descriptors, result2.descriptors, 2);
     defer {
         for (knn_matches) |matches| {
             allocator.free(matches);

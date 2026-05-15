@@ -36,7 +36,7 @@ const circle_offsets = [16][2]i8{
 };
 
 /// Detect FAST corners in the image
-pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
+pub fn detect(self: Fast, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     assert(image.rows > 7 and image.cols > 7); // Need at least 7x7 for radius 3
 
     var keypoints: ArrayList(KeyPoint) = .empty;
@@ -64,7 +64,7 @@ pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 
     // Second pass: non-maximal suppression
     if (self.nonmax_suppression and keypoints.items.len > 0) {
-        const suppressed = try self.suppressNonMaximal(keypoints.items, allocator);
+        const suppressed = try self.suppressNonMaximal(allocator, keypoints.items);
         keypoints.deinit(allocator);
         return suppressed;
     }
@@ -76,6 +76,8 @@ pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
     const center = image.at(row, col).*;
     const threshold = self.threshold;
+    const bright_threshold = center +| threshold;
+    const dark_threshold = center -| threshold;
 
     // Quick rejection test: check pixels at 0, 4, 8, 12 (cardinal directions)
     // At least 3 must be either all brighter or all darker
@@ -87,9 +89,6 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_row = @as(isize, @intCast(row)) + offset[1];
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
-
-        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
-        const dark_threshold = if (center < threshold) 0 else center - threshold;
 
         if (pixel > bright_threshold) {
             bright_count += 1;
@@ -116,9 +115,6 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_row = @as(isize, @intCast(row)) + offset[1];
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
-
-        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
-        const dark_threshold = if (center < threshold) 0 else center - threshold;
 
         if (pixel > bright_threshold) {
             bright_arc += 1;
@@ -157,7 +153,7 @@ fn cornerScore(self: Fast, image: Image(u8), row: usize, col: usize) u32 {
 }
 
 /// Apply non-maximal suppression to remove redundant corners
-fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Allocator) ![]KeyPoint {
+fn suppressNonMaximal(self: Fast, allocator: Allocator, keypoints: []const KeyPoint) ![]KeyPoint {
     _ = self;
 
     if (keypoints.len == 0) {
@@ -238,8 +234,7 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
                         for (grid[neighbor_idx].items) |other| {
                             if (kp.x == other.x and kp.y == other.y) continue;
 
-                            const dist = kp.distance(other);
-                            if (dist < 5.0 and other.response > kp.response) {
+                            if (kp.distanceSquared(other) < 25.0 and other.response > kp.response) {
                                 is_max = false;
                                 break;
                             }
@@ -306,7 +301,7 @@ test "FAST detector on synthetic corner" {
         .nonmax_suppression = false,
     };
 
-    const keypoints = try fast.detect(image, allocator);
+    const keypoints = try fast.detect(allocator, image);
     defer allocator.free(keypoints);
 
     // Should detect at least one corner near (10, 10)
@@ -360,10 +355,10 @@ test "FAST non-maximal suppression" {
         .nonmax_suppression = true,
     };
 
-    const keypoints_no_nms = try fast_no_nms.detect(image, allocator);
+    const keypoints_no_nms = try fast_no_nms.detect(allocator, image);
     defer allocator.free(keypoints_no_nms);
 
-    const keypoints_with_nms = try fast_with_nms.detect(image, allocator);
+    const keypoints_with_nms = try fast_with_nms.detect(allocator, image);
     defer allocator.free(keypoints_with_nms);
 
     // Non-maximal suppression should reduce the number of keypoints
