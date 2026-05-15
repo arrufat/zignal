@@ -120,7 +120,6 @@ pub const ScoreType = enum {
 
 /// Detect keypoints in the image at multiple scales
 pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
-    // Build image pyramid
     var pyramid = try ImagePyramid(u8).build(
         allocator,
         image,
@@ -130,84 +129,11 @@ pub fn detect(self: Orb, image: Image(u8), allocator: Allocator) ![]KeyPoint {
     );
     defer pyramid.deinit();
 
-    // Calculate how many features to detect per level
-    const features_per_level = try self.computeFeaturesPerLevel(allocator);
-    defer allocator.free(features_per_level);
-
-    var all_keypoints: ArrayList(KeyPoint) = .{};
-    defer all_keypoints.deinit(allocator);
-
-    // Detect features at each pyramid level
-    for (0..self.n_levels) |level| {
-        if (level < self.first_level) continue;
-
-        const level_image = pyramid.levels[level];
-        const n_desired = features_per_level[level];
-
-        if (n_desired == 0) continue;
-
-        // Detect FAST corners with adaptive threshold
-        // Lower threshold for higher pyramid levels to maintain detection
-        const adaptive_threshold = self.computeAdaptiveThreshold(level);
-
-        var fast_detector = Fast{
-            .threshold = adaptive_threshold,
-            .nonmax_suppression = true,
-            .min_contiguous = 9,
-        };
-
-        const corners = try fast_detector.detect(level_image, allocator);
-        defer allocator.free(corners);
-
-        // Compute Harris response if requested
-        if (self.score_type == .harris_score) {
-            for (corners) |*corner| {
-                corner.response = computeHarrisResponse(level_image, corner.*);
-            }
-        }
-
-        // Keep only the best corners for this level
-        var level_keypoints = corners;
-        if (corners.len > n_desired) {
-            // Sort by response
-            std.mem.sort(KeyPoint, corners, {}, KeyPoint.compareResponse);
-            level_keypoints = corners[0..n_desired];
-        }
-
-        // Compute orientation and scale coordinates
-        // Scale-aware edge margin: smaller at higher pyramid levels
-        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
-        const edge_margin = @as(f32, @floatFromInt(self.edge_threshold)) / scale;
-        const min_margin = 3.0; // Minimum margin for FAST detector
-        const actual_margin = @max(min_margin, edge_margin);
-
-        for (level_keypoints) |*kp| {
-            // Filter out keypoints too close to image borders
-            if (kp.x < actual_margin or kp.x >= @as(f32, @floatFromInt(level_image.cols)) - actual_margin or
-                kp.y < actual_margin or kp.y >= @as(f32, @floatFromInt(level_image.rows)) - actual_margin)
-            {
-                continue;
-            }
-
-            // Compute orientation using intensity centroid
-            kp.angle = self.computeOrientation(level_image, kp.*);
-            kp.octave = @intCast(level);
-
-            // Scale coordinates to original image
-            kp.x *= scale;
-            kp.y *= scale;
-            kp.size *= scale;
-
-            try all_keypoints.append(allocator, kp.*);
-        }
-    }
-
-    return try all_keypoints.toOwnedSlice(allocator);
+    return self.detectWithPyramid(pyramid, allocator);
 }
 
 /// Compute descriptors for detected keypoints
 pub fn compute(self: Orb, image: Image(u8), keypoints: []const KeyPoint, allocator: Allocator) ![]BinaryDescriptor {
-    // Build pyramid for multi-scale description
     var pyramid = try ImagePyramid(u8).build(
         allocator,
         image,
@@ -217,28 +143,7 @@ pub fn compute(self: Orb, image: Image(u8), keypoints: []const KeyPoint, allocat
     );
     defer pyramid.deinit();
 
-    var descriptors = try allocator.alloc(BinaryDescriptor, keypoints.len);
-
-    for (keypoints, 0..) |kp, i| {
-        const level = @min(@as(usize, @intCast(@max(0, kp.octave))), self.n_levels - 1);
-        const level_image = pyramid.levels[level];
-
-        // Scale keypoint to pyramid level
-        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
-        const level_kp = KeyPoint{
-            .x = kp.x / scale,
-            .y = kp.y / scale,
-            .size = kp.size / scale,
-            .angle = kp.angle,
-            .response = kp.response,
-            .octave = kp.octave,
-            .class_id = kp.class_id,
-        };
-
-        descriptors[i] = self.computeBriefDescriptor(level_image, level_kp);
-    }
-
-    return descriptors;
+    return self.computeWithPyramid(pyramid, keypoints, allocator);
 }
 
 /// Detect keypoints using a pre-built pyramid
@@ -338,7 +243,7 @@ fn computeWithPyramid(self: Orb, pyramid: ImagePyramid(u8), keypoints: []const K
             .class_id = kp.class_id,
         };
 
-        descriptors[i] = self.computeBriefDescriptor(level_image, level_kp);
+        descriptors[i] = computeBriefDescriptor(level_image, level_kp);
     }
 
     return descriptors;
@@ -419,8 +324,7 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
         const desired_float = n_features_f * (1.0 - factor) / (1.0 - factor_to_n) * scale_factor_level;
         const desired_clamped: usize = @min(@as(usize, @round(desired_float)), remaining);
 
-        // Ensure at least some features per level (except possibly last level)
-        // Reduced minimum to allow more flexible distribution, but never exceed remaining budget
+        // Floor each level at a fraction of n_features so small/high pyramid levels aren't starved.
         const base_min = @max(10, self.n_features / (self.n_levels * 3));
         const min_features = @min(remaining, base_min);
 
@@ -524,8 +428,7 @@ fn computeOrientation(self: Orb, image: Image(u8), kp: KeyPoint) f32 {
 }
 
 /// Compute BRIEF descriptor for a keypoint using the learned ORB pattern
-fn computeBriefDescriptor(self: Orb, image: Image(u8), kp: KeyPoint) BinaryDescriptor {
-    _ = self;
+fn computeBriefDescriptor(image: Image(u8), kp: KeyPoint) BinaryDescriptor {
     var descriptor = BinaryDescriptor.init();
 
     const cos_angle = @cos(std.math.degreesToRadians(kp.angle));

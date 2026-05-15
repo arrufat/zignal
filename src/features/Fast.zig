@@ -76,6 +76,8 @@ pub fn detect(self: Fast, image: Image(u8), allocator: Allocator) ![]KeyPoint {
 fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
     const center = image.at(row, col).*;
     const threshold = self.threshold;
+    const bright_threshold: u8 = if (center > 255 - threshold) 255 else center + threshold;
+    const dark_threshold: u8 = if (center < threshold) 0 else center - threshold;
 
     // Quick rejection test: check pixels at 0, 4, 8, 12 (cardinal directions)
     // At least 3 must be either all brighter or all darker
@@ -87,9 +89,6 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_row = @as(isize, @intCast(row)) + offset[1];
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
-
-        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
-        const dark_threshold = if (center < threshold) 0 else center - threshold;
 
         if (pixel > bright_threshold) {
             bright_count += 1;
@@ -116,9 +115,6 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
         const px_row = @as(isize, @intCast(row)) + offset[1];
         const px_col = @as(isize, @intCast(col)) + offset[0];
         const pixel = image.at(@intCast(px_row), @intCast(px_col)).*;
-
-        const bright_threshold = if (center > 255 - threshold) 255 else center + threshold;
-        const dark_threshold = if (center < threshold) 0 else center - threshold;
 
         if (pixel > bright_threshold) {
             bright_arc += 1;
@@ -238,8 +234,7 @@ fn suppressNonMaximal(self: Fast, keypoints: []const KeyPoint, allocator: Alloca
                         for (grid[neighbor_idx].items) |other| {
                             if (kp.x == other.x and kp.y == other.y) continue;
 
-                            const dist = kp.distance(other);
-                            if (dist < 5.0 and other.response > kp.response) {
+                            if (kp.distanceSquared(other) < 25.0 and other.response > kp.response) {
                                 is_max = false;
                                 break;
                             }
