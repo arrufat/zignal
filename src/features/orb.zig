@@ -448,14 +448,11 @@ fn computeBriefDescriptor(image: Image(u8), kp: KeyPoint) BinaryDescriptor {
         const rx2 = cos_angle * x2 - sin_angle * y2;
         const ry2 = sin_angle * x2 + cos_angle * y2;
 
-        // Sample pixels at rotated positions
-        const val1 = samplePixel(image, kp.x + rx1, kp.y + ry1);
-        const val2 = samplePixel(image, kp.x + rx2, kp.y + ry2);
+        // Sample pixels at rotated positions; if either point is out of bounds, leave the bit at 0.
+        const p1 = image.atOrNull(@round(kp.y + ry1), @round(kp.x + rx1)) orelse continue;
+        const p2 = image.atOrNull(@round(kp.y + ry2), @round(kp.x + rx2)) orelse continue;
 
-        // Set bit if val1 < val2 (binary test)
-        if (val1 < val2) {
-            descriptor.setBit(bit_idx);
-        }
+        if (p1.* < p2.*) descriptor.setBit(bit_idx);
     }
 
     return descriptor;
@@ -510,18 +507,6 @@ fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
     const trace = Ixx + Iyy;
 
     return det - k * trace * trace;
-}
-
-/// Sample a pixel with bounds checking
-fn samplePixel(image: Image(u8), x: f32, y: f32) u8 {
-    const ix: isize = @round(x);
-    const iy: isize = @round(y);
-
-    if (ix < 0 or ix >= image.cols or iy < 0 or iy >= image.rows) {
-        return 0;
-    }
-
-    return image.at(@intCast(iy), @intCast(ix)).*;
 }
 
 /// Compute an adaptive FAST threshold for the given pyramid level (bounded to >= 5)
