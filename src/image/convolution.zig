@@ -9,8 +9,34 @@ const border = @import("border.zig");
 pub const BorderMode = border.BorderMode;
 const channel_ops = @import("channel_ops.zig");
 
-/// Pixel I/O operations for type-specific convolution.
-/// Provides unified load/store operations for both u8 (with integer scaling) and f32.
+/// Fixed-point scale used to represent fractional u8 kernel weights as integers.
+const fixed_point_scale: comptime_int = 256;
+/// Squared scale for two-pass (separable) u8 convolutions.
+const fixed_point_scale_sq: comptime_int = fixed_point_scale * fixed_point_scale;
+
+/// Symmetric-rounding divide by `scale` followed by clamp to u8.
+inline fn divClampU8(comptime scale: comptime_int, accum: i64) u8 {
+    const half: i64 = scale / 2;
+    const rounded = @divTrunc(accum + (if (accum >= 0) half else -half), scale);
+    return meta.clamp(u8, rounded);
+}
+
+/// SIMD variant of `divClampU8`.
+inline fn divClampU8Vec(
+    comptime scale: comptime_int,
+    comptime N: usize,
+    accum: @Vector(N, i64),
+) @Vector(N, u8) {
+    const half_vec: @Vector(N, i64) = @splat(scale / 2);
+    const neg_half_vec: @Vector(N, i64) = @splat(-scale / 2);
+    const zero_vec: @Vector(N, i64) = @splat(0);
+    const scale_vec: @Vector(N, i64) = @splat(scale);
+    const max_vec: @Vector(N, i64) = @splat(255);
+    const rounding = @select(i64, accum >= zero_vec, half_vec, neg_half_vec);
+    const rounded = @divTrunc(accum + rounding, scale_vec);
+    return @intCast(@max(zero_vec, @min(max_vec, rounded)));
+}
+
 fn PixelIO(comptime T: type, comptime vec_len: usize) type {
     if (T != u8 and T != f32) {
         @compileError("PixelIO only supports u8 and f32 types");
@@ -18,7 +44,7 @@ fn PixelIO(comptime T: type, comptime vec_len: usize) type {
 
     return struct {
         const Scalar = if (T == u8) i64 else f32;
-        const scale = if (T == u8) 256 else 1;
+        const scale = if (T == u8) fixed_point_scale else 1;
 
         inline fn load(value: T) Scalar {
             return if (T == u8) @as(Scalar, value) else value;
@@ -34,27 +60,12 @@ fn PixelIO(comptime T: type, comptime vec_len: usize) type {
         }
 
         inline fn store(accum: Scalar) T {
-            if (T == u8) {
-                // Symmetric rounding: add half scale for positive, subtract for negative
-                const half: Scalar = scale / 2;
-                const rounded = @divTrunc(accum + (if (accum >= 0) half else -half), scale);
-                return meta.clamp(u8, rounded);
-            } else {
-                return accum;
-            }
+            return if (T == u8) divClampU8(scale, accum) else accum;
         }
 
         inline fn storeVec(accum_vec: @Vector(vec_len, Scalar), dst: []T, offset: usize) void {
             if (T == u8) {
-                const half_scale_vec: @Vector(vec_len, Scalar) = @splat(scale / 2);
-                const neg_half_scale_vec: @Vector(vec_len, Scalar) = @splat(-scale / 2);
-                const zero_vec: @Vector(vec_len, Scalar) = @splat(0);
-                const scale_vec: @Vector(vec_len, Scalar) = @splat(scale);
-                const rounding = @select(Scalar, accum_vec >= zero_vec, half_scale_vec, neg_half_scale_vec);
-                const rounded_vec = @divTrunc(accum_vec + rounding, scale_vec);
-
-                const clamped: @Vector(vec_len, u8) = @intCast(@max(zero_vec, @min(@as(@Vector(vec_len, Scalar), @splat(255)), rounded_vec)));
-                dst[offset..][0..vec_len].* = clamped;
+                dst[offset..][0..vec_len].* = divClampU8Vec(scale, vec_len, accum_vec);
             } else {
                 dst[offset..][0..vec_len].* = accum_vec;
             }
@@ -62,8 +73,6 @@ fn PixelIO(comptime T: type, comptime vec_len: usize) type {
     };
 }
 
-/// Comptime function generator for specialized convolution implementations.
-/// Generates optimized code for specific kernel dimensions at compile time.
 fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usize) type {
     if (T != u8 and T != f32) {
         @compileError("Unsupported kernel type: " ++ @typeName(T) ++ ". Only u8 and f32 are supported");
@@ -81,7 +90,6 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
         const Pixels = PixelIO(T, vec_len);
 
-        /// Flatten a 2D kernel to 1D array and scale to integer for u8.
         pub fn flatten(kernel: anytype) [size]KernelScalar {
             const kernel_info = @typeInfo(@TypeOf(kernel));
             const kernel_height = kernel_info.array.len;
@@ -92,7 +100,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 inline for (0..kernel_width) |kx| {
                     const val = as(f32, kernel[kr][kx]);
                     result[idx] = if (T == u8)
-                        @round(val * 256.0)
+                        @round(val * fixed_point_scale)
                     else
                         val;
                     idx += 1;
@@ -125,9 +133,18 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             }
 
             for (0..src.rows) |r| {
+                const row_in_band = r >= half_h and r + half_h < src.rows;
+
+                if (!row_in_band) {
+                    for (0..src.cols) |c| {
+                        convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
+                    }
+                    continue;
+                }
+
                 var c: usize = 0;
 
-                if (r >= half_h and r + half_h < src.rows and src.cols >= vec_len + 2 * half_w) {
+                if (src.cols >= vec_len + 2 * half_w) {
                     while (c < half_w) : (c += 1) {
                         convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
                     }
@@ -155,7 +172,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 }
 
                 while (c < src.cols) : (c += 1) {
-                    if (r >= half_h and r + half_h < src.rows and c >= half_w and c + half_w < src.cols) {
+                    if (c >= half_w and c + half_w < src.cols) {
                         var result: AccumScalar = 0;
                         inline for (0..rows) |ky| {
                             inline for (0..cols) |kx| {
@@ -176,13 +193,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
     };
 }
 
-/// Applies a 2D convolution with the given kernel to the image.
-///
-/// Parameters:
-/// - `allocator`: The allocator to use if `out` needs to be (re)initialized.
-/// - `kernel`: A 2D array representing the convolution kernel.
-/// - `out`: An out-parameter pointer to an `Image(T)` that will be filled with the convolved image.
-/// - `border_mode`: How to handle pixels at the image borders.
+/// Applies a 2D convolution with the given kernel, writing into `out`.
 pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: anytype, border_mode: BorderMode, out: Image(T)) !void {
     const kernel_info = @typeInfo(@TypeOf(kernel));
     if (kernel_info != .array) @compileError("Kernel must be a 2D array");
@@ -288,7 +299,6 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
     }
 }
 
-/// Scale f32 kernel values to fixed-point i32, returning a newly allocated slice.
 fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_int) ![]i32 {
     const result = try allocator.alloc(i32, kernel.len);
     for (kernel, 0..) |k, i| {
@@ -297,15 +307,8 @@ fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_i
     return result;
 }
 
-/// Performs separable convolution using two 1D kernels (horizontal and vertical).
-/// This is much more efficient for separable filters like Gaussian blur.
-///
-/// Parameters:
-/// - `allocator`: The allocator to use for temporary buffers.
-/// - `kernel_x`: Horizontal (column) kernel.
-/// - `kernel_y`: Vertical (row) kernel.
-/// - `out`: Output image.
-/// - `border_mode`: How to handle image borders.
+/// Separable convolution: applies two 1D kernels (horizontal then vertical).
+/// Much faster than `convolve` for separable filters like Gaussian blur.
 pub fn convolveSeparable(
     comptime T: type,
     image: Image(T),
@@ -320,9 +323,9 @@ pub fn convolveSeparable(
             var temp = try Image(i32).init(allocator, image.rows, image.cols);
             defer temp.deinit(allocator);
 
-            const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, 256);
+            const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
             defer allocator.free(kernel_x_int);
-            const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, 256);
+            const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, fixed_point_scale);
             defer allocator.free(kernel_y_int);
 
             convolveSeparablePlane(u8, i32, image, out, temp, kernel_x_int, kernel_y_int, border_mode);
@@ -338,18 +341,18 @@ pub fn convolveSeparable(
                 if (comptime meta.allFieldsAreU8(T)) {
                     const plane_size = image.rows * image.cols;
 
-                    const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, 256);
+                    const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
                     defer allocator.free(kernel_x_int);
-                    const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, 256);
+                    const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, fixed_point_scale);
                     defer allocator.free(kernel_y_int);
 
-                    // Separable kernel sum is product of 1D sums (each scaled by 256)
+                    // Separable kernel sum is the product of 1D sums; each 1D sum is scaled by fixed_point_scale.
                     var kx_sum: i64 = 0;
                     for (kernel_x_int) |w| kx_sum += w;
                     var ky_sum: i64 = 0;
                     for (kernel_y_int) |w| ky_sum += w;
                     const kernel_sum = kx_sum * ky_sum;
-                    const scale_sq: i64 = 256 * 256;
+                    const scale_sq: i64 = fixed_point_scale_sq;
 
                     const split = try channel_ops.splitChannelsWithUniform(T, image, allocator);
                     const channels = split.channels;
@@ -402,12 +405,8 @@ pub fn convolveSeparable(
                         }
                         if (strategy == .scaled) {
                             const value = uniform_value orelse unreachable;
-                            // Two-pass scaling: accumulator is value * kernel_sum, divide by 256^2
                             const accum = @as(i64, @intCast(value)) * kernel_sum;
-                            const half: i64 = scale_sq / 2;
-                            const rounded = @divTrunc(accum + (if (accum >= 0) half else -half), scale_sq);
-                            const stored = meta.clamp(u8, rounded);
-                            @memset(out_ch.*, stored);
+                            @memset(out_ch.*, divClampU8(fixed_point_scale_sq, accum));
                         }
                     }
 
@@ -437,9 +436,7 @@ pub fn convolveSeparable(
     }
 }
 
-/// Generic implementation of separable convolution plane.
-/// Supports both u8 (via i32 intermediates) and f32.
-/// Uses i64 accumulators for i32 intermediates to prevent overflow.
+// Uses i64 accumulators for i32 intermediates to prevent overflow during the second pass.
 fn convolveSeparablePlane(
     comptime PixelT: type,
     comptime TempT: type,
@@ -484,33 +481,14 @@ fn convolveSeparablePlane(
 
         inline fn storeDstVec(val: @Vector(vec_len, AccumT), ptr: [*]PixelT) void {
             if (PixelT == u8 and AccumT == i64) {
-                const scale_sq: i64 = 256 * 256;
-                const half_scale_sq: i64 = scale_sq / 2;
-                const scale_vec: @Vector(vec_len, i64) = @splat(scale_sq);
-                const zero_vec: @Vector(vec_len, i64) = @splat(0);
-
-                const pos_offset: @Vector(vec_len, i64) = @splat(half_scale_sq);
-                const neg_offset: @Vector(vec_len, i64) = @splat(-half_scale_sq);
-                const rounding = @select(i64, val >= zero_vec, pos_offset, neg_offset);
-                const rounded = @divTrunc(val + rounding, scale_vec);
-
-                const max_u8_vec: @Vector(vec_len, i64) = @splat(255);
-                const clamped = @max(zero_vec, @min(max_u8_vec, rounded));
-                ptr[0..vec_len].* = @as(@Vector(vec_len, u8), @intCast(clamped));
+                ptr[0..vec_len].* = divClampU8Vec(fixed_point_scale_sq, vec_len, val);
             } else {
                 ptr[0..vec_len].* = val;
             }
         }
 
         inline fn storeDstScalar(val: AccumT) PixelT {
-            if (PixelT == u8 and AccumT == i64) {
-                const scale_sq: i64 = 256 * 256;
-                const half_scale_sq: i64 = scale_sq / 2;
-                const rounded = @divTrunc(val + (if (val >= 0) half_scale_sq else -half_scale_sq), scale_sq);
-                return meta.clamp(u8, rounded);
-            } else {
-                return val;
-            }
+            return if (PixelT == u8 and AccumT == i64) divClampU8(fixed_point_scale_sq, val) else val;
         }
 
         inline fn storeTempVec(val: @Vector(vec_len, AccumT), ptr: [*]TempT) void {
@@ -667,8 +645,7 @@ fn convolveSeparablePlane(
     }
 }
 
-/// Get pixel value with border handling, automatically converting to appropriate scalar type.
-/// Returns i32 for u8/i32 pixels (for integer arithmetic), f32 for f32 pixels.
+/// Widens the result so callers can accumulate in i64/f32 without an extra cast at every callsite.
 fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border_mode: BorderMode) if (T == f32) f32 else i32 {
     if (T != u8 and T != f32 and T != i32) @compileError("getPixel only works with u8, i32 and f32 types");
     const coords = border.computeCoords(row, col, @intCast(img.rows), @intCast(img.cols), border_mode);
