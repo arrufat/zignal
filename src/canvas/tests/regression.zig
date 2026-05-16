@@ -8,6 +8,7 @@ const Rectangle = @import("../../geometry.zig").Rectangle;
 const Point = @import("../../geometry/Point.zig").Point;
 const Image = @import("../../image.zig").Image;
 const Canvas = @import("../Canvas.zig").Canvas;
+const font8x8 = @import("../../font.zig").font8x8;
 
 const DrawTestCase = struct {
     name: []const u8,
@@ -165,6 +166,138 @@ fn fillArcFull(canvas: Canvas(Rgba)) void {
     canvas.fillArc(center, 25, 0, 2.0 * std.math.pi, color, .fast) catch {};
 }
 
+fn drawLineSoftThin(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 0, .g = 192, .b = 64, .a = 255 };
+    canvas.drawLine(.init(.{ 15, 25 }), .init(.{ 85, 75 }), color, 1, .soft);
+}
+
+fn drawCircleFastThin(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 255, .g = 64, .b = 64, .a = 255 };
+    canvas.drawCircle(.init(.{ 50, 50 }), 30, color, 1, .fast);
+}
+
+fn drawCircleFastThick(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 64, .g = 64, .b = 255, .a = 255 };
+    canvas.drawCircle(.init(.{ 50, 50 }), 30, color, 5, .fast);
+}
+
+fn drawArcSoftThick(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 192, .g = 96, .b = 192, .a = 255 };
+    const center: Point(2, f32) = .init(.{ 50, 50 });
+    canvas.drawArc(center, 35, 0, std.math.pi, color, 4, .soft) catch {};
+}
+
+fn drawRectangleSoft(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 96, .g = 160, .b = 96, .a = 255 };
+    const rect: Rectangle(f32) = .{ .l = 15, .t = 25, .r = 85, .b = 75 };
+    canvas.drawRectangle(rect, color, 2, .soft);
+}
+
+fn fillRectangleSoft(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 64, .g = 128, .b = 192, .a = 128 };
+    const rect: Rectangle(f32) = .{ .l = 20, .t = 30, .r = 80, .b = 70 };
+    canvas.fillRectangle(rect, color, .soft);
+}
+
+fn drawPolygonOutline(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 255, .g = 96, .b = 96, .a = 255 };
+    const triangle = [_]Point(2, f32){
+        .init(.{ 50, 15 }),
+        .init(.{ 85, 75 }),
+        .init(.{ 15, 75 }),
+    };
+    canvas.drawPolygon(&triangle, color, 2, .soft);
+}
+
+fn fillPolygonFast(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 192, .g = 192, .b = 64, .a = 255 };
+    const triangle = [_]Point(2, f32){
+        .init(.{ 50, 20 }),
+        .init(.{ 80, 70 }),
+        .init(.{ 20, 70 }),
+    };
+    canvas.fillPolygon(&triangle, color, .fast) catch {};
+}
+
+fn drawCubicBezierFast(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 0, .g = 96, .b = 192, .a = 255 };
+    canvas.drawCubicBezier(
+        .init(.{ 10, 50 }),
+        .init(.{ 30, 10 }),
+        .init(.{ 70, 90 }),
+        .init(.{ 90, 50 }),
+        color,
+        2,
+        .fast,
+    );
+}
+
+fn drawQuadraticBezierFast(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 192, .g = 96, .b = 0, .a = 255 };
+    canvas.drawQuadraticBezier(
+        .init(.{ 20, 80 }),
+        .init(.{ 50, 20 }),
+        .init(.{ 80, 80 }),
+        color,
+        3,
+        .fast,
+    );
+}
+
+fn drawSplinePolygonFast(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 96, .g = 192, .b = 192, .a = 255 };
+    const polygon = [_]Point(2, f32){
+        .init(.{ 50, 20 }),
+        .init(.{ 80, 35 }),
+        .init(.{ 80, 65 }),
+        .init(.{ 50, 80 }),
+        .init(.{ 20, 65 }),
+        .init(.{ 20, 35 }),
+    };
+    canvas.drawSplinePolygon(&polygon, color, 2, 0.5, .fast);
+}
+
+fn fillSplinePolygonSoft(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 128, .g = 64, .b = 160, .a = 255 };
+    const polygon = [_]Point(2, f32){
+        .init(.{ 50, 18 }),
+        .init(.{ 82, 35 }),
+        .init(.{ 82, 65 }),
+        .init(.{ 50, 82 }),
+        .init(.{ 18, 65 }),
+        .init(.{ 18, 35 }),
+    };
+    canvas.fillSplinePolygon(&polygon, color, 0.5, .soft) catch {};
+}
+
+fn fillSplinePolygonFast(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 64, .g = 128, .b = 96, .a = 255 };
+    const polygon = [_]Point(2, f32){
+        .init(.{ 50, 18 }),
+        .init(.{ 82, 35 }),
+        .init(.{ 82, 65 }),
+        .init(.{ 50, 82 }),
+        .init(.{ 18, 65 }),
+        .init(.{ 18, 35 }),
+    };
+    canvas.fillSplinePolygon(&polygon, color, 0.5, .fast) catch {};
+}
+
+fn drawTextScale1(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 32, .g = 32, .b = 32, .a = 255 };
+    canvas.drawText("Zignal!", .init(.{ 8, 46 }), color, font8x8.basic, 1.0, .fast);
+}
+
+fn drawTextFastScaled(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 192, .g = 32, .b = 32, .a = 255 };
+    canvas.drawText("Hi", .init(.{ 12, 30 }), color, font8x8.basic, 3.0, .fast);
+}
+
+fn drawTextSoftScaled(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 32, .g = 32, .b = 192, .a = 255 };
+    canvas.drawText("Hi", .init(.{ 12, 30 }), color, font8x8.basic, 3.0, .soft);
+}
+
 const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawLineHorizontal", .md5sum = "96fc75d0d893373c0050e5fe76f5d7ea", .draw_fn = drawLineHorizontal },
     .{ .name = "drawLineVertical", .md5sum = "f7d52e274636af2b20b62172a408b446", .draw_fn = drawLineVertical },
@@ -186,6 +319,22 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "fillArcQuarter", .md5sum = "acfcff99a739fb974774f392f0c472e2", .draw_fn = fillArcQuarter },
     .{ .name = "fillArcHalf", .md5sum = "560df9fb69b25f57670ff5e45c8855e2", .draw_fn = fillArcHalf },
     .{ .name = "fillArcFull", .md5sum = "3c6832b07c09de096e8ba85712419332", .draw_fn = fillArcFull },
+    .{ .name = "drawLineSoftThin", .md5sum = "f6653f14018275770481bf65157b6c34", .draw_fn = drawLineSoftThin },
+    .{ .name = "drawCircleFastThin", .md5sum = "78b865a2557fb04de1cbff5532804feb", .draw_fn = drawCircleFastThin },
+    .{ .name = "drawCircleFastThick", .md5sum = "04ae64801d4ab0fb0e8a31cb85e484c3", .draw_fn = drawCircleFastThick },
+    .{ .name = "drawArcSoftThick", .md5sum = "e4884db05497da75ef4409c867c5111a", .draw_fn = drawArcSoftThick },
+    .{ .name = "drawRectangleSoft", .md5sum = "a5f0dfb184e4deef691c51f09a55a15c", .draw_fn = drawRectangleSoft },
+    .{ .name = "fillRectangleSoft", .md5sum = "88b0b952128335c57d2fefebd8902e8e", .draw_fn = fillRectangleSoft },
+    .{ .name = "drawPolygonOutline", .md5sum = "126cde8ca4560b506c129497f3f56e4d", .draw_fn = drawPolygonOutline },
+    .{ .name = "fillPolygonFast", .md5sum = "994fbc386a4251c16bea6ac45819519a", .draw_fn = fillPolygonFast },
+    .{ .name = "drawCubicBezierFast", .md5sum = "a068d961085015473fabf9d4dff017b3", .draw_fn = drawCubicBezierFast },
+    .{ .name = "drawQuadraticBezierFast", .md5sum = "6207212f5f86d3ece46e457704c05349", .draw_fn = drawQuadraticBezierFast },
+    .{ .name = "drawSplinePolygonFast", .md5sum = "9395a428cda3d7e50dc5cccb17bc354d", .draw_fn = drawSplinePolygonFast },
+    .{ .name = "fillSplinePolygonSoft", .md5sum = "14c830929dedd6daa8924c1326663d3a", .draw_fn = fillSplinePolygonSoft },
+    .{ .name = "fillSplinePolygonFast", .md5sum = "85b923cfdd99827965ca9d2404310b4a", .draw_fn = fillSplinePolygonFast },
+    .{ .name = "drawTextScale1", .md5sum = "6aae9a7cc19d3c2045118de0c7e21bc9", .draw_fn = drawTextScale1 },
+    .{ .name = "drawTextFastScaled", .md5sum = "043ab942f7991837fb4fd63969857587", .draw_fn = drawTextFastScaled },
+    .{ .name = "drawTextSoftScaled", .md5sum = "f2bb866800a6a56b4a65a711f047d422", .draw_fn = drawTextSoftScaled },
 };
 
 test "MD5 checksum regression tests" {
@@ -223,11 +372,14 @@ test "MD5 checksum regression tests" {
 
         const computed = std.fmt.bytesToHex(digest, .lower);
         if (print_md5sums) {
+            // When refreshing fixtures, print every hash and skip assertions so a single run
+            // produces a complete list rather than short-circuiting on the first mismatch.
             std.debug.print("    .{{ .name = \"{s}\", .md5sum = \"{s}\", .draw_fn = {s} }},\n", .{
                 test_case.name,
                 computed,
                 test_case.name,
             });
+            continue;
         }
 
         expectEqualStrings(test_case.md5sum, &computed) catch |err| {
