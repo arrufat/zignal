@@ -78,31 +78,51 @@ pub fn resolveFilter(name: ?[]const u8) !zignal.Interpolation {
         return .bilinear;
     };
     std.log.debug("resolving filter: {s}", .{n});
-    const filter_map = std.StaticStringMap(zignal.Interpolation).initComptime(.{
-        .{ "nearest", .nearest_neighbor },
-        .{ "bilinear", .bilinear },
-        .{ "bicubic", .bicubic },
-        .{ "lanczos", .lanczos },
-        .{ "catmull-rom", .catmull_rom },
-        .{ "mitchell", zignal.Interpolation{ .mitchell = .default } },
-    });
-    return filter_map.get(n) orelse {
+
+    const Tag = @typeInfo(zignal.Interpolation).@"union".tag_type.?;
+    const tag = parseEnum(Tag, n) orelse {
         std.log.err("unknown filter type: {s}", .{n});
         return error.InvalidArguments;
     };
+    return switch (tag) {
+        // The only variant with a payload — every other variant is bare.
+        .mitchell => .{ .mitchell = .default },
+        inline else => |t| @unionInit(zignal.Interpolation, @tagName(t), {}),
+    };
 }
 
-/// Returns a comma-separated string of `T`'s field names, evaluated at comptime.
-/// Useful for help text and error messages derived from an enum or tagged union
-/// so the rendered list cannot drift from the type definition.
+/// Replace `-` with `_`. Used at parse time to normalize kebab-case CLI flag
+/// values into the snake-case form expected by `std.meta.stringToEnum`. The
+/// transform is idempotent on inputs without hyphens.
+pub fn toSnake(name: []const u8, buf: []u8) []const u8 {
+    std.debug.assert(buf.len >= name.len);
+    for (name, 0..) |c, i| buf[i] = if (c == '-') '_' else c;
+    return buf[0..name.len];
+}
+
+/// Looks up `T` from a CLI flag value, accepting either kebab- or snake-case.
+/// Returns null for unknown values or inputs longer than the internal buffer
+/// (64 bytes — far larger than any sensible CLI value).
+pub fn parseEnum(comptime T: type, name: []const u8) ?T {
+    var buf: [64]u8 = undefined;
+    if (name.len > buf.len) return null;
+    return std.meta.stringToEnum(T, toSnake(name, &buf));
+}
+
+/// Returns a comma-separated, kebab-cased string of `T`'s field names,
+/// evaluated at comptime. Use to derive CLI help lists from an enum or
+/// tagged union so help text cannot drift from the type. Tags without
+/// underscores pass through unchanged.
 pub fn joinFieldNames(comptime T: type) []const u8 {
     const fields = std.meta.fields(T);
-    var names: []const u8 = "";
-    for (fields, 0..) |field, i| {
-        names = names ++ field.name;
-        if (i < fields.len - 1) names = names ++ ", ";
+    var result: []const u8 = "";
+    inline for (fields, 0..) |field, i| {
+        inline for (field.name) |c| {
+            result = result ++ &[_]u8{if (c == '_') '-' else c};
+        }
+        if (i < fields.len - 1) result = result ++ ", ";
     }
-    return names;
+    return result;
 }
 
 /// Measures wall-clock elapsed time and logs it at debug level.

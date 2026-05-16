@@ -108,7 +108,7 @@ class TestTransforms:
         # Nearest neighbor and replicate border
         rotated_replicate = img.rotate(
             math.radians(45),
-            method=zignal.Interpolation.NEAREST_NEIGHBOR,
+            method=zignal.Interpolation.NEAREST,
             border=zignal.BorderMode.REPLICATE,
         )
         assert rotated_replicate is not None

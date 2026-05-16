@@ -71,7 +71,7 @@ test "letterbox maintains aspect ratio with padding" {
         var output: Image(Rgb) = try .init(allocator, 4, 12);
         defer output.deinit(allocator);
 
-        const rect = src.letterbox(allocator, output, .nearest_neighbor);
+        const rect = src.letterbox(allocator, output, .nearest);
 
         try expectEqual(@as(usize, 1), rect.width());
         try expectEqual(@as(usize, 4), rect.height());
@@ -102,12 +102,12 @@ test "letterbox edge cases" {
         defer src.deinit(allocator);
 
         const output: Image(u8) = .initFromSlice(0, 10, &[_]u8{});
-        const rect1 = src.letterbox(allocator, output, .nearest_neighbor);
+        const rect1 = src.letterbox(allocator, output, .nearest);
         try expectEqual(@as(usize, 0), rect1.width());
         try expectEqual(@as(usize, 0), rect1.height());
 
         const output2: Image(u8) = .initFromSlice(10, 0, &[_]u8{});
-        const rect2 = src.letterbox(allocator, output2, .nearest_neighbor);
+        const rect2 = src.letterbox(allocator, output2, .nearest);
         try expectEqual(@as(usize, 0), rect2.width());
         try expectEqual(@as(usize, 0), rect2.height());
     }
@@ -146,7 +146,7 @@ test "letterbox edge cases" {
         var output: Image(u8) = try .init(allocator, 10, 10);
         defer output.deinit(allocator);
 
-        const rect = src.letterbox(allocator, output, .nearest_neighbor);
+        const rect = src.letterbox(allocator, output, .nearest);
 
         // 1x1 scaled to fit 10x10 = 10x10
         try expectEqual(@as(usize, 10), rect.width());
@@ -181,7 +181,7 @@ test "letterbox interpolation methods comparison" {
 
     // Test different interpolation methods
     const methods = [_]@import("../interpolation.zig").Interpolation{
-        .nearest_neighbor,
+        .nearest,
         .bilinear,
         .bicubic,
         .lanczos,
@@ -282,7 +282,7 @@ test "scale image" {
     try expectEqual(@as(usize, 200), double.cols);
 
     // Test non-uniform scaling factors
-    var custom = try img.scale(allocator, 1.5, .nearest_neighbor);
+    var custom = try img.scale(allocator, 1.5, .nearest);
     defer custom.deinit(allocator);
     try expectEqual(@as(usize, 150), custom.rows);
     try expectEqual(@as(usize, 150), custom.cols);

@@ -248,7 +248,7 @@ test "extract rotated rectangle basic and 90deg" {
     defer out0.deinit(allocator);
 
     // Angle 0: should match the submatrix directly
-    image.extract(rect, 0.0, out0, .nearest_neighbor, .mirror);
+    image.extract(rect, 0.0, out0, .nearest, .mirror);
 
     try expectEqual(@as(u8, 11), out0.at(0, 0).*);
     try expectEqual(@as(u8, 12), out0.at(0, 1).*);
@@ -264,7 +264,7 @@ test "extract rotated rectangle basic and 90deg" {
     var out90: Image(u8) = try .init(allocator, 3, 3);
     defer out90.deinit(allocator);
 
-    image.extract(rect, std.math.pi / 2.0, out90, .nearest_neighbor, .mirror);
+    image.extract(rect, std.math.pi / 2.0, out90, .nearest, .mirror);
 
     try expectEqual(@as(u8, 13), out90.at(0, 0).*);
     try expectEqual(@as(u8, 23), out90.at(0, 1).*);
@@ -294,13 +294,13 @@ test "extract single-pixel axis handling centers correctly" {
     // 1x1 output should sample rectangle center -> source (2,2) => 22
     var out1: Image(u8) = try .init(allocator, 1, 1);
     defer out1.deinit(allocator);
-    image.extract(rect, 0.0, out1, .nearest_neighbor, .mirror);
+    image.extract(rect, 0.0, out1, .nearest, .mirror);
     try expectEqual(@as(u8, 22), out1.at(0, 0).*);
 
     // 1x3: rows==1 should sample center row (y=2), cols span left-to-right
     var out_row1: Image(u8) = try .init(allocator, 1, 3);
     defer out_row1.deinit(allocator);
-    image.extract(rect, 0.0, out_row1, .nearest_neighbor, .mirror);
+    image.extract(rect, 0.0, out_row1, .nearest, .mirror);
     try expectEqual(@as(u8, 21), out_row1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_row1.at(0, 1).*);
     try expectEqual(@as(u8, 23), out_row1.at(0, 2).*);
@@ -308,7 +308,7 @@ test "extract single-pixel axis handling centers correctly" {
     // 3x1: cols==1 should sample center col (x=2), rows span top-to-bottom
     var out_col1: Image(u8) = try .init(allocator, 3, 1);
     defer out_col1.deinit(allocator);
-    image.extract(rect, 0.0, out_col1, .nearest_neighbor, .mirror);
+    image.extract(rect, 0.0, out_col1, .nearest, .mirror);
     try expectEqual(@as(u8, 12), out_col1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_col1.at(1, 0).*);
     try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
@@ -374,7 +374,7 @@ test "insert and extract inverse relationship" {
         }
 
         const avg_error = @as(f32, @floatFromInt(total_error)) / @as(f32, @floatFromInt(pixel_count));
-        const tolerance: f32 = if (tc.method == .nearest_neighbor) 10 else 25;
+        const tolerance: f32 = if (tc.method == .nearest) 10 else 25;
         try std.testing.expect(avg_error < tolerance);
     }
 }
@@ -395,13 +395,13 @@ test "insert applies blending when requested" {
     const rect = Rectangle(f32).init(0, 0, 1, 1);
 
     // Without a blend mode the pixel should be copied directly.
-    dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.none);
+    dest.insert(source, rect, 0.0, Interpolation.nearest, color.Blending.none);
     try expectEqualDeep(overlay, dest.at(0, 0).*);
 
     // Reset destination pixel and apply blending.
     dest.at(0, 0).* = base;
     const expected = base.blend(overlay, color.Blending.normal);
-    dest.insert(source, rect, 0.0, Interpolation.nearest_neighbor, color.Blending.normal);
+    dest.insert(source, rect, 0.0, Interpolation.nearest, color.Blending.normal);
     try expectEqualDeep(expected, dest.at(0, 0).*);
 }
 
@@ -416,11 +416,11 @@ test "extract from empty image regression" {
     const rect = Rectangle(f32).init(0, 0, 2, 2);
 
     // Should not panic with REPLICATE
-    empty.extract(rect, 0.0, out, .nearest_neighbor, .replicate);
+    empty.extract(rect, 0.0, out, .nearest, .replicate);
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 
     // Should not panic with WRAP
-    empty.extract(rect, 0.0, out, .nearest_neighbor, .wrap);
+    empty.extract(rect, 0.0, out, .nearest, .wrap);
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 }
 

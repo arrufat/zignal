@@ -123,7 +123,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                             .dither = .auto,
                             .width = options.width,
                             .height = options.height,
-                            .interpolation = options.interpolation orelse .nearest_neighbor,
+                            .interpolation = options.interpolation orelse .nearest,
                         } };
                     } else {
                         continue :fmt .{ .sgr = .{
