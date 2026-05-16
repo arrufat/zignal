@@ -300,7 +300,7 @@ pub fn Canvas(comptime T: type) type {
                 // Left endpoint antialiasing
                 if (min_x > left_x) {
                     const alpha = min_x - left_x;
-                    self.setPixel(.init(.{ left_x, y }), c2.fade(alpha));
+                    self.setPoint(.init(.{ left_x, y }), c2.fade(alpha));
                 }
 
                 // Middle solid part - use fillHorizontalSpan for performance
@@ -313,7 +313,7 @@ pub fn Canvas(comptime T: type) type {
                 // Right endpoint antialiasing
                 if (max_x < right_x) {
                     const alpha = right_x - max_x;
-                    self.setPixel(.init(.{ right_x, y }), c2.fade(alpha));
+                    self.setPoint(.init(.{ right_x, y }), c2.fade(alpha));
                 }
 
                 return;
@@ -347,11 +347,11 @@ pub fn Canvas(comptime T: type) type {
                 const y_px = @floor(y_end);
 
                 if (steep) {
-                    self.setPixel(.init(.{ y_px, x_px }), c2.fade(rfpart(y_end) * x_gap));
-                    self.setPixel(.init(.{ y_px + 1, x_px }), c2.fade(fpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ y_px, x_px }), c2.fade(rfpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ y_px + 1, x_px }), c2.fade(fpart(y_end) * x_gap));
                 } else {
-                    self.setPixel(.init(.{ x_px, y_px }), c2.fade(rfpart(y_end) * x_gap));
-                    self.setPixel(.init(.{ x_px, y_px + 1 }), c2.fade(fpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ x_px, y_px }), c2.fade(rfpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ x_px, y_px + 1 }), c2.fade(fpart(y_end) * x_gap));
                 }
 
                 if (idx == 0) {
@@ -366,11 +366,11 @@ pub fn Canvas(comptime T: type) type {
             var x = x_px1 + 1;
             while (x < x_px2) : (x += 1) {
                 if (steep) {
-                    self.setPixel(.init(.{ intery, x }), c2.fade(rfpart(intery)));
-                    self.setPixel(.init(.{ @floor(intery) + 1, x }), c2.fade(fpart(intery)));
+                    self.setPoint(.init(.{ intery, x }), c2.fade(rfpart(intery)));
+                    self.setPoint(.init(.{ @floor(intery) + 1, x }), c2.fade(fpart(intery)));
                 } else {
-                    self.setPixel(.init(.{ x, intery }), c2.fade(rfpart(intery)));
-                    self.setPixel(.init(.{ x, @floor(intery) + 1 }), c2.fade(fpart(intery)));
+                    self.setPoint(.init(.{ x, intery }), c2.fade(rfpart(intery)));
+                    self.setPoint(.init(.{ x, @floor(intery) + 1 }), c2.fade(fpart(intery)));
                 }
                 intery += gradient;
             }
@@ -390,13 +390,13 @@ pub fn Canvas(comptime T: type) type {
 
             if (line_length == 0) {
                 // Single point - draw a filled circle
-                const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
+                const half_width: f32 = as(f32, width) / 2.0;
                 self.fillCircle(p1, half_width, color, .fast);
                 return;
             }
 
             // Calculate perpendicular vector for thick line
-            const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
+            const half_width: f32 = as(f32, width) / 2.0;
             const perp_x = -dy / line_length * half_width;
             const perp_y = dx / line_length * half_width;
 
@@ -424,7 +424,7 @@ pub fn Canvas(comptime T: type) type {
         fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const half_width: f32 = @as(f32, @floatFromInt(width)) / 2.0;
+            const half_width: f32 = as(f32, width) / 2.0;
             const c2 = convertColor(Rgba, color);
             const needs_alpha_blend = c2.a != 255;
 
@@ -459,7 +459,7 @@ pub fn Canvas(comptime T: type) type {
                         if (px_start > px_end) continue;
                         var px = px_start;
                         while (px <= px_end) : (px += 1) {
-                            self.setPixel(.init(.{ @as(f32, @floatFromInt(px)), y }), c2);
+                            self.setPoint(.init(.{ as(f32, px), y }), c2);
                         }
                     } else {
                         // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
@@ -490,7 +490,7 @@ pub fn Canvas(comptime T: type) type {
                             var x = x1;
                             while (x <= x2) : (x += 1) {
                                 if (x >= 0 and x < fcols) {
-                                    self.setPixel(.init(.{ x, py }), c2);
+                                    self.setPoint(.init(.{ x, py }), c2);
                                 }
                             }
                         } else {
@@ -546,30 +546,38 @@ pub fn Canvas(comptime T: type) type {
                         }
 
                         if (alpha > 0) {
-                            self.setPixel(.init(.{ px, py }), c2.fade(alpha));
+                            self.setPixel(@intFromFloat(py), @intFromFloat(px), c2.fade(alpha));
                         }
                     }
                 }
             }
         }
 
-        /// Sets a color to a pixel at the given coordinates with alpha transparency.
-        /// Uses optimized direct assignment for opaque colors or blends when transparency is needed.
-        /// Provides bounds checking and handles coordinate conversion.
-        /// Coordinates are truncated to integers for pixel placement.
-        /// For Rgba colors, uses the color's alpha channel; for other colors, treats as opaque.
-        pub fn setPixel(self: Self, point: Point(2, f32), color: anytype) void {
+        /// Floors `point` to integer pixel coordinates and writes via `Image.setPixel`,
+        /// which handles type conversion and Rgba alpha blending. Out-of-bounds points are
+        /// silently ignored. For Rgba colors with `a == 255` (or non-Rgba colors) the write
+        /// is an unblended overwrite.
+        /// Writes a pixel at integer (row, col), converting `color` to `T` and alpha-blending
+        /// when `color` is `Rgba` with `a != 255`. Out-of-bounds coordinates are silently ignored.
+        pub inline fn setPixel(self: Self, row: u32, col: u32, color: anytype) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
+            if (row >= self.image.rows or col >= self.image.cols) return;
+            const dest = &self.image.data[row * self.image.stride + col];
+            const mode: Blending = if (comptime ColorType == Rgba)
+                if (color.a != 255) .normal else .none
+            else
+                .none;
+            assignPixel(dest, if (comptime ColorType == T) color else convertColor(T, color), mode);
+        }
+
+        /// Floors `point` to an integer pixel cell and writes via `setPixel`. Bridges
+        /// float-coordinate drawing primitives to the integer pixel grid.
+        pub fn setPoint(self: Self, point: Point(2, f32), color: anytype) void {
             const row: i32 = @floor(point.y());
             const col: i32 = @floor(point.x());
-            if (self.atOrNull(row, col)) |pixel| {
-                const mode: Blending = if (comptime ColorType == Rgba)
-                    if (color.a != 255) .normal else .none
-                else
-                    .none;
-                assignPixel(pixel, if (comptime ColorType == T) color else convertColor(T, color), mode);
-            }
+            if (row < 0 or col < 0) return;
+            self.setPixel(@intCast(row), @intCast(col), color);
         }
 
         /// Draws another image onto this canvas at the given top-left position.
@@ -672,10 +680,9 @@ pub fn Canvas(comptime T: type) type {
                     }
                 },
                 .soft => {
-                    // Soft mode: Support alpha blending by using setPixel for each pixel
                     for (bounds.t..bounds.b) |row| {
                         for (bounds.l..bounds.r) |col| {
-                            self.setPixel(.init(.{ @as(f32, @floatFromInt(col)), @as(f32, @floatFromInt(row)) }), color);
+                            self.setPixel(@intCast(row), @intCast(col), color);
                         }
                     }
                 },
@@ -831,7 +838,7 @@ pub fn Canvas(comptime T: type) type {
                         if (!isAngleInArc(std.math.atan2(y, x), range)) continue;
                     }
                     if (aa) {
-                        self.setPixel(.init(.{ as(f32, c), as(f32, r) }), rgba_color.fade(coverage));
+                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
                     } else {
                         self.image.data[r * self.image.stride + c] = solid_color;
                     }
@@ -863,7 +870,7 @@ pub fn Canvas(comptime T: type) type {
                     if (arc) |range| {
                         if (!isAngleInArc(std.math.atan2(o[1], o[0]), range)) continue;
                     }
-                    self.setPixel(.init(.{ cx + o[0], cy + o[1] }), color);
+                    self.setPoint(.init(.{ cx + o[0], cy + o[1] }), color);
                 }
                 if (err <= 0) {
                     y += 1;
@@ -1021,7 +1028,7 @@ pub fn Canvas(comptime T: type) type {
                                 alpha = clamp(alpha, 0, 1);
 
                                 if (alpha > 0) {
-                                    self.setPixel(.init(.{ x, y }), c2.fade(alpha));
+                                    self.setPoint(.init(.{ x, y }), c2.fade(alpha));
                                 }
                             }
                         },
@@ -1234,37 +1241,29 @@ pub fn Canvas(comptime T: type) type {
             const rgba_color = convertColor(Rgba, color);
 
             for (bounds.t..bounds.b) |r| {
-                const py = as(f32, r);
-                const y = py - center.y();
-
+                const y = as(f32, r) - center.y();
                 for (bounds.l..bounds.r) |c| {
-                    const px = as(f32, c);
-                    const x = px - center.x();
+                    const x = as(f32, c) - center.x();
 
-                    // Quick rejection for pixels far outside circle
                     const dist_sq = x * x + y * y;
                     if (dist_sq > (radius + 1) * (radius + 1)) continue;
 
-                    // Check angle first (before expensive sqrt)
                     const angle = std.math.atan2(y, x);
                     const in_arc = isAngleInArc(angle, arc);
 
-                    // Calculate cross products for edge proximity (cheap)
                     const start_cross_product = x * start_edge.y - y * start_edge.x;
                     const end_cross_product = x * end_edge.y - y * end_edge.x;
 
-                    // Early reject if outside arc and not near edges
                     if (!in_arc) {
                         const near_start = @abs(start_cross_product) < 1.0 and start_cross_product < 0;
                         const near_end = @abs(end_cross_product) < 1.0 and end_cross_product > 0;
                         if (!near_start and !near_end) continue;
                     }
 
-                    // Now calculate expensive sqrt only for pixels we'll actually render
                     const dist = @sqrt(dist_sq);
                     const coverage = calculateArcCoverage(dist, radius, in_arc, start_cross_product, end_cross_product);
                     if (coverage > 0) {
-                        self.setPixel(.init(.{ px, py }), rgba_color.fade(coverage));
+                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
                     }
                 }
             }
@@ -1478,7 +1477,7 @@ pub fn Canvas(comptime T: type) type {
             const actual_segments = @min(segments, buffer.len);
 
             for (0..actual_segments) |i| {
-                const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(actual_segments - 1));
+                const t = as(f32, i) / as(f32, actual_segments - 1);
                 buffer[i] = @call(.auto, evalFn, evalArgs ++ .{t});
             }
 
@@ -1665,7 +1664,7 @@ pub fn Canvas(comptime T: type) type {
                     if (x_start >= x_end or y_start >= y_end) continue;
                     for (y_start..y_end) |py| {
                         for (x_start..x_end) |px| {
-                            self.setPixel(.init(.{ as(f32, px), as(f32, py) }), color);
+                            self.setPoint(.init(.{ as(f32, px), as(f32, py) }), color);
                         }
                     }
                 }
@@ -1719,7 +1718,7 @@ pub fn Canvas(comptime T: type) type {
                     const box_area = (x1 - x0) * (y1 - y0);
                     const normalized_coverage = total_coverage / box_area;
                     if (normalized_coverage > 0) {
-                        self.setPixel(.init(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage));
+                        self.setPoint(.init(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage));
                     }
                 }
             }
