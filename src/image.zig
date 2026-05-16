@@ -367,8 +367,12 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Checks if this image's buffer is aliased with (shares the same memory as) another image.
-        /// Returns true if both images point to the same data buffer with the same length.
-        /// This is useful for determining if in-place operations need a temporary buffer.
+        /// Returns true if the byte ranges spanned by `self.data` and `other.data` overlap at all,
+        /// catching both identical buffers and partial overlap from sub-views into a shared parent.
+        /// Use this before in-place operations to decide whether a temporary buffer is required.
+        ///
+        /// Conservative: two non-overlapping strided sub-views whose byte ranges interleave will
+        /// report as aliased, triggering a needless copy rather than corruption.
         ///
         /// Example usage:
         /// ```zig
@@ -380,7 +384,12 @@ pub fn Image(comptime T: type) type {
         /// }
         /// ```
         pub fn isAliased(self: Self, other: Self) bool {
-            return self.data.ptr == other.data.ptr and self.data.len == other.data.len;
+            if (self.data.len == 0 or other.data.len == 0) return false;
+            const a_start = @intFromPtr(self.data.ptr);
+            const a_end = a_start + self.data.len * @sizeOf(T);
+            const b_start = @intFromPtr(other.data.ptr);
+            const b_end = b_start + other.data.len * @sizeOf(T);
+            return a_start < b_end and b_start < a_end;
         }
 
         /// Creates a duplicate of the image with newly allocated memory.
