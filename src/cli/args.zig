@@ -7,15 +7,7 @@ pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug el
 
 /// Comma-separated list of valid `std.log.Level` names — shared by error messages
 /// and help text so they cannot drift.
-pub const log_level_names: []const u8 = blk: {
-    var names: []const u8 = "";
-    const fields = std.meta.fields(std.log.Level);
-    for (fields, 0..) |field, i| {
-        names = names ++ field.name;
-        if (i < fields.len - 1) names = names ++ ", ";
-    }
-    break :blk names;
-};
+pub const log_level_names: []const u8 = @import("common.zig").joinFieldNames(std.log.Level);
 
 /// Configuration for a specific command-line option.
 pub const OptionConfig = struct {

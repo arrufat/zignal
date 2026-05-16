@@ -26,7 +26,7 @@ const Args = struct {
         .display = .{ .help = "Display the result in the terminal (default if no output file)" },
         .width = .{ .help = "Width of each sub-image for display", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image for display", .metavar = "N" },
-        .protocol = .{ .help = "Force display protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
+        .protocol = .{ .help = display.protocol_help, .metavar = "p" },
     };
 };
 
