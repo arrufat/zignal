@@ -788,19 +788,23 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Coverage in the annulus [inner_r, outer_r] for a pixel at offset (x,y) from the
-        /// center. `aa=true` returns smooth edge coverage in [0,1]; `aa=false` returns 1.0
-        /// strictly inside the ring and 0.0 otherwise (cheaper squared-distance form).
+        /// center. `aa=true` returns boundary-centered coverage in [0,1] (~0.5 at the
+        /// geometric edge); `aa=false` returns 1.0 strictly inside the ring, 0.0 otherwise.
+        /// `inner_r <= 0` disables the inner edge — pass 0 to fill a disk.
         inline fn ringCoverage(comptime aa: bool, x: f32, y: f32, inner_r: f32, outer_r: f32) f32 {
             const dist_sq = x * x + y * y;
             if (aa) {
                 const dist = @sqrt(dist_sq);
-                if (dist < inner_r - antialias_edge_offset or dist > outer_r + antialias_edge_offset) return 0;
+                if (dist > outer_r + antialias_edge_offset) return 0;
+                if (inner_r > 0 and dist < inner_r - antialias_edge_offset) return 0;
                 var alpha: f32 = 1.0;
                 if (dist > outer_r - antialias_edge_offset) alpha = @min(alpha, outer_r + antialias_edge_offset - dist);
-                if (dist < inner_r + antialias_edge_offset) alpha = @min(alpha, dist - (inner_r - antialias_edge_offset));
+                if (inner_r > 0 and dist < inner_r + antialias_edge_offset) alpha = @min(alpha, dist - (inner_r - antialias_edge_offset));
                 return clamp(alpha, 0, 1);
             } else {
-                return if (dist_sq >= inner_r * inner_r and dist_sq <= outer_r * outer_r) 1.0 else 0.0;
+                const inside_outer = dist_sq <= outer_r * outer_r;
+                const outside_inner = inner_r <= 0 or dist_sq >= inner_r * inner_r;
+                return if (inside_outer and outside_inner) 1.0 else 0.0;
             }
         }
 
@@ -1102,26 +1106,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling smooth (anti-aliased) circles.
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
-            const bbox = self.ringBoundingBox(center, radius) orelse return;
-            const radius_sq = radius * radius;
-            const rgba_color = convertColor(Rgba, color);
-
-            for (bbox.t..bbox.b) |r| {
-                const y = as(f32, r) - center.y();
-                for (bbox.l..bbox.r) |c| {
-                    const x = as(f32, c) - center.x();
-                    const dist_sq = x * x + y * y;
-                    if (dist_sq <= radius_sq) {
-                        const dist = @sqrt(dist_sq);
-                        const px: Point(2, f32) = .init(.{ as(f32, c), as(f32, r) });
-                        if (dist > radius - 1) {
-                            self.setPixel(px, rgba_color.fade(radius - dist));
-                        } else {
-                            self.setPixel(px, color);
-                        }
-                    }
-                }
-            }
+            self.renderRing(center, 0, radius, color, true, null);
         }
 
         /// Internal function for filling solid (non-anti-aliased) circles.
