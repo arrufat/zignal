@@ -26,7 +26,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    std.log.debug("Printing version info...", .{});
+    std.log.debug("printing version info...", .{});
     try writer.print("{s}\n", .{zignal.version});
     try writer.flush();
 }
