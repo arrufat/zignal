@@ -722,7 +722,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
             .dither = .auto,
             .width = dims.width,
             .height = dims.height,
-            .interpolation = .nearest_neighbor,
+            .interpolation = .nearest,
         } };
     } else if (std.mem.eql(u8, spec_slice, "kitty"))
         .{ .kitty = .default }

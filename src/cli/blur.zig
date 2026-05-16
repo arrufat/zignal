@@ -32,7 +32,7 @@ const Args = struct {
     protocol: ?[]const u8 = null,
 
     pub const meta = .{
-        .type = .{ .help = "Blur type: box, gaussian, median, motion-linear, motion-zoom, motion-spin (default: gaussian)", .metavar = "name" },
+        .type = .{ .help = "Blur type: " ++ common.joinFieldNames(BlurType) ++ " (default: gaussian)", .metavar = "name" },
         .output = .{ .help = "Output file or directory path", .metavar = "path" },
         .display = .{ .help = "Display the result in the terminal (default if no output)" },
         .radius = .{ .help = "Radius for box/median blur (default: 1)", .metavar = "int" },
@@ -74,18 +74,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    const type_map: std.StaticStringMap(BlurType) = .initComptime(.{
-        .{ "box", .box },
-        .{ "gaussian", .gaussian },
-        .{ "median", .median },
-        .{ "motion-linear", .motion_linear },
-        .{ "motion-zoom", .motion_zoom },
-        .{ "motion-spin", .motion_spin },
-    });
-
     var blur_type: BlurType = .gaussian;
     if (parsed.options.type) |t| {
-        blur_type = type_map.get(t) orelse {
+        blur_type = common.parseEnum(BlurType, t) orelse {
             std.log.err("unknown blur type: {s}", .{t});
             return error.InvalidArguments;
         };
