@@ -60,10 +60,9 @@ pub fn Canvas(comptime T: type) type {
             return .{ .image = image, .allocator = allocator };
         }
 
-        /// Clamps a floating-point coordinate to image bounds and converts to u32 .
-        /// Returns the clamped coordinate as a u32  index.
+        /// Clamps a floating-point coordinate to image bounds and converts to a u32 pixel index.
         inline fn clampToImageBounds(coord: f32, max_size: u32) u32 {
-            return @trunc(clamp(coord, 0, @as(f32, @floatFromInt(max_size))));
+            return @trunc(clamp(coord, 0, as(f32, max_size)));
         }
 
         /// Clamps a rectangle to image bounds and returns integer pixel coordinates.
@@ -804,25 +803,22 @@ pub fn Canvas(comptime T: type) type {
                 const line_width: f32 = @floatFromInt(width);
                 const inner_radius = radius - line_width / 2.0;
                 const outer_radius = radius + line_width / 2.0;
+                const inner_radius_sq = inner_radius * inner_radius;
+                const outer_radius_sq = outer_radius * outer_radius;
                 const solid_color = convertColor(T, color);
 
-                // Calculate bounding box
                 const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
                 const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
                 const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
                 const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
 
                 for (top..bottom) |r| {
-                    const y = @as(f32, @floatFromInt(r)) - center.y();
+                    const y = as(f32, r) - center.y();
                     for (left..right) |c| {
-                        const x = @as(f32, @floatFromInt(c)) - center.x();
+                        const x = as(f32, c) - center.x();
                         const dist_sq = x * x + y * y;
-                        const inner_radius_sq = inner_radius * inner_radius;
-                        const outer_radius_sq = outer_radius * outer_radius;
-
                         if (dist_sq >= inner_radius_sq and dist_sq <= outer_radius_sq) {
-                            const pos = r * self.image.stride + c;
-                            self.image.data[pos] = solid_color;
+                            self.image.data[r * self.image.stride + c] = solid_color;
                         }
                     }
                 }
@@ -952,68 +948,42 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for drawing smooth (anti-aliased) arc outlines.
         fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) !void {
-            // Generate polygon approximation of the arc
             const angle_span = end_angle - start_angle;
             const arc_length = @abs(angle_span) * radius;
+            const segments: u32 = @max(8, @min(bezier_max_segments_count, @as(u32, @ceil(arc_length / 5.0))));
+            const angle_step = angle_span / as(f32, segments);
 
-            // Determine number of segments based on arc length
-            const segments: u32 = @max(8, @as(u32, @ceil(arc_length / 5.0)));
-            const angle_step = angle_span / @as(f32, @floatFromInt(segments));
-
-            // Stack allocation for reasonable arc sizes
             var stack_points: [256]Point(2, f32) = undefined;
-            var points: []Point(2, f32) = undefined;
-
             const total_points = if (width > 1) (segments + 1) * 2 else segments + 1;
 
-            if (total_points <= stack_points.len) {
-                points = stack_points[0..total_points];
-            } else {
-                // For very large arcs, use heap allocation
-                points = try self.allocator.alloc(Point(2, f32), total_points);
-            }
+            const points = if (total_points <= stack_points.len)
+                stack_points[0..total_points]
+            else
+                try self.allocator.alloc(Point(2, f32), total_points);
             defer if (total_points > stack_points.len) self.allocator.free(points);
 
             if (width == 1) {
-                // Generate points along the arc
-                for (0..segments + 1) |i| {
-                    const angle = start_angle + @as(f32, @floatFromInt(i)) * angle_step;
-                    points[i] = .init(.{
-                        center.x() + radius * @cos(angle),
-                        center.y() + radius * @sin(angle),
-                    });
-                }
-
-                // Draw as polyline
+                fillArcRing(points[0 .. segments + 1], center, radius, start_angle, angle_step);
                 for (0..segments) |i| {
                     self.drawLine(points[i], points[i + 1], color, 1, .soft);
                 }
             } else {
-                // Generate inner and outer arc points for thick line
                 const line_width: f32 = @floatFromInt(width);
-                const inner_radius = radius - line_width / 2.0;
-                const outer_radius = radius + line_width / 2.0;
-
-                // Generate outer arc (forward)
-                for (0..segments + 1) |i| {
-                    const angle = start_angle + @as(f32, @floatFromInt(i)) * angle_step;
-                    points[i] = .init(.{
-                        center.x() + outer_radius * @cos(angle),
-                        center.y() + outer_radius * @sin(angle),
-                    });
-                }
-
-                // Generate inner arc (backward)
-                for (0..segments + 1) |i| {
-                    const angle = end_angle - @as(f32, @floatFromInt(i)) * angle_step;
-                    points[segments + 1 + i] = .init(.{
-                        center.x() + inner_radius * @cos(angle),
-                        center.y() + inner_radius * @sin(angle),
-                    });
-                }
-
-                // Draw as filled polygon
+                fillArcRing(points[0 .. segments + 1], center, radius + line_width / 2.0, start_angle, angle_step);
+                fillArcRing(points[segments + 1 ..], center, radius - line_width / 2.0, end_angle, -angle_step);
                 try self.fillPolygon(points, color, .soft);
+            }
+        }
+
+        /// Populates `buf` with points along a circular arc, starting at `start_angle` and
+        /// stepping by `angle_step` for each successive index.
+        fn fillArcRing(buf: []Point(2, f32), center: Point(2, f32), radius: f32, start_angle: f32, angle_step: f32) void {
+            for (buf, 0..) |*p, i| {
+                const angle = start_angle + as(f32, i) * angle_step;
+                p.* = .init(.{
+                    center.x() + radius * @cos(angle),
+                    center.y() + radius * @sin(angle),
+                });
             }
         }
 
@@ -1089,19 +1059,14 @@ pub fn Canvas(comptime T: type) type {
                     }
                 }
 
-                // Get intersection slice
-                const intersection_slice = intersections;
-
-                // Sort intersections
-                if (intersection_slice.len > 1) {
-                    std.mem.sort(f32, intersection_slice, {}, std.sort.asc(f32));
+                if (intersections.len > 1) {
+                    std.mem.sort(f32, intersections, {}, std.sort.asc(f32));
                 }
 
-                // Fill between pairs of intersections
                 var i: u32 = 0;
-                while (i + 1 < intersection_slice.len) : (i += 2) {
-                    const left_edge = intersection_slice[i];
-                    const right_edge = intersection_slice[i + 1];
+                while (i + 1 < intersections.len) : (i += 2) {
+                    const left_edge = intersections[i];
+                    const right_edge = intersections[i + 1];
 
                     const x_start = @max(0, @floor(left_edge));
                     const x_end = @min(fcols - 1, @ceil(right_edge));
@@ -1209,22 +1174,21 @@ pub fn Canvas(comptime T: type) type {
 
             if (left >= right or top >= bottom) return;
 
+            const radius_sq = radius * radius;
+            const rgba_color = convertColor(Rgba, color);
+
             for (top..bottom) |r| {
                 const y = as(f32, r) - center.y();
                 for (left..right) |c| {
                     const x = as(f32, c) - center.x();
                     const dist_sq = x * x + y * y;
-                    if (dist_sq <= radius * radius) {
-                        // Apply antialiasing at the edge
+                    if (dist_sq <= radius_sq) {
                         const dist = @sqrt(dist_sq);
+                        const px: Point(2, f32) = .init(.{ as(f32, c), as(f32, r) });
                         if (dist > radius - 1) {
-                            // Edge antialiasing
-                            const edge_alpha = radius - dist;
-                            const rgba_color = convertColor(Rgba, color);
-                            self.setPixel(.init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), rgba_color.fade(edge_alpha));
+                            self.setPixel(px, rgba_color.fade(radius - dist));
                         } else {
-                            // Full opacity in the center - direct assignment
-                            self.setPixel(.init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), color);
+                            self.setPixel(px, color);
                         }
                     }
                 }
@@ -1482,54 +1446,55 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
-            // Stack buffer for common cases (up to 50 segments per curve, 8 curves)
-            var stack_buffer: [spline_polygon_stack_buffer_size]Point(2, f32) = undefined;
-            var total_points: u32 = 0;
+            const EdgeCurve = struct {
+                cp1: Point(2, f32),
+                cp2: Point(2, f32),
+                length: f32,
+                segments: u32,
+            };
 
-            // First pass: calculate total points needed
-            const pixels_per_segment = pixels_per_segment_fast; // Balance between quality and performance for filled shapes
-            for (0..polygon.len) |i| {
+            const pixels_per_segment = pixels_per_segment_fast;
+
+            // Cache per-edge curve data so the tessellation pass doesn't recompute control
+            // points or curve-length estimates. Stack-cap the common case; spill to heap otherwise.
+            var stack_edges: [32]EdgeCurve = undefined;
+            const edges = if (polygon.len <= stack_edges.len)
+                stack_edges[0..polygon.len]
+            else
+                try self.allocator.alloc(EdgeCurve, polygon.len);
+            defer if (polygon.len > stack_edges.len) self.allocator.free(edges);
+
+            var total_points: u32 = 0;
+            for (edges, 0..) |*edge, i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
                 const p2 = polygon[(i + 2) % polygon.len];
-                const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
-                const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments: u32 = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @trunc(estimated_length / pixels_per_segment))));
+                const cps = calculateSmoothControlPoints(p0, p1, p2, tension);
+                const length = estimateCubicBezierLength(p0, cps.cp1, cps.cp2, p1);
+                const segments: u32 = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @trunc(length / pixels_per_segment))));
+                edge.* = .{ .cp1 = cps.cp1, .cp2 = cps.cp2, .length = length, .segments = segments };
                 total_points += segments;
             }
 
-            // Use stack buffer if possible, otherwise allocate
-            var points_buffer: []Point(2, f32) = undefined;
-            var heap_buffer: ?[]Point(2, f32) = null;
-            defer if (heap_buffer) |h| self.allocator.free(h);
+            var stack_buffer: [spline_polygon_stack_buffer_size]Point(2, f32) = undefined;
+            const points_buffer = if (total_points <= spline_polygon_stack_buffer_size)
+                stack_buffer[0..total_points]
+            else
+                try self.allocator.alloc(Point(2, f32), total_points);
+            defer if (total_points > spline_polygon_stack_buffer_size) self.allocator.free(points_buffer);
 
-            if (total_points <= spline_polygon_stack_buffer_size) {
-                points_buffer = stack_buffer[0..total_points];
-            } else {
-                heap_buffer = try self.allocator.alloc(Point(2, f32), total_points);
-                points_buffer = heap_buffer.?;
-            }
-
-            // Second pass: tessellate curves into the buffer
             var write_idx: u32 = 0;
-            for (0..polygon.len) |i| {
+            for (edges, 0..) |edge, i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
-                const p2 = polygon[(i + 2) % polygon.len];
-                const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
-
-                const estimated_length = estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1);
-                const segments: u32 = @max(spline_min_segments_count, @min(spline_max_segments_count, @as(u32, @trunc(estimated_length / pixels_per_segment))));
-
-                // Tessellate directly into our buffer
-                const segment_buffer = points_buffer[write_idx .. write_idx + segments];
+                const segment_buffer = points_buffer[write_idx .. write_idx + edge.segments];
                 const actual_segments = tessellateBezier(
-                    estimated_length,
+                    edge.length,
                     pixels_per_segment,
-                    spline_min_segments_count, // min_segments for cubic
-                    spline_max_segments_count, // max_segments
+                    spline_min_segments_count,
+                    spline_max_segments_count,
                     evalCubicBezier,
-                    .{ p0, control_points.cp1, control_points.cp2, p1 },
+                    .{ p0, edge.cp1, edge.cp2, p1 },
                     segment_buffer,
                 );
                 write_idx += actual_segments;
