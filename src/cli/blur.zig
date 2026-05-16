@@ -85,7 +85,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     var blur_type: BlurType = .gaussian;
     if (parsed.options.type) |t| {
         blur_type = type_map.get(t) orelse {
-            std.log.err("Unknown blur type: {s}", .{t});
+            std.log.err("unknown blur type: {s}", .{t});
             return error.InvalidArguments;
         };
     }
@@ -116,18 +116,17 @@ fn processImage(
     blur_type: BlurType,
     options: Args,
 ) !void {
-    std.log.debug("Loading {s}...", .{input_path});
+    std.log.debug("loading {s}...", .{input_path});
 
-    // Load image
     var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
     defer img.deinit(gpa);
 
     var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, img.rows, img.cols);
     defer out.deinit(gpa);
 
-    std.log.info("Applying {s} blur...", .{@tagName(blur_type)});
+    std.log.info("applying {s} blur...", .{@tagName(blur_type)});
 
-    const start_time = std.Io.Clock.awake.now(io);
+    const timer = common.Timer.begin(io);
 
     switch (blur_type) {
         .box => {
@@ -137,7 +136,7 @@ fn processImage(
         .gaussian => {
             const sigma = options.sigma orelse 1.0;
             if (sigma < 0 or !std.math.isFinite(sigma)) {
-                std.log.err("Sigma must be a non-negative finite number.", .{});
+                std.log.err("sigma must be a non-negative finite number.", .{});
                 return error.InvalidArguments;
             }
             try img.gaussianBlur(gpa, sigma, out);
@@ -145,7 +144,7 @@ fn processImage(
         .median => {
             const radius = options.radius orelse 1;
             if (radius > 256) {
-                std.log.err("Median blur radius {d} exceeds maximum limit of 256.", .{radius});
+                std.log.err("median blur radius {d} exceeds maximum limit of 256.", .{radius});
                 return error.InvalidArguments;
             }
             try img.medianBlur(gpa, radius, out);
@@ -155,18 +154,18 @@ fn processImage(
             var dist = options.distance orelse 10.0;
 
             if (!std.math.isFinite(angle_deg) or !std.math.isFinite(dist)) {
-                std.log.err("Angle and distance must be finite numbers.", .{});
+                std.log.err("angle and distance must be finite numbers.", .{});
                 return error.InvalidArguments;
             }
             if (dist < 0) {
-                std.log.err("Distance must be non-negative.", .{});
+                std.log.err("distance must be non-negative.", .{});
                 return error.InvalidArguments;
             }
 
             const max_dim = @as(f32, @floatFromInt(@max(img.rows, img.cols)));
 
             if (dist > max_dim) {
-                std.log.warn("Motion blur distance {d:.1} exceeds image dimensions. Clamping to {d:.1}.", .{ dist, max_dim });
+                std.log.warn("motion blur distance {d:.1} exceeds image dimensions. clamping to {d:.1}.", .{ dist, max_dim });
                 dist = max_dim;
             }
 
@@ -179,16 +178,16 @@ fn processImage(
             const strength = options.strength orelse 0.5;
 
             if (!std.math.isFinite(cx) or !std.math.isFinite(cy) or !std.math.isFinite(strength)) {
-                std.log.err("Radial blur parameters (center-x, center-y, strength) must be finite numbers.", .{});
+                std.log.err("radial blur parameters (center-x, center-y, strength) must be finite numbers.", .{});
                 return error.InvalidArguments;
             }
 
             if (cx < 0 or cx > 1 or cy < 0 or cy > 1) {
-                std.log.warn("Center coordinates ({d:.2}, {d:.2}) are outside the typical [0, 1] range.", .{ cx, cy });
+                std.log.warn("center coordinates ({d:.2}, {d:.2}) are outside the typical [0, 1] range.", .{ cx, cy });
             }
 
             if (strength < 0 or strength > 1) {
-                std.log.err("Strength must be between 0.0 and 1.0.", .{});
+                std.log.err("strength must be between 0.0 and 1.0.", .{});
                 return error.InvalidArguments;
             }
 
@@ -201,19 +200,14 @@ fn processImage(
         },
     }
 
-    const end_time = std.Io.Clock.awake.now(io);
-    const blur_ns = start_time.durationTo(end_time).toNanoseconds();
-    std.log.debug("Blur operation took {d:.3} ms", .{@as(f64, @floatFromInt(blur_ns)) / std.time.ns_per_ms});
+    timer.logElapsed("blur");
 
     if (target) |tgt| {
-        const output_path = if (tgt.is_directory) try blk_path: {
-            const basename = Io.Dir.path.basename(input_path);
-            break :blk_path Io.Dir.path.join(gpa, &[_][]const u8{ tgt.path, basename });
-        } else tgt.path;
-        defer if (tgt.is_directory) gpa.free(output_path);
+        const resolved = try tgt.resolveOutputPath(gpa, input_path);
+        defer resolved.deinit(gpa);
 
-        std.log.info("Saving to {s}...", .{output_path});
-        try out.save(io, gpa, output_path);
+        std.log.info("saving to {s}...", .{resolved.path});
+        try out.save(io, gpa, resolved.path);
     }
 
     if (should_display) {

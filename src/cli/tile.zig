@@ -5,6 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 const display = @import("display.zig");
 
 const LayoutMode = enum {
@@ -58,7 +59,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const img_count = input_paths.len;
     const output_path = parsed.options.output;
 
-    // Display if requested OR if no output file is specified
     const should_display = parsed.options.display or output_path == null;
 
     var mode: LayoutMode = .square;
@@ -73,12 +73,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         if (mode_map.get(m)) |val| {
             mode = val;
         } else {
-            std.log.err("Unknown layout mode: {s}", .{m});
+            std.log.err("unknown layout mode: {s}", .{m});
             return error.InvalidArguments;
         }
     }
 
-    // Determine Grid Dimensions
     var rows: u32 = 0;
     var cols: u32 = 0;
 
@@ -98,19 +97,19 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         },
         .grid => {
             if (parsed.options.rows == null or parsed.options.cols == null) {
-                std.log.err("Mode 'grid' requires --rows and --cols", .{});
+                std.log.err("mode 'grid' requires --rows and --cols", .{});
                 return error.InvalidArguments;
             }
             rows = parsed.options.rows.?;
             cols = parsed.options.cols.?;
             if (rows * cols < img_count) {
-                std.log.warn("Grid size ({d}x{d}={d}) is smaller than image count ({d}). Some images will be ignored.", .{ rows, cols, rows * cols, img_count });
+                std.log.warn("grid size ({d}x{d}={d}) is smaller than image count ({d}). some images will be ignored.", .{ rows, cols, rows * cols, img_count });
             } else if (rows * cols > img_count) {
-                std.log.debug("Grid size ({d}x{d}={d}) is larger than image count ({d}). Empty cells will be black.", .{ rows, cols, rows * cols, img_count });
+                std.log.debug("grid size ({d}x{d}={d}) is larger than image count ({d}). empty cells will be black.", .{ rows, cols, rows * cols, img_count });
             }
         },
         .factors => {
-            // Find factors closest to square
+            // Largest factor pair closest to a square; prefer landscape below.
             const n = @as(u32, @intCast(img_count));
             var best_r: u32 = 1;
             var i: u32 = 1;
@@ -121,32 +120,22 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             }
             rows = best_r;
             cols = n / best_r;
-            // Prefer landscape orientation (more cols than rows)
-            if (rows > cols) {
-                const tmp = rows;
-                rows = cols;
-                cols = tmp;
-            }
-            std.log.debug("Factors mode: calculated {d}x{d} grid for {d} images", .{ rows, cols, n });
+            if (rows > cols) std.mem.swap(u32, &rows, &cols);
+            std.log.debug("factors mode: calculated {d}x{d} grid for {d} images", .{ rows, cols, n });
         },
     }
 
-    std.log.info("Tiling {d} images into a {d}x{d} grid ({s})...", .{ img_count, cols, rows, @tagName(mode) });
+    std.log.info("tiling {d} images into a {d}x{d} grid ({s})...", .{ img_count, cols, rows, @tagName(mode) });
 
-    // Determine Cell Size
-    var cell_w: u32 = 0;
-    var cell_h: u32 = 0;
+    var cell_w: u32 = parsed.options.width orelse 0;
+    var cell_h: u32 = parsed.options.height orelse 0;
+    // Caches the first image so we don't load it twice when it doubles as the
+    // reference for cell sizing.
     var reference_img: ?zignal.Image(zignal.Rgba(u8)) = null;
     defer if (reference_img) |*img| img.deinit(gpa);
 
-    if (parsed.options.width) |w| cell_w = w;
-    if (parsed.options.height) |h| cell_h = h;
-
     if (cell_w == 0 or cell_h == 0) {
-        // Load first image to establish dimensions
-        std.log.debug("Analyzing reference image: {s}...", .{input_paths[0]});
-
-        // Use RGBA for safety to handle transparency
+        std.log.debug("analyzing reference image: {s}...", .{input_paths[0]});
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
 
         const ref_w_f = @as(f32, @floatFromInt(reference_img.?.cols));
@@ -155,11 +144,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         if (cell_w == 0 and cell_h == 0) {
             cell_w = @intCast(reference_img.?.cols);
             cell_h = @intCast(reference_img.?.rows);
-        } else if (cell_w != 0 and cell_h == 0) {
-            // Scale height proportionally
+        } else if (cell_h == 0) {
             cell_h = @round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f);
-        } else if (cell_w == 0 and cell_h != 0) {
-            // Scale width proportionally
+        } else {
             cell_w = @round((@as(f32, @floatFromInt(cell_h)) / ref_h_f) * ref_w_f);
         }
     }
@@ -167,54 +154,35 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const canvas_w = cols * cell_w;
     const canvas_h = rows * cell_h;
 
-    std.log.debug("Cell Size: {d}x{d}", .{ cell_w, cell_h });
-    std.log.debug("Canvas Size: {d}x{d}", .{ canvas_w, canvas_h });
+    std.log.debug("cell size: {d}x{d}", .{ cell_w, cell_h });
+    std.log.debug("canvas size: {d}x{d}", .{ canvas_w, canvas_h });
 
-    // Create Canvas
-    std.log.debug("Creating canvas...", .{});
     var canvas = try zignal.Image(zignal.Rgba(u8)).init(gpa, canvas_h, canvas_w);
     defer canvas.deinit(gpa);
-    canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Fill black (opaque)
+    canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
-    // Process Images
-    const start_time = std.Io.Clock.awake.now(io);
+    const timer = common.Timer.begin(io);
     for (input_paths, 0..) |path, idx| {
         if (idx >= rows * cols) break;
 
         const r = idx / cols;
         const c = idx % cols;
 
-        std.log.debug("[{d}/{d}] Processing {s}...", .{ idx + 1, img_count, path });
+        std.log.debug("[{d}/{d}] processing {s}...", .{ idx + 1, img_count, path });
 
         var img: zignal.Image(zignal.Rgba(u8)) = undefined;
         var loaded_new = false;
-
-        // Optimization: Use the already loaded reference if it's the first one
         if (idx == 0 and reference_img != null) {
-            std.log.debug("Using reference image for slot {d}", .{idx});
             img = reference_img.?;
         } else {
-            // Load
-            std.log.debug("Loading image for slot {d}: {s}", .{ idx, path });
             img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
-                std.log.warn("Failed to load {s}: {s}. Skipping slot.", .{ path, @errorName(err) });
+                std.log.warn("failed to load {s}: {s}. skipping slot.", .{ path, @errorName(err) });
                 continue;
             };
             loaded_new = true;
         }
         defer if (loaded_new) img.deinit(gpa);
 
-        // Check if resize is needed
-        if (img.cols != cell_w or img.rows != cell_h) {
-            // We need to resize.
-            // Create a temp buffer for the resized image
-            // Note: We can resize directly into the canvas using insert?
-            // Image.insert supports scaling?
-            // Checking src/image.zig: insert(self, source, rect, angle, method, blend_mode)
-            // It scales source to fit rect! Perfect.
-        }
-
-        // Calculate aspect-preserving destination rectangle
         const scale_x = @as(f32, @floatFromInt(cell_w)) / @as(f32, @floatFromInt(img.cols));
         const scale_y = @as(f32, @floatFromInt(cell_h)) / @as(f32, @floatFromInt(img.rows));
         const scale = @min(scale_x, scale_y);
@@ -237,12 +205,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         canvas.insert(img, dest_rect, 0, .bilinear, .none);
     }
-    const end_time = std.Io.Clock.awake.now(io);
-    const tile_ns = start_time.durationTo(end_time).toNanoseconds();
-    std.log.debug("Tiling operation took {d:.3} ms", .{@as(f64, @floatFromInt(tile_ns)) / std.time.ns_per_ms});
+    timer.logElapsed("tiling");
 
     if (output_path) |out_path| {
-        std.log.info("Saving to {s}...", .{out_path});
+        std.log.info("saving to {s}...", .{out_path});
         try canvas.save(io, gpa, out_path);
     }
 

@@ -5,6 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 const display = @import("display.zig");
 
 const Args = struct {
@@ -42,44 +43,36 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const target_path = parsed.positionals[1];
     const output_path = if (parsed.positionals.len == 3) parsed.positionals[2] else null;
 
-    // Display if requested OR if no output file is specified
     const should_display = parsed.options.display or output_path == null;
 
-    // Use Rgb(u8) for style transfer
     const Pixel = zignal.Rgb(u8);
 
-    // Load source image
-    std.log.debug("Loading source image: {s}", .{source_path});
+    std.log.debug("loading source image: {s}", .{source_path});
     var source_img: zignal.Image(Pixel) = try .load(io, gpa, source_path);
     defer source_img.deinit(gpa);
 
-    // Keep a copy of the original for display if needed
+    // FDM mutates `source_img` in place; keep an original copy for the side-by-side preview.
     var original_source: ?zignal.Image(Pixel) = null;
     if (should_display) {
         original_source = try source_img.dupe(gpa);
     }
     defer if (original_source) |*img| img.deinit(gpa);
 
-    // Load target image
-    std.log.debug("Loading target image: {s}", .{target_path});
+    std.log.debug("loading target image: {s}", .{target_path});
     var target_img: zignal.Image(Pixel) = try .load(io, gpa, target_path);
     defer target_img.deinit(gpa);
 
-    // Initialize FDM
     var fdm: zignal.FeatureDistributionMatching(Pixel) = .init(gpa);
     defer fdm.deinit();
 
-    std.log.debug("Applying FDM style transfer...", .{});
+    std.log.debug("applying fdm style transfer...", .{});
 
-    const start_time = std.Io.Clock.awake.now(io);
-    // Apply match
+    const timer = common.Timer.begin(io);
     try fdm.match(source_img, target_img);
-    const end_time = std.Io.Clock.awake.now(io);
-    const fdm_ns = start_time.durationTo(end_time).toNanoseconds();
-    std.log.debug("FDM took {d:.3} ms", .{@as(f64, @floatFromInt(fdm_ns)) / std.time.ns_per_ms});
+    timer.logElapsed("fdm");
 
     if (output_path) |out_path| {
-        std.log.info("Saving result to {s}...", .{out_path});
+        std.log.info("saving result to {s}...", .{out_path});
         try source_img.save(io, gpa, out_path);
     }
 

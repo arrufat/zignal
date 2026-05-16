@@ -5,6 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 const display = @import("display.zig");
 
 const Args = struct {
@@ -57,15 +58,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     const should_display = parsed.options.display or parsed.options.output == null;
 
-    // Load images
-    std.log.debug("Loading first image: {s}", .{path1});
+    std.log.debug("loading first image: {s}", .{path1});
     var img1 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path1) catch |err| {
         std.log.err("failed to load image '{s}': {t}", .{ path1, err });
         return;
     };
     defer img1.deinit(gpa);
 
-    std.log.debug("Loading second image: {s}", .{path2});
+    std.log.debug("loading second image: {s}", .{path2});
     var img2 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path2) catch |err| {
         std.log.err("failed to load image '{s}': {t}", .{ path2, err });
         return;
@@ -73,7 +73,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     defer img2.deinit(gpa);
 
     if (img1.rows != img2.rows or img1.cols != img2.cols) {
-        std.log.err("Dimension mismatch: {d}x{d} vs {d}x{d}", .{
+        std.log.err("dimension mismatch: {d}x{d} vs {d}x{d}", .{
             img1.cols, img1.rows, img2.cols, img2.rows,
         });
         return;
@@ -83,35 +83,27 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const threshold = parsed.options.threshold orelse 0;
     const binary = parsed.options.binary;
 
-    std.log.debug("Computing difference...", .{});
-
     var diff_img = try zignal.Image(zignal.Rgba(u8)).init(gpa, img1.rows, img1.cols);
     defer diff_img.deinit(gpa);
 
-    // Use DiffOptions to handle visualization logic inside the library
     const diff_opts = zignal.Image(zignal.Rgba(u8)).DiffOptions{
         .threshold = @floatFromInt(threshold),
         .scale = scale,
         .binary = binary,
-        .force_opaque = true, // Force visual result to be opaque
+        .force_opaque = true,
     };
 
-    const start_time = std.Io.Clock.awake.now(io);
+    const timer = common.Timer.begin(io);
     const result = try img1.diff(img2, diff_img, diff_opts);
-    const end_time = std.Io.Clock.awake.now(io);
-    const diff_ns = start_time.durationTo(end_time).toNanoseconds();
-    std.log.debug("Diff computation took {d:.3} ms", .{@as(f64, @floatFromInt(diff_ns)) / std.time.ns_per_ms});
+    timer.logElapsed("diff");
 
-    // If using binary mode, stats.max() will be 255 if any diff found, or 0.
-    // If using absolute mode (with scaling), stats.max() will be the max visualization brightness.
-    // However, users usually want to know the *raw* max difference, but we only have stats of the *processed* image.
-    // For now, reporting the max pixel value in the diff image is consistent with what is shown.
-
-    std.log.info("Max difference found: {d}", .{@as(u32, @trunc(result.stats.max()))});
-    std.log.info("Pixels differing > {d}: {d}", .{ threshold, result.diff_count });
+    // `result.stats` describes the *visualized* diff image (after threshold/scale/binary),
+    // not the raw per-pixel delta — so for binary mode max() is 0 or 255.
+    std.log.info("max difference found: {d}", .{@as(u32, @trunc(result.stats.max()))});
+    std.log.info("pixels differing > {d}: {d}", .{ threshold, result.diff_count });
 
     if (parsed.options.output) |output_path| {
-        std.log.info("Saving difference image to '{s}'...", .{output_path});
+        std.log.info("saving difference image to '{s}'...", .{output_path});
         try diff_img.save(io, gpa, output_path);
     }
 
@@ -127,7 +119,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         );
         defer canvas.deinit(gpa);
 
-        std.log.debug("Displaying result...", .{});
         const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }

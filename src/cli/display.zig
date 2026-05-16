@@ -43,16 +43,15 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
-            std.log.debug("File: {s}", .{path});
+            std.log.debug("file: {s}", .{path});
         }
-        std.log.debug("Loading image: {s}", .{path});
+        std.log.debug("loading image: {s}", .{path});
         var image: zignal.Image(zignal.Rgba(u8)) = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
-            std.log.err("Failed to load image '{s}': {}", .{ path, err });
+            std.log.err("failed to load image '{s}': {}", .{ path, err });
             continue;
         };
         defer image.deinit(gpa);
 
-        std.log.debug("Displaying image...", .{});
         try displayCanvas(io, writer, image, display_fmt);
     }
 }
@@ -65,7 +64,7 @@ pub fn resolveDisplayFormat(
     var protocol: zignal.DisplayFormat = .{ .auto = .default };
     if (protocol_name) |p| {
         protocol = parseProtocol(p) catch |err| {
-            std.log.err("Unknown protocol type: {s}", .{p});
+            std.log.err("unknown protocol type: {s}", .{p});
             return err;
         };
     }
@@ -74,7 +73,6 @@ pub fn resolveDisplayFormat(
 }
 
 pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
-    std.log.debug("Parsing protocol: {s}", .{name});
     const protocol_map = std.StaticStringMap(zignal.DisplayFormat).initComptime(.{
         .{ "kitty", zignal.DisplayFormat{ .kitty = .default } },
         .{ "sixel", zignal.DisplayFormat{ .sixel = .default } },
@@ -82,16 +80,9 @@ pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
         .{ "braille", zignal.DisplayFormat{ .braille = .default } },
         .{ "auto", zignal.DisplayFormat{ .auto = .default } },
     });
-    if (protocol_map.get(name)) |p_enum| {
-        return p_enum;
-    } else {
-        return error.InvalidArguments;
-    }
+    return protocol_map.get(name) orelse error.InvalidArguments;
 }
 
-/// Applies user-provided scaling and filter options to a display protocol.
-/// Note: If width and height are null, the protocol will automatically enforce
-/// the global 2048x2048 dimension cap during rendering.
 pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {
     switch (protocol.*) {
         .kitty => |*opts| {
@@ -120,10 +111,6 @@ pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) 
     }
 }
 
-/// Helper function to display an image canvas in the terminal.
-/// Automatically handles protocol selection and scaling options.
-/// Note: Implicitly caps image dimensions to 2048x2048 via aspectScale to prevent
-/// excessive memory usage in the terminal.
 pub fn displayCanvas(
     io: Io,
     writer: *Io.Writer,
@@ -143,10 +130,7 @@ pub fn createHorizontalComposite(
 ) !zignal.Image(T) {
     if (images.len == 0) return zignal.Image(T).init(allocator, 1, 1);
 
-    // Use the first image as reference for aspect ratio scaling
     const ref_img = images[0];
-
-    // Calculate scale based on user constraints relative to the first image
     const scale_factor = zignal.terminal.aspectScale(
         user_width,
         user_height,
@@ -154,20 +138,16 @@ pub fn createHorizontalComposite(
         ref_img.cols,
     );
 
-    // Calculate dimensions for each sub-image
     const w: u32 = @round(@as(f32, @floatFromInt(ref_img.cols)) * scale_factor);
     const h: u32 = @round(@as(f32, @floatFromInt(ref_img.rows)) * scale_factor);
-
-    // Safety check for zero dimensions
-    const final_w = if (w == 0) 1 else w;
-    const final_h = if (h == 0) 1 else h;
+    const final_w = @max(w, 1);
+    const final_h = @max(h, 1);
 
     const canvas_w = @as(u32, @intCast(images.len)) * final_w;
     const canvas_h = final_h;
 
     var canvas = try zignal.Image(T).init(allocator, canvas_h, canvas_w);
 
-    // Fill background
     if (@hasDecl(T, "black")) {
         canvas.fill(T.black);
     } else {
@@ -179,7 +159,6 @@ pub fn createHorizontalComposite(
 
     for (images, 0..) |img, i| {
         const offset_x = @as(f32, @floatFromInt(i)) * wf;
-        // Use .none blend mode to overwrite (copy) pixels directly
         canvas.insert(img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, .bilinear, .none);
     }
 

@@ -72,7 +72,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     var algo: Algo = .sobel;
     if (parsed.options.filter) |f| {
         algo = algo_map.get(f) orelse {
-            std.log.err("Unknown filter: {s}. Supported: sobel, canny, shen-castan", .{f});
+            std.log.err("unknown filter: {s}. supported: sobel, canny, shen-castan", .{f});
             return error.InvalidArguments;
         };
     }
@@ -104,15 +104,15 @@ fn processImage(
     algo: Algo,
     options: Args,
 ) !void {
-    std.log.debug("Loading image: {s}", .{input_path});
+    std.log.debug("loading image: {s}", .{input_path});
     var img = try zignal.Image(u8).load(io, gpa, input_path);
     defer img.deinit(gpa);
 
     var out_img = try zignal.Image(u8).init(gpa, img.rows, img.cols);
     defer out_img.deinit(gpa);
 
-    std.log.debug("Applying {s} edge detection...", .{@tagName(algo)});
-    const start_time = std.Io.Clock.awake.now(io);
+    std.log.debug("applying {s} edge detection...", .{@tagName(algo)});
+    const timer = common.Timer.begin(io);
 
     switch (algo) {
         .sobel => {
@@ -122,7 +122,7 @@ fn processImage(
             const sigma = options.sigma orelse 1.0;
             const low = options.low orelse 50.0;
             const high = options.high orelse 100.0;
-            std.log.debug("Canny params: sigma={d:.2}, low={d:.2}, high={d:.2}", .{ sigma, low, high });
+            std.log.debug("canny params: sigma={d:.2}, low={d:.2}, high={d:.2}", .{ sigma, low, high });
             try img.canny(gpa, sigma, low, high, out_img);
         },
         .shen_castan => {
@@ -133,26 +133,21 @@ fn processImage(
                 .low_rel = options.low orelse 0.5,
                 .use_nms = options.nms,
             };
-            std.log.debug("Shen-Castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
+            std.log.debug("shen-castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
                 opts.smooth, opts.window_size, opts.high_ratio, opts.low_rel, opts.use_nms,
             });
             try img.shenCastan(gpa, opts, out_img);
         },
     }
 
-    const end_time = std.Io.Clock.awake.now(io);
-    const duration_ns = start_time.durationTo(end_time).toNanoseconds();
-    std.log.debug("Edge detection took {d:.3} ms", .{@as(f64, @floatFromInt(duration_ns)) / std.time.ns_per_ms});
+    timer.logElapsed("edge detection");
 
     if (target) |tgt| {
-        const output_path = if (tgt.is_directory) try blk_path: {
-            const basename = Io.Dir.path.basename(input_path);
-            break :blk_path Io.Dir.path.join(gpa, &[_][]const u8{ tgt.path, basename });
-        } else tgt.path;
-        defer if (tgt.is_directory) gpa.free(output_path);
+        const resolved = try tgt.resolveOutputPath(gpa, input_path);
+        defer resolved.deinit(gpa);
 
-        std.log.info("Saving result to {s}...", .{output_path});
-        try out_img.save(io, gpa, output_path);
+        std.log.info("saving result to {s}...", .{resolved.path});
+        try out_img.save(io, gpa, resolved.path);
     }
 
     if (should_display) {

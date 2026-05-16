@@ -5,6 +5,7 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 
 const Args = struct {};
 
@@ -34,16 +35,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const ref_path = parsed.positionals[0];
     const targets = parsed.positionals[1..];
 
-    std.log.debug("Reference image: {s}", .{ref_path});
-    std.log.debug("Loading reference image...", .{});
+    std.log.debug("loading reference image: {s}", .{ref_path});
     var ref_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, ref_path);
     defer ref_img.deinit(gpa);
 
     for (targets) |path| {
         try writer.print("\nComparing: {s}\n", .{path});
 
-        // Load target image
-        std.log.debug("Loading target image: {s}", .{path});
+        std.log.debug("loading target image: {s}", .{path});
         var img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("failed to load image '{s}': {t}", .{ path, err });
             continue;
@@ -57,24 +56,20 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             continue;
         }
 
-        std.log.debug("Calculating metrics...", .{});
-        const start_time = std.Io.Clock.awake.now(io);
+        const timer = common.Timer.begin(io);
 
         const psnr_val = ref_img.psnr(img) catch unreachable;
         const mean_err = ref_img.meanPixelError(img) catch unreachable;
 
-        // SSIM calculation
+        // SSIM requires the window to fit, so 11x11 is the minimum.
         var ssim_val: f64 = 0;
-        // SSIM requires minimum 11x11
         if (img.rows >= 11 and img.cols >= 11) {
             ssim_val = try ref_img.ssim(img);
         } else {
-            std.log.warn("Image {s} is too small for SSIM (min 11x11)", .{path});
+            std.log.warn("image {s} is too small for ssim (min 11x11)", .{path});
         }
 
-        const end_time = std.Io.Clock.awake.now(io);
-        const metrics_ns = start_time.durationTo(end_time).toNanoseconds();
-        std.log.debug("Metrics calculation took {d:.3} ms", .{@as(f64, @floatFromInt(metrics_ns)) / std.time.ns_per_ms});
+        timer.logElapsed("metrics");
 
         try writer.print("  PSNR: {d:.4} dB\n", .{psnr_val});
         try writer.print("  SSIM: {d:.4}\n", .{ssim_val});
