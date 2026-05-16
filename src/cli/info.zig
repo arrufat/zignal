@@ -9,6 +9,7 @@ const bmp = zignal.bmp;
 const gif = zignal.gif;
 
 const args = @import("args.zig");
+const common = @import("common.zig");
 
 const Args = struct {
     stats: bool = false,
@@ -35,7 +36,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    // Buffer for reading file data
     var read_buffer: [4096]u8 = undefined;
 
     for (parsed.positionals) |image_path| {
@@ -43,89 +43,83 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             try writer.print("File: {s}\n", .{image_path});
         }
 
-        // Use a block to catch errors for individual files so we can continue to the next one
         const result = blk: {
-            std.log.debug("Detecting format for: {s}", .{image_path});
-            const image_format = zignal.ImageFormat.detectFromPath(io, gpa, image_path) catch |err| break :blk err;
-            if (image_format) |fmt| {
-                std.log.debug("Format detected: {s}", .{@tagName(fmt)});
-                const file = Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
-                defer file.close(io);
+            std.log.debug("inspecting: {s}", .{image_path});
+            const file = Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
+            defer file.close(io);
 
-                var reader = file.reader(io, &read_buffer);
+            var reader = file.reader(io, &read_buffer);
+            const peek = reader.interface.peek(8) catch |err| break :blk err;
+            const image_format = zignal.ImageFormat.detectFromBytes(peek) orelse break :blk error.UnsupportedImageFormat;
+            std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
-                switch (fmt) {
-                    .png => {
-                        const info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+            switch (image_format) {
+                .png => {
+                    const info = png.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try writer.print("Format:      PNG\n", .{});
-                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
-                        try writer.print("Channels:    {d}\n", .{info.channels()});
-                        try writer.print("Color Space: {s}\n", .{@tagName(info.color_type)});
+                    try writer.print("Format:      PNG\n", .{});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
+                    try writer.print("Channels:    {d}\n", .{info.channels()});
+                    try writer.print("Color Space: {s}\n", .{@tagName(info.color_type)});
 
-                        if (info.gamma) |g| {
-                            try writer.print("Gamma:       {d}\n", .{g});
-                        }
-                        if (info.srgb_intent) |intent| {
-                            try writer.print("sRGB:        {s}\n", .{@tagName(intent)});
-                        }
-                    },
-                    .jpeg => {
-                        const info = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+                    if (info.gamma) |g| {
+                        try writer.print("Gamma:       {d}\n", .{g});
+                    }
+                    if (info.srgb_intent) |intent| {
+                        try writer.print("sRGB:        {s}\n", .{@tagName(intent)});
+                    }
+                },
+                .jpeg => {
+                    const info = jpeg.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try writer.print("Format:      JPEG\n", .{});
-                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try writer.print("Bit Depth:   {d}\n", .{info.precision});
-                        try writer.print("Channels:    {d}\n", .{info.num_components});
-                        try writer.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
-                        try writer.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
-                    },
-                    .bmp => {
-                        const info = bmp.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+                    try writer.print("Format:      JPEG\n", .{});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Bit Depth:   {d}\n", .{info.precision});
+                    try writer.print("Channels:    {d}\n", .{info.num_components});
+                    try writer.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
+                    try writer.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
+                },
+                .bmp => {
+                    const info = bmp.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try writer.print("Format:      BMP\n", .{});
-                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
-                        try writer.print("Compression: {s}\n", .{@tagName(info.compression)});
-                        try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_kind)});
-                        try writer.print("Top-down:    {s}\n", .{if (info.top_down) "yes" else "no"});
-                        if (info.palette_entries > 0) {
-                            try writer.print("Palette:     {d} entries\n", .{info.palette_entries});
-                        }
-                        if (info.hasAlpha()) {
-                            try writer.print("Alpha:       yes\n", .{});
-                        }
-                    },
-                    .gif => {
-                        const info = gif.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+                    try writer.print("Format:      BMP\n", .{});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
+                    try writer.print("Compression: {s}\n", .{@tagName(info.compression)});
+                    try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_kind)});
+                    try writer.print("Top-down:    {s}\n", .{if (info.top_down) "yes" else "no"});
+                    if (info.palette_entries > 0) {
+                        try writer.print("Palette:     {d} entries\n", .{info.palette_entries});
+                    }
+                    if (info.hasAlpha()) {
+                        try writer.print("Alpha:       yes\n", .{});
+                    }
+                },
+                .gif => {
+                    const info = gif.getInfo(&reader.interface, .{}) catch |err| break :blk err;
 
-                        try writer.print("Format:      GIF\n", .{});
-                        try writer.print("Version:     {s}\n", .{@tagName(info.version)});
-                        try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
-                        try writer.print("Frames:      {d}\n", .{info.frame_count});
-                        if (info.loop_count == 0) {
-                            try writer.print("Loop count:  infinite\n", .{});
-                        } else {
-                            try writer.print("Loop count:  {d}\n", .{info.loop_count});
-                        }
-                        if (info.has_global_color_table) {
-                            try writer.print("Palette:     {d} entries (global)\n", .{info.global_color_table_size});
-                        }
-                    },
-                }
-            } else {
-                break :blk error.UnsupportedImageFormat;
+                    try writer.print("Format:      GIF\n", .{});
+                    try writer.print("Version:     {s}\n", .{@tagName(info.version)});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Frames:      {d}\n", .{info.frame_count});
+                    if (info.loop_count == 0) {
+                        try writer.print("Loop count:  infinite\n", .{});
+                    } else {
+                        try writer.print("Loop count:  {d}\n", .{info.loop_count});
+                    }
+                    if (info.has_global_color_table) {
+                        try writer.print("Palette:     {d} entries (global)\n", .{info.global_color_table_size});
+                    }
+                },
             }
 
             if (parsed.options.stats) {
-                // Load image as RGBA(u8)
-                std.log.debug("Loading image for stats: {s}", .{image_path});
+                std.log.debug("loading image for stats: {s}", .{image_path});
                 var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, image_path) catch |err| break :blk err;
                 defer image.deinit(gpa);
 
-                std.log.debug("Computing statistics...", .{});
-                const start_time = std.Io.Clock.awake.now(io);
+                const timer = common.Timer.begin(io);
                 var r_stats: zignal.RunningStats(f64) = .init();
                 var g_stats: zignal.RunningStats(f64) = .init();
                 var b_stats: zignal.RunningStats(f64) = .init();
@@ -135,9 +129,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     g_stats.add(pixel.g);
                     b_stats.add(pixel.b);
                 }
-                const end_time = std.Io.Clock.awake.now(io);
-                const stats_ns = start_time.durationTo(end_time).toNanoseconds();
-                std.log.debug("Statistics computed in {d:.3} ms", .{@as(f64, @floatFromInt(stats_ns)) / std.time.ns_per_ms});
+                timer.logElapsed("statistics");
 
                 try writer.print("\n{s: <8} {s: >8} {s: >8} {s: >10} {s: >10}\n", .{ "Channel", "Min", "Max", "Mean", "StdDev" });
                 inline for (.{ .{ "Red", &r_stats }, .{ "Green", &g_stats }, .{ "Blue", &b_stats } }) |entry| {
@@ -153,9 +145,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             break :blk {};
         };
 
-        if (result) |_| {
-            // Success
-        } else |err| {
+        if (result) |_| {} else |err| {
             std.log.err("failed to get info for '{s}': {t}", .{ image_path, err });
         }
 

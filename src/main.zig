@@ -134,7 +134,7 @@ pub const Cli = struct {
                 return;
             }
 
-            std.log.err("Unknown command: '{s}'", .{cmd_name});
+            std.log.err("unknown command: '{s}'", .{cmd_name});
             try self.printHelp(stdout, null);
             std.process.exit(1);
         }
@@ -169,15 +169,6 @@ pub const Cli = struct {
     }
 
     fn printGeneralHelp(self: Cli, stdout: *Io.Writer) !void {
-        const level_names = comptime blk: {
-            var names: []const u8 = "";
-            const fields = std.meta.fields(std.log.Level);
-            for (fields, 0..) |field, i| {
-                names = names ++ field.name;
-                if (i < fields.len - 1) names = names ++ ", ";
-            }
-            break :blk names;
-        };
         try stdout.print(
             \\Usage: zignal [options] <command> [command-options]
             \\
@@ -186,7 +177,7 @@ pub const Cli = struct {
             \\
             \\Commands:
             \\
-        , .{level_names});
+        , .{cli_args.log_level_names});
 
         var max_len: usize = 0;
         for (self.commands) |cmd| {
