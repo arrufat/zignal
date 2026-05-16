@@ -763,186 +763,137 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
+        /// Angular range for arc filtering in ring/Bresenham renderers.
+        const ArcRange = struct { start: f32, end: f32 };
+
+        /// Screen-space bounding box of the outer circle, clamped to image bounds.
+        /// Returns null when the box has zero area.
+        inline fn ringBoundingBox(self: Self, center: Point(2, f32), outer_radius: f32) ?Rectangle(u32) {
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const fcols: f32 = @floatFromInt(self.image.cols);
+            const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
+            const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
+            const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
+            const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
+            if (left >= right or top >= bottom) return null;
+            return .{ .l = left, .t = top, .r = right, .b = bottom };
+        }
+
+        /// Coverage in the annulus [inner_r, outer_r] for a pixel at offset (x,y) from the
+        /// center. `aa=true` returns smooth edge coverage in [0,1]; `aa=false` returns 1.0
+        /// strictly inside the ring and 0.0 otherwise (cheaper squared-distance form).
+        inline fn ringCoverage(comptime aa: bool, x: f32, y: f32, inner_r: f32, outer_r: f32) f32 {
+            const dist_sq = x * x + y * y;
+            if (aa) {
+                const dist = @sqrt(dist_sq);
+                if (dist < inner_r - antialias_edge_offset or dist > outer_r + antialias_edge_offset) return 0;
+                var alpha: f32 = 1.0;
+                if (dist > outer_r - antialias_edge_offset) alpha = @min(alpha, outer_r + antialias_edge_offset - dist);
+                if (dist < inner_r + antialias_edge_offset) alpha = @min(alpha, dist - (inner_r - antialias_edge_offset));
+                return clamp(alpha, 0, 1);
+            } else {
+                return if (dist_sq >= inner_r * inner_r and dist_sq <= outer_r * outer_r) 1.0 else 0.0;
+            }
+        }
+
+        /// Renders a thick ring outline (or arc segment) by scanning its bounding box and
+        /// shading pixels inside the annulus.
+        ///
+        /// - `aa=false`: writes pre-converted opaque pixels directly to image data — matches
+        ///   the `.fast` contract of never blending.
+        /// - `aa=true`: routes through `setPixel`, so destination-Rgba canvases get alpha blending.
+        /// - `arc`: when non-null, pixels outside the angular range are skipped.
+        inline fn renderRing(
+            self: Self,
+            center: Point(2, f32),
+            inner_radius: f32,
+            outer_radius: f32,
+            color: anytype,
+            comptime aa: bool,
+            arc: ?ArcRange,
+        ) void {
+            const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
+            const solid_color = if (!aa) convertColor(T, color) else undefined;
+            const rgba_color = if (aa) convertColor(Rgba, color) else undefined;
+            for (bbox.t..bbox.b) |r| {
+                const y = as(f32, r) - center.y();
+                for (bbox.l..bbox.r) |c| {
+                    const x = as(f32, c) - center.x();
+                    const coverage = ringCoverage(aa, x, y, inner_radius, outer_radius);
+                    if (coverage <= 0) continue;
+                    if (arc) |range| {
+                        if (!isAngleInArc(std.math.atan2(y, x), range.start, range.end)) continue;
+                    }
+                    if (aa) {
+                        self.setPixel(.init(.{ as(f32, c), as(f32, r) }), rgba_color.fade(coverage));
+                    } else {
+                        self.image.data[r * self.image.stride + c] = solid_color;
+                    }
+                }
+            }
+        }
+
+        /// Rasterizes a 1-pixel-thick Bresenham circle around `center`. When `arc` is non-null,
+        /// each of the 8 octant-symmetric pixels is gated by an angle check.
+        inline fn drawBresenhamCircle(
+            self: Self,
+            center: Point(2, f32),
+            radius: f32,
+            color: anytype,
+            arc: ?ArcRange,
+        ) void {
+            const cx = @round(center.x());
+            const cy = @round(center.y());
+            const r = @round(radius);
+            var x: f32 = r;
+            var y: f32 = 0;
+            var err: f32 = 0;
+            while (x >= y) {
+                const offsets = [_][2]f32{
+                    .{ x, y }, .{ -x, y }, .{ x, -y }, .{ -x, -y },
+                    .{ y, x }, .{ -y, x }, .{ y, -x }, .{ -y, -x },
+                };
+                for (offsets) |o| {
+                    if (arc) |range| {
+                        if (!isAngleInArc(std.math.atan2(o[1], o[0]), range.start, range.end)) continue;
+                    }
+                    self.setPixel(.init(.{ cx + o[0], cy + o[1] }), color);
+                }
+                if (err <= 0) {
+                    y += 1;
+                    err += 2 * y + 1;
+                }
+                if (err > 0) {
+                    x -= 1;
+                    err -= 2 * x + 1;
+                }
+            }
+        }
+
         /// Internal function for drawing solid (aliased) circle outlines.
         fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             if (width == 1) {
-                // Use fast Bresenham for 1-pixel width
-                const cx = @round(center.x());
-                const cy = @round(center.y());
-                const r = @round(radius);
-                var x: f32 = r;
-                var y: f32 = 0;
-                var err: f32 = 0;
-                while (x >= y) {
-                    const points = [_]Point(2, f32){
-                        .init(.{ cx + x, cy + y }),
-                        .init(.{ cx - x, cy + y }),
-                        .init(.{ cx + x, cy - y }),
-                        .init(.{ cx - x, cy - y }),
-                        .init(.{ cx + y, cy + x }),
-                        .init(.{ cx - y, cy + x }),
-                        .init(.{ cx + y, cy - x }),
-                        .init(.{ cx - y, cy - x }),
-                    };
-                    for (points) |p| {
-                        self.setPixel(p, color);
-                    }
-                    if (err <= 0) {
-                        y += 1;
-                        err += 2 * y + 1;
-                    }
-                    if (err > 0) {
-                        x -= 1;
-                        err -= 2 * x + 1;
-                    }
-                }
+                self.drawBresenhamCircle(center, radius, color, null);
             } else {
-                // Use ring filling for thick outlines
-                const frows: f32 = @floatFromInt(self.image.rows);
-                const fcols: f32 = @floatFromInt(self.image.cols);
                 const line_width: f32 = @floatFromInt(width);
-                const inner_radius = radius - line_width / 2.0;
-                const outer_radius = radius + line_width / 2.0;
-                const inner_radius_sq = inner_radius * inner_radius;
-                const outer_radius_sq = outer_radius * outer_radius;
-                const solid_color = convertColor(T, color);
-
-                const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
-                const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
-                const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
-                const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
-
-                for (top..bottom) |r| {
-                    const y = as(f32, r) - center.y();
-                    for (left..right) |c| {
-                        const x = as(f32, c) - center.x();
-                        const dist_sq = x * x + y * y;
-                        if (dist_sq >= inner_radius_sq and dist_sq <= outer_radius_sq) {
-                            self.image.data[r * self.image.stride + c] = solid_color;
-                        }
-                    }
-                }
+                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, false, null);
             }
         }
 
         /// Internal function for drawing smooth (anti-aliased) circle outlines.
         fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
-            const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
             const line_width: f32 = @floatFromInt(width);
-            const inner_radius = radius - line_width / 2.0;
-            const outer_radius = radius + line_width / 2.0;
-
-            // Calculate bounding box
-            const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
-            const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
-            const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
-            const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
-
-            const c2 = convertColor(Rgba, color);
-
-            for (top..bottom) |r| {
-                const y = @as(f32, @floatFromInt(r)) - center.y();
-                for (left..right) |c| {
-                    const x = @as(f32, @floatFromInt(c)) - center.x();
-                    const dist = @sqrt(x * x + y * y);
-
-                    // Only draw if we're in the ring area
-                    if (dist >= inner_radius - antialias_edge_offset and dist <= outer_radius + antialias_edge_offset) {
-                        var alpha: f32 = 1.0;
-
-                        // Smooth outer edge
-                        if (dist > outer_radius - antialias_edge_offset) {
-                            alpha = @min(alpha, outer_radius + antialias_edge_offset - dist);
-                        }
-
-                        // Smooth inner edge
-                        if (dist < inner_radius + antialias_edge_offset) {
-                            alpha = @min(alpha, dist - (inner_radius - antialias_edge_offset));
-                        }
-
-                        alpha = clamp(alpha, 0, 1);
-
-                        if (alpha > 0) {
-                            self.setPixel(.init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), c2.fade(alpha));
-                        }
-                    }
-                }
-            }
+            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, true, null);
         }
 
         /// Internal function for drawing solid (aliased) arc outlines.
         fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) void {
+            const arc: ArcRange = .{ .start = start_angle, .end = end_angle };
             if (width == 1) {
-                // Use modified Bresenham for 1-pixel width arcs
-                const cx = @round(center.x());
-                const cy = @round(center.y());
-                const r = @round(radius);
-                var x: f32 = r;
-                var y: f32 = 0;
-                var err: f32 = 0;
-
-                while (x >= y) {
-                    // Calculate points in all 8 octants
-                    const points = [_]struct { px: f32, py: f32 }{
-                        .{ .px = cx + x, .py = cy + y },
-                        .{ .px = cx - x, .py = cy + y },
-                        .{ .px = cx + x, .py = cy - y },
-                        .{ .px = cx - x, .py = cy - y },
-                        .{ .px = cx + y, .py = cy + x },
-                        .{ .px = cx - y, .py = cy + x },
-                        .{ .px = cx + y, .py = cy - x },
-                        .{ .px = cx - y, .py = cy - x },
-                    };
-
-                    for (points) |pt| {
-                        // Check if this point is within the arc's angle range
-                        const angle = std.math.atan2(pt.py - cy, pt.px - cx);
-                        if (isAngleInArc(angle, start_angle, end_angle)) {
-                            self.setPixel(.init(.{ pt.px, pt.py }), color);
-                        }
-                    }
-
-                    if (err <= 0) {
-                        y += 1;
-                        err += 2 * y + 1;
-                    }
-                    if (err > 0) {
-                        x -= 1;
-                        err -= 2 * x + 1;
-                    }
-                }
+                self.drawBresenhamCircle(center, radius, color, arc);
             } else {
-                // Use ring filling for thick arc outlines
-                const frows: f32 = @floatFromInt(self.image.rows);
-                const fcols: f32 = @floatFromInt(self.image.cols);
                 const line_width: f32 = @floatFromInt(width);
-                const inner_radius = radius - line_width / 2.0;
-                const outer_radius = radius + line_width / 2.0;
-
-                // Calculate bounding box
-                const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
-                const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
-                const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
-                const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
-
-                if (left >= right or top >= bottom) return;
-
-                for (top..bottom) |r| {
-                    const y = @as(f32, @floatFromInt(r)) - center.y();
-                    for (left..right) |c| {
-                        const x = @as(f32, @floatFromInt(c)) - center.x();
-                        const dist = @sqrt(x * x + y * y);
-
-                        // Check if in ring and within arc angle
-                        if (dist >= inner_radius and dist <= outer_radius) {
-                            const angle = std.math.atan2(y, x);
-                            if (isAngleInArc(angle, start_angle, end_angle)) {
-                                self.setPixel(.init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) }), color);
-                            }
-                        }
-                    }
-                }
+                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, false, arc);
             }
         }
 
