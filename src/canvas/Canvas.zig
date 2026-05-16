@@ -118,40 +118,24 @@ pub fn Canvas(comptime T: type) type {
             return self.image.hasSameShape(other.image);
         }
 
-        /// Normalizes an angle to the [0, 2π] range.
+        /// Normalizes an angle to the [0, 2π] range. Use only when the input range is unknown;
+        /// for atan2 outputs (already in [-π, π]) prefer the cheaper inline form in `isAngleInArc`.
         inline fn normalizeAngle(angle: f32) f32 {
             var normalized = @mod(angle, 2 * std.math.pi);
             if (normalized < 0) normalized += 2 * std.math.pi;
             return normalized;
         }
 
-        /// Checks if an angle is within an arc's range.
-        /// Arcs are drawn counter-clockwise from start_angle to end_angle.
-        /// Handles wrapping around 2π correctly.
-        inline fn isAngleInArc(angle: f32, start: f32, end: f32) bool {
-            // Normalize all angles to [0, 2π] range
-            const norm_angle = normalizeAngle(angle);
-            const norm_start = normalizeAngle(start);
-            var norm_end = normalizeAngle(end);
-
-            // If the arc spans a full circle or more, include all angles
-            if (@abs(end - start) >= 2 * std.math.pi) {
-                return true;
-            }
-
-            // Ensure we go counter-clockwise from start to end
-            // If end is less than start after normalization, it wraps around 0
-            if (norm_end < norm_start) {
-                norm_end += 2 * std.math.pi;
-            }
-
-            // Check if angle is in range, handling wrap-around
-            if (norm_angle >= norm_start and norm_angle <= norm_end) {
-                return true;
-            }
-            // Also check with angle shifted by 2π for wrap-around cases
-            const shifted_angle = norm_angle + 2 * std.math.pi;
-            return shifted_angle >= norm_start and shifted_angle <= norm_end;
+        /// Tests whether an `atan2`-produced angle lies within the precomputed arc range.
+        /// Caller must pass a value in [-π, π] (i.e., the output of `std.math.atan2`); other
+        /// inputs require a prior `normalizeAngle` call.
+        inline fn isAngleInArc(angle: f32, range: ArcRange) bool {
+            if (range.full_circle) return true;
+            // atan2 ∈ [-π, π] — one conditional add suffices to reach [0, 2π].
+            const norm_angle = if (angle < 0) angle + 2 * std.math.pi else angle;
+            if (norm_angle >= range.norm_start and norm_angle <= range.norm_end) return true;
+            const shifted = norm_angle + 2 * std.math.pi;
+            return shifted >= range.norm_start and shifted <= range.norm_end;
         }
 
         /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
@@ -763,8 +747,30 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Angular range for arc filtering in ring/Bresenham renderers.
-        const ArcRange = struct { start: f32, end: f32 };
+        /// Angular range for arc filtering. `start`/`end` are the raw user-supplied angles
+        /// (used by `fillArcSoft` to derive edge vectors); `norm_start`/`norm_end` are
+        /// normalized to [0, 2π] with `norm_end` shifted by +2π when the arc wraps past 0,
+        /// so that per-pixel `isAngleInArc` checks need no `@mod`.
+        const ArcRange = struct {
+            start: f32,
+            end: f32,
+            norm_start: f32,
+            norm_end: f32,
+            full_circle: bool,
+
+            inline fn init(start: f32, end: f32) ArcRange {
+                const ns = normalizeAngle(start);
+                var ne = normalizeAngle(end);
+                if (ne < ns) ne += 2 * std.math.pi;
+                return .{
+                    .start = start,
+                    .end = end,
+                    .norm_start = ns,
+                    .norm_end = ne,
+                    .full_circle = @abs(end - start) >= 2 * std.math.pi,
+                };
+            }
+        };
 
         /// Screen-space bounding box of the outer circle, clamped to image bounds.
         /// Returns null when the box has zero area.
@@ -822,7 +828,7 @@ pub fn Canvas(comptime T: type) type {
                     const coverage = ringCoverage(aa, x, y, inner_radius, outer_radius);
                     if (coverage <= 0) continue;
                     if (arc) |range| {
-                        if (!isAngleInArc(std.math.atan2(y, x), range.start, range.end)) continue;
+                        if (!isAngleInArc(std.math.atan2(y, x), range)) continue;
                     }
                     if (aa) {
                         self.setPixel(.init(.{ as(f32, c), as(f32, r) }), rgba_color.fade(coverage));
@@ -855,7 +861,7 @@ pub fn Canvas(comptime T: type) type {
                 };
                 for (offsets) |o| {
                     if (arc) |range| {
-                        if (!isAngleInArc(std.math.atan2(o[1], o[0]), range.start, range.end)) continue;
+                        if (!isAngleInArc(std.math.atan2(o[1], o[0]), range)) continue;
                     }
                     self.setPixel(.init(.{ cx + o[0], cy + o[1] }), color);
                 }
@@ -888,7 +894,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for drawing solid (aliased) arc outlines.
         fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) void {
-            const arc: ArcRange = .{ .start = start_angle, .end = end_angle };
+            const arc: ArcRange = .init(start_angle, end_angle);
             if (width == 1) {
                 self.drawBresenhamCircle(center, radius, color, arc);
             } else {
@@ -1272,6 +1278,8 @@ pub fn Canvas(comptime T: type) type {
                 return;
             }
 
+            const arc: ArcRange = .init(start_angle, end_angle);
+
             // Precompute edge vectors
             const start_edge = .{ .x = @cos(start_angle), .y = @sin(start_angle) };
             const end_edge = .{ .x = @cos(end_angle), .y = @sin(end_angle) };
@@ -1304,7 +1312,7 @@ pub fn Canvas(comptime T: type) type {
 
                     // Check angle first (before expensive sqrt)
                     const angle = std.math.atan2(y, x);
-                    const in_arc = isAngleInArc(angle, start_angle, end_angle);
+                    const in_arc = isAngleInArc(angle, arc);
 
                     // Calculate cross products for edge proximity (cheap)
                     const start_cross_product = x * start_edge.y - y * start_edge.x;
