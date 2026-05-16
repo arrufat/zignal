@@ -70,7 +70,7 @@ test "binary dilation expands single pixel" {
     var out: Image(u8) = try .initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
 
-    const kernel: BinaryKernel = .init(3, 3, &[_]u8{
+    const kernel: BinaryKernel = try .init(3, 3, &[_]u8{
         1, 1, 1,
         1, 1, 1,
         1, 1, 1,
@@ -98,7 +98,7 @@ test "binary open removes isolated noise" {
     };
     var image: Image(u8) = .initFromSlice(5, 5, &data);
 
-    const kernel: BinaryKernel = .init(3, 3, &[_]u8{
+    const kernel: BinaryKernel = try .init(3, 3, &[_]u8{
         1, 1, 1,
         1, 1, 1,
         1, 1, 1,
@@ -124,7 +124,7 @@ test "binary close fills holes" {
     };
     var image: Image(u8) = .initFromSlice(5, 5, &data);
 
-    const kernel: BinaryKernel = .init(3, 3, &[_]u8{
+    const kernel: BinaryKernel = try .init(3, 3, &[_]u8{
         1, 1, 1,
         1, 1, 1,
         1, 1, 1,
@@ -153,7 +153,7 @@ test "binary erosion shrinks block across iterations" {
     var out = try Image(u8).initLike(testing.allocator, image);
     defer out.deinit(testing.allocator);
 
-    const kernel: BinaryKernel = .init(3, 3, &[_]u8{
+    const kernel: BinaryKernel = try .init(3, 3, &[_]u8{
         1, 1, 1,
         1, 1, 1,
         1, 1, 1,
