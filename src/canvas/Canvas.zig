@@ -968,53 +968,31 @@ pub fn Canvas(comptime T: type) type {
             const start_y = @max(0, @floor(min_y));
             const end_y = @min(frows - 1, @ceil(max_y));
 
-            // Use stack buffer for small polygons, fallback to heap for complex ones
+            // One reusable buffer sized at the worst case (polygon.len intersections per scanline).
+            // Stack-allocated for small polygons; spills to heap once over the threshold.
             var stack_intersections: [polygon_intersection_stack_buffer_size]f32 = undefined;
-            var heap_intersections: ?[]f32 = null;
-            defer if (heap_intersections) |h| self.allocator.free(h);
+            const intersections_buf: []f32 = if (polygon.len <= stack_intersections.len)
+                stack_intersections[0..polygon.len]
+            else
+                try self.allocator.alloc(f32, polygon.len);
+            defer if (polygon.len > stack_intersections.len) self.allocator.free(intersections_buf);
 
             const c2 = convertColor(Rgba, color);
             const solid_color = convertColor(T, c2);
 
             var y = start_y;
             while (y <= end_y) : (y += 1) {
-                var intersection_count: u32 = 0;
-
-                // Count intersections first
+                // Single-pass intersection collection.
+                var count: u32 = 0;
                 for (0..polygon.len) |i| {
                     const p1 = polygon[i];
                     const p2 = polygon[(i + 1) % polygon.len];
-
                     if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
-                        intersection_count += 1;
+                        intersections_buf[count] = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
+                        count += 1;
                     }
                 }
-
-                // Get appropriate buffer
-                var intersections: []f32 = undefined;
-                if (intersection_count <= polygon_intersection_stack_buffer_size) {
-                    intersections = stack_intersections[0..intersection_count];
-                } else {
-                    // Need heap allocation
-                    if (heap_intersections == null or heap_intersections.?.len < intersection_count) {
-                        if (heap_intersections) |h| self.allocator.free(h);
-                        heap_intersections = try self.allocator.alloc(f32, intersection_count);
-                    }
-                    intersections = heap_intersections.?[0..intersection_count];
-                }
-
-                // Find actual intersections
-                var idx: u32 = 0;
-                for (0..polygon.len) |i| {
-                    const p1 = polygon[i];
-                    const p2 = polygon[(i + 1) % polygon.len];
-
-                    if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
-                        const intersection = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
-                        intersections[idx] = intersection;
-                        idx += 1;
-                    }
-                }
+                const intersections = intersections_buf[0..count];
 
                 if (intersections.len > 1) {
                     std.mem.sort(f32, intersections, {}, std.sort.asc(f32));
