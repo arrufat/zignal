@@ -101,11 +101,18 @@ pub fn toSnake(name: []const u8, buf: []u8) []const u8 {
 }
 
 /// Looks up `T` from a CLI flag value, accepting either kebab- or snake-case.
-/// Returns null for unknown values or inputs longer than the internal buffer
-/// (64 bytes — far larger than any sensible CLI value).
+/// Returns null for unknown values, including inputs longer than the longest
+/// possible variant name (which cannot match anything).
 pub fn parseEnum(comptime T: type, name: []const u8) ?T {
-    var buf: [64]u8 = undefined;
-    if (name.len > buf.len) return null;
+    const max_len = comptime blk: {
+        var m: usize = 0;
+        for (std.meta.fields(T)) |field| {
+            if (field.name.len > m) m = field.name.len;
+        }
+        break :blk m;
+    };
+    if (name.len > max_len) return null;
+    var buf: [max_len]u8 = undefined;
     return std.meta.stringToEnum(T, toSnake(name, &buf));
 }
 
