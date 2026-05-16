@@ -5,6 +5,18 @@ const builtin = @import("builtin");
 
 pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug else .err;
 
+/// Comma-separated list of valid `std.log.Level` names — shared by error messages
+/// and help text so they cannot drift.
+pub const log_level_names: []const u8 = blk: {
+    var names: []const u8 = "";
+    const fields = std.meta.fields(std.log.Level);
+    for (fields, 0..) |field, i| {
+        names = names ++ field.name;
+        if (i < fields.len - 1) names = names ++ ", ";
+    }
+    break :blk names;
+};
+
 /// Configuration for a specific command-line option.
 pub const OptionConfig = struct {
     /// The descriptive help text for this option.
@@ -42,20 +54,11 @@ pub fn parseLogLevel(arg: []const u8, args: *std.process.Args.Iterator) !bool {
     if (!std.mem.eql(u8, arg, "--log-level")) return false;
 
     const level_str = args.next() orelse {
-        std.log.err("Missing value for --log-level", .{});
+        std.log.err("missing value for --log-level", .{});
         return error.InvalidArguments;
     };
     runtime_log_level = std.meta.stringToEnum(std.log.Level, level_str) orelse {
-        const level_names = comptime blk: {
-            var names: []const u8 = "";
-            const fields = std.meta.fields(std.log.Level);
-            for (fields, 0..) |field, i| {
-                names = names ++ field.name;
-                if (i < fields.len - 1) names = names ++ ", ";
-            }
-            break :blk names;
-        };
-        std.log.err("Invalid log level: {s}. Supported levels: {s}", .{ level_str, level_names });
+        std.log.err("invalid log level: {s}. supported levels: {s}", .{ level_str, log_level_names });
         return error.InvalidArguments;
     };
     return true;
@@ -66,7 +69,7 @@ pub fn parseLogLevel(arg: []const u8, args: *std.process.Args.Iterator) !bool {
 /// Boolean fields are treated as flags (no value required).
 /// Supported types: bool, integer types, and []const u8.
 pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Iterator) !ParseResult(T) {
-    std.log.debug("Parsing arguments for type {s}...", .{@typeName(T)});
+    std.log.debug("parsing arguments for type {s}...", .{@typeName(T)});
     var options: T = .{};
     var positionals: std.ArrayList([]const u8) = .empty;
     errdefer positionals.deinit(allocator);
@@ -106,28 +109,28 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
 
                     if (ChildType == bool) {
                         @field(options, field.name) = true;
-                        std.log.debug("Option --{s} set to true", .{field.name});
+                        std.log.debug("option --{s} set to true", .{field.name});
                     } else {
                         const val_str = args.next() orelse {
-                            std.log.err("Missing value for --{s}", .{field.name});
+                            std.log.err("missing value for --{s}", .{field.name});
                             return error.InvalidArguments;
                         };
 
                         if (ChildType == []const u8) {
                             @field(options, field.name) = val_str;
-                            std.log.debug("Option --{s} set to '{s}'", .{ field.name, val_str });
+                            std.log.debug("option --{s} set to '{s}'", .{ field.name, val_str });
                         } else if (@typeInfo(ChildType) == .int) {
                             @field(options, field.name) = std.fmt.parseInt(ChildType, val_str, 10) catch {
-                                std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
+                                std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
                                 return error.InvalidArguments;
                             };
-                            std.log.debug("Option --{s} set to {s}", .{ field.name, val_str });
+                            std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
                         } else if (@typeInfo(ChildType) == .float) {
                             @field(options, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
-                                std.log.err("Invalid value for --{s}: {s}", .{ field.name, val_str });
+                                std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
                                 return error.InvalidArguments;
                             };
-                            std.log.debug("Option --{s} set to {s}", .{ field.name, val_str });
+                            std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
                         } else {
                             @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
                         }
@@ -135,11 +138,11 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
                 }
             }
             if (!found) {
-                std.log.err("Unknown option: {s}", .{arg});
+                std.log.err("unknown option: {s}", .{arg});
                 return error.InvalidArguments;
             }
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.log.err("Unknown option: {s}", .{arg});
+            std.log.err("unknown option: {s}", .{arg});
             return error.InvalidArguments;
         } else {
             try positionals.append(allocator, arg);
