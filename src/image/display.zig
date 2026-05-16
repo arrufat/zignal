@@ -105,6 +105,75 @@ pub fn DisplayFormatter(comptime T: type) type {
             const can_fallback = self.display_format == .auto;
 
             fmt: switch (self.display_format) {
+                .auto => |options| {
+                    if (kitty.isSupported(self.io)) {
+                        continue :fmt .{ .kitty = .{
+                            .quiet = 1,
+                            .image_id = null,
+                            .placement_id = null,
+                            .delete_after = false,
+                            .enable_chunking = false,
+                            .width = options.width,
+                            .height = options.height,
+                            .interpolation = options.interpolation orelse .bilinear,
+                        } };
+                    } else if (sixel.isSupported(self.io)) {
+                        continue :fmt .{ .sixel = .{
+                            .palette = .{ .adaptive = .{ .max_colors = 256 } },
+                            .dither = .auto,
+                            .width = options.width,
+                            .height = options.height,
+                            .interpolation = options.interpolation orelse .nearest_neighbor,
+                        } };
+                    } else {
+                        continue :fmt .{ .sgr = .{
+                            .width = options.width,
+                            .height = options.height,
+                        } };
+                    }
+                },
+                .kitty => |options| {
+                    // Try to convert to Kitty format (uses original image, handles scaling internally)
+                    const kitty_data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
+                        // On error, try with default options
+                        if (err == error.OutOfMemory) {
+                            break :blk kitty.fromImage(T, self.image.*, allocator, .default) catch null;
+                        } else {
+                            break :blk null;
+                        }
+                    };
+
+                    if (kitty_data) |data| {
+                        try writer.writeAll(data);
+                    } else if (can_fallback) {
+                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
+                    } else {
+                        // Output minimal Kitty sequence to indicate failure
+                        // Empty image with delete command
+                        try writer.writeAll("\x1b_Ga=d\x1b\\");
+                    }
+                },
+                .sixel => |options| {
+                    // Try to convert to sixel (uses original image, handles scaling internally)
+                    const sixel_data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
+                        // On OutOfMemory, try without dithering
+                        if (err == error.OutOfMemory) {
+                            break :blk sixel.fromImage(T, self.image.*, allocator, .fallback) catch null;
+                        } else {
+                            break :blk null;
+                        }
+                    };
+
+                    if (sixel_data) |data| {
+                        try writer.writeAll(data);
+                    } else if (can_fallback) {
+                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
+                    } else {
+                        // Output minimal sixel sequence to indicate failure
+                        // This ensures we always output valid sixel when explicitly requested
+                        try writer.writeAll("\x1bPq\x1b\\");
+                    }
+                },
                 .sgr => |options| {
                     var scaled_image: ?Image(T) = null;
                     defer if (scaled_image) |*img| img.deinit(allocator);
@@ -200,75 +269,6 @@ pub fn DisplayFormatter(comptime T: type) type {
                         if (block_row < block_rows - 1) {
                             try writer.print("\n", .{});
                         }
-                    }
-                },
-                .auto => |options| {
-                    if (kitty.isSupported(self.io)) {
-                        continue :fmt .{ .kitty = .{
-                            .quiet = 1,
-                            .image_id = null,
-                            .placement_id = null,
-                            .delete_after = false,
-                            .enable_chunking = false,
-                            .width = options.width,
-                            .height = options.height,
-                            .interpolation = options.interpolation orelse .bilinear,
-                        } };
-                    } else if (sixel.isSupported(self.io)) {
-                        continue :fmt .{ .sixel = .{
-                            .palette = .{ .adaptive = .{ .max_colors = 256 } },
-                            .dither = .auto,
-                            .width = options.width,
-                            .height = options.height,
-                            .interpolation = options.interpolation orelse .nearest_neighbor,
-                        } };
-                    } else {
-                        continue :fmt .{ .sgr = .{
-                            .width = options.width,
-                            .height = options.height,
-                        } };
-                    }
-                },
-                .sixel => |options| {
-                    // Try to convert to sixel (uses original image, handles scaling internally)
-                    const sixel_data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
-                        // On OutOfMemory, try without dithering
-                        if (err == error.OutOfMemory) {
-                            break :blk sixel.fromImage(T, self.image.*, allocator, .fallback) catch null;
-                        } else {
-                            break :blk null;
-                        }
-                    };
-
-                    if (sixel_data) |data| {
-                        try writer.writeAll(data);
-                    } else if (can_fallback) {
-                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
-                    } else {
-                        // Output minimal sixel sequence to indicate failure
-                        // This ensures we always output valid sixel when explicitly requested
-                        try writer.writeAll("\x1bPq\x1b\\");
-                    }
-                },
-                .kitty => |options| {
-                    // Try to convert to Kitty format (uses original image, handles scaling internally)
-                    const kitty_data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| blk: {
-                        // On error, try with default options
-                        if (err == error.OutOfMemory) {
-                            break :blk kitty.fromImage(T, self.image.*, allocator, .default) catch null;
-                        } else {
-                            break :blk null;
-                        }
-                    };
-
-                    if (kitty_data) |data| {
-                        try writer.writeAll(data);
-                    } else if (can_fallback) {
-                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
-                    } else {
-                        // Output minimal Kitty sequence to indicate failure
-                        // Empty image with delete command
-                        try writer.writeAll("\x1b_Ga=d\x1b\\");
                     }
                 },
             }
