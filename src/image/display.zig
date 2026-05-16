@@ -24,6 +24,10 @@ pub const DisplayFormat = union(enum) {
         interpolation: ?@import("interpolation.zig").Interpolation = null,
         pub const default: @This() = .{};
     },
+    /// Kitty graphics protocol with options
+    kitty: kitty.Options,
+    /// Force sixel output with specific options
+    sixel: sixel.Options,
     /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
     /// Requires a monospace font with Unicode block element support (U+2580)
     sgr: struct {
@@ -45,10 +49,6 @@ pub const DisplayFormat = union(enum) {
         height: ?u32 = null,
         pub const default: @This() = .{ .threshold = 0.5 };
     },
-    /// Force sixel output with specific options
-    sixel: sixel.Options,
-    /// Kitty graphics protocol with options
-    kitty: kitty.Options,
 
     /// Sets the target width and height on the active variant. Every variant
     /// carries these fields, so this works uniformly.

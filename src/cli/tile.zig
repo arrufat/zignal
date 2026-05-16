@@ -34,7 +34,7 @@ const Args = struct {
         .height = .{ .help = "Force cell height (default: first image height)", .metavar = "N" },
         .output = .{ .help = "Output file path", .metavar = "file" },
         .display = .{ .help = "Display the result in the terminal" },
-        .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
+        .protocol = .{ .help = display.protocol_help, .metavar = "p" },
     };
 };
 
