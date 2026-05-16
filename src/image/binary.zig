@@ -198,7 +198,8 @@ pub const Binary = struct {
         defer if (owned_source) |*s| s.deinit(allocator);
 
         // Only odd iteration counts write into `out` on the first pass; even counts
-        // start in `temp`, so the aliased image data survives until it's no longer needed.
+        // start in `temp`, so any overlap between `image` and `out` is harmless because
+        // the source data is fully consumed before `out` is touched.
         if (iterations % 2 != 0 and out.isAliased(image)) {
             owned_source = try image.dupe(allocator);
             source = owned_source.?;
