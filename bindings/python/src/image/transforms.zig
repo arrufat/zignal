@@ -21,7 +21,7 @@ const Rgb = zignal.Rgb(u8);
 const InterpTag = @typeInfo(Interpolation).@"union".tag_type.?;
 fn tagToInterpolation(tag: InterpTag) Interpolation {
     return switch (tag) {
-        .nearest_neighbor => .nearest_neighbor,
+        .nearest => .nearest,
         .bilinear => .bilinear,
         .bicubic => .bicubic,
         .catmull_rom => .catmull_rom,
@@ -261,7 +261,7 @@ pub const image_rotate_doc =
     \\rotated = img.rotate(math.radians(45))
     \\
     \\# Rotate 90 degrees with nearest neighbor
-    \\rotated = img.rotate(math.radians(90), Interpolation.NEAREST_NEIGHBOR)
+    \\rotated = img.rotate(math.radians(90), Interpolation.NEAREST)
     \\
     \\# Rotate with mirror border
     \\rotated = img.rotate(math.radians(45), border=BorderMode.MIRROR)

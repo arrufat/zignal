@@ -8,14 +8,14 @@ pub const interpolation_doc =
     \\
     \\Performance and quality comparison:
     \\
-    \\| Method            | Quality | Speed | Best Use Case       | Overshoot |
-    \\|-------------------|---------|-------|---------------------|-----------|
-    \\| NEAREST_NEIGHBOR  | ★☆☆☆☆   | ★★★★★ | Pixel art, masks    | No        |
-    \\| BILINEAR          | ★★☆☆☆   | ★★★★☆ | Real-time, preview  | No        |
-    \\| BICUBIC           | ★★★☆☆   | ★★★☆☆ | General purpose     | Yes       |
-    \\| CATMULL_ROM       | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
-    \\| MITCHELL          | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
-    \\| LANCZOS           | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
+    \\| Method      | Quality | Speed | Best Use Case       | Overshoot |
+    \\|-------------|---------|-------|---------------------|-----------|
+    \\| NEAREST     | ★☆☆☆☆   | ★★★★★ | Pixel art, masks    | No        |
+    \\| BILINEAR    | ★★☆☆☆   | ★★★★☆ | Real-time, preview  | No        |
+    \\| BICUBIC     | ★★★☆☆   | ★★★☆☆ | General purpose     | Yes       |
+    \\| CATMULL_ROM | ★★★★☆   | ★★★☆☆ | Natural images      | No        |
+    \\| MITCHELL    | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
+    \\| LANCZOS     | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
     \\
     \\Note: "Overshoot" means the filter can create values outside the input range,
     \\which can cause ringing artifacts but may also enhance sharpness.
@@ -23,7 +23,7 @@ pub const interpolation_doc =
 
 // Per-value documentation for stub generation
 pub const interpolation_values = [_]stub_metadata.EnumValueDoc{
-    .{ .name = "NEAREST_NEIGHBOR", .doc = "Fastest, pixelated, good for pixel art" },
+    .{ .name = "NEAREST", .doc = "Fastest, pixelated, good for pixel art" },
     .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
     .{ .name = "BICUBIC", .doc = "Balanced quality/speed, general purpose" },
     .{ .name = "CATMULL_ROM", .doc = "Sharp, good for natural images" },

@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
 
     var resized: Image(Rgba) = try .init(init.gpa, image.rows / 2, image.cols / 2);
     defer resized.deinit(init.gpa);
-    image.resize(init.gpa, resized, .nearest_neighbor);
+    image.resize(init.gpa, resized, .nearest);
     try resized.save(init.io, init.gpa, "image-demo-resized-nearest.png");
     image.resize(init.gpa, resized, .bilinear);
     try resized.save(init.io, init.gpa, "image-demo-resized-bilinear.png");
