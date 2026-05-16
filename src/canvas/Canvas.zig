@@ -1621,16 +1621,42 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Blits a glyph 1:1 (no scaling). Fixed-width fonts iterate the full font row height
-        /// even when the glyph's own height is smaller.
+        /// even when the glyph's own height is smaller. Bypasses `setPixel` per lit bit: floors
+        /// `x`/`y` once (floor commutes with adding the integer col/row/offsets), pre-converts
+        /// `color`, hoists the blend-mode branch, and writes pixels through direct memory
+        /// access with a single u32 bounds check.
         fn renderGlyphUnscaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, color: anytype) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const render_height = if (font.glyph_map == null) font.char_height else glyph_info.height;
+
+            const fx: i32 = @floor(x);
+            const fy: i32 = @floor(y);
+            const base_col = fx + as(i32, glyph_info.x_offset);
+            const base_row = fy + as(i32, glyph_info.y_offset);
+            const rows_i32: i32 = @intCast(self.image.rows);
+            const cols_i32: i32 = @intCast(self.image.cols);
+
+            const ColorType = @TypeOf(color);
+            const pixel: T = if (comptime ColorType == T) color else convertColor(T, color);
+            const blend_mode: Blending = if (comptime ColorType == Rgba)
+                if (color.a != 255) .normal else .none
+            else
+                .none;
+
             for (0..render_height) |row| {
+                const py = base_row + as(i32, row);
+                if (py < 0 or py >= rows_i32) continue;
+                const row_offset: usize = @as(usize, @intCast(py)) * self.image.stride;
                 for (0..glyph_info.width) |col| {
                     if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
-                    const px = x + as(f32, col) + as(f32, glyph_info.x_offset);
-                    const py = y + as(f32, row) + as(f32, glyph_info.y_offset);
-                    self.setPixel(.init(.{ px, py }), color);
+                    const px = base_col + as(i32, col);
+                    if (px < 0 or px >= cols_i32) continue;
+                    const dest = &self.image.data[row_offset + @as(usize, @intCast(px))];
+                    if (blend_mode == .none) {
+                        dest.* = pixel;
+                    } else {
+                        assignPixel(dest, pixel, blend_mode);
+                    }
                 }
             }
         }
