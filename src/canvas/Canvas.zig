@@ -729,14 +729,8 @@ pub fn Canvas(comptime T: type) type {
                 return;
             }
 
-            // Check if this is a full circle (optimize for this case)
-            const angle_diff = @abs(end_angle - start_angle);
-            if (angle_diff >= 2 * std.math.pi) {
-                // Full circle - use optimized circle drawing
-                switch (mode) {
-                    .fast => self.drawCircleFast(center, radius, width, color),
-                    .soft => self.drawCircleSoft(center, radius, width, color),
-                }
+            if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
+                self.drawCircle(center, radius, color, width, mode);
                 return;
             }
 
@@ -1086,14 +1080,8 @@ pub fn Canvas(comptime T: type) type {
                 return;
             }
 
-            // Check if this is a full circle (optimize for this case)
-            const angle_diff = @abs(end_angle - start_angle);
-            if (angle_diff >= 2 * std.math.pi) {
-                // Full circle - use optimized circle filling
-                switch (mode) {
-                    .fast => self.fillCircleFast(center, radius, color),
-                    .soft => self.fillCircleSoft(center, radius, color),
-                }
+            if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
+                self.fillCircle(center, radius, color, mode);
                 return;
             }
 
