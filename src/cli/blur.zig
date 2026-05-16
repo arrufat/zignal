@@ -6,8 +6,9 @@ const zignal = @import("zignal");
 
 const args = @import("args.zig");
 const common = @import("common.zig");
-const displayCanvas = @import("display.zig").displayCanvas;
-const resolveDisplayFormat = @import("display.zig").resolveDisplayFormat;
+const display = @import("display.zig");
+const displayCanvas = display.displayCanvas;
+const resolveDisplayFormat = display.resolveDisplayFormat;
 
 const Args = struct {
     type: ?[]const u8 = null,
@@ -43,7 +44,7 @@ const Args = struct {
         .strength = .{ .help = "Strength (0.0-1.0) for radial motion blur (default: 0.5)", .metavar = "float" },
         .width = .{ .help = "Display width", .metavar = "N" },
         .height = .{ .help = "Display height", .metavar = "N" },
-        .protocol = .{ .help = "Display protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
+        .protocol = .{ .help = display.protocol_help, .metavar = "p" },
     };
 };
 

@@ -5,6 +5,16 @@ const Io = std.Io;
 const zignal = @import("zignal");
 
 const args = @import("args.zig");
+const common = @import("common.zig");
+
+/// Comma-separated list of supported display protocols, in CLI-menu order.
+/// Derived from `zignal.DisplayFormat`'s union fields so help text cannot
+/// drift from the type definition.
+pub const protocol_names: []const u8 = common.joinFieldNames(zignal.DisplayFormat);
+
+/// Standard help line for the `--protocol` option, used by every subcommand
+/// that supports terminal display.
+pub const protocol_help: []const u8 = "Display protocol: " ++ protocol_names;
 
 const Args = struct {
     width: ?u32 = null,
@@ -14,7 +24,7 @@ const Args = struct {
     pub const meta = .{
         .width = .{ .help = "Target width in pixels", .metavar = "N" },
         .height = .{ .help = "Target height in pixels", .metavar = "N" },
-        .protocol = .{ .help = "Force protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
+        .protocol = .{ .help = protocol_help, .metavar = "p" },
     };
 };
 
@@ -73,14 +83,11 @@ pub fn resolveDisplayFormat(
 }
 
 pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
-    const protocol_map = std.StaticStringMap(zignal.DisplayFormat).initComptime(.{
-        .{ "kitty", zignal.DisplayFormat{ .kitty = .default } },
-        .{ "sixel", zignal.DisplayFormat{ .sixel = .default } },
-        .{ "sgr", zignal.DisplayFormat{ .sgr = .default } },
-        .{ "braille", zignal.DisplayFormat{ .braille = .default } },
-        .{ "auto", zignal.DisplayFormat{ .auto = .default } },
-    });
-    return protocol_map.get(name) orelse error.InvalidArguments;
+    const Tag = std.meta.Tag(zignal.DisplayFormat);
+    const tag = std.meta.stringToEnum(Tag, name) orelse return error.InvalidArguments;
+    return switch (tag) {
+        inline else => |t| @unionInit(zignal.DisplayFormat, @tagName(t), .default),
+    };
 }
 
 pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {

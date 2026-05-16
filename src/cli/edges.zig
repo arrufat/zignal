@@ -36,7 +36,7 @@ const Args = struct {
         .nms = .{ .help = "Shen-Castan: use Non-Maximum Suppression" },
         .width = .{ .help = "Display width", .metavar = "N" },
         .height = .{ .help = "Display height", .metavar = "N" },
-        .protocol = .{ .help = "Display protocol: kitty, sixel, sgr, braille, auto", .metavar = "p" },
+        .protocol = .{ .help = display.protocol_help, .metavar = "p" },
     };
 };
 

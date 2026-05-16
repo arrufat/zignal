@@ -92,6 +92,19 @@ pub fn resolveFilter(name: ?[]const u8) !zignal.Interpolation {
     };
 }
 
+/// Returns a comma-separated string of `T`'s field names, evaluated at comptime.
+/// Useful for help text and error messages derived from an enum or tagged union
+/// so the rendered list cannot drift from the type definition.
+pub fn joinFieldNames(comptime T: type) []const u8 {
+    const fields = std.meta.fields(T);
+    var names: []const u8 = "";
+    for (fields, 0..) |field, i| {
+        names = names ++ field.name;
+        if (i < fields.len - 1) names = names ++ ", ";
+    }
+    return names;
+}
+
 /// Measures wall-clock elapsed time and logs it at debug level.
 pub const Timer = struct {
     io: Io,
