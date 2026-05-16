@@ -777,10 +777,12 @@ pub fn Canvas(comptime T: type) type {
         inline fn ringBoundingBox(self: Self, center: Point(2, f32), outer_radius: f32) ?Rectangle(u32) {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: u32 = @round(@max(0, center.x() - outer_radius - 1));
-            const top: u32 = @round(@max(0, center.y() - outer_radius - 1));
-            const right: u32 = @round(@min(fcols, center.x() + outer_radius + 1));
-            const bottom: u32 = @round(@min(frows, center.y() + outer_radius + 1));
+            // Two-sided clamp before coercion: circles entirely off-image produce a negative
+            // right or top edge that would otherwise wrap to a huge u32.
+            const left: u32 = @round(clamp(center.x() - outer_radius - 1, 0, fcols));
+            const top: u32 = @round(clamp(center.y() - outer_radius - 1, 0, frows));
+            const right: u32 = @round(clamp(center.x() + outer_radius + 1, 0, fcols));
+            const bottom: u32 = @round(clamp(center.y() + outer_radius + 1, 0, frows));
             if (left >= right or top >= bottom) return null;
             return .{ .l = left, .t = top, .r = right, .b = bottom };
         }
@@ -1100,21 +1102,13 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling smooth (anti-aliased) circles.
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
-            const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
-            const left: u32 = @trunc(clamp(@round(center.x() - radius), 0, fcols));
-            const top: u32 = @trunc(clamp(@round(center.y() - radius), 0, frows));
-            const right: u32 = @trunc(clamp(@round(center.x() + radius), 0, fcols));
-            const bottom: u32 = @trunc(clamp(@round(center.y() + radius), 0, frows));
-
-            if (left >= right or top >= bottom) return;
-
+            const bbox = self.ringBoundingBox(center, radius) orelse return;
             const radius_sq = radius * radius;
             const rgba_color = convertColor(Rgba, color);
 
-            for (top..bottom) |r| {
+            for (bbox.t..bbox.b) |r| {
                 const y = as(f32, r) - center.y();
-                for (left..right) |c| {
+                for (bbox.l..bbox.r) |c| {
                     const x = as(f32, c) - center.x();
                     const dist_sq = x * x + y * y;
                     if (dist_sq <= radius_sq) {
@@ -1262,20 +1256,10 @@ pub fn Canvas(comptime T: type) type {
             const start_edge = .{ .x = @cos(start_angle), .y = @sin(start_angle) };
             const end_edge = .{ .x = @cos(end_angle), .y = @sin(end_angle) };
 
-            // Calculate bounding box
-            const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
-            const bounds: Rectangle(u32) = .{
-                .l = @round(@max(0, center.x() - radius - 1)),
-                .t = @round(@max(0, center.y() - radius - 1)),
-                .r = @round(@min(fcols, center.x() + radius + 1)),
-                .b = @round(@min(frows, center.y() + radius + 1)),
-            };
-            if (bounds.isEmpty()) return;
+            const bounds = self.ringBoundingBox(center, radius) orelse return;
 
             const rgba_color = convertColor(Rgba, color);
 
-            // Process each pixel in bounding box
             for (bounds.t..bounds.b) |r| {
                 const py = as(f32, r);
                 const y = py - center.y();
