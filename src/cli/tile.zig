@@ -27,7 +27,7 @@ const Args = struct {
     protocol: ?[]const u8 = null,
 
     pub const meta = .{
-        .mode = .{ .help = "Layout mode: square, horizontal, vertical, grid, factors", .metavar = "mode" },
+        .mode = .{ .help = "Layout mode: " ++ common.joinFieldNames(LayoutMode), .metavar = "mode" },
         .rows = .{ .help = "Number of rows (for grid mode)", .metavar = "N" },
         .cols = .{ .help = "Number of columns (for grid mode)", .metavar = "N" },
         .width = .{ .help = "Force cell width (default: first image width)", .metavar = "N" },
@@ -63,19 +63,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     var mode: LayoutMode = .square;
     if (parsed.options.mode) |m| {
-        const mode_map: std.StaticStringMap(LayoutMode) = .initComptime(.{
-            .{ "square", .square },
-            .{ "horizontal", .horizontal },
-            .{ "vertical", .vertical },
-            .{ "grid", .grid },
-            .{ "factors", .factors },
-        });
-        if (mode_map.get(m)) |val| {
-            mode = val;
-        } else {
+        mode = common.parseEnum(LayoutMode, m) orelse {
             std.log.err("unknown layout mode: {s}", .{m});
             return error.InvalidArguments;
-        }
+        };
     }
 
     var rows: u32 = 0;

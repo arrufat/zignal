@@ -63,7 +63,7 @@ pub const Options = struct {
     /// If null, original height is preserved
     height: ?u32,
     /// Interpolation method to use when scaling the image
-    interpolation: Interpolation = .nearest_neighbor,
+    interpolation: Interpolation = .nearest,
 
     /// Default options for automatic formatting
     pub const default: Options = .{
@@ -71,7 +71,7 @@ pub const Options = struct {
         .dither = .auto,
         .width = null,
         .height = null,
-        .interpolation = .nearest_neighbor,
+        .interpolation = .nearest,
     };
     /// Fallback options without dithering
     pub const fallback: Options = .{
@@ -79,7 +79,7 @@ pub const Options = struct {
         .dither = .none,
         .width = null,
         .height = null,
-        .interpolation = .nearest_neighbor,
+        .interpolation = .nearest,
     };
 };
 

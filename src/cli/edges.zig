@@ -26,7 +26,7 @@ const Args = struct {
     protocol: ?[]const u8 = null,
 
     pub const meta = .{
-        .filter = .{ .help = "Filter: sobel, canny, shen-castan (default: sobel)", .metavar = "name" },
+        .filter = .{ .help = "Filter: " ++ common.joinFieldNames(Algo) ++ " (default: sobel)", .metavar = "name" },
         .output = .{ .help = "Output file path (default: display only)", .metavar = "path" },
         .display = .{ .help = "Display the result in the terminal (default if no output)" },
         .sigma = .{ .help = "Canny sigma (def: 1.0) or Shen-Castan smoothing (def: 0.9)", .metavar = "float" },
@@ -63,16 +63,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    const algo_map = std.StaticStringMap(Algo).initComptime(.{
-        .{ "sobel", .sobel },
-        .{ "canny", .canny },
-        .{ "shen-castan", .shen_castan },
-    });
-
     var algo: Algo = .sobel;
     if (parsed.options.filter) |f| {
-        algo = algo_map.get(f) orelse {
-            std.log.err("unknown filter: {s}. supported: sobel, canny, shen-castan", .{f});
+        algo = common.parseEnum(Algo, f) orelse {
+            std.log.err("unknown filter: {s}", .{f});
             return error.InvalidArguments;
         };
     }
@@ -133,7 +127,7 @@ fn processImage(
                 .low_rel = options.low orelse 0.5,
                 .use_nms = options.nms,
             };
-            std.log.debug("shen-castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
+            std.log.debug("shen_castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
                 opts.smooth, opts.window_size, opts.high_ratio, opts.low_rel, opts.use_nms,
             });
             try img.shenCastan(gpa, opts, out_img);

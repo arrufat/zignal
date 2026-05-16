@@ -362,7 +362,7 @@ class TestImage:
         warped = img.warp(sim, shape=(20, 20))
         assert warped is not None
 
-        warped = img.warp(sim, method=zignal.Interpolation.NEAREST_NEIGHBOR)
+        warped = img.warp(sim, method=zignal.Interpolation.NEAREST)
         assert warped is not None
 
         # Works with different image types

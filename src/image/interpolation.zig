@@ -51,7 +51,7 @@ const resolveIndex = @import("border.zig").resolveIndex;
 /// | Mitchell    | ★★★★☆   | ★★☆☆☆ | Balanced quality    | Yes       |
 /// | Lanczos3    | ★★★★★   | ★☆☆☆☆ | High-quality resize | Yes       |
 pub const Interpolation = union(enum) {
-    nearest_neighbor,
+    nearest,
     bilinear,
     bicubic,
     catmull_rom,
@@ -83,7 +83,7 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
     const range_limit = @as(f32, @floatFromInt(std.math.maxInt(isize) / 2));
     if (@abs(x) > range_limit or @abs(y) > range_limit) return null;
     return switch (method) {
-        .nearest_neighbor => interpolateNearestNeighbor(T, self, x, y, border),
+        .nearest => interpolateNearest(T, self, x, y, border),
         .bilinear => interpolateBilinear(T, self, x, y, border),
         .bicubic => interpolateBicubic(T, self, x, y, border),
         .catmull_rom => interpolateCatmullRom(T, self, x, y, border),
@@ -130,7 +130,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
     if (comptime meta.isRgb(T)) {
         // Only use optimized path if the method has an implementation in channel_ops
         const has_optimized_plane_op = switch (method) {
-            .nearest_neighbor, .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => true,
+            .nearest, .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => true,
         };
 
         if (has_optimized_plane_op) {
@@ -167,7 +167,7 @@ pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image
 
             // Resize each channel using optimized plane functions
             switch (method) {
-                .nearest_neighbor => {
+                .nearest => {
                     inline for (channels, out_channels) |src_ch, dst_ch| {
                         channel_ops.resizePlaneNearestU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
                     }
@@ -322,7 +322,7 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
 // Generic Interpolation Functions
 // ============================================================================
 
-fn interpolateNearestNeighbor(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
+fn interpolateNearest(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
     const col = resolveIndex(@round(x), @intCast(self.cols), border) orelse return null;
     const row = resolveIndex(@round(y), @intCast(self.rows), border) orelse return null;
 
