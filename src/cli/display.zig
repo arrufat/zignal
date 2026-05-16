@@ -84,31 +84,8 @@ pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
 }
 
 pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {
-    switch (protocol.*) {
-        .kitty => |*opts| {
-            opts.width = width;
-            opts.height = height;
-            opts.interpolation = .bilinear;
-        },
-        .sixel => |*opts| {
-            opts.width = width;
-            opts.height = height;
-            opts.interpolation = .bilinear;
-        },
-        .sgr => |*opts| {
-            opts.width = width;
-            opts.height = height;
-        },
-        .braille => |*opts| {
-            opts.width = width;
-            opts.height = height;
-        },
-        .auto => |*opts| {
-            opts.width = width;
-            opts.height = height;
-            opts.interpolation = .bilinear;
-        },
-    }
+    protocol.setSize(width, height);
+    protocol.setInterpolation(.bilinear);
 }
 
 pub fn displayCanvas(

@@ -5,6 +5,7 @@ const Io = std.Io;
 
 const color = @import("../color.zig");
 const Image = @import("../image.zig").Image;
+const Interpolation = @import("interpolation.zig").Interpolation;
 const kitty = @import("../kitty.zig");
 const sixel = @import("../sixel.zig");
 const terminal = @import("../terminal.zig");
@@ -48,6 +49,27 @@ pub const DisplayFormat = union(enum) {
     sixel: sixel.Options,
     /// Kitty graphics protocol with options
     kitty: kitty.Options,
+
+    /// Sets the target width and height on the active variant. Every variant
+    /// carries these fields, so this works uniformly.
+    pub fn setSize(self: *DisplayFormat, w: ?u32, h: ?u32) void {
+        switch (self.*) {
+            inline else => |*opts| {
+                opts.width = w;
+                opts.height = h;
+            },
+        }
+    }
+
+    /// Sets the interpolation method on variants that scale images
+    /// (`kitty`, `sixel`, `auto`). No-op for `sgr` and `braille`, which do
+    /// not resample.
+    pub fn setInterpolation(self: *DisplayFormat, interp: Interpolation) void {
+        switch (self.*) {
+            inline .kitty, .sixel, .auto => |*opts| opts.interpolation = interp,
+            .sgr, .braille => {},
+        }
+    }
 };
 
 /// Formatter struct for terminal display with progressive degradation
