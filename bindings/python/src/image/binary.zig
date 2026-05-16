@@ -58,7 +58,12 @@ fn squareKernel(kernel_size: usize) ?struct {
         return null;
     };
     @memset(data, 1);
-    return .{ .storage = data, .kernel = BinaryKernel.init(kernel_size, kernel_size, data) };
+    const kernel = BinaryKernel.init(kernel_size, kernel_size, data) catch {
+        allocator.free(data);
+        python.setValueError("kernel_size must be a positive odd integer", .{});
+        return null;
+    };
+    return .{ .storage = data, .kernel = kernel };
 }
 
 pub const image_threshold_otsu_doc =

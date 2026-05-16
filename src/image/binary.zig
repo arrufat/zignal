@@ -16,10 +16,10 @@ pub const Kernel = struct {
     /// - rows and cols must be positive and odd (for symmetric anchor point)
     /// - data.len must equal rows * cols
     /// - data values: 0 = off, any non-zero = on
-    pub fn init(rows: usize, cols: usize, data: []const u8) Kernel {
-        std.debug.assert(rows > 0 and cols > 0);
-        std.debug.assert(rows % 2 == 1 and cols % 2 == 1);
-        std.debug.assert(data.len == rows * cols);
+    pub fn init(rows: usize, cols: usize, data: []const u8) !Kernel {
+        if (rows == 0 or cols == 0) return error.InvalidKernelSize;
+        if (rows % 2 == 0 or cols % 2 == 0) return error.InvalidKernelSize;
+        if (data.len != rows * cols) return error.InvalidKernelSize;
         return .{ .rows = rows, .cols = cols, .data = data };
     }
 
@@ -51,13 +51,14 @@ pub const Binary = struct {
         var threshold: u8 = 0;
 
         for (hist.values, 0..) |count, intensity| {
-            weight_background += @as(f64, @floatFromInt(count));
+            const count_f: f64 = @floatFromInt(count);
+            weight_background += count_f;
             if (weight_background == 0) continue;
 
             const weight_foreground = total_pixels - weight_background;
             if (weight_foreground == 0) break;
 
-            sum_background += @as(f64, @floatFromInt(count)) * @as(f64, @floatFromInt(intensity));
+            sum_background += count_f * @as(f64, @floatFromInt(intensity));
             const mean_background = sum_background / weight_background;
             const mean_foreground = (sum_total - sum_background) / weight_foreground;
             const diff = mean_background - mean_foreground;
@@ -91,25 +92,15 @@ pub const Binary = struct {
             return;
         }
 
-        var planes = Image(u8).Integral.Planes.init();
-        defer planes.deinit(allocator);
-        try Image(u8).Integral.compute(image, allocator, &planes);
-        const sat = planes.planes[0];
+        var mean = try Image(u8).initLike(allocator, image);
+        defer mean.deinit(allocator);
+        try image.boxBlur(allocator, @intCast(radius), mean);
 
-        const rows = image.rows;
-        const cols = image.cols;
-
-        for (0..rows) |row| {
-            const r1 = row -| radius;
-            const r2 = @min(row + radius, rows - 1);
-            for (0..cols) |col| {
-                const c1 = col -| radius;
-                const c2 = @min(col + radius, cols - 1);
-                const area = @as(f32, @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1)));
-                const sum = Image(u8).Integral.sum(sat, r1, c1, r2, c2);
-                const mean = sum / area;
-                const src_val = @as(f32, @floatFromInt(image.at(row, col).*));
-                out.at(row, col).* = if (src_val > mean - c) 255 else 0;
+        for (0..image.rows) |row| {
+            for (0..image.cols) |col| {
+                const src_val: f32 = @floatFromInt(image.at(row, col).*);
+                const mean_val: f32 = @floatFromInt(mean.at(row, col).*);
+                out.at(row, col).* = if (src_val > mean_val - c) 255 else 0;
             }
         }
     }
@@ -160,8 +151,8 @@ pub const Binary = struct {
         kernel: Kernel,
         iterations: usize,
         out: Image(u8),
-        first_op: Operation,
-        second_op: Operation,
+        comptime first_op: Operation,
+        comptime second_op: Operation,
     ) !void {
         if (iterations == 0) {
             image.copy(out);
@@ -181,7 +172,7 @@ pub const Binary = struct {
         kernel: Kernel,
         iterations: usize,
         out: Image(u8),
-        op: Operation,
+        comptime op: Operation,
     ) !void {
         if (image.rows == 0 or image.cols == 0) {
             return;
@@ -192,41 +183,35 @@ pub const Binary = struct {
             return;
         }
 
-        const alias = out.isAliased(image);
-
         var source = image;
         var owned_source: ?Image(u8) = null;
         defer if (owned_source) |*s| s.deinit(allocator);
 
-        // If input aliases output, we need a copy
-        if (alias) {
+        if (out.isAliased(image)) {
             owned_source = try image.dupe(allocator);
             source = owned_source.?;
         }
 
         if (iterations == 1) {
-            // Single iteration: source -> out
             applyMorph(source, out, kernel, op);
-        } else {
-            // Multiple iterations: ping-pong between temp and out
-            var temp = try Image(u8).initLike(allocator, image);
-            defer temp.deinit(allocator);
+            return;
+        }
 
-            // Perform iterations, alternating buffers
-            for (0..iterations) |i| {
-                const src = if (i == 0) source else if (i % 2 == 1) temp else out;
-                const dst = if (i % 2 == 0) temp else out;
-                applyMorph(src, dst, kernel, op);
-            }
+        var temp = try Image(u8).initLike(allocator, image);
+        defer temp.deinit(allocator);
 
-            // If final result is in temp, copy to out
-            if (iterations % 2 == 1) {
-                temp.copy(out);
-            }
+        // Pick parity so the final iteration writes directly into `out`,
+        // avoiding a trailing temp->out copy.
+        var current_src = source;
+        for (0..iterations) |i| {
+            const remaining = iterations - 1 - i;
+            const dst = if (remaining % 2 == 0) out else temp;
+            applyMorph(current_src, dst, kernel, op);
+            current_src = dst;
         }
     }
 
-    fn applyMorph(src: Image(u8), dst: Image(u8), kernel: Kernel, op: Operation) void {
+    fn applyMorph(src: Image(u8), dst: Image(u8), kernel: Kernel, comptime op: Operation) void {
         const rows = src.rows;
         const cols = src.cols;
         const anchor_r: i32 = @intCast(kernel.rows / 2);
@@ -263,7 +248,7 @@ pub const Binary = struct {
                                 }
                             },
                             .erode => {
-                                // Treat out-of-bounds or background pixels as erosion
+                                // OOB samples are treated as background, so any miss erodes the pixel.
                                 if (sample == null or sample.?.* == 0) {
                                     value = 0;
                                     break :outer;
