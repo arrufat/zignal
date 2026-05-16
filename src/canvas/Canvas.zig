@@ -1169,61 +1169,71 @@ pub fn Canvas(comptime T: type) type {
         /// Internal function for filling solid (non-anti-aliased) arcs.
         /// Fills a pie slice (arc + lines to center).
         fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) void {
+            // Normalize the arc span into (0, 2π); the full-circle case is handled by fillArc's dispatch.
+            const span = @mod(end_angle - start_angle, 2 * std.math.pi);
+            if (span == 0) return;
+            const long_arc = span > std.math.pi;
+
             const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
-            // Calculate bounding box
+            // Half-plane edges: a point (dx, dy) is "after" start_angle CCW iff
+            // dx*sin(start) - dy*cos(start) <= 0, and "before" end_angle CCW iff
+            // dx*sin(end) - dy*cos(end) >= 0. For span <= π the wedge is their intersection;
+            // for span > π it's their union (everything except the smaller complementary wedge).
+            const sin_s = @sin(start_angle);
+            const cos_s = @cos(start_angle);
+            const sin_e = @sin(end_angle);
+            const cos_e = @cos(end_angle);
+            const cx_sin_s = center.x() * sin_s;
+            const cx_sin_e = center.x() * sin_e;
+
             const top = @max(0, center.y() - radius);
             const bottom = @min(frows - 1, center.y() + radius);
             const left = @max(0, center.x() - radius);
             const right = @min(fcols - 1, center.x() + radius);
 
-            // For each scanline in the bounding box
+            const radius_sq = radius * radius;
+
             var y = top;
             while (y <= bottom) : (y += 1) {
                 const dy = y - center.y();
-
-                // Calculate the x-range where the circle intersects this scanline
-                const dx_max_sq = radius * radius - dy * dy;
+                const dx_max_sq = radius_sq - dy * dy;
                 if (dx_max_sq <= 0) continue;
-
                 const dx_max = @sqrt(dx_max_sq);
-                const circle_left = center.x() - dx_max;
-                const circle_right = center.x() + dx_max;
+                const scan_left = @max(left, center.x() - dx_max);
+                const scan_right = @min(right, center.x() + dx_max);
 
-                // Clamp to image bounds
-                const scan_left = @max(left, circle_left);
-                const scan_right = @min(right, circle_right);
+                // Per-scanline x-independent components of the cross products.
+                const start_const = -cx_sin_s - dy * cos_s;
+                const end_const = -cx_sin_e - dy * cos_e;
 
-                // For pie slices, we need to check each pixel individually
-                // This is more accurate than the previous sampling approach
                 var x = scan_left;
                 while (x <= scan_right) : (x += 1) {
-                    const dx = x - center.x();
+                    if (!inArcByCross(x * sin_s + start_const, x * sin_e + end_const, long_arc)) continue;
 
-                    // Verify we're inside the circle
-                    if (dx * dx + dy * dy <= radius * radius) {
-                        // Check if this angle is within the arc
-                        const angle = std.math.atan2(dy, dx);
-                        if (isAngleInArc(angle, start_angle, end_angle)) {
-                            // Find the continuous span of pixels in the arc
-                            var span_end = x;
-                            while (span_end < scan_right) : (span_end += 1) {
-                                const next_dx = span_end + 1 - center.x();
-                                if (next_dx * next_dx + dy * dy > radius * radius) break;
-
-                                const next_angle = std.math.atan2(dy, next_dx);
-                                if (!isAngleInArc(next_angle, start_angle, end_angle)) break;
-                            }
-
-                            // Fill the continuous span
-                            self.setHorizontalSpan(x, span_end, y, solid_color);
-                            x = span_end; // Skip to end of span
-                        }
+                    var span_end = x;
+                    while (span_end < scan_right) : (span_end += 1) {
+                        const nx = span_end + 1;
+                        const dnx = nx - center.x();
+                        // Guard against scan_right's float imprecision pushing nx past the circle —
+                        // without this, setHorizontalSpan's @ceil can include an extra pixel.
+                        if (dnx * dnx + dy * dy > radius_sq) break;
+                        if (!inArcByCross(nx * sin_s + start_const, nx * sin_e + end_const, long_arc)) break;
                     }
+
+                    self.setHorizontalSpan(x, span_end, y, solid_color);
+                    x = span_end;
                 }
             }
+        }
+
+        /// Half-plane test for "angle in arc" using precomputed cross-product components.
+        inline fn inArcByCross(start_cross: f32, end_cross: f32, long_arc: bool) bool {
+            const a = start_cross <= 0;
+            const b = end_cross >= 0;
+            return if (long_arc) (a or b) else (a and b);
         }
 
         /// Helper: Calculate antialiased coverage for arc boundaries
