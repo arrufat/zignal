@@ -92,15 +92,25 @@ pub const Binary = struct {
             return;
         }
 
-        var mean = try Image(u8).initLike(allocator, image);
-        defer mean.deinit(allocator);
-        try image.boxBlur(allocator, @intCast(radius), mean);
+        var planes = Image(u8).Integral.Planes.init();
+        defer planes.deinit(allocator);
+        try Image(u8).Integral.compute(image, allocator, &planes);
+        const sat = planes.planes[0];
 
-        for (0..image.rows) |row| {
-            for (0..image.cols) |col| {
-                const src_val: f32 = @floatFromInt(image.at(row, col).*);
-                const mean_val: f32 = @floatFromInt(mean.at(row, col).*);
-                out.at(row, col).* = if (src_val > mean_val - c) 255 else 0;
+        const rows = image.rows;
+        const cols = image.cols;
+
+        for (0..rows) |row| {
+            const r1 = row -| radius;
+            const r2 = @min(row + radius, rows - 1);
+            for (0..cols) |col| {
+                const c1 = col -| radius;
+                const c2 = @min(col + radius, cols - 1);
+                const area = @as(f32, @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1)));
+                const sum = Image(u8).Integral.sum(sat, r1, c1, r2, c2);
+                const mean = sum / area;
+                const src_val = @as(f32, @floatFromInt(image.at(row, col).*));
+                out.at(row, col).* = if (src_val > mean - c) 255 else 0;
             }
         }
     }
@@ -187,7 +197,9 @@ pub const Binary = struct {
         var owned_source: ?Image(u8) = null;
         defer if (owned_source) |*s| s.deinit(allocator);
 
-        if (out.isAliased(image)) {
+        // Only odd iteration counts write into `out` on the first pass; even counts
+        // start in `temp`, so the aliased image data survives until it's no longer needed.
+        if (iterations % 2 != 0 and out.isAliased(image)) {
             owned_source = try image.dupe(allocator);
             source = owned_source.?;
         }
