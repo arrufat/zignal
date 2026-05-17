@@ -60,11 +60,8 @@ const BdfParseState = struct {
     }
 };
 
-/// Load a BDF font from a file path
-/// Parameters:
-/// - allocator: Memory allocator
-/// - path: Path to BDF file
-/// - filter: Filter for which characters to load
+/// Loads a BDF font from `path` (transparently decompressing `.bdf.gz`), keeping only characters
+/// that match `filter`.
 pub fn load(io: Io, gpa: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
     // Check if file is gzip compressed
     const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");

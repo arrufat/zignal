@@ -2998,16 +2998,8 @@ fn renderRgbBlocksToPixels(comptime T: type, state: *JpegState, img: *Image(T)) 
     }
 }
 
-/// Load JPEG file from disk and decode to specified pixel type.
-/// Supports baseline DCT (SOF0) and progressive DCT (SOF2) JPEG formats.
-/// Handles grayscale (1 component) and YCbCr color (3 components) with 4:4:4, 4:2:2, 4:1:1, and 4:2:0 chroma subsampling.
-///
-/// Parameters:
-/// - T: Desired output pixel type (u8, Rgb, etc.) - color conversion applied if needed
-/// - allocator: Memory allocator for image data
-/// - file_path: Path to JPEG file
-/// Convert JPEG state data to its most natural Zignal Image type.
-/// Returns grayscale for single-component JPEGs, RGB for color JPEGs.
+/// Converts decoded JPEG state to its natural image type: `Image(u8)` for single-component
+/// (grayscale) JPEGs, `Image(Rgb)` for color.
 pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
@@ -3044,10 +3036,9 @@ pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
     }
 }
 
-///
-/// Returns: Decoded Image(T) with automatic color space conversion from source format
-///
-/// Errors: InvalidJpegFile, UnsupportedJpegFormat, OutOfMemory, and various JPEG parsing errors
+/// Decodes a JPEG byte stream into `Image(T)`, converting from the source color format as needed.
+/// Supports baseline DCT (SOF0) and progressive DCT (SOF2), grayscale (1 component) and YCbCr
+/// color (3 components) with 4:4:4, 4:2:2, 4:1:1, and 4:2:0 chroma subsampling.
 pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit();
