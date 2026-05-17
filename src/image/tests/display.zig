@@ -31,7 +31,8 @@ test "image format sgr" {
     // The expected output should combine two rows into one using half-block character
     // First char: upper=red (fg), lower=blue (bg) with ▀
     // Second char: upper=green (fg), lower=white (bg) with ▀
-    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[0m\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m";
+    // Reset is emitted once at end of row, not per cell.
+    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m";
 
     try expectEqualStrings(expected, result);
 }
@@ -61,8 +62,8 @@ test "image format sgr odd rows" {
     // Expected: 2 lines (3 rows compressed to 2 using half-blocks)
     // Line 1: red/blue, green/white
     // Line 2: black/black, gray/gray (last row repeated for odd case)
-    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[0m\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m\n" ++
-        "\x1b[38;2;0;0;0;48;2;0;0;0m▀\x1b[0m\x1b[38;2;128;128;128;48;2;128;128;128m▀\x1b[0m";
+    const expected = "\x1b[38;2;255;0;0;48;2;0;0;255m▀\x1b[38;2;0;255;0;48;2;255;255;255m▀\x1b[0m\n" ++
+        "\x1b[38;2;0;0;0;48;2;0;0;0m▀\x1b[38;2;128;128;128;48;2;128;128;128m▀\x1b[0m";
 
     try expectEqualStrings(expected, result);
 }
