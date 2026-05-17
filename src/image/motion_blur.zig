@@ -60,14 +60,8 @@ pub fn MotionBlurOps(comptime T: type) type {
         /// Radial blur types
         pub const RadialType = enum { zoom, spin };
 
-        /// Applies linear motion blur to simulate camera or object movement in a straight line.
-        /// The blur is created by averaging pixels along a line at the specified angle and distance.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `angle`: Direction of motion in radians (0 = horizontal, π/2 = vertical).
-        /// - `distance`: Length of the blur effect in pixels.
-        /// - `out`: Output image containing the motion blurred result.
+        /// Applies linear motion blur by averaging pixels along a line at the given `angle`
+        /// (radians, 0 = horizontal) and `distance` (pixels).
         pub fn linear(image: Image(T), allocator: Allocator, angle: f32, distance: usize, out: Image(T)) !void {
             if (distance == 0) {
                 image.copy(out);
@@ -241,16 +235,8 @@ pub fn MotionBlurOps(comptime T: type) type {
             }
         }
 
-        /// Applies radial motion blur to simulate zoom or rotational movement.
-        /// Creates either a zoom effect (radiating from center) or spin effect (rotating around center).
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `center_x`: X coordinate of the blur center (0.0 to 1.0, normalized).
-        /// - `center_y`: Y coordinate of the blur center (0.0 to 1.0, normalized).
-        /// - `strength`: Intensity of the blur effect (0.0 to 1.0).
-        /// - `blur_type`: Type of radial blur - .zoom for zoom blur, .spin for rotational blur.
-        /// - `out`: Output image containing the radial motion blurred result.
+        /// Applies radial motion blur — `.zoom` radiates from the center, `.spin` rotates around it.
+        /// `center_x`/`center_y` are normalized [0, 1]; `strength` controls intensity [0, 1].
         pub fn radial(
             image: Image(T),
             _: Allocator,

@@ -37,16 +37,8 @@ glyph_data: ?[]const GlyphData = null,
 /// Optional: Original font ascent from BDF file (for accurate save)
 font_ascent: ?i16 = null,
 
-/// Load a font from file with automatic format detection
-///
-/// Supports:
-/// - BDF (Bitmap Distribution Format)
-/// - PCF (Portable Compiled Format)
-///
-/// Parameters:
-/// - allocator: Memory allocator
-/// - file_path: Path to font file
-/// - filter: Filter for which characters to load
+/// Loads a font from `file_path` with automatic format detection (BDF or PCF), keeping only
+/// characters that match `filter`.
 ///
 /// Example:
 /// ```zig

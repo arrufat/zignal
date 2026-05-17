@@ -67,17 +67,8 @@ pub const Interpolation = union(enum) {
     lanczos,
 };
 
-/// Sample a single pixel from an image using the specified interpolation method
-///
-/// Parameters:
-/// - T: The pixel type of the image
-/// - self: The source image to sample from
-/// - x: Horizontal coordinate (0 to cols-1)
-/// - y: Vertical coordinate (0 to rows-1)
-/// - method: The interpolation method to use
-/// - border: The border handling mode to apply
-///
-/// Returns the interpolated pixel value or null if the coordinates are out of bounds
+/// Samples a single pixel at fractional coordinates using the given interpolation `method`.
+/// Returns null when the coordinates are non-finite or out of bounds under `border`.
 pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
     if (!std.math.isFinite(x) or !std.math.isFinite(y)) return null;
     const range_limit = @as(f32, @floatFromInt(std.math.maxInt(isize) / 2));
@@ -92,19 +83,12 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
     };
 }
 
-/// Resize an image using the specified interpolation method
+/// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`.
 ///
-/// Parameters:
-/// - T: The pixel type of the image
-/// - allocator: Used for temporary buffers during RGB/RGBA channel processing
-/// - self: The source image
-/// - out: The destination image (must be pre-allocated with desired dimensions)
-/// - method: The interpolation method to use
-///
-/// Special optimizations:
-/// - Scale=1: Uses memcpy for same-size copies
-/// - 2x upscaling: Specialized fast path for bilinear
-/// - RGB/RGBA images: Channel separation for optimized processing
+/// Optimizations:
+/// - Same-size: memcpy fast path
+/// - 2× upscale, bilinear: specialized path
+/// - RGB/RGBA: channel-separated processing (uses `allocator` for temporary buffers)
 pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {

@@ -167,18 +167,9 @@ pub fn Canvas(comptime T: type) type {
 
         /// Draws a line between two points with configurable width and rendering quality.
         ///
-        /// Algorithm selection:
-        /// - Width 1, fast mode: Bresenham's algorithm (pixel-perfect, no antialiasing)
-        /// - Width 1, soft mode: Xiaolin Wu's algorithm (smooth antialiasing)
-        /// - Width >1, fast mode: Rectangle with circular caps (solid rendering)
-        /// - Width >1, soft mode: Distance-based antialiasing (superior quality)
-        ///
-        /// Parameters:
-        /// - p1, p2: Line endpoints in floating-point coordinates
-        /// - color: Any color type (Rgba colors support alpha blending in `.soft` mode; `.fast` always overwrites destination pixels)
-        /// - width: Line thickness in pixels (0 = no drawing)
-        /// - mode: .fast (performance) or .soft (quality with antialiasing)
-        /// Note: `.fast` prioritizes raw throughput and never blends with existing pixels.
+        /// Draws a line between two points. `.fast` never blends (Bresenham for width 1,
+        /// rectangle+caps otherwise); `.soft` antialiases (Wu for width 1, distance-based otherwise)
+        /// and honors Rgba alpha.
         pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: u32, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -678,30 +669,12 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Draws an arc (portion of a circle outline) with the specified parameters.
+        /// Draws an arc outline. Angles are in radians from the positive X-axis, counter-clockwise,
+        /// and may exceed 2π (auto-normalized). Arcs spanning ≥ 2π use the optimized full-circle path.
         ///
-        /// **Parameters:**
-        /// - `center`: The center point of the arc
-        /// - `radius`: The radius of the arc (must be positive)
-        /// - `start_angle`: Starting angle in radians (0 = positive X-axis)
-        /// - `end_angle`: Ending angle in radians
-        /// - `color`: The color to draw with (any color type)
-        /// - `width`: Line thickness in pixels (0 = no drawing)
-        /// - `mode`: DrawMode.fast for aliased or DrawMode.soft for anti-aliased
-        ///
-        /// **Angle Convention:**
-        /// - Angles are measured from the positive X-axis
-        /// - Positive angles rotate counter-clockwise
-        /// - Angles can be negative or > 2π (automatically normalized)
-        ///
-        /// **Performance:**
-        /// - Full circles (angle diff ≥ 2π) use optimized circle drawing
-        /// - Fast mode: O(r) for thin lines, O(r²) for thick lines
-        /// - Soft mode: Uses polygon tessellation, O(arc_length)
-        ///
-        /// **Example:**
+        /// Example:
         /// ```zig
-        /// // Draw a red quarter arc from 0 to π/2 (90 degrees)
+        /// // Red quarter arc from 0 to π/2
         /// try canvas.drawArc(center, 50, 0, std.math.pi / 2.0, Rgb.red, 2, .soft);
         /// ```
         pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: u32, mode: DrawMode) !void {
@@ -1030,29 +1003,12 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Fills an arc (pie slice) on the given image.
+        /// Fills a pie slice (arc including the center point). Angles are in radians from the
+        /// positive X-axis, counter-clockwise. Arcs spanning ≥ 2π use the optimized full-circle path.
         ///
-        /// **Parameters:**
-        /// - `center`: The center point of the arc
-        /// - `radius`: The radius of the arc (must be positive)
-        /// - `start_angle`: Starting angle in radians (0 = positive X-axis)
-        /// - `end_angle`: Ending angle in radians
-        /// - `color`: The fill color (any color type)
-        /// - `mode`: DrawMode.fast for aliased or DrawMode.soft for anti-aliased edges
-        ///
-        /// **Angle Convention:**
-        /// - Angles are measured from the positive X-axis
-        /// - Positive angles rotate counter-clockwise
-        /// - The filled region includes the center point (pie slice)
-        ///
-        /// **Performance:**
-        /// - Full circles (angle diff ≥ 2π) use optimized circle filling
-        /// - Fast mode: O(r²) with optimized scanline filling
-        /// - Soft mode: Uses polygon tessellation for smooth edges
-        ///
-        /// **Example:**
+        /// Example:
         /// ```zig
-        /// // Fill a green pie slice from π/4 to 3π/4 (45° to 135°)
+        /// // Green pie slice from π/4 to 3π/4
         /// try canvas.fillArc(center, 60, std.math.pi / 4.0, 3.0 * std.math.pi / 4.0, Rgb.green, .soft);
         /// ```
         pub fn fillArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, mode: DrawMode) !void {
@@ -1431,16 +1387,8 @@ pub fn Canvas(comptime T: type) type {
             return (chord + control_net) / 2.0;
         }
 
-        /// Tessellates a Bézier curve into discrete points for line segment rendering.
-        /// Adaptively determines segment count based on curve length and desired quality.
-        ///
-        /// Parameters:
-        /// - estimated_length: Approximate curve length in pixels
-        /// - pixels_per_segment: Target distance between tessellation points
-        /// - evalFn: Function to evaluate curve at parameter t (e.g. evalCubicBezier)
-        /// - evalArgs: Arguments to pass to evalFn before the t parameter
-        ///
-        /// Returns the number of points actually written to buffer.
+        /// Tessellates a Bézier curve into discrete points, with segment count chosen adaptively
+        /// from `estimated_length` and `pixels_per_segment`. Returns the number of points written.
         fn tessellateBezier(
             estimated_length: f32,
             pixels_per_segment: f32,
@@ -1491,16 +1439,9 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Calculates Bézier control points for smooth spline interpolation through three points.
-        /// Creates control points that produce a smooth curve through p1, influenced by p0 and p2.
-        ///
-        /// Parameters:
-        /// - p0: Previous point (influences incoming tangent)
-        /// - p1: Current point (the vertex being processed)
-        /// - p2: Next point (influences outgoing tangent)
-        /// - tension: Curve tension (0=sharp corners, 1=maximum smoothness)
-        ///
-        /// Returns control points for cubic Bézier: cp1 (outgoing from p0), cp2 (incoming to p1).
+        /// Calculates cubic Bézier control points (`cp1` outgoing from p0, `cp2` incoming to p1)
+        /// for a smooth curve through `p1` influenced by neighbors `p0`/`p2`. `tension` ranges
+        /// from 0 (sharp corners) to 1 (maximum smoothness).
         fn calculateSmoothControlPoints(p0: Point(2, f32), p1: Point(2, f32), p2: Point(2, f32), tension: f32) struct { cp1: Point(2, f32), cp2: Point(2, f32) } {
             const tension_factor = 1 - clamp(tension, 0, 1);
             return .{

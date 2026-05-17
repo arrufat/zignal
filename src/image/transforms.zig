@@ -111,14 +111,8 @@ pub fn Transform(comptime T: type) type {
             return content_rect;
         }
 
-        /// Computes the optimal output dimensions for rotating an image by the given angle.
-        /// This ensures that the entire rotated image fits within the output bounds without clipping.
-        ///
-        /// Parameters:
-        /// - `angle`: The rotation angle in radians.
-        ///
-        /// Returns:
-        /// - A struct containing the optimal `rows` and `cols` for the rotated image.
+        /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
+        /// without clipping.
         pub fn rotateBounds(self: Self, angle: f32) RotationBounds {
             // Normalize angle to [0, 2π) range
             const normalized_angle = @mod(angle, std.math.tau);
@@ -158,14 +152,8 @@ pub fn Transform(comptime T: type) type {
             };
         }
 
-        /// Rotates the image by `angle` (in radians) around its center.
-        /// Returns a new image with optimal dimensions to fit the rotated content.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the rotated image's data.
-        /// - `angle`: The rotation angle in radians.
-        /// - `method`: The interpolation method to use for sampling pixels.
-        /// - `border`: The border handling mode to apply.
+        /// Rotates the image by `angle` (radians) around its center, returning a new image sized
+        /// to fit the rotated content.
         pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
             // Compute optimal bounds
             const bounds = rotateBounds(self, angle);
@@ -235,14 +223,8 @@ pub fn Transform(comptime T: type) type {
             return rotated;
         }
 
-        /// Crops a rectangular region from the image.
-        /// If the specified `rectangle` is not fully contained within the image, the out-of-bounds
-        /// areas in the output are filled with zeroed pixels (e.g., black/transparent).
-        /// Returns a new image containing the cropped region.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the cropped image's data.
-        /// - `rectangle`: The `Rectangle(f32)` defining the region to crop. Coordinates will be rounded.
+        /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds areas
+        /// are filled with zeroed pixels (e.g., black/transparent).
         pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
             const chip_top: i32 = @round(rectangle.t);
             const chip_left: i32 = @round(rectangle.l);
@@ -254,15 +236,9 @@ pub fn Transform(comptime T: type) type {
             return chip;
         }
 
-        /// Extracts a rotated rectangular region from the image and resamples it into `out`.
-        ///
-        /// Parameters:
-        /// - `rect`: Axis-aligned rectangle (in source image coordinates) defining the region before rotation.
-        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
-        /// - `out`: Pre-allocated destination image that defines the output size. The extracted content is
-        ///          resampled to exactly fill this image using `method`.
-        /// - `method`: Interpolation method used when sampling from the source.
-        /// - `border`: The border handling mode to apply.
+        /// Extracts a rotated rectangular region (defined in source coordinates) and resamples it
+        /// to fill the pre-allocated `out` image. `angle` is in radians, counter-clockwise around
+        /// the rect center.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
@@ -321,17 +297,8 @@ pub fn Transform(comptime T: type) type {
             }
         }
 
-        /// Inserts a source image into this image at the specified rectangle with rotation.
-        ///
-        /// This is the complement to `extract`. While `extract` pulls a region out of an image,
-        /// `insert` places a source image into a destination region.
-        ///
-        /// Parameters:
-        /// - `source`: The image to insert into self. Can be any Image type.
-        /// - `rect`: Destination rectangle (in self's coordinates) where source will be placed.
-        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
-        /// - `method`: Interpolation method used when sampling from the source.
-        /// - `blend_mode`: Blending mode to apply while inserting the image.
+        /// Inserts `source` into `self` at the destination rectangle, with optional rotation
+        /// (radians, counter-clockwise around the rect center). Complement of `extract`.
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
