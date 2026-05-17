@@ -49,7 +49,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return Error.InvalidPercentile;
             }
 
-            const alias = out.isAliased(image);
+            const alias = out.data.ptr == image.data.ptr;
 
             var temp_out: Image(T) = .empty;
             defer temp_out.deinit(allocator);
@@ -116,7 +116,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            const alias = out.isAliased(image);
+            const alias = out.data.ptr == image.data.ptr;
             var temp_out: Image(T) = .empty;
             defer temp_out.deinit(allocator);
 
@@ -166,7 +166,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            const alias = out.isAliased(image);
+            const alias = out.data.ptr == image.data.ptr;
             var temp_out: Image(T) = .empty;
             defer temp_out.deinit(allocator);
 
@@ -239,7 +239,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             const window = radius * 2 + 1;
             if (window > @as(usize, std.math.maxInt(u32))) return Error.InvalidRadius;
 
-            const alias = out.isAliased(image);
+            const alias = out.data.ptr == image.data.ptr;
 
             var temp_out: Image(u8) = .empty;
             defer temp_out.deinit(allocator);

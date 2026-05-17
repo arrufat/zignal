@@ -200,7 +200,7 @@ pub const Binary = struct {
         // Only odd iteration counts write into `out` on the first pass; even counts
         // start in `temp`, so any overlap between `image` and `out` is harmless because
         // the source data is fully consumed before `out` is touched.
-        if (iterations % 2 != 0 and out.isAliased(image)) {
+        if (iterations % 2 != 0 and out.data.ptr == image.data.ptr) {
             owned_source = try image.dupe(allocator);
             source = owned_source.?;
         }

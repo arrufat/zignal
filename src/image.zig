@@ -137,14 +137,14 @@ pub fn Image(comptime T: type) type {
             return init(allocator, reference.rows, reference.cols);
         }
 
-        /// Sets the image rows and cols to zero and frees the memory from the image.  It should
-        /// only be called if the image owns the memory.
+        /// Frees the image's backing buffer and resets it to `empty`. Only call this on images
+        /// returned by an allocating constructor (`init`, `initLike`, `dupe`, `scale`, `rotate`,
+        /// `crop`, `load`, `loadFromBytes`, `convert`, `applyColormap`). Do not call on views or
+        /// images created via `initFromSlice` / `initFromBytes`; those do not own their storage.
+        /// Idempotent: safe to call on an already-deinit'd or default-constructed image.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            defer self.* = Self.empty;
-
-            if (self.isOwned()) {
-                allocator.free(self.data);
-            }
+            allocator.free(self.data);
+            self.* = .empty;
         }
 
         /// Constructs an image of rows and cols size from an existing slice.
@@ -171,19 +171,6 @@ pub fn Image(comptime T: type) type {
                 .data = @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0 .. bytes.len / @sizeOf(T)],
                 .stride = cols,
             };
-        }
-
-        /// Returns true when this image appears to fully own its underlying buffer.
-        /// The check is conservative: only contiguous buffers with the expected length
-        /// (`rows * cols`) report true. Views, zero-sized placeholders, or images backed
-        /// by external storage will return false.
-        pub fn isOwned(self: Self) bool {
-            if (self.data.len == 0) return false;
-            if (self.rows == 0 or self.cols == 0) return false;
-            if (self.stride != self.cols) return false;
-
-            const expected_len = std.math.mul(usize, self.rows, self.cols) catch return false;
-            return self.data.len == expected_len;
         }
 
         /// Fills the entire image with a solid value.
@@ -364,32 +351,6 @@ pub fn Image(comptime T: type) type {
         /// When false, there is padding between rows.
         pub fn isContiguous(self: Self) bool {
             return self.cols == self.stride;
-        }
-
-        /// Checks if this image's buffer is aliased with (shares the same memory as) another image.
-        /// Returns true if the byte ranges spanned by `self.data` and `other.data` overlap at all,
-        /// catching both identical buffers and partial overlap from sub-views into a shared parent.
-        /// Use this before in-place operations to decide whether a temporary buffer is required.
-        ///
-        /// Conservative: two non-overlapping strided sub-views whose byte ranges interleave will
-        /// report as aliased, triggering a needless copy rather than corruption.
-        ///
-        /// Example usage:
-        /// ```zig
-        /// if (output.isAliased(input)) {
-        ///     // Need temporary buffer for in-place operation
-        ///     var temp = try Image(T).initLike(allocator, input);
-        ///     defer temp.deinit(allocator);
-        ///     // ... perform operation with temp, then copy to output
-        /// }
-        /// ```
-        pub fn isAliased(self: Self, other: Self) bool {
-            if (self.data.len == 0 or other.data.len == 0) return false;
-            const a_start = @intFromPtr(self.data.ptr);
-            const a_end = a_start + self.data.len * @sizeOf(T);
-            const b_start = @intFromPtr(other.data.ptr);
-            const b_end = b_start + other.data.len * @sizeOf(T);
-            return a_start < b_end and b_start < a_end;
         }
 
         /// Creates a duplicate of the image with newly allocated memory.
