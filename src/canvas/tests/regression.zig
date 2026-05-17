@@ -206,7 +206,7 @@ fn drawPolygonOutline(canvas: Canvas(Rgba)) void {
         .init(.{ 85, 75 }),
         .init(.{ 15, 75 }),
     };
-    canvas.drawPolygon(&triangle, color, 2, .soft);
+    canvas.drawPolygon(&triangle, color, 4, .soft);
 }
 
 fn fillPolygonFast(canvas: Canvas(Rgba)) void {
@@ -309,10 +309,10 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawRectangleFilled", .md5sum = "1112ffbda92473effbd4d44c9722f563", .draw_fn = drawRectangleFilled },
     .{ .name = "drawRectangleOutline", .md5sum = "e8a00365f1d9ba67220af043363c3f0d", .draw_fn = drawRectangleOutline },
     .{ .name = "drawTriangleFilled", .md5sum = "42377f2ec0a954be5bd1cba5458429f6", .draw_fn = drawTriangleFilled },
-    .{ .name = "drawBezierCubic", .md5sum = "312f09be1721dd95a4a9fc10dc1ec28e", .draw_fn = drawBezierCubic },
-    .{ .name = "drawBezierQuadratic", .md5sum = "1f9d0558c9dea663cc1b0ab3daa9eafe", .draw_fn = drawBezierQuadratic },
+    .{ .name = "drawBezierCubic", .md5sum = "c03c2dbbdc34740774d8e8261ce651a5", .draw_fn = drawBezierCubic },
+    .{ .name = "drawBezierQuadratic", .md5sum = "e920480a3126ba80768883bb4d64a82f", .draw_fn = drawBezierQuadratic },
     .{ .name = "drawPolygonComplex", .md5sum = "00b8f03a23fa31332eef549318fe7c6e", .draw_fn = drawPolygonComplex },
-    .{ .name = "drawSplinePolygon", .md5sum = "02503d0eca878b8a2b1c13fafb0fd445", .draw_fn = drawSplinePolygon },
+    .{ .name = "drawSplinePolygon", .md5sum = "649a7ed53ed20ac2c6b67f8b3224c62d", .draw_fn = drawSplinePolygon },
     .{ .name = "drawArcQuarter", .md5sum = "028912b02048fa169c8cb808ff669184", .draw_fn = drawArcQuarter },
     .{ .name = "drawArcHalf", .md5sum = "648732ebb62c3929816c2743a199dff5", .draw_fn = drawArcHalf },
     .{ .name = "drawArcThick", .md5sum = "70595cc2d1252de2e1c10d8debfcea70", .draw_fn = drawArcThick },
@@ -323,9 +323,9 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawCircleFastThin", .md5sum = "78b865a2557fb04de1cbff5532804feb", .draw_fn = drawCircleFastThin },
     .{ .name = "drawCircleFastThick", .md5sum = "04ae64801d4ab0fb0e8a31cb85e484c3", .draw_fn = drawCircleFastThick },
     .{ .name = "drawArcSoftThick", .md5sum = "e4884db05497da75ef4409c867c5111a", .draw_fn = drawArcSoftThick },
-    .{ .name = "drawRectangleSoft", .md5sum = "8cd5813072a054913d41d474e03c4bea", .draw_fn = drawRectangleSoft },
+    .{ .name = "drawRectangleSoft", .md5sum = "82d9da49d1d13bc0e06b655180ddb142", .draw_fn = drawRectangleSoft },
     .{ .name = "fillRectangleSoft", .md5sum = "88b0b952128335c57d2fefebd8902e8e", .draw_fn = fillRectangleSoft },
-    .{ .name = "drawPolygonOutline", .md5sum = "6cbfa9b9d0fd6526f6dddea3357ccb24", .draw_fn = drawPolygonOutline },
+    .{ .name = "drawPolygonOutline", .md5sum = "36dda03a5d13989699dc34cde7783076", .draw_fn = drawPolygonOutline },
     .{ .name = "fillPolygonFast", .md5sum = "994fbc386a4251c16bea6ac45819519a", .draw_fn = fillPolygonFast },
     .{ .name = "drawCubicBezierFast", .md5sum = "a068d961085015473fabf9d4dff017b3", .draw_fn = drawCubicBezierFast },
     .{ .name = "drawQuadraticBezierFast", .md5sum = "6207212f5f86d3ece46e457704c05349", .draw_fn = drawQuadraticBezierFast },

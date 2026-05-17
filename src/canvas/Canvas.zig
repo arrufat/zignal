@@ -48,8 +48,6 @@ pub fn Canvas(comptime T: type) type {
         const pixels_per_segment_quadratic = 2.0;
         /// Offset for antialiasing edge calculations (0.5 = pixel center alignment)
         const antialias_edge_offset = 0.5;
-        /// Threshold for detecting horizontal/vertical lines in line drawing algorithms
-        const horizontal_vertical_threshold = 0.001;
         /// Stack buffer size for polygon intersection calculations (avoids allocation for most cases)
         const polygon_intersection_stack_buffer_size = 64;
         /// Stack buffer size for spline polygon tessellation (avoids allocation for typical polygons)
@@ -422,135 +420,114 @@ pub fn Canvas(comptime T: type) type {
         /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
         /// More expensive than rectangle-based approach but produces better results.
         fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
-            const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
             const half_width: f32 = as(f32, width) / 2.0;
             const c2 = convertColor(Rgba, color);
-            const needs_alpha_blend = c2.a != 255;
 
-            // Calculate line direction vector
             const dx = p2.x() - p1.x();
             const dy = p2.y() - p1.y();
-            const line_length = @sqrt(dx * dx + dy * dy);
-
-            if (line_length == 0) {
-                // Single point - draw a small circle
+            const length_sq = dx * dx + dy * dy;
+            if (length_sq == 0) {
                 self.fillCircle(p1, half_width, color, .soft);
                 return;
             }
 
-            // Special case for perfectly horizontal/vertical lines (faster rendering)
-            if (@abs(dx) < horizontal_vertical_threshold) { // Vertical line
-                const x1 = @round(p1.x());
-                var y1 = @round(p1.y());
-                var y2 = @round(p2.y());
-                if (y1 > y2) std.mem.swap(f32, &y1, &y2);
-                if (x1 < 0 or x1 >= fcols) return;
-
-                const pixel_color = convertColor(T, c2);
-                var y = y1;
-                while (y <= y2) : (y += 1) {
-                    if (y < 0 or y >= frows) continue;
-                    const x_start = x1 - half_width;
-                    const x_end = x1 + half_width;
-                    if (needs_alpha_blend) {
-                        const px_start: u32 = @trunc(@max(0, @floor(x_start)));
-                        const px_end: u32 = @trunc(@min(fcols - 1, @ceil(x_end)));
-                        if (px_start > px_end) continue;
-                        var px = px_start;
-                        while (px <= px_end) : (px += 1) {
-                            self.setPoint(.init(.{ as(f32, px), y }), c2);
-                        }
-                    } else {
-                        // Use fillHorizontalSpan for each horizontal segment of the thick vertical line
-                        self.setHorizontalSpan(x_start, x_end, y, pixel_color);
-                    }
-                }
-                // Add rounded caps
-                self.fillCircle(p1, half_width, color, .soft);
-                self.fillCircle(p2, half_width, color, .soft);
-                return;
-            } else if (@abs(dy) < horizontal_vertical_threshold) { // Horizontal line
-                var x1 = @round(p1.x());
-                var x2 = @round(p2.x());
-                const y1 = @round(p1.y());
-                if (x1 > x2) std.mem.swap(f32, &x1, &x2);
-                if (y1 < 0 or y1 >= frows) return;
-
-                const pixel_color = convertColor(T, c2);
-
-                // Draw horizontal spans for each row of the thick line
-                var i = -half_width;
-                while (i <= half_width) : (i += 1) {
-                    const py = y1 + i;
-                    if (py >= 0 and py < frows) {
-                        const row_is_edge = i == -half_width or i == half_width;
-                        if (needs_alpha_blend or row_is_edge) {
-                            // Use per-pixel blending for translucent colors or edge rows
-                            var x = x1;
-                            while (x <= x2) : (x += 1) {
-                                if (x >= 0 and x < fcols) {
-                                    self.setPoint(.init(.{ x, py }), c2);
-                                }
-                            }
-                        } else {
-                            // Middle rows - use fillHorizontalSpan for performance
-                            self.setHorizontalSpan(x1, x2, py, pixel_color);
-                        }
-                    }
-                }
-                // Add rounded caps
-                self.fillCircle(p1, half_width, color, .soft);
-                self.fillCircle(p2, half_width, color, .soft);
+            // Axis-aligned fast path: per-row (horizontal) or per-col (vertical) alpha is
+            // uniform, so we can skip the per-pixel sqrt and use `setHorizontalSpan` (memset)
+            // for fully-covered interior rows of horizontal lines. End-cap AA still comes from
+            // `fillCircle`. Body bbox is tight to the line endpoints so caps don't double-blend.
+            if (dx == 0 or dy == 0) {
+                self.drawAxisAlignedThickLine(p1, p2, half_width, c2, color);
                 return;
             }
 
-            // For diagonal lines, use optimized distance-based anti-aliasing
-            // Calculate tighter bounding box
-            const line_min_x = @min(p1.x(), p2.x()) - half_width;
-            const line_max_x = @max(p1.x(), p2.x()) + half_width;
-            const line_min_y = @min(p1.y(), p2.y()) - half_width;
-            const line_max_y = @max(p1.y(), p2.y()) + half_width;
-
-            const min_x = @max(0, @floor(line_min_x));
-            const max_x = @min(fcols - 1, @ceil(line_max_x));
-            const min_y = @max(0, @floor(line_min_y));
-            const max_y = @min(frows - 1, @ceil(line_max_y));
-
-            // Precompute for distance calculation optimization
-            const dx_sq = dx * dx;
-            const dy_sq = dy * dy;
-            const length_sq = dx_sq + dy_sq;
             const inv_length_sq = 1.0 / length_sq;
+            const line_rect: Rectangle(f32) = .{
+                .l = @min(p1.x(), p2.x()) - half_width,
+                .t = @min(p1.y(), p2.y()) - half_width,
+                .r = @max(p1.x(), p2.x()) + half_width + 1,
+                .b = @max(p1.y(), p2.y()) + half_width + 1,
+            };
+            const bbox = self.clampRectToImage(line_rect) orelse return;
 
-            // Iterate through pixels in bounding box
-            var py: f32 = min_y;
-            while (py <= max_y) : (py += 1) {
-                var px: f32 = min_x;
-                while (px <= max_x) : (px += 1) {
-                    // Optimized distance calculation
+            for (bbox.t..bbox.b) |r| {
+                const py = as(f32, r);
+                for (bbox.l..bbox.r) |c| {
+                    const px = as(f32, c);
                     const dpx = px - p1.x();
                     const dpy = py - p1.y();
                     const t = clamp((dpx * dx + dpy * dy) * inv_length_sq, 0, 1);
-                    const closest_x = p1.x() + t * dx;
-                    const closest_y = p1.y() + t * dy;
-                    const dist_x = px - closest_x;
-                    const dist_y = py - closest_y;
+                    const dist_x = dpx - t * dx;
+                    const dist_y = dpy - t * dy;
                     const dist = @sqrt(dist_x * dist_x + dist_y * dist_y);
-
-                    // Anti-aliased coverage based on distance
-                    if (dist <= half_width + antialias_edge_offset) {
-                        var alpha: f32 = 1.0;
-                        if (dist > half_width - antialias_edge_offset) {
-                            alpha = (half_width + antialias_edge_offset - dist);
-                        }
-
-                        if (alpha > 0) {
-                            self.setPixel(@intFromFloat(py), @intFromFloat(px), c2.fade(alpha));
-                        }
+                    if (dist > half_width + antialias_edge_offset) continue;
+                    var alpha: f32 = 1.0;
+                    if (dist > half_width - antialias_edge_offset) {
+                        alpha = half_width + antialias_edge_offset - dist;
+                    }
+                    if (alpha > 0) {
+                        self.setPixel(@intCast(r), @intCast(c), c2.fade(alpha));
                     }
                 }
             }
+        }
+
+        /// Specialized renderer for horizontal/vertical thick lines. Computes the perpendicular
+        /// coverage once per row (or column) — uniform across the body — and uses
+        /// `setHorizontalSpan` for fully-covered interior rows of horizontal opaque lines.
+        /// End-cap AA is handled by the `fillCircle` calls at the bottom.
+        fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, c2: Rgba, color: anytype) void {
+            const is_horizontal = p1.y() == p2.y();
+            const can_memset = c2.a == 255;
+            const solid_color = if (can_memset) convertColor(T, color) else undefined;
+
+            // Body bbox is tight to the line's endpoints — end caps are drawn separately,
+            // so excluding their region here avoids double-blend over-saturation.
+            const body_rect: Rectangle(f32) = if (is_horizontal) .{
+                .l = @min(p1.x(), p2.x()),
+                .t = p1.y() - half_width,
+                .r = @max(p1.x(), p2.x()) + 1,
+                .b = p1.y() + half_width + 1,
+            } else .{
+                .l = p1.x() - half_width,
+                .t = @min(p1.y(), p2.y()),
+                .r = p1.x() + half_width + 1,
+                .b = @max(p1.y(), p2.y()) + 1,
+            };
+
+            if (self.clampRectToImage(body_rect)) |bbox| {
+                const perp_center = if (is_horizontal) p1.y() else p1.x();
+                if (is_horizontal) {
+                    for (bbox.t..bbox.b) |r| {
+                        const alpha = perpendicularAlpha(as(f32, r), perp_center, half_width);
+                        if (alpha <= 0) continue;
+                        if (alpha >= 1.0 and can_memset) {
+                            self.setHorizontalSpan(as(f32, bbox.l), as(f32, bbox.r - 1), as(f32, r), solid_color);
+                        } else {
+                            const faded = c2.fade(alpha);
+                            for (bbox.l..bbox.r) |c| self.setPixel(@intCast(r), @intCast(c), faded);
+                        }
+                    }
+                } else {
+                    for (bbox.l..bbox.r) |c| {
+                        const alpha = perpendicularAlpha(as(f32, c), perp_center, half_width);
+                        if (alpha <= 0) continue;
+                        const faded = c2.fade(alpha);
+                        for (bbox.t..bbox.b) |r| self.setPixel(@intCast(r), @intCast(c), faded);
+                    }
+                }
+            }
+
+            self.fillCircle(p1, half_width, color, .soft);
+            self.fillCircle(p2, half_width, color, .soft);
+        }
+
+        /// Coverage of a single perpendicular sample at distance |sample - center| from a
+        /// band's centerline (half-width `half_width`). Same edge ramp as `ringCoverage`.
+        inline fn perpendicularAlpha(sample: f32, center: f32, half_width: f32) f32 {
+            const dist = @abs(sample - center);
+            if (dist > half_width + antialias_edge_offset) return 0;
+            if (dist > half_width - antialias_edge_offset) return half_width + antialias_edge_offset - dist;
+            return 1.0;
         }
 
         /// Floors `point` to integer pixel coordinates and writes via `Image.setPixel`,
