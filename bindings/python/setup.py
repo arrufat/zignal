@@ -83,25 +83,21 @@ class ZigBuildExt(build_ext):
         print(f"Building Zig extension: {' '.join(cmd)}")
         subprocess.check_call(cmd, cwd=PROJECT_ROOT, env=env)
 
-        # Install built library
         zig_out = PROJECT_ROOT / "zig-out" / "lib"
         built_lib = next(zig_out.glob("_zignal*"))
         dest_path = Path(self.get_ext_fullpath(ext.name))
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(built_lib, dest_path)
 
-        # Install CLI binary
         zig_bin = PROJECT_ROOT / "zig-out" / "bin"
-        # Find the binary (handle possible .exe extension)
         binary_name = "zignal.exe" if sys.platform == "win32" else "zignal"
         built_bin = zig_bin / binary_name
-        
+
         if built_bin.exists():
             shutil.copy2(built_bin, dest_path.parent / binary_name)
         else:
             print(f"Warning: CLI binary not found at {built_bin}")
 
-        # Copy stub files
         pkg_dir = Path(__file__).parent / "zignal"
         for f in ["__init__.pyi", "_zignal.pyi", "py.typed"]:
             if (src := pkg_dir / f).exists():
