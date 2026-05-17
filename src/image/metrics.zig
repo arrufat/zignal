@@ -245,8 +245,8 @@ fn generateSsimWindow() [121]f64 {
 
     for (0..window_size) |dy| {
         for (0..window_size) |dx| {
-            const y: f64 = @as(f64, @floatFromInt(dy)) - @as(f64, @floatFromInt(window_radius));
-            const x: f64 = @as(f64, @floatFromInt(dx)) - @as(f64, @floatFromInt(window_radius));
+            const y: f64 = @as(f64, @floatFromInt(dy)) - @as(f64, window_radius);
+            const x: f64 = @as(f64, @floatFromInt(dx)) - @as(f64, window_radius);
             const gauss = @exp(-(x * x + y * y) / (2.0 * sigma * sigma));
             gaussian_window[dy * window_size + dx] = gauss;
             gaussian_sum += gauss;

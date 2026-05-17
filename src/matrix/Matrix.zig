@@ -1505,7 +1505,7 @@ test "Matrix as" {
     defer b.deinit();
     for (0..a.rows) |r| {
         for (0..a.cols) |c| {
-            try expectEqual(@as(f64, @floatCast(a.at(r, c).*)), b.at(r, c).*);
+            try expectEqual(@as(f64, a.at(r, c).*), b.at(r, c).*);
         }
     }
 }

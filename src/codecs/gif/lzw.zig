@@ -92,15 +92,15 @@ pub const Decoder = struct {
                     return .{ .written = written, .consumed = consumed };
                 }
                 const byte = in[consumed];
-                self.accum |= @as(u32, byte) << @as(u5, @intCast(self.bits_in_accum));
+                self.accum |= @as(u32, byte) << self.bits_in_accum;
                 self.bits_in_accum += 8;
                 consumed += 1;
             }
 
-            const mask: u32 = (@as(u32, 1) << @as(u5, @intCast(self.code_size))) - 1;
+            const mask: u32 = (@as(u32, 1) << @as(u5, self.code_size)) - 1;
             const code: u16 = @intCast(self.accum & mask);
-            self.accum >>= @as(u5, @intCast(self.code_size));
-            self.bits_in_accum -= @as(u5, @intCast(self.code_size));
+            self.accum >>= @as(u5, self.code_size);
+            self.bits_in_accum -= @as(u5, self.code_size);
 
             if (code == self.eoi_code) {
                 self.saw_eoi = true;
@@ -223,8 +223,8 @@ pub const Encoder = struct {
     }
 
     fn emitCode(self: *Encoder, gpa: std.mem.Allocator, code: u16, out: *std.ArrayList(u8)) !void {
-        self.bit_accum |= @as(u32, code) << @as(u5, @intCast(self.bits_in_accum));
-        self.bits_in_accum += @as(u5, @intCast(self.code_size));
+        self.bit_accum |= @as(u32, code) << self.bits_in_accum;
+        self.bits_in_accum += @as(u5, self.code_size);
         while (self.bits_in_accum >= 8) {
             try out.append(gpa, @intCast(self.bit_accum & 0xFF));
             self.bit_accum >>= 8;

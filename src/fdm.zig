@@ -73,16 +73,16 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
             // Pass 1: Accumulate statistics
             if (T == u8) {
                 for (target_image.data) |pixel| {
-                    const v = @as(f64, @floatFromInt(pixel)) / 255.0;
+                    const v = @as(f64, pixel) / 255.0;
                     stats.add(.{ v, v, v });
                 }
                 self.target_is_grayscale = true;
             } else {
                 var is_gray = true;
                 for (target_image.data) |pixel| {
-                    const r = @as(f64, @floatFromInt(pixel.r)) / 255.0;
-                    const g = @as(f64, @floatFromInt(pixel.g)) / 255.0;
-                    const b = @as(f64, @floatFromInt(pixel.b)) / 255.0;
+                    const r = @as(f64, pixel.r) / 255.0;
+                    const g = @as(f64, pixel.g) / 255.0;
+                    const b = @as(f64, pixel.b) / 255.0;
                     stats.add(.{ r, g, b });
                     if (pixel.r != pixel.g or pixel.g != pixel.b) is_gray = false;
                 }
@@ -149,7 +149,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
             // Pass 1: Compute source statistics
             if (T == u8) {
                 for (source_img.data) |pixel| {
-                    const v = @as(f64, @floatFromInt(pixel)) / 255.0;
+                    const v = @as(f64, pixel) / 255.0;
                     stats.add(.{ v, v, v });
                 }
             } else {
@@ -158,15 +158,15 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                     for (source_img.data) |pixel| {
                         // Using convertColor logic to get grayscale value.
                         const gray = convertColor(u8, pixel);
-                        const v = @as(f64, @floatFromInt(gray)) / 255.0;
+                        const v = @as(f64, gray) / 255.0;
                         stats.add(.{ v, v, v });
                     }
                 } else {
                     for (source_img.data) |pixel| {
                         stats.add(.{
-                            @as(f64, @floatFromInt(pixel.r)) / 255.0,
-                            @as(f64, @floatFromInt(pixel.g)) / 255.0,
-                            @as(f64, @floatFromInt(pixel.b)) / 255.0,
+                            @as(f64, pixel.r) / 255.0,
+                            @as(f64, pixel.g) / 255.0,
+                            @as(f64, pixel.b) / 255.0,
                         });
                     }
                 }
@@ -184,14 +184,14 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
                 if (T == u8) {
                     for (source_img.data) |*pixel| {
-                        const val = @as(f64, @floatFromInt(pixel.*)) / 255.0;
+                        const val = @as(f64, pixel.*) / 255.0;
                         const result = clamp(val * scale + offset, 0, 1);
                         pixel.* = @round(255.0 * result);
                     }
                 } else {
                     for (source_img.data) |*pixel| {
                         // Color image, target is grayscale: convert to gray then match
-                        const val = @as(f64, @floatFromInt(convertColor(u8, pixel.*))) / 255.0;
+                        const val = @as(f64, convertColor(u8, pixel.*)) / 255.0;
                         const result = clamp(val * scale + offset, 0, 1);
                         const res_u8: u8 = @round(255.0 * result);
                         pixel.* = .{ .r = res_u8, .g = res_u8, .b = res_u8 };
@@ -256,9 +256,9 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
                 // In-place update
                 for (source_img.data) |*pixel| {
-                    const r = @as(f64, @floatFromInt(pixel.r)) / 255.0;
-                    const g = @as(f64, @floatFromInt(pixel.g)) / 255.0;
-                    const b = @as(f64, @floatFromInt(pixel.b)) / 255.0;
+                    const r = @as(f64, pixel.r) / 255.0;
+                    const g = @as(f64, pixel.g) / 255.0;
+                    const b = @as(f64, pixel.b) / 255.0;
 
                     // Apply linear transform: pixel * W + bias
                     var res = [3]f64{ 0, 0, 0 };
@@ -362,18 +362,18 @@ test "FDM mean and covariance matching" {
         target_sum_g += pixel.g;
         target_sum_b += pixel.b;
     }
-    const target_mean_r = @as(f64, @floatFromInt(target_sum_r)) / @as(f64, @floatFromInt(target_img.data.len));
-    const target_mean_g = @as(f64, @floatFromInt(target_sum_g)) / @as(f64, @floatFromInt(target_img.data.len));
-    const target_mean_b = @as(f64, @floatFromInt(target_sum_b)) / @as(f64, @floatFromInt(target_img.data.len));
+    const target_mean_r = @as(f64, target_sum_r) / @as(f64, @floatFromInt(target_img.data.len));
+    const target_mean_g = @as(f64, target_sum_g) / @as(f64, @floatFromInt(target_img.data.len));
+    const target_mean_b = @as(f64, target_sum_b) / @as(f64, @floatFromInt(target_img.data.len));
 
     // Calculate target variances
     var target_var_r: f64 = 0;
     var target_var_g: f64 = 0;
     var target_var_b: f64 = 0;
     for (target_img.data) |pixel| {
-        const dr = @as(f64, @floatFromInt(pixel.r)) - target_mean_r;
-        const dg = @as(f64, @floatFromInt(pixel.g)) - target_mean_g;
-        const db = @as(f64, @floatFromInt(pixel.b)) - target_mean_b;
+        const dr = @as(f64, pixel.r) - target_mean_r;
+        const dg = @as(f64, pixel.g) - target_mean_g;
+        const db = @as(f64, pixel.b) - target_mean_b;
         target_var_r += dr * dr;
         target_var_g += dg * dg;
         target_var_b += db * db;
@@ -396,18 +396,18 @@ test "FDM mean and covariance matching" {
         result_sum_g += pixel.g;
         result_sum_b += pixel.b;
     }
-    const result_mean_r = @as(f64, @floatFromInt(result_sum_r)) / @as(f64, @floatFromInt(source_img.data.len));
-    const result_mean_g = @as(f64, @floatFromInt(result_sum_g)) / @as(f64, @floatFromInt(source_img.data.len));
-    const result_mean_b = @as(f64, @floatFromInt(result_sum_b)) / @as(f64, @floatFromInt(source_img.data.len));
+    const result_mean_r = @as(f64, result_sum_r) / @as(f64, @floatFromInt(source_img.data.len));
+    const result_mean_g = @as(f64, result_sum_g) / @as(f64, @floatFromInt(source_img.data.len));
+    const result_mean_b = @as(f64, result_sum_b) / @as(f64, @floatFromInt(source_img.data.len));
 
     // Calculate result variances
     var result_var_r: f64 = 0;
     var result_var_g: f64 = 0;
     var result_var_b: f64 = 0;
     for (source_img.data) |pixel| {
-        const dr = @as(f64, @floatFromInt(pixel.r)) - result_mean_r;
-        const dg = @as(f64, @floatFromInt(pixel.g)) - result_mean_g;
-        const db = @as(f64, @floatFromInt(pixel.b)) - result_mean_b;
+        const dr = @as(f64, pixel.r) - result_mean_r;
+        const dg = @as(f64, pixel.g) - result_mean_g;
+        const db = @as(f64, pixel.b) - result_mean_b;
         result_var_r += dr * dr;
         result_var_g += dg * dg;
         result_var_b += db * db;
@@ -458,7 +458,7 @@ test "FDM grayscale mean and variance matching" {
     for (source_img.data) |pixel| {
         sum += pixel;
     }
-    const actual_mean = @as(f64, @floatFromInt(sum)) / @as(f64, @floatFromInt(source_img.data.len));
+    const actual_mean = @as(f64, sum) / @as(f64, @floatFromInt(source_img.data.len));
 
     // Mean should be the target mean (149.5)
     try expectEqual(actual_mean, 149.5);
@@ -516,9 +516,9 @@ test "FDM batch processing with reused target" {
             sums[1] += pixel.g;
             sums[2] += pixel.b;
         }
-        means[idx][0] = @as(f64, @floatFromInt(sums[0])) / @as(f64, @floatFromInt(img.data.len));
-        means[idx][1] = @as(f64, @floatFromInt(sums[1])) / @as(f64, @floatFromInt(img.data.len));
-        means[idx][2] = @as(f64, @floatFromInt(sums[2])) / @as(f64, @floatFromInt(img.data.len));
+        means[idx][0] = @as(f64, sums[0]) / @as(f64, @floatFromInt(img.data.len));
+        means[idx][1] = @as(f64, sums[1]) / @as(f64, @floatFromInt(img.data.len));
+        means[idx][2] = @as(f64, sums[2]) / @as(f64, @floatFromInt(img.data.len));
     }
 
     // All transformed images should have similar means (close to target)
@@ -556,7 +556,7 @@ test "FDM grayscale target applied to color source" {
     // Pre-compute target statistics (on 0-255 scale).
     var target_stats: RunningStats(f64) = .init();
     for (target_img.data) |pixel| {
-        target_stats.add(@as(f64, @floatFromInt(pixel.r)));
+        target_stats.add(@as(f64, pixel.r));
     }
     const target_mean = target_stats.mean();
     const target_var = populationVariance(target_stats);

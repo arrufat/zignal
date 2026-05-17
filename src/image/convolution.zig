@@ -269,7 +269,7 @@ pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: 
                         }
                         if (strategy == .scaled) {
                             const value = uniform_value orelse unreachable;
-                            const accum = @as(i64, @intCast(value)) * @as(i64, kernel_sum);
+                            const accum = @as(i64, value) * @as(i64, kernel_sum);
                             const stored = Pixel.store(accum);
                             @memset(out_ch.*, stored);
                         }
@@ -406,7 +406,7 @@ pub fn convolveSeparable(
                         }
                         if (strategy == .scaled) {
                             const value = uniform_value orelse unreachable;
-                            const accum = @as(i64, @intCast(value)) * kernel_sum;
+                            const accum = @as(i64, value) * kernel_sum;
                             @memset(out_ch.*, divClampU8(fixed_point_scale_sq, accum));
                         }
                     }

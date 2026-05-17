@@ -192,7 +192,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
         // Compute orientation and scale coordinates
         // Scale-aware edge margin: smaller at higher pyramid levels
         const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
-        const edge_margin = @as(f32, @floatFromInt(self.edge_threshold)) / scale;
+        const edge_margin = @as(f32, self.edge_threshold) / scale;
         const min_margin = 3.0; // Minimum margin for FAST detector
         const actual_margin = @max(min_margin, edge_margin);
 
@@ -281,7 +281,7 @@ fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
 
     // Exponential scale distribution for better coverage
     // Uses formula: n_features * (1 - factor) / (1 - factor^n_levels) * factor^level
-    const levels_usize = @as(usize, @intCast(self.n_levels));
+    const levels_usize = @as(usize, self.n_levels);
 
     // Handle degenerate scale factors by distributing features evenly
     if (self.n_levels == 1 or self.scale_factor <= 1.0) {
@@ -386,7 +386,7 @@ const MomentComputer = struct {
 
                 // weight == 0 for pixels outside the circular mask, so those contribute nothing.
                 const weight = orientation_weights[v * PATCH_SIZE + u];
-                const intensity = @as(f32, @floatFromInt(ctx.image.at(@intCast(py), @intCast(px)).*)) * weight;
+                const intensity = @as(f32, ctx.image.at(@intCast(py), @intCast(px)).*) * weight;
                 ctx.m00.* += intensity;
                 ctx.m10.* += intensity * @as(f32, @floatFromInt(dx));
                 ctx.m01.* += intensity * @as(f32, @floatFromInt(dy));
@@ -436,10 +436,10 @@ fn computeBriefDescriptor(image: Image(u8), kp: KeyPoint) BinaryDescriptor {
     // Use the learned ORB pattern for robust descriptor computation
     for (orb_pattern, 0..) |pattern, bit_idx| {
         // Get the two points to compare from the pattern
-        const x1 = @as(f32, @floatFromInt(pattern[0]));
-        const y1 = @as(f32, @floatFromInt(pattern[1]));
-        const x2 = @as(f32, @floatFromInt(pattern[2]));
-        const y2 = @as(f32, @floatFromInt(pattern[3]));
+        const x1 = @as(f32, pattern[0]);
+        const y1 = @as(f32, pattern[1]);
+        const x2 = @as(f32, pattern[2]);
+        const y2 = @as(f32, pattern[3]);
 
         // Rotate points by keypoint angle for rotation invariance
         const rx1 = cos_angle * x1 - sin_angle * y1;
@@ -512,7 +512,7 @@ fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
 fn computeAdaptiveThreshold(self: Orb, level: usize) u8 {
     const level_scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
     const attenuation = 1.0 / level_scale;
-    const base_threshold = @as(f32, @floatFromInt(self.fast_threshold));
+    const base_threshold = @as(f32, self.fast_threshold);
     const scaled_threshold = std.math.clamp(base_threshold * attenuation, @as(f32, 5.0), @as(f32, 255.0));
     return @round(scaled_threshold);
 }

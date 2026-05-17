@@ -995,10 +995,10 @@ fn buildGlyphEntries(
         const row_stride = bytes_per_row;
 
         const left = glyph_info.x_offset;
-        const right = @as(i16, @intCast(width)) + left;
+        const right = @as(i16, width) + left;
         const advance = glyph_info.device_width;
         const ascent = font_ascent - glyph_info.y_offset;
-        var descent = @as(i16, @intCast(height)) - ascent;
+        var descent = @as(i16, height) - ascent;
         if (descent < 0) descent = 0;
 
         const metric: GlyphMetrics = .{
@@ -1181,7 +1181,7 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
 
     try props_list.append(allocator, .{ .name = "FONT", .is_string = true, .s_val = font.name, .i_val = 0 });
     try props_list.append(allocator, .{ .name = "PIXEL_SIZE", .is_string = false, .s_val = "", .i_val = @intCast(font.char_height) });
-    try props_list.append(allocator, .{ .name = "POINT_SIZE", .is_string = false, .s_val = "", .i_val = @as(i32, @intCast(font.char_height)) * 10 });
+    try props_list.append(allocator, .{ .name = "POINT_SIZE", .is_string = false, .s_val = "", .i_val = @as(i32, font.char_height) * 10 });
     try props_list.append(allocator, .{ .name = "RESOLUTION_X", .is_string = false, .s_val = "", .i_val = 75 });
     try props_list.append(allocator, .{ .name = "RESOLUTION_Y", .is_string = false, .s_val = "", .i_val = 75 });
     try props_list.append(allocator, .{ .name = "SPACING", .is_string = true, .s_val = if (font.glyph_map != null) "P" else "C", .i_val = 0 });

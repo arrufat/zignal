@@ -38,11 +38,11 @@ pub const Binary = struct {
         }
 
         const hist = image.histogram();
-        const total_pixels: f64 = @as(f64, @floatFromInt(image.rows * image.cols));
+        const total_pixels: f64 = @floatFromInt(image.rows * image.cols);
 
         var sum_total: f64 = 0;
         for (hist.values, 0..) |count, intensity| {
-            sum_total += @as(f64, @floatFromInt(count)) * @as(f64, @floatFromInt(intensity));
+            sum_total += @as(f64, count) * @as(f64, @floatFromInt(intensity));
         }
 
         var sum_background: f64 = 0;
@@ -109,7 +109,7 @@ pub const Binary = struct {
                 const area = @as(f32, @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1)));
                 const sum = Image(u8).Integral.sum(sat, r1, c1, r2, c2);
                 const mean = sum / area;
-                const src_val = @as(f32, @floatFromInt(image.at(row, col).*));
+                const src_val = @as(f32, image.at(row, col).*);
                 out.at(row, col).* = if (src_val > mean - c) 255 else 0;
             }
         }

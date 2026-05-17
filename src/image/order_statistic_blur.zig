@@ -280,7 +280,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                     }
                 }
 
-                const area = @as(usize, @intCast(window_hist.totalPixels()));
+                const area = @as(usize, window_hist.totalPixels());
                 target.at(row, 0).* = try reducer.compute(&window_hist, area);
 
                 for (1..image.cols) |col| {
@@ -298,7 +298,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                         window_hist.addCounts(zero_column);
                     }
 
-                    const local_area = @as(usize, @intCast(window_hist.totalPixels()));
+                    const local_area = @as(usize, window_hist.totalPixels());
                     target.at(row, col).* = try reducer.compute(&window_hist, local_area);
                 }
 
