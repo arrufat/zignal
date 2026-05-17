@@ -6,7 +6,6 @@ Usage:
     pip install .
 
 Environment Variables:
-    ZIG_EXE: Zig executable to invoke (default: "anyzig" if on PATH, else "zig").
     ZIG_TARGET: The Zig compilation target (e.g., "x86_64-linux-gnu", "native").
     ZIG_OPTIMIZE: Zig optimization mode (default: "ReleaseFast").
     ZIG_CPU: Zig CPU architecture (default: "baseline").
@@ -25,13 +24,6 @@ from setuptools.command.build_ext import build_ext
 from setuptools.dist import Distribution
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-
-
-def zig_exe() -> str:
-    """Pick the Zig executable. Prefer anyzig (resolves version from build.zig.zon)."""
-    if override := os.environ.get("ZIG_EXE"):
-        return override
-    return "anyzig" if shutil.which("anyzig") else "zig"
 
 
 class ZigExtension(Extension):
@@ -79,7 +71,7 @@ class ZigBuildExt(build_ext):
                 env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
 
         cmd = [
-            zig_exe(),
+            "zig",
             "build",
             "python-bindings",
             f"-Doptimize={ext.optimize}",
@@ -127,7 +119,7 @@ def get_project_version():
     """Get version from Zig build system directly."""
     try:
         ver = subprocess.check_output(
-            [zig_exe(), "build", "version"], cwd=PROJECT_ROOT, text=True
+            ["zig", "build", "version"], cwd=PROJECT_ROOT, text=True
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "0.0.0.dev0"
