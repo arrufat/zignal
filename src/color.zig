@@ -345,6 +345,7 @@ pub fn Rgb(comptime T: type) type {
                 .hsv => rgbToHsv(T, self),
                 .rgb => self,
                 .rgba => .{ .r = self.r, .g = self.g, .b = self.b, .a = if (T == u8) 255 else 1.0 },
+                .xyb => rgbToXyb(T, self),
                 .xyz => rgbToXyz(T, self),
                 .ycbcr => rgbToYcbcr(T, self),
                 else => self.to(.xyz).to(color_space),
@@ -889,6 +890,7 @@ pub fn Xyb(comptime T: type) type {
         pub fn to(self: Xyb(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
                 .xyb => self,
+                .rgb => xybToRgb(T, self),
                 .xyz => xybToXyz(T, self),
                 else => self.to(.xyz).to(color_space),
             };
@@ -938,8 +940,8 @@ pub fn Ycbcr(comptime T: type) type {
         pub fn as(self: Ycbcr(T), comptime U: type) Ycbcr(U) {
             switch (@typeInfo(U)) {
                 .float => {},
-                .int => |info| if (info.bits != 8 or info.signedness != .unsigned) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
-                else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
+                .int => |info| if (info.bits != 8 or info.signedness != .unsigned) @compileError("Unsupported backing type " ++ @typeName(U) ++ " for color space"),
+                else => @compileError("Unsupported backing type " ++ @typeName(U) ++ " for color space"),
             }
             return switch (T) {
                 u8 => switch (U) {
@@ -1033,7 +1035,6 @@ fn rgbToGray(comptime T: type, rgb: Rgb(T)) Gray(T) {
 }
 
 /// Converts grayscale to RGB by replicating the Y component across channels.
-/// Converts grayscale to RGB.
 fn grayToRgb(comptime T: type, gray: Gray(T)) Rgb(T) {
     return .{ .r = gray.y, .g = gray.y, .b = gray.y };
 }
@@ -1058,11 +1059,8 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
         const cb = ycbcr.cb;
         const cr = ycbcr.cr;
 
-        // R = Y + 1.402 * Cr
         const r = y + 1.402 * cr;
-        // G = Y - 0.344136 * Cb - 0.714136 * Cr
         const g = y - 0.344136 * cb - 0.714136 * cr;
-        // B = Y + 1.772 * Cb
         const b = y + 1.772 * cb;
 
         return .{
@@ -1101,8 +1099,8 @@ fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
 fn hslToRgb(comptime T: type, hsl: Hsl(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const h = @mod(hsl.h, 360);
-    const s = @max(0, @min(1, hsl.s / 100));
-    const l = @max(0, @min(1, hsl.l / 100));
+    const s = clamp(hsl.s / 100, 0, 1);
+    const l = clamp(hsl.l / 100, 0, 1);
 
     const hue_sector: T = h / 60.0;
     const sector: usize = @trunc(hue_sector);
@@ -1158,17 +1156,17 @@ fn rgbToHsl(comptime T: type, rgb: Rgb(T)) Hsl(T) {
 
     return .{
         .h = @mod(hue * 60.0, 360.0),
-        .s = @max(0, @min(1, s)) * 100.0,
-        .l = @max(0, @min(1, l)) * 100.0,
+        .s = clamp(s, 0, 1) * 100.0,
+        .l = clamp(l, 0, 1) * 100.0,
     };
 }
 
 /// Converts HSV to RGB.
 fn hsvToRgb(comptime T: type, hsv: Hsv(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
-    const hue = @max(0, @min(1, hsv.h / 360));
-    const sat = @max(0, @min(1, hsv.s / 100));
-    const val = @max(0, @min(1, hsv.v / 100));
+    const hue = clamp(hsv.h / 360, 0, 1);
+    const sat = clamp(hsv.s / 100, 0, 1);
+    const val = clamp(hsv.v / 100, 0, 1);
 
     if (sat == 0.0) {
         return .{ .r = val, .g = val, .b = val };
@@ -1307,28 +1305,17 @@ fn xyzToLab(comptime T: type, xyz: Xyz(T)) Lab(T) {
 /// Converts Lab to XYZ.
 fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
     comptime assert(@typeInfo(T) == .float);
-    // Inverse CIELAB transformation
-    var y: f64 = (lab.l + 16.0) / 116.0;
-    var x: f64 = (lab.a / 500.0) + y;
-    var z: f64 = y - (lab.b / 200.0);
+    const fy: f64 = (lab.l + 16.0) / 116.0;
+    const fx: f64 = (lab.a / 500.0) + fy;
+    const fz: f64 = fy - (lab.b / 200.0);
 
-    if (pow(f64, y, 3.0) > lab_epsilon) {
-        y = pow(f64, y, 3.0);
-    } else {
-        y = (y - lab_delta) / lab_kappa_div_116;
-    }
+    const y3 = fy * fy * fy;
+    const x3 = fx * fx * fx;
+    const z3 = fz * fz * fz;
 
-    if (pow(f64, x, 3.0) > lab_epsilon) {
-        x = pow(f64, x, 3.0);
-    } else {
-        x = (x - lab_delta) / lab_kappa_div_116;
-    }
-
-    if (pow(f64, z, 3.0) > lab_epsilon) {
-        z = pow(f64, z, 3.0);
-    } else {
-        z = (z - lab_delta) / lab_kappa_div_116;
-    }
+    const y = if (y3 > lab_epsilon) y3 else (fy - lab_delta) / lab_kappa_div_116;
+    const x = if (x3 > lab_epsilon) x3 else (fx - lab_delta) / lab_kappa_div_116;
+    const z = if (z3 > lab_epsilon) z3 else (fz - lab_delta) / lab_kappa_div_116;
 
     return .{
         .x = @floatCast(x * d65_x),
@@ -1341,7 +1328,7 @@ fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
 fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(lab.a * lab.a + lab.b * lab.b);
-    const h = std.math.atan2(lab.b, lab.a) * 180.0 / std.math.pi;
+    const h = std.math.radiansToDegrees(std.math.atan2(lab.b, lab.a));
     return .{
         .l = lab.l,
         .c = c,
@@ -1352,7 +1339,7 @@ fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
 /// Converts LCh to Lab.
 fn lchToLab(comptime T: type, lch: Lch(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h_rad = lch.h * std.math.pi / 180.0;
+    const h_rad = std.math.degreesToRadians(lch.h);
     return .{
         .l = lch.l,
         .a = lch.c * @cos(h_rad),
@@ -1424,7 +1411,7 @@ fn oklabToXyz(comptime T: type, oklab: Oklab(T)) Xyz(T) {
 fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     comptime assert(@typeInfo(T) == .float);
     const c = @sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
-    const h = std.math.atan2(oklab.b, oklab.a) * 180.0 / std.math.pi;
+    const h = std.math.radiansToDegrees(std.math.atan2(oklab.b, oklab.a));
 
     return .{
         .l = oklab.l,
@@ -1436,7 +1423,7 @@ fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
 /// Converts Oklch to Oklab.
 fn oklchToOklab(comptime T: type, oklch: Oklch(T)) Oklab(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h_rad = oklch.h * std.math.pi / 180.0;
+    const h_rad = std.math.degreesToRadians(oklch.h);
 
     return .{
         .l = oklch.l,
@@ -1493,7 +1480,7 @@ fn xybToXyz(comptime T: type, xyb: Xyb(T)) Xyz(T) {
     };
 }
 
-/// Converts RGB to XYB.
+/// Converts RGB to XYB directly, skipping the XYZ round-trip.
 fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     comptime assert(@typeInfo(T) == .float);
     const r = gammaToLinear(T, rgb.r);
@@ -1515,7 +1502,7 @@ fn rgbToXyb(comptime T: type, rgb: Rgb(T)) Xyb(T) {
     };
 }
 
-/// Converts XYB to RGB.
+/// Converts XYB to RGB directly, skipping the XYZ round-trip.
 fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
     comptime assert(@typeInfo(T) == .float);
     const l_dash = xyb.y + xyb.x;
