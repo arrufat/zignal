@@ -28,12 +28,8 @@ const sobel_y = [3][3]f32{
 /// Provides Sobel and Shen-Castan edge detection algorithms.
 pub fn Edges(comptime T: type) type {
     return struct {
-        /// Applies the Sobel filter to perform edge detection.
-        /// The output is a grayscale image representing the magnitude of gradients at each pixel.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `out`: Output image that will be filled with the Sobel magnitude image.
+        /// Applies the Sobel filter, writing the per-pixel gradient magnitude into `out` as a
+        /// grayscale image.
         pub fn sobel(self: Image(T), allocator: Allocator, out: Image(u8)) !void {
             // For now, use float path for all types to ensure correctness
             {
@@ -211,14 +207,8 @@ pub fn Edges(comptime T: type) type {
         /// 4. Double thresholding to classify strong and weak edges
         /// 5. Edge tracking by hysteresis to link edges
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers
-        /// - `sigma`: Standard deviation for Gaussian blur (typical: 1.0-2.0)
-        /// - `low_threshold`: Lower threshold for hysteresis (0-255)
-        /// - `high_threshold`: Upper threshold for hysteresis (0-255)
-        /// - `out`: Output edge map as binary image (0 or 255)
-        ///
-        /// Note: high_threshold should be 2-3x larger than low_threshold
+        /// `sigma` is typically 1.0–2.0; thresholds are in 0–255 and `high_threshold` should be
+        /// 2–3× `low_threshold`. `out` receives a binary edge map (0 or 255).
         pub fn canny(
             self: Image(T),
             allocator: Allocator,

@@ -583,17 +583,10 @@ pub fn Image(comptime T: type) type {
             return Transform(T).letterbox(self, allocator, out, method);
         }
 
-        /// Rotates the image by `angle` (in radians) around its center.
-        /// Returns a new image with optimal dimensions to fit the rotated content.
-        /// The caller is responsible for calling deinit() on the returned image.
+        /// Rotates the image by `angle` (radians) around its center, returning a new image sized
+        /// to fit the rotated content. Caller must `deinit` the result.
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the rotated image's data.
-        /// - `angle`: The rotation angle in radians.
-        /// - `method`: The interpolation method to use for sampling pixels.
-        /// - `border`: The border handling mode to apply.
-        ///
-        /// Example usage:
+        /// Example:
         /// ```zig
         /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear, .zero);
         /// defer rotated.deinit(allocator);
@@ -602,17 +595,10 @@ pub fn Image(comptime T: type) type {
             return Transform(T).rotate(self, allocator, angle, method, border);
         }
 
-        /// Crops a rectangular region from the image.
-        /// If the specified `rectangle` is not fully contained within the image, the out-of-bounds
-        /// areas in the output are filled with zeroed pixels (e.g., black/transparent).
-        /// Returns a new image containing the cropped region.
-        /// The caller is responsible for calling deinit() on the returned image.
+        /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds areas
+        /// are filled with zeroed pixels (e.g., black/transparent). Caller must `deinit` the result.
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the cropped image's data.
-        /// - `rectangle`: The `Rectangle(f32)` defining the region to crop. Coordinates will be rounded.
-        ///
-        /// Example usage:
+        /// Example:
         /// ```zig
         /// var chip = try image.crop(allocator, .{ .l = 10, .t = 10, .r = 100, .b = 100 });
         /// defer chip.deinit(allocator);
@@ -621,15 +607,9 @@ pub fn Image(comptime T: type) type {
             return Transform(T).crop(self, allocator, rectangle);
         }
 
-        /// Extracts a rotated rectangular region from the image and resamples it into `out`.
-        ///
-        /// Parameters:
-        /// - `rect`: Axis-aligned rectangle (in source image coordinates) defining the region before rotation.
-        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
-        /// - `out`: Pre-allocated destination image that defines the output size. The extracted content is
-        ///          resampled to exactly fill this image using `method`.
-        /// - `method`: Interpolation method used when sampling from the source.
-        /// - `border`: The border handling mode to apply.
+        /// Extracts a rotated rectangular region (defined in source coordinates) and resamples it
+        /// to fill the pre-allocated `out` image. `angle` is in radians, counter-clockwise around
+        /// the rect center.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
@@ -639,17 +619,8 @@ pub fn Image(comptime T: type) type {
             return Transform(T).extract(self, rect, angle, out, method, border);
         }
 
-        /// Inserts a source image into this image at the specified rectangle with rotation.
-        ///
-        /// This is the complement to `extract`. While `extract` pulls a region out of an image,
-        /// `insert` places a source image into a destination region.
-        ///
-        /// Parameters:
-        /// - `source`: The image to insert into self. Can be any Image type.
-        /// - `rect`: Destination rectangle (in self's coordinates) where source will be placed.
-        /// - `angle`: Rotation angle in radians (counter-clockwise) applied around `rect` center.
-        /// - `method`: Interpolation method used when sampling from the source.
-        /// - `blend_mode`: Blending mode to apply while inserting the image.
+        /// Inserts `source` into `self` at the destination rectangle, with optional rotation
+        /// (radians, counter-clockwise around the rect center). Complement of `extract`.
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
@@ -661,21 +632,11 @@ pub fn Image(comptime T: type) type {
             return Transform(T).insert(self, source, rect, angle, method, blend_mode);
         }
 
-        /// Applies a geometric transform to the image using the specified interpolation method.
+        /// Warps the image through a Similarity, Affine, or Projective `transform`, sampling each
+        /// destination pixel from the corresponding source location. `out` is allocated to
+        /// `out_rows`×`out_cols` if empty.
         ///
-        /// This method warps an image using a geometric transform (Similarity, Affine, or Projective).
-        /// For each pixel in the output image, it applies the transform to find the corresponding
-        /// location in the source image and samples using the specified interpolation method.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the output image.
-        /// - `transform`: A geometric transform object (SimilarityTransform, AffineTransform, or ProjectiveTransform).
-        /// - `method`: Interpolation method for sampling pixels.
-        /// - `out`: Output image. If empty, will be allocated with specified dimensions.
-        /// - `out_rows`: Number of rows in the output image.
-        /// - `out_cols`: Number of columns in the output image.
-        ///
-        /// Example usage:
+        /// Example:
         /// ```zig
         /// const transform = try SimilarityTransform(f32).init(from_points, to_points);
         /// var warped: Image(T) = .empty;
@@ -870,21 +831,9 @@ pub fn Image(comptime T: type) type {
             Self.Integral.sharpen(&planes, self, out, radius);
         }
 
-        /// Automatically adjusts the contrast of an image by stretching the intensity range.
-        ///
-        /// This function analyzes the histogram of the image and remaps pixel values so that
-        /// the darkest pixels become black (0) and the brightest become white (255), with
-        /// intermediate values scaled proportionally.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the new image
-        /// - `cutoff`: Percentage of pixels to ignore at the extremes (0-100).
-        ///             For example, 2.0 ignores the darkest and brightest 2% of pixels,
-        ///             which helps remove outliers.
-        ///
-        /// Adjusts contrast by stretching the intensity range. Modifies in-place.
-        /// Parameters:
-        /// - `cutoff`: Fraction of pixels to ignore from each end (0.0 to 0.5)
+        /// Stretches the intensity range so the darkest/brightest pixels map to 0/255, modifying
+        /// the image in place. `cutoff` is the fraction of pixels [0, 0.5] to ignore from each
+        /// end of the histogram (helps reject outliers).
         pub fn autocontrast(self: Self, cutoff: f32) !void {
             return Enhancement(T).autocontrast(self, cutoff);
         }

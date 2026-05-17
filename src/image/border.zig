@@ -28,17 +28,7 @@ pub const BorderMode = enum {
 };
 
 /// Computes border-adjusted coordinates for a given position and border mode.
-/// Returns null when the result should be zero (out of bounds with .zero mode, or empty image).
-///
-/// Parameters:
-/// - `row`: Row index (can be negative or >= rows)
-/// - `col`: Column index (can be negative or >= cols)
-/// - `rows`: Total number of rows in the image
-/// - `cols`: Total number of columns in the image
-/// - `border`: The border handling mode to apply
-///
-/// Returns:
-/// - Adjusted coordinates within bounds, or null if pixel should be zero
+/// Returns null when the result should be zero (out of bounds with `.zero` mode, or empty image).
 pub fn computeCoords(
     row: isize,
     col: isize,
@@ -51,16 +41,8 @@ pub fn computeCoords(
     return .{ .row = r, .col = c };
 }
 
-/// Convenience function to resolve a single dimension index with border handling.
-/// Useful for 1D operations or when rows and columns are handled separately.
-///
-/// Parameters:
-/// - `idx`: Index to resolve (can be negative or >= length)
-/// - `length`: Total length of the dimension
-/// - `border`: The border handling mode to apply
-///
-/// Returns:
-/// - Adjusted index within bounds, or null if should be treated as zero
+/// Resolves a single-dimension index against `length` using the given border mode.
+/// Returns null when the position should map to a zero value.
 pub fn resolveIndex(idx: isize, length: isize, border: BorderMode) ?usize {
     return if (idx >= 0 and idx < length)
         @intCast(idx)

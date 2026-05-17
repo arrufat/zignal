@@ -70,16 +70,8 @@ fn countDecimalPlaces(val: anytype) u8 {
     return count;
 }
 
-/// Solves the assignment problem using the Hungarian algorithm (Kuhn-Munkres algorithm)
-///
-/// Finds the optimal one-to-one assignment that minimizes/maximizes total cost in O(n³) time.
-/// This implementation handles both square and rectangular cost matrices.
-///
-/// @param T The numeric type of the cost matrix (int or float)
-/// @param allocator Memory allocator for temporary data structures
-/// @param cost_matrix Matrix where element (i,j) is the cost/profit of assigning row i to column j
-/// @param policy Whether to minimize cost or maximize profit
-/// @return Optimal assignment that minimizes/maximizes total cost
+/// Solves the assignment problem with the Hungarian (Kuhn-Munkres) algorithm in O(n³), handling
+/// square and rectangular cost matrices and either a `.minimize` or `.maximize` policy.
 pub fn solveAssignmentProblem(
     comptime T: type,
     allocator: Allocator,

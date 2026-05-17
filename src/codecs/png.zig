@@ -1087,18 +1087,9 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
 
 // High-level API functions
 
-/// Load PNG file from disk and decode to specified pixel type.
-/// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (1/2/4/8-bit with transparency).
-/// Includes full Adam7 interlacing support for all formats. Automatically converts to desired output type.
-///
-/// Parameters:
-/// - T: Desired output pixel type (u8, Rgb, Rgba, etc.) - color conversion applied if needed
-/// - allocator: Memory allocator for image data
-/// - file_path: Path to PNG file
-///
-/// Returns: Decoded Image(T) with automatic color space conversion from source format
-///
-/// Errors: InvalidPngSignature, ImageTooLarge, OutOfMemory, and various PNG parsing errors
+/// Decodes a PNG byte stream into `Image(T)`, converting from the source color format as needed.
+/// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (1/2/4/8-bit
+/// with transparency), with full Adam7 interlacing.
 pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
     var png_state = try decode(allocator, png_data, limits);
     defer png_state.deinit(allocator);
@@ -1373,17 +1364,8 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     }
 }
 
-/// Save Image to PNG file with automatic format detection.
-/// Encodes to optimal PNG format based on input pixel type with automatic conversion if needed.
-/// Uses deflate compression with PNG row filtering for optimal file size.
-///
-/// Parameters:
-/// - T: Input image pixel type (u8->grayscale, Rgb->RGB, Rgba->RGBA, others converted to RGB)
-/// - allocator: Memory allocator for encoding operations
-/// - image: Source image to save
-/// - file_path: Output PNG file path
-///
-/// Errors: OutOfMemory, file creation/write errors, encoding errors
+/// Encodes `image` to a PNG file at `file_path` using deflate compression with row filtering.
+/// Output color format is chosen from `T`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
