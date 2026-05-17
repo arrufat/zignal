@@ -7,6 +7,12 @@
 //! - Geometric transforms (resize, rotate, crop, flip)
 //! - Filters (blur, sharpen, edge detection)
 //! - Views for zero-copy sub-image operations
+//!
+//! ## Aliasing contract
+//!
+//! Input and output images must be fully disjoint, unless a function documents
+//! in-place support. Partial overlap is undefined behavior, silently corrupts
+//! the output, and is not checked at runtime.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
