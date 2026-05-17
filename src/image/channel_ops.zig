@@ -180,9 +180,9 @@ pub fn resizePlaneBilinearU8(
             const br = @as(i32, src[y1 * src_cols + x1]);
 
             // Bilinear interpolation using integer arithmetic
-            const top = tl * (s - @as(i32, @intCast(fx))) + tr * @as(i32, @intCast(fx));
-            const bottom = bl * (s - @as(i32, @intCast(fx))) + br * @as(i32, @intCast(fx));
-            const result = @divTrunc(top * (s - @as(i32, @intCast(fy))) + bottom * @as(i32, @intCast(fy)), s * s);
+            const top = tl * (s - fx) + tr * fx;
+            const bottom = bl * (s - fx) + br * fx;
+            const result = @divTrunc(top * (s - fy) + bottom * fy, s * s);
 
             dst[r * dst_cols + c] = meta.clamp(u8, result);
         }

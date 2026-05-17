@@ -143,11 +143,11 @@ test "Shen-Castan with different b parameters" {
 
     for (0..40) |r| {
         for (0..40) |c| {
-            const dr = @as(f32, @floatFromInt(r)) - @as(f32, @floatFromInt(center_r));
-            const dc = @as(f32, @floatFromInt(c)) - @as(f32, @floatFromInt(center_c));
+            const dr = @as(f32, @floatFromInt(r)) - @as(f32, center_r);
+            const dc = @as(f32, @floatFromInt(c)) - @as(f32, center_c);
             const dist = @sqrt(dr * dr + dc * dc);
 
-            if (dist <= @as(f32, @floatFromInt(radius))) {
+            if (dist <= @as(f32, radius)) {
                 img.at(r, c).* = 200;
             } else {
                 // Add slight gradient to background

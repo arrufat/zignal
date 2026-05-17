@@ -50,7 +50,7 @@ pub const HoughTransform = struct {
         const sqrt_2 = math.sqrt(2.0);
 
         for (0..size) |t| {
-            const theta = @as(f64, @floatFromInt(t)) * math.pi / @as(f64, @floatFromInt(even_size));
+            const theta = @as(f64, @floatFromInt(t)) * math.pi / @as(f64, even_size);
             cos_table[t] = @trunc(scale * @cos(theta) / sqrt_2);
             sin_table[t] = @trunc(scale * @sin(theta) / sqrt_2);
         }
@@ -82,7 +82,7 @@ pub const HoughTransform = struct {
         const size_minus_one: i32 = @intCast(self.size - 1);
         const box_t: i32 = @intCast(box.t);
         const box_l: i32 = @intCast(box.l);
-        const offset: i32 = @round(((1 << 16) * @as(f64, @floatFromInt(self.even_size)) / 4.0));
+        const offset: i32 = @round(((1 << 16) * @as(f64, self.even_size) / 4.0));
 
         // Use a local slice for faster access and to avoid bounds checks in the hot loop
         const cos_table = self.cos_table;

@@ -105,8 +105,8 @@ pub fn clamp(comptime T: type, value: anytype) T {
                     const min = if (int_info.signedness == .unsigned)
                         0.0
                     else
-                        @as(f64, @floatFromInt(std.math.minInt(T)));
-                    const max = @as(f64, @floatFromInt(std.math.maxInt(T)));
+                        @as(f64, std.math.minInt(T));
+                    const max = @as(f64, std.math.maxInt(T));
                     return @trunc(std.math.clamp(@round(as(f64, value)), min, max));
                 },
                 else => @compileError("clamp only supports numeric inputs, got: " ++ @typeName(ValueType)),
@@ -189,8 +189,8 @@ pub fn safeCast(comptime T: type, value: anytype) !T {
                 .float, .comptime_float => {
                     if (!std.math.isFinite(value)) return error.Overflow;
                     const rounded = @round(value);
-                    const min_limit = @as(f64, @floatFromInt(std.math.minInt(T)));
-                    const max_limit = @as(f64, @floatFromInt(std.math.maxInt(T)));
+                    const min_limit: f64 = @floatFromInt(std.math.minInt(T));
+                    const max_limit: f64 = @floatFromInt(std.math.maxInt(T));
                     if (rounded < min_limit or rounded > max_limit) return error.Overflow;
                     // Special check for negative zero or small negative floats casting to unsigned
                     if (int_info.signedness == .unsigned and rounded < 0) return error.Overflow;

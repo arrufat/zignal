@@ -571,12 +571,12 @@ fn matrix_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject
 
         // Handle negative indices
         const actual_row: u32 = if (row < 0)
-            @intCast(@as(i64, @intCast(ptr.rows)) + row)
+            @intCast(@as(i64, ptr.rows) + row)
         else
             @intCast(row);
 
         const actual_col: u32 = if (col < 0)
-            @intCast(@as(i64, @intCast(ptr.cols)) + col)
+            @intCast(@as(i64, ptr.cols) + col)
         else
             @intCast(col);
 
@@ -1459,7 +1459,7 @@ fn matrix_row_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const idx: u32 = if (params.idx < 0)
-        @intCast(@as(i64, @intCast(ptr.rows)) + params.idx)
+        @intCast(@as(i64, ptr.rows) + params.idx)
     else
         @intCast(params.idx);
 
@@ -1490,7 +1490,7 @@ fn matrix_col_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
     const idx: u32 = if (params.idx < 0)
-        @intCast(@as(i64, @intCast(ptr.cols)) + params.idx)
+        @intCast(@as(i64, ptr.cols) + params.idx)
     else
         @intCast(params.idx);
 

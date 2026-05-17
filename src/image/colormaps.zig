@@ -486,16 +486,16 @@ test "colormaps" {
         // 0 -> Roughly R=35, G=23, B=27 (from Polynomial)
         // coefficients[0] * 255
         const p0 = turbo_img.at(0, 0).*;
-        try testing.expectApproxEqAbs(@as(f32, 35.0), @as(f32, @floatFromInt(p0.r)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 23.0), @as(f32, @floatFromInt(p0.g)), 1.0);
-        try testing.expectApproxEqAbs(@as(f32, 27.0), @as(f32, @floatFromInt(p0.b)), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 35.0), @as(f32, p0.r), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 23.0), @as(f32, p0.g), 1.0);
+        try testing.expectApproxEqAbs(@as(f32, 27.0), @as(f32, p0.b), 1.0);
 
         // 255 -> Roughly R=144, G=13, B=0 (from Polynomial)
         const p255 = turbo_img.at(0, 255).*;
         // We use a larger tolerance for the end because summing coefficients might have error accumulation
-        try testing.expectApproxEqAbs(@as(f32, 144.0), @as(f32, @floatFromInt(p255.r)), 2.0);
-        try testing.expectApproxEqAbs(@as(f32, 13.0), @as(f32, @floatFromInt(p255.g)), 2.0);
-        try testing.expectApproxEqAbs(@as(f32, 0.0), @as(f32, @floatFromInt(p255.b)), 2.0);
+        try testing.expectApproxEqAbs(@as(f32, 144.0), @as(f32, p255.r), 2.0);
+        try testing.expectApproxEqAbs(@as(f32, 13.0), @as(f32, p255.g), 2.0);
+        try testing.expectApproxEqAbs(@as(f32, 0.0), @as(f32, p255.b), 2.0);
     }
 
     // Viridis

@@ -493,9 +493,9 @@ test "PCA on image color data using Point conversion" {
 
     for (image.data, 0..) |pixel, i| {
         // Convert RGB values (0-255) to normalized float (0-1)
-        color_matrix.at(i, 0).* = @as(f64, @floatFromInt(pixel.r)) / 255.0;
-        color_matrix.at(i, 1).* = @as(f64, @floatFromInt(pixel.g)) / 255.0;
-        color_matrix.at(i, 2).* = @as(f64, @floatFromInt(pixel.b)) / 255.0;
+        color_matrix.at(i, 0).* = @as(f64, pixel.r) / 255.0;
+        color_matrix.at(i, 1).* = @as(f64, pixel.g) / 255.0;
+        color_matrix.at(i, 2).* = @as(f64, pixel.b) / 255.0;
     }
 
     // Apply PCA to color data

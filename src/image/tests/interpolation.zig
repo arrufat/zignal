@@ -140,10 +140,10 @@ test "lanczos interpolation - exact pixels" {
 
     // Test positions away from edges (Lanczos needs 6x6 neighborhood)
     const val1 = img.interpolate(3, 3, .lanczos, .mirror);
-    try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(3, 3).*)), @as(f32, @floatFromInt(val1.?)), 1.0);
+    try expectApproxEqAbs(@as(f32, img.at(3, 3).*), @as(f32, val1.?), 1.0);
 
     const val2 = img.interpolate(5, 5, .lanczos, .mirror);
-    try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(5, 5).*)), @as(f32, @floatFromInt(val2.?)), 1.0);
+    try expectApproxEqAbs(@as(f32, img.at(5, 5).*), @as(f32, val2.?), 1.0);
 }
 
 test "mitchell interpolation - default parameters" {
@@ -154,11 +154,11 @@ test "mitchell interpolation - default parameters" {
     // Test with default Mitchell parameters (B=1/3, C=1/3)
     const val1 = img.interpolate(2, 2, .{ .mitchell = .{ .b = 1.0 / 3.0, .c = 1.0 / 3.0 } }, .mirror);
     // Mitchell at exact pixels should be very close but may have slight differences
-    try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(2, 2).*)), @as(f32, @floatFromInt(val1.?)), 1.0);
+    try expectApproxEqAbs(@as(f32, img.at(2, 2).*), @as(f32, val1.?), 1.0);
 
     // Test simplified syntax
     const val2 = img.interpolate(5, 5, .{ .mitchell = .default }, .mirror);
-    try expectApproxEqAbs(@as(f32, @floatFromInt(img.at(5, 5).*)), @as(f32, @floatFromInt(val2.?)), 1.0);
+    try expectApproxEqAbs(@as(f32, img.at(5, 5).*), @as(f32, val2.?), 1.0);
 }
 
 test "mitchell interpolation - custom parameters" {
@@ -575,7 +575,7 @@ test "extreme value edge cases" {
             // Lanczos at position (2,2)
             const val = img.interpolate(2, 2, method, .mirror);
             if (val) |v| {
-                try expectApproxEqAbs(@as(f32, 0), @as(f32, @floatFromInt(v)), 1.0);
+                try expectApproxEqAbs(@as(f32, 0), @as(f32, v), 1.0);
             }
         } else if (method == .nearest or method == .bilinear) {
             const val = img.interpolate(0, 0, method, .mirror);

@@ -690,9 +690,9 @@ fn buildQuantRecipLLM(divisors_out: *[64]u32, qtbl: *const [64]u8) void {
     // For LLM DCT (libjpeg-style), the output is scaled by 8
     // We need to divide by 8 * quantization value
     for (0..64) |idx| {
-        const q = @as(f64, @floatFromInt(qtbl[idx]));
+        const q = @as(f64, qtbl[idx]);
         const scale = 8.0; // Overall factor of 8 from the DCT
-        const recip_f = (@as(f64, @floatFromInt(1 << RECIP_SHIFT))) / (q * scale);
+        const recip_f = (@as(f64, 1 << RECIP_SHIFT)) / (q * scale);
         const recip_u: u32 = @round(@max(0.0, @min(4_294_967_295.0, recip_f)));
         divisors_out[idx] = recip_u;
     }
@@ -967,7 +967,7 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
                     const ix = @min(cols - 1, bc * 8 + x);
                     const v: u8 = bytes[iy * cols + ix];
                     // Convert to fixed-point, center at 128
-                    block[y * 8 + x] = @as(i32, @intCast(v)) - 128;
+                    block[y * 8 + x] = @as(i32, v) - 128;
                 }
             }
             try encodeBlock(&block, &ql_recip, &ew, &dc, &ac, &prev_dc);
@@ -1421,13 +1421,13 @@ pub const JpegState = struct {
                 var j: usize = 0;
                 while (j < count) : (j += 1) {
                     // Check for invalid code (all 1s)
-                    if (code == (@as(u17, @intCast(1)) << (@as(u5, @intCast(i)) + 1)) - 1) {
+                    if (code == (@as(u17, 1) << (@as(u5, @intCast(i)) + 1)) - 1) {
                         return error.InvalidHuffmanTable;
                     }
 
                     const byte = huffval[huffval_index];
                     huffval_index += 1;
-                    try code_map.put(self.allocator, .{ .length_minus_one = @as(u4, @intCast(i)), .code = code }, byte);
+                    try code_map.put(self.allocator, .{ .length_minus_one = @intCast(i), .code = code }, byte);
 
                     // Build fast lookup table for codes <= 9 bits
                     if (i + 1 <= 9) {
@@ -1436,7 +1436,7 @@ pub const JpegState = struct {
                         for (0..num_indexes) |index| {
                             std.debug.assert(fast_table[first_index + index] == 255);
                             fast_table[first_index + index] = byte;
-                            fast_size[first_index + index] = @as(u5, @intCast(i + 1));
+                            fast_size[first_index + index] = @intCast(i + 1);
                         }
                     }
 
@@ -2659,7 +2659,7 @@ fn dequantizeAllBlocks(state: *JpegState) !void {
             const quant_table = state.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
 
             for (0..64) |i| {
-                block_set[comp_idx][i] *= @as(i32, @intCast(quant_table[i]));
+                block_set[comp_idx][i] *= @as(i32, quant_table[i]);
             }
         }
     }
