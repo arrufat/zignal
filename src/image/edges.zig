@@ -460,7 +460,7 @@ fn computeAdaptiveGradients(
     const gray_masked_buf = try allocator.alloc(f32, plane_size);
     defer allocator.free(gray_masked_buf);
     for (0..plane_size) |i| {
-        gray_masked_buf[i] = gray.data[i] * @as(f32, @floatFromInt(bli.data[i]));
+        gray_masked_buf[i] = gray.data[i] * @as(f32, bli.data[i]);
     }
     const gray_masked: Image(f32) = .initFromSlice(rows, cols, gray_masked_buf);
     var masked_planes: Image(f32).Integral.Planes = .init();

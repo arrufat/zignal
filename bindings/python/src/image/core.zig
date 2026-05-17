@@ -775,7 +775,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                     }
                 }
             }
-            const mse = sum / (@as(f64, @floatFromInt(img1.rows * img1.cols)) * channels);
+            const mse = sum / (@as(f64, img1.rows * img1.cols) * channels);
             if (mse == 0.0) {
                 return std.math.inf(f64);
             }

@@ -109,7 +109,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     if (DestType == SrcType) return source;
 
     // Scalar <-> Scalar
-    if (SrcType == u8 and @typeInfo(DestType) == .float) return @as(DestType, @floatFromInt(source)) / @as(DestType, 255.0);
+    if (SrcType == u8 and @typeInfo(DestType) == .float) return @as(DestType, source) / @as(DestType, 255.0);
     if (@typeInfo(SrcType) == .float and DestType == u8) {
         // Use f64 for precision with smaller floats, but SrcType if it's larger.
         const P = if (@typeInfo(SrcType).float.bits < 64) f64 else SrcType;
@@ -303,9 +303,9 @@ pub fn Rgb(comptime T: type) type {
                 return .{ .r = r, .g = g, .b = b };
             } else {
                 return .{
-                    .r = @as(T, @floatFromInt(r)) / 255.0,
-                    .g = @as(T, @floatFromInt(g)) / 255.0,
-                    .b = @as(T, @floatFromInt(b)) / 255.0,
+                    .r = @as(T, r) / 255.0,
+                    .g = @as(T, g) / 255.0,
+                    .b = @as(T, b) / 255.0,
                 };
             }
         }
@@ -366,9 +366,9 @@ pub fn Rgb(comptime T: type) type {
                 u8 => switch (U) {
                     u8 => self,
                     else => .{
-                        .r = @as(U, @floatFromInt(self.r)) / 255,
-                        .g = @as(U, @floatFromInt(self.g)) / 255,
-                        .b = @as(U, @floatFromInt(self.b)) / 255,
+                        .r = @as(U, self.r) / 255,
+                        .g = @as(U, self.g) / 255,
+                        .b = @as(U, self.b) / 255,
                     },
                 },
                 else => switch (U) {
@@ -419,10 +419,10 @@ pub fn Rgba(comptime T: type) type {
                 return .{ .r = r, .g = g, .b = b, .a = a };
             } else {
                 return .{
-                    .r = @as(T, @floatFromInt(r)) / 255.0,
-                    .g = @as(T, @floatFromInt(g)) / 255.0,
-                    .b = @as(T, @floatFromInt(b)) / 255.0,
-                    .a = @as(T, @floatFromInt(a)) / 255.0,
+                    .r = @as(T, r) / 255.0,
+                    .g = @as(T, g) / 255.0,
+                    .b = @as(T, b) / 255.0,
+                    .a = @as(T, a) / 255.0,
                 };
             }
         }
@@ -446,7 +446,7 @@ pub fn Rgba(comptime T: type) type {
         pub fn fade(self: Rgba(T), alpha: f32) Rgba(T) {
             const scale = clamp(alpha, 0, 1);
             if (T == u8) {
-                const new_a: u8 = @trunc(@as(f32, @floatFromInt(self.a)) * scale);
+                const new_a: u8 = @trunc(@as(f32, self.a) * scale);
                 return .{ .r = self.r, .g = self.g, .b = self.b, .a = new_a };
             } else {
                 const s: T = @as(T, scale);
@@ -485,10 +485,10 @@ pub fn Rgba(comptime T: type) type {
                 u8 => switch (U) {
                     u8 => self,
                     else => .{
-                        .r = @as(U, @floatFromInt(self.r)) / 255,
-                        .g = @as(U, @floatFromInt(self.g)) / 255,
-                        .b = @as(U, @floatFromInt(self.b)) / 255,
-                        .a = @as(U, @floatFromInt(self.a)) / 255,
+                        .r = @as(U, self.r) / 255,
+                        .g = @as(U, self.g) / 255,
+                        .b = @as(U, self.b) / 255,
+                        .a = @as(U, self.a) / 255,
                     },
                 },
                 else => switch (U) {
@@ -547,7 +547,7 @@ pub fn Gray(comptime T: type) type {
             return switch (T) {
                 u8 => switch (U) {
                     u8 => .{ .y = self.y },
-                    else => .{ .y = @as(U, @floatFromInt(self.y)) / 255 },
+                    else => .{ .y = @as(U, self.y) / 255 },
                 },
                 else => switch (U) {
                     u8 => .{ .y = @round(255 * clamp(self.y, 0, 1)) },
@@ -955,9 +955,9 @@ pub fn Ycbcr(comptime T: type) type {
                 u8 => switch (U) {
                     u8 => self,
                     else => .{
-                        .y = @as(U, @floatFromInt(self.y)) / 255,
-                        .cb = (@as(U, @floatFromInt(self.cb)) - 128) / 255,
-                        .cr = (@as(U, @floatFromInt(self.cr)) - 128) / 255,
+                        .y = @as(U, self.y) / 255,
+                        .cb = (@as(U, self.cb) - 128) / 255,
+                        .cr = (@as(U, self.cr) - 128) / 255,
                     },
                 },
                 else => switch (U) {
@@ -1016,9 +1016,9 @@ fn rgbToYcbcr(comptime T: type, rgb: Rgb(T)) Ycbcr(T) {
 /// Returns a value in the range [0.0, 1.0].
 pub fn rgbLuma(r: anytype, g: anytype, b: anytype) f64 {
     const T = @TypeOf(r);
-    const r_f: f64 = if (T == u8) @as(f64, @floatFromInt(r)) / 255.0 else @floatCast(r);
-    const g_f: f64 = if (T == u8) @as(f64, @floatFromInt(g)) / 255.0 else @floatCast(g);
-    const b_f: f64 = if (T == u8) @as(f64, @floatFromInt(b)) / 255.0 else @floatCast(b);
+    const r_f: f64 = if (T == u8) @as(f64, r) / 255.0 else @floatCast(r);
+    const g_f: f64 = if (T == u8) @as(f64, g) / 255.0 else @floatCast(g);
+    const b_f: f64 = if (T == u8) @as(f64, b) / 255.0 else @floatCast(b);
     return luma_r * r_f + luma_g * g_f + luma_b * b_f;
 }
 
@@ -1760,9 +1760,9 @@ test "100 random colors" {
         const rgb_from_ycbcr = rgb.as(f64).to(.ycbcr).to(.rgb).as(u8);
         try expectEqualDeep(rgb, rgb_from_ycbcr);
         const rgb_from_ycbcr2 = rgb.to(.ycbcr).to(.rgb);
-        try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.r)), @as(f32, @floatFromInt(rgb_from_ycbcr2.r)), 1);
-        try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.g)), @as(f32, @floatFromInt(rgb_from_ycbcr2.g)), 1);
-        try expectApproxEqAbs(@as(f32, @floatFromInt(rgb.b)), @as(f32, @floatFromInt(rgb_from_ycbcr2.b)), 1);
+        try expectApproxEqAbs(@as(f32, rgb.r), @as(f32, rgb_from_ycbcr2.r), 1);
+        try expectApproxEqAbs(@as(f32, rgb.g), @as(f32, rgb_from_ycbcr2.g), 1);
+        try expectApproxEqAbs(@as(f32, rgb.b), @as(f32, rgb_from_ycbcr2.b), 1);
         const rgb_from_inv = rgb.invert().invert();
         try expectEqualDeep(rgb, rgb_from_inv);
     }

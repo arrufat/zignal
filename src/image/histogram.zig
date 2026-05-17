@@ -521,7 +521,7 @@ const stats = struct {
         for (bins, 0..) |count, value| {
             if (count > 0) {
                 const diff = @as(f64, @floatFromInt(value)) - mean_val;
-                sum_sq_diff += diff * diff * @as(f64, @floatFromInt(count));
+                sum_sq_diff += diff * diff * @as(f64, count);
                 total += count;
             }
         }
@@ -547,7 +547,7 @@ const stats = struct {
         for (bins, 0..) |count, value| {
             if (count > 0) {
                 const diff = (@as(f64, @floatFromInt(value)) - mean_val) / std_dev;
-                sum_cub_diff += diff * diff * diff * @as(f64, @floatFromInt(count));
+                sum_cub_diff += diff * diff * diff * @as(f64, count);
                 total += count;
             }
         }
@@ -569,7 +569,7 @@ const stats = struct {
         for (bins, 0..) |count, value| {
             if (count > 0) {
                 const diff = (@as(f64, @floatFromInt(value)) - mean_val) / std_dev;
-                sum_four_diff += diff * diff * diff * diff * @as(f64, @floatFromInt(count));
+                sum_four_diff += diff * diff * diff * diff * @as(f64, count);
                 total += count;
             }
         }
@@ -649,7 +649,7 @@ const stats = struct {
 
         for (bins) |count| {
             if (count > 0) {
-                const p = @as(f64, @floatFromInt(count)) / total_f;
+                const p = @as(f64, count) / total_f;
                 ent -= p * std.math.log2(p);
             }
         }

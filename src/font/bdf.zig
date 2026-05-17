@@ -400,8 +400,8 @@ fn convertToBitmapFont(
     bitmap_data: []u8,
     all_ascii: bool,
 ) !BitmapFont {
-    const char_width = @as(u32, @intCast(@abs(font.bbox_width)));
-    const char_height = @as(u32, @intCast(@abs(font.bbox_height)));
+    const char_width = @as(u32, @abs(font.bbox_width));
+    const char_height = @as(u32, @abs(font.bbox_height));
 
     if (all_ascii and glyphs.len > 0) {
         // ASCII font - determine range
@@ -932,7 +932,7 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
     var max_height: u16 = if (font.char_height == 0) height else font.char_height;
 
     // Use stored font_ascent if available, otherwise estimate
-    const font_ascent = font.font_ascent orelse @as(i16, @intCast(height));
+    const font_ascent = font.font_ascent orelse @as(i16, height);
 
     if (font.glyph_data) |glyphs| {
         // Calculate actual BDF coordinates using the original font_ascent
@@ -941,7 +941,7 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
             max_height = @max(max_height, glyph.height);
 
             // Reverse the transformation: bdf_y_offset = font_ascent - (internal_y_offset + height)
-            const bdf_y_offset = font_ascent - (glyph.y_offset + @as(i16, @intCast(glyph.height)));
+            const bdf_y_offset = font_ascent - (glyph.y_offset + @as(i16, glyph.height));
             min_y_offset = @min(min_y_offset, bdf_y_offset);
             min_x_offset = @min(min_x_offset, glyph.x_offset);
         }
@@ -990,10 +990,10 @@ fn writeBdfGlyph(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFon
     };
 
     // Use stored font_ascent if available, otherwise estimate
-    const font_ascent = font.font_ascent orelse @as(i16, @intCast(font.char_height));
+    const font_ascent = font.font_ascent orelse @as(i16, font.char_height);
 
     // Reverse the y_offset transformation
-    const bdf_y_offset = font_ascent - (glyph_info.y_offset + @as(i16, @intCast(glyph_info.height)));
+    const bdf_y_offset = font_ascent - (glyph_info.y_offset + @as(i16, glyph_info.height));
 
     const swidth_line = try std.fmt.allocPrint(allocator, "SWIDTH {d} 0\n", .{glyph_info.device_width * 72});
     defer allocator.free(swidth_line);

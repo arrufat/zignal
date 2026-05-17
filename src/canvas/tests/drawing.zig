@@ -90,7 +90,7 @@ test "thick lines have correct width" {
         }
 
         // Draw horizontal line in the middle
-        const y = @as(f32, @floatFromInt(height / 2));
+        const y = @as(f32, height / 2);
         canvas.drawLine(.init(.{ 50, y }), .init(.{ 150, y }), color, @intCast(line_width), .fast);
 
         // Measure actual width at several points along the line
@@ -422,8 +422,8 @@ test "antialiased vs solid fill coverage" {
     var smooth_coverage: f32 = 0;
 
     for (img_solid.data, img_smooth.data) |p1, p2| {
-        solid_coverage += @as(f32, @floatFromInt(255 - p1.r));
-        smooth_coverage += @as(f32, @floatFromInt(255 - p2.r));
+        solid_coverage += @as(f32, 255 - p1.r);
+        smooth_coverage += @as(f32, 255 - p2.r);
     }
 
     // Antialiased version should have similar total coverage

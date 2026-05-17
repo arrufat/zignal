@@ -151,11 +151,11 @@ pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
 /// For example, an 8x8 character has pixels at positions 0-7, so bounds are (0,0) to (8,8)
 pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
     var width: f32 = 0;
-    var height: f32 = @as(f32, @floatFromInt(self.char_height)) * scale;
+    var height: f32 = @as(f32, self.char_height) * scale;
     var current_line_width: f32 = 0;
     var lines: f32 = 1;
 
-    const char_height_scaled = @as(f32, @floatFromInt(self.char_height)) * scale;
+    const char_height_scaled = @as(f32, self.char_height) * scale;
 
     var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (utf8_iter.nextCodepoint()) |codepoint| {
@@ -165,7 +165,7 @@ pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f
             lines += 1;
         } else {
             const char_advance = self.getCharAdvanceWidth(codepoint);
-            current_line_width += @as(f32, @floatFromInt(char_advance)) * scale;
+            current_line_width += @as(f32, char_advance) * scale;
         }
     }
     width = @max(width, current_line_width);
@@ -193,7 +193,7 @@ pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectan
 
     var x: f32 = 0;
     var y: f32 = 0;
-    const char_height_scaled = @as(f32, @floatFromInt(self.char_height)) * scale;
+    const char_height_scaled = @as(f32, self.char_height) * scale;
 
     var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (utf8_iter.nextCodepoint()) |codepoint| {
@@ -208,10 +208,10 @@ pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectan
 
         if (tight.has_pixels) {
             has_any_pixels = true;
-            const left = x + @as(f32, @floatFromInt(tight.bounds.l)) * scale;
-            const top = y + @as(f32, @floatFromInt(tight.bounds.t)) * scale;
-            const right = x + @as(f32, @floatFromInt(tight.bounds.r)) * scale;
-            const bottom = y + @as(f32, @floatFromInt(tight.bounds.b)) * scale;
+            const left = x + @as(f32, tight.bounds.l) * scale;
+            const top = y + @as(f32, tight.bounds.t) * scale;
+            const right = x + @as(f32, tight.bounds.r) * scale;
+            const bottom = y + @as(f32, tight.bounds.b) * scale;
 
             min_x = @min(min_x, left);
             max_x = @max(max_x, right);
@@ -220,7 +220,7 @@ pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectan
         }
 
         const char_advance = self.getCharAdvanceWidth(codepoint);
-        x += @as(f32, @floatFromInt(char_advance)) * scale;
+        x += @as(f32, char_advance) * scale;
     }
 
     if (!has_any_pixels) {
