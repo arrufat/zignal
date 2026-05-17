@@ -79,6 +79,14 @@ const lab_epsilon = 0.008856;
 const lab_kappa_div_116 = 7.787;
 const lab_delta = 16.0 / 116.0;
 
+// sRGB gamma transfer (IEC 61966-2-1)
+const srgb_linear_threshold = 0.0031308;
+const srgb_gamma_threshold = 0.04045;
+const srgb_gamma_offset = 0.055;
+const srgb_gamma_scale = 1.055;
+const srgb_linear_slope = 12.92;
+const srgb_gamma_exponent = 2.4;
+
 /// Returns true if `T` can be interpreted as a color by Zignal APIs.
 ///
 /// This includes:
@@ -1230,13 +1238,19 @@ fn hslToHsv(comptime T: type, hsl: Hsl(T)) Hsv(T) {
 /// Converts linear RGB component to sRGB gamma.
 fn linearToGamma(comptime T: type, c: T) T {
     comptime assert(@typeInfo(T) == .float);
-    return if (c > 0.0031308) 1.055 * pow(T, c, (1.0 / 2.4)) - 0.055 else c * 12.92;
+    return if (c > srgb_linear_threshold)
+        srgb_gamma_scale * pow(T, c, 1.0 / srgb_gamma_exponent) - srgb_gamma_offset
+    else
+        c * srgb_linear_slope;
 }
 
 /// Converts sRGB gamma component to linear RGB.
 fn gammaToLinear(comptime T: type, c: T) T {
     comptime assert(@typeInfo(T) == .float);
-    return if (c > 0.04045) pow(T, (c + 0.055) / 1.055, 2.4) else c / 12.92;
+    return if (c > srgb_gamma_threshold)
+        pow(T, (c + srgb_gamma_offset) / srgb_gamma_scale, srgb_gamma_exponent)
+    else
+        c / srgb_linear_slope;
 }
 
 /// Converts RGB to XYZ.
@@ -1267,38 +1281,25 @@ fn xyzToRgb(comptime T: type, xyz: Xyz(T)) Rgb(T) {
     };
 }
 
+/// CIELAB forward nonlinearity f(t) used by xyzToLab.
+fn labForward(comptime T: type, t: T) T {
+    return if (t > lab_epsilon) pow(T, t, 1.0 / 3.0) else lab_kappa_div_116 * t + lab_delta;
+}
+
 /// Converts XYZ to Lab.
 fn xyzToLab(comptime T: type, xyz: Xyz(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
-    var xn = xyz.x / d65_x;
-    var yn = xyz.y / d65_y;
-    var zn = xyz.z / d65_z;
-
-    if (xn > lab_epsilon) {
-        xn = pow(T, xn, 1.0 / 3.0);
-    } else {
-        xn = (lab_kappa_div_116 * xn) + lab_delta;
-    }
-
-    if (yn > lab_epsilon) {
-        yn = pow(T, yn, 1.0 / 3.0);
-    } else {
-        yn = (lab_kappa_div_116 * yn) + lab_delta;
-    }
-
-    if (zn > lab_epsilon) {
-        zn = pow(T, zn, 1.0 / 3.0);
-    } else {
-        zn = (lab_kappa_div_116 * zn) + lab_delta;
-    }
+    const fx = labForward(T, xyz.x / d65_x);
+    const fy = labForward(T, xyz.y / d65_y);
+    const fz = labForward(T, xyz.z / d65_z);
 
     return .{
         // L* is typically 0-100, but we only clamp to positive.
-        .l = @max(0, 116.0 * yn - 16.0),
+        .l = @max(0, 116.0 * fy - 16.0),
         // a* and b* are theoretically unbounded, though often within [-128, 127].
         // We remove the hard clamping to support wide-gamut colors.
-        .a = 500.0 * (xn - yn),
-        .b = 200.0 * (yn - zn),
+        .a = 500.0 * (fx - fy),
+        .b = 200.0 * (fy - fz),
     };
 }
 
@@ -1324,27 +1325,32 @@ fn labToXyz(comptime T: type, lab: Lab(T)) Xyz(T) {
     };
 }
 
+/// Shared (a,b) -> (chroma, hue°) conversion for Lab→Lch and Oklab→Oklch.
+fn cartesianToCylindrical(comptime T: type, a: T, b: T) struct { c: T, h: T } {
+    return .{
+        .c = @sqrt(a * a + b * b),
+        .h = @mod(std.math.radiansToDegrees(std.math.atan2(b, a)), 360.0),
+    };
+}
+
+/// Shared (chroma, hue°) -> (a, b) conversion for Lch→Lab and Oklch→Oklab.
+fn cylindricalToCartesian(comptime T: type, c: T, h: T) struct { a: T, b: T } {
+    const h_rad = std.math.degreesToRadians(h);
+    return .{ .a = c * @cos(h_rad), .b = c * @sin(h_rad) };
+}
+
 /// Converts Lab to LCh.
 fn labToLch(comptime T: type, lab: Lab(T)) Lch(T) {
     comptime assert(@typeInfo(T) == .float);
-    const c = @sqrt(lab.a * lab.a + lab.b * lab.b);
-    const h = std.math.radiansToDegrees(std.math.atan2(lab.b, lab.a));
-    return .{
-        .l = lab.l,
-        .c = c,
-        .h = @mod(h, 360.0),
-    };
+    const cyl = cartesianToCylindrical(T, lab.a, lab.b);
+    return .{ .l = lab.l, .c = cyl.c, .h = cyl.h };
 }
 
 /// Converts LCh to Lab.
 fn lchToLab(comptime T: type, lch: Lch(T)) Lab(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h_rad = std.math.degreesToRadians(lch.h);
-    return .{
-        .l = lch.l,
-        .a = lch.c * @cos(h_rad),
-        .b = lch.c * @sin(h_rad),
-    };
+    const cart = cylindricalToCartesian(T, lch.c, lch.h);
+    return .{ .l = lch.l, .a = cart.a, .b = cart.b };
 }
 
 /// Converts XYZ to LMS.
@@ -1410,26 +1416,15 @@ fn oklabToXyz(comptime T: type, oklab: Oklab(T)) Xyz(T) {
 /// Converts Oklab to Oklch.
 fn oklabToOklch(comptime T: type, oklab: Oklab(T)) Oklch(T) {
     comptime assert(@typeInfo(T) == .float);
-    const c = @sqrt(oklab.a * oklab.a + oklab.b * oklab.b);
-    const h = std.math.radiansToDegrees(std.math.atan2(oklab.b, oklab.a));
-
-    return .{
-        .l = oklab.l,
-        .c = c,
-        .h = @mod(h, 360.0),
-    };
+    const cyl = cartesianToCylindrical(T, oklab.a, oklab.b);
+    return .{ .l = oklab.l, .c = cyl.c, .h = cyl.h };
 }
 
 /// Converts Oklch to Oklab.
 fn oklchToOklab(comptime T: type, oklch: Oklch(T)) Oklab(T) {
     comptime assert(@typeInfo(T) == .float);
-    const h_rad = std.math.degreesToRadians(oklch.h);
-
-    return .{
-        .l = oklch.l,
-        .a = oklch.c * @cos(h_rad),
-        .b = oklch.c * @sin(h_rad),
-    };
+    const cart = cylindricalToCartesian(T, oklch.c, oklch.h);
+    return .{ .l = oklch.l, .a = cart.a, .b = cart.b };
 }
 
 /// Converts XYZ to XYB.
