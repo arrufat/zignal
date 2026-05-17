@@ -15,8 +15,8 @@ const png = @import("codecs.zig").png;
 const Rgb = @import("color.zig").Rgb(u8);
 const terminal = @import("terminal.zig");
 
-// Kitty protocol constants
-const max_chunk_size: usize = 4096; // Maximum payload size per escape sequence
+/// Maximum payload size per escape sequence
+const max_chunk_size: usize = 4096;
 
 /// Options for Kitty graphics protocol encoding
 pub const Options = struct {
@@ -30,11 +30,9 @@ pub const Options = struct {
     delete_after: bool = false,
     /// Enable chunking for increased reliability (Ghostty doesn't support it)
     enable_chunking: bool = false,
-    /// Display width in pixels
-    /// If null, uses image's natural width
+    /// Display width in pixels (null = image's natural width)
     width: ?u32 = null,
-    /// Display height in pixels
-    /// If null, uses image's natural height or calculates from width to preserve aspect ratio
+    /// Display height in pixels (null = aspect-preserved from width, or natural height)
     height: ?u32 = null,
     /// Interpolation method to use when scaling the image
     interpolation: Interpolation = .bilinear,
@@ -52,6 +50,13 @@ pub const Options = struct {
     };
 };
 
+fn writeControlHeader(output: *std.ArrayList(u8), gpa: Allocator, options: Options) !void {
+    try output.print(gpa, "a=T,f=100,q={d}", .{options.quiet});
+    if (options.image_id) |id| try output.print(gpa, ",i={d}", .{id});
+    if (options.placement_id) |id| try output.print(gpa, ",p={d}", .{id});
+    if (options.delete_after) try output.appendSlice(gpa, ",d=1");
+}
+
 /// Converts an image to Kitty graphics protocol format
 pub fn fromImage(
     comptime T: type,
@@ -63,68 +68,33 @@ pub fn fromImage(
     var scaled_image: ?Image(T) = null;
     defer if (scaled_image) |*img| img.deinit(gpa);
 
-    // Handle scaling with shared policy (preserve aspect ratio)
     const scale_factor = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
     if (@abs(scale_factor - 1.0) > 0.001) {
         scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
         image_to_encode = scaled_image.?;
     }
 
-    // Encode the (possibly scaled) image as PNG
     const png_data = try png.encode(T, gpa, image_to_encode, .default);
     defer gpa.free(png_data);
 
-    // Calculate base64 encoded size
     const encoder = std.base64.standard.Encoder;
-    const encoded_size = encoder.calcSize(png_data.len);
-
-    // Allocate buffer for base64 data
-    const base64_data = try gpa.alloc(u8, encoded_size);
+    const base64_data = try gpa.alloc(u8, encoder.calcSize(png_data.len));
     defer gpa.free(base64_data);
-
-    // Encode to base64
     _ = encoder.encode(base64_data, png_data);
 
-    // Build the output with proper escape sequences
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(gpa);
+    try output.ensureTotalCapacity(gpa, base64_data.len + 64);
 
-    // If chunking is disabled, send everything in one go
     if (!options.enable_chunking) {
-        // Write escape sequence start
         try output.appendSlice(gpa, "\x1b_G");
-
-        // Write control data
-        try output.appendSlice(gpa, "a=T");
-        try output.appendSlice(gpa, ",f=100");
-        const q_fmt = try std.fmt.allocPrint(gpa, ",q={d}", .{options.quiet});
-        defer gpa.free(q_fmt);
-        try output.appendSlice(gpa, q_fmt);
-
-        // Optional parameters
-        if (options.image_id) |id| {
-            const i_fmt = try std.fmt.allocPrint(gpa, ",i={d}", .{id});
-            defer gpa.free(i_fmt);
-            try output.appendSlice(gpa, i_fmt);
-        }
-        if (options.placement_id) |id| {
-            const p_fmt = try std.fmt.allocPrint(gpa, ",p={d}", .{id});
-            defer gpa.free(p_fmt);
-            try output.appendSlice(gpa, p_fmt);
-        }
-        if (options.delete_after) {
-            try output.appendSlice(gpa, ",d=1");
-        }
-
-        // Separator and payload
-        try output.appendSlice(gpa, ";");
+        try writeControlHeader(&output, gpa, options);
+        try output.append(gpa, ';');
         try output.appendSlice(gpa, base64_data);
         try output.appendSlice(gpa, "\x1b\\");
-
         return output.toOwnedSlice(gpa);
     }
 
-    // Process each chunk (original chunking logic)
     var offset: usize = 0;
     var chunk_index: usize = 0;
     while (offset < base64_data.len) : (chunk_index += 1) {
@@ -132,62 +102,19 @@ pub fn fromImage(
         const chunk_end = if (is_last)
             base64_data.len
         else
-            // Non-final chunks must be multiples of 4
+            // Non-final chunks must be multiples of 4 to keep base64 aligned
             offset + (max_chunk_size & ~@as(usize, 3));
         const chunk = base64_data[offset..chunk_end];
 
-        // Write escape sequence start
         try output.appendSlice(gpa, "\x1b_G");
-
-        // Write control data for first chunk
         if (chunk_index == 0) {
-            // Action: transmit and display
-            try output.appendSlice(gpa, "a=T");
-
-            // Format: PNG
-            try output.appendSlice(gpa, ",f=100");
-
-            // Quiet mode
-            const q_fmt = try std.fmt.allocPrint(gpa, ",q={d}", .{options.quiet});
-            defer gpa.free(q_fmt);
-            try output.appendSlice(gpa, q_fmt);
-
-            // Optional image ID
-            if (options.image_id) |id| {
-                const i_fmt = try std.fmt.allocPrint(gpa, ",i={d}", .{id});
-                defer gpa.free(i_fmt);
-                try output.appendSlice(gpa, i_fmt);
-            }
-
-            // Optional placement ID
-            if (options.placement_id) |id| {
-                const p_fmt = try std.fmt.allocPrint(gpa, ",p={d}", .{id});
-                defer gpa.free(p_fmt);
-                try output.appendSlice(gpa, p_fmt);
-            }
-
-            // Delete after display
-            if (options.delete_after) {
-                try output.appendSlice(gpa, ",d=1");
-            }
+            try writeControlHeader(&output, gpa, options);
+            if (!is_last) try output.appendSlice(gpa, ",m=1");
+        } else if (!is_last) {
+            try output.appendSlice(gpa, "m=1");
         }
-
-        // More data indicator (m=1 for continuation, m=0 or omitted for final)
-        if (!is_last) {
-            if (chunk_index == 0) {
-                try output.appendSlice(gpa, ",m=1");
-            } else {
-                try output.appendSlice(gpa, "m=1");
-            }
-        }
-
-        // Separator between control and payload
-        try output.appendSlice(gpa, ";");
-
-        // Write chunk data
+        try output.append(gpa, ';');
         try output.appendSlice(gpa, chunk);
-
-        // Write escape sequence end
         try output.appendSlice(gpa, "\x1b\\");
 
         offset = chunk_end;
@@ -198,13 +125,7 @@ pub fn fromImage(
 
 /// Detects if the terminal supports Kitty graphics protocol
 pub fn isSupported(io: std.Io) bool {
-    // Check if we're connected to a terminal
-    if (!terminal.isStdoutTty(io)) {
-        // Not a TTY, don't support Kitty for file output
-        return false;
-    }
-
-    // Try terminal detection first
+    if (!terminal.isStdoutTty(io)) return false;
     return terminal.isKittySupported(io) catch false;
 }
 
@@ -250,7 +171,7 @@ test "imageToKitty with options" {
     img.at(0, 0).* = 128;
 
     // Test with custom options
-    const options = Options{
+    const options: Options = .{
         .quiet = 2,
         .image_id = 42,
         .placement_id = 7,
@@ -284,11 +205,7 @@ test "imageToKitty with scaling" {
     }
 
     // Test scaling up to 16x16
-    const options = Options{
-        .width = 16,
-        .height = 16,
-        .interpolation = .bilinear,
-    };
+    const options: Options = .{ .width = 16, .height = 16 };
 
     const kitty_data = try fromImage(Rgb, img, allocator, options);
     defer allocator.free(kitty_data);
@@ -320,7 +237,7 @@ test "imageToKitty with chunking enabled" {
         }
     }
 
-    const options = Options{
+    const options: Options = .{
         .enable_chunking = true,
         .width = 512,
         .height = 512,
