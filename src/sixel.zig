@@ -53,15 +53,13 @@ pub const DitherMode = dither.Mode;
 /// Options for sixel encoding
 pub const Options = struct {
     /// Palette generation mode
-    palette: PaletteMode,
+    palette: PaletteMode = .{ .adaptive = .{ .max_colors = 256 } },
     /// Dithering algorithm to use
-    dither: DitherMode,
-    /// Target width (image will be scaled to fit, preserving aspect ratio)
-    /// If null, original width is preserved
-    width: ?u32,
-    /// Target height (image will be scaled to fit, preserving aspect ratio)
-    /// If null, original height is preserved
-    height: ?u32,
+    dither: DitherMode = .auto,
+    /// Target width (null = original width preserved, scaling fits aspect ratio)
+    width: ?u32 = null,
+    /// Target height (null = original height preserved, scaling fits aspect ratio)
+    height: ?u32 = null,
     /// Interpolation method to use when scaling the image
     interpolation: Interpolation = .nearest,
 
@@ -155,7 +153,6 @@ pub fn fromImageProfiled(
         total_start = monotonicNs();
     }
 
-    // Calculate scaling if needed
     var width = image.cols;
     var height = image.rows;
     const scale = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
@@ -164,7 +161,6 @@ pub fn fromImageProfiled(
         height = @trunc(@as(f32, @floatFromInt(height)) * scale);
     }
 
-    // Prepare palette based on mode
     var palette: [256]Rgb = undefined;
     var palette_size: usize = options.palette.size();
 
@@ -193,7 +189,6 @@ pub fn fromImageProfiled(
         p.palette_ns += monotonicNs() - palette_start;
     }
 
-    // Build lookup table for all palettes
     var lut_start: u64 = 0;
     if (profiler != null) lut_start = monotonicNs();
     const color_lut = PaletteLutCache.get(options.palette, palette[0..palette_size]);
@@ -201,7 +196,6 @@ pub fn fromImageProfiled(
         p.lut_ns += monotonicNs() - lut_start;
     }
 
-    // Determine dithering mode
     const dither_mode = switch (options.dither) {
         .auto => blk: {
             const total_pixels = std.math.mul(usize, width, height) catch std.math.maxInt(usize);
@@ -214,20 +208,18 @@ pub fn fromImageProfiled(
         else => options.dither,
     };
 
-    // Prepare image for fast sampling and optional dithering
-    const is_rgb = comptime std.meta.eql(@typeInfo(T), @typeInfo(Rgb));
+    const is_rgb = T == Rgb;
     const need_prepared_image = dither_mode != .none or scale != 1.0 or !is_rgb;
 
-    var prepared_img_opt: ?Image(Rgb) = null;
-    var prepared_img_ptr: ?*Image(Rgb) = null;
-    defer if (prepared_img_opt) |*img| img.deinit(gpa);
+    var prepared_img: ?Image(Rgb) = null;
+    defer if (prepared_img) |*img| img.deinit(gpa);
 
     if (need_prepared_image) {
         var convert_start: u64 = 0;
         if (profiler != null) convert_start = monotonicNs();
 
         if (scale == 1.0) {
-            prepared_img_opt = try image.convert(Rgb, gpa);
+            prepared_img = try image.convert(Rgb, gpa);
         } else {
             var scaled_img = try Image(Rgb).init(gpa, height, width);
             const inv_scale = 1.0 / scale;
@@ -242,7 +234,8 @@ pub fn fromImageProfiled(
                             break :blk convertColor(Rgb, pixel);
                         }
 
-                        // Fallback to clamped nearest-neighbor sample to avoid leaving pixels uninitialized.
+                        // Fallback to clamped nearest sample: interpolate can return null
+                        // for non-finite or out-of-range coords beyond what `.mirror` covers.
                         const clamped_col: isize = clamp(
                             @as(isize, @round(src_x)),
                             0,
@@ -261,15 +254,11 @@ pub fn fromImageProfiled(
                 }
             }
 
-            prepared_img_opt = scaled_img;
+            prepared_img = scaled_img;
         }
 
         if (profiler) |p| {
             p.scale_convert_ns += monotonicNs() - convert_start;
-        }
-
-        if (prepared_img_opt) |*img| {
-            prepared_img_ptr = img;
         }
     }
 
@@ -277,8 +266,9 @@ pub fn fromImageProfiled(
         var dither_start: u64 = 0;
         if (profiler != null) dither_start = monotonicNs();
 
-        const working_img = prepared_img_ptr orelse unreachable;
-        dither.apply(working_img.*, palette[0..palette_size], color_lut, dither_mode);
+        if (prepared_img) |*working_img| {
+            dither.apply(working_img.*, palette[0..palette_size], color_lut, dither_mode);
+        } else unreachable;
 
         if (profiler) |p| {
             p.dither_ns += monotonicNs() - dither_start;
@@ -306,29 +296,13 @@ pub fn fromImageProfiled(
     // black padding for images whose height is not a multiple of 6
     try output.print(gpa, "\x1bPq\"1;1;{d};{d}", .{ width, height });
 
-    // Define palette - unified approach
-
     var palette_emit_start: u64 = 0;
     if (profiler != null) palette_emit_start = monotonicNs();
 
-    for (0..palette_size) |i| {
-        const p = if (options.palette == .fixed_6x7x6) blk: {
-            // Calculate 6x7x6 color directly
-            const r_idx = i / 42;
-            const g_idx = (i % 42) / 6;
-            const b_idx = i % 6;
-            break :blk Rgb{
-                .r = @intCast((r_idx * 255 + 2) / 5),
-                .g = @intCast((g_idx * 255 + 3) / 6),
-                .b = @intCast((b_idx * 255 + 2) / 5),
-            };
-        } else palette[i];
-
+    for (palette[0..palette_size], 0..) |p, i| {
         const r_val = (@as(u32, p.r) * 100 + 127) / 255;
         const g_val = (@as(u32, p.g) * 100 + 127) / 255;
         const b_val = (@as(u32, p.b) * 100 + 127) / 255;
-
-        // Build palette definition
         try output.print(gpa, "#{d};2;{d};{d};{d}", .{ i, r_val, g_val, b_val });
     }
 
@@ -336,7 +310,6 @@ pub fn fromImageProfiled(
         p.palette_emit_ns += monotonicNs() - palette_emit_start;
     }
 
-    // Encode pixels as sixels
     var encode_start: u64 = 0;
     if (profiler != null) encode_start = monotonicNs();
 
@@ -371,20 +344,17 @@ pub fn fromImageProfiled(
             color_generation_counter = 1;
         }
 
-        // Prepare row slices for fast access
         var row_slices: [6][]const Rgb = undefined;
         const limit = @min(6, height - row);
 
         for (0..limit) |i| {
             const r = row + i;
-            if (prepared_img_ptr) |ptr| {
+            if (prepared_img) |*ptr| {
                 const offset = r * ptr.stride;
                 row_slices[i] = ptr.data[offset .. offset + ptr.cols];
-            } else {
-                if (comptime is_rgb) {
-                    const offset = r * image.stride;
-                    row_slices[i] = image.data[offset .. offset + image.cols];
-                }
+            } else if (comptime is_rgb) {
+                const offset = r * image.stride;
+                row_slices[i] = image.data[offset .. offset + image.cols];
             }
         }
 
@@ -433,14 +403,10 @@ pub fn fromImageProfiled(
             }
         }
 
-        var current_color: usize = std.math.maxInt(usize);
         for (0..palette_size) |c| {
             if (!colors_used[c]) continue;
 
-            if (c != current_color) {
-                current_color = c;
-                try output.print(gpa, "#{d}", .{current_color});
-            }
+            try output.print(gpa, "#{d}", .{c});
 
             var row_buffer: [max_supported_width]u8 = undefined;
             if (width > row_buffer.len) return error.ImageTooWide;
@@ -491,7 +457,6 @@ pub fn fromImageProfiled(
         }
     }
 
-    // End sixel sequence with ST
     try output.appendSlice(gpa, "\x1b\\");
 
     if (profiler) |p| {
@@ -538,13 +503,8 @@ const PaletteLutCache = struct {
 
 /// Checks if the terminal supports sixel graphics
 pub fn isSupported(io: std.Io) bool {
-    // Check if we're connected to a terminal
-    if (!terminal.isStdoutTty(io)) {
-        // Not a TTY, allow sixel for file output
-        return true;
-    }
-
-    // We're in a terminal, so perform actual detection
+    // Not a TTY → assume sixel is fine (file output, e.g. piping to a sixel viewer).
+    if (!terminal.isStdoutTty(io)) return true;
     return terminal.isSixelSupported(io) catch false;
 }
 
