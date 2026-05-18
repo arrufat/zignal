@@ -68,6 +68,7 @@ pub const Interpolation = @import("image.zig").Interpolation;
 pub const ImageFormat = @import("image.zig").ImageFormat;
 pub const DisplayFormat = @import("image.zig").DisplayFormat;
 pub const BorderMode = @import("image.zig").BorderMode;
+pub const RotationBounds = @import("image.zig").RotationBounds;
 pub const MotionBlur = @import("image.zig").MotionBlur;
 pub const ShenCastan = @import("image.zig").ShenCastan;
 pub const HoughTransform = @import("image.zig").HoughTransform;

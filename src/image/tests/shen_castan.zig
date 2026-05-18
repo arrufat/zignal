@@ -38,7 +38,7 @@ test "Shen-Castan edge detection basic functionality" {
     opts.window_size = 7;
     opts.high_ratio = 0.9; // More sensitive - top 10% instead of top 1%
     opts.low_rel = 0.3; // Lower threshold for hysteresis
-    try filter.shenCastan(img, allocator, opts, edges);
+    try filter.shenCastan(img, edges, allocator, opts);
 
     // Check that edges were detected at the square boundaries
     // The exact edge pixels will depend on the algorithm parameters,
@@ -69,20 +69,20 @@ test "Shen-Castan parameter validation" {
     const filter = Edges(u8);
 
     // Test invalid b_param (out of range)
-    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, allocator, .{ .smooth = 0.0 }, edges));
-    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, allocator, .{ .smooth = 1.0 }, edges));
-    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, allocator, .{ .smooth = -0.5 }, edges));
+    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, edges, allocator, .{ .smooth = 0.0 }));
+    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, edges, allocator, .{ .smooth = 1.0 }));
+    try testing.expectError(error.InvalidBParameter, filter.shenCastan(img, edges, allocator, .{ .smooth = -0.5 }));
 
     // Test invalid thresholds (ratio-based)
-    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, allocator, .{ .high_ratio = 0.0 }, edges));
-    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, allocator, .{ .high_ratio = 1.0 }, edges));
-    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, allocator, .{ .low_rel = 0.0 }, edges));
+    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, edges, allocator, .{ .high_ratio = 0.0 }));
+    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, edges, allocator, .{ .high_ratio = 1.0 }));
+    try testing.expectError(error.InvalidThreshold, filter.shenCastan(img, edges, allocator, .{ .low_rel = 0.0 }));
 
     // Test invalid window size (even number)
-    try testing.expectError(error.WindowSizeMustBeOdd, filter.shenCastan(img, allocator, .{ .window_size = 6 }, edges));
+    try testing.expectError(error.WindowSizeMustBeOdd, filter.shenCastan(img, edges, allocator, .{ .window_size = 6 }));
 
     // Test window size too small (< 3)
-    try testing.expectError(error.WindowSizeTooSmall, filter.shenCastan(img, allocator, .{ .window_size = 1 }, edges));
+    try testing.expectError(error.WindowSizeTooSmall, filter.shenCastan(img, edges, allocator, .{ .window_size = 1 }));
 }
 
 test "Shen-Castan on gradient image" {
@@ -115,7 +115,7 @@ test "Shen-Castan on gradient image" {
     opts.window_size = 7;
     opts.high_ratio = 0.8; // Even more sensitive - top 20% of edges
     opts.low_rel = 0.3;
-    try filter.shenCastan(img, allocator, opts, edges);
+    try filter.shenCastan(img, edges, allocator, opts);
 
     // Should detect the sharp edge around column 25
     var edge_at_boundary: bool = false;
@@ -161,12 +161,12 @@ test "Shen-Castan with different b parameters" {
     // Test with low b (more smoothing)
     var edges_low_b = try Image(u8).initLike(allocator, img);
     defer edges_low_b.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.7, .window_size = 7, .high_ratio = 0.9 }, edges_low_b);
+    try filter.shenCastan(img, edges_low_b, allocator, .{ .smooth = 0.7, .window_size = 7, .high_ratio = 0.9 });
 
     // Test with high b (less smoothing)
     var edges_high_b = try Image(u8).initLike(allocator, img);
     defer edges_high_b.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.9, .window_size = 7, .high_ratio = 0.9 }, edges_high_b);
+    try filter.shenCastan(img, edges_high_b, allocator, .{ .smooth = 0.9, .window_size = 7, .high_ratio = 0.9 });
 
     // Count edges for each
     var count_low_b: usize = 0;
@@ -211,7 +211,7 @@ test "Shen-Castan on RGB image" {
 
     const filter = Edges(Rgb);
     // Use lower thresholds for RGB edge detection
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 }, edges);
+    try filter.shenCastan(img, edges, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 });
 
     // Should detect edges at the color boundaries
     var edge_count: usize = 0;
@@ -257,12 +257,12 @@ test "Shen-Castan threshold monotonicity" {
     // Test with low thresholds
     var edges_low = try Image(u8).initLike(allocator, img);
     defer edges_low.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.95, .low_rel = 0.5 }, edges_low);
+    try filter.shenCastan(img, edges_low, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.95, .low_rel = 0.5 });
 
     // Test with high thresholds
     var edges_high = try Image(u8).initLike(allocator, img);
     defer edges_high.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.999, .low_rel = 0.5 }, edges_high);
+    try filter.shenCastan(img, edges_high, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.999, .low_rel = 0.5 });
 
     // Count edges
     var count_low: usize = 0;
@@ -306,7 +306,7 @@ test "Shen-Castan diagonal edge detection" {
     defer edges.deinit(allocator);
 
     const filter = Edges(u8);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 }, edges);
+    try filter.shenCastan(img, edges, allocator, .{ .smooth = 0.8, .window_size = 7, .high_ratio = 0.9 });
 
     // Check that diagonal edge is detected
     var diagonal_detected = false;
@@ -346,12 +346,12 @@ test "Shen-Castan window size effect" {
     // Test with small window (should be more sensitive to noise)
     var edges_small = try Image(u8).initLike(allocator, img);
     defer edges_small.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 3, .high_ratio = 0.9 }, edges_small);
+    try filter.shenCastan(img, edges_small, allocator, .{ .smooth = 0.8, .window_size = 3, .high_ratio = 0.9 });
 
     // Test with larger window (should be more robust to noise)
     var edges_large = try Image(u8).initLike(allocator, img);
     defer edges_large.deinit(allocator);
-    try filter.shenCastan(img, allocator, .{ .smooth = 0.8, .window_size = 11, .high_ratio = 0.9 }, edges_large);
+    try filter.shenCastan(img, edges_large, allocator, .{ .smooth = 0.8, .window_size = 11, .high_ratio = 0.9 });
 
     // Both should detect some edges
     var count_small: usize = 0;

@@ -18,20 +18,20 @@ pub fn main(init: std.process.Init) !void {
     defer image.deinit(init.gpa);
 
     std.debug.print("Detecting edges...\n", .{});
-    var gray = try image.convert(u8, init.gpa);
+    var gray = try image.convert(init.gpa, u8);
     defer gray.deinit(init.gpa);
     var edges = try Image(u8).init(init.gpa, image.rows, image.cols);
     defer edges.deinit(init.gpa);
 
-    try gray.canny(init.gpa, 2.0, 25, 75, edges);
+    try gray.canny(edges, init.gpa, 2.0, 25, 75);
     // Custom "Human-Like" Shen-Castan parameters
-    // try gray.shenCastan(init.gpa, .{
+    // try gray.shenCastan(edges,init.gpa, .{
     //     .smooth = 0.5, // Moderate smoothing (balance detail/structure)
     //     .window_size = 13, // Medium window
     //     .high_ratio = 0.92, // More sensitive start threshold
     //     .low_rel = 0.4, // Continue lines even if faint
     //     .use_nms = true, // Clean single-pixel lines
-    // }, edges);
+    // });
 
     // Save edges for reference
     try edges.save(init.io, init.gpa, "trace_edges_input.png");

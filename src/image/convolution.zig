@@ -195,7 +195,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 }
 
 /// Applies a 2D convolution with the given kernel, writing into `out`.
-pub fn convolve(comptime T: type, self: Image(T), allocator: Allocator, kernel: anytype, border_mode: BorderMode, out: Image(T)) !void {
+pub fn convolve(comptime T: type, self: Image(T), out: Image(T), allocator: Allocator, kernel: anytype, border_mode: BorderMode) !void {
     const kernel_info = @typeInfo(@TypeOf(kernel));
     if (kernel_info != .array) @compileError("Kernel must be a 2D array");
     const outer_array = kernel_info.array;
@@ -313,11 +313,11 @@ fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_i
 pub fn convolveSeparable(
     comptime T: type,
     image: Image(T),
+    out: Image(T),
     allocator: Allocator,
     kernel_x: []const f32,
     kernel_y: []const f32,
     border_mode: BorderMode,
-    out: Image(T),
 ) !void {
     switch (T) {
         u8 => {
