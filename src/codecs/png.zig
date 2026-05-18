@@ -1103,7 +1103,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(T, allocator);
+                return img.convert(allocator, T);
             }
         },
         .rgb => |*img| {
@@ -1112,7 +1112,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(T, allocator);
+                return img.convert(allocator, T);
             }
         },
         .rgba => |*img| {
@@ -1121,7 +1121,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(T, allocator);
+                return img.convert(allocator, T);
             }
         },
     }

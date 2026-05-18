@@ -64,7 +64,7 @@ test "boxBlur radius 0 with views" {
     // Apply boxBlur with radius 0 to view
     var blurred = try Image(u8).initLike(std.testing.allocator, view);
     defer blurred.deinit(std.testing.allocator);
-    try view.boxBlur(std.testing.allocator, 0, blurred);
+    try view.boxBlur(blurred, std.testing.allocator, 0);
 
     // Should be identical to view
     for (0..view.rows) |r| {
@@ -94,7 +94,7 @@ test "boxBlur basic functionality" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.boxBlur(std.testing.allocator, 1, blurred);
+    try image.boxBlur(blurred, std.testing.allocator, 1);
 
     // Uniform image should remain uniform after blur
     for (blurred.data) |pixel| {
@@ -115,7 +115,7 @@ test "boxBlur zero radius" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.boxBlur(std.testing.allocator, 0, blurred);
+    try image.boxBlur(blurred, std.testing.allocator, 0);
 
     // Zero radius should produce identical image
     for (0..image.rows) |r| {
@@ -136,7 +136,7 @@ test "boxBlur border effects" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.boxBlur(std.testing.allocator, 1, blurred);
+    try image.boxBlur(blurred, std.testing.allocator, 1);
 
     // The center should be blurred down, corners should have some blur effect
     try expectEqual(@as(usize, 5), blurred.rows);
@@ -170,7 +170,7 @@ test "boxBlur struct type" {
 
     var blurred = try Image(Rgba).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.boxBlur(std.testing.allocator, 1, blurred);
+    try image.boxBlur(blurred, std.testing.allocator, 1);
 
     try expectEqual(@as(usize, 3), blurred.rows);
     try expectEqual(@as(usize, 3), blurred.cols);
@@ -197,7 +197,7 @@ test "boxBlur border area calculations" {
 
     var uniform_blurred = try Image(u8).initLike(std.testing.allocator, uniform_image);
     defer uniform_blurred.deinit(std.testing.allocator);
-    try uniform_image.boxBlur(std.testing.allocator, radius, uniform_blurred);
+    try uniform_image.boxBlur(uniform_blurred, std.testing.allocator, radius);
 
     // All pixels should remain 200 since it's uniform
     for (0..test_size) |r| {
@@ -218,7 +218,7 @@ test "boxBlur border area calculations" {
 
     var gradient_blurred = try Image(u8).initLike(std.testing.allocator, gradient_image);
     defer gradient_blurred.deinit(std.testing.allocator);
-    try gradient_image.boxBlur(std.testing.allocator, radius, gradient_blurred);
+    try gradient_image.boxBlur(gradient_blurred, std.testing.allocator, radius);
 
     // Check that we got reasonable blur results (no crashes, no extreme values)
     for (0..test_size) |r| {
@@ -254,7 +254,7 @@ test "boxBlur struct type comprehensive" {
 
             var blurred = try Image(Rgba).initLike(std.testing.allocator, image);
             defer blurred.deinit(std.testing.allocator);
-            try image.boxBlur(std.testing.allocator, radius, blurred);
+            try image.boxBlur(blurred, std.testing.allocator, radius);
 
             // Check that alpha remains unchanged
             for (0..test_size) |r| {
@@ -287,7 +287,7 @@ test "sharpen basic functionality" {
 
     var sharpened = try Image(u8).initLike(std.testing.allocator, image);
     defer sharpened.deinit(std.testing.allocator);
-    try image.sharpen(std.testing.allocator, 1, sharpened);
+    try image.sharpen(sharpened, std.testing.allocator, 1);
 
     try expectEqual(@as(usize, 5), sharpened.rows);
     try expectEqual(@as(usize, 5), sharpened.cols);
@@ -314,7 +314,7 @@ test "sharpen zero radius" {
 
     var sharpened = try Image(u8).initLike(std.testing.allocator, image);
     defer sharpened.deinit(std.testing.allocator);
-    try image.sharpen(std.testing.allocator, 0, sharpened);
+    try image.sharpen(sharpened, std.testing.allocator, 0);
 
     // Zero radius should produce identical image
     for (0..image.rows) |r| {
@@ -333,7 +333,7 @@ test "sharpen uniform image" {
 
     var sharpened = try Image(u8).initLike(std.testing.allocator, image);
     defer sharpened.deinit(std.testing.allocator);
-    try image.sharpen(std.testing.allocator, 1, sharpened);
+    try image.sharpen(sharpened, std.testing.allocator, 1);
 
     // Uniform image should remain uniform after sharpening
     // (2 * original - blurred = 2 * 100 - 100 = 100)
@@ -352,7 +352,7 @@ test "sharpen struct type" {
 
     var sharpened = try Image(Rgba).initLike(std.testing.allocator, image);
     defer sharpened.deinit(std.testing.allocator);
-    try image.sharpen(std.testing.allocator, 1, sharpened);
+    try image.sharpen(sharpened, std.testing.allocator, 1);
 
     try expectEqual(@as(usize, 3), sharpened.rows);
     try expectEqual(@as(usize, 3), sharpened.cols);
@@ -387,7 +387,7 @@ test "convolve identity kernel" {
 
     var result = try Image(u8).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, identity, .zero, result);
+    try image.convolve(result, std.testing.allocator, identity, .zero);
 
     // Should be identical to original
     for (0..image.rows) |r| {
@@ -417,7 +417,7 @@ test "convolve blur kernel" {
 
     var result = try Image(u8).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, blur, .replicate, result);
+    try image.convolve(result, std.testing.allocator, blur, .replicate);
 
     // Edge should be softened (values between 0 and 255)
     const edge_val = result.at(2, 2).*;
@@ -442,17 +442,17 @@ test "convolve border modes" {
     // Test zero border mode
     var result_zero = try Image(u8).initLike(std.testing.allocator, image);
     defer result_zero.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, kernel, .zero, result_zero);
+    try image.convolve(result_zero, std.testing.allocator, kernel, .zero);
 
     // Test replicate border mode
     var result_replicate = try Image(u8).initLike(std.testing.allocator, image);
     defer result_replicate.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, kernel, .replicate, result_replicate);
+    try image.convolve(result_replicate, std.testing.allocator, kernel, .replicate);
 
     // Test mirror border mode
     var result_mirror = try Image(u8).initLike(std.testing.allocator, image);
     defer result_mirror.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, kernel, .mirror, result_mirror);
+    try image.convolve(result_mirror, std.testing.allocator, kernel, .mirror);
 
     // Border modes should produce different results
     const corner_replicate = result_replicate.at(0, 0).*;
@@ -479,7 +479,7 @@ test "convolveSeparable Gaussian approximation" {
 
     var result = try Image(f32).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.convolveSeparable(std.testing.allocator, &gaussian_1d, &gaussian_1d, .zero, result);
+    try image.convolveSeparable(result, std.testing.allocator, &gaussian_1d, &gaussian_1d, .zero);
 
     // Check that center has been spread out
     const center = result.at(3, 3).*;
@@ -504,7 +504,7 @@ test "gaussianBlur basic" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.gaussianBlur(std.testing.allocator, 1.0, blurred);
+    try image.gaussianBlur(blurred, std.testing.allocator, 1.0);
 
     // Check that blur has smoothed the edges
     const edge_sharp = image.at(2, 5).*; // Just outside the square
@@ -529,11 +529,11 @@ test "gaussianBlur sigma variations" {
     // Test with different sigmas
     var blur_small = try Image(f32).initLike(std.testing.allocator, image);
     defer blur_small.deinit(std.testing.allocator);
-    try image.gaussianBlur(std.testing.allocator, 0.5, blur_small);
+    try image.gaussianBlur(blur_small, std.testing.allocator, 0.5);
 
     var blur_large = try Image(f32).initLike(std.testing.allocator, image);
     defer blur_large.deinit(std.testing.allocator);
-    try image.gaussianBlur(std.testing.allocator, 2.0, blur_large);
+    try image.gaussianBlur(blur_large, std.testing.allocator, 2.0);
 
     // Larger sigma should spread more
     const center_small = blur_small.at(7, 7).*;
@@ -558,7 +558,7 @@ test "sobel with new convolution" {
 
     var edges = try Image(u8).initLike(std.testing.allocator, image);
     defer edges.deinit(std.testing.allocator);
-    try image.sobel(std.testing.allocator, edges);
+    try image.sobel(edges, std.testing.allocator);
 
     // Should detect strong edge at column 2
     const edge_strength = edges.at(2, 2).*;
@@ -586,7 +586,7 @@ test "repro: uniform channel bug in struct convolution with .zero borders" {
         .{ 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0 },
     };
 
-    try image.convolve(allocator, blur_kernel, .zero, out);
+    try image.convolve(out, allocator, blur_kernel, .zero);
 
     // At (0,0), only 4 of 9 taps are inside the image.
     // Sum should be 255 * (4/9) = 113.33 -> 113.
@@ -621,7 +621,7 @@ test "repro: stride bug in f32 separable convolution" {
     defer out.deinit(allocator);
 
     const k1 = [_]f32{1.0};
-    try view.convolveSeparable(allocator, &k1, &k1, .zero, out);
+    try view.convolveSeparable(out, allocator, &k1, &k1, .zero);
 
     // out should match view exactly if identity.
     for (0..3) |r| {
@@ -652,7 +652,7 @@ test "convolve3x3 optimization" {
 
     var result = try Image(u8).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, edge, .zero, result);
+    try image.convolve(result, std.testing.allocator, edge, .zero);
 
     // Just verify it runs without error and produces reasonable output
     try expectEqual(result.rows, image.rows);
@@ -684,7 +684,7 @@ test "convolve preserves color channels" {
 
     var result = try Image(Rgb).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.convolve(std.testing.allocator, identity, .zero, result);
+    try image.convolve(result, std.testing.allocator, identity, .zero);
 
     // Verify identity kernel preserves all color channels exactly
     for (1..image.rows - 1) |r| {
@@ -725,7 +725,7 @@ test "convolve into view (stride-safe)" {
         .{ 0, 0, 0 },
     };
 
-    try src_view.convolve(std.testing.allocator, identity, .zero, dst_view);
+    try src_view.convolve(dst_view, std.testing.allocator, identity, .zero);
 
     // Verify dst view matches src view
     for (0..src_view.rows) |r| {
@@ -764,7 +764,7 @@ test "convolveSeparable into view (stride-safe)" {
 
     // Separable identity: [1] horizontally and vertically
     const k1 = [_]f32{1.0};
-    try src_view.convolveSeparable(std.testing.allocator, &k1, &k1, .zero, dst_view);
+    try src_view.convolveSeparable(dst_view, std.testing.allocator, &k1, &k1, .zero);
 
     // Verify dst view matches src view
     for (0..src_view.rows) |r| {
@@ -797,7 +797,7 @@ test "gaussianBlur preserves color" {
 
     var blurred = try Image(Rgb).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.gaussianBlur(std.testing.allocator, 1.0, blurred);
+    try image.gaussianBlur(blurred, std.testing.allocator, 1.0);
 
     // Center should still be red (though not pure 255)
     const center = blurred.at(3, 3).*;
@@ -823,7 +823,7 @@ test "medianBlur removes impulse noise" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.medianBlur(std.testing.allocator, 1, blurred);
+    try image.medianBlur(blurred, std.testing.allocator, 1);
 
     try expectEqual(@as(u8, 0), blurred.at(2, 2).*);
     try expectEqual(@as(u8, 0), blurred.at(2, 1).*);
@@ -844,7 +844,7 @@ test "percentileBlur max filter" {
 
     var out = try Image(u8).initLike(std.testing.allocator, image);
     defer out.deinit(std.testing.allocator);
-    try image.percentileBlur(std.testing.allocator, 1, 1.0, BorderMode.zero, out);
+    try image.percentileBlur(out, std.testing.allocator, 1, 1.0, BorderMode.zero);
 
     try expectEqual(@as(u8, 8), out.at(1, 1).*);
     try expectEqual(@as(u8, 4), out.at(0, 0).*);
@@ -860,7 +860,7 @@ test "medianBlur preserves dominant RGB color" {
 
     var blurred = try Image(Rgb).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.medianBlur(std.testing.allocator, 1, blurred);
+    try image.medianBlur(blurred, std.testing.allocator, 1);
 
     try expectEqualDeep(base, blurred.at(1, 1).*);
     try expectEqualDeep(base, blurred.at(0, 0).*);
@@ -883,8 +883,8 @@ test "minBlur matches percentile zero" {
     var percentile = try Image(u8).initLike(std.testing.allocator, image);
     defer percentile.deinit(std.testing.allocator);
 
-    try image.minBlur(std.testing.allocator, 1, BorderMode.replicate, min_blur);
-    try image.percentileBlur(std.testing.allocator, 1, 0.0, BorderMode.replicate, percentile);
+    try image.minBlur(min_blur, std.testing.allocator, 1, BorderMode.replicate);
+    try image.percentileBlur(percentile, std.testing.allocator, 1, 0.0, BorderMode.replicate);
 
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -908,8 +908,8 @@ test "maxBlur matches percentile one" {
     var percentile = try Image(u8).initLike(std.testing.allocator, image);
     defer percentile.deinit(std.testing.allocator);
 
-    try image.maxBlur(std.testing.allocator, 1, BorderMode.replicate, max_blur);
-    try image.percentileBlur(std.testing.allocator, 1, 1.0, BorderMode.replicate, percentile);
+    try image.maxBlur(max_blur, std.testing.allocator, 1, BorderMode.replicate);
+    try image.percentileBlur(percentile, std.testing.allocator, 1, 1.0, BorderMode.replicate);
 
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -932,7 +932,7 @@ test "midpointBlur averages extremes" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.midpointBlur(std.testing.allocator, 1, BorderMode.replicate, blurred);
+    try image.midpointBlur(blurred, std.testing.allocator, 1, BorderMode.replicate);
 
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
@@ -951,7 +951,7 @@ test "alphaTrimmedMeanBlur drops extremes" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.alphaTrimmedMeanBlur(std.testing.allocator, 1, 0.12, BorderMode.replicate, blurred);
+    try image.alphaTrimmedMeanBlur(blurred, std.testing.allocator, 1, 0.12, BorderMode.replicate);
 
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
@@ -963,7 +963,7 @@ test "alphaTrimmedMeanBlur invalid trim" {
     var out = try Image(u8).initLike(std.testing.allocator, image);
     defer out.deinit(std.testing.allocator);
 
-    try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(std.testing.allocator, 1, 0.6, BorderMode.replicate, out));
+    try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(out, std.testing.allocator, 1, 0.6, BorderMode.replicate));
 }
 
 test "linearMotionBlur horizontal" {
@@ -979,7 +979,7 @@ test "linearMotionBlur horizontal" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } });
 
     // Edge should be blurred horizontally
     const edge_val = blurred.at(2, 3).*;
@@ -1005,7 +1005,7 @@ test "linearMotionBlur vertical" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 3 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 3 } });
 
     // Edge should be blurred vertically
     const edge_val = blurred.at(3, 2).*;
@@ -1028,7 +1028,7 @@ test "linearMotionBlur diagonal" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 3 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 3 } });
 
     // Should create diagonal streak
     // Points along the diagonal should have non-zero values
@@ -1050,7 +1050,7 @@ test "linearMotionBlur zero distance" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 0 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 0 } });
 
     // Should be identical to original
     for (0..image.rows) |r| {
@@ -1070,7 +1070,7 @@ test "linearMotionBlur RGB" {
 
     var blurred = try Image(Rgb).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .linear = .{ .angle = 0, .distance = 3 } });
 
     // Color should be preserved but spread
     const center = blurred.at(2, 2).*;
@@ -1098,7 +1098,7 @@ test "radialMotionBlur zoom" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } });
 
     // Ring should be blurred radially
     // Center should be relatively unchanged
@@ -1119,7 +1119,7 @@ test "radialMotionBlur spin" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } });
 
     // Should create arc/spin pattern
     // Adjacent pixels in tangential direction should have values
@@ -1146,7 +1146,7 @@ test "radialMotionBlur zero strength" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.motionBlur(std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0 } }, blurred);
+    try image.motionBlur(blurred, std.testing.allocator, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0 } });
 
     // Should be identical to original
     for (0..image.rows) |r| {
@@ -1169,7 +1169,7 @@ test "gaussianBlur with sigma=0" {
 
     var result = try Image(f32).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.gaussianBlur(std.testing.allocator, 0, result);
+    try image.gaussianBlur(result, std.testing.allocator, 0);
 
     // With sigma=0, result should be identical to input
     for (0..image.rows) |r| {
@@ -1193,7 +1193,7 @@ test "canny edge detection basic" {
 
     var edges = try Image(u8).initLike(std.testing.allocator, image);
     defer edges.deinit(std.testing.allocator);
-    try image.canny(std.testing.allocator, 1.0, 50, 100, edges);
+    try image.canny(edges, std.testing.allocator, 1.0, 50, 100);
 
     try expectEqual(image.rows, edges.rows);
     try expectEqual(image.cols, edges.cols);
@@ -1225,15 +1225,15 @@ test "canny edge detection parameter validation" {
     defer edges.deinit(std.testing.allocator);
 
     // Test sigma=0 is valid (no blur)
-    try image.canny(std.testing.allocator, 0, 50, 100, edges);
+    try image.canny(edges, std.testing.allocator, 0, 50, 100);
 
     // Test invalid sigma
-    try expectError(error.InvalidSigma, image.canny(std.testing.allocator, -1, 50, 100, edges));
+    try expectError(error.InvalidSigma, image.canny(edges, std.testing.allocator, -1, 50, 100));
 
     // Test invalid thresholds
-    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, -1, 100, edges));
-    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, 50, -1, edges));
-    try expectError(error.InvalidThreshold, image.canny(std.testing.allocator, 1.0, 100, 50, edges));
+    try expectError(error.InvalidThreshold, image.canny(edges, std.testing.allocator, 1.0, -1, 100));
+    try expectError(error.InvalidThreshold, image.canny(edges, std.testing.allocator, 1.0, 50, -1));
+    try expectError(error.InvalidThreshold, image.canny(edges, std.testing.allocator, 1.0, 100, 50));
 }
 
 test "canny rejects non-finite parameters" {
@@ -1250,17 +1250,17 @@ test "canny rejects non-finite parameters" {
     defer edges.deinit(std.testing.allocator);
 
     // Test NaN
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, std.math.nan(f32), 50, 100, edges));
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, std.math.nan(f32), 100, edges));
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, 50, std.math.nan(f32), edges));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, std.math.nan(f32), 50, 100));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, 1.0, std.math.nan(f32), 100));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, 1.0, 50, std.math.nan(f32)));
 
     // Test infinity
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, std.math.inf(f32), 50, 100, edges));
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, std.math.inf(f32), 100, edges));
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, 1.0, 50, std.math.inf(f32), edges));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, std.math.inf(f32), 50, 100));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, 1.0, std.math.inf(f32), 100));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, 1.0, 50, std.math.inf(f32)));
 
     // Test negative infinity
-    try expectError(error.InvalidParameter, image.canny(std.testing.allocator, -std.math.inf(f32), 50, 100, edges));
+    try expectError(error.InvalidParameter, image.canny(edges, std.testing.allocator, -std.math.inf(f32), 50, 100));
 }
 
 test "canny edge detection on RGB" {
@@ -1281,7 +1281,7 @@ test "canny edge detection on RGB" {
 
     var edges = try Image(u8).initLike(std.testing.allocator, image);
     defer edges.deinit(std.testing.allocator);
-    try image.canny(std.testing.allocator, 1.0, 30, 90, edges);
+    try image.canny(edges, std.testing.allocator, 1.0, 30, 90);
 
     try expectEqual(image.rows, edges.rows);
     try expectEqual(image.cols, edges.cols);
@@ -1318,7 +1318,7 @@ test "convolve regression issue #255 (missing pixels)" {
         .{ 1, 1, 1 },
     };
 
-    try image.convolve(std.testing.allocator, kernel, .zero, result);
+    try image.convolve(result, std.testing.allocator, kernel, .zero);
 
     // For interior pixels with all 1s and zero padding, 3x3 kernel with 0 at center
     // should result in 8 if all neighbors are 1.

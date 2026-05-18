@@ -53,7 +53,7 @@ fn image_reshape(self: *ImageObject, rows: u32, cols: u32, method: Interpolation
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            img.resize(allocator, out, m);
+            img.resize(out, allocator, m);
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -64,7 +64,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: u32, cols: u32, method: Inter
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            _ = img.letterbox(allocator, out, m);
+            _ = img.letterbox(out, allocator, m);
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -376,7 +376,10 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     return self.py_image.?.dispatch(.{ transform_obj, method, out_rows, out_cols }, struct {
         fn apply(img: anytype, t_obj: ?*c.PyObject, m: Interpolation, orows: u32, ocols: u32) ?*c.PyObject {
-            var warped_img: @TypeOf(img.*) = .empty;
+            var warped_img: @TypeOf(img.*) = @TypeOf(img.*).init(allocator, orows, ocols) catch {
+                python.setMemoryError("warped image");
+                return null;
+            };
 
             // Determine transform type and apply warp
             if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
@@ -391,10 +394,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
-                    python.mapZigError(err, "warp image");
-                    return null;
-                };
+                img.warp(warped_img, zignal_transform, m);
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
                 const transform: *transforms.AffineTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.AffineTransform(f32) = .{
@@ -407,10 +407,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
-                    python.mapZigError(err, "warp image");
-                    return null;
-                };
+                img.warp(warped_img, zignal_transform, m);
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
                 const transform: *transforms.ProjectiveTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.ProjectiveTransform(f32) = .{
@@ -420,11 +417,9 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{ @floatCast(transform.matrix[2][0]), @floatCast(transform.matrix[2][1]), @floatCast(transform.matrix[2][2]) },
                     }),
                 };
-                img.warp(allocator, zignal_transform, m, &warped_img, orows, ocols) catch |err| {
-                    python.mapZigError(err, "warp image");
-                    return null;
-                };
+                img.warp(warped_img, zignal_transform, m);
             } else {
+                warped_img.deinit(allocator);
                 c.PyErr_SetString(c.PyExc_TypeError, "transform must be a SimilarityTransform, AffineTransform, or ProjectiveTransform");
                 return null;
             }
@@ -640,7 +635,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                 python.mapZigError(err, "extract image");
                 return null;
             };
-            img.extract(r, @floatCast(a), out, m, b);
+            img.extract(out, r, @floatCast(a), m, b);
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -728,7 +723,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             switch (src_pimg.data) {
                 .gray => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgb => |img| {
-                    var src_converted = img.convert(u8, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, u8) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
@@ -736,7 +731,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                     dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgba => |img| {
-                    var src_converted = img.convert(u8, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, u8) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
@@ -752,7 +747,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(Rgb, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, Rgb) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
@@ -761,7 +756,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 },
                 .rgb => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
                 .rgba => |img| {
-                    var src_converted = img.convert(Rgb, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, Rgb) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
@@ -777,7 +772,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(Rgba, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, Rgba) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
@@ -785,7 +780,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                     dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgb => |img| {
-                    var src_converted = img.convert(Rgba, allocator) catch |err| {
+                    var src_converted = img.convert(allocator, Rgba) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };

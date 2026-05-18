@@ -21,20 +21,20 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
         pub fn medianBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
-            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 0.5, .mirror, out);
+            try Self.percentileBlur(image, out, allocator, radius, 0.5, .mirror);
         }
 
         pub fn percentileBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
             percentile: f64,
             border: BorderMode,
-            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
                 return;
@@ -82,30 +82,30 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
         pub fn minBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 0.0, border, out);
+            try Self.percentileBlur(image, out, allocator, radius, 0.0, border);
         }
 
         pub fn maxBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Image(T),
         ) !void {
-            try Self.percentileBlur(image, allocator, radius, 1.0, border, out);
+            try Self.percentileBlur(image, out, allocator, radius, 1.0, border);
         }
 
         pub fn midpointBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
                 return;
@@ -147,11 +147,11 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
         pub fn alphaTrimmedMeanBlur(
             image: Image(T),
+            out: Image(T),
             allocator: Allocator,
             radius: usize,
             trim_fraction: f64,
             border: BorderMode,
-            out: Image(T),
         ) !void {
             if (image.rows == 0 or image.cols == 0) {
                 return;

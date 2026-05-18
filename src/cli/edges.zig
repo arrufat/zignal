@@ -110,14 +110,14 @@ fn processImage(
 
     switch (algo) {
         .sobel => {
-            try img.sobel(gpa, out_img);
+            try img.sobel(out_img, gpa);
         },
         .canny => {
             const sigma = options.sigma orelse 1.0;
             const low = options.low orelse 50.0;
             const high = options.high orelse 100.0;
             std.log.debug("canny params: sigma={d:.2}, low={d:.2}, high={d:.2}", .{ sigma, low, high });
-            try img.canny(gpa, sigma, low, high, out_img);
+            try img.canny(out_img, gpa, sigma, low, high);
         },
         .shen_castan => {
             const opts = zignal.ShenCastan{
@@ -130,7 +130,7 @@ fn processImage(
             std.log.debug("shen_castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
                 opts.smooth, opts.window_size, opts.high_ratio, opts.low_rel, opts.use_nms,
             });
-            try img.shenCastan(gpa, opts, out_img);
+            try img.shenCastan(out_img, gpa, opts);
         },
     }
 

@@ -62,7 +62,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
         /// Applies linear motion blur by averaging pixels along a line at the given `angle`
         /// (radians, 0 = horizontal) and `distance` (pixels).
-        pub fn linear(image: Image(T), allocator: Allocator, angle: f32, distance: usize, out: Image(T)) !void {
+        pub fn linear(image: Image(T), out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
             if (distance == 0) {
                 image.copy(out);
                 return;
@@ -94,7 +94,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (horizontal blur only)
-                try image.convolveSeparable(allocator, kernel, &identity, .replicate, out);
+                try image.convolveSeparable(out, allocator, kernel, &identity, .replicate);
             } else if (is_vertical) {
                 // Use separable convolution for vertical motion blur
                 const kernel_size = distance;
@@ -111,7 +111,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (vertical blur only)
-                try image.convolveSeparable(allocator, &identity, kernel, .replicate, out);
+                try image.convolveSeparable(out, allocator, &identity, kernel, .replicate);
             } else {
                 // General diagonal motion blur
                 switch (@typeInfo(T)) {
@@ -239,12 +239,12 @@ pub fn MotionBlurOps(comptime T: type) type {
         /// `center_x`/`center_y` are normalized [0, 1]; `strength` controls intensity [0, 1].
         pub fn radial(
             image: Image(T),
+            out: Image(T),
             _: Allocator,
             center_x: f32,
             center_y: f32,
             strength: f32,
             blur_type: RadialType,
-            out: Image(T),
         ) !void {
             if (strength == 0) {
                 image.copy(out);

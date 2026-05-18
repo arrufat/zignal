@@ -33,6 +33,7 @@ const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
 
 pub const BorderMode = @import("image/border.zig").BorderMode;
+pub const RotationBounds = @import("image/transforms.zig").RotationBounds;
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
@@ -412,10 +413,10 @@ pub fn Image(comptime T: type) type {
         /// Example usage:
         /// ```zig
         /// var rgba_image: Image(Rgba) = ...;
-        /// var gray_image = try rgba_image.convert(u8, allocator);
+        /// var gray_image = try rgba_image.convert(allocator, u8);
         /// defer gray_image.deinit(allocator);
         /// ```
-        pub fn convert(self: Self, comptime TargetType: type, allocator: Allocator) !Image(TargetType) {
+        pub fn convert(self: Self, allocator: Allocator, comptime TargetType: type) !Image(TargetType) {
             const result = try Image(TargetType).init(allocator, self.rows, self.cols);
             self.convertInto(TargetType, result);
             return result;
@@ -519,8 +520,8 @@ pub fn Image(comptime T: type) type {
         /// Resizes an image to fit in out, using the specified interpolation method.
         /// The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) void {
-            interpolation.resize(T, allocator, self, out, method);
+        pub fn resize(self: Self, out: Self, allocator: Allocator, method: Interpolation) void {
+            interpolation.resize(T, self, out, allocator, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
@@ -535,15 +536,15 @@ pub fn Image(comptime T: type) type {
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
             const scaled: Self = try .init(allocator, new_rows, new_cols);
-            self.resize(allocator, scaled, method);
+            self.resize(scaled, allocator, method);
             return scaled;
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
-            return Transform(T).letterbox(self, allocator, out, method);
+        pub fn letterbox(self: Self, out: Self, allocator: Allocator, method: Interpolation) Rectangle(u32) {
+            return Transform(T).letterbox(self, out, allocator, method);
         }
 
         /// Rotates the image by `angle` (radians) around its center, returning a new image sized
@@ -556,6 +557,18 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
             return Transform(T).rotate(self, allocator, angle, method, border);
+        }
+
+        /// Rotates the image into the pre-allocated `out`, centered with `border` padding for any
+        /// uncovered area. Use `rotateBounds(angle)` to size `out` if you want no clipping.
+        pub fn rotateInto(self: Self, out: Self, angle: f32, method: Interpolation, border: BorderMode) void {
+            return Transform(T).rotateInto(self, out, angle, method, border);
+        }
+
+        /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
+        /// without clipping.
+        pub fn rotateBounds(self: Self, angle: f32) RotationBounds {
+            return Transform(T).rotateBounds(self, angle);
         }
 
         /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds areas
@@ -578,8 +591,8 @@ pub fn Image(comptime T: type) type {
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
         /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
-        pub fn extract(self: Self, rect: Rectangle(f32), angle: f32, out: Self, method: Interpolation, border: BorderMode) void {
-            return Transform(T).extract(self, rect, angle, out, method, border);
+        pub fn extract(self: Self, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
+            return Transform(T).extract(self, out, rect, angle, method, border);
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation
@@ -596,18 +609,18 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Warps the image through a Similarity, Affine, or Projective `transform`, sampling each
-        /// destination pixel from the corresponding source location. `out` is allocated to
-        /// `out_rows`×`out_cols` if empty.
+        /// destination pixel from the corresponding source location. `out` must be pre-allocated
+        /// to the desired output shape.
         ///
         /// Example:
         /// ```zig
         /// const transform: SimilarityTransform(T) = try .init(from_points, to_points);
-        /// var warped: Image(T) = .empty;
-        /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
+        /// const warped: Image(T) = try .init(allocator, 512, 512);
         /// defer warped.deinit(allocator);
+        /// image.warp(warped, transform, .bilinear);
         /// ```
-        pub fn warp(self: Self, allocator: Allocator, transform: anytype, method: Interpolation, out: *Self, out_rows: u32, out_cols: u32) !void {
-            return Transform(T).warp(self, allocator, transform, method, out, out_rows, out_cols);
+        pub fn warp(self: Self, out: Self, transform: anytype, method: Interpolation) void {
+            return Transform(T).warp(self, out, transform, method);
         }
 
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
@@ -622,7 +635,7 @@ pub fn Image(comptime T: type) type {
         /// using an integral image. The `radius` parameter determines the size of the box window.
         /// This function is optimized using SIMD instructions for performance where applicable.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn boxBlur(self: Self, allocator: Allocator, radius: u32, out: Self) !void {
+        pub fn boxBlur(self: Self, out: Self, allocator: Allocator, radius: u32) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -640,11 +653,11 @@ pub fn Image(comptime T: type) type {
         /// Applies a median blur using a square window with the given radius.
         /// Radius specifies half the window size; window size = `radius * 2 + 1`.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn medianBlur(self: Self, allocator: Allocator, radius: usize, out: Self) !void {
+        pub fn medianBlur(self: Self, out: Self, allocator: Allocator, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).medianBlur(self, allocator, radius, out);
+            try OrderStatisticBlurOps(T).medianBlur(self, out, allocator, radius);
         }
 
         /// Applies a percentile blur (order-statistic filter) with the given percentile fraction.
@@ -657,20 +670,20 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var robust = try Image(u8).initLike(allocator, image);
         /// defer robust.deinit(allocator);
-        /// try image.percentileBlur(allocator, 2, 0.1, .mirror, robust);
+        /// try image.percentileBlur(robust, allocator, 2, 0.1, .mirror);
         /// ```
         pub fn percentileBlur(
             self: Self,
+            out: Self,
             allocator: Allocator,
             radius: usize,
             percentile: f64,
             border: BorderMode,
-            out: Self,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).percentileBlur(self, allocator, radius, percentile, border, out);
+            try OrderStatisticBlurOps(T).percentileBlur(self, out, allocator, radius, percentile, border);
         }
 
         /// Applies a minimum blur (percentile zero) over a square window with the given radius.
@@ -681,19 +694,19 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var denoised = try Image(u8).initLike(allocator, image);
         /// defer denoised.deinit(allocator);
-        /// try image.minBlur(allocator, 1, .mirror, denoised);
+        /// try image.minBlur(denoised, allocator, 1, .mirror);
         /// ```
         pub fn minBlur(
             self: Self,
+            out: Self,
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Self,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).minBlur(self, allocator, radius, border, out);
+            try OrderStatisticBlurOps(T).minBlur(self, out, allocator, radius, border);
         }
 
         /// Applies a maximum blur (percentile one) over a square window with the given radius.
@@ -704,19 +717,19 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var mask = try Image(u8).initLike(allocator, image);
         /// defer mask.deinit(allocator);
-        /// try image.maxBlur(allocator, 2, .mirror, mask);
+        /// try image.maxBlur(mask, allocator, 2, .mirror);
         /// ```
         pub fn maxBlur(
             self: Self,
+            out: Self,
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Self,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).maxBlur(self, allocator, radius, border, out);
+            try OrderStatisticBlurOps(T).maxBlur(self, out, allocator, radius, border);
         }
 
         /// Applies a midpoint blur that averages the minimum and maximum values within the window.
@@ -727,19 +740,19 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var softened = try Image(u8).initLike(allocator, image);
         /// defer softened.deinit(allocator);
-        /// try image.midpointBlur(allocator, 1, .mirror, softened);
+        /// try image.midpointBlur(softened, allocator, 1, .mirror);
         /// ```
         pub fn midpointBlur(
             self: Self,
+            out: Self,
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
-            out: Self,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).midpointBlur(self, allocator, radius, border, out);
+            try OrderStatisticBlurOps(T).midpointBlur(self, out, allocator, radius, border);
         }
 
         /// Applies an alpha-trimmed mean blur, discarding a fraction of the lowest and highest pixels.
@@ -752,20 +765,20 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var robust_mean = try Image(Rgba).initLike(allocator, color_image);
         /// defer robust_mean.deinit(allocator);
-        /// try color_image.alphaTrimmedMeanBlur(allocator, 2, 0.1, .mirror, robust_mean);
+        /// try color_image.alphaTrimmedMeanBlur(robust_mean, allocator, 2, 0.1, .mirror);
         /// ```
         pub fn alphaTrimmedMeanBlur(
             self: Self,
+            out: Self,
             allocator: Allocator,
             radius: usize,
             trim_fraction: f64,
             border: BorderMode,
-            out: Self,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, allocator, radius, trim_fraction, border, out);
+            try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, out, allocator, radius, trim_fraction, border);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges.
@@ -774,7 +787,7 @@ pub fn Image(comptime T: type) type {
         /// The `radius` parameter controls the size of the blur. This operation effectively
         /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn sharpen(self: Self, allocator: Allocator, radius: usize, out: Self) !void {
+        pub fn sharpen(self: Self, out: Self, allocator: Allocator, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -825,75 +838,75 @@ pub fn Image(comptime T: type) type {
         /// Computes Otsu's threshold and produces a binary image.
         /// Returns the threshold value that maximizes between-class variance.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn thresholdOtsu(self: Self, allocator: Allocator, out: Image(u8)) !u8 {
+        pub fn thresholdOtsu(self: Self, out: Image(u8), allocator: Allocator) !u8 {
             if (comptime T != u8) {
                 @compileError("thresholdOtsu is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return binary.Binary.thresholdOtsu(self, allocator, out);
+            return binary.Binary.thresholdOtsu(self, out, allocator);
         }
 
         /// Applies adaptive mean thresholding using a square window defined by `radius`.
         /// Each pixel is compared against the mean of its local neighborhood minus `c`.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn thresholdAdaptiveMean(self: Self, allocator: Allocator, radius: usize, c: f32, out: Image(u8)) !void {
+        pub fn thresholdAdaptiveMean(self: Self, out: Image(u8), allocator: Allocator, radius: usize, c: f32) !void {
             if (comptime T != u8) {
                 @compileError("thresholdAdaptiveMean is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return binary.Binary.thresholdAdaptiveMean(self, allocator, radius, c, out);
+            return binary.Binary.thresholdAdaptiveMean(self, out, allocator, radius, c);
         }
 
         /// Performs binary dilation using the provided structuring element.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn dilateBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: Image(u8)) !void {
+        pub fn dilateBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("dilateBinary is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try binary.Binary.dilate(self, allocator, kernel, iterations, out);
+            try binary.Binary.dilate(self, out, allocator, kernel, iterations);
         }
 
         /// Performs binary erosion using the provided structuring element.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn erodeBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: Image(u8)) !void {
+        pub fn erodeBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("erodeBinary is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try binary.Binary.erode(self, allocator, kernel, iterations, out);
+            try binary.Binary.erode(self, out, allocator, kernel, iterations);
         }
 
         /// Performs a binary opening (erosion followed by dilation).
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn openBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: Image(u8)) !void {
+        pub fn openBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("openBinary is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try binary.Binary.open(self, allocator, kernel, iterations, out);
+            try binary.Binary.open(self, out, allocator, kernel, iterations);
         }
 
         /// Performs a binary closing (dilation followed by erosion).
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn closeBinary(self: Self, allocator: Allocator, kernel: BinaryKernel, iterations: usize, out: Image(u8)) !void {
+        pub fn closeBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("closeBinary is only available for Image(u8)");
             }
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try binary.Binary.close(self, allocator, kernel, iterations, out);
+            try binary.Binary.close(self, out, allocator, kernel, iterations);
         }
 
         /// Applies a 2D convolution with the given kernel to the image.
@@ -903,11 +916,11 @@ pub fn Image(comptime T: type) type {
         /// - `kernel`: A 2D array representing the convolution kernel.
         /// - `border`: How to handle pixels at the image borders.
         /// - `out`: The output image (must be pre-allocated with same dimensions).
-        pub fn convolve(self: Self, allocator: Allocator, kernel: anytype, border: BorderMode, out: Self) !void {
+        pub fn convolve(self: Self, out: Self, allocator: Allocator, kernel: anytype, border: BorderMode) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return convolution.convolve(T, self, allocator, kernel, border, out);
+            return convolution.convolve(T, self, out, allocator, kernel, border);
         }
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
@@ -919,11 +932,11 @@ pub fn Image(comptime T: type) type {
         /// - `kernel_y`: Vertical (row) kernel.
         /// - `border`: How to handle image borders.
         /// - `out`: The output image (must be pre-allocated with same dimensions).
-        pub fn convolveSeparable(self: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, border: BorderMode, out: Self) !void {
+        pub fn convolveSeparable(self: Self, out: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, border: BorderMode) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return convolution.convolveSeparable(T, self, allocator, kernel_x, kernel_y, border, out);
+            return convolution.convolveSeparable(T, self, out, allocator, kernel_x, kernel_y, border);
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
@@ -932,7 +945,7 @@ pub fn Image(comptime T: type) type {
         /// - `allocator`: The allocator to use for temporary buffers.
         /// - `sigma`: Standard deviation of the Gaussian kernel.
         /// - `out`: The output blurred image (must be pre-allocated with same dimensions).
-        pub fn gaussianBlur(self: Self, allocator: Allocator, sigma: f32, out: Self) !void {
+        pub fn gaussianBlur(self: Self, out: Self, allocator: Allocator, sigma: f32) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -964,7 +977,7 @@ pub fn Image(comptime T: type) type {
             }
 
             // Apply separable convolution
-            try convolution.convolveSeparable(T, self, allocator, kernel, kernel, .mirror, out);
+            try convolution.convolveSeparable(T, self, out, allocator, kernel, kernel, .mirror);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
@@ -974,11 +987,11 @@ pub fn Image(comptime T: type) type {
         /// Parameters:
         /// - `allocator`: The allocator to use for temporary buffers.
         /// - `out`: Output image that will be filled with the Sobel magnitude image.
-        pub fn sobel(self: Self, allocator: Allocator, out: Image(u8)) !void {
+        pub fn sobel(self: Self, out: Image(u8), allocator: Allocator) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).sobel(self, allocator, out);
+            return Edges(T).sobel(self, out, allocator);
         }
 
         /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
@@ -992,14 +1005,14 @@ pub fn Image(comptime T: type) type {
         /// - `out`: Output edge map as binary image (0 or 255).
         pub fn shenCastan(
             self: Self,
+            out: Image(u8),
             allocator: Allocator,
             opts: ShenCastan,
-            out: Image(u8),
         ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).shenCastan(self, allocator, opts, out);
+            return Edges(T).shenCastan(self, out, allocator, opts);
         }
 
         /// Applies the Canny edge detection algorithm, a classic multi-stage edge detector.
@@ -1025,20 +1038,20 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var edges = try Image(u8).initLike(allocator, image);
         /// defer edges.deinit(allocator);
-        /// try image.canny(allocator, 1.4, 50, 150, edges);
+        /// try image.canny(edges, allocator, 1.4, 50, 150);
         /// ```
         pub fn canny(
             self: Self,
+            out: Image(u8),
             allocator: Allocator,
             sigma: f32,
             low_threshold: f32,
             high_threshold: f32,
-            out: Image(u8),
         ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).canny(self, allocator, sigma, low_threshold, high_threshold, out);
+            return Edges(T).canny(self, out, allocator, sigma, low_threshold, high_threshold);
         }
 
         /// Applies motion blur effect to the image.
@@ -1056,16 +1069,16 @@ pub fn Image(comptime T: type) type {
         /// defer out.deinit(allocator);
         ///
         /// // Linear motion blur
-        /// try image.motionBlur(allocator, .{ .linear = .{ .angle = 0, .distance = 30 }}, out);
+        /// try image.motionBlur(out, allocator, .{ .linear = .{ .angle = 0, .distance = 30 }});
         /// ```
-        pub fn motionBlur(self: Self, allocator: Allocator, motion: MotionBlur, out: Self) !void {
+        pub fn motionBlur(self: Self, out: Self, allocator: Allocator, motion: MotionBlur) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
             switch (motion) {
-                .linear => |params| try MotionBlurOps(T).linear(self, allocator, params.angle, params.distance, out),
-                .radial_zoom => |params| try MotionBlurOps(T).radial(self, allocator, params.center_x, params.center_y, params.strength, .zoom, out),
-                .radial_spin => |params| try MotionBlurOps(T).radial(self, allocator, params.center_x, params.center_y, params.strength, .spin, out),
+                .linear => |params| try MotionBlurOps(T).linear(self, out, allocator, params.angle, params.distance),
+                .radial_zoom => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .zoom),
+                .radial_spin => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .spin),
             }
         }
 
@@ -1113,8 +1126,8 @@ pub fn Image(comptime T: type) type {
         /// Computes the difference between `self` and `other` per pixel/channel.
         /// The result is stored in `out`, which must have the same dimensions.
         /// Applies scaling, thresholding, and visualization options in a single pass.
-        pub fn diff(self: Self, other: Self, out: Self, opts: DiffOptions) !DiffResult {
-            return diff_mod.compute(T, self, other, out, opts);
+        pub fn diff(self: Self, out: Self, other: Self, opts: DiffOptions) !DiffResult {
+            return diff_mod.compute(T, self, out, other, opts);
         }
 
         /// Computes the mean absolute pixel error normalized by the maximum channel value

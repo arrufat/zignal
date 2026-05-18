@@ -795,17 +795,17 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
         .grayscale => |*img| {
             if (T == u8) return img.*;
             defer img.deinit(allocator);
-            return img.convert(T, allocator);
+            return img.convert(allocator, T);
         },
         .rgb => |*img| {
             if (T == Rgb) return img.*;
             defer img.deinit(allocator);
-            return img.convert(T, allocator);
+            return img.convert(allocator, T);
         },
         .rgba => |*img| {
             if (T == Rgba) return img.*;
             defer img.deinit(allocator);
-            return img.convert(T, allocator);
+            return img.convert(allocator, T);
         },
     }
 }
