@@ -30,7 +30,7 @@ pub fn Edges(comptime T: type) type {
     return struct {
         /// Applies the Sobel filter, writing the per-pixel gradient magnitude into `out` as a
         /// grayscale image.
-        pub fn sobel(self: Image(T), allocator: Allocator, out: Image(u8)) !void {
+        pub fn sobel(self: Image(T), out: Image(u8), allocator: Allocator) !void {
             // For now, use float path for all types to ensure correctness
             {
                 // Convert input to grayscale float if needed
@@ -54,8 +54,8 @@ pub fn Edges(comptime T: type) type {
                 defer grad_x.deinit(allocator);
                 defer grad_y.deinit(allocator);
 
-                try convolve(f32, gray_float, allocator, sobel_x, .replicate, grad_x);
-                try convolve(f32, gray_float, allocator, sobel_y, .replicate, grad_y);
+                try convolve(f32, gray_float, grad_x, allocator, sobel_x, .replicate);
+                try convolve(f32, gray_float, grad_y, allocator, sobel_y, .replicate);
 
                 // Compute gradient magnitude
                 for (0..self.rows) |r| {
@@ -82,9 +82,9 @@ pub fn Edges(comptime T: type) type {
         /// - Thresholds apply to raw luminance differences (0..255 scale).
         pub fn shenCastan(
             self: Image(T),
+            out: Image(u8),
             allocator: Allocator,
             opts: ShenCastan,
-            out: Image(u8),
         ) !void {
             try opts.validate();
 
@@ -211,11 +211,11 @@ pub fn Edges(comptime T: type) type {
         /// 2–3× `low_threshold`. `out` receives a binary edge map (0 or 255).
         pub fn canny(
             self: Image(T),
+            out: Image(u8),
             allocator: Allocator,
             sigma: f32,
             low_threshold: f32,
             high_threshold: f32,
-            out: Image(u8),
         ) !void {
             // Check for non-finite values first to prevent runtime traps
             if (!std.math.isFinite(sigma) or !std.math.isFinite(low_threshold) or !std.math.isFinite(high_threshold)) {
@@ -250,8 +250,8 @@ pub fn Edges(comptime T: type) type {
             defer grad_x.deinit(allocator);
             defer grad_y.deinit(allocator);
 
-            try convolve(f32, blurred, allocator, sobel_x, .replicate, grad_x);
-            try convolve(f32, blurred, allocator, sobel_y, .replicate, grad_y);
+            try convolve(f32, blurred, grad_x, allocator, sobel_x, .replicate);
+            try convolve(f32, blurred, grad_y, allocator, sobel_y, .replicate);
 
             // Compute gradient magnitude
             var magnitude = try Image(f32).init(allocator, self.rows, self.cols);
@@ -684,7 +684,7 @@ fn blurGaussian(src: Image(f32), sigma: f32, dst: Image(f32), allocator: Allocat
 
     // Apply separable convolution
     const convolution_mod = @import("convolution.zig");
-    try convolution_mod.convolveSeparable(f32, src, allocator, kernel, kernel, .replicate, dst);
+    try convolution_mod.convolveSeparable(f32, src, dst, allocator, kernel, kernel, .replicate);
 }
 
 /// Non-maximum suppression specifically for Canny edge detection.

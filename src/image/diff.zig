@@ -27,8 +27,8 @@ pub const DiffResult = struct {
 pub fn compute(
     comptime T: type,
     img1: Image(T),
-    img2: Image(T),
     out: Image(T),
+    img2: Image(T),
     opts: DiffOptions,
 ) !DiffResult {
     if (!img1.hasSameShape(img2) or !img1.hasSameShape(out)) {

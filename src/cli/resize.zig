@@ -99,7 +99,7 @@ fn processImage(
     defer out.deinit(gpa);
 
     const timer = common.Timer.begin(io);
-    img.resize(gpa, out, filter);
+    img.resize(out, gpa, filter);
     timer.logElapsed("resize");
 
     std.log.info("{s}saving to {s}...", .{ indent, resolved.path });

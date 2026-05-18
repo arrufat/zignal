@@ -252,7 +252,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
         u8 => return encodeGrayscale(allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options),
         Rgb => return encodeRgb(allocator, image, options),
         else => {
-            var converted = try image.convert(Rgb, allocator);
+            var converted = try image.convert(allocator, Rgb);
             defer converted.deinit(allocator);
             return encodeRgb(allocator, converted, options);
         },
@@ -3052,7 +3052,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(T, allocator);
+                return img.convert(allocator, T);
             }
         },
         .rgb => |*img| {
@@ -3061,7 +3061,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(T, allocator);
+                return img.convert(allocator, T);
             }
         },
     }
@@ -3128,7 +3128,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
     try renderRgbBlocksToPixels(Rgb, &state, &out);
 
     // Convert original gray to RGB for PSNR
-    var gray_rgb = try img.convert(Rgb, gpa);
+    var gray_rgb = try img.convert(gpa, Rgb);
     defer gray_rgb.deinit(gpa);
     const psnr = try gray_rgb.psnr(out);
     try std.testing.expect(psnr > 45);

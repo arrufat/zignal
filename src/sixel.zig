@@ -219,7 +219,7 @@ pub fn fromImageProfiled(
         if (profiler != null) convert_start = monotonicNs();
 
         if (scale == 1.0) {
-            prepared_img = try image.convert(Rgb, gpa);
+            prepared_img = try image.convert(gpa, Rgb);
         } else {
             var scaled_img = try Image(Rgb).init(gpa, height, width);
             const inv_scale = 1.0 / scale;
