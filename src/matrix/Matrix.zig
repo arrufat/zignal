@@ -512,8 +512,7 @@ pub fn Matrix(comptime T: type) type {
             return self.gemm(true, self, false, 1.0, 0.0, null);
         }
 
-        /// Helper function for optimized SIMD GEMM kernel
-        /// Both matrices must be arranged for row-major access
+        /// SIMD GEMM kernel. Both matrices must be arranged for row-major access.
         fn simdGemmKernel(
             comptime VecType: type,
             result: *Matrix(T),

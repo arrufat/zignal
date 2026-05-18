@@ -72,7 +72,6 @@ pub const HoughTransform = struct {
     }
 
     /// Performs the Hough Transform on a binary edge image.
-    /// Optimized with integer arithmetic, precomputed Y-terms, and loop unrolling.
     pub fn compute(self: Self, edges: Image(u8), box: Rectangle(u32), accumulator: Image(u32)) void {
         assert(box.width() == self.size and box.height() == self.size);
         assert(accumulator.rows == self.size and accumulator.cols == self.size);

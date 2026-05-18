@@ -79,7 +79,7 @@ pub fn Canvas(comptime T: type) type {
             return .{ .l = left, .t = top, .r = right, .b = bottom };
         }
 
-        /// Fills the entire canvas with a solid color using @memset.
+        /// Fills the entire canvas with a solid color.
         pub fn fill(self: Self, color: anytype) void {
             self.image.fill(convertColor(T, color));
         }
@@ -146,7 +146,7 @@ pub fn Canvas(comptime T: type) type {
             };
         }
 
-        /// Sets a horizontal span to `color` using @memset.
+        /// Sets a horizontal span to `color` without alpha blending.
         pub fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
@@ -406,10 +406,9 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Distance-based antialiased rendering for thick lines.
-        /// Calculates the exact perpendicular distance from each pixel to the line segment,
-        /// applying smooth alpha falloff at edges for superior visual quality.
-        /// Includes optimized paths for horizontal/vertical lines and handles end caps naturally.
-        /// More expensive than rectangle-based approach but produces better results.
+        /// Calculates the perpendicular distance from each pixel to the line segment and
+        /// applies smooth alpha falloff at edges. End caps fall out naturally from the
+        /// distance test.
         fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             const half_width: f32 = as(f32, width) / 2.0;
             const c2 = convertColor(Rgba, color);
@@ -629,8 +628,8 @@ pub fn Canvas(comptime T: type) type {
         /// Fills a rectangle on the given image.
         /// The rectangle is defined using standard conventions where l,t are inclusive and r,b are exclusive.
         /// This means a rectangle from (0,0) to (10,10) will fill pixels at positions 0-9 in both dimensions.
-        /// - **DrawMode.fast**: Uses @memset for optimal performance (no alpha blending)
-        /// - **DrawMode.soft**: Supports alpha blending by using setPixel for each pixel
+        /// - **DrawMode.fast**: hard edges, no alpha blending.
+        /// - **DrawMode.soft**: alpha blending via setPixel.
         pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, mode: DrawMode) void {
             comptime assert(isColor(@TypeOf(color)));
 
@@ -670,7 +669,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws an arc outline. Angles are in radians from the positive X-axis, counter-clockwise,
-        /// and may exceed 2π (auto-normalized). Arcs spanning ≥ 2π use the optimized full-circle path.
+        /// and may exceed 2π (auto-normalized). Arcs spanning ≥ 2π render as a full circle.
         ///
         /// Example:
         /// ```zig
@@ -901,12 +900,12 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Fills the given polygon on an image using the scanline algorithm with @memset optimization.
+        /// Fills the given polygon on an image using a scanline algorithm.
         /// The polygon is defined by an array of points (vertices).
         ///
         /// **Rendering Modes:**
-        /// - **DrawMode.fast**: Hard edges, maximum performance with @memset optimization
-        /// - **DrawMode.soft**: Antialiased edges, uses alpha blending (no @memset)
+        /// - **DrawMode.fast**: hard edges, no alpha blending.
+        /// - **DrawMode.soft**: antialiased edges via alpha blending.
         pub fn fillPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, mode: DrawMode) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
@@ -1004,7 +1003,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Fills a pie slice (arc including the center point). Angles are in radians from the
-        /// positive X-axis, counter-clockwise. Arcs spanning ≥ 2π use the optimized full-circle path.
+        /// positive X-axis, counter-clockwise. Arcs spanning ≥ 2π render as a full circle.
         ///
         /// Example:
         /// ```zig
