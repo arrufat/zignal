@@ -310,14 +310,21 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return .init(.{ cos_a * centered.x() - sin_a * centered.y(), sin_a * centered.x() + cos_a * centered.y() }).add(center);
         }
 
-        /// Compute 3D cross product with another point
-        pub fn cross(self: Self, other: Self) Self {
-            comptime assert(dim == 3);
-            return .init(.{
-                self.y() * other.z() - self.z() * other.y(),
-                self.z() * other.x() - self.x() * other.z(),
-                self.x() * other.y() - self.y() * other.x(),
-            });
+        /// Compute the cross product. For 3D, returns a new Point(3, T). For 2D, returns the scalar (wedge) product.
+        pub fn cross(self: Self, other: Self) switch (dim) {
+            2 => T,
+            3 => Self,
+            else => @compileError("Cross product is only defined for 2D and 3D points."),
+        } {
+            if (dim == 2) {
+                return self.x() * other.y() - self.y() * other.x();
+            } else if (dim == 3) {
+                return .init(.{
+                    self.y() * other.z() - self.z() * other.y(),
+                    self.z() * other.x() - self.x() * other.z(),
+                    self.x() * other.y() - self.y() * other.x(),
+                });
+            } else unreachable;
         }
 
         // Direct vector/array access
@@ -584,4 +591,11 @@ test "Point areAllCollinear" {
         .init(.{ 0, 1 }),
     };
     try std.testing.expect(!P2.areAllCollinear(pts_non_collinear));
+}
+
+test "2D cross product" {
+    const i: Point(2, f64) = .init(.{ 1.0, 0.0 });
+    const j: Point(2, f64) = .init(.{ 0.0, 1.0 });
+    try std.testing.expectEqual(@as(f64, 1.0), i.cross(j));
+    try std.testing.expectEqual(@as(f64, -1.0), j.cross(i));
 }

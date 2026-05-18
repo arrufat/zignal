@@ -71,7 +71,6 @@ pub fn Canvas(comptime T: type) type {
             const right = clampToImageBounds(rect.r, self.image.cols);
             const bottom = clampToImageBounds(rect.b, self.image.rows);
 
-            // Check if rectangle is valid after clamping
             if (left >= right or top >= bottom) {
                 return null;
             }
@@ -114,26 +113,6 @@ pub fn Canvas(comptime T: type) type {
         /// It does not compare pixel data or types.
         pub inline fn hasSameShape(self: Self, other: anytype) bool {
             return self.image.hasSameShape(other.image);
-        }
-
-        /// Normalizes an angle to the [0, 2π] range. Use only when the input range is unknown;
-        /// for atan2 outputs (already in [-π, π]) prefer the cheaper inline form in `isAngleInArc`.
-        inline fn normalizeAngle(angle: f32) f32 {
-            var normalized = @mod(angle, 2 * std.math.pi);
-            if (normalized < 0) normalized += 2 * std.math.pi;
-            return normalized;
-        }
-
-        /// Tests whether an `atan2`-produced angle lies within the precomputed arc range.
-        /// Caller must pass a value in [-π, π] (i.e., the output of `std.math.atan2`); other
-        /// inputs require a prior `normalizeAngle` call.
-        inline fn isAngleInArc(angle: f32, range: ArcRange) bool {
-            if (range.full_circle) return true;
-            // atan2 ∈ [-π, π] — one conditional add suffices to reach [0, 2π].
-            const norm_angle = if (angle < 0) angle + 2 * std.math.pi else angle;
-            if (norm_angle >= range.norm_start and norm_angle <= range.norm_end) return true;
-            const shifted = norm_angle + 2 * std.math.pi;
-            return shifted >= range.norm_start and shifted <= range.norm_end;
         }
 
         /// Creates a view (sub-canvas) of this canvas within the specified rectangle.
@@ -687,34 +666,86 @@ pub fn Canvas(comptime T: type) type {
             }
 
             // Partial arc
+            const arc: ArcRange = .init(start_angle, end_angle);
             switch (mode) {
-                .fast => self.drawArcFast(center, radius, start_angle, end_angle, width, color),
-                .soft => try self.drawArcSoft(center, radius, start_angle, end_angle, width, color),
+                .fast => self.drawArcFast(center, radius, arc, width, color),
+                .soft => try self.drawArcSoft(center, radius, arc, width, color),
             }
         }
 
-        /// Angular range for arc filtering. `start`/`end` are the raw user-supplied angles
-        /// (used by `fillArcSoft` to derive edge vectors); `norm_start`/`norm_end` are
-        /// normalized to [0, 2π] with `norm_end` shifted by +2π when the arc wraps past 0,
+        /// Angular range for arc filtering. `start`/`end` are
+        /// normalized to [0, 2π] with `end` shifted by +2π when the arc wraps past 0,
         /// so that per-pixel `isAngleInArc` checks need no `@mod`.
         const ArcRange = struct {
             start: f32,
             end: f32,
-            norm_start: f32,
-            norm_end: f32,
-            full_circle: bool,
 
             inline fn init(start: f32, end: f32) ArcRange {
-                const ns = normalizeAngle(start);
-                var ne = normalizeAngle(end);
+                const ns = normalize(start);
+                var ne = normalize(end);
                 if (ne < ns) ne += 2 * std.math.pi;
                 return .{
-                    .start = start,
-                    .end = end,
-                    .norm_start = ns,
-                    .norm_end = ne,
-                    .full_circle = @abs(end - start) >= 2 * std.math.pi,
+                    .start = ns,
+                    .end = ne,
                 };
+            }
+
+            const full: ArcRange = .{ .start = 0, .end = 2 * std.math.pi };
+
+            /// Normalizes an angle to the [0, 2π] range. Use only when the input range is unknown;
+            /// for atan2 outputs (already in [-π, π]) prefer the cheaper inline form in `contains`.
+            fn normalize(angle: f32) f32 {
+                var normalized = @mod(angle, 2 * std.math.pi);
+                if (normalized < 0) normalized += 2 * std.math.pi;
+                return normalized;
+            }
+
+            /// Tests whether an `atan2`-produced angle lies within the precomputed arc range.
+            /// Caller must pass a value in [-π, π] (i.e., the output of `std.math.atan2`); other
+            /// inputs require a prior `normalizeAngle` call.
+            inline fn contains(self: ArcRange, angle: f32) bool {
+                // atan2 ∈ [-π, π] — one conditional add suffices to reach [0, 2π].
+                const norm_angle = if (angle < 0) angle + 2 * std.math.pi else angle;
+                if (norm_angle >= self.start and norm_angle <= self.end) return true;
+                const shifted = norm_angle + 2 * std.math.pi;
+                return shifted >= self.start and shifted <= self.end;
+            }
+
+            /// Returns the absolute angular span of the arc.
+            inline fn span(self: ArcRange) f32 {
+                return self.end - self.start;
+            }
+
+            /// Returns the absolute geometric length of the arc along the specified radius.
+            inline fn length(self: ArcRange, radius: f32) f32 {
+                return self.span() * radius;
+            }
+
+            /// Returns true if the arc spans more than half a circle (π radians).
+            inline fn isLong(self: ArcRange) bool {
+                return self.span() > std.math.pi;
+            }
+
+            /// Returns true if the arc spans a full circle (≥ 2π radians).
+            inline fn isFull(self: ArcRange) bool {
+                return self.span() >= 2 * std.math.pi;
+            }
+
+            /// Returns the directional vector for the start of the arc.
+            inline fn startVector(self: ArcRange) Point(2, f32) {
+                return .init(.{ @cos(self.start), @sin(self.start) });
+            }
+
+            /// Returns the directional vector for the end of the arc.
+            inline fn endVector(self: ArcRange) Point(2, f32) {
+                return .init(.{ @cos(self.end), @sin(self.end) });
+            }
+
+            /// Half-plane test for "angle in arc" using precomputed cross-product components.
+            inline fn containsCross(self: ArcRange, start_cross: f32, end_cross: f32) bool {
+                const a = start_cross <= 0;
+                const b = end_cross >= 0;
+                return if (self.isLong()) (a or b) else (a and b);
             }
         };
 
@@ -760,14 +791,13 @@ pub fn Canvas(comptime T: type) type {
         /// - `aa=false`: writes pre-converted opaque pixels directly to image data — matches
         ///   the `.fast` contract of never blending.
         /// - `aa=true`: routes through `setPixel`, so destination-Rgba canvases get alpha blending.
-        /// - `arc`: when non-null, pixels outside the angular range are skipped.
         inline fn renderRing(
             self: Self,
             center: Point(2, f32),
             inner_radius: f32,
             outer_radius: f32,
             color: anytype,
-            arc: ?ArcRange,
+            arc: ArcRange,
             mode: DrawMode,
         ) void {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
@@ -779,8 +809,8 @@ pub fn Canvas(comptime T: type) type {
                     const x = as(f32, c) - center.x();
                     const coverage = ringCoverage(x, y, inner_radius, outer_radius, mode);
                     if (coverage <= 0) continue;
-                    if (arc) |range| {
-                        if (!isAngleInArc(std.math.atan2(y, x), range)) continue;
+                    if (!arc.isFull()) {
+                        if (!arc.contains(std.math.atan2(y, x))) continue;
                     }
                     if (mode == .soft) {
                         self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
@@ -791,14 +821,14 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Rasterizes a 1-pixel-thick Bresenham circle around `center`. When `arc` is non-null,
-        /// each of the 8 octant-symmetric pixels is gated by an angle check.
+        /// Rasterizes a 1-pixel-thick Bresenham circle around `center`.
+        /// Each of the 8 octant-symmetric pixels is gated by an angle check.
         inline fn drawBresenhamCircle(
             self: Self,
             center: Point(2, f32),
             radius: f32,
             color: anytype,
-            arc: ?ArcRange,
+            arc: ArcRange,
         ) void {
             const cx = @round(center.x());
             const cy = @round(center.y());
@@ -806,14 +836,15 @@ pub fn Canvas(comptime T: type) type {
             var x: f32 = r;
             var y: f32 = 0;
             var err: f32 = 0;
+            const full = arc.isFull();
             while (x >= y) {
                 const offsets = [_][2]f32{
                     .{ x, y }, .{ -x, y }, .{ x, -y }, .{ -x, -y },
                     .{ y, x }, .{ -y, x }, .{ y, -x }, .{ -y, -x },
                 };
                 for (offsets) |o| {
-                    if (arc) |range| {
-                        if (!isAngleInArc(std.math.atan2(o[1], o[0]), range)) continue;
+                    if (!full) {
+                        if (!arc.contains(std.math.atan2(o[1], o[0]))) continue;
                     }
                     self.setPoint(.init(.{ cx + o[0], cy + o[1] }), color);
                 }
@@ -831,22 +862,21 @@ pub fn Canvas(comptime T: type) type {
         /// Internal function for drawing solid (aliased) circle outlines.
         fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             if (width == 1) {
-                self.drawBresenhamCircle(center, radius, color, null);
+                self.drawBresenhamCircle(center, radius, color, .full);
             } else {
                 const line_width: f32 = @floatFromInt(width);
-                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, null, .fast);
+                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, .full, .fast);
             }
         }
 
         /// Internal function for drawing smooth (anti-aliased) circle outlines.
         fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             const line_width: f32 = @floatFromInt(width);
-            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, null, .soft);
+            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, .full, .soft);
         }
 
         /// Internal function for drawing solid (aliased) arc outlines.
-        fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) void {
-            const arc: ArcRange = .init(start_angle, end_angle);
+        fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype) void {
             if (width == 1) {
                 self.drawBresenhamCircle(center, radius, color, arc);
             } else {
@@ -856,9 +886,9 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing smooth (anti-aliased) arc outlines.
-        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, width: u32, color: anytype) !void {
-            const angle_span = end_angle - start_angle;
-            const arc_length = @abs(angle_span) * radius;
+        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype) !void {
+            const angle_span = arc.span();
+            const arc_length = arc.length(radius);
             const segments: u32 = @max(8, @min(bezier_max_segments_count, @as(u32, @ceil(arc_length / 5.0))));
             const angle_step = angle_span / as(f32, segments);
 
@@ -872,14 +902,14 @@ pub fn Canvas(comptime T: type) type {
             defer if (total_points > stack_points.len) self.allocator.free(points);
 
             if (width == 1) {
-                fillArcRing(points[0 .. segments + 1], center, radius, start_angle, angle_step);
+                fillArcRing(points[0 .. segments + 1], center, radius, arc.start, angle_step);
                 for (0..segments) |i| {
                     self.drawLine(points[i], points[i + 1], color, 1, .soft);
                 }
             } else {
                 const line_width: f32 = @floatFromInt(width);
-                fillArcRing(points[0 .. segments + 1], center, radius + line_width / 2.0, start_angle, angle_step);
-                fillArcRing(points[segments + 1 ..], center, radius - line_width / 2.0, end_angle, -angle_step);
+                fillArcRing(points[0 .. segments + 1], center, radius + line_width / 2.0, arc.start, angle_step);
+                fillArcRing(points[segments + 1 ..], center, radius - line_width / 2.0, arc.end, -angle_step);
                 try self.fillPolygon(points, color, .soft);
             }
         }
@@ -1021,15 +1051,16 @@ pub fn Canvas(comptime T: type) type {
             }
 
             // Partial arc
+            const arc: ArcRange = .init(start_angle, end_angle);
             switch (mode) {
-                .fast => self.fillArcFast(center, radius, start_angle, end_angle, color),
-                .soft => try self.fillArcSoft(center, radius, start_angle, end_angle, color),
+                .fast => self.fillArcFast(center, radius, arc, color),
+                .soft => try self.fillArcSoft(center, radius, arc, color),
             }
         }
 
         /// Internal function for filling smooth (anti-aliased) circles.
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
-            self.renderRing(center, 0, radius, color, null, .soft);
+            self.renderRing(center, 0, radius, color, .full, .soft);
         }
 
         /// Internal function for filling solid (non-anti-aliased) circles.
@@ -1054,11 +1085,8 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling solid (non-anti-aliased) arcs.
         /// Fills a pie slice (arc + lines to center).
-        fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) void {
-            // Normalize the arc span into (0, 2π); the full-circle case is handled by fillArc's dispatch.
-            const span = @mod(end_angle - start_angle, 2 * std.math.pi);
-            if (span == 0) return;
-            const long_arc = span > std.math.pi;
+        fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype) void {
+            if (arc.span() <= 0) return;
 
             const solid_color = convertColor(T, color);
             const frows: f32 = @floatFromInt(self.image.rows);
@@ -1068,10 +1096,12 @@ pub fn Canvas(comptime T: type) type {
             // dx*sin(start) - dy*cos(start) <= 0, and "before" end_angle CCW iff
             // dx*sin(end) - dy*cos(end) >= 0. For span <= π the wedge is their intersection;
             // for span > π it's their union (everything except the smaller complementary wedge).
-            const sin_s = @sin(start_angle);
-            const cos_s = @cos(start_angle);
-            const sin_e = @sin(end_angle);
-            const cos_e = @cos(end_angle);
+            const sv = arc.startVector();
+            const ev = arc.endVector();
+            const sin_s = sv.y();
+            const cos_s = sv.x();
+            const sin_e = ev.y();
+            const cos_e = ev.x();
             const cx_sin_s = center.x() * sin_s;
             const cx_sin_e = center.x() * sin_e;
 
@@ -1097,7 +1127,7 @@ pub fn Canvas(comptime T: type) type {
 
                 var x = scan_left;
                 while (x <= scan_right) : (x += 1) {
-                    if (!inArcByCross(x * sin_s + start_const, x * sin_e + end_const, long_arc)) continue;
+                    if (!arc.containsCross(x * sin_s + start_const, x * sin_e + end_const)) continue;
 
                     var span_end = x;
                     while (span_end < scan_right) : (span_end += 1) {
@@ -1106,20 +1136,13 @@ pub fn Canvas(comptime T: type) type {
                         // Guard against scan_right's float imprecision pushing nx past the circle —
                         // without this, setHorizontalSpan's @ceil can include an extra pixel.
                         if (dnx * dnx + dy * dy > radius_sq) break;
-                        if (!inArcByCross(nx * sin_s + start_const, nx * sin_e + end_const, long_arc)) break;
+                        if (!arc.containsCross(nx * sin_s + start_const, nx * sin_e + end_const)) break;
                     }
 
                     self.setHorizontalSpan(x, span_end, y, solid_color);
                     x = span_end;
                 }
             }
-        }
-
-        /// Half-plane test for "angle in arc" using precomputed cross-product components.
-        inline fn inArcByCross(start_cross: f32, end_cross: f32, long_arc: bool) bool {
-            const a = start_cross <= 0;
-            const b = end_cross >= 0;
-            return if (long_arc) (a or b) else (a and b);
         }
 
         /// Helper: Calculate antialiased coverage for arc boundaries
@@ -1135,34 +1158,28 @@ pub fn Canvas(comptime T: type) type {
             else
                 0.0;
 
+            const eps = 1e-5;
+
             if (!in_arc) {
                 // Outside arc - apply edge antialiasing
                 var edge_coverage: f32 = 0;
-                if (start_cross < 1.0 and start_cross_product < 0) edge_coverage = @max(edge_coverage, 1.0 - start_cross);
-                if (end_cross < 1.0 and end_cross_product > 0) edge_coverage = @max(edge_coverage, 1.0 - end_cross);
+                if (start_cross < 1.0 and start_cross_product < eps) edge_coverage = @max(edge_coverage, 1.0 - start_cross);
+                if (end_cross < 1.0 and end_cross_product > -eps) edge_coverage = @max(edge_coverage, 1.0 - end_cross);
                 return circ_coverage * edge_coverage;
             } else {
                 // Inside arc - reduce coverage near edges
                 var coverage = circ_coverage;
-                if (start_cross < 1.0 and start_cross_product >= 0) coverage = @min(coverage, start_cross);
-                if (end_cross < 1.0 and end_cross_product <= 0) coverage = @min(coverage, end_cross);
+                if (start_cross < 1.0 and start_cross_product >= -eps) coverage = @min(coverage, start_cross);
+                if (end_cross < 1.0 and end_cross_product <= eps) coverage = @min(coverage, end_cross);
                 return coverage;
             }
         }
 
         /// Internal function for filling smooth (anti-aliased) arcs.
-        fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype) !void {
-            // For full circles, use fillCircle for better quality
-            if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
-                self.fillCircle(center, radius, color, .soft);
-                return;
-            }
-
-            const arc: ArcRange = .init(start_angle, end_angle);
-
+        fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype) !void {
             // Precompute edge vectors
-            const start_edge = .{ .x = @cos(start_angle), .y = @sin(start_angle) };
-            const end_edge = .{ .x = @cos(end_angle), .y = @sin(end_angle) };
+            const start_edge = arc.startVector();
+            const end_edge = arc.endVector();
 
             const bounds = self.ringBoundingBox(center, radius) orelse return;
 
@@ -1177,14 +1194,17 @@ pub fn Canvas(comptime T: type) type {
                     if (dist_sq > (radius + 1) * (radius + 1)) continue;
 
                     const angle = std.math.atan2(y, x);
-                    const in_arc = isAngleInArc(angle, arc);
+                    const in_arc = arc.contains(angle);
 
-                    const start_cross_product = x * start_edge.y - y * start_edge.x;
-                    const end_cross_product = x * end_edge.y - y * end_edge.x;
+                    const p: Point(2, f32) = .init(.{ x, y });
+
+                    const start_cross_product = p.cross(start_edge);
+                    const end_cross_product = p.cross(end_edge);
 
                     if (!in_arc) {
-                        const near_start = @abs(start_cross_product) < 1.0 and start_cross_product < 0;
-                        const near_end = @abs(end_cross_product) < 1.0 and end_cross_product > 0;
+                        const eps = 1e-5;
+                        const near_start = @abs(start_cross_product) < 1.0 and start_cross_product < eps;
+                        const near_end = @abs(end_cross_product) < 1.0 and end_cross_product > -eps;
                         if (!near_start and !near_end) continue;
                     }
 
