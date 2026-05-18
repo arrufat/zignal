@@ -357,7 +357,6 @@ const orientation_weights: [PATCH_SIZE * PATCH_SIZE]f32 = blk: {
 };
 
 /// Helper for computing keypoint moments with optional bounds checking.
-/// Used by computeOrientation to provide an optimized safe-path.
 const MomentComputer = struct {
     image: Image(u8),
     x: isize,

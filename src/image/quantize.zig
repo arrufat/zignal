@@ -92,7 +92,7 @@ pub const ColorLookupTable = struct {
         return self;
     }
 
-    /// Finds the nearest color in a palette to the target color using SIMD.
+    /// Finds the nearest color in a palette to the target color.
     fn findNearestColorSIMD(
         len: usize,
         pal_r: *const [256]i32,

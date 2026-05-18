@@ -21,7 +21,6 @@ nonmax_suppression: bool = true,
 
 /// Minimum number of contiguous pixels that must be brighter/darker
 /// Standard FAST uses 9 (FAST-9) or 12 (FAST-12).
-/// Default is 9 (FAST-9) which is generally robust and efficient.
 min_contiguous: u8 = 9,
 
 const Fast = @This();

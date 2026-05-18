@@ -22,7 +22,7 @@ pub const Mode = enum {
     floyd_steinberg,
     /// Atkinson dithering (used by the original Macintosh — only 75% of error is diffused).
     atkinson,
-    /// Ordered dithering using an 8x8 Bayer matrix; faster and parallelizable.
+    /// Ordered dithering using an 8x8 Bayer matrix.
     ordered,
     /// Automatic heuristic — caller must resolve to a concrete mode before invoking
     /// `apply` / `applyOrdered` / `applyErrorDiffusion`.

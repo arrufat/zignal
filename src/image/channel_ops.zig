@@ -434,8 +434,7 @@ pub fn resizePlaneMitchellU8(
     }
 }
 
-/// Optimized Lanczos3 resize for u8 planes using float arithmetic for kernel.
-/// Although it uses float for the weights (due to sin), it processes planes efficiently.
+/// Lanczos3 resize for u8 planes with f32 kernel weights.
 pub fn resizePlaneLanczosU8(
     src: []const u8,
     dst: []u8,
@@ -493,7 +492,7 @@ pub fn resizePlaneLanczosU8(
     }
 }
 
-/// Generic f32 plane resize with SIMD optimization.
+/// Generic f32 plane resize.
 pub fn resizePlaneF32(
     src: []const f32,
     dst: []f32,
