@@ -211,7 +211,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                 return transposed.leadingSingularValue();
             }
 
-            const svd_result = self.svd(.{ .mode = .skinny_u, .with_u = false, .with_v = false });
+            const svd_result = self.svd(.{ .mode = .no_u, .with_v = false });
             return svd_result.s.items[0][0];
         }
 
@@ -224,7 +224,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                 return transposed.sumSingularP(exponent);
             }
 
-            const svd_result = self.svd(.{ .mode = .skinny_u, .with_u = false, .with_v = false });
+            const svd_result = self.svd(.{ .mode = .no_u, .with_v = false });
             var accum: T = 0;
             for (0..svd_result.s.rows) |i| {
                 accum += std.math.pow(T, svd_result.s.items[i][0], exponent);

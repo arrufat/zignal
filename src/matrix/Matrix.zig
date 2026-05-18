@@ -345,7 +345,7 @@ pub fn Matrix(comptime T: type) type {
             std.debug.assert(self.rows >= self.cols);
 
             const allocator = self.allocator;
-            const svd_options = SvdOptions{ .with_u = true, .with_v = true, .mode = .skinny_u };
+            const svd_options = SvdOptions{ .with_v = true, .mode = .skinny_u };
 
             var svd_result = try self.svd(allocator, svd_options);
             defer svd_result.deinit();
@@ -962,7 +962,7 @@ pub fn Matrix(comptime T: type) type {
                 return transposed.leadingSingularValue(allocator);
             }
 
-            var svd_result = try self.svd(allocator, .{ .with_u = false, .with_v = false, .mode = .skinny_u });
+            var svd_result = try self.svd(allocator, .{ .with_v = false, .mode = .no_u });
             defer svd_result.deinit();
             if (svd_result.converged != 0) {
                 return error.NotConverged;
@@ -976,7 +976,7 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows == 0 or self.cols == 0) return 0;
 
             if (self.rows >= self.cols) {
-                var svd_result = try self.svd(allocator, .{ .with_u = false, .with_v = false, .mode = .skinny_u });
+                var svd_result = try self.svd(allocator, .{ .with_v = false, .mode = .no_u });
                 defer svd_result.deinit();
                 if (svd_result.converged != 0) {
                     return error.NotConverged;

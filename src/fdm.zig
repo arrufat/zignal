@@ -106,7 +106,6 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 
                 const cov_static = cov_matrix.toSMatrix(3, 3);
                 const target_svd = cov_static.svd(.{
-                    .with_u = true,
                     .with_v = false,
                     .mode = .skinny_u,
                 });
@@ -206,7 +205,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 // W = U_s * diag(sqrt(lambda_t / lambda_s)) * U_t^T
 
                 const source_cov_static = source_cov_mat.toSMatrix(3, 3);
-                const source_svd = source_cov_static.svd(.{ .with_u = true, .with_v = false, .mode = .skinny_u });
+                const source_svd = source_cov_static.svd(.{ .with_v = false, .mode = .skinny_u });
 
                 if (source_svd.converged != 0) {
                     return error.NotConverged;
