@@ -1859,9 +1859,8 @@ fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const compute_uv_bool = params.compute_uv != 0;
 
     const svd_options: Matrix(f64).SvdOptions = .{
-        .with_u = compute_uv_bool,
         .with_v = compute_uv_bool,
-        .mode = if (full_matrices_bool) .full_u else .skinny_u,
+        .mode = if (!compute_uv_bool) .no_u else if (full_matrices_bool) .full_u else .skinny_u,
     };
 
     var svd_result = ptr.svd(allocator, svd_options) catch {

@@ -29,14 +29,9 @@ const State = enum {
 /// Configuration options for SVD computation.
 /// Allows fine-grained control over which matrices are computed.
 pub const Options = struct {
-    /// Whether to compute the left singular vectors (U matrix).
-    /// Set to false when only singular values are needed.
-    with_u: bool = true,
     /// Whether to compute the right singular vectors (V matrix).
-    /// Set to false when only U and singular values are needed.
     with_v: bool = false,
-    /// Controls the size of the U matrix when with_u is true.
-    /// Ignored when with_u is false.
+    /// Controls computation and size of the U matrix.
     mode: Mode = .full_u,
 };
 
@@ -57,8 +52,8 @@ pub fn Result(
 ) type {
     return struct {
         /// Left singular vectors matrix. Each column is a left singular vector.
-        /// Dimensions: m×m (full_u) or m×n (skinny_u)
-        u: SMatrix(T, rows, if (options.mode == .skinny_u) cols else rows),
+        /// Dimensions: m×m (full_u) or m×n (skinny_u or no_u, contents undefined for no_u).
+        u: SMatrix(T, rows, if (options.mode == .full_u) rows else cols),
         /// Singular values in descending order as a column vector.
         /// These are the diagonal elements of the Σ matrix.
         s: SMatrix(T, cols, 1),
@@ -68,33 +63,16 @@ pub fn Result(
         /// Convergence status: 0 if successful, k if failed at k-th singular value.
         /// Non-zero values indicate the iterative algorithm failed to converge.
         converged: usize,
-
-        // Provide a no-op deinit for compatibility
-        pub fn deinit(self: *@This()) void {
-            _ = self;
-        }
     };
 }
 
-/// Performs singular value decomposition. Code adapted from dlib's svd4, which is, in turn,
-/// translated to 'C' from the original Algol code in "Hanbook for Automatic Computation, vol. II,
-/// Linear Algebra", Springer-Verlag.  Note that this published algorithm is considered to be
-/// the best and numerically stable approach to computing the real-valued svd and is referenced
-/// repeatedly in ieee journal papers, etc where the svd is used.
+/// Singular value decomposition of `a` (m×n with m ≥ n) into U, Σ, V^T.
 ///
-/// This is almost an exact translation from the original, except that an iteration counter
-/// is added to prevent stalls.  This corresponds to similar changes in other translations.
-/// Returns an error code = 0, if no errors and 'k' if a failure to converge at the 'kth'
-/// singular value.
+/// Adapted from dlib's svd4, which translated the original Algol from
+/// "Handbook for Automatic Computation, vol. II, Linear Algebra" (Springer-Verlag) into C.
+/// An iteration counter is added to prevent stalls.
 ///
-/// USAGE: given the singular value decomposition a = u * diagm(q) * trans(v) for an m*n
-/// matrix a with m >= n.  After the svd call, u is an m x m matrix which is columnwise
-/// orthogonal. q will be an n element vector consisting of singular values and v an n x n
-/// orthogonal matrix. eps and tol are tolerance constants.  Suitable values are eps=1e-16
-/// and tol=(1e-300)/eps if T == double.
-///
-/// If options.mode == .no_u, then u won't be computed and similarly if options.with_v == false
-/// then v won't be computed.  If options.mode == .skinny_u then u will be m x n instead of m x m.
+/// Sets `converged = 0` on success, or `k` if the algorithm fails to converge at the k-th singular value.
 pub fn svd(
     comptime T: type,
     comptime rows: usize,
@@ -103,6 +81,7 @@ pub fn svd(
     comptime options: Options,
 ) Result(T, rows, cols, options) {
     comptime std.debug.assert(rows >= cols);
+    const max_iterations: usize = 300;
     var eps: T = std.math.floatEps(T);
     const tol: T = std.math.floatMin(T) / eps;
     const m = rows;
@@ -192,9 +171,7 @@ pub fn svd(
             }
         }
         y = @abs(q.items[i][0]) + @abs(e.items[i][0]);
-        if (y > x) {
-            x = y;
-        }
+        x = @max(x, y);
     }
 
     // Accumulation of right-hand transformations.
@@ -328,7 +305,7 @@ pub fn svd(
                 }
                 // Shift from bottom 2x2 minor.
                 iter += 1;
-                if (iter > 300) {
+                if (iter > max_iterations) {
                     retval = k;
                     break :state;
                 }
@@ -389,7 +366,6 @@ pub fn svd(
 
             .convergence_check => {
                 if (z < 0) {
-                    // q.items[k][0]s made non-negative
                     q.items[k][0] = -z;
                     if (options.with_v) {
                         for (0..n) |j| {
@@ -402,13 +378,10 @@ pub fn svd(
         }
     }
 
-    // Sort singular values in descending order
-    // This requires swapping columns of U and V accordingly
+    // Sort singular values in descending order.
     for (0..n) |i| {
         var max_idx = i;
         var max_val = q.items[i][0];
-
-        // Find the maximum singular value from i to n
         for (i + 1..n) |j| {
             if (q.items[j][0] > max_val) {
                 max_idx = j;
@@ -416,28 +389,16 @@ pub fn svd(
             }
         }
 
-        // Swap if needed
         if (max_idx != i) {
-            // Swap singular values
-            const temp_s = q.items[i][0];
-            q.items[i][0] = q.items[max_idx][0];
-            q.items[max_idx][0] = temp_s;
-
-            // Swap columns of U
+            std.mem.swap(T, &q.items[i][0], &q.items[max_idx][0]);
             if (options.mode != .no_u) {
                 for (0..u.rows) |row| {
-                    const temp_u = u.items[row][i];
-                    u.items[row][i] = u.items[row][max_idx];
-                    u.items[row][max_idx] = temp_u;
+                    std.mem.swap(T, &u.items[row][i], &u.items[row][max_idx]);
                 }
             }
-
-            // Swap columns of V
             if (options.with_v) {
                 for (0..n) |row| {
-                    const temp_v = v.items[row][i];
-                    v.items[row][i] = v.items[row][max_idx];
-                    v.items[row][max_idx] = temp_v;
+                    std.mem.swap(T, &v.items[row][i], &v.items[row][max_idx]);
                 }
             }
         }
@@ -457,7 +418,7 @@ test "svd static basic" {
         .{ 0, 0, 0, 0 },
         .{ 2, 0, 0, 0 },
     });
-    const res = svd(f64, m, n, a, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const res = svd(f64, m, n, a, .{ .with_v = true, .mode = .full_u });
     const u = &res.u;
     const s = &res.s;
     const v = &res.v;
