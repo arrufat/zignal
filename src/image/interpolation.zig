@@ -15,7 +15,7 @@
 //! ```zig
 //! var small = Image(Rgba).init(256, 256, small_data);
 //! var large = Image(Rgba).init(512, 512, large_data);
-//! small.resize(large, .lanczos); // High quality upscaling
+//! small.resize(large, allocator, .lanczos); // High quality upscaling
 //! ```
 //!
 //! ## Performance Guide
@@ -89,7 +89,7 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 /// - Same-size: memcpy fast path
 /// - 2× upscale, bilinear: specialized path
 /// - RGB/RGBA: channel-separated processing (uses `allocator` for temporary buffers)
-pub fn resize(comptime T: type, allocator: Allocator, self: Image(T), out: Image(T), method: Interpolation) void {
+pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         if (self.data.ptr == out.data.ptr) return;

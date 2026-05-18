@@ -131,7 +131,7 @@ pub export fn seam_carve(
 
     var edges = Image(u8).init(allocator, rows, cols) catch @panic("OOM");
     defer edges.deinit(allocator);
-    image.sobel(allocator, edges) catch @panic("OOM");
+    image.sobel(edges, allocator) catch @panic("OOM");
 
     var energy_map = Image(u32).init(allocator, image.rows, image.cols) catch @panic("OOM");
     defer energy_map.deinit(allocator);

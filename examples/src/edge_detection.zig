@@ -25,17 +25,17 @@ pub fn main(init: std.process.Init) !void {
     const font = zignal.font.font8x8.basic;
 
     const sobel = edges.view(.{ .t = 0, .l = 0, .r = scaled.cols, .b = scaled.rows });
-    try scaled.sobel(init.gpa, sobel);
+    try scaled.sobel(sobel, init.gpa);
     canvas = .init(init.gpa, sobel);
     canvas.drawText("Sobel", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
     const shenCastan = edges.view(.{ .t = 0, .l = scaled.cols, .r = 2 * scaled.cols, .b = scaled.rows });
-    try scaled.shenCastan(init.gpa, .heavy_smooth, shenCastan);
+    try scaled.shenCastan(shenCastan, init.gpa, .heavy_smooth);
     canvas = .init(init.gpa, shenCastan);
     canvas.drawText("Shen Castan", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 
     const canny = edges.view(.{ .t = 0, .l = 2 * scaled.cols, .r = 3 * scaled.cols, .b = scaled.rows });
-    try scaled.canny(init.gpa, 1.4, 75, 150, canny);
+    try scaled.canny(canny, init.gpa, 1.4, 75, 150);
     canvas = .init(init.gpa, canny);
     canvas.drawText("Canny", p(.{ 0, 0 }), @as(u8, 255), font, 3, .fast);
 

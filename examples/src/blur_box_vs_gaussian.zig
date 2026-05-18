@@ -92,7 +92,7 @@ pub fn main(init: std.process.Init) !void {
     defer gaussian.deinit(init.gpa);
 
     const start_gaussian = std.Io.Clock.awake.now(init.io);
-    try original.gaussianBlur(init.gpa, sigma, gaussian);
+    try original.gaussianBlur(gaussian, init.gpa, sigma);
     const end_gaussian = std.Io.Clock.awake.now(init.io);
     const gaussian_ns = start_gaussian.durationTo(end_gaussian).toNanoseconds();
     try gaussian.save(init.io, init.gpa, "blur_gaussian.png");
@@ -133,7 +133,7 @@ pub fn main(init: std.process.Init) !void {
             const radius: u32 = @intCast((width - 1) / 2);
             const dst = scratch[scratch_index];
             scratch_index = (scratch_index + 1) % scratch.len;
-            try source.boxBlur(init.gpa, radius, dst.*);
+            try source.boxBlur(dst.*, init.gpa, radius);
             source = dst;
             last_result = dst;
         }

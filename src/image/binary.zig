@@ -32,7 +32,7 @@ pub const Kernel = struct {
 const Operation = enum { dilate, erode };
 
 pub const Binary = struct {
-    pub fn thresholdOtsu(image: Image(u8), _: std.mem.Allocator, out: Image(u8)) !u8 {
+    pub fn thresholdOtsu(image: Image(u8), out: Image(u8), _: std.mem.Allocator) !u8 {
         if (image.rows == 0 or image.cols == 0) {
             return 0;
         }
@@ -82,10 +82,10 @@ pub const Binary = struct {
 
     pub fn thresholdAdaptiveMean(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         radius: usize,
         c: f32,
-        out: Image(u8),
     ) !void {
         if (radius == 0) return error.InvalidRadius;
         if (image.rows == 0 or image.cols == 0) {
@@ -117,50 +117,50 @@ pub const Binary = struct {
 
     pub fn dilate(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
     ) !void {
-        try morph(image, allocator, kernel, iterations, out, .dilate);
+        try morph(image, out, allocator, kernel, iterations, .dilate);
     }
 
     pub fn erode(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
     ) !void {
-        try morph(image, allocator, kernel, iterations, out, .erode);
+        try morph(image, out, allocator, kernel, iterations, .erode);
     }
 
     pub fn open(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
     ) !void {
-        try morphComposite(image, allocator, kernel, iterations, out, .erode, .dilate);
+        try morphComposite(image, out, allocator, kernel, iterations, .erode, .dilate);
     }
 
     pub fn close(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
     ) !void {
-        try morphComposite(image, allocator, kernel, iterations, out, .dilate, .erode);
+        try morphComposite(image, out, allocator, kernel, iterations, .dilate, .erode);
     }
 
     fn morphComposite(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
         comptime first_op: Operation,
         comptime second_op: Operation,
     ) !void {
@@ -172,16 +172,16 @@ pub const Binary = struct {
         var temp = try Image(u8).initLike(allocator, image);
         defer temp.deinit(allocator);
 
-        try morph(image, allocator, kernel, iterations, temp, first_op);
-        try morph(temp, allocator, kernel, iterations, out, second_op);
+        try morph(image, temp, allocator, kernel, iterations, first_op);
+        try morph(temp, out, allocator, kernel, iterations, second_op);
     }
 
     fn morph(
         image: Image(u8),
+        out: Image(u8),
         allocator: std.mem.Allocator,
         kernel: Kernel,
         iterations: usize,
-        out: Image(u8),
         comptime op: Operation,
     ) !void {
         if (image.rows == 0 or image.cols == 0) {

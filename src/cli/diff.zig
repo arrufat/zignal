@@ -94,7 +94,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     };
 
     const timer = common.Timer.begin(io);
-    const result = try img1.diff(img2, diff_img, diff_opts);
+    const result = try img1.diff(diff_img, img2, diff_opts);
     timer.logElapsed("diff");
 
     // `result.stats` describes the *visualized* diff image (after threshold/scale/binary),

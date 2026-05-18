@@ -123,7 +123,7 @@ fn processImage(
     switch (blur_type) {
         .box => {
             const radius = options.radius orelse 1;
-            try img.boxBlur(gpa, radius, out);
+            try img.boxBlur(out, gpa, radius);
         },
         .gaussian => {
             const sigma = options.sigma orelse 1.0;
@@ -131,7 +131,7 @@ fn processImage(
                 std.log.err("sigma must be a non-negative finite number.", .{});
                 return error.InvalidArguments;
             }
-            try img.gaussianBlur(gpa, sigma, out);
+            try img.gaussianBlur(out, gpa, sigma);
         },
         .median => {
             const radius = options.radius orelse 1;
@@ -139,7 +139,7 @@ fn processImage(
                 std.log.err("median blur radius {d} exceeds maximum limit of 256.", .{radius});
                 return error.InvalidArguments;
             }
-            try img.medianBlur(gpa, radius, out);
+            try img.medianBlur(out, gpa, radius);
         },
         .motion_linear => {
             const angle_deg = options.angle orelse 0.0;
@@ -162,7 +162,7 @@ fn processImage(
             }
 
             const angle_rad = std.math.degreesToRadians(angle_deg);
-            try img.motionBlur(gpa, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } }, out);
+            try img.motionBlur(out, gpa, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } });
         },
         .motion_zoom, .motion_spin => {
             const cx = options.center_x orelse 0.5;
@@ -188,7 +188,7 @@ fn processImage(
             else
                 .{ .radial_spin = .{ .center_x = cx, .center_y = cy, .strength = strength } };
 
-            try img.motionBlur(gpa, motion, out);
+            try img.motionBlur(out, gpa, motion);
         },
     }
 

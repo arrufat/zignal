@@ -617,7 +617,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else {
-                    const out = img.convert(u8, allocator) catch {
+                    const out = img.convert(allocator, u8) catch {
                         python.setMemoryError("image conversion");
                         return null;
                     };
@@ -632,7 +632,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else {
-                    const out = img.convert(Rgb, allocator) catch {
+                    const out = img.convert(allocator, Rgb) catch {
                         python.setMemoryError("image conversion");
                         return null;
                     };
@@ -647,7 +647,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                     img.copy(out);
                     return @ptrCast(moveImageToPython(out) orelse return null);
                 } else {
-                    const out = img.convert(Rgba, allocator) catch {
+                    const out = img.convert(allocator, Rgba) catch {
                         python.setMemoryError("image conversion");
                         return null;
                     };

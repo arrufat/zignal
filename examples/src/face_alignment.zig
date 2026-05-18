@@ -92,9 +92,9 @@ pub fn extractAlignedFace(
 
     // Perform blurring or sharpening to the aligned face.
     if (blurring > 0) {
-        try out.boxBlur(allocator, @intCast(blurring), out.*);
+        try out.boxBlur(out.*, allocator, @intCast(blurring));
     } else if (blurring < 0) {
-        try out.sharpen(allocator, @intCast(-blurring), out.*);
+        try out.sharpen(out.*, allocator, @intCast(-blurring));
     }
 }
 

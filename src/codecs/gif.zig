@@ -557,7 +557,7 @@ fn composeFirstFrame(comptime T: type, allocator: Allocator, state: GifState) !I
 
     if (T == Rgba) return canvas;
     defer canvas.deinit(allocator);
-    return canvas.convert(T, allocator);
+    return canvas.convert(allocator, T);
 }
 
 /// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
@@ -650,7 +650,7 @@ fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !Ani
             frames_out[i] = rgba_frame;
         } else {
             defer rgba_frame.deinit(allocator);
-            frames_out[i] = try rgba_frame.convert(T, allocator);
+            frames_out[i] = try rgba_frame.convert(allocator, T);
         }
         frames_init = i + 1;
 
@@ -885,7 +885,7 @@ fn mapImageToPalette(
     const lut = quantize.ColorLookupTable.init(lookup_palette);
 
     if (use_dither) {
-        var work = try image.convert(Rgb, allocator);
+        var work = try image.convert(allocator, Rgb);
         defer work.deinit(allocator);
         dither.applyFloydSteinberg(work, lookup_palette, lut);
         var i: usize = 0;
