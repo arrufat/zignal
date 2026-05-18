@@ -140,6 +140,9 @@ pub fn Image(comptime T: type) type {
         /// try original.gaussianBlur(1.4, blurred);
         /// ```
         pub fn initLike(allocator: Allocator, reference: anytype) !Image(T) {
+            const RefType = @TypeOf(reference);
+            comptime assert(@hasField(RefType, "rows"));
+            comptime assert(@hasField(RefType, "cols"));
             return init(allocator, reference.rows, reference.cols);
         }
 
@@ -185,7 +188,6 @@ pub fn Image(comptime T: type) type {
             if (self.isContiguous()) {
                 @memset(self.data, value);
             } else {
-                // Respect stride when the image is a view
                 for (0..self.rows) |r| {
                     const start = r * self.stride;
                     @memset(self.data[start .. start + self.cols], value);
@@ -202,14 +204,12 @@ pub fn Image(comptime T: type) type {
                 return;
             };
 
-            // Top band [0, inner.t)
             var r: usize = 0;
             while (r < inner.t) : (r += 1) {
                 const start = r * self.stride;
                 @memset(self.data[start .. start + self.cols], value);
             }
 
-            // Middle rows [inner.t, inner.b)
             r = inner.t;
             while (r < inner.b) : (r += 1) {
                 const row_start = r * self.stride;
@@ -221,7 +221,6 @@ pub fn Image(comptime T: type) type {
                 }
             }
 
-            // Bottom band [inner.b, rows)
             r = inner.b;
             while (r < self.rows) : (r += 1) {
                 const start = r * self.stride;
@@ -247,7 +246,6 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
             const image_format = try ImageFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedImageFormat;
-
             return switch (image_format) {
                 .png => png.load(T, io, allocator, file_path, .{}),
                 .jpeg => jpeg.load(T, io, allocator, file_path, .{}),
@@ -267,7 +265,6 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn loadFromBytes(allocator: Allocator, data: []const u8) !Self {
             const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
-
             return switch (image_format) {
                 .png => png.loadFromBytes(T, allocator, data, .{}),
                 .jpeg => jpeg.loadFromBytes(T, allocator, data, .{}),
@@ -300,7 +297,7 @@ pub fn Image(comptime T: type) type {
                 .int, .float => 1,
                 .@"struct" => std.meta.fields(T).len,
                 .array => |info| info.len,
-                else => @compileError("Image(" ++ @typeName(T) ++ " is unsupported."),
+                else => @compileError("Image(" ++ @typeName(T) ++ ") is unsupported."),
             };
         }
 
@@ -368,14 +365,13 @@ pub fn Image(comptime T: type) type {
         /// defer duped.deinit(allocator);
         /// ```
         pub fn dupe(self: Self, allocator: Allocator) !Self {
-            const result = try Self.init(allocator, self.rows, self.cols);
+            const result: Self = try .init(allocator, self.rows, self.cols);
             self.copy(result);
             return result;
         }
 
         /// Copies image data from `self` to `dst`, correctly handling views.
         /// If src and dst are the same object, does nothing (no-op).
-        /// Uses fast @memcpy when neither image is a view, falls back to row-by-row copying otherwise.
         pub fn copy(self: Self, dst: Self) void {
             assert(self.hasSameShape(dst));
             if (self.data.ptr == dst.data.ptr) {
@@ -434,7 +430,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Returns the optional value at row, col in the image.
-        pub fn atOrNull(self: Self, row: i32, col: i32) ?*T {
+        pub fn atOrNull(self: Self, row: i64, col: i64) ?*T {
             const irows: isize = @intCast(self.rows);
             const icols: isize = @intCast(self.cols);
             if (row < 0 or col < 0 or row >= irows or col >= icols) {
@@ -463,7 +459,7 @@ pub fn Image(comptime T: type) type {
         /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});  // Kitty graphics protocol
         /// ```
         pub fn display(self: *const Self, io: Io, display_format: DisplayFormat) DisplayFormatter(T) {
-            return DisplayFormatter(T){
+            return .{
                 .image = self,
                 .display_format = display_format,
                 .io = io,
@@ -506,7 +502,7 @@ pub fn Image(comptime T: type) type {
                 for (0..self.rows) |r| {
                     for (0..self.cols) |c| {
                         const pixel = self.at(r, c);
-                        pixel.* = pixel.*.invert();
+                        pixel.* = pixel.invert();
                     }
                 }
             } else {
@@ -605,7 +601,7 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// const transform = try SimilarityTransform(f32).init(from_points, to_points);
+        /// const transform: SimilarityTransform(T) = try .init(from_points, to_points);
         /// var warped: Image(T) = .empty;
         /// try image.warp(allocator, transform, .bilinear, &warped, 512, 512);
         /// defer warped.deinit(allocator);
@@ -618,11 +614,7 @@ pub fn Image(comptime T: type) type {
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
         /// Uses SIMD optimizations for improved performance with a two-pass approach.
-        pub fn integral(
-            self: Self,
-            allocator: Allocator,
-            planes: *Self.Integral.Planes,
-        ) !void {
+        pub fn integral(self: Self, allocator: Allocator, planes: *Self.Integral.Planes) !void {
             return Self.Integral.compute(self, allocator, planes);
         }
 
