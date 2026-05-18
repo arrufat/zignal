@@ -147,7 +147,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Sets a horizontal span to `color` without alpha blending.
-        pub fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
@@ -185,10 +185,8 @@ pub fn Canvas(comptime T: type) type {
         /// - Width >1: Uses rectangle-based approach with circular end caps
         fn drawLineFast(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             if (width == 1) {
-                // Use Bresenham's algorithm for 1px lines - fast and precise
                 self.drawLineBresenham(p1, p2, color);
             } else {
-                // Use polygon-based approach for thick lines
                 self.drawLineRectangle(p1, p2, width, color);
             }
         }
@@ -197,10 +195,8 @@ pub fn Canvas(comptime T: type) type {
         /// - Width >1: Uses distance-based algorithm for superior thick line quality
         fn drawLineSoft(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
             if (width == 1) {
-                // Use Wu's algorithm for 1px lines - optimal antialiasing and performance
                 self.drawLineXiaolinWu(p1, p2, color);
             } else {
-                // Use distance-based antialiasing for thick lines - better quality
                 self.drawLineDistance(p1, p2, width, color);
             }
         }
@@ -741,9 +737,9 @@ pub fn Canvas(comptime T: type) type {
         /// center. `aa=true` returns boundary-centered coverage in [0,1] (~0.5 at the
         /// geometric edge); `aa=false` returns 1.0 strictly inside the ring, 0.0 otherwise.
         /// `inner_r <= 0` disables the inner edge — pass 0 to fill a disk.
-        inline fn ringCoverage(comptime aa: bool, x: f32, y: f32, inner_r: f32, outer_r: f32) f32 {
+        inline fn ringCoverage(x: f32, y: f32, inner_r: f32, outer_r: f32, mode: DrawMode) f32 {
             const dist_sq = x * x + y * y;
-            if (aa) {
+            if (mode == .soft) {
                 const dist = @sqrt(dist_sq);
                 if (dist > outer_r + antialias_edge_offset) return 0;
                 if (inner_r > 0 and dist < inner_r - antialias_edge_offset) return 0;
@@ -771,22 +767,22 @@ pub fn Canvas(comptime T: type) type {
             inner_radius: f32,
             outer_radius: f32,
             color: anytype,
-            comptime aa: bool,
             arc: ?ArcRange,
+            mode: DrawMode,
         ) void {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
-            const solid_color = if (!aa) convertColor(T, color) else undefined;
-            const rgba_color = if (aa) convertColor(Rgba, color) else undefined;
+            const solid_color = if (mode == .fast) convertColor(T, color) else undefined;
+            const rgba_color = if (mode == .soft) convertColor(Rgba, color) else undefined;
             for (bbox.t..bbox.b) |r| {
                 const y = as(f32, r) - center.y();
                 for (bbox.l..bbox.r) |c| {
                     const x = as(f32, c) - center.x();
-                    const coverage = ringCoverage(aa, x, y, inner_radius, outer_radius);
+                    const coverage = ringCoverage(x, y, inner_radius, outer_radius, mode);
                     if (coverage <= 0) continue;
                     if (arc) |range| {
                         if (!isAngleInArc(std.math.atan2(y, x), range)) continue;
                     }
-                    if (aa) {
+                    if (mode == .soft) {
                         self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
                     } else {
                         self.image.data[r * self.image.stride + c] = solid_color;
@@ -838,14 +834,14 @@ pub fn Canvas(comptime T: type) type {
                 self.drawBresenhamCircle(center, radius, color, null);
             } else {
                 const line_width: f32 = @floatFromInt(width);
-                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, false, null);
+                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, null, .fast);
             }
         }
 
         /// Internal function for drawing smooth (anti-aliased) circle outlines.
         fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
             const line_width: f32 = @floatFromInt(width);
-            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, true, null);
+            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, null, .soft);
         }
 
         /// Internal function for drawing solid (aliased) arc outlines.
@@ -855,7 +851,7 @@ pub fn Canvas(comptime T: type) type {
                 self.drawBresenhamCircle(center, radius, color, arc);
             } else {
                 const line_width: f32 = @floatFromInt(width);
-                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, false, arc);
+                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, arc, .fast);
             }
         }
 
@@ -1033,7 +1029,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling smooth (anti-aliased) circles.
         fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
-            self.renderRing(center, 0, radius, color, true, null);
+            self.renderRing(center, 0, radius, color, null, .soft);
         }
 
         /// Internal function for filling solid (non-anti-aliased) circles.
