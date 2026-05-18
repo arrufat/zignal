@@ -25,7 +25,7 @@ test "SVD comparison: basic 5x4 matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
     var a_dynamic = try Matrix(f64).init(allocator, m, n);
@@ -35,7 +35,7 @@ test "SVD comparison: basic 5x4 matrix" {
             a_dynamic.at(i, j).* = test_matrix[i][j];
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = true, .mode = .full_u });
     defer dynamic_result.deinit();
 
     // Compare convergence
@@ -79,7 +79,7 @@ test "SVD comparison: identity matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, n, n) = .identity();
-    const static_result = svd_static(f64, n, n, a_static, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const static_result = svd_static(f64, n, n, a_static, .{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
     var a_dynamic = try Matrix(f64).init(allocator, n, n);
@@ -89,7 +89,7 @@ test "SVD comparison: identity matrix" {
             a_dynamic.at(i, j).* = if (i == j) 1.0 else 0.0;
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = true, .mode = .full_u });
     defer dynamic_result.deinit();
 
     // All singular values should be 1.0 for identity matrix
@@ -116,7 +116,7 @@ test "SVD comparison: singular matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
     var a_dynamic = try Matrix(f64).init(allocator, m, n);
@@ -126,7 +126,7 @@ test "SVD comparison: singular matrix" {
             a_dynamic.at(i, j).* = test_matrix[i][j];
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = true, .mode = .full_u });
     defer dynamic_result.deinit();
 
     // Compare singular values
@@ -168,7 +168,7 @@ test "SVD comparison: skinny_u mode" {
 
     // Static SVD with skinny_u
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = false, .mode = .skinny_u });
 
     // Dynamic SVD with skinny_u
     var a_dynamic = try Matrix(f64).init(allocator, m, n);
@@ -178,7 +178,7 @@ test "SVD comparison: skinny_u mode" {
             a_dynamic.at(i, j).* = test_matrix[i][j];
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = false, .mode = .skinny_u });
     defer dynamic_result.deinit();
 
     // Check dimensions
@@ -211,7 +211,7 @@ test "SVD comparison: rectangular matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
     var a_dynamic = try Matrix(f64).init(allocator, m, n);
@@ -221,7 +221,7 @@ test "SVD comparison: rectangular matrix" {
             a_dynamic.at(i, j).* = test_matrix[i][j];
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = true, .mode = .full_u });
     defer dynamic_result.deinit();
 
     // Compare convergence
@@ -260,7 +260,7 @@ test "SVD comparison: reconstruction accuracy" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_u = true, .with_v = true, .mode = .skinny_u });
+    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .skinny_u });
 
     // Dynamic SVD
     var a_dynamic = try Matrix(f64).init(allocator, m, n);
@@ -270,7 +270,7 @@ test "SVD comparison: reconstruction accuracy" {
             a_dynamic.at(i, j).* = test_matrix[i][j];
         }
     }
-    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_u = true, .with_v = true, .mode = .skinny_u });
+    var dynamic_result = try svd_dynamic(f64, allocator, a_dynamic, .{ .with_v = true, .mode = .skinny_u });
     defer dynamic_result.deinit();
 
     // Reconstruct A = U * S * V^T for both implementations

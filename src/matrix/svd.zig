@@ -29,14 +29,9 @@ const State = enum {
 /// Configuration options for SVD computation.
 /// Allows fine-grained control over which matrices are computed.
 pub const Options = struct {
-    /// Whether to compute the left singular vectors (U matrix).
-    /// Set to false when only singular values are needed.
-    with_u: bool = true,
     /// Whether to compute the right singular vectors (V matrix).
-    /// Set to false when only U and singular values are needed.
     with_v: bool = false,
-    /// Controls the size of the U matrix when with_u is true.
-    /// Ignored when with_u is false.
+    /// Controls computation and size of the U matrix.
     mode: Mode = .full_u,
 };
 
@@ -72,25 +67,13 @@ pub fn Result(comptime T: type) type {
     };
 }
 
-/// Performs singular value decomposition. Code adapted from dlib's svd4, which is, in turn,
-/// translated to 'C' from the original Algol code in "Hanbook for Automatic Computation, vol. II,
-/// Linear Algebra", Springer-Verlag.  Note that this published algorithm is considered to be
-/// the best and numerically stable approach to computing the real-valued svd and is referenced
-/// repeatedly in ieee journal papers, etc where the svd is used.
+/// Singular value decomposition of `a` (m×n with m ≥ n) into U, Σ, V^T.
 ///
-/// This is almost an exact translation from the original, except that an iteration counter
-/// is added to prevent stalls.  This corresponds to similar changes in other translations.
-/// Returns an error code = 0, if no errors and 'k' if a failure to converge at the 'kth'
-/// singular value.
+/// Adapted from dlib's svd4, which translated the original Algol from
+/// "Handbook for Automatic Computation, vol. II, Linear Algebra" (Springer-Verlag) into C.
+/// An iteration counter is added to prevent stalls.
 ///
-/// USAGE: given the singular value decomposition a = u * diagm(q) * trans(v) for an m*n
-/// matrix a with m >= n.  After the svd call, u is an m x m matrix which is columnwise
-/// orthogonal. q will be an n element vector consisting of singular values and v an n x n
-/// orthogonal matrix. eps and tol are tolerance constants.  Suitable values are eps=1e-16
-/// and tol=(1e-300)/eps if T == double.
-///
-/// If options.mode == .no_u, then u won't be computed and similarly if options.with_v == false
-/// then v won't be computed.  If options.mode == .skinny_u then u will be m x n instead of m x m.
+/// Sets `converged = 0` on success, or `k` if the algorithm fails to converge at the k-th singular value.
 pub fn svd(
     comptime T: type,
     allocator: std.mem.Allocator,
@@ -98,26 +81,29 @@ pub fn svd(
     options: Options,
 ) !Result(T) {
     std.debug.assert(a.rows >= a.cols);
+    const max_iterations: usize = 300;
     var eps: T = std.math.floatEps(T);
     const tol: T = std.math.floatMin(T) / eps;
     const m = a.rows;
     const n = a.cols;
 
-    // Allocate matrices based on options
     var u = if (options.mode == .full_u)
         try Matrix(T).initAll(allocator, m, m, 0)
     else
         try Matrix(T).initAll(allocator, m, n, 0);
     errdefer u.deinit();
 
-    var v = try Matrix(T).initAll(allocator, n, n, 0);
+    var v = if (options.with_v)
+        try Matrix(T).initAll(allocator, n, n, 0)
+    else
+        try Matrix(T).init(allocator, 0, 0);
     errdefer v.deinit();
 
     var q = try Matrix(T).initAll(allocator, n, 1, 0);
     errdefer q.deinit();
 
     var e = try Matrix(T).initAll(allocator, n, 1, 0);
-    defer e.deinit(); // e is only used internally
+    defer e.deinit();
 
     var l: usize = 0;
     var retval: usize = 0;
@@ -200,9 +186,7 @@ pub fn svd(
             }
         }
         y = @abs(q.at(i, 0).*) + @abs(e.at(i, 0).*);
-        if (y > x) {
-            x = y;
-        }
+        x = @max(x, y);
     }
 
     // Accumulation of right-hand transformations.
@@ -336,7 +320,7 @@ pub fn svd(
                 }
                 // Shift from bottom 2x2 minor.
                 iter += 1;
-                if (iter > 300) {
+                if (iter > max_iterations) {
                     retval = k;
                     break :state;
                 }
@@ -397,7 +381,6 @@ pub fn svd(
 
             .convergence_check => {
                 if (z < 0) {
-                    // q.at(k, 0) made non-negative
                     q.at(k, 0).* = -z;
                     if (options.with_v) {
                         for (0..n) |j| {
@@ -409,13 +392,10 @@ pub fn svd(
             },
         }
     }
-    // Sort singular values in descending order
-    // This requires swapping columns of U and V accordingly
+    // Sort singular values in descending order.
     for (0..n) |i| {
         var max_idx = i;
         var max_val = q.at(i, 0).*;
-
-        // Find the maximum singular value from i to n
         for (i + 1..n) |j| {
             if (q.at(j, 0).* > max_val) {
                 max_idx = j;
@@ -423,28 +403,16 @@ pub fn svd(
             }
         }
 
-        // Swap if needed
         if (max_idx != i) {
-            // Swap singular values
-            const temp_s = q.at(i, 0).*;
-            q.at(i, 0).* = q.at(max_idx, 0).*;
-            q.at(max_idx, 0).* = temp_s;
-
-            // Swap columns of U
+            std.mem.swap(T, q.at(i, 0), q.at(max_idx, 0));
             if (options.mode != .no_u) {
                 for (0..m) |row| {
-                    const temp_u = u.at(row, i).*;
-                    u.at(row, i).* = u.at(row, max_idx).*;
-                    u.at(row, max_idx).* = temp_u;
+                    std.mem.swap(T, u.at(row, i), u.at(row, max_idx));
                 }
             }
-
-            // Swap columns of V
             if (options.with_v) {
                 for (0..n) |row| {
-                    const temp_v = v.at(row, i).*;
-                    v.at(row, i).* = v.at(row, max_idx).*;
-                    v.at(row, max_idx).* = temp_v;
+                    std.mem.swap(T, v.at(row, i), v.at(row, max_idx));
                 }
             }
         }
@@ -475,7 +443,7 @@ test "svd basic" {
         }
     }
 
-    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res = try a.svd(allocator, .{ .with_v = true, .mode = .full_u });
     defer res.deinit();
     const u = &res.u;
     const s = &res.s;
@@ -516,18 +484,18 @@ test "svd modes" {
     });
 
     // Test no_u mode
-    var res_no_u = try a.svd(allocator, .{ .with_u = false, .with_v = true, .mode = .no_u });
+    var res_no_u = try a.svd(allocator, .{ .with_v = true, .mode = .no_u });
     defer res_no_u.deinit();
     const s_no_u = &res_no_u.s;
 
     // Test skinny_u mode
-    var res_skinny = try a.svd(allocator, .{ .with_u = true, .with_v = false, .mode = .skinny_u });
+    var res_skinny = try a.svd(allocator, .{ .with_v = false, .mode = .skinny_u });
     defer res_skinny.deinit();
     const u_skinny = &res_skinny.u;
     const s_skinny = &res_skinny.s;
 
     // Test full_u mode
-    var res_full = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res_full = try a.svd(allocator, .{ .with_v = true, .mode = .full_u });
     defer res_full.deinit();
     const u_full = &res_full.u;
     const s_full = &res_full.s;
@@ -552,7 +520,7 @@ test "svd identity matrix" {
     const n: usize = 3;
     var a = try Matrix(f64).identity(allocator, n, n);
 
-    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res = try a.svd(allocator, .{ .with_v = true, .mode = .full_u });
     defer res.deinit();
     const s = &res.s;
 
@@ -576,7 +544,7 @@ test "svd singular matrix" {
         1, 2, 3,
     });
 
-    var res = try a.svd(allocator, .{ .with_u = true, .with_v = true, .mode = .full_u });
+    var res = try a.svd(allocator, .{ .with_v = true, .mode = .full_u });
     defer res.deinit();
     const s = &res.s;
 

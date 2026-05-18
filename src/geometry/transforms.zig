@@ -76,7 +76,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             sigma_to /= num_points;
             cov = cov.scale(1.0 / num_points);
             const det_cov = cov.at(0, 0).* * cov.at(1, 1).* - cov.at(0, 1).* * cov.at(1, 0).*;
-            const result = cov.svd(.{ .with_u = true, .with_v = true, .mode = .skinny_u });
+            const result = cov.svd(.{ .with_v = true, .mode = .skinny_u });
             if (result.converged != 0) {
                 return error.NotConverged;
             }
@@ -260,7 +260,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 b.setSubMatrix(1, 6, f.scale(-t.at(0, 0).*));
                 accum = accum.add(b.transpose().dot(b));
             }
-            const result = accum.svd(.{ .with_u = true, .with_v = false, .mode = .full_u });
+            const result = accum.svd(.{ .with_v = false, .mode = .full_u });
             if (result.converged != 0) {
                 return error.NotConverged;
             }
