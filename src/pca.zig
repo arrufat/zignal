@@ -337,7 +337,6 @@ pub fn Pca(comptime T: type) type {
 
             // Compute SVD of covariance matrix
             var result = try cov_matrix.svd(self.allocator, .{
-                .with_u = true,
                 .with_v = false,
                 .mode = .skinny_u,
             });
@@ -393,7 +392,6 @@ pub fn Pca(comptime T: type) type {
 
             // Compute SVD of Gram matrix
             var result = try gram_matrix.svd(self.allocator, .{
-                .with_u = true,
                 .with_v = false,
                 .mode = .skinny_u,
             });
