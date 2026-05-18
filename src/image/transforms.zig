@@ -232,7 +232,6 @@ pub fn Transform(comptime T: type) type {
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
-        /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
         pub fn extract(self: Self, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
             if (out.rows == 0 or out.cols == 0) return;
 
@@ -467,7 +466,6 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Internal helper: copies a rectangular region into a pre-allocated output image.
-        /// Used by both `crop` and `extract` (in fast-path).
         fn copyRect(self: Self, rect_top: i32, rect_left: i32, out: Self, border: BorderMode) void {
             // Optimization for zero border (common case for crop)
             if (border == .zero) {

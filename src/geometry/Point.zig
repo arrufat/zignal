@@ -9,7 +9,7 @@ pub const Orientation = enum {
     counter_clockwise,
 };
 
-/// A unified point type supporting arbitrary dimensions with SIMD acceleration.
+/// A unified point type supporting arbitrary dimensions.
 /// Common dimensions 2D, 3D, 4D have convenient x(), y(), z(), w() accessors.
 /// Direct access to components via .items[index].
 pub fn Point(comptime dim: usize, comptime T: type) type {

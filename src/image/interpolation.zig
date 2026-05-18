@@ -84,11 +84,8 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 }
 
 /// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`.
-///
-/// Optimizations:
-/// - Same-size: memcpy fast path
-/// - 2× upscale, bilinear: specialized path
-/// - RGB/RGBA: channel-separated processing (uses `allocator` for temporary buffers)
+/// For RGB/RGBA pixel types, processing is channel-separated and uses `allocator` for
+/// temporary buffers; other pixel types do not allocate.
 pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
@@ -193,7 +190,7 @@ pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Alloca
     resizeGeneric(T, self, out, method);
 }
 
-/// Generic resize implementation for non-optimized types
+/// Generic per-pixel resize fallback.
 fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interpolation) void {
     const scale_x = @as(f32, @floatFromInt(self.cols)) / @as(f32, @floatFromInt(out.cols));
     const scale_y = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(out.rows));

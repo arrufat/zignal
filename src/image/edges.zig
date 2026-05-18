@@ -660,7 +660,6 @@ fn nonMaxSuppressEdges(
 // ============================================================================
 
 /// Applies Gaussian blur to an image for Canny edge detection preprocessing.
-/// Uses separable convolution for efficiency.
 fn blurGaussian(src: Image(f32), sigma: f32, dst: Image(f32), allocator: Allocator) !void {
     // Calculate kernel size (3 sigma on each side)
     const radius: usize = @ceil(3.0 * sigma);

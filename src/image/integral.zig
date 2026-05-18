@@ -12,10 +12,7 @@ pub fn Integral(comptime T: type) type {
         const channel_count = Image(T).channels();
 
         /// Holds one summed-area table (integral image) per channel. Scalar image types
-        /// only populate `planes[0]`, while struct-based pixels keep a dedicated plane
-        /// for each channel. Owning the planes separately lets us reuse the fast scalar
-        /// `plane`/`boxBlurPlane` implementations across all pixel types and defer any
-        /// channel interleaving until after the blur/sharpen operations finish.
+        /// only populate `planes[0]`; struct-based pixels keep a dedicated plane per channel.
         pub const Planes = struct {
             planes: [channel_count]Image(f32),
 
@@ -41,8 +38,6 @@ pub fn Integral(comptime T: type) type {
         /// After building the integral image:
         /// - sat[r,c] = sum of all pixels in rectangle from (0,0) to (r,c) inclusive
         /// - Rectangle sum from (r1,c1) to (r2,c2) = sat[r2,c2] - sat[r1-1,c2] - sat[r2,c1-1] + sat[r1-1,c1-1]
-        ///
-        /// Uses SIMD optimization for the column-wise accumulation pass.
         pub fn plane(src_img: Image(T), dst_img: Image(f32)) void {
             assert(src_img.rows == dst_img.rows and src_img.cols == dst_img.cols);
 
@@ -195,7 +190,7 @@ pub fn Integral(comptime T: type) type {
             }
         }
 
-        /// Box blur for scalar plane types using integral image with SIMD optimization.
+        /// Box blur for scalar plane types using an integral image.
         fn boxBlurPlane(comptime PlaneType: type, sat: Image(f32), dst: Image(PlaneType), radius: usize) void {
             assert(sat.rows == dst.rows and sat.cols == dst.cols);
             const rows = sat.rows;

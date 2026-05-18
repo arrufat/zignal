@@ -184,7 +184,6 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Fills the entire image with a solid value.
-        /// Uses a fast memset when contiguous; otherwise fills row-by-row respecting stride.
         pub fn fill(self: Self, value: T) void {
             if (self.isContiguous()) {
                 @memset(self.data, value);
@@ -590,7 +589,6 @@ pub fn Image(comptime T: type) type {
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
-        /// - Optimized fast path for axis-aligned crops when angle is 0 and dimensions match.
         pub fn extract(self: Self, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
             return Transform(T).extract(self, out, rect, angle, method, border);
         }
@@ -626,15 +624,13 @@ pub fn Image(comptime T: type) type {
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
         /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
-        /// Uses SIMD optimizations for improved performance with a two-pass approach.
         pub fn integral(self: Self, allocator: Allocator, planes: *Self.Integral.Planes) !void {
             return Self.Integral.compute(self, allocator, planes);
         }
 
-        /// Computes a blurred version of `self` using a box blur algorithm, efficiently implemented
-        /// using an integral image. The `radius` parameter determines the size of the box window.
-        /// This function is optimized using SIMD instructions for performance where applicable.
-        /// The output image must be pre-allocated with the same dimensions as the input.
+        /// Computes a blurred version of `self` using a box blur. The `radius` parameter
+        /// determines the size of the box window. The output image must be pre-allocated
+        /// with the same dimensions as the input.
         pub fn boxBlur(self: Self, out: Self, allocator: Allocator, radius: u32) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
@@ -734,8 +730,8 @@ pub fn Image(comptime T: type) type {
 
         /// Applies a midpoint blur that averages the minimum and maximum values within the window.
         ///
-        /// Midpoint filtering is a fast way to reduce random impulse noise while retaining thin
-        /// edges. Think of it as a compromise between min and max filters.
+        /// Midpoint filtering reduces random impulse noise while retaining thin edges.
+        /// Think of it as a compromise between min and max filters.
         ///
         /// ```zig
         /// var softened = try Image(u8).initLike(allocator, image);
@@ -781,11 +777,9 @@ pub fn Image(comptime T: type) type {
             try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, out, allocator, radius, trim_fraction, border);
         }
 
-        /// Computes a sharpened version of `self` by enhancing edges.
-        /// It uses the formula `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred
-        /// version of the original image (calculated efficiently using an integral image).
-        /// The `radius` parameter controls the size of the blur. This operation effectively
-        /// increases the contrast at edges. SIMD optimizations are used for performance where applicable.
+        /// Computes a sharpened version of `self` by enhancing edges using the formula
+        /// `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred version
+        /// of the original image. The `radius` parameter controls the size of the blur.
         /// The output image must be pre-allocated with the same dimensions as the input.
         pub fn sharpen(self: Self, out: Self, allocator: Allocator, radius: usize) !void {
             if (!self.hasSameShape(out)) {

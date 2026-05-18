@@ -3,7 +3,6 @@ const std = @import("std");
 const SMatrix = @import("SMatrix.zig").SMatrix;
 
 /// Controls the size and computation of the left singular vectors matrix (U) in SVD.
-/// This allows optimization of memory usage and computation time based on your needs.
 pub const Mode = enum {
     /// Skip computation of U matrix entirely. Use when only singular values are needed.
     no_u,
