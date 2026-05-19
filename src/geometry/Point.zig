@@ -141,11 +141,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Linear interpolation between two points
         pub fn lerp(self: Self, other: Self, t: T) Self {
             comptime assert(@typeInfo(T) == .float);
-            var result: @Vector(dim, T) = undefined;
-            inline for (0..dim) |i| {
-                result[i] = std.math.lerp(self.items[i], other.items[i], t);
-            }
-            return .{ .items = result };
+            return .{ .items = std.math.lerp(self.items, other.items, @as(@Vector(dim, T), @splat(t))) };
         }
 
         /// Component-wise minimum with another point
@@ -193,15 +189,9 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             // t = (AP . AB) / |AB|^2
             const t = ap.dot(ab) / ab_len_sq;
 
-            if (t <= 0.0) {
-                return ap.norm(); // Closest point is A
-            } else if (t >= 1.0) {
-                return self.sub(b).norm(); // Closest point is B
-            }
-
-            // Closest point is on the segment
-            const projection = a.add(ab.scale(t));
-            return self.sub(projection).norm();
+            if (t <= 0.0) return ap.norm();
+            if (t >= 1.0) return self.sub(b).norm();
+            return self.sub(a.add(ab.scale(t))).norm();
         }
 
         /// Computes the orientation of this point relative to points `b` and `c`.
@@ -209,12 +199,13 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Only available for 2D points.
         pub fn orientation(self: Self, b: Self, c: Self) Orientation {
             comptime assert(dim == 2);
+            // u and v are algebraically equal (v = -u), but reordered terms carry
+            // different floating-point roundoff. Testing u*v == 0 catches near-
+            // collinear triples where either computation rounds to zero.
             const u: T = self.x() * (b.y() - c.y()) + b.x() * (c.y() - self.y()) + c.x() * (self.y() - b.y());
             const v: T = self.x() * (c.y() - b.y()) + c.x() * (b.y() - self.y()) + b.x() * (self.y() - c.y());
             if (u * v == 0) return .collinear;
-            if (u < 0) return .clockwise;
-            if (u > 0) return .counter_clockwise;
-            return .collinear;
+            return if (u < 0) .clockwise else .counter_clockwise;
         }
 
         /// Returns true if, and only if, this point is inside the triangle defined by vertices `a`, `b`, and `c`.
@@ -222,13 +213,13 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Only available for 2D points.
         pub fn inTriangle(self: Self, a: Self, b: Self, c: Self) bool {
             comptime assert(dim == 2);
-            const s = (a.x() - c.x()) * (self.y() - c.y()) - (a.y() - c.y()) * (self.x() - c.x());
-            const t = (b.x() - a.x()) * (self.y() - a.y()) - (b.y() - a.y()) * (self.x() - a.x());
+            const s = a.sub(c).cross(self.sub(c));
+            const t = b.sub(a).cross(self.sub(a));
 
             if ((s < 0) != (t < 0) and s != 0 and t != 0)
                 return false;
 
-            const d = (c.x() - b.x()) * (self.y() - b.y()) - (c.y() - b.y()) * (self.x() - b.x());
+            const d = c.sub(b).cross(self.sub(b));
             return d == 0 or (d < 0) == (s + t < 0);
         }
 
@@ -289,7 +280,6 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Project to 3D by taking first 3 components
         pub fn to3d(self: Self) Point(3, T) {
-            comptime assert(dim >= 3);
             return self.project(3);
         }
 
@@ -316,15 +306,15 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             3 => Self,
             else => @compileError("Cross product is only defined for 2D and 3D points."),
         } {
-            if (dim == 2) {
-                return self.x() * other.y() - self.y() * other.x();
-            } else if (dim == 3) {
-                return .init(.{
+            return switch (dim) {
+                2 => self.x() * other.y() - self.y() * other.x(),
+                3 => .init(.{
                     self.y() * other.z() - self.z() * other.y(),
                     self.z() * other.x() - self.x() * other.z(),
                     self.x() * other.y() - self.y() * other.x(),
-                });
-            } else unreachable;
+                }),
+                else => unreachable,
+            };
         }
 
         // Direct vector/array access
@@ -350,18 +340,14 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             inline for (0..dim) |i| {
                 result[i] = meta.as(U, self.items[i]);
             }
-            return Point(dim, U){ .items = result };
+            return .{ .items = result };
         }
 
         // Homogeneous coordinate conversion for 3D points
         /// Convert 3D homogeneous point to 2D by dividing by Z
         pub fn to2dHomogeneous(self: Self) Point(2, T) {
             comptime assert(dim == 3);
-            if (self.z() == 0) {
-                return self.to2d();
-            } else {
-                return .init(.{ self.x() / self.z(), self.y() / self.z() });
-            }
+            return if (self.z() == 0) self.to2d() else self.scale(1 / self.z()).to2d();
         }
     };
 }
@@ -398,15 +384,12 @@ test "Point creation and accessors" {
 }
 
 test "Point with integer types" {
-    const Point2i = Point(2, i32);
-    const Point3i = Point(3, i32);
-
-    const p2: Point2i = .init(.{ 10, 20 });
+    const p2: Point(2, i32) = .init(.{ 10, 20 });
     try std.testing.expectEqual(@as(i32, 10), p2.x());
     try std.testing.expectEqual(@as(i32, 20), p2.y());
 
-    const p3: Point3i = .init(.{ 1, 2, 3 });
-    const sum = p3.add(Point3i.init(.{ 10, 20, 30 }));
+    const p3: Point(3, i32) = .init(.{ 1, 2, 3 });
+    const sum = p3.add(.init(.{ 10, 20, 30 }));
     try std.testing.expectEqual(@as(i32, 11), sum.x());
     try std.testing.expectEqual(@as(i32, 22), sum.y());
     try std.testing.expectEqual(@as(i32, 33), sum.z());
@@ -505,37 +488,35 @@ test "3D cross product" {
 }
 
 test "Point distanceToSegment" {
-    const P2 = Point(2, f64);
-    const a = P2.init(.{ 0.0, 0.0 });
-    const b = P2.init(.{ 10.0, 0.0 });
+    const a: Point(2, f64) = .init(.{ 0.0, 0.0 });
+    const b: Point(2, f64) = .init(.{ 10.0, 0.0 });
 
     // Point above the segment (perpendicular)
-    const p1 = P2.init(.{ 5.0, 5.0 });
+    const p1: Point(2, f64) = .init(.{ 5.0, 5.0 });
     try std.testing.expectApproxEqAbs(@as(f64, 5.0), p1.distanceToSegment(a, b), 1e-9);
 
     // Point before the segment (closest to a)
-    const p2 = P2.init(.{ -3.0, 4.0 });
+    const p2: Point(2, f64) = .init(.{ -3.0, 4.0 });
     try std.testing.expectApproxEqAbs(@as(f64, 5.0), p2.distanceToSegment(a, b), 1e-9);
 
     // Point after the segment (closest to b)
-    const p3 = P2.init(.{ 13.0, 4.0 });
+    const p3: Point(2, f64) = .init(.{ 13.0, 4.0 });
     try std.testing.expectApproxEqAbs(@as(f64, 5.0), p3.distanceToSegment(a, b), 1e-9);
 
     // Point on the segment
-    const p4 = P2.init(.{ 2.0, 0.0 });
+    const p4: Point(2, f64) = .init(.{ 2.0, 0.0 });
     try std.testing.expectApproxEqAbs(@as(f64, 0.0), p4.distanceToSegment(a, b), 1e-9);
 
     // Zero-length segment (a == b)
-    const p5 = P2.init(.{ 3.0, 4.0 });
+    const p5: Point(2, f64) = .init(.{ 3.0, 4.0 });
     try std.testing.expectApproxEqAbs(@as(f64, 5.0), p5.distanceToSegment(a, a), 1e-9);
 }
 
 test "Point orientation" {
-    const P2 = Point(2, f64);
-    const a = P2.init(.{ 0.0, 0.0 });
-    const b = P2.init(.{ 1.0, 0.0 });
-    const c = P2.init(.{ 1.0, 1.0 });
-    const d = P2.init(.{ 0.5, 0.0 });
+    const a: Point(2, f64) = .init(.{ 0.0, 0.0 });
+    const b: Point(2, f64) = .init(.{ 1.0, 0.0 });
+    const c: Point(2, f64) = .init(.{ 1.0, 1.0 });
+    const d: Point(2, f64) = .init(.{ 0.5, 0.0 });
 
     try std.testing.expectEqual(Orientation.counter_clockwise, a.orientation(b, c));
     try std.testing.expectEqual(Orientation.clockwise, a.orientation(c, b));
@@ -556,13 +537,12 @@ test "Point orientation precision" {
 }
 
 test "Point inTriangle" {
-    const P2 = Point(2, f32);
-    const tri = [_]P2{
+    const tri = [_]Point(2, f32){
         .init(.{ 0.0, 0.0 }),
         .init(.{ 2.0, 0.0 }),
         .init(.{ 1.0, 2.0 }),
     };
-    var p = P2.init(.{ 1.0, 1.0 });
+    var p: Point(2, f32) = .init(.{ 1.0, 1.0 });
     try std.testing.expect(p.inTriangle(tri[0], tri[1], tri[2]));
 
     p = .init(.{ 3.0, 1.0 });
