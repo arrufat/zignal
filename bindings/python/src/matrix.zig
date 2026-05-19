@@ -730,6 +730,84 @@ fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return matrixToObject(result_matrix);
 }
 
+/// Generic dispatcher for in-place matrix operations (e.g. +=)
+fn dispatchInplaceMatrixOp(
+    self_obj: ?*c.PyObject,
+    other: ?*c.PyObject,
+    mat_mat_op: fn (*Matrix(f64), *Matrix(f64)) MatrixError!void,
+    mat_scalar_op: fn (*Matrix(f64), f64) MatrixError!void,
+) ?*c.PyObject {
+    const self = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
+    const other_is_mat = c.PyObject_IsInstance(other, @ptrCast(&MatrixType)) == 1;
+
+    if (other_is_mat) {
+        const other_ptr = python.unwrap(MatrixObject, "matrix_ptr", other, "Matrix") orelse return null;
+        mat_mat_op(self, other_ptr) catch |e| {
+            python.mapZigError(e, "Matrix");
+            return null;
+        };
+    } else {
+        if (python.parse(f64, other)) |scalar| {
+            mat_scalar_op(self, scalar) catch |e| {
+                python.mapZigError(e, "Matrix");
+                return null;
+            };
+        } else |_| {
+            python.clearError();
+            return python.notImplemented();
+        }
+    }
+
+    c.Py_IncRef(self_obj);
+    return self_obj;
+}
+
+fn inplace_op_add(a: *Matrix(f64), b: *Matrix(f64)) MatrixError!void {
+    return a.addBy(b.*);
+}
+fn inplace_op_add_scalar(a: *Matrix(f64), s: f64) MatrixError!void {
+    return a.offsetBy(s);
+}
+fn inplace_op_sub(a: *Matrix(f64), b: *Matrix(f64)) MatrixError!void {
+    return a.subBy(b.*);
+}
+fn inplace_op_sub_scalar(a: *Matrix(f64), s: f64) MatrixError!void {
+    return a.offsetBy(-s);
+}
+fn inplace_op_mul(a: *Matrix(f64), b: *Matrix(f64)) MatrixError!void {
+    return a.timesBy(b.*);
+}
+fn inplace_op_mul_scalar(a: *Matrix(f64), s: f64) MatrixError!void {
+    return a.scaleBy(s);
+}
+
+fn matrix_inplace_add(self: ?*c.PyObject, other: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    return dispatchInplaceMatrixOp(self, other, inplace_op_add, inplace_op_add_scalar);
+}
+
+fn matrix_inplace_subtract(self: ?*c.PyObject, other: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    return dispatchInplaceMatrixOp(self, other, inplace_op_sub, inplace_op_sub_scalar);
+}
+
+fn matrix_inplace_multiply(self: ?*c.PyObject, other: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    return dispatchInplaceMatrixOp(self, other, inplace_op_mul, inplace_op_mul_scalar);
+}
+
+fn matrix_inplace_truediv(self_obj: ?*c.PyObject, other: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const scalar = python.parse(f64, other) catch return python.notImplemented();
+    if (scalar == 0.0) {
+        c.PyErr_SetString(c.PyExc_ZeroDivisionError, "Cannot divide matrix by zero");
+        return null;
+    }
+    const self = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
+    self.scaleBy(1.0 / scalar) catch |e| {
+        python.mapZigError(e, "Matrix");
+        return null;
+    };
+    c.Py_IncRef(self_obj);
+    return self_obj;
+}
+
 // Helper function to convert Zig Matrix to Python MatrixObject
 fn matrixToObject(matrix_or_err: MatrixResult) ?*c.PyObject {
     const matrix = matrix_or_err catch |e| {
@@ -834,9 +912,9 @@ var matrix_as_number = c.PyNumberMethods{
     .nb_int = null,
     .nb_reserved = null,
     .nb_float = null,
-    .nb_inplace_add = null,
-    .nb_inplace_subtract = null,
-    .nb_inplace_multiply = null,
+    .nb_inplace_add = matrix_inplace_add,
+    .nb_inplace_subtract = matrix_inplace_subtract,
+    .nb_inplace_multiply = matrix_inplace_multiply,
     .nb_inplace_remainder = null,
     .nb_inplace_power = null,
     .nb_inplace_lshift = null,
@@ -847,7 +925,7 @@ var matrix_as_number = c.PyNumberMethods{
     .nb_floor_divide = null,
     .nb_true_divide = matrix_truediv,
     .nb_inplace_floor_divide = null,
-    .nb_inplace_true_divide = null,
+    .nb_inplace_true_divide = matrix_inplace_truediv,
     .nb_index = null,
     .nb_matrix_multiply = matrix_matmul,
     .nb_inplace_matrix_multiply = null,
@@ -951,6 +1029,18 @@ fn matrix_sum_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*
 
     const result = ptr.sum();
     return python.create(result);
+}
+
+fn matrix_sum_rows_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
+    return matrixToObject(self.sumRows());
+}
+
+fn matrix_sum_cols_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    _ = args;
+    const self = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
+    return matrixToObject(self.sumCols());
 }
 
 const matrix_mean_doc =
@@ -2011,6 +2101,22 @@ pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
         .doc = matrix_sum_doc,
         .params = "self",
         .returns = "float",
+    },
+    .{
+        .name = "sum_rows",
+        .meth = @ptrCast(&matrix_sum_rows_method),
+        .flags = c.METH_NOARGS,
+        .doc = "Sum all elements across each row, returning a 1 × cols row vector.",
+        .params = "self",
+        .returns = "Matrix",
+    },
+    .{
+        .name = "sum_cols",
+        .meth = @ptrCast(&matrix_sum_cols_method),
+        .flags = c.METH_NOARGS,
+        .doc = "Sum all elements down each column, returning a rows × 1 column vector.",
+        .params = "self",
+        .returns = "Matrix",
     },
     .{
         .name = "mean",
