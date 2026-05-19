@@ -146,6 +146,16 @@ pub fn Matrix(comptime T: type) type {
             self.allocator.free(self.items);
         }
 
+        /// Relinquish ownership of the matrix's buffer. Returns the current
+        /// matrix and resets the receiver to an empty state.
+        pub fn release(self: *Self) Self {
+            const out = self.*;
+            self.items = self.items[0..0];
+            self.rows = 0;
+            self.cols = 0;
+            return out;
+        }
+
         /// Lift this matrix into a `Chain(T)` for fluent chaining of multiple ops.
         /// The matrix is borrowed — callers retain ownership and must still `deinit` it.
         pub fn chain(self: Self) Chain(T) {
@@ -212,6 +222,30 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        // ===== Summary operations =====
+
+        /// Sum all elements across each row, returning a 1 × cols row vector.
+        pub fn sumRows(self: Self) MatrixError!Self {
+            var result = try Matrix(T).initAll(self.allocator, 1, self.cols, 0);
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    result.at(0, c).* += self.at(r, c).*;
+                }
+            }
+            return result;
+        }
+
+        /// Sum all elements down each column, returning a rows × 1 column vector.
+        pub fn sumCols(self: Self) MatrixError!Self {
+            var result = try Matrix(T).initAll(self.allocator, self.rows, 1, 0);
+            for (0..self.rows) |r| {
+                for (0..self.cols) |c| {
+                    result.at(r, 0).* += self.at(r, c).*;
+                }
+            }
+            return result;
+        }
+
         // ===== Chainable operations (return Self) =====
 
         /// Add another matrix element-wise
@@ -226,6 +260,16 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Add another matrix element-wise (in-place)
+        pub fn addBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] += other.items[i];
+            }
+        }
+
         /// Subtract another matrix element-wise
         pub fn sub(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
@@ -238,6 +282,16 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Subtract another matrix element-wise (in-place)
+        pub fn subBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] -= other.items[i];
+            }
+        }
+
         /// Scale all elements by a value
         pub fn scale(self: Self, value: T) MatrixError!Self {
             var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
@@ -245,6 +299,13 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] * value;
             }
             return result;
+        }
+
+        /// Scale all elements by a value (in-place)
+        pub fn scaleBy(self: *Self, value: T) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] *= value;
+            }
         }
 
         /// Transpose the matrix
@@ -268,6 +329,16 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] * other.items[i];
             }
             return result;
+        }
+
+        /// Perform element-wise multiplication (in-place)
+        pub fn timesBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] *= other.items[i];
+            }
         }
 
         /// Matrix multiplication (dot product) - changes dimensions
@@ -771,6 +842,13 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Apply a function to all matrix elements with optional arguments (in-place)
+        pub fn applyBy(self: *Self, comptime func: anytype, args: anytype) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] = @call(.auto, func, .{self.items[i]} ++ args);
+            }
+        }
+
         /// Add scalar to all elements
         pub fn offset(self: Self, value: T) MatrixError!Self {
             var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
@@ -778,6 +856,13 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] + value;
             }
             return result;
+        }
+
+        /// Add scalar to all elements (in-place)
+        pub fn offsetBy(self: *Self, value: T) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] += value;
+            }
         }
 
         /// Raise all elements to power n (convenience method)
@@ -788,6 +873,16 @@ pub fn Matrix(comptime T: type) type {
                 }
             }.f;
             return self.apply(powN, .{n});
+        }
+
+        /// Raise all elements to power n (convenience method) (in-place)
+        pub fn powBy(self: *Self, n: T) MatrixError!void {
+            const powN = struct {
+                fn f(x: T, exponent: T) T {
+                    return std.math.pow(T, x, exponent);
+                }
+            }.f;
+            try self.applyBy(powN, .{n});
         }
 
         fn ensureFloat(comptime context: []const u8) void {
@@ -1604,6 +1699,59 @@ test "dynamic matrix format" {
         \\[ 1.41421e0   5.7721e-1 ]
     ;
     try expectEqualStrings(expected_scientific, result_scientific);
+}
+
+test "Matrix(T).sumRows and sumCols" {
+    const allocator = std.testing.allocator;
+    var a = try Matrix(f64).init(allocator, 2, 3);
+    defer a.deinit();
+    a.at(0, 0).* = 1;
+    a.at(0, 1).* = 2;
+    a.at(0, 2).* = 3;
+    a.at(1, 0).* = 4;
+    a.at(1, 1).* = 5;
+    a.at(1, 2).* = 6;
+
+    var rows_sum = try a.sumRows();
+    defer rows_sum.deinit();
+    try std.testing.expectEqual(@as(u32, 1), rows_sum.rows);
+    try std.testing.expectEqual(@as(u32, 3), rows_sum.cols);
+    try std.testing.expectEqual(@as(f64, 5), rows_sum.at(0, 0).*);
+    try std.testing.expectEqual(@as(f64, 7), rows_sum.at(0, 1).*);
+    try std.testing.expectEqual(@as(f64, 9), rows_sum.at(0, 2).*);
+
+    var cols_sum = try a.sumCols();
+    defer cols_sum.deinit();
+    try std.testing.expectEqual(@as(u32, 2), cols_sum.rows);
+    try std.testing.expectEqual(@as(u32, 1), cols_sum.cols);
+    try std.testing.expectEqual(@as(f64, 6), cols_sum.at(0, 0).*);
+    try std.testing.expectEqual(@as(f64, 15), cols_sum.at(1, 0).*);
+}
+
+test "Matrix(T).By operations (in-place)" {
+    const allocator = std.testing.allocator;
+    var a = try Matrix(f64).initAll(allocator, 2, 2, 10.0);
+    defer a.deinit();
+    var b = try Matrix(f64).initAll(allocator, 2, 2, 5.0);
+    defer b.deinit();
+
+    try a.addBy(b);
+    try std.testing.expectEqual(@as(f64, 15.0), a.at(0, 0).*);
+
+    try a.subBy(b);
+    try std.testing.expectEqual(@as(f64, 10.0), a.at(0, 0).*);
+
+    try a.scaleBy(2.0);
+    try std.testing.expectEqual(@as(f64, 20.0), a.at(0, 0).*);
+
+    try a.timesBy(b);
+    try std.testing.expectEqual(@as(f64, 100.0), a.at(0, 0).*);
+
+    try a.offsetBy(1.0);
+    try std.testing.expectEqual(@as(f64, 101.0), a.at(0, 0).*);
+
+    try a.powBy(2.0);
+    try std.testing.expectEqual(@as(f64, 10201.0), a.at(0, 0).*);
 }
 
 test "matrix conversions" {
