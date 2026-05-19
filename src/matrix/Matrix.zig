@@ -146,6 +146,16 @@ pub fn Matrix(comptime T: type) type {
             self.allocator.free(self.items);
         }
 
+        /// Relinquish ownership of the matrix's buffer. Returns the current
+        /// matrix and resets the receiver to an empty state.
+        pub fn release(self: *Self) Self {
+            const out = self.*;
+            self.items = self.items[0..0];
+            self.rows = 0;
+            self.cols = 0;
+            return out;
+        }
+
         /// Lift this matrix into a `Chain(T)` for fluent chaining of multiple ops.
         /// The matrix is borrowed — callers retain ownership and must still `deinit` it.
         pub fn chain(self: Self) Chain(T) {

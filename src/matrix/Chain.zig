@@ -45,8 +45,6 @@ pub fn Chain(comptime T: type) type {
         /// True iff `current` is heap-owned by Chain. The initial input is
         /// borrowed (false); every chainable op produces an owned result (true).
         owns_current: bool,
-        /// Allocator used for newly produced matrices. Inherited from the input.
-        allocator: std.mem.Allocator,
         /// Deferred error from any chainable op; surfaced by `toOwned()`.
         err: ?MatrixError = null,
 
@@ -56,7 +54,6 @@ pub fn Chain(comptime T: type) type {
             return .{
                 .current = matrix,
                 .owns_current = false,
-                .allocator = matrix.allocator,
             };
         }
 
@@ -86,15 +83,9 @@ pub fn Chain(comptime T: type) type {
             }
             if (!self.owns_current) {
                 // Zero-op chain: input is borrowed; return a fresh copy.
-                return self.current.dupe(self.allocator);
+                return self.current.dupe(self.current.allocator);
             }
-            const out = self.current;
-            // Reset self.current to an empty matrix. The items slice is
-            // truncated to length 0 so the (now stale) pointer is never
-            // dereferenced even if the caller has freed the returned buffer.
-            self.current.items = self.current.items[0..0];
-            self.current.rows = 0;
-            self.current.cols = 0;
+            const out = self.current.release();
             self.owns_current = false;
             return out;
         }
