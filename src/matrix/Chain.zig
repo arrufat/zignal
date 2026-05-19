@@ -256,6 +256,16 @@ pub fn Chain(comptime T: type) type {
         pub fn row(self: *Self, row_idx: u32) *Self {
             return self.dispatch("row", .{row_idx});
         }
+
+        /// Sum all elements across each row, returning a 1 × cols row vector.
+        pub fn sumRows(self: *Self) *Self {
+            return self.dispatch("sumRows", .{});
+        }
+
+        /// Sum all elements down each column, returning a rows × 1 column vector.
+        pub fn sumCols(self: *Self) *Self {
+            return self.dispatch("sumCols", .{});
+        }
     };
 }
 
@@ -351,4 +361,50 @@ test "Chain: abandoned chain (no toOwned) leaks nothing" {
         _ = p.add(b).scale(3.0); // never toOwned
     }
     // testing.allocator panics on leaks; reaching here means deinit cleaned up.
+}
+
+test "Chain: in-place optimization" {
+    const allocator = std.testing.allocator;
+    var a: Matrix(f64) = try .initAll(allocator, 2, 2, 1.0);
+    defer a.deinit();
+
+    var p = a.chain();
+    defer p.deinit();
+
+    // First op creates an owned matrix.
+    _ = p.scale(2.0);
+    const ptr_before = p.current.items.ptr;
+
+    // Second element-wise op should happen in-place.
+    _ = p.offset(1.0);
+    const ptr_after = p.current.items.ptr;
+
+    try std.testing.expectEqual(ptr_before, ptr_after);
+
+    var r = try p.toOwned();
+    defer r.deinit();
+    try std.testing.expectEqual(@as(f64, 3.0), r.at(0, 0).*);
+}
+
+test "Chain: sumRows and sumCols" {
+    const allocator = std.testing.allocator;
+    var a: Matrix(f64) = try .initAll(allocator, 2, 3, 1.0);
+    defer a.deinit();
+
+    var p = a.chain();
+    defer p.deinit();
+
+    var r_rows = try p.sumRows().toOwned();
+    defer r_rows.deinit();
+    try std.testing.expectEqual(@as(u32, 1), r_rows.rows);
+    try std.testing.expectEqual(@as(u32, 3), r_rows.cols);
+    try std.testing.expectEqual(@as(f64, 2.0), r_rows.at(0, 0).*);
+
+    var q = a.chain();
+    defer q.deinit();
+    var r_cols = try q.sumCols().toOwned();
+    defer r_cols.deinit();
+    try std.testing.expectEqual(@as(u32, 2), r_cols.rows);
+    try std.testing.expectEqual(@as(u32, 1), r_cols.cols);
+    try std.testing.expectEqual(@as(f64, 3.0), r_cols.at(0, 0).*);
 }
