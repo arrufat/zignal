@@ -263,25 +263,29 @@ def test_svd_decomposition():
 def test_inplace_operators():
     """Test in-place operator overloads."""
     a = zignal.Matrix([[1, 2], [3, 4]])
+    a_np = np.array([[1.0, 2.0], [3.0, 4.0]])
 
     a += 10
-    assert a[0, 0] == pytest.approx(11.0)
-    assert a[0, 1] == pytest.approx(12.0)
-    assert a[1, 0] == pytest.approx(13.0)
-    assert a[1, 1] == pytest.approx(14.0)
+    a_np += 10
+    assert np.allclose(a.to_numpy(), a_np)
 
     b = zignal.Matrix([[1, 1], [1, 1]])
+    b_np = np.array([[1.0, 1.0], [1.0, 1.0]])
     a += b
-    assert a[0, 0] == pytest.approx(12.0)
+    a_np += b_np
+    assert np.allclose(a.to_numpy(), a_np)
 
     a -= 2
-    assert a[0, 0] == pytest.approx(10.0)
+    a_np -= 2
+    assert np.allclose(a.to_numpy(), a_np)
 
     a *= 2
-    assert a[0, 0] == pytest.approx(20.0)
+    a_np *= 2
+    assert np.allclose(a.to_numpy(), a_np)
 
     a /= 2
-    assert a[0, 0] == pytest.approx(10.0)
+    a_np /= 2
+    assert np.allclose(a.to_numpy(), a_np)
 
 
 def test_sum_rows_cols():
