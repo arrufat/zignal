@@ -236,6 +236,16 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Add another matrix element-wise (in-place)
+        pub fn addBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] += other.items[i];
+            }
+        }
+
         /// Subtract another matrix element-wise
         pub fn sub(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
@@ -248,6 +258,16 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Subtract another matrix element-wise (in-place)
+        pub fn subBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] -= other.items[i];
+            }
+        }
+
         /// Scale all elements by a value
         pub fn scale(self: Self, value: T) MatrixError!Self {
             var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
@@ -255,6 +275,13 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] * value;
             }
             return result;
+        }
+
+        /// Scale all elements by a value (in-place)
+        pub fn scaleBy(self: *Self, value: T) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] *= value;
+            }
         }
 
         /// Transpose the matrix
@@ -278,6 +305,16 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] * other.items[i];
             }
             return result;
+        }
+
+        /// Perform element-wise multiplication (in-place)
+        pub fn timesBy(self: *Self, other: Self) MatrixError!void {
+            if (self.rows != other.rows or self.cols != other.cols) {
+                return error.DimensionMismatch;
+            }
+            for (0..self.items.len) |i| {
+                self.items[i] *= other.items[i];
+            }
         }
 
         /// Matrix multiplication (dot product) - changes dimensions
@@ -781,6 +818,13 @@ pub fn Matrix(comptime T: type) type {
             return result;
         }
 
+        /// Apply a function to all matrix elements with optional arguments (in-place)
+        pub fn applyBy(self: *Self, comptime func: anytype, args: anytype) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] = @call(.auto, func, .{self.items[i]} ++ args);
+            }
+        }
+
         /// Add scalar to all elements
         pub fn offset(self: Self, value: T) MatrixError!Self {
             var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
@@ -788,6 +832,13 @@ pub fn Matrix(comptime T: type) type {
                 result.items[i] = self.items[i] + value;
             }
             return result;
+        }
+
+        /// Add scalar to all elements (in-place)
+        pub fn offsetBy(self: *Self, value: T) MatrixError!void {
+            for (0..self.items.len) |i| {
+                self.items[i] += value;
+            }
         }
 
         /// Raise all elements to power n (convenience method)
@@ -798,6 +849,16 @@ pub fn Matrix(comptime T: type) type {
                 }
             }.f;
             return self.apply(powN, .{n});
+        }
+
+        /// Raise all elements to power n (convenience method) (in-place)
+        pub fn powBy(self: *Self, n: T) MatrixError!void {
+            const powN = struct {
+                fn f(x: T, exponent: T) T {
+                    return std.math.pow(T, x, exponent);
+                }
+            }.f;
+            try self.applyBy(powN, .{n});
         }
 
         fn ensureFloat(comptime context: []const u8) void {
