@@ -123,7 +123,7 @@ pub fn Chain(comptime T: type) type {
                 const in_place_name = name ++ "By";
                 if (@hasDecl(Matrix(T), in_place_name)) {
                     @call(.auto, @field(Matrix(T), in_place_name), .{&self.current} ++ args) catch |e| {
-                        self.err = e;
+                        if (self.err == null) self.err = e;
                     };
                     return self;
                 }
