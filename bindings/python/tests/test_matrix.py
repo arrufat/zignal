@@ -258,3 +258,47 @@ def test_svd_decomposition():
     # With compute_uv=False (still returns u, s, v based on implementation)
     result_no_uv = m.svd(compute_uv=False)
     assert isinstance(result_no_uv, dict)
+
+
+def test_inplace_operators():
+    """Test in-place operator overloads."""
+    a = zignal.Matrix([[1, 2], [3, 4]])
+    a_np = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    a += 10
+    a_np += 10
+    assert np.allclose(a.to_numpy(), a_np)
+
+    b = zignal.Matrix([[1, 1], [1, 1]])
+    b_np = np.array([[1.0, 1.0], [1.0, 1.0]])
+    a += b
+    a_np += b_np
+    assert np.allclose(a.to_numpy(), a_np)
+
+    a -= 2
+    a_np -= 2
+    assert np.allclose(a.to_numpy(), a_np)
+
+    a *= 2
+    a_np *= 2
+    assert np.allclose(a.to_numpy(), a_np)
+
+    a /= 2
+    a_np /= 2
+    assert np.allclose(a.to_numpy(), a_np)
+
+
+def test_sum_rows_cols():
+    """Test row and column sums."""
+    m = zignal.Matrix([[1, 2, 3], [4, 5, 6]])
+
+    rows_sum = m.sum_rows()
+    assert rows_sum.shape == (1, 3)
+    assert rows_sum[0, 0] == pytest.approx(5.0)
+    assert rows_sum[0, 1] == pytest.approx(7.0)
+    assert rows_sum[0, 2] == pytest.approx(9.0)
+
+    cols_sum = m.sum_cols()
+    assert cols_sum.shape == (2, 1)
+    assert cols_sum[0, 0] == pytest.approx(6.0)
+    assert cols_sum[1, 0] == pytest.approx(15.0)
