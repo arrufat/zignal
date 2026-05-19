@@ -105,90 +105,91 @@ pub fn Chain(comptime T: type) type {
         /// install the result as the new `current`, freeing the previous one
         /// if owned. On failure, store the error and leave `current` alone.
         fn step(self: *Self, result: MatrixError!Matrix(T)) *Self {
-            if (self.err != null) return self;
             const new_matrix = result catch |e| {
-                self.err = e;
+                if (self.err == null) self.err = e;
                 return self;
             };
+            // If the chain already has an error, we must discard this result.
+            // (Current dispatch logic prevents this, but we harden for safety).
+            if (self.err != null) {
+                var m = new_matrix;
+                m.deinit();
+                return self;
+            }
             if (self.owns_current) self.current.deinit();
             self.current = new_matrix;
             self.owns_current = true;
             return self;
         }
 
+        /// Helper to delegate a method call to `Matrix(T)`.
+        fn dispatch(self: *Self, comptime name: []const u8, args: anytype) *Self {
+            if (self.err != null) return self;
+            const func = @field(Matrix(T), name);
+            return self.step(@call(.auto, func, .{self.current} ++ args));
+        }
+
         // === Chainable operations ===
 
         /// Element-wise addition.
         pub fn add(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.add(other));
+            return self.dispatch("add", .{other});
         }
 
         /// Element-wise subtraction.
         pub fn sub(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.sub(other));
+            return self.dispatch("sub", .{other});
         }
 
         /// Element-wise multiplication (Hadamard product).
         pub fn times(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.times(other));
+            return self.dispatch("times", .{other});
         }
 
         /// Scale all elements by a scalar.
         pub fn scale(self: *Self, value: T) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.scale(value));
+            return self.dispatch("scale", .{value});
         }
 
         /// Add a scalar to every element.
         pub fn offset(self: *Self, value: T) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.offset(value));
+            return self.dispatch("offset", .{value});
         }
 
         /// Raise every element to power `n`.
         pub fn pow(self: *Self, n: T) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.pow(n));
+            return self.dispatch("pow", .{n});
         }
 
         /// Apply a function element-wise. Extra `args` are forwarded to `func`
         /// after the element value.
         pub fn apply(self: *Self, comptime func: anytype, args: anytype) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.apply(func, args));
+            return self.dispatch("apply", .{ func, args });
         }
 
         /// Transpose.
         pub fn transpose(self: *Self) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.transpose());
+            return self.dispatch("transpose", .{});
         }
 
         /// Matrix multiplication (dot product).
         pub fn dot(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.dot(other));
+            return self.dispatch("dot", .{other});
         }
 
         /// Scaled matrix multiplication: α * A * B.
         pub fn scaledDot(self: *Self, other: Matrix(T), alpha: T) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.scaledDot(other, alpha));
+            return self.dispatch("scaledDot", .{ other, alpha });
         }
 
         /// Matrix multiplication with right-side transpose: A * B^T.
         pub fn dotTranspose(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.dotTranspose(other));
+            return self.dispatch("dotTranspose", .{other});
         }
 
         /// Matrix multiplication with left-side transpose: A^T * B.
         pub fn transposeDot(self: *Self, other: Matrix(T)) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.transposeDot(other));
+            return self.dispatch("transposeDot", .{other});
         }
 
         /// General matrix multiply: C = α · op(self) · op(other) + β · c
@@ -201,56 +202,47 @@ pub fn Chain(comptime T: type) type {
             beta: T,
             c: ?Matrix(T),
         ) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.gemm(trans_a, other, trans_b, alpha, beta, c));
+            return self.dispatch("gemm", .{ trans_a, other, trans_b, alpha, beta, c });
         }
 
         /// Gram matrix: A · A^T.
         pub fn gram(self: *Self) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.gram());
+            return self.dispatch("gram", .{});
         }
 
         /// Covariance matrix: A^T · A.
         pub fn covariance(self: *Self) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.covariance());
+            return self.dispatch("covariance", .{});
         }
 
         /// Matrix inverse.
         pub fn inverse(self: *Self) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.inverse());
+            return self.dispatch("inverse", .{});
         }
 
         /// Moore-Penrose pseudo-inverse.
         pub fn pseudoInverse(self: *Self, options: Matrix(T).PseudoInverseOptions) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.pseudoInverse(options));
+            return self.dispatch("pseudoInverse", .{options});
         }
 
         /// Cholesky decomposition (lower triangular L such that A = L · L^T).
         pub fn cholesky(self: *Self) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.cholesky());
+            return self.dispatch("cholesky", .{});
         }
 
         /// Extract a submatrix.
         pub fn subMatrix(self: *Self, row_begin: u32, col_begin: u32, row_count: u32, col_count: u32) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.subMatrix(row_begin, col_begin, row_count, col_count));
+            return self.dispatch("subMatrix", .{ row_begin, col_begin, row_count, col_count });
         }
 
         /// Extract a single column.
         pub fn col(self: *Self, col_idx: u32) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.col(col_idx));
+            return self.dispatch("col", .{col_idx});
         }
 
         /// Extract a single row.
         pub fn row(self: *Self, row_idx: u32) *Self {
-            if (self.err != null) return self;
-            return self.step(self.current.row(row_idx));
+            return self.dispatch("row", .{row_idx});
         }
     };
 }
