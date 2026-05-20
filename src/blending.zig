@@ -58,37 +58,40 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
             blended_v = base_v * overlay_v;
         },
         .screen => {
-            const ones = @as(@Vector(3, F), @splat(1.0));
+            const ones: @Vector(3, F) = @splat(1.0);
             blended_v = ones - (ones - base_v) * (ones - overlay_v);
         },
         .overlay => {
-            const cond = base_v < @as(@Vector(3, F), @splat(0.5));
-            const ones = @as(@Vector(3, F), @splat(1.0));
-            const twos = @as(@Vector(3, F), @splat(2.0));
+            const halfs: @Vector(3, F) = @splat(0.5);
+            const cond = base_v < halfs;
+            const ones: @Vector(3, F) = @splat(1.0);
+            const twos: @Vector(3, F) = @splat(2.0);
             const expr1 = twos * base_v * overlay_v;
             const expr2 = ones - twos * (ones - base_v) * (ones - overlay_v);
             blended_v = @select(F, cond, expr1, expr2);
         },
         .soft_light => {
-            const cond = overlay_v <= @as(@Vector(3, F), @splat(0.5));
-            const ones = @as(@Vector(3, F), @splat(1.0));
-            const twos = @as(@Vector(3, F), @splat(2.0));
+            const halfs: @Vector(3, F) = @splat(0.5);
+            const cond = overlay_v <= halfs;
+            const ones: @Vector(3, F) = @splat(1.0);
+            const twos: @Vector(3, F) = @splat(2.0);
             const sqrt_base = @sqrt(base_v);
             const expr1 = base_v - (ones - twos * overlay_v) * base_v * (ones - base_v);
             const expr2 = base_v + (twos * overlay_v - ones) * (sqrt_base - base_v);
             blended_v = @select(F, cond, expr1, expr2);
         },
         .hard_light => {
-            const cond = overlay_v < @as(@Vector(3, F), @splat(0.5));
-            const ones = @as(@Vector(3, F), @splat(1.0));
-            const twos = @as(@Vector(3, F), @splat(2.0));
+            const halfs: @Vector(3, F) = @splat(0.5);
+            const cond = overlay_v < halfs;
+            const ones: @Vector(3, F) = @splat(1.0);
+            const twos: @Vector(3, F) = @splat(2.0);
             const expr1 = twos * overlay_v * base_v;
             const expr2 = ones - twos * (ones - overlay_v) * (ones - base_v);
             blended_v = @select(F, cond, expr1, expr2);
         },
         .color_dodge => {
-            const ones = @as(@Vector(3, F), @splat(1.0));
-            const zeros = @as(@Vector(3, F), @splat(0.0));
+            const ones: @Vector(3, F) = @splat(1.0);
+            const zeros: @Vector(3, F) = @splat(0.0);
             const result = base_v / (ones - overlay_v);
             const is_base_zero = base_v == zeros;
             const is_blend_one = overlay_v >= ones;
@@ -97,8 +100,8 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
             blended_v = @select(F, is_base_zero, zeros, val_blend);
         },
         .color_burn => {
-            const ones = @as(@Vector(3, F), @splat(1.0));
-            const zeros = @as(@Vector(3, F), @splat(0.0));
+            const ones: @Vector(3, F) = @splat(1.0);
+            const zeros: @Vector(3, F) = @splat(0.0);
             const result = ones - (ones - base_v) / overlay_v;
             const is_base_one = base_v >= ones;
             const is_blend_zero = overlay_v <= zeros;
@@ -116,7 +119,7 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
             blended_v = @abs(base_v - overlay_v);
         },
         .exclusion => {
-            const twos = @as(@Vector(3, F), @splat(2.0));
+            const twos: @Vector(3, F) = @splat(2.0);
             blended_v = base_v + overlay_v - twos * base_v * overlay_v;
         },
     }
@@ -137,9 +140,9 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
         const base_weight = base_f.a * (1.0 - overlay_f.a);
         const inv_result_a = 1.0 / result_a;
 
-        const base_weight_v = @as(@Vector(3, F), @splat(base_weight));
-        const overlay_a_v = @as(@Vector(3, F), @splat(overlay_f.a));
-        const inv_result_a_v = @as(@Vector(3, F), @splat(inv_result_a));
+        const base_weight_v: @Vector(3, F) = @splat(base_weight);
+        const overlay_a_v: @Vector(3, F) = @splat(overlay_f.a);
+        const inv_result_a_v: @Vector(3, F) = @splat(inv_result_a);
 
         const out_v = (blended_v * overlay_a_v + base_v * base_weight_v) * inv_result_a_v;
         out = .{
