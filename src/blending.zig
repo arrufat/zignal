@@ -21,34 +21,21 @@ pub const Blending = enum {
     exclusion,
 };
 
-/// Helper to calculate the alpha of the resulting color.
-/// Inputs are normalized alpha values (0.0 - 1.0).
-fn compositeAlpha(comptime F: type, base_a: F, overlay_a: F) F {
-    comptime assert(@typeInfo(F) == .float);
-    return overlay_a + base_a * (1.0 - overlay_a);
-}
-
-/// Helper to composite a blended color channel (result of blend mode) with the base color
-/// using standard alpha compositing (Source Over).
-/// All inputs are normalized (0.0 - 1.0).
-/// Formula: C_out = (B(Cb, Cs) * as + Cb * ab * (1 - as)) / ar
-fn compositePixel(
-    comptime F: type,
-    base_val: F,
-    base_a: F,
-    blend_val: F,
-    overlay_a: F,
-    result_a: F,
-) F {
-    comptime assert(@typeInfo(F) == .float);
-    if (result_a == 0) return 0;
-    return (blend_val * overlay_a + base_val * base_a * (1.0 - overlay_a)) / result_a;
-}
-
 /// Blends two RGBA colors using the specified blend mode.
 /// Accepts any Rgba(T) types (e.g., Rgba(u8), Rgba(f32)).
 /// Returns Rgba(T) matching the base color's type.
 pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blending) Rgba(T) {
+    if (mode == .none) return overlay;
+
+    // Early return for fully transparent overlay
+    if (if (T == u8) overlay.a == 0 else overlay.a <= 0) return base;
+
+    // Hidden base color should not influence blending
+    if (if (T == u8) base.a == 0 else base.a <= 0) return overlay;
+
+    // For normal blend mode with a fully opaque overlay, result is just overlay
+    if (mode == .normal and (if (T == u8) overlay.a == 255 else overlay.a >= 1.0)) return overlay;
+
     switch (@typeInfo(T)) {
         .float => {},
         .int => if (T != u8) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
@@ -58,88 +45,110 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
     const base_f = if (T == u8) base.as(F) else base;
     const overlay_f = if (T == u8) overlay.as(F) else overlay;
 
-    // Early return for fully transparent overlay
-    if (overlay_f.a <= 0) return base;
-
-    // Hidden base color should not influence blending
-    if (base_f.a <= 0) return overlay;
-
-    const result_a = compositeAlpha(F, base_f.a, overlay_f.a);
-    if (result_a <= 0) return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
-
-    var blended: Rgba(F) = undefined;
+    const base_v = @Vector(3, F){ base_f.r, base_f.g, base_f.b };
+    const overlay_v = @Vector(3, F){ overlay_f.r, overlay_f.g, overlay_f.b };
+    var blended_v: @Vector(3, F) = undefined;
 
     switch (mode) {
-        .none => return overlay,
+        .none => unreachable,
         .normal => {
-            blended.r = overlay_f.r;
-            blended.g = overlay_f.g;
-            blended.b = overlay_f.b;
+            blended_v = overlay_v;
         },
         .multiply => {
-            blended.r = base_f.r * overlay_f.r;
-            blended.g = base_f.g * overlay_f.g;
-            blended.b = base_f.b * overlay_f.b;
+            blended_v = base_v * overlay_v;
         },
         .screen => {
-            blended.r = 1.0 - (1.0 - base_f.r) * (1.0 - overlay_f.r);
-            blended.g = 1.0 - (1.0 - base_f.g) * (1.0 - overlay_f.g);
-            blended.b = 1.0 - (1.0 - base_f.b) * (1.0 - overlay_f.b);
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            blended_v = ones - (ones - base_v) * (ones - overlay_v);
         },
         .overlay => {
-            blended.r = overlayChannel(F, base_f.r, overlay_f.r);
-            blended.g = overlayChannel(F, base_f.g, overlay_f.g);
-            blended.b = overlayChannel(F, base_f.b, overlay_f.b);
+            const cond = base_v < @as(@Vector(3, F), @splat(0.5));
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            const twos = @as(@Vector(3, F), @splat(2.0));
+            const expr1 = twos * base_v * overlay_v;
+            const expr2 = ones - twos * (ones - base_v) * (ones - overlay_v);
+            blended_v = @select(F, cond, expr1, expr2);
         },
         .soft_light => {
-            blended.r = softLightChannel(F, base_f.r, overlay_f.r);
-            blended.g = softLightChannel(F, base_f.g, overlay_f.g);
-            blended.b = softLightChannel(F, base_f.b, overlay_f.b);
+            const cond = overlay_v <= @as(@Vector(3, F), @splat(0.5));
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            const twos = @as(@Vector(3, F), @splat(2.0));
+            const sqrt_base = @sqrt(base_v);
+            const expr1 = base_v - (ones - twos * overlay_v) * base_v * (ones - base_v);
+            const expr2 = base_v + (twos * overlay_v - ones) * (sqrt_base - base_v);
+            blended_v = @select(F, cond, expr1, expr2);
         },
         .hard_light => {
-            // Hard light is overlay with base and overlay swapped
-            blended.r = overlayChannel(F, overlay_f.r, base_f.r);
-            blended.g = overlayChannel(F, overlay_f.g, base_f.g);
-            blended.b = overlayChannel(F, overlay_f.b, base_f.b);
+            const cond = overlay_v < @as(@Vector(3, F), @splat(0.5));
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            const twos = @as(@Vector(3, F), @splat(2.0));
+            const expr1 = twos * overlay_v * base_v;
+            const expr2 = ones - twos * (ones - overlay_v) * (ones - base_v);
+            blended_v = @select(F, cond, expr1, expr2);
         },
         .color_dodge => {
-            blended.r = colorDodgeChannel(F, base_f.r, overlay_f.r);
-            blended.g = colorDodgeChannel(F, base_f.g, overlay_f.g);
-            blended.b = colorDodgeChannel(F, base_f.b, overlay_f.b);
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            const zeros = @as(@Vector(3, F), @splat(0.0));
+            const result = base_v / (ones - overlay_v);
+            const is_base_zero = base_v == zeros;
+            const is_blend_one = overlay_v >= ones;
+            const val_else = @min(ones, result);
+            const val_blend = @select(F, is_blend_one, ones, val_else);
+            blended_v = @select(F, is_base_zero, zeros, val_blend);
         },
         .color_burn => {
-            blended.r = colorBurnChannel(F, base_f.r, overlay_f.r);
-            blended.g = colorBurnChannel(F, base_f.g, overlay_f.g);
-            blended.b = colorBurnChannel(F, base_f.b, overlay_f.b);
+            const ones = @as(@Vector(3, F), @splat(1.0));
+            const zeros = @as(@Vector(3, F), @splat(0.0));
+            const result = ones - (ones - base_v) / overlay_v;
+            const is_base_one = base_v >= ones;
+            const is_blend_zero = overlay_v <= zeros;
+            const val_else = @max(zeros, result);
+            const val_blend = @select(F, is_blend_zero, zeros, val_else);
+            blended_v = @select(F, is_base_one, ones, val_blend);
         },
         .darken => {
-            blended.r = @min(base_f.r, overlay_f.r);
-            blended.g = @min(base_f.g, overlay_f.g);
-            blended.b = @min(base_f.b, overlay_f.b);
+            blended_v = @min(base_v, overlay_v);
         },
         .lighten => {
-            blended.r = @max(base_f.r, overlay_f.r);
-            blended.g = @max(base_f.g, overlay_f.g);
-            blended.b = @max(base_f.b, overlay_f.b);
+            blended_v = @max(base_v, overlay_v);
         },
         .difference => {
-            blended.r = @abs(base_f.r - overlay_f.r);
-            blended.g = @abs(base_f.g - overlay_f.g);
-            blended.b = @abs(base_f.b - overlay_f.b);
+            blended_v = @abs(base_v - overlay_v);
         },
         .exclusion => {
-            blended.r = exclusionChannel(F, base_f.r, overlay_f.r);
-            blended.g = exclusionChannel(F, base_f.g, overlay_f.g);
-            blended.b = exclusionChannel(F, base_f.b, overlay_f.b);
+            const twos = @as(@Vector(3, F), @splat(2.0));
+            blended_v = base_v + overlay_v - twos * base_v * overlay_v;
         },
     }
 
-    const out = Rgba(F){
-        .r = compositePixel(F, base_f.r, base_f.a, blended.r, overlay_f.a, result_a),
-        .g = compositePixel(F, base_f.g, base_f.a, blended.g, overlay_f.a, result_a),
-        .b = compositePixel(F, base_f.b, base_f.a, blended.b, overlay_f.a, result_a),
-        .a = result_a,
-    };
+    const is_opaque = if (T == u8) overlay.a == 255 else overlay.a >= 1.0;
+    var out: Rgba(F) = undefined;
+
+    if (is_opaque) {
+        out = .{
+            .r = blended_v[0],
+            .g = blended_v[1],
+            .b = blended_v[2],
+            .a = 1.0,
+        };
+    } else {
+        const result_a = overlay_f.a + base_f.a * (1.0 - overlay_f.a);
+        if (result_a <= 0) return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+        const base_weight = base_f.a * (1.0 - overlay_f.a);
+        const inv_result_a = 1.0 / result_a;
+
+        const base_weight_v = @as(@Vector(3, F), @splat(base_weight));
+        const overlay_a_v = @as(@Vector(3, F), @splat(overlay_f.a));
+        const inv_result_a_v = @as(@Vector(3, F), @splat(inv_result_a));
+
+        const out_v = (blended_v * overlay_a_v + base_v * base_weight_v) * inv_result_a_v;
+        out = .{
+            .r = out_v[0],
+            .g = out_v[1],
+            .b = out_v[2],
+            .a = result_a,
+        };
+    }
 
     return if (T == u8) out.as(T) else out;
 }
@@ -148,37 +157,28 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
 
 fn overlayChannel(comptime F: type, base: F, blend: F) F {
     comptime assert(@typeInfo(F) == .float);
-    if (base < 0.5) {
-        return 2.0 * base * blend;
-    } else {
-        return 1.0 - 2.0 * (1.0 - base) * (1.0 - blend);
-    }
+    if (base < 0.5) return 2.0 * base * blend;
+    return 1.0 - 2.0 * (1.0 - base) * (1.0 - blend);
 }
 
 fn softLightChannel(comptime F: type, base: F, blend: F) F {
     comptime assert(@typeInfo(F) == .float);
-    if (blend <= 0.5) {
-        return base - (1.0 - 2.0 * blend) * base * (1.0 - base);
-    } else {
-        const sqrt_base = @sqrt(base);
-        return base + (2.0 * blend - 1.0) * (sqrt_base - base);
-    }
+    if (blend <= 0.5) return base - (1.0 - 2.0 * blend) * base * (1.0 - base);
+    return base + (2.0 * blend - 1.0) * (@sqrt(base) - base);
 }
 
 fn colorDodgeChannel(comptime F: type, base: F, blend: F) F {
     comptime assert(@typeInfo(F) == .float);
     if (base == 0) return 0;
     if (blend >= 1.0) return 1.0;
-    const result = base / (1.0 - blend);
-    return @min(1.0, result);
+    return @min(1.0, base / (1.0 - blend));
 }
 
 fn colorBurnChannel(comptime F: type, base: F, blend: F) F {
     comptime assert(@typeInfo(F) == .float);
     if (base >= 1.0) return 1.0;
     if (blend <= 0.0) return 0.0;
-    const result = 1.0 - (1.0 - base) / blend;
-    return @max(0.0, result);
+    return @max(0.0, 1.0 - (1.0 - base) / blend);
 }
 
 fn exclusionChannel(comptime F: type, base: F, blend: F) F {
