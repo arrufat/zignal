@@ -6,7 +6,7 @@ const Matrix = @import("../matrix.zig").Matrix;
 const Point = @import("Point.zig").Point;
 
 /// Applies a similarity transform to a point.  By default, it will be initialized to the identity
-/// function.  Use the fit method to update the transform to map between two sets of points.
+/// function.  Use the find method to update the transform to map between two sets of points.
 pub fn SimilarityTransform(comptime T: type) type {
     comptime assert(@typeInfo(T) == .float);
     return struct {
@@ -51,9 +51,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             var mean_from: Point(2, T) = .origin;
             var mean_to: Point(2, T) = .origin;
             var sigma_from: T = 0;
-            var sigma_to: T = 0;
             var cov: SMatrix(T, 2, 2) = .initAll(0);
-            self.matrix = cov;
             for (0..from_points.len) |i| {
                 mean_from = mean_from.add(from_points[i]);
                 mean_to = mean_to.add(to_points[i]);
@@ -66,16 +64,14 @@ pub fn SimilarityTransform(comptime T: type) type {
                 const to = to_points[i].sub(mean_to);
 
                 sigma_from += from.normSquared();
-                sigma_to += to.normSquared();
 
                 const from_mat: SMatrix(T, 1, 2) = .init(.{.{ from.x(), from.y() }});
                 const to_mat: SMatrix(T, 2, 1) = .init(.{ .{to.x()}, .{to.y()} });
                 cov = cov.add(to_mat.dot(from_mat));
             }
             sigma_from /= num_points;
-            sigma_to /= num_points;
             cov = cov.scale(1.0 / num_points);
-            const det_cov = cov.at(0, 0).* * cov.at(1, 1).* - cov.at(0, 1).* * cov.at(1, 0).*;
+            const det_cov = cov.determinant();
             const result = cov.svd(.{ .with_v = true, .mode = .skinny_u });
             if (result.converged != 0) {
                 return error.NotConverged;
@@ -94,8 +90,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             const u = &result.u;
             const d: SMatrix(T, 2, 2) = .init(.{ .{ result.s.at(0, 0).*, 0 }, .{ 0, result.s.at(1, 0).* } });
             const v = &result.v;
-            const det_u = u.at(0, 0).* * u.at(1, 1).* - u.at(0, 1).* * u.at(1, 0).*;
-            const det_v = v.at(0, 0).* * v.at(1, 1).* - v.at(0, 1).* * v.at(1, 0).*;
+            const det_u = u.determinant();
+            const det_v = v.determinant();
             var s: SMatrix(T, cov.rows, cov.cols) = .identity();
             if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
                 if (d.at(1, 1).* < d.at(0, 0).*) {
@@ -118,7 +114,7 @@ pub fn SimilarityTransform(comptime T: type) type {
 }
 
 /// Applies an affine transform to a point.  By default, it will be initialized to the identity
-/// function.  Use the fit method to update the transform to map between two sets of points.
+/// function.  Use the find method to update the transform to map between two sets of points.
 pub fn AffineTransform(comptime T: type) type {
     comptime assert(@typeInfo(T) == .float);
     return struct {
@@ -171,7 +167,6 @@ pub fn AffineTransform(comptime T: type) type {
                 q.at(0, i).* = to_points[i].x();
                 q.at(1, i).* = to_points[i].y();
             }
-            // Use Matrix operations to perform matrix operations
             // Compute the pseudo-inverse so we can support additional correspondences
             var effective_rank: u32 = 0;
             var pinv = try p.pseudoInverse(.{ .effective_rank = &effective_rank });
@@ -198,7 +193,7 @@ pub fn AffineTransform(comptime T: type) type {
 }
 
 /// Applies a projective transform to a point.  By default, it will be initialized to the identity
-/// function.  Use the fit method to update the transform to map between two sets of points.
+/// function.  Use the find method to update the transform to map between two sets of points.
 pub fn ProjectiveTransform(comptime T: type) type {
     comptime assert(@typeInfo(T) == .float);
     return struct {
@@ -253,31 +248,22 @@ pub fn ProjectiveTransform(comptime T: type) type {
             var b: SMatrix(T, 2, 9) = .initAll(0);
             for (0..from_points.len) |i| {
                 const f: SMatrix(T, 1, 3) = .init(.{.{ from_points[i].x(), from_points[i].y(), 1 }});
-                const t: SMatrix(T, 1, 3) = .init(.{.{ to_points[i].x(), to_points[i].y(), 1 }});
-                b.setSubMatrix(0, 0, f.scale(t.at(0, 1).*));
+                const tx = to_points[i].x();
+                const ty = to_points[i].y();
+                const neg_tx_f = f.scale(-tx);
+                b.setSubMatrix(0, 0, f.scale(ty));
                 b.setSubMatrix(1, 0, f);
-                b.setSubMatrix(0, 3, f.scale(-t.at(0, 0).*));
-                b.setSubMatrix(1, 6, f.scale(-t.at(0, 0).*));
+                b.setSubMatrix(0, 3, neg_tx_f);
+                b.setSubMatrix(1, 6, neg_tx_f);
                 accum = accum.add(b.transpose().dot(b));
             }
             const result = accum.svd(.{ .with_v = false, .mode = .full_u });
             if (result.converged != 0) {
                 return error.NotConverged;
             }
+            // Singular values come back in descending order, so the smallest is the last column of u.
             const u = &result.u;
-            const s = &result.s;
-            self.matrix = blk: {
-                var min: T = s.at(0, 0).*;
-                var idx: u32 = 0;
-                for (1..s.rows) |i| {
-                    const val = s.at(i, 0).*;
-                    if (val < min) {
-                        min = val;
-                        idx = @intCast(i);
-                    }
-                }
-                break :blk u.col(idx).reshape(3, 3);
-            };
+            self.matrix = u.col(u.cols - 1).reshape(3, 3);
         }
     };
 }
