@@ -33,7 +33,6 @@ const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
 
 pub const BorderMode = @import("image/border.zig").BorderMode;
-pub const RotationBounds = @import("image/transforms.zig").RotationBounds;
 const DisplayFormatter = @import("image/display.zig").DisplayFormatter;
 const Edges = @import("image/edges.zig").Edges;
 const Enhancement = @import("image/enhancement.zig").Enhancement;
@@ -566,7 +565,7 @@ pub fn Image(comptime T: type) type {
 
         /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
         /// without clipping.
-        pub fn rotateBounds(self: Self, angle: f32) RotationBounds {
+        pub fn rotateBounds(self: Self, angle: f32) struct { rows: u32, cols: u32 } {
             return Transform(T).rotateBounds(self, angle);
         }
 
