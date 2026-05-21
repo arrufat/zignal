@@ -118,18 +118,16 @@ pub fn ConvexHull(comptime T: type) type {
             // Check orientation of point relative to all edges.
             // Since vertices are in clockwise order, the point must be to the right (clockwise)
             // or collinear with every edge to be inside.
-            for (0..self.hull.items.len) |i| {
+            return for (0..self.hull.items.len) |i| {
                 const p1 = self.hull.items[i];
                 const p2 = self.hull.items[(i + 1) % self.hull.items.len];
                 const orientation = p1.orientation(p2, p);
 
                 // If point is to the left (counter-clockwise) of any edge, it's outside
                 if (orientation == .counter_clockwise) {
-                    return false;
+                    break false;
                 }
-            }
-
-            return true;
+            } else true;
         }
     };
 }
