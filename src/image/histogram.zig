@@ -553,7 +553,7 @@ const stats = struct {
         }
 
         if (total <= 2) return 0;
-        const n = @as(f64, @floatFromInt(total));
+        const n: f64 = @floatFromInt(total);
         return (n / ((n - 1) * (n - 2))) * sum_cub_diff;
     }
 
@@ -575,7 +575,7 @@ const stats = struct {
         }
 
         if (total <= 3) return 0;
-        const n = @as(f64, @floatFromInt(total));
+        const n: f64 = @floatFromInt(total);
         const n1 = n - 1;
 
         return ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) * sum_four_diff -
@@ -645,7 +645,7 @@ const stats = struct {
         if (total == 0) return 0;
 
         var ent: f64 = 0;
-        const total_f = @as(f64, @floatFromInt(total));
+        const total_f: f64 = @floatFromInt(total);
 
         for (bins) |count| {
             if (count > 0) {

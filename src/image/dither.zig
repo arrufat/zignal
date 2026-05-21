@@ -148,12 +148,12 @@ pub fn applyOrdered(img: Image(Rgb), pal: []const Rgb, lut: ColorLookupTable) vo
                 const ptr = @as([*]const u8, @ptrCast(row_slice.ptr)) + c * 3;
                 const pixels_u8: @Vector(24, u8) = ptr[0..24].*;
 
-                const pixels_i16 = @as(@Vector(24, i16), pixels_u8);
+                const pixels_i16: @Vector(24, i16) = pixels_u8;
                 const result_i16 = pixels_i16 + offset_vec;
 
                 const clamped = @min(@max(result_i16, min_vec), max_vec);
 
-                const result_u8 = @as(@Vector(24, u8), @intCast(clamped));
+                const result_u8: @Vector(24, u8) = @intCast(clamped);
                 const quantized_vec = result_u8 >> @as(@Vector(24, u3), @splat(8 - color_quantize_bits));
                 const q_arr: [24]u8 = quantized_vec;
 

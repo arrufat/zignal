@@ -106,10 +106,10 @@ pub const Binary = struct {
             for (0..cols) |col| {
                 const c1 = col -| radius;
                 const c2 = @min(col + radius, cols - 1);
-                const area = @as(f32, @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1)));
+                const area: f32 = @floatFromInt((r2 - r1 + 1) * (c2 - c1 + 1));
                 const sum = Image(u8).Integral.sum(sat, r1, c1, r2, c2);
                 const mean = sum / area;
-                const src_val = @as(f32, image.at(row, col).*);
+                const src_val: f32 = image.at(row, col).*;
                 out.at(row, col).* = if (src_val > mean - c) 255 else 0;
             }
         }

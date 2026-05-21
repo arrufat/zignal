@@ -138,8 +138,8 @@ pub fn createHorizontalComposite(
         @memset(canvas.asBytes(), 0);
     }
 
-    const wf = @as(f32, @floatFromInt(final_w));
-    const hf = @as(f32, @floatFromInt(final_h));
+    const wf: f32 = @floatFromInt(final_w);
+    const hf: f32 = @floatFromInt(final_h);
 
     for (images, 0..) |img, i| {
         const offset_x = @as(f32, @floatFromInt(i)) * wf;
