@@ -99,9 +99,7 @@ const perlin_mod = @import("perlin.zig");
 pub const perlin = perlin_mod.perlin;
 pub const PerlinOptions = perlin_mod.PerlinOptions;
 
-// New unified Point system with arbitrary dimensions and SIMD acceleration
-const point = @import("geometry/Point.zig");
-pub const Point = point.Point;
+pub const Point = @import("geometry/Point.zig").Point;
 
 pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
