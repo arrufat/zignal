@@ -111,15 +111,15 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         }
 
         fn convolvePixelWithBorder(src: Image(T), dst: Image(T), r: usize, c: usize, kernel: [size]KernelScalar, border_mode: BorderMode) void {
-            const ir = @as(isize, @intCast(r));
-            const ic = @as(isize, @intCast(c));
+            const ir: isize = @intCast(r);
+            const ic: isize = @intCast(c);
             var result: AccumScalar = 0;
             inline for (0..rows) |ky| {
                 inline for (0..cols) |kx| {
                     const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
                     const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
-                    const pixel_val = @as(AccumScalar, getPixel(T, src, iry, icx, border_mode));
-                    const k_val = @as(AccumScalar, kernel[ky * cols + kx]);
+                    const pixel_val: AccumScalar = getPixel(T, src, iry, icx, border_mode);
+                    const k_val: AccumScalar = kernel[ky * cols + kx];
                     result += pixel_val * k_val;
                 }
             }
@@ -129,7 +129,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         fn convolve(src: Image(T), dst: Image(T), kernel: [size]KernelScalar, border_mode: BorderMode) void {
             var kernel_vecs: [size]@Vector(vec_len, AccumScalar) = undefined;
             inline for (0..size) |i| {
-                const k_val = @as(AccumScalar, kernel[i]);
+                const k_val: AccumScalar = kernel[i];
                 kernel_vecs[i] = @splat(k_val);
             }
 
@@ -180,7 +180,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                                 const src_r = r + ky - half_h;
                                 const src_c = c + kx - half_w;
                                 const pixel_val = Pixels.load(src.data[src_r * src.stride + src_c]);
-                                const k_val = @as(AccumScalar, kernel[ky * cols + kx]);
+                                const k_val: AccumScalar = kernel[ky * cols + kx];
                                 result += pixel_val * k_val;
                             }
                         }

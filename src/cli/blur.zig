@@ -154,7 +154,7 @@ fn processImage(
                 return error.InvalidArguments;
             }
 
-            const max_dim = @as(f32, @floatFromInt(@max(img.rows, img.cols)));
+            const max_dim: f32 = @floatFromInt(@max(img.rows, img.cols));
 
             if (dist > max_dim) {
                 std.log.warn("motion blur distance {d:.1} exceeds image dimensions. clamping to {d:.1}.", .{ dist, max_dim });

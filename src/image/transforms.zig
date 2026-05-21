@@ -345,11 +345,11 @@ pub fn Transform(comptime T: type) type {
 
             // Only iterate over potentially affected pixels
             for (min_r..max_r) |r| {
-                const dest_y = @as(f32, @floatFromInt(r));
+                const dest_y: f32 = @floatFromInt(r);
                 const dy = dest_y - cy;
 
                 for (min_c..max_c) |c| {
-                    const dest_x = @as(f32, @floatFromInt(c));
+                    const dest_x: f32 = @floatFromInt(c);
                     const dx = dest_x - cx;
 
                     // Inverse rotate to rectangle space

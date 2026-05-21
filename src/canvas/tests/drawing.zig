@@ -90,7 +90,7 @@ test "thick lines have correct width" {
         }
 
         // Draw horizontal line in the middle
-        const y = @as(f32, height / 2);
+        const y: f32 = height / 2;
         canvas.drawLine(.init(.{ 50, y }), .init(.{ 150, y }), color, @intCast(line_width), .fast);
 
         // Measure actual width at several points along the line
