@@ -121,6 +121,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Compute Euclidean norm (length) of the point
         pub fn norm(self: Self) T {
+            comptime assert(@typeInfo(T) == .float);
             return @sqrt(self.normSquared());
         }
 
@@ -159,6 +160,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Compute Euclidean distance to another point
         pub fn distance(self: Self, other: Self) T {
+            comptime assert(@typeInfo(T) == .float);
             return self.sub(other).norm();
         }
 
