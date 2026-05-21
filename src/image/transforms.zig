@@ -15,10 +15,6 @@ const BorderMode = @import("border.zig").BorderMode;
 const computeCoords = @import("border.zig").computeCoords;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
-
-/// Rotation bounds result
-pub const RotationBounds = struct { rows: u32, cols: u32 };
-
 /// Transform operations for Image(T)
 pub fn Transform(comptime T: type) type {
     return struct {
@@ -113,7 +109,7 @@ pub fn Transform(comptime T: type) type {
 
         /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
         /// without clipping.
-        pub fn rotateBounds(self: Self, angle: f32) RotationBounds {
+        pub fn rotateBounds(self: Self, angle: f32) struct { rows: u32, cols: u32 } {
             // Normalize angle to [0, 2π) range
             const normalized_angle = @mod(angle, std.math.tau);
             const epsilon = 1e-6;
