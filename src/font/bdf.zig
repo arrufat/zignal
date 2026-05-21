@@ -397,8 +397,8 @@ fn convertToBitmapFont(
     bitmap_data: []u8,
     all_ascii: bool,
 ) !BitmapFont {
-    const char_width = @as(u32, @abs(font.bbox_width));
-    const char_height = @as(u32, @abs(font.bbox_height));
+    const char_width: u32 = @abs(font.bbox_width);
+    const char_height: u32 = @abs(font.bbox_height);
 
     if (all_ascii and glyphs.len > 0) {
         // ASCII font - determine range

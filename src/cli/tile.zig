@@ -84,7 +84,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         .square => {
             const sqrt = std.math.sqrt(@as(f32, @floatFromInt(img_count)));
             cols = @ceil(sqrt);
-            rows = @ceil(@as(f32, @floatFromInt(img_count)) / @as(f32, @floatFromInt(cols)));
+            rows = @intCast((img_count + cols - 1) / cols);
         },
         .grid => {
             if (parsed.options.rows == null or parsed.options.cols == null) {
@@ -101,7 +101,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         },
         .factors => {
             // Largest factor pair closest to a square; prefer landscape below.
-            const n = @as(u32, @intCast(img_count));
+            const n: u32 = @intCast(img_count);
             var best_r: u32 = 1;
             var i: u32 = 1;
             while (i * i <= n) : (i += 1) {
@@ -129,8 +129,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         std.log.debug("analyzing reference image: {s}...", .{input_paths[0]});
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
 
-        const ref_w_f = @as(f32, @floatFromInt(reference_img.?.cols));
-        const ref_h_f = @as(f32, @floatFromInt(reference_img.?.rows));
+        const ref_w_f: f32 = @floatFromInt(reference_img.?.cols);
+        const ref_h_f: f32 = @floatFromInt(reference_img.?.rows);
 
         if (cell_w == 0 and cell_h == 0) {
             cell_w = @intCast(reference_img.?.cols);
@@ -184,8 +184,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         const x_offset = (@as(f32, @floatFromInt(cell_w)) - target_w) / 2.0;
         const y_offset = (@as(f32, @floatFromInt(cell_h)) - target_h) / 2.0;
 
-        const cell_l = @as(f32, @floatFromInt(c * cell_w));
-        const cell_t = @as(f32, @floatFromInt(r * cell_h));
+        const cell_l: f32 = @floatFromInt(c * cell_w);
+        const cell_t: f32 = @floatFromInt(r * cell_h);
 
         const dest_rect = zignal.Rectangle(f32){
             .l = cell_l + x_offset,

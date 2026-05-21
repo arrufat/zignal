@@ -486,7 +486,7 @@ fn parseProperties(allocator: std.mem.Allocator, data: []const u8, table: TableE
 
         if (prop_info.is_string) {
             // Value is an offset into string pool
-            const value_offset = @as(u32, @bitCast(prop_info.value));
+            const value_offset: u32 = @bitCast(prop_info.value);
             if (value_offset >= string_size) {
                 return PcfError.InvalidTableEntry;
             }
@@ -575,8 +575,8 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     encoding.default_char = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
 
     // Calculate total encodings with overflow protection
-    const cols = @as(u32, encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1);
-    const rows = @as(u32, encoding.max_byte1 - encoding.min_byte1 + 1);
+    const cols: u32 = encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1;
+    const rows: u32 = encoding.max_byte1 - encoding.min_byte1 + 1;
     const encodings_count = cols * rows;
 
     if (encodings_count > max_glyph_count) {
@@ -859,7 +859,7 @@ fn convertToBitmapFont(
         }
         const format_flags = FormatFlags.decode(bitmap_info.format);
         const pad_bits: u2 = @truncate(bitmap_info.format & 0x3);
-        const glyph_pad = @as(GlyphPadding, @enumFromInt(pad_bits));
+        const glyph_pad: GlyphPadding = @enumFromInt(pad_bits);
 
         try convertGlyphBitmap(
             gpa,
@@ -949,7 +949,7 @@ fn collectCodepoints(allocator: Allocator, font: BitmapFont) ![]u21 {
             return allocator.alloc(u21, 0);
         }
 
-        const count = @as(usize, font.last_char - font.first_char + 1);
+        const count: usize = font.last_char - font.first_char + 1;
         keys = try allocator.alloc(u21, count);
         for (keys, 0..) |*cp, idx| {
             cp.* = @as(u21, font.first_char) + @as(u21, @intCast(idx));
@@ -988,7 +988,7 @@ fn buildGlyphEntries(
         const height = glyph_info.height;
         const char_data = font.getCharData(cp) orelse return PcfError.InvalidBitmapData;
 
-        const bytes_per_row = @as(usize, (width + 7) / 8);
+        const bytes_per_row: usize = (width + 7) / 8;
         const row_stride = bytes_per_row;
 
         const left = glyph_info.x_offset;
@@ -1115,8 +1115,8 @@ fn writeEncodingTable(
     var max_byte2: u16 = 0;
 
     for (glyphs) |g| {
-        const high = @as(u16, @intCast(g.codepoint >> 8));
-        const low = @as(u16, @intCast(g.codepoint & 0xFF));
+        const high: u16 = @intCast(g.codepoint >> 8);
+        const low: u16 = @intCast(g.codepoint & 0xFF);
         if (high < min_byte1) min_byte1 = high;
         if (high > max_byte1) max_byte1 = high;
         if (low < min_byte2) min_byte2 = low;
@@ -1126,8 +1126,8 @@ fn writeEncodingTable(
     // Default char (usually space or first char)
     const default_char: u16 = 0;
 
-    const rows = @as(usize, max_byte1 - min_byte1 + 1);
-    const cols = @as(usize, max_byte2 - min_byte2 + 1);
+    const rows: usize = max_byte1 - min_byte1 + 1;
+    const cols: usize = max_byte2 - min_byte2 + 1;
     const table_len = rows * cols;
 
     var glyph_indices = try allocator.alloc(u16, table_len);
@@ -1135,8 +1135,8 @@ fn writeEncodingTable(
     @memset(glyph_indices, 0xFFFF);
 
     for (glyphs, 0..) |glyph, idx| {
-        const high = @as(usize, (glyph.codepoint >> 8) - min_byte1);
-        const low = @as(usize, (glyph.codepoint & 0xFF) - min_byte2);
+        const high: usize = (glyph.codepoint >> 8) - min_byte1;
+        const low: usize = (glyph.codepoint & 0xFF) - min_byte2;
         const pos = high * cols + low;
         if (pos < glyph_indices.len) {
             glyph_indices[pos] = @intCast(idx);
@@ -1194,13 +1194,13 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
     defer allocator.free(prop_entries);
 
     for (props_list.items, 0..) |p, i| {
-        const name_off = @as(u32, @intCast(string_pool.items.len));
+        const name_off: u32 = @intCast(string_pool.items.len);
         try string_pool.appendSlice(allocator, p.name);
         try string_pool.append(allocator, 0);
 
         var val: i32 = p.i_val;
         if (p.is_string) {
-            const val_off = @as(u32, @intCast(string_pool.items.len));
+            const val_off: u32 = @intCast(string_pool.items.len);
             try string_pool.appendSlice(allocator, p.s_val);
             try string_pool.append(allocator, 0);
             val = @bitCast(val_off);
