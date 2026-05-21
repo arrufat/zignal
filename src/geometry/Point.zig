@@ -80,9 +80,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
                 .pointer => |ptr| blk: {
                     if (ptr.size == .slice) {
                         assert(components.len == dim);
-                        var result: [dim]T = undefined;
-                        @memcpy(&result, components[0..dim]);
-                        break :blk .{ .items = result };
+                        break :blk .{ .items = components[0..dim].* };
                     } else {
                         @compileError("Point.init expects tuple literal, array, slice, or vector");
                     }
@@ -123,7 +121,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 
         /// Compute Euclidean norm (length) of the point
         pub fn norm(self: Self) T {
-            return @sqrt(self.dot(self));
+            return @sqrt(self.normSquared());
         }
 
         /// Compute squared norm (avoids sqrt for performance)
@@ -190,8 +188,8 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             const t = ap.dot(ab) / ab_len_sq;
 
             if (t <= 0.0) return ap.norm();
-            if (t >= 1.0) return self.sub(b).norm();
-            return self.sub(a.add(ab.scale(t))).norm();
+            if (t >= 1.0) return self.distance(b);
+            return ap.distance(ab.scale(t));
         }
 
         /// Computes the orientation of this point relative to points `b` and `c`.
@@ -199,13 +197,18 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Only available for 2D points.
         pub fn orientation(self: Self, b: Self, c: Self) Orientation {
             comptime assert(dim == 2);
-            // u and v are algebraically equal (v = -u), but reordered terms carry
-            // different floating-point roundoff. Testing u*v == 0 catches near-
-            // collinear triples where either computation rounds to zero.
-            const u: T = self.x() * (b.y() - c.y()) + b.x() * (c.y() - self.y()) + c.x() * (self.y() - b.y());
-            const v: T = self.x() * (c.y() - b.y()) + c.x() * (b.y() - self.y()) + b.x() * (self.y() - c.y());
-            if (u * v == 0) return .collinear;
-            return if (u < 0) .clockwise else .counter_clockwise;
+            // Lexicographically sort b and c to ensure the float math is computed in a
+            // symmetric order. This guarantees that orientation(b, c) and orientation(c, b)
+            // have consistent float roundoff behavior and correctly match collinearity.
+            const swap = (b.x() > c.x()) or (b.x() == c.x() and b.y() > c.y());
+            const p1 = if (swap) c else b;
+            const p2 = if (swap) b else c;
+
+            const u = self.x() * (p1.y() - p2.y()) + p1.x() * (p2.y() - self.y()) + p2.x() * (self.y() - p1.y());
+            if (u == 0) return .collinear;
+            // If we swapped the inputs, the computed sign of the orientation determinant (u > 0)
+            // is inverted. Correct for this by checking if swap matches the sign of u.
+            return if (swap == (u > 0)) .clockwise else .counter_clockwise;
         }
 
         /// Returns true if, and only if, this point is inside the triangle defined by vertices `a`, `b`, and `c`.
@@ -215,12 +218,11 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             comptime assert(dim == 2);
             const s = a.sub(c).cross(self.sub(c));
             const t = b.sub(a).cross(self.sub(a));
-
-            if ((s < 0) != (t < 0) and s != 0 and t != 0)
-                return false;
-
             const d = c.sub(b).cross(self.sub(b));
-            return d == 0 or (d < 0) == (s + t < 0);
+
+            const has_neg = (s < 0) or (t < 0) or (d < 0);
+            const has_pos = (s > 0) or (t > 0) or (d > 0);
+            return !(has_neg and has_pos);
         }
 
         /// Returns true when all points in the slice are collinear.
@@ -233,7 +235,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             var i: usize = 1;
             // Find the first point distinct from p1
             while (i < points.len) : (i += 1) {
-                if (points[i].distanceSquared(p1) > 0) break;
+                if (!points[i].eql(p1)) break;
             }
 
             // If all points are identical to p1, they are collinear
@@ -275,11 +277,13 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         // Convenient aliases for common projections
         /// Project to 2D by taking first 2 components
         pub fn to2d(self: Self) Point(2, T) {
+            comptime assert(dim >= 2);
             return self.project(2);
         }
 
         /// Project to 3D by taking first 3 components
         pub fn to3d(self: Self) Point(3, T) {
+            comptime assert(dim >= 3);
             return self.project(3);
         }
 
@@ -331,6 +335,11 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         /// Get read-only slice view of components
         pub fn asSlice(self: *const Self) []const T {
             return &self.items;
+        }
+
+        /// Returns true if all components of the two points are equal
+        pub fn eql(self: Self, other: Self) bool {
+            return @reduce(.And, self.items == other.items);
         }
 
         // Type conversion
