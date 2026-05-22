@@ -29,7 +29,6 @@
 //!
 //! Available on [GitHub](https://github.com/arrufat/zignal).
 
-/// The zignal version
 pub const version = @import("build_options").version;
 
 pub const Canvas = @import("canvas.zig").Canvas;
