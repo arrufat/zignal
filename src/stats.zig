@@ -56,16 +56,17 @@ pub fn RunningStats(comptime T: type) type {
 
         /// Clear all statistics and reset to initial state
         pub fn clear(self: *Self) void {
-            self.* = Self.init();
+            self.* = .init();
         }
 
         /// Add a new value to the running statistics
         pub fn add(self: *Self, val: T) void {
-            const n1 = @as(T, @floatFromInt(self.n + 1));
+            const n: T = @floatFromInt(self.n);
+            const n1 = n + 1;
             const delta = val - self.m1;
             const delta_n = delta / n1;
             const delta_n2 = delta_n * delta_n;
-            const term1 = delta * delta_n * @as(T, @floatFromInt(self.n));
+            const term1 = delta * delta_n * n;
 
             // Update moments using Welford's algorithm
             self.m1 += delta_n;
@@ -130,7 +131,7 @@ pub fn RunningStats(comptime T: type) type {
             const variance_val = self.variance();
             if (variance_val == 0) return 0;
 
-            const n = @as(T, @floatFromInt(self.n));
+            const n: T = @floatFromInt(self.n);
             const n1 = n - 1;
 
             const kurt = ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) *
@@ -168,9 +169,9 @@ pub fn RunningStats(comptime T: type) type {
             result.n = self.n + other.n;
             result.sum = self.sum + other.sum;
 
-            const n1 = @as(T, @floatFromInt(self.n));
-            const n2 = @as(T, @floatFromInt(other.n));
-            const n_total = @as(T, @floatFromInt(result.n));
+            const n1: T = @floatFromInt(self.n);
+            const n2: T = @floatFromInt(other.n);
+            const n_total: T = @floatFromInt(result.n);
 
             const delta = other.m1 - self.m1;
             const delta2 = delta * delta;
@@ -233,7 +234,7 @@ pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
         /// Add a sample vector
         pub fn add(self: *Self, sample: [dim]T) void {
             self.count += 1;
-            const n = @as(T, @floatFromInt(self.count));
+            const n: T = @floatFromInt(self.count);
 
             var delta: [dim]T = undefined;
             inline for (0..dim) |i| {
@@ -261,7 +262,7 @@ pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
         /// Returns simple variance vector (diagonal of covariance matrix)
         pub fn varianceVector(self: Self) [dim]T {
             if (self.count <= 1) return @splat(0);
-            const n_1 = @as(T, @floatFromInt(self.count - 1));
+            const n_1: T = @floatFromInt(self.count - 1);
             var res: [dim]T = undefined;
 
             inline for (0..dim) |i| {
@@ -272,13 +273,13 @@ pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
 
         /// Returns full covariance matrix allocated with allocator
         pub fn covarianceMatrix(self: Self, allocator: std.mem.Allocator) !Matrix(T) {
-            var mat = try Matrix(T).init(allocator, dim, dim);
+            var mat: Matrix(T) = try .init(allocator, dim, dim);
             if (self.count <= 1) {
                 @memset(mat.items, 0);
                 return mat;
             }
 
-            const n_1 = @as(T, @floatFromInt(self.count - 1));
+            const n_1: T = @floatFromInt(self.count - 1);
 
             inline for (0..dim) |i| {
                 inline for (i..dim) |j| {
