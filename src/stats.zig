@@ -6,7 +6,9 @@
 //! Inspired by dlib's running_stats implementation.
 
 const std = @import("std");
+const assert = std.debug.assert;
 const testing = std.testing;
+
 const Matrix = @import("matrix.zig").Matrix;
 
 /// Running statistics for streaming data.
@@ -14,25 +16,25 @@ const Matrix = @import("matrix.zig").Matrix;
 /// Uses Welford's algorithm for numerical stability.
 /// Inspired by dlib's running_stats implementation.
 pub fn RunningStats(comptime T: type) type {
-    comptime {
-        const info = @typeInfo(T);
-        if (info != .float) {
-            @compileError("RunningStats only supports floating-point types (f32, f64, f128)");
-        }
-    }
+    comptime assert(@typeInfo(T) == .float);
 
     return struct {
         const Self = @This();
 
-        // Core statistics
-        n: usize, // Number of samples
-        sum: T, // Sum of values
+        /// Number of samples
+        n: usize,
+        /// Sum of values
+        sum: T,
 
         // Running mean for Welford's algorithm
-        m1: T, // Mean
-        m2: T, // Second moment
-        m3: T, // Third moment
-        m4: T, // Fourth moment
+        /// Mean
+        m1: T,
+        /// Second moment
+        m2: T,
+        /// Third moment
+        m3: T,
+        /// Fourth moment
+        m4: T,
 
         // Extrema
         min_val: T,
