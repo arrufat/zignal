@@ -57,9 +57,7 @@ pub fn build(b: *Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
     // Version info step
     const version_info_step = b.step("version", "Print the resolved version information");
     const version_info_run = b.addRunArtifact(exe);
@@ -113,7 +111,7 @@ pub fn build(b: *Build) void {
     // Format check
     const fmt_step = b.step("fmt", "Check code formatting");
     const fmt = b.addFmt(.{
-        .paths = &.{ "src", "build.zig", "build.zig.zon" },
+        .paths = b.pathList(&.{ "src", "build.zig", "build.zig.zon" }),
         .check = true,
     });
     fmt_step.dependOn(&fmt.step);
@@ -183,7 +181,7 @@ pub fn build(b: *Build) void {
     py_bindings_step.dependOn(&install_py_module.step);
 
     // Also copy the built extension into the source package directory for local development
-    const pkg_dir = b.pathJoin(&.{ b.build_root.path.?, "bindings/python/zignal" });
+    const pkg_dir = b.pathJoin(&.{ b.root.root_dir.path.?, "bindings/python/zignal" });
     const wf = b.addWriteFiles();
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
 
@@ -254,7 +252,7 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
 /// Helper function to run git commands and return stdout
 fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     var code: u8 = undefined;
-    const dir = b.pathFromRoot(".");
+    const dir = b.root.root_dir.path orelse ".";
     var full_args: std.ArrayList([]const u8) = .empty;
     defer full_args.deinit(b.allocator);
     try full_args.appendSlice(b.allocator, &.{ "git", "-C", dir });

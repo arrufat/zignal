@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
 
             // Create individual run step
             const run_exe = b.addRunArtifact(exe);
-            if (b.args) |args| run_exe.addArgs(args);
+            run_exe.addPassthruArgs();
 
             // Replace underscores with hyphens for step name
             const run_name = blk: {
@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
 
     const fmt_step = b.step("fmt", "Run zig fmt");
     const fmt = b.addFmt(.{
-        .paths = &.{ "src", "build.zig", "build.zig.zon" },
+        .paths = b.pathList(&.{ "src", "build.zig", "build.zig.zon" }),
         .check = true,
     });
     fmt_step.dependOn(&fmt.step);
