@@ -249,6 +249,17 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     return zignal_version;
 }
 
+/// Run `python -c <snippet>` and return its trimmed stdout, or null on any
+/// failure (interpreter missing, non-zero exit, empty output). Used to discover
+/// Python paths on Windows, where there is no pkg-config fallback.
+fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
+    const exe = b.graph.environ_map.get("PYTHON") orelse "python";
+    var code: u8 = undefined;
+    const out = b.runAllowFail(&.{ exe, "-c", snippet }, &code, .ignore) catch return null;
+    const trimmed = std.mem.trim(u8, out, " \r\n");
+    return if (trimmed.len == 0) null else trimmed;
+}
+
 /// Helper function to run git commands and return stdout
 fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     var code: u8 = undefined;
@@ -272,6 +283,7 @@ fn linkPython(
 ) void {
     const root = artifact.root_module;
     const os_tag = target.result.os.tag;
+    const is_windows = os_tag == .windows;
 
     const tc = b.addTranslateC(.{
         .root_source_file = b.path("bindings/python/src/c.h"),
@@ -285,6 +297,13 @@ fn linkPython(
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
         tc.addIncludePath(.{ .cwd_relative = python_include });
+    } else if (is_windows) {
+        // Windows has no pkg-config, so ask the interpreter for the include
+        // path directly. translate-c only needs `-I`; it never links libpython.
+        const python_include = pythonValue(b, "import sysconfig;print(sysconfig.get_path('include'),end='')") orelse
+            @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
+        validatePath(python_include, "PYTHON_INCLUDE_DIR");
+        tc.addIncludePath(.{ .cwd_relative = python_include });
     } else {
         // Let pkg-config discover the Python include path. This also emits
         // link flags, but linkSystemLibrary below is the source of truth for
@@ -294,14 +313,26 @@ fn linkPython(
     root.addImport("c", tc.createModule());
 
     root.link_libc = true;
-    if (b.graph.environ_map.get("PYTHON_LIBS_DIR")) |libs_dir| {
-        validatePath(libs_dir, "PYTHON_LIBS_DIR");
-        root.addLibraryPath(.{ .cwd_relative = libs_dir });
+
+    // On Windows the env vars below are normally set by setup.py / CI; fall back
+    // to the interpreter so `zig build python-stubs` also works standalone.
+    const libs_dir = b.graph.environ_map.get("PYTHON_LIBS_DIR") orelse if (is_windows)
+        pythonValue(b, "import sysconfig;from pathlib import Path;p=Path(sysconfig.get_path('stdlib')).parent/'libs';print(p if p.exists() else '',end='')")
+    else
+        null;
+    if (libs_dir) |dir| {
+        validatePath(dir, "PYTHON_LIBS_DIR");
+        root.addLibraryPath(.{ .cwd_relative = dir });
     }
-    const lib_name = if (b.graph.environ_map.get("PYTHON_LIB_NAME")) |name| blk: {
+
+    const env_lib_name = b.graph.environ_map.get("PYTHON_LIB_NAME") orelse if (is_windows)
+        pythonValue(b, "import sys;print(f'python{sys.version_info.major}{sys.version_info.minor}.lib',end='')")
+    else
+        null;
+    const lib_name = if (env_lib_name) |name| blk: {
         validateLibName(name, "PYTHON_LIB_NAME");
         // On Windows, strip the .lib extension
-        if (os_tag == .windows and std.mem.endsWith(u8, name, ".lib")) {
+        if (is_windows and std.mem.endsWith(u8, name, ".lib")) {
             break :blk name[0 .. name.len - ".lib".len];
         }
         break :blk name;
