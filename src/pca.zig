@@ -135,7 +135,7 @@ pub fn Pca(comptime T: type) type {
                     self.mean[j] += data_matrix.at(i, j).*;
                 }
             }
-            const n_samples_f = @as(T, @floatFromInt(n_samples));
+            const n_samples_f: T = @floatFromInt(n_samples);
             for (0..self.dim) |j| {
                 self.mean[j] /= n_samples_f;
             }
@@ -192,16 +192,15 @@ pub fn Pca(comptime T: type) type {
                     var j: u32 = 0;
                     // Vectorized loop
                     while (j + VecSize <= self.dim) : (j += VecSize) {
-                        var centered_arr: [VecSize]T = undefined;
+                        const vec_chunk: @Vector(VecSize, T) = vector[j..][0..VecSize].*;
+                        const mean_chunk: @Vector(VecSize, T) = self.mean[j..][0..VecSize].*;
+                        // components are column-strided in row-major storage, so gather them
                         var comp_arr: [VecSize]T = undefined;
                         inline for (0..VecSize) |k| {
-                            centered_arr[k] = vector[j + k] - self.mean[j + k];
                             comp_arr[k] = self.components.at(j + k, i).*;
                         }
-                        const centered_vec: @Vector(VecSize, T) = centered_arr;
                         const comp_vec: @Vector(VecSize, T) = comp_arr;
-                        const prod = centered_vec * comp_vec;
-                        sum += @reduce(.Add, prod);
+                        sum += @reduce(.Add, (vec_chunk - mean_chunk) * comp_vec);
                     }
                     // Handle remainder
                     while (j < self.dim) : (j += 1) {
@@ -242,24 +241,18 @@ pub fn Pca(comptime T: type) type {
                 const VecSize = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     const weight = coefficients[i];
+                    const weight_vec: @Vector(VecSize, T) = @splat(weight);
                     var j: u32 = 0;
                     // Vectorized loop
                     while (j + VecSize <= self.dim) : (j += VecSize) {
+                        // components are column-strided in row-major storage, so gather them
                         var comp_arr: [VecSize]T = undefined;
-                        var res_arr: [VecSize]T = undefined;
                         inline for (0..VecSize) |k| {
                             comp_arr[k] = self.components.at(j + k, i).*;
-                            res_arr[k] = result[j + k];
                         }
                         const comp_vec: @Vector(VecSize, T) = comp_arr;
-                        const res_vec: @Vector(VecSize, T) = res_arr;
-                        const weight_vec = @as(@Vector(VecSize, T), @splat(weight));
-                        const weighted = weight_vec * comp_vec;
-                        const new_vec = res_vec + weighted;
-                        const new_arr = @as([VecSize]T, new_vec);
-                        inline for (0..VecSize) |k| {
-                            result[j + k] = new_arr[k];
-                        }
+                        const res_vec: @Vector(VecSize, T) = result[j..][0..VecSize].*;
+                        result[j..][0..VecSize].* = res_vec + weight_vec * comp_vec;
                     }
                     // Handle remainder
                     while (j < self.dim) : (j += 1) {
@@ -328,8 +321,6 @@ pub fn Pca(comptime T: type) type {
             var cov_matrix = try data_matrix.gemm(true, data_matrix.*, false, scale, 0.0, null);
             defer cov_matrix.deinit();
 
-            const n = cov_matrix.rows;
-
             // Prepare outputs
             self.num_components = num_components;
             self.eigenvalues = try self.allocator.realloc(self.eigenvalues, num_components);
@@ -343,16 +334,12 @@ pub fn Pca(comptime T: type) type {
             defer result.deinit();
             if (result.converged != 0) return error.SvdFailed;
 
-            // Extract eigenvalues and components
+            // Extract eigenvalues and components. The covariance matrix is dim × dim and
+            // `fit` clamps num_components to at most dim, so every index is in range.
             for (0..num_components) |i| {
-                if (i < n) {
-                    self.eigenvalues[i] = result.s.at(i, 0).*;
-                    for (0..self.dim) |j| {
-                        self.components.at(j, i).* = if (j < n) result.u.at(j, i).* else 0;
-                    }
-                } else {
-                    self.eigenvalues[i] = 0;
-                    for (0..self.dim) |j| self.components.at(j, i).* = 0;
+                self.eigenvalues[i] = result.s.at(i, 0).*;
+                for (0..self.dim) |j| {
+                    self.components.at(j, i).* = result.u.at(j, i).*;
                 }
             }
         }
@@ -398,9 +385,10 @@ pub fn Pca(comptime T: type) type {
             defer result.deinit();
             if (result.converged != 0) return error.SvdFailed;
 
-            // Project eigenvectors back to feature space
-            const actual_components = @min(num_components, n);
-            for (0..actual_components) |i| {
+            // Project eigenvectors back to feature space. The Gram matrix is
+            // n_samples × n_samples and `fit` clamps num_components to at most
+            // n_samples - 1, so every requested component has a backing eigenvector.
+            for (0..num_components) |i| {
                 const eigenval = result.s.at(i, 0).*;
                 self.eigenvalues[i] = eigenval;
 
@@ -416,10 +404,6 @@ pub fn Pca(comptime T: type) type {
                 } else {
                     for (0..self.dim) |j| self.components.at(j, i).* = 0;
                 }
-            }
-            for (actual_components..num_components) |i| {
-                self.eigenvalues[i] = 0;
-                for (0..self.dim) |j| self.components.at(j, i).* = 0;
             }
         }
     };

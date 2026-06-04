@@ -39,16 +39,16 @@ pub fn registerEnum(
     defer c.Py_DecRef(values);
 
     const EI = getEnumInfo(E);
-    inline for (EI.fields) |field| {
+    inline for (EI.field_names, EI.field_values) |field_name, field_value| {
         // Uppercase name for Python convention
         var up: [129]u8 = undefined;
-        const n = field.name.len;
+        const n = field_name.len;
         if (n > up.len - 1) return error.NameTooLong;
         var i: usize = 0;
-        while (i < n) : (i += 1) up[i] = std.ascii.toUpper(field.name[i]);
+        while (i < n) : (i += 1) up[i] = std.ascii.toUpper(field_name[i]);
         up[n] = 0; // NUL terminate
 
-        const py_val = python.create(field.value) orelse return error.ValueCreationFailed;
+        const py_val = python.create(field_value) orelse return error.ValueCreationFailed;
         defer c.Py_DecRef(py_val);
         if (c.PyDict_SetItemString(values, @ptrCast(&up[0]), py_val) < 0) return error.DictSetFailed;
     }
@@ -124,10 +124,10 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     const EI = getEnumInfo(E);
     var matched = false;
     var out: E = @enumFromInt(0);
-    inline for (EI.fields) |field| {
-        if (v == field.value) {
+    inline for (EI.field_values) |field_value| {
+        if (v == field_value) {
             matched = true;
-            out = @enumFromInt(field.value);
+            out = @enumFromInt(field_value);
         }
     }
     if (!matched) {
@@ -168,9 +168,9 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     }
 
     const EI = getEnumInfo(U);
-    inline for (EI.fields) |field| {
-        if (v == field.value) {
-            return @enumFromInt(field.value);
+    inline for (EI.field_values) |field_value| {
+        if (v == field_value) {
+            return @enumFromInt(field_value);
         }
     }
     var buf: [128]u8 = undefined;
@@ -192,9 +192,9 @@ fn ResolvedEnum(comptime T: type) type {
 /// Convert a c_long integer to a Zig enum value (or union tag)
 pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
     const EI = getEnumInfo(T);
-    inline for (EI.fields) |field| {
-        if (value == field.value) {
-            return @enumFromInt(field.value);
+    inline for (EI.field_values) |field_value| {
+        if (value == field_value) {
+            return @enumFromInt(field_value);
         }
     }
     var buf: [128]u8 = undefined;

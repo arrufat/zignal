@@ -63,9 +63,9 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return switch (info) {
                 .@"struct" => |s| blk: {
                     if (s.is_tuple) {
-                        comptime assert(s.fields.len == dim);
+                        comptime assert(s.field_names.len == dim);
                         var items: @Vector(dim, T) = undefined;
-                        inline for (s.fields, 0..) |_, i| {
+                        inline for (s.field_names, 0..) |_, i| {
                             items[i] = @as(T, components[i]);
                         }
                         break :blk .{ .items = items };

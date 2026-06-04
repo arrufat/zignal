@@ -29,7 +29,7 @@ pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
 /// Generate a color binding with automatic property getters and validation
 pub fn ColorBinding(comptime ZigColorType: type) type {
     const name = comptime getSimpleTypeName(ZigColorType);
-    const fields = @typeInfo(ZigColorType).@"struct".fields;
+    const fields = zignal.meta.structFields(ZigColorType);
     const is_packed = isPacked(ZigColorType);
 
     // Create the Python object type manually (avoiding @Type complexity)
@@ -337,7 +337,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             var alpha_obj: ?*c.PyObject = null;
             if (c.PyArg_ParseTuple(args, "O", &alpha_obj) == 0) return null;
 
-            const field_type = @typeInfo(ZigColorType).@"struct".fields[0].type;
+            const field_type = @typeInfo(ZigColorType).@"struct".field_types[0];
             var alpha: field_type = undefined;
 
             if (@typeInfo(field_type) == .float) {
@@ -497,7 +497,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             const ColorType = @TypeOf(zig_color);
             const is_u8_backed = switch (@typeInfo(ColorType)) {
-                .@"struct" => |info| info.fields[0].type == u8,
+                .@"struct" => |info| info.field_types[0] == u8,
                 else => false,
             };
             const float_color = if (is_u8_backed) zig_color.as(f64) else zig_color;
