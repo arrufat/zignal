@@ -71,7 +71,7 @@ pub const Cli = struct {
             for (std.meta.declarations(root)) |decl| {
                 if (getCommandModule(decl)) |val| {
                     array[i] = .{
-                        .name = decl.name,
+                        .name = decl,
                         .run = val.run,
                         .description = val.description,
                         .help = val.help,
@@ -92,7 +92,7 @@ pub const Cli = struct {
     }
 
     fn getCommandModule(comptime decl: anytype) ?type {
-        const val = @field(root, decl.name);
+        const val = @field(root, decl);
         return if (@TypeOf(val) == type and
             @hasDecl(val, "run") and
             @hasDecl(val, "description") and

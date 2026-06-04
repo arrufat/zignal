@@ -40,7 +40,7 @@ pub fn findUniformValue(comptime T: type, data: []const T) ?T {
 
 /// Get the common type of all fields in a struct, or compile error if not uniform
 fn FieldTypeOf(comptime T: type) type {
-    const fields = std.meta.fields(T);
+    const fields = comptime meta.structFields(T);
     if (fields.len == 0) @compileError("Type " ++ @typeName(T) ++ " has no fields");
 
     const first_type = fields[0].type;
@@ -58,7 +58,7 @@ pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: st
     uniforms: [Image(T).channels()]?FieldTypeOf(T),
 } {
     const num_channels = comptime Image(T).channels();
-    const fields = std.meta.fields(T);
+    const fields = comptime meta.structFields(T);
     const FieldType = FieldTypeOf(T);
     const plane_size = image.rows * image.cols;
 
@@ -120,7 +120,7 @@ pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Alloc
 
 /// Combine channels back into struct image.
 pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
-    const fields = std.meta.fields(T);
+    const fields = comptime meta.structFields(T);
 
     var idx: u32 = 0;
     for (0..out.rows) |r| {

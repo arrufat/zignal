@@ -387,7 +387,7 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border:
         },
         .float => temp = lerpFloat(T, tl, tr, bl, br, lr_frac, tb_frac),
         .@"struct" => {
-            inline for (std.meta.fields(T)) |f| {
+            inline for (comptime meta.structFields(T)) |f| {
                 const f_tl = @field(tl, f.name);
                 const f_tr = @field(tr, f.name);
                 const f_bl = @field(bl, f.name);
@@ -486,7 +486,7 @@ fn interpolateWithKernel(
             result = clamp(T, val);
         },
         .@"struct" => {
-            const fields = std.meta.fields(T);
+            const fields = comptime meta.structFields(T);
             var sums: [fields.len]f32 = @splat(0);
             var weight_sum: f32 = 0;
 

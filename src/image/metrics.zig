@@ -27,7 +27,7 @@ pub fn psnr(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
                     component_count += 1;
                 },
                 .@"struct" => {
-                    inline for (std.meta.fields(T)) |field| {
+                    inline for (comptime meta.structFields(T)) |field| {
                         const diff = getScalarValue(field.type, @field(image_a.data[idx_a], field.name)) - getScalarValue(field.type, @field(image_b.data[idx_b], field.name));
                         mse += diff * diff;
                         component_count += 1;
@@ -132,7 +132,7 @@ pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f
                     component_count += 1;
                 },
                 .@"struct" => {
-                    inline for (std.meta.fields(T)) |field| {
+                    inline for (comptime meta.structFields(T)) |field| {
                         const diff = @abs(
                             getScalarValue(field.type, @field(image_a.data[idx_a], field.name)) -
                                 getScalarValue(field.type, @field(image_b.data[idx_b], field.name)),
@@ -168,7 +168,7 @@ pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f
 inline fn componentType(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .int, .float => T,
-        .@"struct" => std.meta.fields(T)[0].type,
+        .@"struct" => |info| info.field_types[0],
         .array => |info| info.child,
         else => T,
     };
@@ -203,7 +203,7 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
             }
             var sum: f64 = 0.0;
             var count: usize = 0;
-            inline for (std.meta.fields(PixelType)) |field| {
+            inline for (comptime meta.structFields(PixelType)) |field| {
                 sum += getScalarValue(field.type, @field(pixel, field.name));
                 count += 1;
             }

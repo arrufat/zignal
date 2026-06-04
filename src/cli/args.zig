@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
+const meta = @import("zignal").meta;
 
 pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug else .err;
 
@@ -84,7 +85,7 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
             const flag_name = arg[2..];
             var found = false;
 
-            inline for (std.meta.fields(T)) |field| {
+            inline for (comptime meta.structFields(T)) |field| {
                 const matches = blk: {
                     if (flag_name.len != field.name.len) break :blk false;
                     for (flag_name, field.name) |c_flag, c_field| {
@@ -152,7 +153,7 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
 pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime description: []const u8) []const u8 {
     var text: []const u8 = "Usage: " ++ usage_line ++ "\n\n" ++ description ++ "\n\n";
 
-    const fields = std.meta.fields(T);
+    const fields = comptime meta.structFields(T);
     if (fields.len > 0) {
         text = text ++ "Options:\n";
     }

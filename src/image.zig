@@ -294,7 +294,7 @@ pub fn Image(comptime T: type) type {
         pub fn channels() u32 {
             return comptime switch (@typeInfo(T)) {
                 .int, .float => 1,
-                .@"struct" => std.meta.fields(T).len,
+                .@"struct" => |info| info.field_names.len,
                 .array => |info| info.len,
                 else => @compileError("Image(" ++ @typeName(T) ++ ") is unsupported."),
             };
