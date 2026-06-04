@@ -73,9 +73,26 @@ pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
     return &result;
 }
 
+/// A struct field's name, type and default value, mirroring the old `std.builtin.Type.StructField`.
+pub const FieldDesc = struct { name: [:0]const u8, type: type, default_value_ptr: ?*const anyopaque };
+
+/// Replacement for the removed `std.meta.fields` (struct kind). Comptime-only;
+/// call in a comptime context, e.g. `inline for (comptime meta.structFields(T))`.
+pub fn structFields(comptime T: type) []const FieldDesc {
+    return comptime blk: {
+        const info = @typeInfo(T).@"struct";
+        var result: [info.field_names.len]FieldDesc = undefined;
+        for (info.field_names, info.field_types, info.field_attrs, 0..) |field_name, field_type, attrs, i| {
+            result[i] = .{ .name = field_name, .type = field_type, .default_value_ptr = attrs.default_value_ptr };
+        }
+        const final = result;
+        break :blk &final;
+    };
+}
+
 /// Returns true if and only if all fields of T are of type u8
 pub fn allFieldsAreU8(comptime T: type) bool {
-    return for (std.meta.fields(T)) |field| {
+    return for (comptime structFields(T)) |field| {
         if (field.type != u8) break false;
     } else true;
 }
@@ -130,7 +147,7 @@ pub fn isRgb(comptime T: type) bool {
     const type_info = @typeInfo(T);
     if (type_info != .@"struct") return false;
 
-    const fields = std.meta.fields(T);
+    const fields = comptime structFields(T);
     if (fields.len < 3 or fields.len > 4) return false;
 
     // Check first three fields are u8 and named appropriately
@@ -161,7 +178,7 @@ pub fn isRgb(comptime T: type) bool {
 /// const no_alpha = meta.hasAlphaChannel(Rgb);   // false
 /// ```
 pub fn hasAlphaChannel(comptime T: type) bool {
-    const fields = std.meta.fields(T);
+    const fields = comptime structFields(T);
     if (fields.len != 4) return false;
     const last_field = fields[3];
     return std.mem.eql(u8, last_field.name, "a") or std.mem.eql(u8, last_field.name, "alpha");

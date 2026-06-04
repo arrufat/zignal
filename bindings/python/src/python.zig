@@ -341,7 +341,7 @@ pub fn getterOptionalPtr(
 ) *const anyopaque {
     const field_index = std.meta.fieldIndex(Obj, field_name) orelse
         @compileError("Field '" ++ field_name ++ "' not found on type " ++ @typeName(Obj));
-    const FieldType = std.meta.fields(Obj)[field_index].type;
+    const FieldType = std.meta.fieldTypes(Obj)[field_index];
     const opt_info = @typeInfo(FieldType);
     if (opt_info != .optional) {
         @compileError("Field '" ++ field_name ++ "' on type " ++ @typeName(Obj) ++ " must be optional");
@@ -1021,8 +1021,8 @@ pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
 /// ```
 pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: *T) !void {
     const type_info = @typeInfo(T);
-    const fields = switch (type_info) {
-        .@"struct" => |s| s.fields,
+    const fields = comptime switch (type_info) {
+        .@"struct" => zignal.meta.structFields(T),
         else => @compileError("parseArgs expects a struct type, got: " ++ @typeName(T)),
     };
 
@@ -1287,7 +1287,7 @@ pub fn genericNew(comptime T: type) fn (?*c.PyTypeObject, ?*c.PyObject, ?*c.PyOb
             const self: ?*T = @ptrCast(c.PyType_GenericAlloc(type_obj, 0));
             if (self) |obj| {
                 // Initialize all pointer fields to null
-                inline for (@typeInfo(T).@"struct".fields) |field| {
+                inline for (comptime zignal.meta.structFields(T)) |field| {
                     if (@typeInfo(field.type) == .optional) {
                         @field(obj, field.name) = null;
                     }

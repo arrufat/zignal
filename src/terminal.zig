@@ -240,6 +240,20 @@ const State = struct {
         }
     }
 
+    /// Index of a control character in `termios.cc`. `std.posix.V` fails to
+    /// compile on Linux in Zig `0.17.0-dev.690` (std bug: `arch_bits == .alpha`),
+    /// so compute the index directly there and defer to `std.posix.V` elsewhere.
+    fn ccIndex(comptime field: enum { MIN, TIME }) usize {
+        if (builtin.os.tag == .linux) {
+            const arch = builtin.cpu.arch;
+            return switch (field) {
+                .MIN => if (arch.isMIPS()) 4 else if (arch.isPowerPC()) 5 else if (arch == .alpha) 16 else 6,
+                .TIME => if (arch.isMIPS()) 5 else if (arch.isPowerPC()) 7 else if (arch == .alpha) 17 else 5,
+            };
+        }
+        return @intFromEnum(@field(std.posix.V, @tagName(field)));
+    }
+
     /// Enter raw mode for reading terminal responses
     ///
     /// Disables canonical mode and echo to allow reading individual characters
@@ -259,8 +273,8 @@ const State = struct {
                     raw.lflag.ECHO = false;
 
                     // Set minimum characters and timeout
-                    raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-                    raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout
+                    raw.cc[ccIndex(.MIN)] = 0;
+                    raw.cc[ccIndex(.TIME)] = 1; // 0.1 second timeout
 
                     try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
                 }

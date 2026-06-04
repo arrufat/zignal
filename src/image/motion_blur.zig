@@ -171,7 +171,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                     },
                     .@"struct" => {
                         // Process struct types (RGB, RGBA, etc.)
-                        const fields = std.meta.fields(T);
+                        const fields = comptime meta.structFields(T);
                         for (0..image.rows) |r| {
                             for (0..image.cols) |c| {
                                 var result_pixel: T = undefined;
@@ -345,7 +345,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 },
                 .@"struct" => {
                     // Process struct types (RGB, RGBA, etc.)
-                    const fields = std.meta.fields(T);
+                    const fields = comptime meta.structFields(T);
                     for (0..image.rows) |r| {
                         for (0..image.cols) |c| {
                             const fx = @as(f32, @floatFromInt(c));

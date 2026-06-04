@@ -139,16 +139,16 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
 
     // Constructor
     try stub.write("    def __init__(self");
-    inline for (type_info.fields) |field| {
-        const python_type = getPythonType(field.type);
-        try stub.writef(", {s}: {s}", .{ field.name, python_type });
+    inline for (type_info.field_names, type_info.field_types) |field_name, field_type| {
+        const python_type = getPythonType(field_type);
+        try stub.writef(", {s}: {s}", .{ field_name, python_type });
     }
     try stub.write(") -> None: ...\n");
 
     // Properties (getters and setters)
-    inline for (type_info.fields) |field| {
-        try generatePropertyGetter(stub, field.name, field.type);
-        try generatePropertySetter(stub, field.name, field.type);
+    inline for (type_info.field_names, type_info.field_types) |field_name, field_type| {
+        try generatePropertyGetter(stub, field_name, field_type);
+        try generatePropertySetter(stub, field_name, field_type);
     }
 
     // to(self, space) accepting a color class
@@ -325,19 +325,19 @@ fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumI
     try stub.writef("    \"\"\"{s}\"\"\"\n", .{enum_info.doc});
 
     // Generate enum values
-    inline for (enum_type_info.fields) |field| {
+    inline for (enum_type_info.field_names, enum_type_info.field_values) |field_name, field_value| {
         // Convert field name to uppercase for Python convention
         var uppercase_name: [128]u8 = undefined;
-        const name_len = field.name.len;
+        const name_len = field_name.len;
         if (name_len > uppercase_name.len) {
             return error.NameTooLong;
         }
-        for (field.name, 0..) |c, i| {
+        for (field_name, 0..) |c, i| {
             uppercase_name[i] = std.ascii.toUpper(c);
         }
 
         // Write enum value with optional inline documentation
-        try stub.writef("    {s} = {d}\n", .{ uppercase_name[0..name_len], field.value });
+        try stub.writef("    {s} = {d}\n", .{ uppercase_name[0..name_len], field_value });
 
         // Add inline comment if documentation is provided
         if (enum_info.value_docs) |docs| {

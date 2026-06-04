@@ -110,7 +110,7 @@ pub fn Integral(comptime T: type) type {
                     plane(image, planes.planes[0]);
                 },
                 .@"struct" => {
-                    const fields = std.meta.fields(T);
+                    const fields = comptime meta.structFields(T);
                     const plane_len = try std.math.mul(usize, image.rows, image.cols);
                     const src_plane = try allocator.alloc(f32, plane_len);
                     defer allocator.free(src_plane);
@@ -169,7 +169,7 @@ pub fn Integral(comptime T: type) type {
                     var scratch = try Image(f32).init(allocator, dst.rows, dst.cols);
                     defer scratch.deinit(allocator);
 
-                    const fields = std.meta.fields(T);
+                    const fields = comptime meta.structFields(T);
                     inline for (fields, 0..) |field, ch| {
                         boxBlurPlane(f32, sat.planes[ch], scratch, radius);
 
@@ -292,7 +292,7 @@ pub fn Integral(comptime T: type) type {
                 },
                 .@"struct" => {
                     // Multi-channel sharpen
-                    const fields = std.meta.fields(T);
+                    const fields = comptime meta.structFields(T);
                     for (0..src.rows) |r| {
                         for (0..src.cols) |c| {
                             const r1 = r -| radius;

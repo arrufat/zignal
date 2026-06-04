@@ -80,7 +80,7 @@ pub fn compute(
                 .@"struct" => {
                     var is_pixel_diff = false;
                     var pixel_max_val: f64 = 0;
-                    const fields = std.meta.fields(T);
+                    const fields = comptime meta.structFields(T);
                     var diffs: [fields.len]f32 = undefined;
 
                     // 1. Calculate raw differences and check threshold

@@ -28,7 +28,7 @@ const RgbaPixelProxy = extern struct {
 };
 
 fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) type {
-    const fields = @typeInfo(ColorType).@"struct".fields;
+    const fields = zignal.meta.structFields(ColorType);
 
     return struct {
         const Self = @This();
