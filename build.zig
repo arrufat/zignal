@@ -216,48 +216,42 @@ fn resolveVersion(b: *std.Build) std.SemanticVersion {
     }
 
     if (zignal_version.pre == null and zignal_version.build == null) return zignal_version;
-    // Check if we're exactly on a tagged release
-    _ = runGit(b, &.{ "describe", "--tags", "--exact-match" }) catch {
-        // Not on a tag, need to create a dev version
-        const git_hash_raw = runGit(b, &.{ "rev-parse", "--short", "HEAD" }) catch return zignal_version;
-        const commit_hash = std.mem.trim(u8, git_hash_raw, " \n\r");
-        // Get the commit count - either from base tag or total
-        const commit_count = blk: {
-            // Try to find the most recent base version tag (ending with .0)
-            const base_tag_raw = runGit(b, &.{ "describe", "--tags", "--match=*.0", "--abbrev=0" }) catch {
-                // No .0 tags found, fall back to total commit count
-                const git_count_raw = runGit(b, &.{ "rev-list", "--count", "HEAD" }) catch return zignal_version;
-                break :blk std.mem.trim(u8, git_count_raw, " \n\r");
-            };
 
-            const base_tag = std.mem.trim(u8, base_tag_raw, " \n\r");
-            // Count commits since the base tag
-            const count_cmd = b.fmt("{s}..HEAD", .{base_tag});
-            const git_count_raw = runGit(b, &.{ "rev-list", "--count", count_cmd }) catch return zignal_version;
-            break :blk std.mem.trim(u8, git_count_raw, " \n\r");
-        };
+    // On an exact tag, return the version as-is.
+    if (runGit(b, &.{ "describe", "--tags", "--exact-match" }) != null) return zignal_version;
 
-        return .{
-            .major = zignal_version.major,
-            .minor = zignal_version.minor,
-            .patch = zignal_version.patch,
-            .pre = b.fmt("dev.{s}", .{commit_count}),
-            .build = commit_hash,
-        };
+    // Otherwise build a dev version from the short hash and a commit count.
+    const commit_hash = runGit(b, &.{ "rev-parse", "--short", "HEAD" }) orelse return zignal_version;
+    // Count commits since the most recent base version tag (ending in .0),
+    // falling back to the total commit count when no such tag exists.
+    const commit_count = if (runGit(b, &.{ "describe", "--tags", "--match=*.0", "--abbrev=0" })) |base_tag|
+        runGit(b, &.{ "rev-list", "--count", b.fmt("{s}..HEAD", .{base_tag}) }) orelse return zignal_version
+    else
+        runGit(b, &.{ "rev-list", "--count", "HEAD" }) orelse return zignal_version;
+
+    return .{
+        .major = zignal_version.major,
+        .minor = zignal_version.minor,
+        .patch = zignal_version.patch,
+        .pre = b.fmt("dev.{s}", .{commit_count}),
+        .build = commit_hash,
     };
-    // We're exactly on a tag, return the version as-is
-    return zignal_version;
 }
 
-/// Run `python -c <snippet>` and return its trimmed stdout, or null on any
-/// failure (interpreter missing, non-zero exit, empty output). Used to discover
-/// Python paths on Windows, where there is no pkg-config fallback.
-fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
-    const exe = b.graph.environ_map.get("PYTHON") orelse "python";
+/// Run a subprocess at configure time and return its trimmed stdout, or null on
+/// any failure (spawn error, non-zero exit, empty output).
+fn runCapture(b: *std.Build, argv: []const []const u8) ?[]const u8 {
     var code: u8 = undefined;
-    const out = b.runAllowFail(&.{ exe, "-c", snippet }, &code, .ignore) catch return null;
+    const out = b.runAllowFail(argv, &code, .ignore) catch return null;
     const trimmed = std.mem.trim(u8, out, " \r\n");
     return if (trimmed.len == 0) null else trimmed;
+}
+
+/// Run `python -c <snippet>` and return its trimmed stdout, or null on failure.
+/// Used to discover Python paths on Windows, where there is no pkg-config.
+fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
+    const exe = b.graph.environ_map.get("PYTHON") orelse "python";
+    return runCapture(b, &.{ exe, "-c", snippet });
 }
 
 /// Resolve a Python build value from the named env var, falling back to a
@@ -267,15 +261,15 @@ fn envOrPython(b: *Build, is_windows: bool, env_name: []const u8, snippet: []con
     return b.graph.environ_map.get(env_name) orelse if (is_windows) pythonValue(b, snippet) else null;
 }
 
-/// Helper function to run git commands and return stdout
-fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
-    var code: u8 = undefined;
+/// Run a git command in the repo root and return its trimmed stdout, or null on
+/// failure (git missing, non-zero exit — e.g. not on a tag, not a repo).
+fn runGit(b: *std.Build, args: []const []const u8) ?[]const u8 {
     const dir = b.root.root_dir.path orelse ".";
     var full_args: std.ArrayList([]const u8) = .empty;
     defer full_args.deinit(b.allocator);
-    try full_args.appendSlice(b.allocator, &.{ "git", "-C", dir });
-    try full_args.appendSlice(b.allocator, args);
-    return b.runAllowFail(full_args.items, &code, .ignore);
+    full_args.appendSlice(b.allocator, &.{ "git", "-C", dir }) catch return null;
+    full_args.appendSlice(b.allocator, args) catch return null;
+    return runCapture(b, full_args.items);
 }
 
 /// Translate Python.h via the build system, import it as `c`, and wire up
@@ -309,9 +303,6 @@ fn linkPython(
     } else if (is_windows) {
         @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
     } else {
-        // Let pkg-config discover the Python include path. This also emits
-        // link flags, but linkSystemLibrary below is the source of truth for
-        // linking and duplicates are harmless.
         tc.linkSystemLibrary(python_lib, .{});
     }
     root.addImport("c", tc.createModule());
@@ -342,9 +333,6 @@ fn linkPython(
 fn validatePath(path: []const u8, env_name: []const u8) void {
     if (!std.fs.path.isAbsolute(path)) {
         std.debug.panic("Invalid path in {s}: '{s}'. An absolute path is required.", .{ env_name, path });
-    }
-    if (std.mem.indexOf(u8, path, "..") != null) {
-        std.debug.panic("Invalid path in {s}: '{s}'. Path traversal is not allowed.", .{ env_name, path });
     }
 }
 
