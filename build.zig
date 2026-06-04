@@ -278,7 +278,8 @@ fn linkPython(
         .target = target,
         // Pin to Debug: translate-c in zig 0.17.0-dev.690 rejects the `-O<mode>`
         // flag it emits for Release modes ("unrecognized optimization mode").
-        // TODO: revert to `optimize` once a newer zig fixes this.
+        // Fixed upstream by ziglang/translate-c#375 (commit 57924d2, zig-dev.772+).
+        // TODO: revert to `optimize` once the pinned zig includes that fix.
         .optimize = .Debug,
     });
     if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
