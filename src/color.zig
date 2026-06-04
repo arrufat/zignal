@@ -58,6 +58,7 @@ const blending = @import("blending.zig");
 pub const Blending = blending.Blending;
 pub const blendColors = blending.blendColors;
 const getSimpleTypeName = @import("meta.zig").getSimpleTypeName;
+const structFields = @import("meta.zig").structFields;
 
 // Rec.709 Luma coefficients (used for Grayscale/Luma)
 const luma_r = 0.2126;
@@ -120,7 +121,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
     // Scalar -> Color
     if (SrcType == u8 or @typeInfo(SrcType) == .float) {
         const DestT = switch (@typeInfo(DestType)) {
-            .@"struct" => |info| info.fields[0].type,
+            .@"struct" => |info| info.field_types[0],
             else => @compileError("Destination type must be a color struct"),
         };
         // Interpret scalar as grayscale
@@ -136,7 +137,7 @@ pub fn convertColor(comptime DestType: type, source: anytype) DestType {
 
     // Color -> Color
     const DestT = switch (@typeInfo(DestType)) {
-        .@"struct" => |info| info.fields[0].type,
+        .@"struct" => |info| info.field_types[0],
         else => @compileError("Destination type must be a color struct"),
     };
 
@@ -167,7 +168,7 @@ fn formatColor(comptime T: type, self: T, writer: *Io.Writer) !void {
     );
 
     // Print each field
-    const fields = std.meta.fields(T);
+    const fields = comptime structFields(T);
     inline for (fields, 0..) |field, i| {
         try writer.print(".{s} = ", .{field.name});
 
@@ -1531,7 +1532,7 @@ fn xybToRgb(comptime T: type, xyb: Xyb(T)) Rgb(T) {
 fn testRoundTripConversion(from: Rgb(u8), to: anytype) !void {
     const Dest = @TypeOf(to);
     const T = switch (@typeInfo(Dest)) {
-        .@"struct" => |info| info.fields[0].type, // Assumes first field is component type, consistent with rest of file
+        .@"struct" => |info| info.field_types[0], // Assumes first field is component type, consistent with rest of file
         else => @compileError("Invalid test destination type"),
     };
     const target_space = comptime ColorSpace.tag(Dest);
@@ -1541,7 +1542,7 @@ fn testRoundTripConversion(from: Rgb(u8), to: anytype) !void {
 
     const Source = @TypeOf(from);
     const U = switch (@typeInfo(Source)) {
-        .@"struct" => |info| info.fields[0].type,
+        .@"struct" => |info| info.field_types[0],
         else => @compileError("Invalid test source type"),
     };
 

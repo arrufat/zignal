@@ -36,7 +36,7 @@ const zignalColorTypes = .{
 
 fn objectToZigColor(comptime ColorType: type, comptime Binding: type, obj: *c.PyObject) ColorType {
     const py_obj: *Binding.PyObjectType = @ptrCast(@alignCast(obj));
-    const fields = @typeInfo(ColorType).@"struct".fields;
+    const fields = comptime zignal.meta.structFields(ColorType);
 
     if (comptime zignal.meta.isPacked(ColorType)) {
         comptime {
