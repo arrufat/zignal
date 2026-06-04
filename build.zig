@@ -260,6 +260,13 @@ fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
     return if (trimmed.len == 0) null else trimmed;
 }
 
+/// Resolve a Python build value from the named env var, falling back to a
+/// `python -c <snippet>` query on Windows (where there is no pkg-config).
+/// Returns null when neither source yields a value.
+fn envOrPython(b: *Build, is_windows: bool, env_name: []const u8, snippet: []const u8) ?[]const u8 {
+    return b.graph.environ_map.get(env_name) orelse if (is_windows) pythonValue(b, snippet) else null;
+}
+
 /// Helper function to run git commands and return stdout
 fn runGit(b: *std.Build, args: []const []const u8) ![]const u8 {
     var code: u8 = undefined;
@@ -294,16 +301,13 @@ fn linkPython(
         // TODO: revert to `optimize` once the pinned zig includes that fix.
         .optimize = .Debug,
     });
-    if (b.graph.environ_map.get("PYTHON_INCLUDE_DIR")) |python_include| {
+    // On Windows the interpreter supplies the include path (no pkg-config);
+    // translate-c only needs `-I`, it never links libpython.
+    if (envOrPython(b, is_windows, "PYTHON_INCLUDE_DIR", "import sysconfig;print(sysconfig.get_path('include'),end='')")) |python_include| {
         validatePath(python_include, "PYTHON_INCLUDE_DIR");
         tc.addIncludePath(.{ .cwd_relative = python_include });
     } else if (is_windows) {
-        // Windows has no pkg-config, so ask the interpreter for the include
-        // path directly. translate-c only needs `-I`; it never links libpython.
-        const python_include = pythonValue(b, "import sysconfig;print(sysconfig.get_path('include'),end='')") orelse
-            @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
-        validatePath(python_include, "PYTHON_INCLUDE_DIR");
-        tc.addIncludePath(.{ .cwd_relative = python_include });
+        @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
     } else {
         // Let pkg-config discover the Python include path. This also emits
         // link flags, but linkSystemLibrary below is the source of truth for
@@ -316,19 +320,12 @@ fn linkPython(
 
     // On Windows the env vars below are normally set by setup.py / CI; fall back
     // to the interpreter so `zig build python-stubs` also works standalone.
-    const libs_dir = b.graph.environ_map.get("PYTHON_LIBS_DIR") orelse if (is_windows)
-        pythonValue(b, "import sysconfig;from pathlib import Path;p=Path(sysconfig.get_path('stdlib')).parent/'libs';print(p if p.exists() else '',end='')")
-    else
-        null;
-    if (libs_dir) |dir| {
+    if (envOrPython(b, is_windows, "PYTHON_LIBS_DIR", "import sysconfig;from pathlib import Path;p=Path(sysconfig.get_path('stdlib')).parent/'libs';print(p if p.exists() else '',end='')")) |dir| {
         validatePath(dir, "PYTHON_LIBS_DIR");
         root.addLibraryPath(.{ .cwd_relative = dir });
     }
 
-    const env_lib_name = b.graph.environ_map.get("PYTHON_LIB_NAME") orelse if (is_windows)
-        pythonValue(b, "import sys;print(f'python{sys.version_info.major}{sys.version_info.minor}.lib',end='')")
-    else
-        null;
+    const env_lib_name = envOrPython(b, is_windows, "PYTHON_LIB_NAME", "import sys;print(f'python{sys.version_info.major}{sys.version_info.minor}.lib',end='')");
     const lib_name = if (env_lib_name) |name| blk: {
         validateLibName(name, "PYTHON_LIB_NAME");
         // On Windows, strip the .lib extension
@@ -343,6 +340,9 @@ fn linkPython(
 }
 
 fn validatePath(path: []const u8, env_name: []const u8) void {
+    if (!std.fs.path.isAbsolute(path)) {
+        std.debug.panic("Invalid path in {s}: '{s}'. An absolute path is required.", .{ env_name, path });
+    }
     if (std.mem.indexOf(u8, path, "..") != null) {
         std.debug.panic("Invalid path in {s}: '{s}'. Path traversal is not allowed.", .{ env_name, path });
     }
