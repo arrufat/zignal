@@ -418,8 +418,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     // Get buffer interface from the array
-    var buffer: c.Py_buffer = undefined;
-    buffer = std.mem.zeroes(c.Py_buffer);
+    var buffer: c.Py_buffer = std.mem.zeroes(c.Py_buffer);
 
     // Request buffer with format and strides info
     const flags: c_int = c.PyBUF_FORMAT | c.PyBUF_ND | c.PyBUF_STRIDES;
@@ -447,7 +446,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const expected_stride_col = @sizeOf(f64);
 
     if (buffer.strides[0] != @as(c.Py_ssize_t, @intCast(expected_stride_row)) or
-        buffer.strides[1] != @as(c.Py_ssize_t, @intCast(expected_stride_col)))
+        buffer.strides[1] != expected_stride_col)
     {
         python.setValueError("Array must be C-contiguous. Use np.ascontiguousarray() to convert.", .{});
         return null;
