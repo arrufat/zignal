@@ -37,6 +37,27 @@ test "image format sgr" {
     try expectEqualStrings(expected, result);
 }
 
+test "image format sgr coalesces repeated colors" {
+    const Rgb = color.Rgb(u8);
+
+    // 2x2 solid red: both cells share the same fg/bg pair, so the escape is emitted once.
+    var image = try Image(Rgb).init(std.testing.allocator, 2, 2);
+    defer image.deinit(std.testing.allocator);
+    for (0..2) |r| {
+        for (0..2) |c| image.at(r, c).* = Rgb.red;
+    }
+
+    var buffer: [256]u8 = undefined;
+    var stream = Io.Writer.fixed(&buffer);
+
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .sgr = .default })});
+    const result = buffer[0..stream.end];
+
+    const expected = "\x1b[38;2;255;0;0;48;2;255;0;0m▀▀\x1b[0m";
+
+    try expectEqualStrings(expected, result);
+}
+
 test "image format sgr odd rows" {
     const Rgb = color.Rgb(u8);
 
@@ -93,7 +114,7 @@ test "image format braille" {
     var buffer: [256]u8 = undefined;
     var stream = Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .color = false } })});
     const result = buffer[0..stream.end];
 
     // Expected pattern: dots 2, 4, 6, 8 are on (white pixels)
@@ -126,7 +147,7 @@ test "image format braille custom threshold" {
     var buffer: [256]u8 = undefined;
     var stream = Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .threshold = 0.3 } })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .threshold = 0.3, .color = false } })});
     const result = buffer[0..stream.end];
 
     // Expected: pixels with >30% brightness are on
@@ -161,7 +182,7 @@ test "image format braille large image" {
     var buffer: [256]u8 = undefined;
     var stream = Io.Writer.fixed(&buffer);
 
-    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .color = false } })});
     const result = buffer[0..stream.end];
 
     // Expected: checkerboard pattern creates same pattern in all blocks
@@ -172,6 +193,85 @@ test "image format braille large image" {
     // B W
     // All blocks have the same pattern because checkerboard is regular
     const expected = "⢕⢕\n⢕⢕";
+
+    try expectEqualStrings(expected, result);
+}
+
+test "image format braille color" {
+    const Rgb = color.Rgb(u8);
+
+    // 4x2 image: lit (bright) pixels are colored, dark pixels stay off.
+    var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
+    defer image.deinit(std.testing.allocator);
+
+    // Same diagonal as the monochrome test, but the white dots are red instead.
+    image.at(0, 0).* = Rgb.black;
+    image.at(0, 1).* = Rgb.red;
+    image.at(1, 0).* = Rgb.red;
+    image.at(1, 1).* = Rgb.black;
+    image.at(2, 0).* = Rgb.black;
+    image.at(2, 1).* = Rgb.red;
+    image.at(3, 0).* = Rgb.red;
+    image.at(3, 1).* = Rgb.black;
+
+    var buffer: [256]u8 = undefined;
+    var stream = Io.Writer.fixed(&buffer);
+
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{ .threshold = 0.2 } })});
+    const result = buffer[0..stream.end];
+
+    // Lit dots are all pure red, so the cell is tinted red, then reset at line end.
+    // Pattern is the same ⡪ as the monochrome diagonal test.
+    const expected = "\x1b[38;2;255;0;0m⡪\x1b[0m";
+
+    try expectEqualStrings(expected, result);
+}
+
+test "image format braille palette snaps tint" {
+    const Rgb = color.Rgb(u8);
+
+    var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
+    defer image.deinit(std.testing.allocator);
+
+    // A single off-primary red dot; the VGA-16 palette should snap it to pure red.
+    for (0..4) |r| {
+        for (0..2) |c| image.at(r, c).* = Rgb.black;
+    }
+    image.at(0, 0).* = Rgb{ .r = 200, .g = 20, .b = 10 };
+
+    var buffer: [256]u8 = undefined;
+    var stream = Io.Writer.fixed(&buffer);
+
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .{
+        .threshold = 0.1,
+        .palette = .fixed_vga16,
+    } })});
+    const result = buffer[0..stream.end];
+
+    // Only dot 1 (bit 0) is lit -> 0x2801 = ⠁, tinted with the nearest VGA color (red).
+    const expected = "\x1b[38;2;255;0;0m⠁\x1b[0m";
+
+    try expectEqualStrings(expected, result);
+}
+
+test "image format braille coalesces repeated colors" {
+    const Rgb = color.Rgb(u8);
+
+    // 4x4 solid white: two full cells in the row share one color, so one escape is emitted.
+    var image = try Image(Rgb).init(std.testing.allocator, 4, 4);
+    defer image.deinit(std.testing.allocator);
+    for (0..4) |r| {
+        for (0..4) |c| image.at(r, c).* = Rgb.white;
+    }
+
+    var buffer: [256]u8 = undefined;
+    var stream = Io.Writer.fixed(&buffer);
+
+    try stream.print("{f}", .{image.display(std.testing.io, .{ .braille = .default })});
+    const result = buffer[0..stream.end];
+
+    // Both 4x2 blocks are fully lit -> 0x28FF = ⣿; color escape emitted once, reset at row end.
+    const expected = "\x1b[38;2;255;255;255m⣿⣿\x1b[0m";
 
     try expectEqualStrings(expected, result);
 }
