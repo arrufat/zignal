@@ -135,7 +135,7 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, py_module, target, "python3");
+    linkPython(b, py_module, target, optimize, "python3");
 
     const extension = switch (os_tag) {
         .windows => ".pyd",
@@ -157,11 +157,11 @@ pub fn build(b: *Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = optimize,
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, stub_generator, target, "python3-embed");
+    linkPython(b, stub_generator, target, optimize, "python3-embed");
 
     // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
@@ -280,6 +280,7 @@ fn linkPython(
     b: *Build,
     artifact: *Build.Step.Compile,
     target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
     python_lib: []const u8,
 ) void {
     const root = artifact.root_module;
@@ -289,11 +290,7 @@ fn linkPython(
     const tc = b.addTranslateC(.{
         .root_source_file = b.path("bindings/python/src/c.h"),
         .target = target,
-        // Pin to Debug: translate-c in zig 0.17.0-dev.690 rejects the `-O<mode>`
-        // flag it emits for Release modes ("unrecognized optimization mode").
-        // Fixed upstream by ziglang/translate-c#375 (commit 57924d2, zig-dev.772+).
-        // TODO: revert to `optimize` once the pinned zig includes that fix.
-        .optimize = .Debug,
+        .optimize = optimize,
     });
     // On Windows the interpreter supplies the include path (no pkg-config);
     // translate-c only needs `-I`, it never links libpython.
