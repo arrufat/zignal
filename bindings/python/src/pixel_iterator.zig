@@ -1,3 +1,4 @@
+const color = @import("color.zig");
 const ImageObject = @import("image.zig").ImageObject;
 const python = @import("python.zig");
 const c = python.c;
@@ -49,51 +50,25 @@ fn pixel_iterator_next(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     }
 
     const img_py: *ImageObject = @ptrCast(self.image_ref.?);
-    const total = if (img_py.py_image) |pimg| pimg.rows() * pimg.cols() else 0;
-    if (self.index >= total) {
+    const pimg = img_py.py_image orelse {
+        c.PyErr_SetNone(c.PyExc_StopIteration);
+        return null;
+    };
+
+    const cols = pimg.cols();
+    if (self.index >= pimg.rows() * cols) {
         c.PyErr_SetNone(c.PyExc_StopIteration);
         return null;
     }
 
     // Compute row/col and get pixel in native format
-    var row: usize = undefined;
-    var col: usize = undefined;
-    var pixel_obj: ?*c.PyObject = null;
-
-    if (img_py.py_image == null) {
-        c.PyErr_SetNone(c.PyExc_StopIteration);
-        return null;
-    }
-    const pimg = img_py.py_image.?;
-    row = self.index / pimg.cols();
-    col = self.index % pimg.cols();
-    switch (pimg.data) {
-        .gray => |img| {
-            const v = img.at(row, col).*;
-            pixel_obj = python.create(v);
-        },
-        .rgb => |img| {
-            const p = img.at(row, col).*;
-            const color_module = @import("color.zig");
-            const rgb_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgb), 0) orelse return null;
-            const rgb: *color_module.RgbBinding.PyObjectType = @ptrCast(rgb_obj);
-            rgb.field0 = p.r;
-            rgb.field1 = p.g;
-            rgb.field2 = p.b;
-            pixel_obj = rgb_obj;
-        },
-        .rgba => |img| {
-            const p = img.at(row, col).*;
-            const color_module = @import("color.zig");
-            const rgba_obj = c.PyType_GenericAlloc(@ptrCast(&color_module.rgba), 0) orelse return null;
-            const rgba: *color_module.RgbaBinding.PyObjectType = @ptrCast(rgba_obj);
-            rgba.field0 = p.r;
-            rgba.field1 = p.g;
-            rgba.field2 = p.b;
-            rgba.field3 = p.a;
-            pixel_obj = rgba_obj;
-        },
-    }
+    const row = self.index / cols;
+    const col = self.index % cols;
+    const pixel_obj: ?*c.PyObject = switch (pimg.data) {
+        .gray => |img| python.create(img.at(row, col).*),
+        .rgb => |img| color.createColorPyObject(img.at(row, col).*),
+        .rgba => |img| color.createColorPyObject(img.at(row, col).*),
+    };
 
     if (pixel_obj == null) return null;
 

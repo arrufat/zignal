@@ -199,24 +199,10 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 const rgba = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));
 
                 // Return the color as the appropriate type
-                if (ColorType == Rgb) {
-                    const obj = c.PyType_GenericNew(&color.rgb, null, null);
-                    if (obj == null) return null;
-                    const py_obj: *color.RgbBinding.PyObjectType = @ptrCast(obj);
-                    py_obj.field0 = rgba.r;
-                    py_obj.field1 = rgba.g;
-                    py_obj.field2 = rgba.b;
-                    return obj;
-                } else {
-                    const obj = c.PyType_GenericNew(&color.rgba, null, null);
-                    if (obj == null) return null;
-                    const py_obj: *color.RgbaBinding.PyObjectType = @ptrCast(obj);
-                    py_obj.field0 = rgba.r;
-                    py_obj.field1 = rgba.g;
-                    py_obj.field2 = rgba.b;
-                    py_obj.field3 = rgba.a;
-                    return obj;
-                }
+                return if (ColorType == Rgb)
+                    color.createColorPyObject(Rgb{ .r = rgba.r, .g = rgba.g, .b = rgba.b })
+                else
+                    color.createColorPyObject(rgba);
             }
 
             c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
@@ -269,24 +255,10 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                 pimg.setPixelRgba(@intCast(proxy.row), @intCast(proxy.col), blended);
 
                 // Return the new blended color as an Rgb or Rgba object
-                if (ColorType == Rgb) {
-                    const obj = c.PyType_GenericNew(&color.rgb, null, null);
-                    if (obj == null) return null;
-                    const py_obj: *color.RgbBinding.PyObjectType = @ptrCast(obj);
-                    py_obj.field0 = blended.r;
-                    py_obj.field1 = blended.g;
-                    py_obj.field2 = blended.b;
-                    return obj;
-                } else {
-                    const obj = c.PyType_GenericNew(&color.rgba, null, null);
-                    if (obj == null) return null;
-                    const py_obj: *color.RgbaBinding.PyObjectType = @ptrCast(obj);
-                    py_obj.field0 = blended.r;
-                    py_obj.field1 = blended.g;
-                    py_obj.field2 = blended.b;
-                    py_obj.field3 = blended.a;
-                    return obj;
-                }
+                return if (ColorType == Rgb)
+                    color.createColorPyObject(Rgb{ .r = blended.r, .g = blended.g, .b = blended.b })
+                else
+                    color.createColorPyObject(blended);
             }
 
             c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
