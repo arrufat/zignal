@@ -7,6 +7,7 @@ const color = @import("../color.zig");
 const Image = @import("../image.zig").Image;
 const Interpolation = @import("interpolation.zig").Interpolation;
 const kitty = @import("../kitty.zig");
+const quantize = @import("quantize.zig");
 const sixel = @import("../sixel.zig");
 const terminal = @import("../terminal.zig");
 
@@ -35,12 +36,18 @@ pub const DisplayFormat = union(enum) {
         height: ?u32 = null,
         pub const default: @This() = .{};
     },
-    /// Braille patterns for 2x4 monochrome resolution
+    /// Braille patterns for 2x4 resolution
     /// Requires Unicode Braille pattern support (U+2800-U+28FF)
-    /// Color images are binarized with threshold
+    /// Dot on/off is binarized with `threshold`; when `color` is set each cell
+    /// is tinted with the average color of its lit dots. An optional `palette`
+    /// snaps that tint to a fixed/adaptive palette (see `quantize.PaletteMode`).
     braille: struct {
         /// Brightness threshold for on/off (0.0-1.0)
-        threshold: f32 = 0.5,
+        threshold: f32 = 0.39,
+        /// Tint each cell with the average color of its lit dots
+        color: bool = true,
+        /// Snap each cell's tint to a quantized palette (null = 24-bit truecolor)
+        palette: ?quantize.PaletteMode = .{ .adaptive = .{ .max_colors = 256 } },
         /// Optional target width in pixels
         width: ?u32 = null,
         /// Optional target height in pixels
@@ -151,6 +158,9 @@ pub fn DisplayFormatter(comptime T: type) type {
                     const row_pairs = (image_to_display.rows + 1) / 2;
 
                     for (0..row_pairs) |pair_idx| {
+                        // Re-emit the fg/bg escape only when the pair changes.
+                        var last_upper: ?Rgb = null;
+                        var last_lower: ?Rgb = null;
                         for (0..image_to_display.cols) |col| {
                             const row1 = pair_idx * 2;
                             // Odd-row image: duplicate the last row so the final half-block renders as a solid cell.
@@ -159,10 +169,18 @@ pub fn DisplayFormatter(comptime T: type) type {
                             const rgb_upper = color.convertColor(Rgb, image_to_display.at(row1, col).*);
                             const rgb_lower = color.convertColor(Rgb, image_to_display.at(row2, col).*);
 
-                            try writer.print("\x1b[38;2;{d};{d};{d};48;2;{d};{d};{d}m▀", .{
-                                rgb_upper.r, rgb_upper.g, rgb_upper.b,
-                                rgb_lower.r, rgb_lower.g, rgb_lower.b,
-                            });
+                            if (last_upper == null or
+                                !std.meta.eql(rgb_upper, last_upper.?) or
+                                !std.meta.eql(rgb_lower, last_lower.?))
+                            {
+                                try writer.print("\x1b[38;2;{d};{d};{d};48;2;{d};{d};{d}m", .{
+                                    rgb_upper.r, rgb_upper.g, rgb_upper.b,
+                                    rgb_lower.r, rgb_lower.g, rgb_lower.b,
+                                });
+                                last_upper = rgb_upper;
+                                last_lower = rgb_lower;
+                            }
+                            try writer.writeAll("▀");
                         }
                         try writer.writeAll("\x1b[0m");
                         if (pair_idx < row_pairs - 1) try writer.writeByte('\n');
@@ -180,12 +198,28 @@ pub fn DisplayFormatter(comptime T: type) type {
                         .{ 2, 5 },
                         .{ 6, 7 },
                     };
+                    const Rgb = color.Rgb(u8);
                     const block_rows = (image_to_display.rows + 3) / 4;
                     const block_cols = (image_to_display.cols + 1) / 2;
 
+                    // Optional quantization: snap each cell's tint to a palette.
+                    var palette_buf: [256]quantize.Rgb = undefined;
+                    const color_lut: ?quantize.ColorLookupTable = if (config.color) blk: {
+                        const mode = config.palette orelse break :blk null;
+                        const size = quantize.buildPalette(T, allocator, image_to_display.*, mode, &palette_buf);
+                        break :blk quantize.getPaletteLut(mode, palette_buf[0..size]);
+                    } else null;
+
                     for (0..block_rows) |block_row| {
+                        // Re-emit the fg escape only when the cell color changes.
+                        var last_color: ?Rgb = null;
                         for (0..block_cols) |block_col| {
                             var pattern: u8 = 0;
+                            // Accumulate lit-dot colors for the cell tint.
+                            var sum_r: u32 = 0;
+                            var sum_g: u32 = 0;
+                            var sum_b: u32 = 0;
+                            var lit: u32 = 0;
 
                             for (0..4) |dy| {
                                 for (0..2) |dx| {
@@ -193,11 +227,32 @@ pub fn DisplayFormatter(comptime T: type) type {
                                     const x = block_col * 2 + dx;
 
                                     if (y < image_to_display.rows and x < image_to_display.cols) {
-                                        const brightness = color.convertColor(f32, image_to_display.at(y, x).*);
+                                        const pixel = image_to_display.at(y, x).*;
+                                        const brightness = color.convertColor(f32, pixel);
                                         if (brightness > config.threshold) {
                                             pattern |= @as(u8, 1) << braille_bits[dy][dx];
+                                            if (config.color) {
+                                                const rgb = color.convertColor(Rgb, pixel);
+                                                sum_r += rgb.r;
+                                                sum_g += rgb.g;
+                                                sum_b += rgb.b;
+                                                lit += 1;
+                                            }
                                         }
                                     }
+                                }
+                            }
+
+                            if (config.color and lit > 0) {
+                                var rgb: Rgb = .{
+                                    .r = @intCast(sum_r / lit),
+                                    .g = @intCast(sum_g / lit),
+                                    .b = @intCast(sum_b / lit),
+                                };
+                                if (color_lut) |lut| rgb = palette_buf[lut.lookup(rgb)];
+                                if (last_color == null or !std.meta.eql(rgb, last_color.?)) {
+                                    try writer.print("\x1b[38;2;{d};{d};{d}m", .{ rgb.r, rgb.g, rgb.b });
+                                    last_color = rgb;
                                 }
                             }
 
@@ -208,6 +263,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                                 0x80 | (pattern & 0x3F),
                             });
                         }
+                        if (config.color) try writer.writeAll("\x1b[0m");
                         if (block_row < block_rows - 1) try writer.writeByte('\n');
                     }
                 },

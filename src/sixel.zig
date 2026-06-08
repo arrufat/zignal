@@ -18,34 +18,8 @@ const rle = @import("rle.zig");
 const terminal = @import("terminal.zig");
 
 const Rgb = quantize.Rgb;
-const ColorLookupTable = quantize.ColorLookupTable;
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
 const max_supported_width: usize = 2048;
-
-/// Available palette modes for sixel encoding
-pub const PaletteMode = union(enum) {
-    /// Fixed 252-color palette with 6x7x6 RGB distribution
-    fixed_6x7x6,
-    /// Fixed 16-color VGA palette
-    fixed_vga16,
-    /// Fixed 216-color web-safe palette (6x6x6 RGB cube)
-    fixed_web216,
-    /// Adaptive palette using median cut algorithm
-    adaptive: struct {
-        /// Maximum colors for adaptive palette (1-256)
-        max_colors: u16 = 256,
-    },
-
-    /// Get the palette size for this mode
-    pub fn size(self: PaletteMode) usize {
-        return switch (self) {
-            .fixed_6x7x6 => 252, // 6*7*6 = 252 colors
-            .fixed_vga16 => 16, // Standard VGA palette
-            .fixed_web216 => 216, // 6*6*6 = 216 web-safe colors
-            .adaptive => |opts| @min(opts.max_colors, 256),
-        };
-    }
-};
 
 /// Dithering modes for color quantization (alias for the shared `dither.Mode`).
 pub const DitherMode = dither.Mode;
@@ -53,7 +27,7 @@ pub const DitherMode = dither.Mode;
 /// Options for sixel encoding
 pub const Options = struct {
     /// Palette generation mode
-    palette: PaletteMode = .{ .adaptive = .{ .max_colors = 256 } },
+    palette: quantize.PaletteMode = .{ .adaptive = .{ .max_colors = 256 } },
     /// Dithering algorithm to use
     dither: DitherMode = .auto,
     /// Target width (null = original width preserved, scaling fits aspect ratio)
@@ -162,28 +136,11 @@ pub fn fromImageProfiled(
     }
 
     var palette: [256]Rgb = undefined;
-    var palette_size: usize = options.palette.size();
 
     var palette_start: u64 = 0;
     if (profiler != null) palette_start = monotonicNs();
 
-    switch (options.palette) {
-        .fixed_6x7x6 => {
-            quantize.fixed6x7x6Palette(&palette);
-        },
-        .fixed_vga16 => {
-            @memcpy(palette[0..16], &quantize.vga16_palette);
-        },
-        .fixed_web216 => {
-            quantize.web216Palette(&palette);
-        },
-        .adaptive => |adaptive_opts| {
-            palette_size = quantize.medianCut(T, gpa, image, &palette, adaptive_opts.max_colors) catch blk: {
-                quantize.fixed6x7x6Palette(&palette);
-                break :blk 252;
-            };
-        },
-    }
+    const palette_size = quantize.buildPalette(T, gpa, image, options.palette, &palette);
 
     if (profiler) |p| {
         p.palette_ns += monotonicNs() - palette_start;
@@ -191,7 +148,7 @@ pub fn fromImageProfiled(
 
     var lut_start: u64 = 0;
     if (profiler != null) lut_start = monotonicNs();
-    const color_lut = PaletteLutCache.get(options.palette, palette[0..palette_size]);
+    const color_lut = quantize.getPaletteLut(options.palette, palette[0..palette_size]);
     if (profiler) |p| {
         p.lut_ns += monotonicNs() - lut_start;
     }
@@ -466,40 +423,6 @@ pub fn fromImageProfiled(
 
     return output.toOwnedSlice(gpa);
 }
-
-/// Cache of `ColorLookupTable`s for sixel's fixed palettes — avoids rebuilding the
-/// 32x32x32 LUT for every sixel render. Adaptive palettes get a fresh LUT.
-const PaletteLutCache = struct {
-    var lock_val = std.atomic.Value(u32).init(0);
-    var fixed_6x7x6: ?ColorLookupTable = null;
-    var fixed_vga16: ?ColorLookupTable = null;
-    var fixed_web216: ?ColorLookupTable = null;
-
-    fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
-        if (!builtin.single_threaded) {
-            while (lock_val.swap(1, .acquire) != 0) {
-                std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
-            }
-        }
-        defer if (!builtin.single_threaded) lock_val.store(0, .release);
-
-        if (cache_field.*) |cached| {
-            return cached;
-        }
-        const lut: ColorLookupTable = .init(palette);
-        cache_field.* = lut;
-        return lut;
-    }
-
-    fn get(mode: PaletteMode, palette: []const Rgb) ColorLookupTable {
-        return switch (mode) {
-            .fixed_6x7x6 => getOrInit(&PaletteLutCache.fixed_6x7x6, palette),
-            .fixed_vga16 => getOrInit(&PaletteLutCache.fixed_vga16, palette),
-            .fixed_web216 => getOrInit(&PaletteLutCache.fixed_web216, palette),
-            .adaptive => .init(palette),
-        };
-    }
-};
 
 /// Checks if the terminal supports sixel graphics
 pub fn isSupported(io: std.Io) bool {
