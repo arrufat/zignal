@@ -444,7 +444,7 @@ pub fn Image(comptime T: type) type {
         ///
         /// Display modes:
         /// - `.sgr`: Uses SGR (Select Graphic Rendition) with Unicode half-block characters (requires monospace font with U+2580 support)
-        /// - `.braille`: Uses Braille patterns for 2x4 monochrome resolution (requires Unicode Braille support U+2800-U+28FF, converts to grayscale)
+        /// - `.braille`: Uses Braille patterns for 2x4 resolution (requires Unicode Braille support U+2800-U+28FF; dots binarized by `threshold`, optionally tinted with truecolor or a quantized palette)
         /// - `.sixel`: Uses the sixel graphics protocol if supported
         /// - `.kitty`: Uses the kitty graphics protocol if supported
         /// - `.auto`: Automatically selects best available format: kitty -> sixel -> sgr
@@ -453,7 +453,7 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// const img = try Image(Rgb).load(io, allocator, "test.png");
         /// std.debug.print("{f}", .{img.display(io, .sgr)});           // SGR with unicode half blocks
-        /// std.debug.print("{f}", .{img.display(io, .{ .braille = .{ .threshold = 0.5 } })}); // 2x4 monochrome
+        /// std.debug.print("{f}", .{img.display(io, .{ .braille = .{ .threshold = 0.5 } })}); // 2x4 braille, truecolor tint
         /// std.debug.print("{f}", .{img.display(io, .{ .sixel = .{ .palette_mode = .adaptive } })});
         /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});  // Kitty graphics protocol
         /// ```

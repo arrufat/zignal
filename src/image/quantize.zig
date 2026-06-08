@@ -7,6 +7,7 @@
 //! - Fixed palette generators: 6x7x6 (252 colors), web-safe 216, VGA-16.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const convertColor = @import("../color.zig").convertColor;
@@ -470,3 +471,93 @@ pub const vga16_palette = [16]Rgb{
     Rgb{ .r = 0, .g = 255, .b = 255 }, // Cyan
     Rgb{ .r = 255, .g = 255, .b = 255 }, // White
 };
+
+/// Palette generation strategy shared by sixel, braille, and other renderers.
+pub const PaletteMode = union(enum) {
+    /// Fixed 252-color palette with 6x7x6 RGB distribution
+    fixed_6x7x6,
+    /// Fixed 16-color VGA palette
+    fixed_vga16,
+    /// Fixed 216-color web-safe palette (6x6x6 RGB cube)
+    fixed_web216,
+    /// Adaptive palette using median cut algorithm
+    adaptive: struct {
+        /// Maximum colors for adaptive palette (1-256)
+        max_colors: u16 = 256,
+    },
+
+    /// Get the palette size for this mode
+    pub fn size(self: PaletteMode) usize {
+        return switch (self) {
+            .fixed_6x7x6 => 252, // 6*7*6 = 252 colors
+            .fixed_vga16 => 16, // Standard VGA palette
+            .fixed_web216 => 216, // 6*6*6 = 216 web-safe colors
+            .adaptive => |opts| @min(opts.max_colors, 256),
+        };
+    }
+};
+
+/// Fills `palette` according to `mode` and returns the number of colors written.
+/// Adaptive generation falls back to the fixed 6x7x6 palette if allocation fails.
+pub fn buildPalette(
+    comptime T: type,
+    gpa: Allocator,
+    image: Image(T),
+    mode: PaletteMode,
+    palette: *[256]Rgb,
+) usize {
+    return switch (mode) {
+        .fixed_6x7x6 => blk: {
+            fixed6x7x6Palette(palette);
+            break :blk 252;
+        },
+        .fixed_vga16 => blk: {
+            @memcpy(palette[0..16], &vga16_palette);
+            break :blk 16;
+        },
+        .fixed_web216 => blk: {
+            web216Palette(palette);
+            break :blk 216;
+        },
+        .adaptive => |opts| medianCut(T, gpa, image, palette, opts.max_colors) catch blk: {
+            fixed6x7x6Palette(palette);
+            break :blk 252;
+        },
+    };
+}
+
+/// Cache of `ColorLookupTable`s for the fixed palettes — avoids rebuilding the
+/// 32x32x32 LUT on every render. Adaptive palettes get a fresh LUT each call.
+const PaletteLutCache = struct {
+    var lock_val = std.atomic.Value(u32).init(0);
+    var fixed_6x7x6: ?ColorLookupTable = null;
+    var fixed_vga16: ?ColorLookupTable = null;
+    var fixed_web216: ?ColorLookupTable = null;
+
+    fn getOrInit(cache_field: *?ColorLookupTable, palette: []const Rgb) ColorLookupTable {
+        if (!builtin.single_threaded) {
+            while (lock_val.swap(1, .acquire) != 0) {
+                std.Thread.yield() catch |err| std.debug.panic("Thread.yield failed: {s}", .{@errorName(err)});
+            }
+        }
+        defer if (!builtin.single_threaded) lock_val.store(0, .release);
+
+        if (cache_field.*) |cached| {
+            return cached;
+        }
+        const lut: ColorLookupTable = .init(palette);
+        cache_field.* = lut;
+        return lut;
+    }
+};
+
+/// Returns a nearest-color lookup table for `palette`, caching the result for
+/// fixed palettes and building a fresh one for adaptive palettes.
+pub fn getPaletteLut(mode: PaletteMode, palette: []const Rgb) ColorLookupTable {
+    return switch (mode) {
+        .fixed_6x7x6 => PaletteLutCache.getOrInit(&PaletteLutCache.fixed_6x7x6, palette),
+        .fixed_vga16 => PaletteLutCache.getOrInit(&PaletteLutCache.fixed_vga16, palette),
+        .fixed_web216 => PaletteLutCache.getOrInit(&PaletteLutCache.fixed_web216, palette),
+        .adaptive => .init(palette),
+    };
+}
