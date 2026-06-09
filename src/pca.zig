@@ -197,20 +197,20 @@ pub fn Pca(
 
             // SIMD-accelerated version for f32/f64 when dim is large enough
             if (comptime T == f32 or T == f64) {
-                const VecSize = std.simd.suggestVectorLength(T) orelse 1;
+                const vec_len = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     var sum: T = 0;
                     var j: u32 = 0;
                     // Vectorized loop
-                    while (j + VecSize <= self.dim) : (j += VecSize) {
-                        const vec_chunk: @Vector(VecSize, T) = vector[j..][0..VecSize].*;
-                        const mean_chunk: @Vector(VecSize, T) = self.mean[j..][0..VecSize].*;
+                    while (j + vec_len <= self.dim) : (j += vec_len) {
+                        const vec_chunk: @Vector(vec_len, T) = vector[j..][0..vec_len].*;
+                        const mean_chunk: @Vector(vec_len, T) = self.mean[j..][0..vec_len].*;
                         // components are column-strided in row-major storage, so gather them
-                        var comp_arr: [VecSize]T = undefined;
-                        inline for (0..VecSize) |k| {
+                        var comp_arr: [vec_len]T = undefined;
+                        inline for (0..vec_len) |k| {
                             comp_arr[k] = self.components.at(j + k, i).*;
                         }
-                        const comp_vec: @Vector(VecSize, T) = comp_arr;
+                        const comp_vec: @Vector(vec_len, T) = comp_arr;
                         sum += @reduce(.Add, (vec_chunk - mean_chunk) * comp_vec);
                     }
                     // Handle remainder
@@ -252,21 +252,21 @@ pub fn Pca(
 
             // Add weighted components (SIMD-accelerated for f32/f64)
             if (comptime T == f32 or T == f64) {
-                const VecSize = std.simd.suggestVectorLength(T) orelse 1;
+                const vec_len = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     const weight = coefficients[i];
-                    const weight_vec: @Vector(VecSize, T) = @splat(weight);
+                    const weight_vec: @Vector(vec_len, T) = @splat(weight);
                     var j: u32 = 0;
                     // Vectorized loop
-                    while (j + VecSize <= self.dim) : (j += VecSize) {
+                    while (j + vec_len <= self.dim) : (j += vec_len) {
                         // components are column-strided in row-major storage, so gather them
-                        var comp_arr: [VecSize]T = undefined;
-                        inline for (0..VecSize) |k| {
+                        var comp_arr: [vec_len]T = undefined;
+                        inline for (0..vec_len) |k| {
                             comp_arr[k] = self.components.at(j + k, i).*;
                         }
-                        const comp_vec: @Vector(VecSize, T) = comp_arr;
-                        const res_vec: @Vector(VecSize, T) = result[j..][0..VecSize].*;
-                        result[j..][0..VecSize].* = res_vec + weight_vec * comp_vec;
+                        const comp_vec: @Vector(vec_len, T) = comp_arr;
+                        const res_vec: @Vector(vec_len, T) = result[j..][0..vec_len].*;
+                        result[j..][0..vec_len].* = res_vec + weight_vec * comp_vec;
                     }
                     // Handle remainder
                     while (j < self.dim) : (j += 1) {
@@ -559,7 +559,7 @@ test "PCA Gram path normalization and direction" {
 test "PCA SIMD path on larger dimensions" {
     const allocator = std.testing.allocator;
 
-    // 10D data with 5 samples to trigger SIMD (if VecSize <=10)
+    // 10D data with 5 samples to trigger SIMD (if vec_len <=10)
     var data: Matrix(f64) = try .init(allocator, 5, 10);
     defer data.deinit();
     for (0..5) |i| {
