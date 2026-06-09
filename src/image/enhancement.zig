@@ -8,10 +8,11 @@ pub fn Enhancement(comptime T: type) type {
     return struct {
         /// Automatically adjusts the contrast by stretching the intensity range.
         /// Modifies the image in-place.
-        ///
-        /// Parameters:
-        /// - `cutoff`: Fraction of pixels to ignore from each end (0.0 to 0.5)
-        pub fn autocontrast(image: Image(T), cutoff: f32) !void {
+        pub fn autocontrast(
+            image: Image(T),
+            /// Fraction of pixels to ignore from each end (0.0 to 0.5).
+            cutoff: f32,
+        ) !void {
             if (cutoff < 0 or cutoff >= 0.5) {
                 return error.InvalidCutoff; // Can't ignore 50% or more from each end
             }
