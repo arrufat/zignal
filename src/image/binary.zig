@@ -12,11 +12,14 @@ pub const Kernel = struct {
     data: []const u8,
 
     /// Initialize a kernel with the given dimensions and data.
-    /// Requirements:
-    /// - rows and cols must be positive and odd (for symmetric anchor point)
-    /// - data.len must equal rows * cols
-    /// - data values: 0 = off, any non-zero = on
-    pub fn init(rows: usize, cols: usize, data: []const u8) !Kernel {
+    pub fn init(
+        /// Must be positive and odd (for a symmetric anchor point).
+        rows: usize,
+        /// Must be positive and odd (for a symmetric anchor point).
+        cols: usize,
+        /// Kernel weights; length must equal rows * cols (0 = off, any non-zero = on).
+        data: []const u8,
+    ) !Kernel {
         if (rows == 0 or cols == 0) return error.InvalidKernelSize;
         if (rows % 2 == 0 or cols % 2 == 0) return error.InvalidKernelSize;
         if (data.len != rows * cols) return error.InvalidKernelSize;

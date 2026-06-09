@@ -641,12 +641,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// General Matrix Multiply (GEMM): C = α * op(A) * op(B) + β * C
         ///
-        /// This is the fundamental matrix operation that unifies many matrix computations:
-        /// - op(A) = A if trans_a is false, A^T if trans_a is true
-        /// - op(B) = B if trans_b is false, B^T if trans_b is true
-        /// - α (alpha) scales the product op(A) * op(B)
-        /// - β (beta) scales the existing matrix C before adding the product
-        /// - If c is null, it defaults to zero matrix
+        /// This is the fundamental matrix operation that unifies many matrix computations.
         ///
         /// Examples:
         /// - Matrix multiplication: gemm(false, B, false, 1.0, 0.0, null)
@@ -656,11 +651,16 @@ pub fn Matrix(comptime T: type) type {
         /// - Accumulation: gemm(false, B, false, 1.0, 1.0, C) -> A * B + C
         pub fn gemm(
             self: Self,
+            /// If true, use A^T (transpose of self) instead of A.
             trans_a: bool,
             other: Self,
+            /// If true, use B^T (transpose of other) instead of B.
             trans_b: bool,
+            /// Scales the product op(A) * op(B).
             alpha: T,
+            /// Scales the existing matrix C before adding the product.
             beta: T,
+            /// Existing matrix to accumulate into; if null, defaults to the zero matrix.
             c: ?Self,
         ) MatrixError!Self {
             // Determine dimensions after potential transposition
