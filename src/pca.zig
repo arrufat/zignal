@@ -47,16 +47,15 @@ const Rgb = @import("color.zig").Rgb(u8);
 
 /// Principal Component Analysis
 ///
-/// Type parameters
-/// - `T`: floating-point scalar type used for all computations and storage.
-///   Typically `f32` (faster, less memory) or `f64` (higher precision).
-///   Constraints: `T` must be a floating-point type.
-///
 /// Notes
 /// - The components matrix has shape `dim × k` (columns are principal axes).
 /// - Eigenvalues (length `k`) are variances along each component (descending).
 /// - Choose `T = f32` for speed and `T = f64` for numerical robustness.
-pub fn Pca(comptime T: type) type {
+pub fn Pca(
+    /// Floating-point scalar type used for all computations and storage.
+    /// Typically `f32` (faster, less memory) or `f64` (higher precision).
+    comptime T: type,
+) type {
     assert(@typeInfo(T) == .float);
 
     return struct {
@@ -97,14 +96,18 @@ pub fn Pca(comptime T: type) type {
         }
 
         /// Fit the PCA model on centered data derived from data matrix.
-        /// - data_matrix: training samples matrix (n_samples × dim)
-        /// - num_components: number of components to retain; when null keeps `min(n-1, dim)`
         ///
         /// Notes:
         /// - Uses covariance path when `n > dim`, Gram path otherwise.
         /// - Replaces previous `components`/`eigenvalues` if already fitted.
         /// - Returns `error.InsufficientData` for `n < 2` and `error.InvalidComponents` for `0`.
-        pub fn fit(self: *Self, data_matrix: Matrix(T), num_components: ?u32) !void {
+        pub fn fit(
+            self: *Self,
+            /// Training samples matrix (n_samples × dim).
+            data_matrix: Matrix(T),
+            /// Number of components to retain; when null keeps `min(n-1, dim)`.
+            num_components: ?u32,
+        ) !void {
             const n_samples = data_matrix.rows;
             const data_dim = data_matrix.cols;
 
@@ -161,10 +164,13 @@ pub fn Pca(comptime T: type) type {
         }
 
         /// Project a single vector onto PCA space, returning a freshly allocated coefficient slice.
-        /// - Input: `vector` slice of length `dim`
-        /// - Output: `[]T` of length `num_components` (caller frees)
-        /// - For hot paths, prefer `projectInto` to reuse a buffer.
-        pub fn project(self: Self, vector: []const T) ![]T {
+        /// Returns a `[]T` of length `num_components` (caller frees).
+        /// For hot paths, prefer `projectInto` to reuse a buffer.
+        pub fn project(
+            self: Self,
+            /// Slice of length `dim`.
+            vector: []const T,
+        ) ![]T {
             if (self.num_components == 0) return error.NotFitted;
             if (vector.len != self.dim) return error.DimensionMismatch;
 
@@ -177,9 +183,14 @@ pub fn Pca(comptime T: type) type {
         }
 
         /// Project a single vector into a caller-provided buffer (avoids allocation).
-        /// - `dst.len` must equal `num_components`.
-        /// - Writes `components^T * (vector - mean)` into `dst`.
-        pub fn projectInto(self: Self, dst: []T, vector: []const T) !void {
+        /// Writes `components^T * (vector - mean)` into `dst`.
+        pub fn projectInto(
+            self: Self,
+            /// Destination buffer; length must equal `num_components`.
+            dst: []T,
+            /// Slice of length `dim`.
+            vector: []const T,
+        ) !void {
             if (self.num_components == 0) return error.NotFitted;
             if (dst.len != self.num_components) return error.InvalidCoefficients;
             if (vector.len != self.dim) return error.DimensionMismatch;
@@ -223,9 +234,12 @@ pub fn Pca(comptime T: type) type {
         }
 
         /// Reconstruct a vector from PCA coefficients: `mean + components * coefficients`.
-        /// - `coefficients.len` must equal `num_components`.
-        /// - Returns allocated slice of length `dim` (caller must free)
-        pub fn reconstruct(self: Self, coefficients: []const T) ![]T {
+        /// Returns an allocated slice of length `dim` (caller must free).
+        pub fn reconstruct(
+            self: Self,
+            /// Coefficients; length must equal `num_components`.
+            coefficients: []const T,
+        ) ![]T {
             if (self.num_components == 0) return error.NotFitted;
             if (coefficients.len != self.num_components) return error.InvalidCoefficients;
 
@@ -273,9 +287,12 @@ pub fn Pca(comptime T: type) type {
         }
 
         /// Batch-transform: project a data matrix onto PCA space.
-        /// - data_matrix: samples matrix (n_samples × dim)
-        /// - Returns: transformed matrix (n_samples × num_components)
-        pub fn transform(self: Self, data_matrix: Matrix(T)) !Matrix(T) {
+        /// Returns the transformed matrix (n_samples × num_components).
+        pub fn transform(
+            self: Self,
+            /// Samples matrix (n_samples × dim).
+            data_matrix: Matrix(T),
+        ) !Matrix(T) {
             if (self.num_components == 0) return error.NotFitted;
             if (data_matrix.cols != self.dim) return error.DimensionMismatch;
             if (data_matrix.rows == 0) return error.NoVectors;

@@ -812,11 +812,6 @@ pub fn Image(comptime T: type) type {
         ///
         /// For color images (RGB/RGBA), each channel is equalized independently.
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for the new image
-        ///
-        /// Returns: A new image with equalized histogram
-        ///
         /// Example usage:
         /// ```zig
         /// var img = try Image(u8).load(io, allocator, "low_contrast.png");
@@ -903,13 +898,16 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Applies a 2D convolution with the given kernel to the image.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `kernel`: A 2D array representing the convolution kernel.
-        /// - `border`: How to handle pixels at the image borders.
-        /// - `out`: The output image (must be pre-allocated with same dimensions).
-        pub fn convolve(self: Self, out: Self, allocator: Allocator, kernel: anytype, border: BorderMode) !void {
+        pub fn convolve(
+            self: Self,
+            /// The output image (must be pre-allocated with same dimensions).
+            out: Self,
+            allocator: Allocator,
+            /// A 2D array representing the convolution kernel.
+            kernel: anytype,
+            /// How to handle pixels at the image borders.
+            border: BorderMode,
+        ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -918,14 +916,18 @@ pub fn Image(comptime T: type) type {
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
         /// This is much more efficient for separable filters like Gaussian blur.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `kernel_x`: Horizontal (column) kernel.
-        /// - `kernel_y`: Vertical (row) kernel.
-        /// - `border`: How to handle image borders.
-        /// - `out`: The output image (must be pre-allocated with same dimensions).
-        pub fn convolveSeparable(self: Self, out: Self, allocator: Allocator, kernel_x: []const f32, kernel_y: []const f32, border: BorderMode) !void {
+        pub fn convolveSeparable(
+            self: Self,
+            /// The output image (must be pre-allocated with same dimensions).
+            out: Self,
+            allocator: Allocator,
+            /// Horizontal (column) kernel.
+            kernel_x: []const f32,
+            /// Vertical (row) kernel.
+            kernel_y: []const f32,
+            /// How to handle image borders.
+            border: BorderMode,
+        ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -933,12 +935,14 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `sigma`: Standard deviation of the Gaussian kernel.
-        /// - `out`: The output blurred image (must be pre-allocated with same dimensions).
-        pub fn gaussianBlur(self: Self, out: Self, allocator: Allocator, sigma: f32) !void {
+        pub fn gaussianBlur(
+            self: Self,
+            /// The output blurred image (must be pre-allocated with same dimensions).
+            out: Self,
+            allocator: Allocator,
+            /// Standard deviation of the Gaussian kernel.
+            sigma: f32,
+        ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -976,11 +980,12 @@ pub fn Image(comptime T: type) type {
         /// Applies the Sobel filter to `self` to perform edge detection.
         /// The output is a grayscale image representing the magnitude of gradients at each pixel.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `out`: Output image that will be filled with the Sobel magnitude image.
-        pub fn sobel(self: Self, out: Image(u8), allocator: Allocator) !void {
+        pub fn sobel(
+            self: Self,
+            /// Output image that will be filled with the Sobel magnitude image.
+            out: Image(u8),
+            allocator: Allocator,
+        ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
@@ -991,15 +996,12 @@ pub fn Image(comptime T: type) type {
         /// Exponential Filter (ISEF). This algorithm provides superior edge localization
         /// and noise handling compared to traditional methods.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `opts`: Shen-Castan options (smoothing, thresholds, thinning, hysteresis).
-        /// - `out`: Output edge map as binary image (0 or 255).
         pub fn shenCastan(
             self: Self,
+            /// Output edge map as binary image (0 or 255).
             out: Image(u8),
             allocator: Allocator,
+            /// Shen-Castan options (smoothing, thresholds, thinning, hysteresis).
             opts: ShenCastan,
         ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
@@ -1018,13 +1020,6 @@ pub fn Image(comptime T: type) type {
         /// 4. Double thresholding to classify strong and weak edges
         /// 5. Edge tracking by hysteresis to link edges
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `sigma`: Standard deviation for Gaussian blur (typical: 1.0-2.0).
-        /// - `low_threshold`: Lower threshold for hysteresis (0-255).
-        /// - `high_threshold`: Upper threshold for hysteresis (0-255).
-        /// - `out`: Output edge map as binary image (0 or 255).
-        ///
         /// Note: `high_threshold` should be 2-3x larger than `low_threshold` for best results.
         ///
         /// Example:
@@ -1035,10 +1030,14 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn canny(
             self: Self,
+            /// Output edge map as binary image (0 or 255).
             out: Image(u8),
             allocator: Allocator,
+            /// Standard deviation for Gaussian blur (typical: 1.0-2.0).
             sigma: f32,
+            /// Lower threshold for hysteresis (0-255).
             low_threshold: f32,
+            /// Upper threshold for hysteresis (0-255).
             high_threshold: f32,
         ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
@@ -1051,11 +1050,6 @@ pub fn Image(comptime T: type) type {
         /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
         /// The output image must be pre-allocated with the same dimensions as the input.
         ///
-        /// Parameters:
-        /// - `allocator`: The allocator to use for temporary buffers.
-        /// - `motion`: Type and parameters of motion blur to apply.
-        /// - `out`: Output image containing the motion blurred result.
-        ///
         /// Example usage:
         /// ```zig
         /// var out = try Image(Rgb).initLike(allocator, image);
@@ -1064,7 +1058,14 @@ pub fn Image(comptime T: type) type {
         /// // Linear motion blur
         /// try image.motionBlur(out, allocator, .{ .linear = .{ .angle = 0, .distance = 30 }});
         /// ```
-        pub fn motionBlur(self: Self, out: Self, allocator: Allocator, motion: MotionBlur) !void {
+        pub fn motionBlur(
+            self: Self,
+            /// Output image containing the motion blurred result.
+            out: Self,
+            allocator: Allocator,
+            /// Type and parameters of motion blur to apply.
+            motion: MotionBlur,
+        ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }

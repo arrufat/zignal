@@ -566,15 +566,15 @@ pub fn Gray(comptime T: type) type {
 }
 
 /// A color in the [HSV](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace.
-/// - h: Hue, in degrees (0-360, though often normalized to 0-359).
-/// - s: Saturation, as a percentage (0-100).
-/// - v: Value, as a percentage (0-100).
 pub fn Hsv(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .hsv;
+        /// Hue, in degrees (0-360, though often normalized to 0-359).
         h: T,
+        /// Saturation, as a percentage (0-100).
         s: T,
+        /// Value, as a percentage (0-100).
         v: T,
 
         /// Formats the color for terminal output.
@@ -604,15 +604,15 @@ pub fn Hsv(comptime T: type) type {
 }
 
 /// A color in the [HSL](https://en.wikipedia.org/wiki/HSL_and_HSV) colorspace.
-/// - h: Hue, in degrees (0-360, though often normalized to 0-359).
-/// - s: Saturation, as a percentage (0-100).
-/// - l: Lightness, as a percentage (0-100).
 pub fn Hsl(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .hsl;
+        /// Hue, in degrees (0-360, though often normalized to 0-359).
         h: T,
+        /// Saturation, as a percentage (0-100).
         s: T,
+        /// Lightness, as a percentage (0-100).
         l: T,
 
         /// Formats the color for terminal output.
@@ -644,15 +644,18 @@ pub fn Hsl(comptime T: type) type {
 /// A color in the [CIE 1931 XYZ color space](https://en.wikipedia.org/wiki/CIE_1931_color_space).
 /// This is a device-independent space that covers the full gamut of human-perceptible colors
 /// visible to the CIE 2° standard observer.
-/// - x, y, z: Tristimulus values, typically non-negative. Y represents luminance.
-///   The typical range for these values can vary depending on the reference white point (e.g. D65).
-///   Often, Y is normalized to 100 for white.
+///
+/// Tristimulus values are typically non-negative; their range varies with the
+/// reference white point (e.g. D65), with Y often normalized to 100 for white.
 pub fn Xyz(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .xyz;
+        /// X tristimulus value.
         x: T,
+        /// Y tristimulus value, representing luminance.
         y: T,
+        /// Z tristimulus value.
         z: T,
 
         /// Formats the color for terminal output.
@@ -687,16 +690,16 @@ pub fn Xyz(comptime T: type) type {
 }
 
 /// A color in the [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space) (also known as L*a*b*).
-/// It expresses color as three values:
-/// - l: Lightness (0 for black to 100 for white).
-/// - a: Green-red axis (-128 for green to +127 for red).
-/// - b: Blue-yellow axis (-128 for blue to +127 for yellow).
+/// It expresses color as three values.
 pub fn Lab(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .lab;
+        /// Lightness (0 for black to 100 for white).
         l: T,
+        /// Green-red axis (-128 for green to +127 for red).
         a: T,
+        /// Blue-yellow axis (-128 for blue to +127 for yellow).
         b: T,
 
         /// Formats the color for terminal output.
@@ -727,15 +730,15 @@ pub fn Lab(comptime T: type) type {
 
 /// A color in the [CIELCh color space](https://en.wikipedia.org/wiki/CIELAB_color_space#Cylindrical_model).
 /// LCh is the cylindrical representation of the CIELAB color space.
-/// - l: Lightness (0 for black to 100 for white).
-/// - c: Chroma (chromatic intensity) (0 for achromatic, no upper bound).
-/// - h: Hue angle in degrees (0-360).
 pub fn Lch(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .lch;
+        /// Lightness (0 for black to 100 for white).
         l: T,
+        /// Chroma (chromatic intensity) (0 for achromatic, no upper bound).
         c: T,
+        /// Hue angle in degrees (0-360).
         h: T,
 
         /// Formats the color for terminal output.
@@ -801,15 +804,15 @@ pub fn Lms(comptime T: type) type {
 
 /// A color in the [Oklab color space](https://bottosson.github.io/posts/oklab/).
 /// Oklab is designed to be a perceptually uniform color space.
-/// - l: Perceived lightness (0 for black to approximately 1 for white).
-/// - a: Green-red axis (negative values towards green, positive towards red, typically around -0.4 to 0.4).
-/// - b: Blue-yellow axis (negative values towards blue, positive towards yellow, typically around -0.4 to 0.4).
 pub fn Oklab(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .oklab;
+        /// Perceived lightness (0 for black to approximately 1 for white).
         l: T,
+        /// Green-red axis (negative towards green, positive towards red, typically around -0.4 to 0.4).
         a: T,
+        /// Blue-yellow axis (negative towards blue, positive towards yellow, typically around -0.4 to 0.4).
         b: T,
 
         /// Formats the color for terminal output.
@@ -840,15 +843,15 @@ pub fn Oklab(comptime T: type) type {
 
 /// A color in the [Oklch color space](https://en.wikipedia.org/wiki/Oklab_color_space).
 /// Oklch is the cylindrical representation of the Oklab color space.
-/// - l: Perceived lightness (0 for black to approximately 1 for white).
-/// - c: Chroma (chromatic intensity) (0 for achromatic to approximately 0.5 for pure colors).
-/// - h: Hue angle in degrees (0-360).
 pub fn Oklch(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .oklch;
+        /// Perceived lightness (0 for black to approximately 1 for white).
         l: T,
+        /// Chroma (chromatic intensity) (0 for achromatic to approximately 0.5 for pure colors).
         c: T,
+        /// Hue angle in degrees (0-360).
         h: T,
 
         /// Formats the color for terminal output.
@@ -878,16 +881,16 @@ pub fn Oklch(comptime T: type) type {
 
 /// A color in the [XYB color space](https://jpeg.org/jpegxl/documentation/xl-color-management.html#xyb)
 /// used in JPEG XL. It's derived from LMS and designed for efficient image compression.
-/// - x: X component (L-M, red-green opponent channel).
-/// - y: Y component (L+M, luminance-like channel).
-/// - b: B component (S, blue-yellow like channel, but often scaled S cone response).
 /// Ranges can vary based on transformations, but often centered around 0 for x and b, and positive for y.
 pub fn Xyb(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
         pub const space: ColorSpace = .xyb;
+        /// X component (L-M, red-green opponent channel).
         x: T,
+        /// Y component (L+M, luminance-like channel).
         y: T,
+        /// B component (S, blue-yellow like channel, but often scaled S cone response).
         b: T,
 
         /// Formats the color for terminal output.
