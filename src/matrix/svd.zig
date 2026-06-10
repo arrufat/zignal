@@ -81,29 +81,92 @@ pub fn svd(
     options: Options,
 ) !Result(T) {
     std.debug.assert(a.rows >= a.cols);
-    const max_iterations: usize = 300;
-    var eps: T = std.math.floatEps(T);
-    const tol: T = std.math.floatMin(T) / eps;
     const m = a.rows;
     const n = a.cols;
 
-    var u = if (options.mode == .full_u)
-        try Matrix(T).initAll(allocator, m, m, 0)
+    var u: Matrix(T) = if (options.mode == .full_u)
+        try .initAll(allocator, m, m, 0)
     else
-        try Matrix(T).initAll(allocator, m, n, 0);
+        try .initAll(allocator, m, n, 0);
     errdefer u.deinit();
 
-    var v = if (options.with_v)
-        try Matrix(T).initAll(allocator, n, n, 0)
+    var v: Matrix(T) = if (options.with_v)
+        try .initAll(allocator, n, n, 0)
     else
-        try Matrix(T).init(allocator, 0, 0);
+        try .init(allocator, 0, 0);
     errdefer v.deinit();
 
-    var q = try Matrix(T).initAll(allocator, n, 1, 0);
+    var q: Matrix(T) = try .initAll(allocator, n, 1, 0);
     errdefer q.deinit();
 
-    var e = try Matrix(T).initAll(allocator, n, 1, 0);
+    var e: Matrix(T) = try .initAll(allocator, n, 1, 0);
     defer e.deinit();
+
+    const converged = kernel(a, &u, &v, &q, &e, options.with_v, options.mode);
+    return .{ .u = u, .s = q, .v = v, .converged = converged };
+}
+
+/// Comptime check that `M` is matrix-like: an `at(row, col)` accessor plus
+/// `rows` and `cols` members, as exposed by both Matrix and SMatrix.
+fn assertMatrixLike(comptime name: []const u8, comptime M: type) void {
+    if (@typeInfo(M) != .@"struct")
+        @compileError("svd kernel: `" ++ name ++ "` must be a matrix, got " ++ @typeName(M));
+    if (!@hasDecl(M, "at"))
+        @compileError("svd kernel: `" ++ name ++ "` (" ++ @typeName(M) ++ ") has no `at(row, col)` accessor");
+    if (!@hasField(M, "rows") or !@hasField(M, "cols"))
+        @compileError("svd kernel: `" ++ name ++ "` (" ++ @typeName(M) ++ ") has no `rows`/`cols` members");
+}
+
+/// Comptime check that `P` is a mutable single-item pointer to a matrix-like type.
+fn assertMatrixPtr(comptime name: []const u8, comptime P: type) void {
+    const info = @typeInfo(P);
+    if (info != .pointer or info.pointer.size != .one or info.pointer.attrs.@"const")
+        @compileError("svd kernel: `" ++ name ++ "` must be a mutable pointer to a matrix, got " ++ @typeName(P));
+    assertMatrixLike(name, info.pointer.child);
+}
+
+/// Comptime check that a matrix shares the element type of `a`.
+fn assertSameElem(comptime name: []const u8, comptime T: type, comptime E: type) void {
+    if (E != T)
+        @compileError("svd kernel: `" ++ name ++ "` has element type " ++ @typeName(E) ++
+            ", expected " ++ @typeName(T) ++ " (the element type of `a`)");
+}
+
+/// Golub-Reinsch kernel shared by the dynamic (`svd` above) and static
+/// (`SMatrix.svd`) entry points. `u`, `v`, `q` and `e` point to
+/// pre-sized matrices; all element access goes through the `at()` accessor
+/// that both matrix types expose. The element type and dimensions are taken
+/// from `a`. Returns 0 on success, or k if the iteration fails to converge
+/// at the k-th singular value.
+pub fn kernel(
+    a: anytype,
+    u: anytype,
+    v: anytype,
+    q: anytype,
+    e: anytype,
+    with_v: bool,
+    mode: Mode,
+) usize {
+    comptime {
+        assertMatrixLike("a", @TypeOf(a));
+        assertMatrixPtr("u", @TypeOf(u));
+        assertMatrixPtr("v", @TypeOf(v));
+        assertMatrixPtr("q", @TypeOf(q));
+        assertMatrixPtr("e", @TypeOf(e));
+    }
+    const T = @TypeOf(a.at(0, 0).*);
+    comptime {
+        assertSameElem("u", T, @TypeOf(u.at(0, 0).*));
+        assertSameElem("v", T, @TypeOf(v.at(0, 0).*));
+        assertSameElem("q", T, @TypeOf(q.at(0, 0).*));
+        assertSameElem("e", T, @TypeOf(e.at(0, 0).*));
+    }
+
+    const m: usize = a.rows;
+    const n: usize = a.cols;
+    const max_iterations: usize = 300;
+    var eps: T = std.math.floatEps(T);
+    const tol: T = std.math.floatMin(T) / eps;
 
     var l: usize = 0;
     var retval: usize = 0;
@@ -190,7 +253,7 @@ pub fn svd(
     }
 
     // Accumulation of right-hand transformations.
-    if (options.with_v) {
+    if (with_v) {
         for (0..n) |ri| {
             const i = n - 1 - ri;
             if (g != 0) {
@@ -219,7 +282,7 @@ pub fn svd(
     }
 
     // Accumulation of left-hand transformations.
-    if (options.mode != .no_u) {
+    if (mode != .no_u) {
         for (n..u.rows) |i| {
             for (n..u.cols) |j| {
                 u.at(i, j).* = 0;
@@ -230,7 +293,7 @@ pub fn svd(
         }
     }
 
-    if (options.mode != .no_u) {
+    if (mode != .no_u) {
         for (0..n) |ri| {
             const i = n - 1 - ri;
             l = i + 1;
@@ -301,7 +364,7 @@ pub fn svd(
                     q.at(i, 0).* = h;
                     c = g / h;
                     s = -f / h;
-                    if (options.mode != .no_u) {
+                    if (mode != .no_u) {
                         for (0..m) |j| {
                             y = u.at(j, l1).*;
                             z = u.at(j, i).*;
@@ -348,7 +411,7 @@ pub fn svd(
                     g = -x * s + g * c;
                     h = y * s;
                     y *= c;
-                    if (options.with_v) {
+                    if (with_v) {
                         for (0..n) |j| {
                             x = v.at(j, i - 1).*;
                             z = v.at(j, i).*;
@@ -364,7 +427,7 @@ pub fn svd(
                     }
                     f = c * g + s * y;
                     x = -s * g + c * y;
-                    if (options.mode != .no_u) {
+                    if (mode != .no_u) {
                         for (0..m) |j| {
                             y = u.at(j, i - 1).*;
                             z = u.at(j, i).*;
@@ -382,7 +445,7 @@ pub fn svd(
             .convergence_check => {
                 if (z < 0) {
                     q.at(k, 0).* = -z;
-                    if (options.with_v) {
+                    if (with_v) {
                         for (0..n) |j| {
                             v.at(j, k).* = -v.at(j, k).*;
                         }
@@ -405,12 +468,12 @@ pub fn svd(
 
         if (max_idx != i) {
             std.mem.swap(T, q.at(i, 0), q.at(max_idx, 0));
-            if (options.mode != .no_u) {
+            if (mode != .no_u) {
                 for (0..m) |row| {
                     std.mem.swap(T, u.at(row, i), u.at(row, max_idx));
                 }
             }
-            if (options.with_v) {
+            if (with_v) {
                 for (0..n) |row| {
                     std.mem.swap(T, v.at(row, i), v.at(row, max_idx));
                 }
@@ -418,7 +481,7 @@ pub fn svd(
         }
     }
 
-    return .{ .u = u, .s = q, .v = v, .converged = retval };
+    return retval;
 }
 
 test "svd basic" {
@@ -518,7 +581,7 @@ test "svd identity matrix" {
     const allocator = arena.allocator();
 
     const n: usize = 3;
-    var a = try Matrix(f64).identity(allocator, n, n);
+    var a: Matrix(f64) = try .identity(allocator, n, n);
 
     var res = try a.svd(allocator, .{ .with_v = true, .mode = .full_u });
     defer res.deinit();

@@ -46,18 +46,18 @@ test "Matrix GEMM operations" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
-    const a = try Matrix(f32).fromSlice(arena.allocator(), 2, 3, &.{
+    const a: Matrix(f32) = try .fromSlice(arena.allocator(), 2, 3, &.{
         1.0, 2.0, 3.0,
         4.0, 5.0, 6.0,
     });
 
-    const b = try Matrix(f32).fromSlice(arena.allocator(), 3, 2, &.{
+    const b: Matrix(f32) = try .fromSlice(arena.allocator(), 3, 2, &.{
         7.0,  8.0,
         9.0,  10.0,
         11.0, 12.0,
     });
 
-    const c = try Matrix(f32).fromSlice(arena.allocator(), 2, 2, &.{
+    const c: Matrix(f32) = try .fromSlice(arena.allocator(), 2, 2, &.{
         1.0, 1.0,
         1.0, 1.0,
     });
@@ -322,7 +322,7 @@ test "Matrix GEMM double transpose respects operands" {
     const simd_result = try a.gemm(true, b, true, 1.0, 0.0, null);
 
     const expected = blk: {
-        var temp = try Matrix(f64).init(arena.allocator(), a.cols, b.rows);
+        var temp: Matrix(f64) = try .init(arena.allocator(), a.cols, b.rows);
         for (0..a.cols) |i| {
             for (0..b.rows) |j| {
                 var accum: f64 = 0;

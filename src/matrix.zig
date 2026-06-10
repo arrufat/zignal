@@ -13,7 +13,6 @@ test {
     _ = @import("matrix/Matrix.zig");
     _ = @import("matrix/Chain.zig");
     _ = @import("matrix/svd.zig");
-    _ = @import("matrix/svd_static.zig");
     _ = @import("matrix/formatting.zig");
     _ = @import("matrix/test_ops_basic.zig");
     _ = @import("matrix/test_ops_gemm.zig");
