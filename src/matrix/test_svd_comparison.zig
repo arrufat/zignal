@@ -7,7 +7,6 @@ const expectApproxEqAbs = testing.expectApproxEqAbs;
 const Matrix = @import("Matrix.zig").Matrix;
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_dynamic = @import("svd.zig").svd;
-const svd_static = @import("svd_static.zig").svd;
 
 test "SVD comparison: basic 5x4 matrix" {
     const allocator = testing.allocator;
@@ -25,10 +24,10 @@ test "SVD comparison: basic 5x4 matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
+    const static_result = a_static.svd(.{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
-    var a_dynamic = try Matrix(f64).init(allocator, m, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, m, n);
     defer a_dynamic.deinit();
     for (0..m) |i| {
         for (0..n) |j| {
@@ -79,10 +78,10 @@ test "SVD comparison: identity matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, n, n) = .identity();
-    const static_result = svd_static(f64, n, n, a_static, .{ .with_v = true, .mode = .full_u });
+    const static_result = a_static.svd(.{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
-    var a_dynamic = try Matrix(f64).init(allocator, n, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, n, n);
     defer a_dynamic.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
@@ -116,10 +115,10 @@ test "SVD comparison: singular matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
+    const static_result = a_static.svd(.{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
-    var a_dynamic = try Matrix(f64).init(allocator, m, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, m, n);
     defer a_dynamic.deinit();
     for (0..m) |i| {
         for (0..n) |j| {
@@ -168,10 +167,10 @@ test "SVD comparison: skinny_u mode" {
 
     // Static SVD with skinny_u
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = false, .mode = .skinny_u });
+    const static_result = a_static.svd(.{ .with_v = false, .mode = .skinny_u });
 
     // Dynamic SVD with skinny_u
-    var a_dynamic = try Matrix(f64).init(allocator, m, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, m, n);
     defer a_dynamic.deinit();
     for (0..m) |i| {
         for (0..n) |j| {
@@ -211,10 +210,10 @@ test "SVD comparison: rectangular matrix" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .full_u });
+    const static_result = a_static.svd(.{ .with_v = true, .mode = .full_u });
 
     // Dynamic SVD
-    var a_dynamic = try Matrix(f64).init(allocator, m, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, m, n);
     defer a_dynamic.deinit();
     for (0..m) |i| {
         for (0..n) |j| {
@@ -260,10 +259,10 @@ test "SVD comparison: reconstruction accuracy" {
 
     // Static SVD
     const a_static: SMatrix(f64, m, n) = .init(test_matrix);
-    const static_result = svd_static(f64, m, n, a_static, .{ .with_v = true, .mode = .skinny_u });
+    const static_result = a_static.svd(.{ .with_v = true, .mode = .skinny_u });
 
     // Dynamic SVD
-    var a_dynamic = try Matrix(f64).init(allocator, m, n);
+    var a_dynamic: Matrix(f64) = try .init(allocator, m, n);
     defer a_dynamic.deinit();
     for (0..m) |i| {
         for (0..n) |j| {
