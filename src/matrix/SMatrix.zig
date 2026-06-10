@@ -8,16 +8,42 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const Point = @import("../geometry/Point.zig").Point;
+const Matrix = @import("Matrix.zig").Matrix;
 const meta = @import("../meta.zig");
 const formatting = @import("formatting.zig");
-const svd_module = @import("svd_static.zig");
+const svd_module = @import("svd.zig");
 
 /// Creates a static matrix with elements of type T and size rows times cols.
 pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
     return struct {
         pub const SvdMode = svd_module.Mode;
         pub const SvdOptions = svd_module.Options;
-        pub const SvdResult = svd_module.Result;
+
+        /// Result type for SVD decomposition: A = U × Σ × V^T
+        /// where A is the input matrix, U contains left singular vectors,
+        /// Σ is a diagonal matrix of singular values (stored as a vector),
+        /// and V contains right singular vectors.
+        ///
+        /// The dimensions of matrices depend on the options used:
+        /// - U: m×m (full_u), or m×n (skinny_u or no_u, contents undefined for no_u)
+        /// - s: n×1 vector of singular values in descending order
+        /// - V: n×n matrix (contents undefined if with_v=false)
+        pub fn SvdResult(comptime options: SvdOptions) type {
+            return struct {
+                /// Left singular vectors matrix. Each column is a left singular vector.
+                u: SMatrix(T, rows, if (options.mode == .full_u) rows else cols),
+                /// Singular values in descending order as a column vector.
+                /// These are the diagonal elements of the Σ matrix.
+                s: SMatrix(T, cols, 1),
+                /// Right singular vectors matrix. Each column is a right singular vector.
+                /// The matrix is orthogonal: V^T × V = I
+                v: SMatrix(T, cols, cols),
+                /// Convergence status: 0 if successful, k if failed at k-th singular value.
+                /// Non-zero values indicate the iterative algorithm failed to converge.
+                converged: usize,
+            };
+        }
+
         const Self = @This();
         items: [rows][cols]T = undefined,
         comptime rows: u32 = rows,
@@ -178,12 +204,19 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
 
         /// Computes the Frobenius norm of the matrix.
         pub fn frobeniusNorm(self: Self) T {
-            return @sqrt(self.times(self).sum());
+            ensureFloat("frobeniusNorm");
+            var squared_sum: T = 0;
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    squared_sum += self.items[r][c] * self.items[r][c];
+                }
+            }
+            return @sqrt(squared_sum);
         }
 
         /// Computes the nuclear norm (sum of singular values) of the matrix.
         pub fn nuclearNorm(self: Self) T {
-            return self.schattenNorm(@as(T, 1.0));
+            return self.schattenNorm(1);
         }
 
         /// Computes the element-wise L1 norm (sum of absolute entries).
@@ -240,7 +273,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
 
         /// Computes the L-infinity norm (maximum absolute value among all elements) of the matrix.
         pub fn maxNorm(self: Self) T {
-            var result: T = -std.math.inf(T);
+            var result: T = 0;
             for (0..rows) |r| {
                 for (0..cols) |c| {
                     const val = @abs(self.items[r][c]);
@@ -592,8 +625,8 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Converts this SMatrix to a dynamic Matrix
-        pub fn toMatrix(self: Self, allocator: std.mem.Allocator) !@import("Matrix.zig").Matrix(T) {
-            const result = try @import("Matrix.zig").Matrix(T).init(allocator, rows, cols);
+        pub fn toMatrix(self: Self, allocator: std.mem.Allocator) !Matrix(T) {
+            const result: Matrix(T) = try .init(allocator, rows, cols);
             @memcpy(result.items, @as(*const [rows * cols]T, @ptrCast(&self.items)));
             return result;
         }
@@ -713,9 +746,17 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         /// - V contains right singular vectors
         ///
         /// Requires rows >= cols. See SvdOptions for configuration details.
-        pub fn svd(self: Self, comptime options: SvdOptions) SvdResult(T, rows, cols, options) {
+        ///
+        /// Sets `converged = 0` on success, or `k` if the shared Golub-Reinsch
+        /// kernel fails to converge at the k-th singular value.
+        pub fn svd(self: Self, comptime options: SvdOptions) SvdResult(options) {
             comptime assert(rows >= cols);
-            return svd_module.svd(T, rows, cols, self, options);
+            var u = comptime if (options.mode == .full_u) SMatrix(T, rows, rows){} else SMatrix(T, rows, cols){};
+            var v: SMatrix(T, cols, cols) = .{};
+            var q: SMatrix(T, cols, 1) = .{};
+            var e: SMatrix(T, cols, 1) = .{};
+            const converged = svd_module.kernel(self, &u, &v, &q, &e, options.with_v, options.mode);
+            return .{ .u = u, .s = q, .v = v, .converged = converged };
         }
 
         /// Returns a formatter for decimal notation with specified precision
@@ -1082,6 +1123,42 @@ test "SMatrix Cholesky" {
     for (0..3) |i| {
         for (0..3) |j| {
             try expectApproxEqAbs(mat.items[i][j], recon.items[i][j], eps);
+        }
+    }
+}
+
+test "SMatrix svd basic" {
+    const m: usize = 5;
+    const n: usize = 4;
+    // Example matrix taken from Wikipedia
+    const a: SMatrix(f64, m, n) = .init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 0, 0, 0, 2 },
+        .{ 0, 3, 0, 0 },
+        .{ 0, 0, 0, 0 },
+        .{ 2, 0, 0, 0 },
+    });
+    const res = a.svd(.{ .with_v = true, .mode = .full_u });
+    const u = &res.u;
+    const s = &res.s;
+    const v = &res.v;
+
+    // Check that we got the right dimensions
+    try expectEqual(@as(usize, m), u.rows);
+    try expectEqual(@as(usize, m), u.cols);
+    try expectEqual(@as(usize, n), s.rows);
+    try expectEqual(@as(usize, 1), s.cols);
+    try expectEqual(@as(usize, n), v.rows);
+    try expectEqual(@as(usize, n), v.cols);
+
+    // Check convergence
+    try expectEqual(@as(usize, 0), res.converged);
+
+    // Check that singular values are non-negative and in descending order
+    for (0..n) |i| {
+        try std.testing.expect(s.at(i, 0).* >= 0);
+        if (i > 0) {
+            try std.testing.expect(s.at(i - 1, 0).* >= s.at(i, 0).*);
         }
     }
 }

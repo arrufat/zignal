@@ -117,12 +117,11 @@ pub fn Chain(comptime T: type) type {
         fn dispatch(self: *Self, comptime name: []const u8, args: anytype) *Self {
             if (self.err != null) return self;
 
-            // Optimization: use in-place updates if we own the current matrix
-            // and the operation is element-wise.
-            if (self.owns_current and comptime isElementWise(name)) {
-                const in_place_name = name ++ "By";
-                if (@hasDecl(Matrix(T), in_place_name)) {
-                    @call(.auto, @field(Matrix(T), in_place_name), .{&self.current} ++ args) catch |e| {
+            // Optimization: ops with an in-place `<name>By` variant preserve
+            // shape, so reuse the current buffer when we own it.
+            if (comptime @hasDecl(Matrix(T), name ++ "By")) {
+                if (self.owns_current) {
+                    @call(.auto, @field(Matrix(T), name ++ "By"), .{&self.current} ++ args) catch |e| {
                         if (self.err == null) self.err = e;
                     };
                     return self;
@@ -131,14 +130,6 @@ pub fn Chain(comptime T: type) type {
 
             const func = @field(Matrix(T), name);
             return self.step(@call(.auto, func, .{self.current} ++ args));
-        }
-
-        fn isElementWise(comptime name: []const u8) bool {
-            const list = .{ "add", "sub", "times", "scale", "offset", "pow", "apply" };
-            inline for (list) |item| {
-                if (std.mem.eql(u8, name, item)) return true;
-            }
-            return false;
         }
 
         // === Chainable operations ===
