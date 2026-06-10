@@ -83,7 +83,7 @@ pub fn Matrix(comptime T: type) type {
             /// For LU, PA = LU (use .row). For QR, AP = QR (use .column).
             pub fn toMatrix(self: *const @This(), mode: Mode) !Matrix(T) {
                 const n = self.indices.len;
-                var p_mat = try Matrix(T).initAll(self.allocator, @as(u32, @intCast(n)), @as(u32, @intCast(n)), 0);
+                var p_mat: Matrix(T) = try .initAll(self.allocator, @intCast(n), @intCast(n), 0);
                 switch (mode) {
                     .row => {
                         // For PA = LU
@@ -118,11 +118,7 @@ pub fn Matrix(comptime T: type) type {
         };
 
         pub fn init(allocator: std.mem.Allocator, rows: u32, cols: u32) !Self {
-            const alignment = comptime blk: {
-                const log2_align = std.math.log2_int(u32, simd_alignment);
-                break :blk @as(std.mem.Alignment, @enumFromInt(log2_align));
-            };
-            const data = try allocator.alignedAlloc(T, alignment, @as(u32, rows) * @as(usize, cols));
+            const data = try allocator.alignedAlloc(T, comptime .fromByteUnits(simd_alignment), @as(usize, rows) * cols);
             return Self{
                 .items = data,
                 .rows = rows,
@@ -164,12 +160,9 @@ pub fn Matrix(comptime T: type) type {
 
         /// Cast the underlying items of the matrix from T to U.
         pub fn as(self: Self, allocator: std.mem.Allocator, comptime U: type) !Matrix(U) {
-            var result: Matrix(U) = try .init(allocator, self.rows, self.cols);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const pos = r * self.cols + c;
-                    result.items[pos] = meta.as(U, self.items[pos]);
-                }
+            const result: Matrix(U) = try .init(allocator, self.rows, self.cols);
+            for (result.items, self.items) |*dst, src| {
+                dst.* = meta.as(U, src);
             }
             return result;
         }
@@ -215,9 +208,9 @@ pub fn Matrix(comptime T: type) type {
             var prng: std.Random.DefaultPrng = .init(seed);
             var rand = prng.random();
 
-            var result = try init(allocator, rows, cols);
-            for (0..@as(usize, rows) * @as(usize, cols)) |i| {
-                result.items[i] = rand.float(T);
+            const result = try init(allocator, rows, cols);
+            for (result.items) |*item| {
+                item.* = rand.float(T);
             }
             return result;
         }
@@ -226,7 +219,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Sum all elements across each row, returning a 1 × cols row vector.
         pub fn sumRows(self: Self) MatrixError!Self {
-            var result = try Matrix(T).initAll(self.allocator, 1, self.cols, 0);
+            var result: Matrix(T) = try .initAll(self.allocator, 1, self.cols, 0);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.at(0, c).* += self.at(r, c).*;
@@ -237,7 +230,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Sum all elements down each column, returning a rows × 1 column vector.
         pub fn sumCols(self: Self) MatrixError!Self {
-            var result = try Matrix(T).initAll(self.allocator, self.rows, 1, 0);
+            var result: Matrix(T) = try .initAll(self.allocator, self.rows, 1, 0);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.at(r, 0).* += self.at(r, c).*;
@@ -253,9 +246,9 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = self.items[i] + other.items[i];
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items, other.items) |*dst, a, b| {
+                dst.* = a + b;
             }
             return result;
         }
@@ -265,8 +258,8 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            for (0..self.items.len) |i| {
-                self.items[i] += other.items[i];
+            for (self.items, other.items) |*dst, b| {
+                dst.* += b;
             }
         }
 
@@ -275,9 +268,9 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = self.items[i] - other.items[i];
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items, other.items) |*dst, a, b| {
+                dst.* = a - b;
             }
             return result;
         }
@@ -287,30 +280,30 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            for (0..self.items.len) |i| {
-                self.items[i] -= other.items[i];
+            for (self.items, other.items) |*dst, b| {
+                dst.* -= b;
             }
         }
 
         /// Scale all elements by a value
         pub fn scale(self: Self, value: T) MatrixError!Self {
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = self.items[i] * value;
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items) |*dst, a| {
+                dst.* = a * value;
             }
             return result;
         }
 
         /// Scale all elements by a value (in-place)
         pub fn scaleBy(self: *Self, value: T) MatrixError!void {
-            for (0..self.items.len) |i| {
-                self.items[i] *= value;
+            for (self.items) |*item| {
+                item.* *= value;
             }
         }
 
         /// Transpose the matrix
         pub fn transpose(self: Self) MatrixError!Self {
-            var result = try Matrix(T).init(self.allocator, self.cols, self.rows);
+            var result: Matrix(T) = try .init(self.allocator, self.cols, self.rows);
             for (0..self.rows) |r| {
                 for (0..self.cols) |c| {
                     result.at(c, r).* = self.at(r, c).*;
@@ -324,9 +317,9 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = self.items[i] * other.items[i];
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items, other.items) |*dst, a, b| {
+                dst.* = a * b;
             }
             return result;
         }
@@ -336,8 +329,8 @@ pub fn Matrix(comptime T: type) type {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
-            for (0..self.items.len) |i| {
-                self.items[i] *= other.items[i];
+            for (self.items, other.items) |*dst, b| {
+                dst.* *= b;
             }
         }
 
@@ -361,7 +354,7 @@ pub fn Matrix(comptime T: type) type {
                     return error.Singular;
                 }
 
-                var inv = try Matrix(T).init(self.allocator, n, n);
+                var inv: Matrix(T) = try .init(self.allocator, n, n);
 
                 switch (n) {
                     1 => inv.at(0, 0).* = 1 / det,
@@ -428,25 +421,28 @@ pub fn Matrix(comptime T: type) type {
             if (sigma_max == 0) {
                 const zero_rows = self.cols;
                 const zero_cols = self.rows;
-                const zero = try Matrix(T).initAll(allocator, zero_rows, zero_cols, 0);
+                const zero: Matrix(T) = try .initAll(allocator, zero_rows, zero_cols, 0);
                 if (options.effective_rank) |rank_ptr| {
                     rank_ptr.* = 0;
                 }
                 return zero;
             }
-            const max_dim = if (self.rows > self.cols) self.rows else self.cols;
+            const max_dim = @max(self.rows, self.cols);
             const default_tol: T = sigma_max * @as(T, @floatFromInt(max_dim)) * std.math.floatEps(T);
             const tol = options.tolerance orelse default_tol;
 
-            var sigma_inv = try Matrix(T).initAll(allocator, singular_count, singular_count, 0);
-            defer sigma_inv.deinit();
+            // Compute V * Σ⁻¹ by scaling each column of V in place;
+            // singular values below the tolerance are discarded (column zeroed).
+            var v_sigma = try svd_result.v.dupe(allocator);
+            defer v_sigma.deinit();
 
             var effective_rank: u32 = 0;
             for (0..singular_count) |i| {
                 const sigma = svd_result.s.at(i, 0).*;
-                if (sigma > tol) {
-                    sigma_inv.at(i, i).* = 1 / sigma;
-                    effective_rank += 1;
+                const inv_sigma: T = if (sigma > tol) 1 / sigma else 0;
+                if (sigma > tol) effective_rank += 1;
+                for (0..v_sigma.rows) |r| {
+                    v_sigma.at(r, i).* *= inv_sigma;
                 }
             }
 
@@ -454,13 +450,7 @@ pub fn Matrix(comptime T: type) type {
                 rank_ptr.* = effective_rank;
             }
 
-            var u_t = try svd_result.u.transpose();
-            defer u_t.deinit();
-
-            var v_sigma = try svd_result.v.dot(sigma_inv);
-            defer v_sigma.deinit();
-
-            return v_sigma.dot(u_t);
+            return v_sigma.dotTranspose(svd_result.u);
         }
 
         /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
@@ -469,7 +459,7 @@ pub fn Matrix(comptime T: type) type {
             const n = self.rows;
 
             // Create augmented matrix [A | I]
-            var augmented = try Matrix(T).init(self.allocator, n, 2 * n);
+            var augmented: Matrix(T) = try .init(self.allocator, n, 2 * n);
             defer augmented.deinit();
 
             // Copy original matrix to left half and identity to right half
@@ -497,18 +487,20 @@ pub fn Matrix(comptime T: type) type {
                 // Check for singular matrix
                 if (max_val < std.math.floatEps(T) * 10) return error.Singular;
 
+                // Columns before pivot_col in the left half are already reduced
+                // to unit columns (exact zeros in the rows below), so the row
+                // operations can start at pivot_col.
+
                 // Swap rows if needed
                 if (max_row != pivot_col) {
-                    for (0..2 * n) |j| {
-                        const temp = augmented.at(pivot_col, j).*;
-                        augmented.at(pivot_col, j).* = augmented.at(max_row, j).*;
-                        augmented.at(max_row, j).* = temp;
+                    for (pivot_col..2 * n) |j| {
+                        std.mem.swap(T, augmented.at(pivot_col, j), augmented.at(max_row, j));
                     }
                 }
 
                 // Scale pivot row
                 const pivot = augmented.at(pivot_col, pivot_col).*;
-                for (0..2 * n) |j| {
+                for (pivot_col..2 * n) |j| {
                     augmented.at(pivot_col, j).* /= pivot;
                 }
 
@@ -516,7 +508,7 @@ pub fn Matrix(comptime T: type) type {
                 for (0..n) |row_idx| {
                     if (row_idx != pivot_col) {
                         const factor = augmented.at(row_idx, pivot_col).*;
-                        for (0..2 * n) |j| {
+                        for (pivot_col..2 * n) |j| {
                             augmented.at(row_idx, j).* -= factor * augmented.at(pivot_col, j).*;
                         }
                     }
@@ -524,7 +516,7 @@ pub fn Matrix(comptime T: type) type {
             }
 
             // Extract inverse from right half of augmented matrix
-            var inv = try Matrix(T).init(self.allocator, n, n);
+            var inv: Matrix(T) = try .init(self.allocator, n, n);
 
             for (0..n) |i| {
                 for (0..n) |j| {
@@ -540,11 +532,10 @@ pub fn Matrix(comptime T: type) type {
             if (row_begin + row_count > self.rows or col_begin + col_count > self.cols) {
                 return error.OutOfBounds;
             }
-            var result = try Matrix(T).init(self.allocator, row_count, col_count);
+            var result: Matrix(T) = try .init(self.allocator, row_count, col_count);
             for (0..row_count) |r| {
-                for (0..col_count) |c| {
-                    result.at(r, c).* = self.at(row_begin + r, col_begin + c).*;
-                }
+                const src_offset = (row_begin + r) * self.cols + col_begin;
+                @memcpy(result.items[r * col_count ..][0..col_count], self.items[src_offset..][0..col_count]);
             }
             return result;
         }
@@ -552,7 +543,7 @@ pub fn Matrix(comptime T: type) type {
         /// Extract a column - changes dimensions
         pub fn col(self: Self, col_idx: u32) MatrixError!Self {
             if (col_idx >= self.cols) return error.OutOfBounds;
-            var result = try Matrix(T).init(self.allocator, self.rows, 1);
+            var result: Matrix(T) = try .init(self.allocator, self.rows, 1);
             for (0..self.rows) |r| {
                 result.at(r, 0).* = self.at(r, col_idx).*;
             }
@@ -562,10 +553,8 @@ pub fn Matrix(comptime T: type) type {
         /// Extract a row - changes dimensions
         pub fn row(self: Self, row_idx: u32) MatrixError!Self {
             if (row_idx >= self.rows) return error.OutOfBounds;
-            var result = try Matrix(T).init(self.allocator, 1, self.cols);
-            for (0..self.cols) |c| {
-                result.at(0, c).* = self.at(row_idx, c).*;
-            }
+            const result: Matrix(T) = try .init(self.allocator, 1, self.cols);
+            @memcpy(result.items, self.items[@as(usize, row_idx) * self.cols ..][0..self.cols]);
             return result;
         }
 
@@ -672,7 +661,7 @@ pub fn Matrix(comptime T: type) type {
             // Verify matrix multiplication compatibility
             if (a_cols != b_rows) return error.DimensionMismatch;
 
-            var result = try Matrix(T).init(self.allocator, a_rows, b_cols);
+            var result: Matrix(T) = try .init(self.allocator, a_rows, b_cols);
             errdefer result.deinit();
 
             // Initialize with scaled C matrix if provided
@@ -680,11 +669,12 @@ pub fn Matrix(comptime T: type) type {
                 if (c_mat.rows != a_rows or c_mat.cols != b_cols) {
                     return error.DimensionMismatch;
                 }
-                if (beta != 0) {
-                    for (0..a_rows) |i| {
-                        for (0..b_cols) |j| {
-                            result.at(i, j).* = beta * c_mat.at(i, j).*;
-                        }
+            }
+            if (c != null and beta != 0) {
+                const c_mat = c.?;
+                for (0..a_rows) |i| {
+                    for (0..b_cols) |j| {
+                        result.at(i, j).* = beta * c_mat.at(i, j).*;
                     }
                 }
             } else {
@@ -707,35 +697,17 @@ pub fn Matrix(comptime T: type) type {
 
                     if (!trans_a and !trans_b) {
                         // Case 1: A * B - transpose B for cache-friendly row-major access
-
-                        // Handle special case when A and B are the same matrix (for A * A)
-                        if (self.rows == other.rows and
-                            self.cols == other.cols and
-                            std.mem.eql(T, self.items, other.items))
-                        {
-                            // For A * A, we need to transpose A for the second operand
-                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
-                            defer a_transposed.deinit();
-                            for (0..a_cols) |k| {
-                                for (0..b_cols) |j| {
-                                    a_transposed.at(j, k).* = self.at(k, j).*;
-                                }
+                        var b_transposed: Matrix(T) = try .init(self.allocator, b_cols, a_cols);
+                        defer b_transposed.deinit();
+                        for (0..a_cols) |k| {
+                            for (0..b_cols) |j| {
+                                b_transposed.at(j, k).* = other.at(k, j).*;
                             }
-                            simdGemmKernel(VecType, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
-                        } else {
-                            // General case: transpose B for cache-friendly row-major access
-                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
-                            defer b_transposed.deinit();
-                            for (0..a_cols) |k| {
-                                for (0..b_cols) |j| {
-                                    b_transposed.at(j, k).* = other.at(k, j).*;
-                                }
-                            }
-                            simdGemmKernel(VecType, &result, self, b_transposed, alpha, a_rows, a_cols, b_cols);
                         }
+                        simdGemmKernel(VecType, &result, self, b_transposed, alpha, a_rows, a_cols, b_cols);
                     } else if (trans_a and !trans_b) {
                         // Case 2: A^T * B - transpose A for cache-friendly row-major access
-                        var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
+                        var a_transposed: Matrix(T) = try .init(self.allocator, a_rows, a_cols);
                         defer a_transposed.deinit();
                         // Transpose A: a_transposed[i,j] = A[j,i]
                         for (0..a_cols) |k| {
@@ -744,15 +716,12 @@ pub fn Matrix(comptime T: type) type {
                             }
                         }
                         // Handle special case when A and B are the same matrix (for covariance)
-                        if (self.rows == other.rows and
-                            self.cols == other.cols and
-                            std.mem.eql(T, self.items, other.items))
-                        {
+                        if (self.items.ptr == other.items.ptr) {
                             // For covariance (A^T * A), we need to also use transposed for B
                             simdGemmKernel(VecType, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
                         } else {
                             // General case: transpose B for row-wise access
-                            var b_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
+                            var b_transposed: Matrix(T) = try .init(self.allocator, b_cols, a_cols);
                             defer b_transposed.deinit();
                             for (0..a_cols) |k| {
                                 for (0..b_cols) |j| {
@@ -763,28 +732,10 @@ pub fn Matrix(comptime T: type) type {
                         }
                     } else if (!trans_a and trans_b) {
                         // Case 3: A * B^T - no transpose needed, B^T is naturally row-wise
-
-                        // Handle special case when A and B are the same matrix (for A * A^T)
-                        if (self.rows == other.rows and
-                            self.cols == other.cols and
-                            std.mem.eql(T, self.items, other.items))
-                        {
-                            // For A * A^T, we need to transpose A for the second operand
-                            var a_transposed = try Matrix(T).init(self.allocator, b_cols, a_cols);
-                            defer a_transposed.deinit();
-                            for (0..a_cols) |k| {
-                                for (0..b_cols) |j| {
-                                    a_transposed.at(j, k).* = self.at(j, k).*;
-                                }
-                            }
-                            simdGemmKernel(VecType, &result, self, a_transposed, alpha, a_rows, a_cols, b_cols);
-                        } else {
-                            // General case: B^T is naturally row-wise
-                            simdGemmKernel(VecType, &result, self, other, alpha, a_rows, a_cols, b_cols);
-                        }
+                        simdGemmKernel(VecType, &result, self, other, alpha, a_rows, a_cols, b_cols);
                     } else if (trans_a and trans_b) {
                         // Case 4: A^T * B^T - transpose A so rows are contiguous, reuse B rows directly
-                        var a_transposed = try Matrix(T).init(self.allocator, a_rows, a_cols);
+                        var a_transposed: Matrix(T) = try .init(self.allocator, a_rows, a_cols);
                         defer a_transposed.deinit();
                         for (0..a_rows) |i| {
                             for (0..a_cols) |j| {
@@ -835,53 +786,47 @@ pub fn Matrix(comptime T: type) type {
 
         /// Apply a function to all matrix elements with optional arguments
         pub fn apply(self: Self, comptime func: anytype, args: anytype) MatrixError!Self {
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = @call(.auto, func, .{self.items[i]} ++ args);
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items) |*dst, src| {
+                dst.* = @call(.auto, func, .{src} ++ args);
             }
             return result;
         }
 
         /// Apply a function to all matrix elements with optional arguments (in-place)
         pub fn applyBy(self: *Self, comptime func: anytype, args: anytype) MatrixError!void {
-            for (0..self.items.len) |i| {
-                self.items[i] = @call(.auto, func, .{self.items[i]} ++ args);
+            for (self.items) |*item| {
+                item.* = @call(.auto, func, .{item.*} ++ args);
             }
         }
 
         /// Add scalar to all elements
         pub fn offset(self: Self, value: T) MatrixError!Self {
-            var result = try Matrix(T).init(self.allocator, self.rows, self.cols);
-            for (0..result.items.len) |i| {
-                result.items[i] = self.items[i] + value;
+            const result: Matrix(T) = try .init(self.allocator, self.rows, self.cols);
+            for (result.items, self.items) |*dst, a| {
+                dst.* = a + value;
             }
             return result;
         }
 
         /// Add scalar to all elements (in-place)
         pub fn offsetBy(self: *Self, value: T) MatrixError!void {
-            for (0..self.items.len) |i| {
-                self.items[i] += value;
+            for (self.items) |*item| {
+                item.* += value;
             }
+        }
+
+        fn powN(x: T, exponent: T) T {
+            return std.math.pow(T, x, exponent);
         }
 
         /// Raise all elements to power n (convenience method)
         pub fn pow(self: Self, n: T) MatrixError!Self {
-            const powN = struct {
-                fn f(x: T, exponent: T) T {
-                    return std.math.pow(T, x, exponent);
-                }
-            }.f;
             return self.apply(powN, .{n});
         }
 
         /// Raise all elements to power n (convenience method) (in-place)
         pub fn powBy(self: *Self, n: T) MatrixError!void {
-            const powN = struct {
-                fn f(x: T, exponent: T) T {
-                    return std.math.pow(T, x, exponent);
-                }
-            }.f;
             try self.applyBy(powN, .{n});
         }
 
@@ -940,25 +885,13 @@ pub fn Matrix(comptime T: type) type {
         /// Minimum element
         pub fn min(self: Self) T {
             assert(self.items.len > 0);
-            var min_val = self.items[0];
-            for (self.items[1..]) |val| {
-                if (val < min_val) {
-                    min_val = val;
-                }
-            }
-            return min_val;
+            return std.mem.min(T, self.items);
         }
 
         /// Maximum element
         pub fn max(self: Self) T {
             assert(self.items.len > 0);
-            var max_val = self.items[0];
-            for (self.items[1..]) |val| {
-                if (val > max_val) {
-                    max_val = val;
-                }
-            }
-            return max_val;
+            return std.mem.max(T, self.items);
         }
 
         /// Entrywise L1 norm: sum of absolute values of all elements
@@ -1192,9 +1125,8 @@ pub fn Matrix(comptime T: type) type {
             if (n != self.cols) return error.NotSquare;
 
             // Create working copy
-            var work: Matrix(T) = try .init(self.allocator, n, n);
+            var work = try self.dupe(self.allocator);
             defer work.deinit();
-            @memcpy(work.items, self.items);
 
             // Initialize L as identity, U as zero
             var l: Matrix(T) = try .init(self.allocator, n, n);
@@ -1233,32 +1165,23 @@ pub fn Matrix(comptime T: type) type {
                     }
                 }
 
-                // Check for zero pivot (singular matrix)
-                if (max_val < std.math.floatEps(T) * 10) {
-                    // Continue with decomposition even if singular
-                    // User can check if U has zeros on diagonal
-                }
+                // A zero pivot (singular matrix) is allowed: the decomposition
+                // continues and the user can check if U has zeros on its diagonal.
 
                 // Swap rows if needed
                 if (max_row != pivot_col) {
                     sign = -sign;
                     // Swap in permutation vector
-                    const temp_p = p.indices[pivot_col];
-                    p.indices[pivot_col] = p.indices[max_row];
-                    p.indices[max_row] = temp_p;
+                    std.mem.swap(u32, &p.indices[pivot_col], &p.indices[max_row]);
 
                     // Swap rows in work matrix
                     for (0..n) |j| {
-                        const temp = work.at(pivot_col, j).*;
-                        work.at(pivot_col, j).* = work.at(max_row, j).*;
-                        work.at(max_row, j).* = temp;
+                        std.mem.swap(T, work.at(pivot_col, j), work.at(max_row, j));
                     }
 
                     // Swap rows in L (only the part already computed)
                     for (0..pivot_col) |j| {
-                        const temp = l.at(pivot_col, j).*;
-                        l.at(pivot_col, j).* = l.at(max_row, j).*;
-                        l.at(max_row, j).* = temp;
+                        std.mem.swap(T, l.at(pivot_col, j), l.at(max_row, j));
                     }
                 }
 
@@ -1294,7 +1217,7 @@ pub fn Matrix(comptime T: type) type {
             ensureFloat("cholesky");
             if (self.rows != self.cols) return error.NotSquare;
             const n = self.rows;
-            var l = try Matrix(T).init(self.allocator, n, n);
+            var l: Matrix(T) = try .init(self.allocator, n, n);
             errdefer l.deinit();
             @memset(l.items, 0);
             for (0..n) |i| {
@@ -1441,24 +1364,16 @@ pub fn Matrix(comptime T: type) type {
                 if (max_col != k) {
                     // Swap in Q
                     for (0..m) |i| {
-                        const temp = q.at(i, k).*;
-                        q.at(i, k).* = q.at(i, max_col).*;
-                        q.at(i, max_col).* = temp;
+                        std.mem.swap(T, q.at(i, k), q.at(i, max_col));
                     }
                     // Swap in R (for already computed rows)
                     for (0..k) |i| {
-                        const temp = r.at(i, k).*;
-                        r.at(i, k).* = r.at(i, max_col).*;
-                        r.at(i, max_col).* = temp;
+                        std.mem.swap(T, r.at(i, k), r.at(i, max_col));
                     }
                     // Swap in permutation
-                    const temp_perm = perm.indices[k];
-                    perm.indices[k] = perm.indices[max_col];
-                    perm.indices[max_col] = temp_perm;
+                    std.mem.swap(u32, &perm.indices[k], &perm.indices[max_col]);
                     // Swap column norms
-                    const temp_norm = col_norms[k];
-                    col_norms[k] = col_norms[max_col];
-                    col_norms[max_col] = temp_norm;
+                    std.mem.swap(T, &col_norms[k], &col_norms[max_col]);
                 }
 
                 // Compute R[k,k] = ||Q[:,k]||
@@ -1570,23 +1485,13 @@ pub fn Matrix(comptime T: type) type {
             assert(self.cols == cols);
 
             var result: SMatrix(T, rows, cols) = .{};
-            for (0..rows) |r| {
-                for (0..cols) |c| {
-                    result.at(r, c).* = self.at(r, c).*;
-                }
-            }
+            @memcpy(@as(*[rows * cols]T, @ptrCast(&result.items)), self.items);
             return result;
         }
 
         /// Creates a Matrix from a static SMatrix
         pub fn fromSMatrix(allocator: std.mem.Allocator, smatrix: anytype) !Matrix(T) {
-            var result = try Matrix(T).init(allocator, smatrix.rows, smatrix.cols);
-            for (0..smatrix.rows) |r| {
-                for (0..smatrix.cols) |c| {
-                    result.at(r, c).* = smatrix.at(r, c).*;
-                }
-            }
-            return result;
+            return smatrix.toMatrix(allocator);
         }
     };
 }
@@ -1610,7 +1515,7 @@ test "matrix surfaces errors at the source op" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var singular = try Matrix(f64).init(alloc, 2, 2);
+    var singular: Matrix(f64) = try .init(alloc, 2, 2);
     defer singular.deinit();
     singular.at(0, 0).* = 1;
     singular.at(0, 1).* = 2;
@@ -1621,9 +1526,9 @@ test "matrix surfaces errors at the source op" {
     try expectError(MatrixError.Singular, singular.inverse());
 
     // Dimension mismatch surfaces from the failing op directly.
-    var a = try Matrix(f64).initAll(alloc, 2, 3, 1.0);
+    var a: Matrix(f64) = try .initAll(alloc, 2, 3, 1.0);
     defer a.deinit();
-    var b = try Matrix(f64).initAll(alloc, 3, 2, 1.0);
+    var b: Matrix(f64) = try .initAll(alloc, 3, 2, 1.0);
     defer b.deinit();
     try expectError(MatrixError.DimensionMismatch, a.add(b));
     try expectError(MatrixError.DimensionMismatch, a.sub(b));
@@ -1639,7 +1544,7 @@ test "matrix elementNorm invalid exponent" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
-    var m = try Matrix(f64).init(arena.allocator(), 1, 1);
+    var m: Matrix(f64) = try .init(arena.allocator(), 1, 1);
     defer m.deinit();
     m.at(0, 0).* = 1.0;
 
@@ -1652,7 +1557,7 @@ test "dynamic matrix format" {
     defer arena.deinit();
 
     // Test dynamic Matrix formatting
-    var dm = try Matrix(f32).init(arena.allocator(), 2, 2);
+    var dm: Matrix(f32) = try .init(arena.allocator(), 2, 2);
     dm.at(0, 0).* = 3.14159;
     dm.at(0, 1).* = -2.71828;
     dm.at(1, 0).* = 1.41421;
@@ -1703,7 +1608,7 @@ test "dynamic matrix format" {
 
 test "Matrix(T).sumRows and sumCols" {
     const allocator = std.testing.allocator;
-    var a = try Matrix(f64).init(allocator, 2, 3);
+    var a: Matrix(f64) = try .init(allocator, 2, 3);
     defer a.deinit();
     a.at(0, 0).* = 1;
     a.at(0, 1).* = 2;
@@ -1730,9 +1635,9 @@ test "Matrix(T).sumRows and sumCols" {
 
 test "Matrix(T).By operations (in-place)" {
     const allocator = std.testing.allocator;
-    var a = try Matrix(f64).initAll(allocator, 2, 2, 10.0);
+    var a: Matrix(f64) = try .initAll(allocator, 2, 2, 10.0);
     defer a.deinit();
-    var b = try Matrix(f64).initAll(allocator, 2, 2, 5.0);
+    var b: Matrix(f64) = try .initAll(allocator, 2, 2, 5.0);
     defer b.deinit();
 
     try a.addBy(b);
@@ -1785,7 +1690,7 @@ test "Matrix fromSlice" {
     const data = [_]f64{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
 
     // Test successful initialization (2x3)
-    var mat = try Matrix(f64).fromSlice(arena.allocator(), 2, 3, &data);
+    var mat: Matrix(f64) = try .fromSlice(arena.allocator(), 2, 3, &data);
     defer mat.deinit();
 
     try expectEqual(@as(u32, 2), mat.rows);

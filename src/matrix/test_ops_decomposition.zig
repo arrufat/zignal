@@ -170,7 +170,7 @@ test "Matrix QR decomposition" {
     }
 
     // Verify A * P = Q * R (with column pivoting)
-    var qr_product = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var qr_product: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     defer qr_product.deinit();
     @memset(qr_product.items, 0);
 
@@ -183,7 +183,7 @@ test "Matrix QR decomposition" {
     }
 
     // Apply permutation: A * P should equal Q * R
-    var ap = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var ap: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     defer ap.deinit();
 
     // Apply permutation: A * P = Q * R
@@ -262,7 +262,7 @@ test "Matrix QR decomposition" {
     // try std.testing.expect(@abs(qr_result.r.at(1, 1).*) >= @abs(qr_result.r.at(2, 2).*));
 
     // Test rectangular matrix (4x3) with linearly independent columns
-    var rect_mat = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var rect_mat: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     rect_mat.at(0, 0).* = 1.0;
     rect_mat.at(0, 1).* = 0.0;
     rect_mat.at(0, 2).* = 0.0;
@@ -286,7 +286,7 @@ test "Matrix QR decomposition" {
     try expectEqual(@as(usize, 3), rect_qr.r.cols);
 
     // Verify A * P = Q * R for rectangular matrix
-    var rect_product = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var rect_product: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     defer rect_product.deinit();
     @memset(rect_product.items, 0);
 
@@ -299,7 +299,7 @@ test "Matrix QR decomposition" {
     }
 
     // Apply permutation to columns of rectangular matrix
-    var rect_ap = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var rect_ap: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     defer rect_ap.deinit();
 
     for (0..4) |i| {
@@ -332,7 +332,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
 
     // Create a rank-deficient 4x3 matrix (rank 2)
     // Third column is exactly the sum of first two columns
-    var mat = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var mat: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     mat.at(0, 0).* = 1.0;
     mat.at(0, 1).* = 2.0;
     mat.at(0, 2).* = 3.0; // 1 + 2
@@ -357,7 +357,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
     try std.testing.expect(@abs(qr_result.r.at(2, 2).*) < eps);
 
     // Verify A * P = Q * R still holds
-    var qr_product = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var qr_product: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     defer qr_product.deinit();
     @memset(qr_product.items, 0);
 
@@ -370,7 +370,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
     }
 
     // Apply permutation
-    var ap = try Matrix(f64).init(arena.allocator(), 4, 3);
+    var ap: Matrix(f64) = try .init(arena.allocator(), 4, 3);
     defer ap.deinit();
 
     for (0..4) |i| {
@@ -397,7 +397,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
     try std.testing.expect(deficient_relative_error < 1e-10);
 
     // Test with zero matrix (rank 0)
-    const zero_mat = try Matrix(f64).initAll(arena.allocator(), 3, 3, 0);
+    const zero_mat: Matrix(f64) = try .initAll(arena.allocator(), 3, 3, 0);
 
     var zero_qr = try zero_mat.qr();
     defer zero_qr.deinit();
@@ -411,7 +411,7 @@ test "Matrix rank computation" {
     defer arena.deinit();
 
     // Test 1: Full rank matrix
-    var full_rank = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var full_rank: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     full_rank.at(0, 0).* = 1.0;
     full_rank.at(0, 1).* = 2.0;
     full_rank.at(0, 2).* = 3.0;
@@ -426,7 +426,7 @@ test "Matrix rank computation" {
 
     // Test 2: Rank deficient matrix (rank 1)
     // All columns are multiples of the first column
-    var rank_1 = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var rank_1: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     rank_1.at(0, 0).* = 1.0;
     rank_1.at(0, 1).* = 2.0; // 2 * col0
     rank_1.at(0, 2).* = 3.0; // 3 * col0
@@ -440,7 +440,7 @@ test "Matrix rank computation" {
     try expectEqual(@as(usize, 1), try rank_1.rank());
 
     // Test 2b: Rank 2 matrix
-    var rank_2 = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var rank_2: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     rank_2.at(0, 0).* = 1.0;
     rank_2.at(0, 1).* = 0.0;
     rank_2.at(0, 2).* = 1.0; // col2 = col0
@@ -454,11 +454,11 @@ test "Matrix rank computation" {
     try expectEqual(@as(usize, 2), try rank_2.rank());
 
     // Test 3: Zero matrix (rank 0)
-    const zero_mat = try Matrix(f64).initAll(arena.allocator(), 4, 3, 0);
+    const zero_mat: Matrix(f64) = try .initAll(arena.allocator(), 4, 3, 0);
     try expectEqual(@as(usize, 0), try zero_mat.rank());
 
     // Test 4: Rectangular matrix with rank deficiency
-    var rect_mat = try Matrix(f64).init(arena.allocator(), 5, 3);
+    var rect_mat: Matrix(f64) = try .init(arena.allocator(), 5, 3);
     // Make columns 0 and 1 independent, column 2 = column0 + column1
     rect_mat.at(0, 0).* = 1.0;
     rect_mat.at(0, 1).* = 0.0;
@@ -479,18 +479,18 @@ test "Matrix rank computation" {
     try expectEqual(@as(usize, 2), try rect_mat.rank());
 
     // Test 5: Single element matrix
-    const single = try Matrix(f64).initAll(arena.allocator(), 1, 1, 5.0);
+    const single: Matrix(f64) = try .initAll(arena.allocator(), 1, 1, 5.0);
     try expectEqual(@as(usize, 1), try single.rank());
 
     // Test 6: Column vector
-    var col_vec = try Matrix(f64).init(arena.allocator(), 5, 1);
+    var col_vec: Matrix(f64) = try .init(arena.allocator(), 5, 1);
     for (0..5) |i| {
         col_vec.at(i, 0).* = @floatFromInt(i + 1);
     }
     try expectEqual(@as(usize, 1), try col_vec.rank());
 
     // Test 7: Row vector
-    var row_vec = try Matrix(f64).init(arena.allocator(), 1, 5);
+    var row_vec: Matrix(f64) = try .init(arena.allocator(), 1, 5);
     for (0..5) |i| {
         row_vec.at(0, i).* = @floatFromInt(i + 1);
     }
@@ -503,7 +503,7 @@ test "Matrix Cholesky decomposition" {
     const MatrixError = @import("Matrix.zig").MatrixError;
 
     // Test 3x3 symmetric positive-definite matrix
-    var mat = try Matrix(f64).init(arena.allocator(), 3, 3);
+    var mat: Matrix(f64) = try .init(arena.allocator(), 3, 3);
     // A = L * L^T
     // L = [[2, 0, 0], [1, 2, 0], [1, 1, 2]]
     // A = [[4, 2, 2], [2, 5, 3], [2, 3, 6]]
@@ -527,7 +527,7 @@ test "Matrix Cholesky decomposition" {
         1.0, 2.0, 0.0,
         1.0, 1.0, 2.0,
     };
-    var expected_l = try Matrix(f64).fromSlice(arena.allocator(), 3, 3, &expected_l_data);
+    var expected_l: Matrix(f64) = try .fromSlice(arena.allocator(), 3, 3, &expected_l_data);
     defer expected_l.deinit();
 
     for (0..3) |i| {
@@ -549,7 +549,7 @@ test "Matrix Cholesky decomposition" {
     }
 
     // Test non-positive definite matrix
-    var non_spd = try Matrix(f64).init(arena.allocator(), 2, 2);
+    var non_spd: Matrix(f64) = try .init(arena.allocator(), 2, 2);
     non_spd.at(0, 0).* = 1.0;
     non_spd.at(0, 1).* = 2.0;
     non_spd.at(1, 0).* = 2.0;

@@ -273,9 +273,11 @@ fn runGit(b: *std.Build, args: []const []const u8) ?[]const u8 {
 }
 
 /// Translate Python.h via the build system, import it as `c`, and wire up
-/// linking against libpython. `python_lib` is the default pkg-config/system
-/// library name ("python3" for extension modules, "python3-embed" for
-/// embedding executables) and can be overridden with `PYTHON_LIB_NAME`.
+/// linking against libpython where required (embedding executables always,
+/// extension modules only on Windows). `python_lib` is the default
+/// pkg-config/system library name ("python3" for extension modules,
+/// "python3-embed" for embedding executables) and can be overridden with
+/// `PYTHON_LIB_NAME`.
 fn linkPython(
     b: *Build,
     artifact: *Build.Step.Compile,
@@ -305,6 +307,14 @@ fn linkPython(
     root.addImport("c", tc.createModule());
 
     root.link_libc = true;
+
+    // Extension modules must not link libpython: their Python symbols bind to
+    // the loading interpreter (`-undefined dynamic_lookup` on Mach-O).
+    // Windows is the exception: extensions there must link pythonXY.lib.
+    if (artifact.isDynamicLibrary() and !is_windows) {
+        artifact.linker_allow_shlib_undefined = true;
+        return;
+    }
 
     // On Windows the env vars below are normally set by setup.py / CI; fall back
     // to the interpreter so `zig build python-stubs` also works standalone.

@@ -16,10 +16,6 @@ fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, va
 
 /// Generic matrix formatting function that works with both SMatrix and Matrix
 pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *Io.Writer) !void {
-    const MatrixType = @TypeOf(matrix);
-
-    // Matrix has allocator field, SMatrix doesn't
-    const is_smatrix = !@hasField(MatrixType, "allocator");
     const rows = matrix.rows;
     const cols = matrix.cols;
 
@@ -33,7 +29,7 @@ pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *I
         for (0..max_cols) |c| {
             // Create a temporary buffer to measure the width of this element
             var temp_buf: [64]u8 = undefined;
-            const value = if (is_smatrix) matrix.items[r][c] else matrix.at(r, c).*;
+            const value = matrix.at(r, c).*;
             const formatted = formatNumber(@TypeOf(value), &temp_buf, number_fmt, value);
             col_widths[c] = @max(col_widths[c], formatted.len);
         }
@@ -42,20 +38,17 @@ pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *I
     // Second pass: format and write the matrix with proper alignment
     for (0..rows) |r| {
         try writer.writeAll("[ ");
-        for (0..@min(cols, max_cols)) |c| {
+        for (0..max_cols) |c| {
             // Format the number
             var temp_buf: [64]u8 = undefined;
-            const value = if (is_smatrix) matrix.items[r][c] else matrix.at(r, c).*;
+            const value = matrix.at(r, c).*;
             const formatted = formatNumber(@TypeOf(value), &temp_buf, number_fmt, value);
 
             // Right-align the number within the column width
-            const padding = col_widths[c] -| formatted.len;
-            for (0..padding) |_| {
-                try writer.writeAll(" ");
-            }
+            try writer.splatByteAll(' ', col_widths[c] -| formatted.len);
             try writer.writeAll(formatted);
 
-            if (c < @min(cols, max_cols) - 1) {
+            if (c < max_cols - 1) {
                 try writer.writeAll("  "); // Two spaces between columns
             }
         }
