@@ -43,11 +43,11 @@ pub const DisplayFormat = union(enum) {
     /// snaps that tint to a fixed/adaptive palette (see `quantize.PaletteMode`).
     braille: struct {
         /// Brightness threshold for on/off (0.0-1.0)
-        threshold: f32 = 0.39,
+        threshold: f32 = 0.5,
         /// Tint each cell with the average color of its lit dots
         color: bool = true,
         /// Snap each cell's tint to a quantized palette (null = 24-bit truecolor)
-        palette: ?quantize.PaletteMode = .{ .adaptive = .{ .max_colors = 256 } },
+        palette: ?quantize.PaletteMode = .{ .adaptive = .{ .max_colors = 32 } },
         /// Optional target width in pixels
         width: ?u32 = null,
         /// Optional target height in pixels
