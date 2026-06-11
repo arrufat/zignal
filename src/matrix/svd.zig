@@ -5,6 +5,9 @@ const Matrix = @import("Matrix.zig").Matrix;
 /// Controls the size and computation of the left singular vectors matrix (U) in SVD.
 pub const Mode = enum {
     /// Skip computation of U matrix entirely. Use when only singular values are needed.
+    ///
+    /// Note: For dynamic SVD, the returned U matrix is empty (0×0).
+    /// For static SVD, the returned U matrix is m×n with undefined contents.
     no_u,
     /// Compute only the first n columns of U (economy/thin SVD). Results in U being m×n.
     /// More memory efficient when m >> n.
@@ -47,7 +50,7 @@ pub const Options = struct {
 pub fn Result(comptime T: type) type {
     return struct {
         /// Left singular vectors matrix. Each column is a left singular vector.
-        /// Dimensions: m×m (full_u) or m×n (skinny_u)
+        /// Dimensions: m×m (full_u), m×n (skinny_u), or 0×0 (no_u)
         u: Matrix(T),
         /// Singular values in descending order as a column vector.
         /// These are the diagonal elements of the Σ matrix.
@@ -103,6 +106,11 @@ pub fn svd(
     defer e.deinit();
 
     const converged = kernel(a, &u, &v, &q, &e, options.with_v, options.mode);
+    if (options.mode == .no_u) {
+        const empty_u: Matrix(T) = try .init(allocator, 0, 0);
+        u.deinit();
+        u = empty_u;
+    }
     return .{ .u = u, .s = q, .v = v, .converged = converged };
 }
 
@@ -156,6 +164,9 @@ pub fn kernel(
     }
     const T = @TypeOf(a.at(0, 0).*);
     comptime {
+        if (@typeInfo(T) != .float) {
+            @compileError("svd kernel: element type must be a floating point type, got " ++ @typeName(T));
+        }
         assertSameElem("u", T, @TypeOf(u.at(0, 0).*));
         assertSameElem("v", T, @TypeOf(v.at(0, 0).*));
         assertSameElem("q", T, @TypeOf(q.at(0, 0).*));
@@ -549,6 +560,8 @@ test "svd modes" {
     // Test no_u mode
     var res_no_u = try a.svd(allocator, .{ .with_v = true, .mode = .no_u });
     defer res_no_u.deinit();
+    try std.testing.expectEqual(@as(u32, 0), res_no_u.u.rows);
+    try std.testing.expectEqual(@as(u32, 0), res_no_u.u.cols);
     const s_no_u = &res_no_u.s;
 
     // Test skinny_u mode
