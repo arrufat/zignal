@@ -1,6 +1,7 @@
 # Zig build artifacts
 .zig-cache/
 zig-out/
+zig-pkg/
 
 # Python bindings build artifacts
 bindings/python/build/
