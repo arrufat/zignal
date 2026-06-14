@@ -10,6 +10,7 @@
 //! Run with:  zig build run-optimization-example
 
 const std = @import("std");
+const Io = std.Io;
 
 const zignal = @import("zignal");
 const GlobalOptimizer = zignal.GlobalOptimizer;
@@ -75,6 +76,12 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const gpa = debug_allocator.allocator();
 
+    // A thread-pool-backed Io drives the objective evaluations. Pass any std.Io implementation
+    // (e.g. Io.Threaded.global_single_threaded.io()) to run them inline instead.
+    var threaded = Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
     // ------------------------------------------------------------------------------------
     // 1. Rosenbrock — a smooth function whose minimizer we want to recover.
     //    dlib finds this with BFGS; here we find it globally, with no derivatives or start point.
@@ -82,7 +89,7 @@ pub fn main() !void {
     std.debug.print("== Rosenbrock (global minimum at (1, 1)) ==\n", .{});
     {
         const space = [_]Dimension{ .{ .lower = -5, .upper = 5 }, .{ .lower = -5, .upper = 5 } };
-        var res = try findGlobalOptimum(gpa, rosen, &space, 150, .min_default);
+        var res = try findGlobalOptimum(io, gpa, rosen, &space, 150, .min_default);
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});
@@ -100,7 +107,10 @@ pub fn main() !void {
             .{ .lower = -10, .upper = 10 },
             .{ .lower = -10, .upper = 10 },
         };
-        var res = try findGlobalOptimum(gpa, beLikeTarget, &space, 200, .min_default);
+        // `max_concurrency > 1` evaluates several candidates at once on the thread pool above. These
+        // toy objectives are too cheap to show a wall-clock win, but a costly thread-safe objective
+        // would scale across cores.
+        var res = try findGlobalOptimum(io, gpa, beLikeTarget, &space, 200, .{ .policy = .min, .max_concurrency = 4 });
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});

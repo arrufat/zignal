@@ -115,6 +115,54 @@ pub const UpperBound = struct {
         return ub;
     }
 
+    /// Nearest-neighbor `y` among the stored points (Euclidean over `x`). Used to impute a provisional
+    /// value for an in-flight ("pending") point so concurrent asks don't collapse onto it. Returns 0
+    /// when there are no points yet.
+    pub fn nearestY(self: *const UpperBound, x: []const f64) f64 {
+        const dims = self.dims;
+        var best_d: f64 = std.math.inf(f64);
+        var best_y: f64 = 0;
+        for (0..self.npoints) |i| {
+            const xi = self.xs[i * dims ..][0..dims];
+            var s: f64 = 0;
+            for (0..dims) |k| {
+                const d = x[k] - xi[k];
+                s += d * d;
+            }
+            if (s < best_d) {
+                best_d = s;
+                best_y = self.ys[i];
+            }
+        }
+        return best_y;
+    }
+
+    /// Like `evaluate`, but also lowers the bound near `npending` in-flight points (point p at
+    /// `pending_xs[p*dims..][0..dims]`, provisional value `pending_ys[p]`), reusing the current slopes
+    /// with a zero offset (no refit). The cheap read-only analogue of dlib's
+    /// `build_upper_bound_with_all_function_evals`.
+    pub fn evaluateWithPending(
+        self: *const UpperBound,
+        x: []const f64,
+        pending_xs: []const f64,
+        pending_ys: []const f64,
+        npending: usize,
+    ) f64 {
+        var ub = self.evaluate(x);
+        const dims = self.dims;
+        for (0..npending) |p| {
+            const xp = pending_xs[p * dims ..][0..dims];
+            var s: f64 = 0;
+            for (0..dims) |k| {
+                const d = x[k] - xp[k];
+                s += self.slopes[k] * d * d;
+            }
+            const local = pending_ys[p] + @sqrt(@max(0.0, s));
+            ub = @min(ub, local);
+        }
+        return ub;
+    }
+
     /// Fit `slopes` and `offsets` via the dual-coordinate-descent QP described in the file header.
     fn learnParams(self: *UpperBound) !void {
         const n = self.npoints;

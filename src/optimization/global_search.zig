@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const tr = @import("trust_region.zig");
@@ -64,6 +65,21 @@ pub const GlobalOptimizer = struct {
     pure_random_probability: f64,
     num_random_samples: usize,
     solver_epsilon: f64,
+    max_concurrency: usize,
+
+    // Parallel-path state (used only when max_concurrency > 1): one in-flight "slot" per worker,
+    // active between dispatch and record. Concurrent asks impute a nearest-neighbor value for active
+    // slots so they don't collapse onto one point; `pending_*` packs them for `evaluateWithPending`.
+    // All slots stay inactive on the sequential path, so `ask` behaves exactly as before.
+    // The `_x` arrays are flat row-major `max_concurrency * dims` (point i at `[i*dims..][0..dims]`);
+    // every other array holds one entry per slot (`max_concurrency`).
+    outstanding_x: []f64,
+    outstanding_y: []f64,
+    outstanding_predicted: []f64,
+    outstanding_move: []Move,
+    outstanding_active: []bool,
+    pending_x: []f64,
+    pending_y: []f64,
 
     /// One search dimension: its inclusive box bounds and whether it is integer-valued. Define the
     /// search space by passing a `[]const Dimension` (one per variable) to `init`/`findGlobalOptimum`.
@@ -80,6 +96,10 @@ pub const GlobalOptimizer = struct {
         pure_random_probability: f64 = 0.02,
         num_random_samples: usize = 5000,
         solver_epsilon: f64 = 0.0,
+        /// Maximum number of objective evaluations in flight at once. The default 1 is the plain
+        /// sequential algorithm; values > 1 enable a rolling worker pool in `optimize` (which needs a
+        /// pooled `Io` to actually run in parallel, and a thread-safe objective).
+        max_concurrency: usize = 1,
 
         /// Minimize, with default search settings.
         pub const min_default: Options = .{ .policy = .min };
@@ -146,6 +166,23 @@ pub const GlobalOptimizer = struct {
         const scratch = try allocator.alloc(f64, dims);
         errdefer allocator.free(scratch);
 
+        const mc = @max(@as(usize, 1), options.max_concurrency);
+        const outstanding_x = try allocator.alloc(f64, mc * dims);
+        errdefer allocator.free(outstanding_x);
+        const outstanding_y = try allocator.alloc(f64, mc);
+        errdefer allocator.free(outstanding_y);
+        const outstanding_predicted = try allocator.alloc(f64, mc);
+        errdefer allocator.free(outstanding_predicted);
+        const outstanding_move = try allocator.alloc(Move, mc);
+        errdefer allocator.free(outstanding_move);
+        const outstanding_active = try allocator.alloc(bool, mc);
+        errdefer allocator.free(outstanding_active);
+        @memset(outstanding_active, false);
+        const pending_x = try allocator.alloc(f64, mc * dims);
+        errdefer allocator.free(pending_x);
+        const pending_y = try allocator.alloc(f64, mc);
+        errdefer allocator.free(pending_y);
+
         const upper_bound: UpperBound = try .init(allocator, dims, .{
             .relative_noise_magnitude = options.relative_noise_magnitude,
         });
@@ -166,6 +203,14 @@ pub const GlobalOptimizer = struct {
             .pure_random_probability = options.pure_random_probability,
             .num_random_samples = options.num_random_samples,
             .solver_epsilon = options.solver_epsilon,
+            .max_concurrency = mc,
+            .outstanding_x = outstanding_x,
+            .outstanding_y = outstanding_y,
+            .outstanding_predicted = outstanding_predicted,
+            .outstanding_move = outstanding_move,
+            .outstanding_active = outstanding_active,
+            .pending_x = pending_x,
+            .pending_y = pending_y,
         };
     }
 
@@ -174,6 +219,13 @@ pub const GlobalOptimizer = struct {
         self.allocator.free(self.best_x);
         self.allocator.free(self.last_x);
         self.allocator.free(self.scratch);
+        self.allocator.free(self.outstanding_x);
+        self.allocator.free(self.outstanding_y);
+        self.allocator.free(self.outstanding_predicted);
+        self.allocator.free(self.outstanding_move);
+        self.allocator.free(self.outstanding_active);
+        self.allocator.free(self.pending_x);
+        self.allocator.free(self.pending_y);
         self.upper_bound.deinit();
     }
 
@@ -203,26 +255,84 @@ pub const GlobalOptimizer = struct {
         };
     }
 
-    /// Run `step()` until the budget is spent, a target is reached, or improvement stalls.
-    pub fn optimize(self: *GlobalOptimizer, objective: anytype, stop: StopOptions) !Evaluation {
-        var since_improve: usize = 0;
-        var prev_best = self.best_y;
-        while (self.evals < stop.max_evals) {
-            _ = try self.step(objective);
-            const cur = self.best_y.?; // step() always records, so a best now exists
-            if (stop.target) |t| {
-                if (cur >= self.sign * t) break;
+    /// Run the ask-tell loop until the budget is spent, a target is reached, or improvement stalls.
+    ///
+    /// `io` runs the objective evaluations: single-threaded inline, or up to `Options.max_concurrency`
+    /// in parallel on a pooled `Io`. **With `max_concurrency > 1` the objective is called from several
+    /// threads at once (must be thread-safe) and runs are non-deterministic;** `max_concurrency == 1`
+    /// is the deterministic sequential path and ignores `io`.
+    pub fn optimize(self: *GlobalOptimizer, io: Io, objective: anytype, stop: StopOptions) !Evaluation {
+        if (self.max_concurrency <= 1) {
+            var state: StopState = .{ .prev_best = self.best_y };
+            while (self.evals < stop.max_evals) {
+                _ = try self.step(objective);
+                if (self.shouldStop(stop, self.best_y.?, &state)) break;
             }
-            if (stop.patience) |pat| {
-                if (prev_best == null or cur > prev_best.?) {
-                    prev_best = cur;
-                    since_improve = 0;
-                } else {
-                    since_improve += 1;
-                    if (since_improve >= pat) break;
+            return self.best();
+        }
+
+        // Rolling pool: `max_concurrency` workers each loop ask -> evaluate -> record under one mutex,
+        // released only across the objective call so the evaluations run concurrently.
+        const obj_arg = switch (@typeInfo(@TypeOf(objective))) {
+            .@"fn" => &objective, // bare fn -> *const fn: storable in the worker's args tuple
+            else => objective,
+        };
+        const ObjArg = @TypeOf(obj_arg);
+
+        const Shared = struct {
+            mutex: Io.Mutex = .init,
+            dispatched: usize = 0,
+            stopped: bool = false,
+            err: ?anyerror = null,
+            state: StopState,
+        };
+
+        const Worker = struct {
+            fn run(opt: *GlobalOptimizer, w_io: Io, obj: ObjArg, sh: *Shared, slot: usize, st: StopOptions) void {
+                const dims = opt.space.len;
+                while (true) {
+                    sh.mutex.lockUncancelable(w_io);
+                    if (sh.stopped or sh.err != null or sh.dispatched >= st.max_evals) {
+                        sh.mutex.unlock(w_io);
+                        return;
+                    }
+                    const a = opt.ask() catch |e| {
+                        sh.err = e;
+                        sh.mutex.unlock(w_io);
+                        return;
+                    };
+                    const xslot = opt.outstanding_x[slot * dims ..][0..dims];
+                    @memcpy(xslot, opt.last_x);
+                    opt.outstanding_y[slot] = opt.upper_bound.nearestY(xslot);
+                    opt.outstanding_move[slot] = a.move;
+                    opt.outstanding_predicted[slot] = a.predicted;
+                    opt.outstanding_active[slot] = true;
+                    sh.dispatched += 1;
+                    sh.mutex.unlock(w_io);
+
+                    const y_raw = callObjective(obj, xslot); // evaluated without the lock held
+
+                    sh.mutex.lockUncancelable(w_io);
+                    opt.outstanding_active[slot] = false;
+                    opt.record(xslot, opt.sign * y_raw, opt.outstanding_move[slot], opt.outstanding_predicted[slot]) catch |e| {
+                        sh.err = e;
+                        sh.mutex.unlock(w_io);
+                        return;
+                    };
+                    opt.evals += 1;
+                    if (opt.shouldStop(st, opt.best_y.?, &sh.state)) sh.stopped = true;
+                    sh.mutex.unlock(w_io);
                 }
             }
+        };
+
+        var shared: Shared = .{ .state = .{ .prev_best = self.best_y } };
+        var group: Io.Group = .init;
+        for (0..self.max_concurrency) |slot| {
+            group.async(io, Worker.run, .{ self, io, obj_arg, &shared, slot, stop });
         }
+        group.await(io) catch {};
+        if (shared.err) |e| return e;
         return self.best();
     }
 
@@ -237,19 +347,63 @@ pub const GlobalOptimizer = struct {
         predicted: f64 = 0,
     };
 
-    /// Choose the next point to evaluate, writing it into `self.last_x`. Port of `get_next_x`.
-    fn ask(self: *GlobalOptimizer) !Ask {
-        const n = self.upper_bound.numPoints();
-        const init_budget = @max(@as(usize, 3), self.space.len);
+    // Patience/target stop bookkeeping, shared by both `optimize` paths.
+    const StopState = struct { prev_best: ?f64, since_improve: usize = 0 };
 
-        // Initial design: first point at the box center, then random until the budget is filled.
-        if (n < init_budget) {
-            if (n == 0) self.centerVector(self.last_x) else self.randomVector(self.last_x);
+    /// Whether `cur` (the internal-sign best) trips `stop`'s target or patience, updating `state`.
+    fn shouldStop(self: *const GlobalOptimizer, stop: StopOptions, cur: f64, state: *StopState) bool {
+        if (stop.target) |t| {
+            if (cur >= self.sign * t) return true;
+        }
+        if (stop.patience) |pat| {
+            if (state.prev_best == null or cur > state.prev_best.?) {
+                state.prev_best = cur;
+                state.since_improve = 0;
+            } else {
+                state.since_improve += 1;
+                if (state.since_improve >= pat) return true;
+            }
+        }
+        return false;
+    }
+
+    /// Choose the next point to evaluate, writing it into `self.last_x`. Port of `get_next_x`.
+    ///
+    /// In-flight ("pending") points from concurrent workers count towards the init budget and the
+    /// one-trust-region-at-a-time rule, and lower the surrogate near themselves so two asks don't pick
+    /// the same spot. With none in flight (the sequential path) this is the original behavior.
+    fn ask(self: *GlobalOptimizer) !Ask {
+        const dims = self.space.len;
+
+        // Pack the active in-flight points into `pending_*` and note any outstanding trust-region step.
+        var npending: usize = 0;
+        var tr_outstanding = false;
+        for (0..self.outstanding_active.len) |j| {
+            if (!self.outstanding_active[j]) continue;
+            @memcpy(self.pending_x[npending * dims ..][0..dims], self.outstanding_x[j * dims ..][0..dims]);
+            self.pending_y[npending] = self.outstanding_y[j];
+            if (self.outstanding_move[j] == .exploit) tr_outstanding = true;
+            npending += 1;
+        }
+
+        const real_n = self.upper_bound.numPoints();
+        const init_budget = @max(@as(usize, 3), dims);
+
+        // Initial design: box center first, then random until the budget is filled. Pending points
+        // count, so concurrent workers don't all flood the box with init samples.
+        if (real_n + npending < init_budget) {
+            if (real_n + npending == 0) self.centerVector(self.last_x) else self.randomVector(self.last_x);
             return .{ .move = .init };
         }
 
-        // Exploit: local quadratic trust-region step.
-        if (self.do_trust_region_step and n > self.space.len + 1) {
+        // No recorded points yet (only in-flight ones): nothing to fit or bound against, so go random.
+        if (real_n == 0) {
+            self.randomVector(self.last_x);
+            return .{ .move = .random };
+        }
+
+        // Exploit: local quadratic trust-region step (skipped if one is already in flight).
+        if (self.do_trust_region_step and !tr_outstanding and real_n > dims + 1) {
             const predicted = try self.pickTrustRegion();
             if (predicted > self.solver_epsilon) {
                 self.do_trust_region_step = false;
@@ -260,7 +414,7 @@ pub const GlobalOptimizer = struct {
         // Explore: maximize the Lipschitz upper bound (with a small pure-random probability).
         self.do_trust_region_step = true;
         if (self.prng.random().float(f64) >= self.pure_random_probability) {
-            if (self.pickMaxUpperBound()) {
+            if (self.pickMaxUpperBound(self.pending_x, self.pending_y, npending)) {
                 return .{ .move = .explore };
             }
         }
@@ -304,8 +458,9 @@ pub const GlobalOptimizer = struct {
 
     /// Random search for the point maximizing the upper bound; writes the best into `self.last_x`.
     /// Returns whether that point's bound exceeds the best observed value (i.e. it's worth exploring).
-    /// Port of `pick_next_sample_as_max_upper_bound`.
-    fn pickMaxUpperBound(self: *GlobalOptimizer) bool {
+    /// `pending_x`/`pending_y` are the `npending` in-flight points whose imputed values tighten the
+    /// bound near themselves (0 in the sequential case). Port of `pick_next_sample_as_max_upper_bound`.
+    fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, npending: usize) bool {
         // Hoist the SoA columns and RNG handle out of the (num_random_samples-iteration) loop.
         const s = self.space.slice();
         const lower = s.items(.lower);
@@ -317,7 +472,7 @@ pub const GlobalOptimizer = struct {
         var rounds: usize = 0;
         while (rounds < self.num_random_samples) : (rounds += 1) {
             sampleInBox(self.scratch, lower, upper, is_integer, r);
-            const b = self.upper_bound.evaluate(self.scratch);
+            const b = self.upper_bound.evaluateWithPending(self.scratch, pending_x, pending_y, npending);
             if (b > best_ub) {
                 best_ub = b;
                 @memcpy(self.last_x, self.scratch);
@@ -486,10 +641,12 @@ fn norm(a: []const f64) f64 {
 // ---------------------------------------------------------------------------------------
 
 /// Optimize `objective` over `dimensions` (one `Dimension` per variable) using up to `max_evals`
-/// function evaluations. `options` is the same `GlobalOptimizer.Options` the struct API takes — pass
-/// `.min_default` or `.max_default` (or a full literal). The returned `Evaluation` owns its `x`;
-/// free it via `result.deinit(allocator)`.
+/// function evaluations. `io` runs the evaluations (single-threaded inline, or parallel on a pooled
+/// `Io` when `options.max_concurrency > 1`). `options` is the same `GlobalOptimizer.Options` the struct
+/// API takes — pass `.min_default` or `.max_default` (or a full literal). The returned `Evaluation`
+/// owns its `x`; free it via `result.deinit(allocator)`.
 pub fn findGlobalOptimum(
+    io: Io,
     allocator: Allocator,
     objective: anytype,
     dimensions: []const GlobalOptimizer.Dimension,
@@ -498,7 +655,7 @@ pub fn findGlobalOptimum(
 ) !GlobalOptimizer.Evaluation {
     var opt = try GlobalOptimizer.init(allocator, dimensions, options);
     defer opt.deinit();
-    const b = try opt.optimize(objective, .{ .max_evals = max_evals });
+    const b = try opt.optimize(io, objective, .{ .max_evals = max_evals });
     const x = try allocator.dupe(f64, b.x);
     return .{ .x = x, .y = b.y };
 }
@@ -528,8 +685,9 @@ fn box2(lo: f64, hi: f64) [2]GlobalOptimizer.Dimension {
 
 test "findGlobalOptimum: shifted bowl (maximize)" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-2, 2);
-    var res = try findGlobalOptimum(allocator, negShiftedBowl, &space, 80, .max_default);
+    var res = try findGlobalOptimum(io, allocator, negShiftedBowl, &space, 80, .max_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
@@ -538,8 +696,9 @@ test "findGlobalOptimum: shifted bowl (maximize)" {
 
 test "findGlobalOptimum: shifted bowl (minimize)" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-2, 2);
-    var res = try findGlobalOptimum(allocator, shiftedBowl, &space, 80, .min_default);
+    var res = try findGlobalOptimum(io, allocator, shiftedBowl, &space, 80, .min_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
@@ -576,10 +735,11 @@ test "GlobalOptimizer: step() reports progress and is deterministic" {
 
 test "GlobalOptimizer: optimize() with target early-stop" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-5, 5);
     var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1 });
     defer opt.deinit();
-    const b = try opt.optimize(shiftedBowl, .{ .max_evals = 1000, .target = 1e-2 });
+    const b = try opt.optimize(io, shiftedBowl, .{ .max_evals = 1000, .target = 1e-2 });
     try std.testing.expect(b.y <= 1e-2);
     try std.testing.expect(opt.evals < 1000); // stopped early
 }
@@ -595,11 +755,12 @@ test "GlobalOptimizer: context-carrying objective via evaluate()" {
             return a * a + b * b;
         }
     };
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-3, 3);
     var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 3 });
     defer opt.deinit();
     const obj = Quadratic{ .cx = -1.2, .cy = 0.8 };
-    const b = try opt.optimize(obj, .{ .max_evals = 90 });
+    const b = try opt.optimize(io, obj, .{ .max_evals = 90 });
     try expectApproxEqAbs(@as(f64, -1.2), b.x[0], 2e-2);
     try expectApproxEqAbs(@as(f64, 0.8), b.x[1], 2e-2);
 }
@@ -618,12 +779,13 @@ test "GlobalOptimizer: integer variable converges to integer" {
         .{ .lower = 0, .upper = 6, .is_integer = true },
         .{ .lower = -2, .upper = 2 },
     };
+    const io = Io.Threaded.global_single_threaded.io();
     var opt = try GlobalOptimizer.init(allocator, &space, .{
         .policy = .min,
         .seed = 11,
     });
     defer opt.deinit();
-    const b = try opt.optimize(Obj.f, .{ .max_evals = 120 });
+    const b = try opt.optimize(io, Obj.f, .{ .max_evals = 120 });
     try expectApproxEqAbs(@as(f64, 3), b.x[0], 1e-9); // exactly integral
     try expectApproxEqAbs(@as(f64, 0.5), b.x[1], 5e-2);
 }
@@ -644,6 +806,7 @@ fn holderTable(x: []const f64) f64 {
 
 test "end-to-end: Rosenbrock valley (minimization)" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-2, 2);
     var opt = try GlobalOptimizer.init(allocator, &space, .{
         .policy = .min,
@@ -651,7 +814,7 @@ test "end-to-end: Rosenbrock valley (minimization)" {
         .num_random_samples = 600,
     });
     defer opt.deinit();
-    const b = try opt.optimize(rosenbrock, .{ .max_evals = 300 });
+    const b = try opt.optimize(io, rosenbrock, .{ .max_evals = 300 });
     try std.testing.expect(b.y < 1e-2);
     try expectApproxEqAbs(@as(f64, 1), b.x[0], 5e-2);
     try expectApproxEqAbs(@as(f64, 1), b.x[1], 5e-2);
@@ -659,6 +822,7 @@ test "end-to-end: Rosenbrock valley (minimization)" {
 
 test "end-to-end: Holder table (multimodal minimization)" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-10, 10);
     var opt = try GlobalOptimizer.init(allocator, &space, .{
         .policy = .min,
@@ -666,18 +830,106 @@ test "end-to-end: Holder table (multimodal minimization)" {
         .num_random_samples = 1000,
     });
     defer opt.deinit();
-    const b = try opt.optimize(holderTable, .{ .max_evals = 400 });
+    const b = try opt.optimize(io, holderTable, .{ .max_evals = 400 });
     // Reach one of the four global minima (~ -19.2085).
     try std.testing.expect(b.y < -19.0);
 }
 
 test "GlobalOptimizer: warm-start seeds the model" {
     const allocator = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
     const space = box2(-5, 5);
     var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 5 });
     defer opt.deinit();
     // Seed a point near the optimum.
     try opt.addEvaluation(.{ .x = &[_]f64{ 0.35, -0.45 }, .y = shiftedBowl(&[_]f64{ 0.35, -0.45 }) });
-    const b = try opt.optimize(shiftedBowl, .{ .max_evals = 60 });
+    const b = try opt.optimize(io, shiftedBowl, .{ .max_evals = 60 });
     try std.testing.expect(b.y < 1e-2);
 }
+
+test "GlobalOptimizer: parallel path with single-threaded Io (graceful fallback)" {
+    const allocator = std.testing.allocator;
+    // A single-threaded Io runs the workers inline, so max_concurrency > 1 still produces a correct
+    // result — it just doesn't run in parallel.
+    const io = Io.Threaded.global_single_threaded.io();
+    const space = box2(-2, 2);
+    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 4, .max_concurrency = 4 });
+    defer opt.deinit();
+    const b = try opt.optimize(io, shiftedBowl, .{ .max_evals = 120 });
+    try std.testing.expect(b.y < 1e-2);
+    try std.testing.expectEqual(@as(usize, 120), opt.evals);
+}
+
+test "GlobalOptimizer: parallel optimize on a thread pool" {
+    const allocator = std.testing.allocator;
+    var threaded = Io.Threaded.init(allocator, .{ .async_limit = .limited(8) });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    // A thread-safe objective: every concurrent call bumps a shared atomic counter.
+    const Counter = struct {
+        calls: *std.atomic.Value(usize),
+        fn evaluate(self: @This(), x: []const f64) f64 {
+            _ = self.calls.fetchAdd(1, .monotonic);
+            const a = x[0] - 0.3;
+            const b = x[1] + 0.4;
+            return a * a + b * b;
+        }
+    };
+    var calls = std.atomic.Value(usize).init(0);
+    const obj = Counter{ .calls = &calls };
+
+    const space = box2(-2, 2);
+    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 9, .max_concurrency = 8 });
+    defer opt.deinit();
+    const b = try opt.optimize(io, obj, .{ .max_evals = 200 });
+    try std.testing.expect(b.y < 1e-2);
+    // Exactly max_evals evaluations dispatched and recorded, with no double-counting or races.
+    try std.testing.expectEqual(@as(usize, 200), opt.evals);
+    try std.testing.expectEqual(@as(usize, 200), calls.load(.monotonic));
+}
+
+// test "BENCH parallel speedup" {
+//     const allocator = std.testing.allocator;
+//     const Expensive = struct {
+//         fn evaluate(_: @This(), x: []const f64) f64 {
+//             // Simulate a costly objective: ~2M flops of real work, kept by doNotOptimizeAway.
+//             var acc: f64 = 0;
+//             var i: usize = 0;
+//             while (i < 2_000_000) : (i += 1) acc += @sin(@as(f64, @floatFromInt(i)) * 1e-6 + x[0]);
+//             std.mem.doNotOptimizeAway(acc);
+//             const a = x[0] - 0.3;
+//             const b = x[1] + 0.4;
+//             return a * a + b * b;
+//         }
+//     };
+//     const obj = Expensive{};
+//     const space = box2(-2, 2);
+//     const max_evals = 96;
+
+//     var threaded = Io.Threaded.init(allocator, .{ .async_limit = .limited(8) });
+//     defer threaded.deinit();
+//     const io = threaded.io();
+
+//     // Serial baseline (max_concurrency = 1 takes the sequential fast-path and ignores the pool).
+//     const t0 = Io.Clock.Timestamp.now(io, .awake);
+//     {
+//         var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 1 });
+//         defer opt.deinit();
+//         _ = try opt.optimize(io, obj, .{ .max_evals = max_evals });
+//     }
+//     const serial_ns = t0.untilNow(io).raw.nanoseconds;
+
+//     // Parallel on the 8-thread pool.
+//     const t1 = Io.Clock.Timestamp.now(io, .awake);
+//     {
+//         var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 8 });
+//         defer opt.deinit();
+//         _ = try opt.optimize(io, obj, .{ .max_evals = max_evals });
+//     }
+//     const par_ns = t1.untilNow(io).raw.nanoseconds;
+
+//     const serial_ms = @as(f64, @floatFromInt(serial_ns)) / 1e6;
+//     const par_ms = @as(f64, @floatFromInt(par_ns)) / 1e6;
+//     std.debug.print("\n[BENCH] {d} evals, expensive objective, 8 cores:\n  serial (mc=1):  {d:.1} ms\n  parallel (mc=8): {d:.1} ms\n  speedup: {d:.2}x\n", .{ max_evals, serial_ms, par_ms, serial_ms / par_ms });
+// }
