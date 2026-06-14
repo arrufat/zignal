@@ -157,16 +157,10 @@ pub fn solveTrustRegionSubproblem(
         solveLowerT(m, n, tmp, p);
         const p_norm = norm(p);
 
-        if (lambda == 0) {
-            if (p_norm < radius) {
-                converged = true;
-                break;
-            }
-        } else {
-            if (@abs(p_norm - radius) / radius < eps) {
-                converged = true;
-                break;
-            }
+        const target_met = if (lambda == 0) p_norm < radius else @abs(p_norm - radius) / radius < eps;
+        if (target_met) {
+            converged = true;
+            break;
         }
 
         if (p_norm < radius) lambda_max = lambda else lambda_min = lambda;
@@ -282,15 +276,22 @@ pub fn solveTrustRegionSubproblemBounded(
         var max_violation: f64 = 0;
         var bounded_value: f64 = 0;
         for (0..cur) |i| {
-            if (!(lo[i] <= pp[i] and pp[i] <= hi[i])) {
-                if (lo[i] - pp[i] > max_violation) {
-                    max_violation = lo[i] - pp[i];
+            const val = pp[i];
+            const l = lo[i];
+            const h = hi[i];
+            if (val < l) {
+                const violation = l - val;
+                if (violation > max_violation) {
+                    max_violation = violation;
                     most = i;
-                    bounded_value = lo[i];
-                } else if (pp[i] - hi[i] > max_violation) {
-                    max_violation = pp[i] - hi[i];
+                    bounded_value = l;
+                }
+            } else if (val > h) {
+                const violation = val - h;
+                if (violation > max_violation) {
+                    max_violation = violation;
                     most = i;
-                    bounded_value = hi[i];
+                    bounded_value = h;
                 }
             }
         }

@@ -684,23 +684,32 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         /// Computes the inverse of self if it's a square matrix.
         pub fn inv(self: Self) ?Self {
             comptime assert(rows == cols);
-            const d = self.det();
-            if (d == 0) {
-                return null;
-            }
             var ans: Self = .{};
             switch (rows) {
-                1 => ans.items[0][0] = 1 / d,
+                1 => {
+                    const d = self.items[0][0];
+                    if (d == 0) return null;
+                    ans.items[0][0] = 1 / d;
+                },
                 2 => {
+                    const d = self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0];
+                    if (d == 0) return null;
                     ans.items[0][0] = self.items[1][1] / d;
                     ans.items[0][1] = -self.items[0][1] / d;
                     ans.items[1][0] = -self.items[1][0] / d;
                     ans.items[1][1] = self.items[0][0] / d;
                 },
                 3 => {
-                    ans.items[0][0] = (self.items[1][1] * self.items[2][2] - self.items[1][2] * self.items[2][1]) / d;
-                    ans.items[0][1] = (self.items[0][2] * self.items[2][1] - self.items[0][1] * self.items[2][2]) / d;
-                    ans.items[0][2] = (self.items[0][1] * self.items[1][2] - self.items[0][2] * self.items[1][1]) / d;
+                    const c00 = self.items[1][1] * self.items[2][2] - self.items[1][2] * self.items[2][1];
+                    const c01 = self.items[0][2] * self.items[2][1] - self.items[0][1] * self.items[2][2];
+                    const c02 = self.items[0][1] * self.items[1][2] - self.items[0][2] * self.items[1][1];
+
+                    const d = self.items[0][0] * c00 + self.items[1][0] * c01 + self.items[2][0] * c02;
+                    if (d == 0) return null;
+
+                    ans.items[0][0] = c00 / d;
+                    ans.items[0][1] = c01 / d;
+                    ans.items[0][2] = c02 / d;
                     ans.items[1][0] = (self.items[1][2] * self.items[2][0] - self.items[1][0] * self.items[2][2]) / d;
                     ans.items[1][1] = (self.items[0][0] * self.items[2][2] - self.items[0][2] * self.items[2][0]) / d;
                     ans.items[1][2] = (self.items[0][2] * self.items[1][0] - self.items[0][0] * self.items[1][2]) / d;

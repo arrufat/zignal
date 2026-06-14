@@ -26,20 +26,6 @@ pub const Assignment = struct {
     }
 };
 
-/// Multiplier mapping float costs onto i64: scales the largest-magnitude entry to ~1e12 so tiny
-/// costs keep their relative differences without overflowing the i64 padding sum. 1 for all-zero.
-fn findScaleFactor(comptime T: type, matrix: Matrix(T)) f64 {
-    if (@typeInfo(T) != .float) return 1;
-    var max_abs: f64 = 0;
-    for (0..matrix.rows) |i| {
-        for (0..matrix.cols) |j| {
-            max_abs = @max(max_abs, @abs(as(f64, matrix.at(i, j).*)));
-        }
-    }
-    if (max_abs == 0) return 1;
-    return 1e12 / max_abs;
-}
-
 /// Solves the assignment problem with the Hungarian (Kuhn-Munkres) algorithm in O(n³), handling
 /// square and rectangular cost matrices and either a `.min` or `.max` policy.
 pub fn solveAssignmentProblem(
@@ -56,21 +42,37 @@ pub fn solveAssignmentProblem(
     const n_cols = cost_matrix.cols;
     const n = @max(n_rows, n_cols);
 
-    const scale_factor = if (@typeInfo(T) == .float) findScaleFactor(T, cost_matrix) else 1;
+    var scale_factor: f64 = 1.0;
+    var padding_value: i64 = 1;
+
+    // Combine scaling and padding scans into a single pass
+    if (@typeInfo(T) == .float) {
+        var max_abs: f64 = 0;
+        var sum_abs: f64 = 0;
+        for (0..n_rows) |i| {
+            for (0..n_cols) |j| {
+                const val = @abs(as(f64, cost_matrix.at(i, j).*));
+                max_abs = @max(max_abs, val);
+                sum_abs += val;
+            }
+        }
+        if (max_abs > 0) {
+            scale_factor = 1e12 / max_abs;
+        }
+        padding_value = @as(i64, @intFromFloat(@ceil(sum_abs * scale_factor))) + 1;
+    } else {
+        var sum_abs: u64 = 0;
+        for (0..n_rows) |i| {
+            for (0..n_cols) |j| {
+                sum_abs += @abs(@as(i64, cost_matrix.at(i, j).*));
+            }
+        }
+        padding_value = @intCast(sum_abs + 1);
+    }
 
     // Create square working matrix - pad with large values
     var work = try allocator.alloc(i64, n * n);
     defer allocator.free(work);
-
-    // Find a large padding value (sum of all absolute values + 1)
-    var padding_value: i64 = 1;
-    for (0..n_rows) |i| {
-        for (0..n_cols) |j| {
-            const base_val = cost_matrix.at(i, j).*;
-            const abs_val = @abs(as(f64, base_val));
-            padding_value += @ceil(abs_val * scale_factor);
-        }
-    }
 
     // Initialize work matrix - convert all types to i64 with appropriate scaling for floats
     for (0..n) |i| {
@@ -133,18 +135,18 @@ pub fn solveAssignmentProblem(
     const col_covered = try allocator.alloc(bool, n);
     defer allocator.free(col_covered);
 
-    // Arrays for tracking marked cells and paths
-    // Using separate arrays instead of Matrix since Matrix requires float types
-    var starred = try allocator.alloc(bool, n * n);
-    defer allocator.free(starred);
-    var primed = try allocator.alloc(bool, n * n);
-    defer allocator.free(primed);
-    @memset(starred, false);
-    @memset(primed, false);
+    // Track primed column index for each row (replaces the O(n^2) primed matrix)
+    var row_primed = try allocator.alloc(?u32, n);
+    defer allocator.free(row_primed);
+    @memset(row_primed, null);
+
+    // Pre-allocated path buffer for constructAugmentingPath
+    const path = try allocator.alloc(PathNode, 2 * n);
+    defer allocator.free(path);
 
     // Initialize assignments
-    for (row_assignment) |*r| r.* = null;
-    for (col_assignment) |*c| c.* = null;
+    @memset(row_assignment, null);
+    @memset(col_assignment, null);
 
     // Step 1: Find initial zeros and create stars (assignments)
     for (0..n) |i| {
@@ -152,7 +154,6 @@ pub fn solveAssignmentProblem(
             if (work[i * n + j] == 0 and row_assignment[i] == null and col_assignment[j] == null) {
                 row_assignment[i] = @intCast(j);
                 col_assignment[j] = @intCast(i);
-                starred[i * n + j] = true; // Star the zero
             }
         }
     }
@@ -205,14 +206,10 @@ pub fn solveAssignmentProblem(
 
             if (found_zero) {
                 // Prime the zero
-                primed[zero_row * n + zero_col] = true;
+                row_primed[zero_row] = zero_col;
 
-                // Check if there's a starred zero in the same row
-                const star_col = for (0..n) |j| {
-                    if (starred[zero_row * n + j]) {
-                        break j;
-                    }
-                } else null;
+                // Check if there's a starred zero in the same row (O(1) lookup via row_assignment)
+                const star_col = row_assignment[zero_row];
 
                 if (star_col) |col| {
                     // Cover this row and uncover the star's column
@@ -221,10 +218,10 @@ pub fn solveAssignmentProblem(
                     // Continue loop to find next uncovered zero
                 } else {
                     // No starred zero in row, construct augmenting path
-                    try constructAugmentingPath(allocator, starred, primed, zero_row, zero_col, row_assignment, col_assignment, n);
+                    constructAugmentingPath(row_primed, zero_row, zero_col, row_assignment, col_assignment, path);
 
                     // Clear primes and break to restart from step 2
-                    @memset(primed, false);
+                    @memset(row_primed, null);
                     break;
                 }
             } else {
@@ -301,21 +298,17 @@ fn countAssignments(assignments: []const ?u32) u32 {
     return count;
 }
 
+const PathNode = struct { row: u32, col: u32 };
+
 fn constructAugmentingPath(
-    allocator: Allocator,
-    starred: []bool,
-    primed: []bool,
+    row_primed: []const ?u32,
     start_row: u32,
     start_col: u32,
     row_assignment: []?u32,
     col_assignment: []?u32,
-    n: u32,
-) !void {
+    path: []PathNode,
+) void {
     // Build augmenting path: alternating primed and starred zeros
-    // Path can have up to 2*n elements (alternating starred and primed)
-    const PathNode = struct { row: u32, col: u32 };
-    const path = try allocator.alloc(PathNode, 2 * @as(usize, n));
-    defer allocator.free(path);
     var path_len: u32 = 0;
 
     path[path_len] = .{ .row = start_row, .col = start_col };
@@ -323,26 +316,20 @@ fn constructAugmentingPath(
 
     var current_col = start_col;
     while (true) {
-        // Find starred zero in current column
-        const star_row = for (0..n) |i| {
-            if (starred[i * n + current_col]) break i;
-        } else null;
+        // Find starred zero in current column (O(1) lookup via col_assignment)
+        const star_row = col_assignment[current_col];
 
         if (star_row) |r| {
             // Add starred zero to path
-            path[path_len] = .{ .row = @intCast(r), .col = current_col };
+            path[path_len] = .{ .row = r, .col = current_col };
             path_len += 1;
 
-            // Find primed zero in this row
-            const prime_col = for (0..n) |j| {
-                if (primed[r * n + j]) break j;
-            } else null;
-
-            if (prime_col) |c| {
+            // Find primed zero in this row (O(1) lookup via row_primed)
+            if (row_primed[r]) |c| {
                 // Add primed zero to path
-                path[path_len] = .{ .row = @intCast(r), .col = @intCast(c) };
+                path[path_len] = .{ .row = r, .col = c };
                 path_len += 1;
-                current_col = @intCast(c);
+                current_col = c;
             } else {
                 break;
             }
@@ -351,23 +338,13 @@ fn constructAugmentingPath(
         }
     }
 
-    // Flip the path: star even indices (primed), unstar odd indices (starred)
+    // Flip the path: star even indices (primed), update assignments directly in O(path_len)
     for (0..path_len) |i| {
-        const r = path[i].row;
-        const c = path[i].col;
-        starred[r * n + c] = (i % 2) == 0;
-    }
-
-    // Update assignments based on starred zeros
-    for (row_assignment) |*r| r.* = null;
-    for (col_assignment) |*c| c.* = null;
-
-    for (0..n) |i| {
-        for (0..n) |j| {
-            if (starred[i * n + j]) {
-                row_assignment[i] = @intCast(j);
-                col_assignment[j] = @intCast(i);
-            }
+        if (i % 2 == 0) {
+            const r = path[i].row;
+            const c = path[i].col;
+            row_assignment[r] = c;
+            col_assignment[c] = r;
         }
     }
 }
@@ -465,4 +442,43 @@ test "Hungarian algorithm - tiny costs keep relative scale" {
     try expectEqual(@as(?u32, 1), result.assignments[1]);
     try expectEqual(@as(?u32, 0), result.assignments[2]);
     try expectApproxEqAbs(@as(f64, 10e-8), result.total_cost, 1e-15);
+}
+
+fn bruteForceAssignment(cost: Matrix(i32), n: usize, row: usize, used: *[8]bool, acc: i32, best: *i32, comptime is_max: bool) void {
+    if (row == n) {
+        best.* = if (is_max) @max(best.*, acc) else @min(best.*, acc);
+        return;
+    }
+    for (0..n) |col| {
+        if (used[col]) continue;
+        used[col] = true;
+        bruteForceAssignment(cost, n, row + 1, used, acc + cost.at(row, col).*, best, is_max);
+        used[col] = false;
+    }
+}
+
+test "Hungarian algorithm - matches brute force on random square matrices" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xA55E7);
+    const rand = prng.random();
+    for (1..7) |n| {
+        var trial: usize = 0;
+        while (trial < 30) : (trial += 1) {
+            var cost = try Matrix(i32).init(allocator, @intCast(n), @intCast(n));
+            defer cost.deinit();
+            for (0..n) |i| for (0..n) |j| {
+                cost.at(i, j).* = rand.intRangeAtMost(i32, 0, 50);
+            };
+
+            inline for (.{ false, true }) |is_max| {
+                var used: [8]bool = @splat(false);
+                var best: i32 = if (is_max) std.math.minInt(i32) else std.math.maxInt(i32);
+                bruteForceAssignment(cost, n, 0, &used, 0, &best, is_max);
+
+                var result = try solveAssignmentProblem(i32, allocator, cost, if (is_max) .max else .min);
+                defer result.deinit();
+                try expectEqual(@as(f64, @floatFromInt(best)), result.total_cost);
+            }
+        }
+    }
 }

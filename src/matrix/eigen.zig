@@ -238,17 +238,21 @@ test "eigh: rejects a non-square matrix" {
 
 test "eigh: huge Jacobi theta (tiny off-diagonal) stays finite and correct" {
     const allocator = std.testing.allocator;
-    // theta = 0.5*(2-1)/1e-20 ≈ 5e19; squaring that overflows f32 to +inf. The large-theta branch
-    // must keep t (and the eigenvalues) finite. The off-diagonal is negligible, so λ ≈ 1, 2.
+    // a(0,1) is tiny but a(0,2) is not, so the sweep enters the rotation loop and processes the
+    // (0,1) pair with theta ≈ 5e19 — which f32 overflows to +inf when squared. λ ≈ {2-√1.25, 2, 2+√1.25}.
     const off: f32 = 1e-20;
-    var a: Matrix(f32) = try .fromSlice(allocator, 2, 2, &.{ 1, off, off, 2 });
+    var a: Matrix(f32) = try .fromSlice(allocator, 3, 3, &.{
+        1,   off, 0.5,
+        off, 2,   0,
+        0.5, 0,   3,
+    });
     defer a.deinit();
     var eig = try eigh(f32, allocator, a);
     defer eig.deinit();
-    try std.testing.expect(std.math.isFinite(eig.values.at(0, 0).*));
-    try std.testing.expect(std.math.isFinite(eig.values.at(1, 0).*));
-    try expectApproxEqAbs(@as(f32, 1), eig.values.at(0, 0).*, 1e-5);
-    try expectApproxEqAbs(@as(f32, 2), eig.values.at(1, 0).*, 1e-5);
+    for (0..3) |i| try std.testing.expect(std.math.isFinite(eig.values.at(i, 0).*));
+    try expectApproxEqAbs(@as(f32, 0.881966), eig.values.at(0, 0).*, 1e-4);
+    try expectApproxEqAbs(@as(f32, 2), eig.values.at(1, 0).*, 1e-4);
+    try expectApproxEqAbs(@as(f32, 3.118034), eig.values.at(2, 0).*, 1e-4);
 }
 
 test "eigh: rejects non-finite entries instead of returning NaN eigenvalues" {

@@ -360,37 +360,46 @@ pub fn Matrix(comptime T: type) type {
 
             // Use analytical formulas for small matrices (more efficient)
             if (n <= 3) {
-                const d = try self.det();
-
-                if (@abs(d) < std.math.floatEps(T)) {
-                    return error.Singular;
-                }
-
-                var ans: Matrix(T) = try .init(self.allocator, n, n);
-
                 switch (n) {
-                    1 => ans.at(0, 0).* = 1 / d,
+                    1 => {
+                        const d = self.at(0, 0).*;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
+                        ans.at(0, 0).* = 1 / d;
+                        return ans;
+                    },
                     2 => {
+                        const d = self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
                         ans.at(0, 0).* = self.at(1, 1).* / d;
                         ans.at(0, 1).* = -self.at(0, 1).* / d;
                         ans.at(1, 0).* = -self.at(1, 0).* / d;
                         ans.at(1, 1).* = self.at(0, 0).* / d;
+                        return ans;
                     },
                     3 => {
-                        ans.at(0, 0).* = (self.at(1, 1).* * self.at(2, 2).* - self.at(1, 2).* * self.at(2, 1).*) / d;
-                        ans.at(0, 1).* = (self.at(0, 2).* * self.at(2, 1).* - self.at(0, 1).* * self.at(2, 2).*) / d;
-                        ans.at(0, 2).* = (self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*) / d;
+                        const c00 = self.at(1, 1).* * self.at(2, 2).* - self.at(1, 2).* * self.at(2, 1).*;
+                        const c01 = self.at(0, 2).* * self.at(2, 1).* - self.at(0, 1).* * self.at(2, 2).*;
+                        const c02 = self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*;
+
+                        const d = self.at(0, 0).* * c00 + self.at(1, 0).* * c01 + self.at(2, 0).* * c02;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
+                        ans.at(0, 0).* = c00 / d;
+                        ans.at(0, 1).* = c01 / d;
+                        ans.at(0, 2).* = c02 / d;
                         ans.at(1, 0).* = (self.at(1, 2).* * self.at(2, 0).* - self.at(1, 0).* * self.at(2, 2).*) / d;
                         ans.at(1, 1).* = (self.at(0, 0).* * self.at(2, 2).* - self.at(0, 2).* * self.at(2, 0).*) / d;
                         ans.at(1, 2).* = (self.at(0, 2).* * self.at(1, 0).* - self.at(0, 0).* * self.at(1, 2).*) / d;
                         ans.at(2, 0).* = (self.at(1, 0).* * self.at(2, 1).* - self.at(1, 1).* * self.at(2, 0).*) / d;
                         ans.at(2, 1).* = (self.at(0, 1).* * self.at(2, 0).* - self.at(0, 0).* * self.at(2, 1).*) / d;
                         ans.at(2, 2).* = (self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*) / d;
+                        return ans;
                     },
                     else => unreachable,
                 }
-
-                return ans;
             } else {
                 // Use Gauss-Jordan elimination for larger matrices
                 return self.inverseGaussJordan();
