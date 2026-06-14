@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Global Optimization</title>
+		<link rel="stylesheet" href="styles.css">
+		<link rel="icon" type="image/png" href="favicon.png">
+	</head>
+	<body>
+		<div class="header">
+			<h1>Global Optimization</h1>
+			<p>Derivative-free MaxLIPO + Trust Region search — zignal's <code>GlobalOptimizer</code>, a port of dlib's <code>find_min_global</code> — running in WebAssembly</p>
+		</div>
+
+		<div class="instructions">
+			Write a JavaScript objective, set the bounds for each input, then press <strong>Optimize</strong>
+			to watch the solver explore the space and home in on the optimum.
+		</div>
+
+		<div id="optimizer-layout">
+			<div id="optimizer-controls">
+				<fieldset>
+					<legend>Objective</legend>
+					<label for="preset">Example</label>
+					<select id="preset"></select>
+					<label for="fn-input">Receives <code>x</code> (an array of inputs); <code>return</code> a single number.</label>
+					<textarea id="fn-input" spellcheck="false" rows="6"></textarea>
+					<div id="fn-error" class="opt-error"></div>
+				</fieldset>
+
+				<fieldset>
+					<legend>Variables</legend>
+					<table id="bounds-table">
+						<thead>
+							<tr><th>name</th><th>lower</th><th>upper</th><th>int</th><th></th></tr>
+						</thead>
+						<tbody id="bounds-body"></tbody>
+					</table>
+					<button id="add-var" type="button" class="copy-button opt-small-btn">+ add variable</button>
+				</fieldset>
+
+				<fieldset>
+					<legend>Settings</legend>
+					<div class="param-grid">
+						<div>
+							<label for="policy">Goal</label>
+							<select id="policy">
+								<option value="0">Minimize</option>
+								<option value="1">Maximize</option>
+							</select>
+						</div>
+						<div>
+							<label for="max-evals">Max evaluations</label>
+							<input id="max-evals" type="number" min="1" value="200">
+						</div>
+						<div>
+							<label for="seed">Seed</label>
+							<input id="seed" type="number" min="0" value="0">
+						</div>
+						<div>
+							<label for="samples">Random samples</label>
+							<input id="samples" type="number" min="1" value="2000">
+						</div>
+					</div>
+					<label class="checkbox-inline-label"><input type="checkbox" id="animate" checked> Animate the search</label>
+				</fieldset>
+
+				<div class="opt-buttons">
+					<button id="run-button" disabled>Optimize</button>
+					<button id="step-button" disabled>Step</button>
+				</div>
+			</div>
+
+			<div id="optimizer-viz">
+				<canvas id="opt-canvas" width="480" height="480"></canvas>
+				<div class="opt-legend" id="opt-legend">Press Optimize to start.</div>
+				<div id="opt-expected"></div>
+				<div id="status">WASM loading…</div>
+				<div id="opt-results"></div>
+			</div>
+		</div>
+
+		<script src="global-optimization.js"></script>
+	</body>
+</html>

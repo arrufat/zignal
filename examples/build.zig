@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
         "metrics",
         "contrast_enhancement",
         "hough_animation",
+        "global_optimization",
     };
 
     // List of additional examples to build as executables
