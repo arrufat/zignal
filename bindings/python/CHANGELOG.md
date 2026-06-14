@@ -6,6 +6,9 @@
 - **BMP I/O**: `Image.load("foo.bmp")` and `Image.save("foo.bmp")` decode and encode BMP files. Decode covers indexed (1/4/8 bpp), 16/24/32 bpp, BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS / RLE4 / RLE8, both row orders. Encode writes 24bpp for Rgb images and 32bpp BI_BITFIELDS for Rgba.
 - **GIF I/O**: `Image.load("foo.gif")` and `Image.save("foo.gif")` work for single-frame GIFs (frame 0 of animated files is returned for `load`). The encoder uses median-cut quantization automatically and supports caller-supplied palettes.
 
+### Changed
+- **Matrix/Transform methods renamed to conventional short names** (breaking): `Matrix.inverse()` → `Matrix.inv()`, `Matrix.determinant()` → `Matrix.det()`, and `ProjectiveTransform.inverse()` → `ProjectiveTransform.inv()`. (`Matrix.pinv()` was already named.)
+
 ## [0.10.0] - 2026-04-15
 
 ### Added
