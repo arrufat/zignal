@@ -517,7 +517,7 @@ test "Matrix Cholesky decomposition" {
     mat.at(2, 1).* = 3.0;
     mat.at(2, 2).* = 6.0;
 
-    var chol = try mat.cholesky();
+    var chol = try mat.chol();
     defer chol.deinit();
 
     // Check L
@@ -555,5 +555,5 @@ test "Matrix Cholesky decomposition" {
     non_spd.at(1, 0).* = 2.0;
     non_spd.at(1, 1).* = 1.0; // Det = 1 - 4 = -3, not positive definite
 
-    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.cholesky());
+    try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.chol());
 }

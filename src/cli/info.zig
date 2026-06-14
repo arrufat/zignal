@@ -120,9 +120,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                 defer image.deinit(gpa);
 
                 const timer = common.Timer.begin(io);
-                var r_stats: zignal.RunningStats(f64) = .init();
-                var g_stats: zignal.RunningStats(f64) = .init();
-                var b_stats: zignal.RunningStats(f64) = .init();
+                var r_stats: zignal.RunningStats(f64, .summary) = .init();
+                var g_stats: zignal.RunningStats(f64, .summary) = .init();
+                var b_stats: zignal.RunningStats(f64, .summary) = .init();
 
                 for (image.data) |pixel| {
                     r_stats.add(pixel.r);

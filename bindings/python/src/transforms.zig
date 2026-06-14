@@ -412,7 +412,7 @@ fn projective_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 
     // Compute inverse
     const transform = ProjectiveTransform(f64){ .matrix = matrix };
-    const inverse_transform = transform.inverse() orelse {
+    const inverse_transform = transform.inv() orelse {
         const none = c.Py_None();
         c.Py_IncRef(none);
         return none;
@@ -446,7 +446,7 @@ fn projective_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
 
 var projective_methods = [_]c.PyMethodDef{
     .{ .ml_name = "project", .ml_meth = @ptrCast(&projective_project), .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS, .ml_doc = "Transform point(s). Accepts (x,y) tuple or list of tuples." },
-    .{ .ml_name = "inverse", .ml_meth = @ptrCast(&projective_inverse), .ml_flags = c.METH_NOARGS, .ml_doc = "Get inverse transform, or None if not invertible." },
+    .{ .ml_name = "inv", .ml_meth = @ptrCast(&projective_inverse), .ml_flags = c.METH_NOARGS, .ml_doc = "Get inverse transform, or None if not invertible." },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
@@ -525,7 +525,7 @@ pub const projective_methods_metadata = [_]stub_metadata.MethodInfo{
         .doc = "Transform point(s). Returns same type as input.",
     },
     .{
-        .name = "inverse",
+        .name = "inv",
         .params = "self",
         .returns = "ProjectiveTransform | None",
         .doc = "Get inverse transform, or None if not invertible.",

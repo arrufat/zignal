@@ -9,7 +9,7 @@ test "Matrix determinant - small matrices" {
     // Test 1x1 matrix
     const mat1: Matrix(f64) = try .init(arena.allocator(), 1, 1);
     mat1.at(0, 0).* = 5.0;
-    try expectEqual(@as(f64, 5.0), try mat1.determinant());
+    try expectEqual(@as(f64, 5.0), try mat1.det());
 
     // Test 2x2 matrix
     const mat2: Matrix(f64) = try .init(arena.allocator(), 2, 2);
@@ -18,7 +18,7 @@ test "Matrix determinant - small matrices" {
     mat2.at(1, 0).* = 2.0;
     mat2.at(1, 1).* = 6.0;
     // det = 4*6 - 7*2 = 24 - 14 = 10
-    try expectEqual(@as(f64, 10.0), try mat2.determinant());
+    try expectEqual(@as(f64, 10.0), try mat2.det());
 
     // Test 3x3 matrix
     const mat3: Matrix(f64) = try .init(arena.allocator(), 3, 3);
@@ -34,7 +34,7 @@ test "Matrix determinant - small matrices" {
     // det = 1*(1*0 - 4*6) - 2*(0*0 - 4*5) + 3*(0*6 - 1*5)
     //     = 1*(-24) - 2*(-20) + 3*(-5)
     //     = -24 + 40 - 15 = 1
-    try expectEqual(@as(f64, 1.0), try mat3.determinant());
+    try expectEqual(@as(f64, 1.0), try mat3.det());
 }
 
 test "Matrix determinant - large matrices using LU" {
@@ -60,7 +60,7 @@ test "Matrix determinant - large matrices using LU" {
     mat4.at(3, 2).* = 0.0;
     mat4.at(3, 3).* = 4.0;
 
-    const det4 = try mat4.determinant();
+    const det4 = try mat4.det();
 
     // This matrix should have a non-zero determinant
     try std.testing.expect(@abs(det4) > 1e-10);
@@ -84,7 +84,7 @@ test "Matrix determinant - large matrices using LU" {
     sing.at(3, 2).* = 8.0;
     sing.at(3, 3).* = 10.0;
 
-    const det_sing = try sing.determinant();
+    const det_sing = try sing.det();
 
     // Singular matrix should have determinant 0
     try std.testing.expect(@abs(det_sing) < 1e-10);
@@ -96,7 +96,7 @@ test "Matrix determinant - large matrices using LU" {
         identity5.at(i, i).* = 1.0;
     }
 
-    const det_id = try identity5.determinant();
+    const det_id = try identity5.det();
 
     try expectEqual(@as(f64, 1.0), det_id);
 }

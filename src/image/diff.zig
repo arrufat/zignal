@@ -17,7 +17,7 @@ pub const DiffOptions = struct {
 
 /// Result of a difference operation.
 pub const DiffResult = struct {
-    stats: RunningStats(f64),
+    stats: RunningStats(f64, .summary),
     diff_count: usize,
 };
 
@@ -35,7 +35,7 @@ pub fn compute(
         return error.DimensionMismatch;
     }
 
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .summary) = .init();
     var diff_count: usize = 0;
 
     for (0..img1.rows) |r| {

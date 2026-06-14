@@ -117,7 +117,7 @@ def test_basic_methods():
     m = zignal.Matrix([[1, 2], [3, 4]])
 
     assert isinstance(m.copy(), zignal.Matrix)
-    assert isinstance(m.inverse(), zignal.Matrix)
+    assert isinstance(m.inv(), zignal.Matrix)
     assert isinstance(m.dot(m), zignal.Matrix)
 
 
@@ -139,7 +139,7 @@ def test_linear_algebra_methods():
     m = zignal.Matrix([[2, 0], [0, 3]])
 
     # Determinant
-    assert isinstance(m.determinant(), float)
+    assert isinstance(m.det(), float)
 
     # Gram and covariance
     a = zignal.Matrix([[1, 2], [3, 4], [5, 6]])

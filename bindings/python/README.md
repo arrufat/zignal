@@ -15,7 +15,7 @@ Zero-dependency image processing primitives written in Zig and packaged for Pyth
 | **Canvas & Fonts** | Lines, arcs, splines, polygons, flood fills, bitmap font text rendering |
 | **Geometry** | Rectangle algebra, convex hulls, similarity/affine/projective transforms |
 | **Terminal Output** | SGR, Braille, Sixel, and Kitty renderers with automatic format negotiation |
-| **Numerics** | Matrices with rich linear algebra, PCA, optimization (Hungarian), running statistics |
+| **Numerics** | Matrices with rich linear algebra, PCA, optimization (Hungarian assignment + MaxLIPO+TR global optimizer), running statistics |
 
 All functionality is implemented in Zig with no runtime dependencies, making the wheel lightweight and easy to vendor.
 
