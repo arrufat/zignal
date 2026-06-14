@@ -5,7 +5,8 @@
 //!
 //! Everything operates on f64 with small, dense, row-major matrices stored as flat slices, which
 //! suits the low-dimensional sub-problems that arise here. Heavy decompositions reuse zignal's
-//! `Matrix` (SVD-based pseudo-inverse); the rest is self-contained.
+//! `Matrix` (pseudo-inverse for the quadratic fit, `eigh` for the trust-region hard case);
+//! the rest is self-contained.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -34,7 +35,7 @@ fn norm(a: []const f64) f64 {
 /// In-place Cholesky factorization. `a` is an n*n row-major symmetric matrix; on success its
 /// lower triangle is overwritten with L such that A = L*L^T. Returns false if A is not positive
 /// definite (the partial result is then meaningless).
-fn choleskyInPlace(a: []f64, n: usize) bool {
+fn cholInPlace(a: []f64, n: usize) bool {
     for (0..n) |j| {
         var sum = a[j * n + j];
         for (0..j) |k| sum -= a[j * n + k] * a[j * n + k];
@@ -68,83 +69,6 @@ fn solveLowerT(l: []const f64, n: usize, y: []const f64, x: []f64) void {
         for (i + 1..n) |k| s -= l[k * n + i] * x[k];
         x[i] = s / l[i * n + i];
     }
-}
-
-/// Eigendecomposition of a symmetric n*n matrix via cyclic Jacobi rotations.
-/// `values[i]` holds eigenvalue i; `vectors` is row-major n*n with column j the eigenvector for
-/// `values[j]`. Caller owns both returned slices. Robust and fast for the small dense matrices here.
-pub const Eig = struct {
-    values: []f64,
-    vectors: []f64,
-    allocator: Allocator,
-
-    pub fn deinit(self: *Eig) void {
-        self.allocator.free(self.values);
-        self.allocator.free(self.vectors);
-    }
-};
-
-fn jacobiEig(allocator: Allocator, src: []const f64, n: usize) !Eig {
-    const a = try allocator.dupe(f64, src[0 .. n * n]);
-    defer allocator.free(a);
-    const v = try allocator.alloc(f64, n * n);
-    errdefer allocator.free(v);
-    @memset(v, 0);
-    for (0..n) |i| v[i * n + i] = 1;
-
-    // Scale-invariant convergence: off-diagonals are "zero" relative to the matrix magnitude.
-    // The Frobenius norm is invariant under Jacobi rotations, so this bound is computed once.
-    var frob_sq: f64 = 0;
-    for (a) |x| frob_sq += x * x;
-    const eps = std.math.floatEps(f64);
-    const off_tol = frob_sq * eps * eps;
-
-    var sweep: usize = 0;
-    while (sweep < 100) : (sweep += 1) {
-        var off: f64 = 0;
-        for (0..n) |p| for (p + 1..n) |q| {
-            off += a[p * n + q] * a[p * n + q];
-        };
-        if (off <= off_tol) break;
-
-        for (0..n) |p| {
-            for (p + 1..n) |q| {
-                const apq = a[p * n + q];
-                if (apq == 0) continue;
-                const theta = 0.5 * (a[q * n + q] - a[p * n + p]) / apq;
-                const t = blk: {
-                    const sign: f64 = if (theta < 0) -1 else 1;
-                    break :blk sign / (@abs(theta) + @sqrt(theta * theta + 1));
-                };
-                const c = 1.0 / @sqrt(t * t + 1);
-                const s = t * c;
-                // A <- J^T A J : first rotate columns p,q, then rows p,q.
-                for (0..n) |k| {
-                    const akp = a[k * n + p];
-                    const akq = a[k * n + q];
-                    a[k * n + p] = c * akp - s * akq;
-                    a[k * n + q] = s * akp + c * akq;
-                }
-                for (0..n) |k| {
-                    const apk = a[p * n + k];
-                    const aqk = a[q * n + k];
-                    a[p * n + k] = c * apk - s * aqk;
-                    a[q * n + k] = s * apk + c * aqk;
-                }
-                // Accumulate eigenvectors: V <- V J.
-                for (0..n) |k| {
-                    const vkp = v[k * n + p];
-                    const vkq = v[k * n + q];
-                    v[k * n + p] = c * vkp - s * vkq;
-                    v[k * n + q] = s * vkp + c * vkq;
-                }
-            }
-        }
-    }
-
-    const values = try allocator.alloc(f64, n);
-    for (0..n) |i| values[i] = a[i * n + i];
-    return .{ .values = values, .vectors = v, .allocator = allocator };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -214,7 +138,7 @@ pub fn solveTrustRegionSubproblem(
         @memcpy(m, b[0 .. n * n]);
         for (0..n) |d| m[d * n + d] += lambda;
 
-        if (!choleskyInPlace(m, n)) {
+        if (!cholInPlace(m, n)) {
             // Cholesky doesn't exist: B + lambda*I not positive definite.
             if (g_norm <= numeric_eps) break; // go to eigen-decomposition path
             lambda_min = lambda;
@@ -268,26 +192,23 @@ pub fn solveTrustRegionSubproblem(
 
     if (converged) return;
 
-    // Hard case: use an eigen-decomposition (port of dlib's fallback, replicated verbatim).
-    var eig = try jacobiEig(allocator, b, n);
+    // Hard case: use a symmetric eigendecomposition (port of dlib's fallback). Eigenvalues come back
+    // ascending, so the most-negative one and its eigenvector are at index 0.
+    var bmat: Matrix(f64) = try .fromSlice(allocator, @intCast(n), @intCast(n), b[0 .. n * n]);
+    defer bmat.deinit();
+    var eig = try bmat.eigh(allocator);
     defer eig.deinit();
 
-    var min_eig: f64 = eig.values[0];
-    var min_eig_idx: usize = 0;
+    const min_eig = eig.values.at(0, 0).*;
+    const min_eig_idx: usize = 0;
     var max_abs_eig: f64 = 0;
-    for (0..n) |i| {
-        if (eig.values[i] < min_eig) {
-            min_eig = eig.values[i];
-            min_eig_idx = i;
-        }
-        max_abs_eig = @max(max_abs_eig, @abs(eig.values[i]));
-    }
+    for (0..n) |i| max_abs_eig = @max(max_abs_eig, @abs(eig.values.at(i, 0).*));
 
     // ev <- reciprocal of (eigenvalue - min_eig), with near-zero entries zeroed.
     const ev = tmp;
     const zero_tol = max_abs_eig * std.math.floatEps(f64);
     for (0..n) |i| {
-        const shifted = eig.values[i] - min_eig;
+        const shifted = eig.values.at(i, 0).* - min_eig;
         ev[i] = if (shifted > zero_tol) 1.0 / shifted else 0;
     }
 
@@ -299,19 +220,19 @@ pub fn solveTrustRegionSubproblem(
     const vt_g = hard[n .. 2 * n];
     for (0..n) |j| {
         var s: f64 = 0;
-        for (0..n) |k| s += eig.vectors[k * n + j] * g[k]; // (V^T g)_j
+        for (0..n) |k| s += eig.vectors.at(k, j).* * g[k]; // (V^T g)_j
         vt_g[j] = s * ev[j];
     }
     for (0..n) |row| {
         var s: f64 = 0;
-        for (0..n) |j| s += eig.vectors[row * n + j] * vt_g[j];
+        for (0..n) |j| s += eig.vectors.at(row, j).* * vt_g[j];
         p_hard[row] = s;
     }
 
     const p_hard_norm = norm(p_hard);
     if (p_hard_norm < radius and p_hard_norm >= norm(p)) {
         const tau = @sqrt(@max(0.0, radius * radius - p_hard_norm * p_hard_norm));
-        for (0..n) |row| p[row] = p_hard[row] + tau * eig.vectors[row * n + min_eig_idx];
+        for (0..n) |row| p[row] = p_hard[row] + tau * eig.vectors.at(row, min_eig_idx).*;
     }
 }
 
@@ -490,7 +411,7 @@ fn fitQuadraticMse(
     defer ycol.deinit();
     for (0..m) |j| ycol.at(j, 0).* = y[j];
 
-    var pinv = try wt.pseudoInverse(.{}); // k x m
+    var pinv = try wt.pinv(.{}); // k x m
     defer pinv.deinit();
     var z = try pinv.dot(ycol); // k x 1
     defer z.deinit();
@@ -537,7 +458,7 @@ fn fitQuadraticInterp(
     defer rcol.deinit();
     for (0..m) |i| rcol.at(i, 0).* = y[i];
 
-    var pinv = try w.pseudoInverse(.{});
+    var pinv = try w.pinv(.{});
     defer pinv.deinit();
     var z = try pinv.dot(rcol); // n x 1
     defer z.deinit();
@@ -585,10 +506,10 @@ fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const f64)
     return q;
 }
 
-test "choleskyInPlace + solve" {
+test "cholInPlace + solve" {
     // A = [[4,2],[2,3]] (SPD), solve A x = b with b = [10, 8] -> x = [...]
     var a = [_]f64{ 4, 2, 2, 3 };
-    try std.testing.expect(choleskyInPlace(&a, 2));
+    try std.testing.expect(cholInPlace(&a, 2));
     const b = [_]f64{ 10, 8 };
     var y: [2]f64 = undefined;
     var x: [2]f64 = undefined;
@@ -599,34 +520,6 @@ test "choleskyInPlace + solve" {
     const ax1 = 2 * x[0] + 3 * x[1];
     try expectApproxEqAbs(@as(f64, 10), ax0, 1e-9);
     try expectApproxEqAbs(@as(f64, 8), ax1, 1e-9);
-}
-
-test "jacobiEig of [[2,1],[1,2]]" {
-    const a = [_]f64{ 2, 1, 1, 2 };
-    var eig = try jacobiEig(std.testing.allocator, &a, 2);
-    defer eig.deinit();
-    const lo = @min(eig.values[0], eig.values[1]);
-    const hi = @max(eig.values[0], eig.values[1]);
-    try expectApproxEqAbs(@as(f64, 1), lo, 1e-9);
-    try expectApproxEqAbs(@as(f64, 3), hi, 1e-9);
-    // Eigenvectors orthonormal: each column has unit norm.
-    for (0..2) |j| {
-        const c0 = eig.vectors[0 * 2 + j];
-        const c1 = eig.vectors[1 * 2 + j];
-        try expectApproxEqAbs(@as(f64, 1), c0 * c0 + c1 * c1, 1e-9);
-    }
-}
-
-test "jacobiEig is scale-invariant (large-magnitude matrix)" {
-    // [[2,1],[1,2]] scaled by 1e8 -> eigenvalues 1e8 and 3e8.
-    const s: f64 = 1e8;
-    const a = [_]f64{ 2 * s, 1 * s, 1 * s, 2 * s };
-    var eig = try jacobiEig(std.testing.allocator, &a, 2);
-    defer eig.deinit();
-    const lo = @min(eig.values[0], eig.values[1]);
-    const hi = @max(eig.values[0], eig.values[1]);
-    try expectApproxEqAbs(@as(f64, 1e8), lo, 1.0);
-    try expectApproxEqAbs(@as(f64, 3e8), hi, 1.0);
 }
 
 test "trust region: interior solution" {
@@ -660,6 +553,20 @@ test "trust region: n==1 hard case (negative curvature, ~zero gradient)" {
     var p: [1]f64 = undefined;
     try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1, 1.0, &p, .{});
     try expectApproxEqAbs(@as(f64, 1.0), @abs(p[0]), 1e-9);
+}
+
+test "trust region: n==2 hard case follows the min eigenvector of an indefinite B" {
+    // Indefinite B = [[1,2],[2,1]] (eigenvalues 3 and -1) with a ~zero gradient drives the eigen
+    // ("hard case") fallback for n>=2 — the path that actually depends on eigh returning eigenvalues
+    // ascending so the consumer reads the most-negative one and its eigenvector at index 0.
+    const b = [_]f64{ 1, 2, 2, 1 };
+    const g = [_]f64{ 0, 0 };
+    var p: [2]f64 = undefined;
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 2, 1.0, &p, .{});
+    // The step rides the trust-region boundary along the min eigenvector [1,-1]/sqrt2.
+    try expectApproxEqAbs(@as(f64, 1.0), norm(&p), 1e-9);
+    try expectApproxEqAbs(@abs(p[0]), @abs(p[1]), 1e-9);
+    try std.testing.expect(p[0] * p[1] < 0);
 }
 
 test "trust region bounded: box clips a variable" {

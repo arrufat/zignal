@@ -192,7 +192,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Performs pointwise multiplication.
-        pub fn times(self: Self, other: Self) Self {
+        pub fn hadamard(self: Self, other: Self) Self {
             var result: Self = .{};
             for (0..rows) |r| {
                 for (0..cols) |c| {
@@ -666,7 +666,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Computes the determinant of self if it's a square matrix.
-        pub fn determinant(self: Self) T {
+        pub fn det(self: Self) T {
             comptime assert(rows == cols);
             return switch (rows) {
                 1 => self.item(),
@@ -677,45 +677,45 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                     self.items[0][2] * self.items[1][1] * self.items[2][0] -
                     self.items[0][1] * self.items[1][0] * self.items[2][2] -
                     self.items[0][0] * self.items[1][2] * self.items[2][1],
-                else => @compileError("Matrix(T).determinant() is not implemented for sizes above 3"),
+                else => @compileError("Matrix(T).det() is not implemented for sizes above 3"),
             };
         }
 
         /// Computes the inverse of self if it's a square matrix.
-        pub fn inverse(self: Self) ?Self {
+        pub fn inv(self: Self) ?Self {
             comptime assert(rows == cols);
-            const det = self.determinant();
-            if (det == 0) {
+            const d = self.det();
+            if (d == 0) {
                 return null;
             }
-            var inv: Self = .{};
+            var ans: Self = .{};
             switch (rows) {
-                1 => inv.items[0][0] = 1 / det,
+                1 => ans.items[0][0] = 1 / d,
                 2 => {
-                    inv.items[0][0] = self.items[1][1] / det;
-                    inv.items[0][1] = -self.items[0][1] / det;
-                    inv.items[1][0] = -self.items[1][0] / det;
-                    inv.items[1][1] = self.items[0][0] / det;
+                    ans.items[0][0] = self.items[1][1] / d;
+                    ans.items[0][1] = -self.items[0][1] / d;
+                    ans.items[1][0] = -self.items[1][0] / d;
+                    ans.items[1][1] = self.items[0][0] / d;
                 },
                 3 => {
-                    inv.items[0][0] = (self.items[1][1] * self.items[2][2] - self.items[1][2] * self.items[2][1]) / det;
-                    inv.items[0][1] = (self.items[0][2] * self.items[2][1] - self.items[0][1] * self.items[2][2]) / det;
-                    inv.items[0][2] = (self.items[0][1] * self.items[1][2] - self.items[0][2] * self.items[1][1]) / det;
-                    inv.items[1][0] = (self.items[1][2] * self.items[2][0] - self.items[1][0] * self.items[2][2]) / det;
-                    inv.items[1][1] = (self.items[0][0] * self.items[2][2] - self.items[0][2] * self.items[2][0]) / det;
-                    inv.items[1][2] = (self.items[0][2] * self.items[1][0] - self.items[0][0] * self.items[1][2]) / det;
-                    inv.items[2][0] = (self.items[1][0] * self.items[2][1] - self.items[1][1] * self.items[2][0]) / det;
-                    inv.items[2][1] = (self.items[0][1] * self.items[2][0] - self.items[0][0] * self.items[2][1]) / det;
-                    inv.items[2][2] = (self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0]) / det;
+                    ans.items[0][0] = (self.items[1][1] * self.items[2][2] - self.items[1][2] * self.items[2][1]) / d;
+                    ans.items[0][1] = (self.items[0][2] * self.items[2][1] - self.items[0][1] * self.items[2][2]) / d;
+                    ans.items[0][2] = (self.items[0][1] * self.items[1][2] - self.items[0][2] * self.items[1][1]) / d;
+                    ans.items[1][0] = (self.items[1][2] * self.items[2][0] - self.items[1][0] * self.items[2][2]) / d;
+                    ans.items[1][1] = (self.items[0][0] * self.items[2][2] - self.items[0][2] * self.items[2][0]) / d;
+                    ans.items[1][2] = (self.items[0][2] * self.items[1][0] - self.items[0][0] * self.items[1][2]) / d;
+                    ans.items[2][0] = (self.items[1][0] * self.items[2][1] - self.items[1][1] * self.items[2][0]) / d;
+                    ans.items[2][1] = (self.items[0][1] * self.items[2][0] - self.items[0][0] * self.items[2][1]) / d;
+                    ans.items[2][2] = (self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0]) / d;
                 },
-                else => @compileError("Matrix(T).inverse() is not implemented for sizes above 3"),
+                else => @compileError("Matrix(T).inv() is not implemented for sizes above 3"),
             }
-            return inv;
+            return ans;
         }
 
         /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
         /// Returns L such that A = L * L^T where L is lower triangular.
-        pub fn cholesky(self: Self) !SMatrix(T, rows, cols) {
+        pub fn chol(self: Self) !SMatrix(T, rows, cols) {
             comptime assert(rows == cols);
             var l: SMatrix(T, rows, cols) = .initAll(0);
 
@@ -849,7 +849,7 @@ test "SMatrix apply" {
 
 test "SMatrix norm" {
     var matrix: SMatrix(f32, 3, 4) = .random(5678);
-    try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.times(matrix).sum()));
+    try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.hadamard(matrix).sum()));
 
     matrix.at(2, 3).* = 1000000;
     try expectEqual(matrix.elementNorm(std.math.inf(f32)), matrix.maxNorm());
@@ -896,13 +896,13 @@ test "SMatrix inverse" {
     a.at(0, 1).* = 1.5;
     a.at(1, 0).* = 1;
     a.at(1, 1).* = -1;
-    try expectEqual(a.determinant(), -0.5);
+    try expectEqual(a.det(), -0.5);
     var a_i: SMatrix(f32, 2, 2) = .{};
     a_i.at(0, 0).* = 2;
     a_i.at(0, 1).* = 3;
     a_i.at(1, 0).* = 2;
     a_i.at(1, 1).* = 2;
-    try expectEqualDeep(a.inverse(), a_i);
+    try expectEqualDeep(a.inv(), a_i);
     var b: SMatrix(f32, 3, 3) = .{};
     b.at(0, 0).* = 1;
     b.at(0, 1).* = 2;
@@ -913,7 +913,7 @@ test "SMatrix inverse" {
     b.at(2, 0).* = 7;
     b.at(2, 1).* = 2;
     b.at(2, 2).* = 9;
-    try expectEqual(b.determinant(), -36);
+    try expectEqual(b.det(), -36);
     var b_i: SMatrix(f32, 3, 3) = .{};
     b_i.at(0, 0).* = -11.0 / 12.0;
     b_i.at(0, 1).* = 1.0 / 3.0;
@@ -924,7 +924,7 @@ test "SMatrix inverse" {
     b_i.at(2, 0).* = 3.0 / 4.0;
     b_i.at(2, 1).* = -1.0 / 3.0;
     b_i.at(2, 2).* = 1.0 / 12.0;
-    try expectEqualDeep(b.inverse().?, b_i);
+    try expectEqualDeep(b.inv().?, b_i);
 }
 
 test "SMatrix row and column extraction" {
@@ -1101,7 +1101,7 @@ test "SMatrix Cholesky" {
         .{ 2.0, 3.0, 6.0 },
     });
 
-    const chol = try mat.cholesky();
+    const chol = try mat.chol();
     const eps = 1e-10;
 
     // Check L
