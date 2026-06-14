@@ -43,9 +43,9 @@ inline fn callObjective(objective: anytype, x: []const f64) f64 {
 pub const GlobalOptimizer = struct {
     allocator: Allocator,
 
-    // Search space stored as a struct-of-arrays; `space.items(.lower)` etc. give the per-field
-    // columns the hot loops iterate over. `space.len` is the dimensionality.
-    space: std.MultiArrayList(Dimension),
+    // The variables stored as a struct-of-arrays; `variables.items(.lower)` etc. give the
+    // per-field columns the hot loops iterate over. `variables.len` is the dimensionality.
+    variables: std.MultiArrayList(Variable),
 
     upper_bound: UpperBound,
 
@@ -81,9 +81,9 @@ pub const GlobalOptimizer = struct {
     pending_x: []f64,
     pending_y: []f64,
 
-    /// One search dimension: its inclusive box bounds and whether it is integer-valued. Define the
-    /// search space by passing a `[]const Dimension` (one per variable) to `init`/`findGlobalOptimum`.
-    pub const Dimension = struct {
+    /// One optimization variable: its inclusive box bounds and whether it is integer-valued. Define
+    /// the search space by passing a `[]const Variable` (one per variable) to `init`/`findGlobalOptimum`.
+    pub const Variable = struct {
         lower: f64,
         upper: f64,
         is_integer: bool = false,
@@ -144,22 +144,22 @@ pub const GlobalOptimizer = struct {
 
     pub fn init(
         allocator: Allocator,
-        dimensions: []const Dimension,
+        variables: []const Variable,
         options: Options,
     ) !GlobalOptimizer {
-        if (dimensions.len == 0) return GlobalError.InvalidBounds;
-        const dims = dimensions.len;
-        for (dimensions) |d| {
+        if (variables.len == 0) return GlobalError.InvalidBounds;
+        const dims = variables.len;
+        for (variables) |d| {
             if (!(d.upper > d.lower)) return GlobalError.InvalidBounds;
             if (d.is_integer and (@round(d.lower) != d.lower or @round(d.upper) != d.upper)) {
                 return GlobalError.NonIntegralBound;
             }
         }
 
-        var space: std.MultiArrayList(Dimension) = .{};
-        errdefer space.deinit(allocator);
-        try space.ensureTotalCapacity(allocator, dims);
-        for (dimensions) |d| space.appendAssumeCapacity(d);
+        var soa: std.MultiArrayList(Variable) = .{};
+        errdefer soa.deinit(allocator);
+        try soa.ensureTotalCapacity(allocator, dims);
+        for (variables) |d| soa.appendAssumeCapacity(d);
 
         const best_x = try allocator.alloc(f64, dims);
         errdefer allocator.free(best_x);
@@ -191,7 +191,7 @@ pub const GlobalOptimizer = struct {
 
         return .{
             .allocator = allocator,
-            .space = space,
+            .variables = soa,
             .upper_bound = upper_bound,
             .best_x = best_x,
             .best_y = null,
@@ -217,7 +217,7 @@ pub const GlobalOptimizer = struct {
     }
 
     pub fn deinit(self: *GlobalOptimizer) void {
-        self.space.deinit(self.allocator);
+        self.variables.deinit(self.allocator);
         self.allocator.free(self.best_x);
         self.allocator.free(self.last_x);
         self.allocator.free(self.scratch);
@@ -238,7 +238,7 @@ pub const GlobalOptimizer = struct {
     /// Record an externally computed `eval` (warm-start, or any prior knowledge). `eval.y` is in
     /// the caller's original sign.
     pub fn addEvaluation(self: *GlobalOptimizer, eval: Evaluation) !void {
-        if (eval.x.len != self.space.len) return GlobalError.DimensionMismatch;
+        if (eval.x.len != self.variables.len) return GlobalError.DimensionMismatch;
         // A warm-start point is a seed, not a trust-region step → treat it like an `.init` move.
         try self.record(eval.x, self.sign * eval.y, .init, 0);
     }
@@ -291,7 +291,7 @@ pub const GlobalOptimizer = struct {
 
         const Worker = struct {
             fn run(opt: *GlobalOptimizer, w_io: Io, obj: ObjArg, sh: *Shared, slot: usize, st: StopOptions) void {
-                const dims = opt.space.len;
+                const dims = opt.variables.len;
                 while (true) {
                     sh.mutex.lockUncancelable(w_io);
                     if (sh.stopped or sh.err != null or sh.dispatched >= st.max_evals) {
@@ -375,7 +375,7 @@ pub const GlobalOptimizer = struct {
     /// one-trust-region-at-a-time rule, and lower the surrogate near themselves so two asks don't pick
     /// the same spot. With none in flight (the sequential path) this is the original behavior.
     fn ask(self: *GlobalOptimizer) !Ask {
-        const dims = self.space.len;
+        const dims = self.variables.len;
 
         // Pack the active in-flight points into `pending_*` and note any outstanding trust-region step.
         var npending: usize = 0;
@@ -464,7 +464,7 @@ pub const GlobalOptimizer = struct {
     /// bound near themselves (0 in the sequential case). Port of `pick_next_sample_as_max_upper_bound`.
     fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, npending: usize) bool {
         // Hoist the SoA columns and RNG handle out of the (num_random_samples-iteration) loop.
-        const s = self.space.slice();
+        const s = self.variables.slice();
         const lower = s.items(.lower);
         const upper = s.items(.upper);
         const is_integer = s.items(.is_integer);
@@ -489,11 +489,11 @@ pub const GlobalOptimizer = struct {
     /// Writes the candidate into `self.last_x`; returns predicted improvement. Port of
     /// `pick_next_sample_using_trust_region` + `find_max_quadraticly_interpolated_vector`.
     fn pickTrustRegion(self: *GlobalOptimizer) !f64 {
-        const space = self.space.slice();
-        const dims = space.len;
-        const lower = space.items(.lower);
-        const upper = space.items(.upper);
-        const is_integer = space.items(.is_integer);
+        const vars = self.variables.slice();
+        const dims = vars.len;
+        const lower = vars.items(.lower);
+        const upper = vars.items(.upper);
+        const is_integer = vars.items(.is_integer);
         @memcpy(self.last_x, self.best_x);
 
         // Active (continuous) dimensions only — integer variables are held at the best value.
@@ -600,12 +600,12 @@ pub const GlobalOptimizer = struct {
     }
 
     fn randomVector(self: *GlobalOptimizer, buf: []f64) void {
-        const s = self.space.slice();
+        const s = self.variables.slice();
         sampleInBox(buf, s.items(.lower), s.items(.upper), s.items(.is_integer), self.prng.random());
     }
 
     fn centerVector(self: *GlobalOptimizer, buf: []f64) void {
-        const s = self.space.slice();
+        const s = self.variables.slice();
         for (buf, s.items(.lower), s.items(.upper), s.items(.is_integer)) |*v, lo, hi, is_int| {
             var x = (lo + hi) / 2;
             if (is_int) x = std.math.clamp(@round(x), lo, hi);
@@ -642,7 +642,7 @@ fn norm(a: []const f64) f64 {
 // One-shot convenience wrapper
 // ---------------------------------------------------------------------------------------
 
-/// Optimize `objective` over `dimensions` (one `Dimension` per variable) using up to `max_evals`
+/// Optimize `objective` over the given `variables` (one `Variable` per dimension) using up to `max_evals`
 /// function evaluations. `io` runs the evaluations (single-threaded inline, or parallel on a pooled
 /// `Io` when `options.max_concurrency > 1`). `options` is the same `GlobalOptimizer.Options` the struct
 /// API takes — pass `.min_default` or `.max_default` (or a full literal). The returned `Evaluation`
@@ -651,11 +651,11 @@ pub fn findGlobalOptimum(
     io: Io,
     allocator: Allocator,
     objective: anytype,
-    dimensions: []const GlobalOptimizer.Dimension,
+    variables: []const GlobalOptimizer.Variable,
     max_evals: usize,
     options: GlobalOptimizer.Options,
 ) !GlobalOptimizer.Evaluation {
-    var opt = try GlobalOptimizer.init(allocator, dimensions, options);
+    var opt = try GlobalOptimizer.init(allocator, variables, options);
     defer opt.deinit();
     const b = try opt.optimize(io, objective, .{ .max_evals = max_evals });
     const x = try allocator.dupe(f64, b.x);
@@ -681,15 +681,15 @@ fn shiftedBowl(x: []const f64) f64 {
 }
 
 /// A square 2-D continuous search space [lo, hi]^2.
-fn box2(lo: f64, hi: f64) [2]GlobalOptimizer.Dimension {
+fn box2(lo: f64, hi: f64) [2]GlobalOptimizer.Variable {
     return .{ .{ .lower = lo, .upper = hi }, .{ .lower = lo, .upper = hi } };
 }
 
 test "findGlobalOptimum: shifted bowl (maximize)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-2, 2);
-    var res = try findGlobalOptimum(io, allocator, negShiftedBowl, &space, 80, .max_default);
+    const variables = box2(-2, 2);
+    var res = try findGlobalOptimum(io, allocator, negShiftedBowl, &variables, 80, .max_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
@@ -699,8 +699,8 @@ test "findGlobalOptimum: shifted bowl (maximize)" {
 test "findGlobalOptimum: shifted bowl (minimize)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-2, 2);
-    var res = try findGlobalOptimum(io, allocator, shiftedBowl, &space, 80, .min_default);
+    const variables = box2(-2, 2);
+    var res = try findGlobalOptimum(io, allocator, shiftedBowl, &variables, 80, .min_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
@@ -709,9 +709,9 @@ test "findGlobalOptimum: shifted bowl (minimize)" {
 
 test "GlobalOptimizer: step() reports progress and is deterministic" {
     const allocator = std.testing.allocator;
-    const space = box2(-2, 2);
+    const variables = box2(-2, 2);
 
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 7 });
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 7 });
     defer opt.deinit();
 
     var saw_move = [_]bool{ false, false, false, false };
@@ -727,7 +727,7 @@ test "GlobalOptimizer: step() reports progress and is deterministic" {
     try std.testing.expect(saw_move[@intFromEnum(GlobalOptimizer.Move.init)]);
 
     // Same seed -> same trajectory.
-    var opt2 = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 7 });
+    var opt2 = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 7 });
     defer opt2.deinit();
     i = 0;
     while (i < 60) : (i += 1) _ = try opt2.step(shiftedBowl);
@@ -738,8 +738,8 @@ test "GlobalOptimizer: step() reports progress and is deterministic" {
 test "GlobalOptimizer: optimize() with target early-stop" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-5, 5);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1 });
+    const variables = box2(-5, 5);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 1 });
     defer opt.deinit();
     const b = try opt.optimize(io, shiftedBowl, .{ .max_evals = 1000, .target = 1e-2 });
     try std.testing.expect(b.y <= 1e-2);
@@ -758,8 +758,8 @@ test "GlobalOptimizer: context-carrying objective via evaluate()" {
         }
     };
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-3, 3);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 3 });
+    const variables = box2(-3, 3);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 3 });
     defer opt.deinit();
     const obj = Quadratic{ .cx = -1.2, .cy = 0.8 };
     const b = try opt.optimize(io, obj, .{ .max_evals = 90 });
@@ -777,12 +777,12 @@ test "GlobalOptimizer: integer variable converges to integer" {
             return a * a + b * b;
         }
     };
-    const space = [_]GlobalOptimizer.Dimension{
+    const variables = [_]GlobalOptimizer.Variable{
         .{ .lower = 0, .upper = 6, .is_integer = true },
         .{ .lower = -2, .upper = 2 },
     };
     const io = Io.Threaded.global_single_threaded.io();
-    var opt = try GlobalOptimizer.init(allocator, &space, .{
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{
         .policy = .min,
         .seed = 11,
     });
@@ -809,8 +809,8 @@ fn holderTable(x: []const f64) f64 {
 test "end-to-end: Rosenbrock valley (minimization)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-2, 2);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{
+    const variables = box2(-2, 2);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{
         .policy = .min,
         .seed = 42,
         .num_random_samples = 600,
@@ -825,8 +825,8 @@ test "end-to-end: Rosenbrock valley (minimization)" {
 test "end-to-end: Holder table (multimodal minimization)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-10, 10);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{
+    const variables = box2(-10, 10);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{
         .policy = .min,
         .seed = 1,
         .num_random_samples = 1000,
@@ -840,8 +840,8 @@ test "end-to-end: Holder table (multimodal minimization)" {
 test "GlobalOptimizer: warm-start seeds the model" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-5, 5);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 5 });
+    const variables = box2(-5, 5);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 5 });
     defer opt.deinit();
     // Seed a point near the optimum.
     try opt.addEvaluation(.{ .x = &[_]f64{ 0.35, -0.45 }, .y = shiftedBowl(&[_]f64{ 0.35, -0.45 }) });
@@ -854,8 +854,8 @@ test "GlobalOptimizer: parallel path with single-threaded Io (graceful fallback)
     // A single-threaded Io runs the workers inline, so max_concurrency > 1 still produces a correct
     // result — it just doesn't run in parallel.
     const io = Io.Threaded.global_single_threaded.io();
-    const space = box2(-2, 2);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 4, .max_concurrency = 4 });
+    const variables = box2(-2, 2);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 4, .max_concurrency = 4 });
     defer opt.deinit();
     const b = try opt.optimize(io, shiftedBowl, .{ .max_evals = 120 });
     try std.testing.expect(b.y < 1e-2);
@@ -881,8 +881,8 @@ test "GlobalOptimizer: parallel optimize on a thread pool" {
     var calls = std.atomic.Value(usize).init(0);
     const obj = Counter{ .calls = &calls };
 
-    const space = box2(-2, 2);
-    var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 9, .max_concurrency = 8 });
+    const variables = box2(-2, 2);
+    var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 9, .max_concurrency = 8 });
     defer opt.deinit();
     const b = try opt.optimize(io, obj, .{ .max_evals = 200 });
     try std.testing.expect(b.y < 1e-2);
@@ -906,7 +906,7 @@ test "GlobalOptimizer: parallel optimize on a thread pool" {
 //         }
 //     };
 //     const obj = Expensive{};
-//     const space = box2(-2, 2);
+//     const variables =box2(-2, 2);
 //     const max_evals = 96;
 
 //     var threaded = Io.Threaded.init(allocator, .{ .async_limit = .limited(8) });
@@ -916,7 +916,7 @@ test "GlobalOptimizer: parallel optimize on a thread pool" {
 //     // Serial baseline (max_concurrency = 1 takes the sequential fast-path and ignores the pool).
 //     const t0 = Io.Clock.Timestamp.now(io, .awake);
 //     {
-//         var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 1 });
+//         var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 1 });
 //         defer opt.deinit();
 //         _ = try opt.optimize(io, obj, .{ .max_evals = max_evals });
 //     }
@@ -925,7 +925,7 @@ test "GlobalOptimizer: parallel optimize on a thread pool" {
 //     // Parallel on the 8-thread pool.
 //     const t1 = Io.Clock.Timestamp.now(io, .awake);
 //     {
-//         var opt = try GlobalOptimizer.init(allocator, &space, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 8 });
+//         var opt = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 1, .num_random_samples = 100, .max_concurrency = 8 });
 //         defer opt.deinit();
 //         _ = try opt.optimize(io, obj, .{ .max_evals = max_evals });
 //     }

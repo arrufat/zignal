@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **Global optimizer**: `optimize(objective, bounds, max_evals, ...)` exposes the MaxLIPO+Trust-Region global optimizer as a single free function. The objective is a Python callable `objective(x: list[float]) -> float`, `bounds` is a list of `(lower, upper)` pairs, and all settings (`policy`, `is_integer`, `seed`, `target`, `patience`, `pure_random_probability`, `num_random_samples`, `trust_region_eps`, `relative_noise_magnitude`, `solver_eps`) are keyword arguments with sane defaults. Returns `(best_x, best_y)`. Evaluation is sequential (the GIL serializes Python callbacks); exceptions raised by the objective propagate out unchanged.
 - **BMP I/O**: `Image.load("foo.bmp")` and `Image.save("foo.bmp")` decode and encode BMP files. Decode covers indexed (1/4/8 bpp), 16/24/32 bpp, BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS / RLE4 / RLE8, both row orders. Encode writes 24bpp for Rgb images and 32bpp BI_BITFIELDS for Rgba.
 - **GIF I/O**: `Image.load("foo.gif")` and `Image.save("foo.gif")` work for single-frame GIFs (frame 0 of animated files is returned for `load`). The encoder uses median-cut quantization automatically and supports caller-supplied palettes.
 

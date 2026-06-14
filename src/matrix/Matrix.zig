@@ -28,8 +28,8 @@
 //!
 //! ## Available Operations
 //!
-//! - Element-wise: `add()`, `sub()`, `times()`, `scale()`, `offset()`, `pow()`
-//! - Matrix operations: `dot()`, `transpose()`, `inverse()`
+//! - Element-wise: `add()`, `sub()`, `hadamard()`, `scale()`, `offset()`, `pow()`
+//! - Matrix operations: `dot()`, `transpose()`, `inv()`
 //! - Special products: `gram()`, `covariance()`
 //! - Advanced: `gemm()` (general matrix multiply), `apply()` (custom functions)
 //! - Extraction: `row()`, `col()`, `subMatrix()`

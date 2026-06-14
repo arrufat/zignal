@@ -14,7 +14,7 @@ const Io = std.Io;
 
 const zignal = @import("zignal");
 const GlobalOptimizer = zignal.GlobalOptimizer;
-const Dimension = GlobalOptimizer.Dimension;
+const Variable = GlobalOptimizer.Variable;
 const findGlobalOptimum = zignal.findGlobalOptimum;
 
 // ----------------------------------------------------------------------------------------
@@ -88,8 +88,8 @@ pub fn main() !void {
     // ------------------------------------------------------------------------------------
     std.debug.print("== Rosenbrock (global minimum at (1, 1)) ==\n", .{});
     {
-        const space = [_]Dimension{ .{ .lower = -5, .upper = 5 }, .{ .lower = -5, .upper = 5 } };
-        var res = try findGlobalOptimum(io, gpa, rosen, &space, 150, .min_default);
+        const variables = [_]Variable{ .{ .lower = -5, .upper = 5 }, .{ .lower = -5, .upper = 5 } };
+        var res = try findGlobalOptimum(io, gpa, rosen, &variables, 150, .min_default);
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});
@@ -101,7 +101,7 @@ pub fn main() !void {
     // ------------------------------------------------------------------------------------
     std.debug.print("== Be-like-target (BOBYQA's job; optimum at {{3, 5, 1, 7}}) ==\n", .{});
     {
-        const space = [_]Dimension{
+        const variables = [_]Variable{
             .{ .lower = -10, .upper = 10 },
             .{ .lower = -10, .upper = 10 },
             .{ .lower = -10, .upper = 10 },
@@ -110,7 +110,7 @@ pub fn main() !void {
         // `max_concurrency > 1` evaluates several candidates at once on the thread pool above. These
         // toy objectives are too cheap to show a wall-clock win, but a costly thread-safe objective
         // would scale across cores.
-        var res = try findGlobalOptimum(io, gpa, beLikeTarget, &space, 200, .{ .policy = .min, .max_concurrency = 4 });
+        var res = try findGlobalOptimum(io, gpa, beLikeTarget, &variables, 200, .{ .policy = .min, .max_concurrency = 4 });
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});
@@ -123,8 +123,8 @@ pub fn main() !void {
     // ------------------------------------------------------------------------------------
     std.debug.print("== Complex Holder table (multimodal; global y should be about -21.9210397) ==\n", .{});
     {
-        const space = [_]Dimension{ .{ .lower = -10, .upper = 10 }, .{ .lower = -10, .upper = 10 } };
-        var opt = try GlobalOptimizer.init(gpa, &space, .{
+        const variables = [_]Variable{ .{ .lower = -10, .upper = 10 }, .{ .lower = -10, .upper = 10 } };
+        var opt = try GlobalOptimizer.init(gpa, &variables, .{
             .policy = .min,
             .seed = 1,
             .num_random_samples = 500,
