@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
+const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const as = @import("../meta.zig").as;
 const Matrix = @import("../matrix.zig").Matrix;
@@ -25,41 +26,18 @@ pub const Assignment = struct {
     }
 };
 
-/// Find the optimal scale factor for converting float matrix to integers
-/// by analyzing the decimal places in the data
-fn findScaleFactor(comptime T: type, matrix: Matrix(T)) i32 {
-    if (@typeInfo(T) != .float) return 1; // No scaling for integers
-
-    var max_decimal_places: u8 = 0;
+/// Multiplier mapping float costs onto i64: scales the largest-magnitude entry to ~1e12 so tiny
+/// costs keep their relative differences without overflowing the i64 padding sum. 1 for all-zero.
+fn findScaleFactor(comptime T: type, matrix: Matrix(T)) f64 {
+    if (@typeInfo(T) != .float) return 1;
+    var max_abs: f64 = 0;
     for (0..matrix.rows) |i| {
         for (0..matrix.cols) |j| {
-            const val = matrix.at(i, j).*;
-            const decimal_places = countDecimalPlaces(val);
-            max_decimal_places = @max(max_decimal_places, decimal_places);
+            max_abs = @max(max_abs, @abs(as(f64, matrix.at(i, j).*)));
         }
     }
-
-    const capped_places = @min(max_decimal_places, 6); // Cap at 6 decimal places
-    var scale: i32 = 1;
-    for (0..capped_places) |_| scale *= 10;
-    return scale;
-}
-
-/// Count the number of significant decimal places in a float
-fn countDecimalPlaces(val: anytype) u8 {
-    if (val == 0) return 0;
-
-    const abs_val = @abs(val);
-    var count: u8 = 0;
-    var temp = abs_val - @floor(abs_val); // Remove integer part
-
-    // Count decimal places (up to precision limits)
-    while (temp > 0.000001 and count < 7) {
-        temp = temp * 10 - @floor(temp * 10);
-        count += 1;
-    }
-
-    return count;
+    if (max_abs == 0) return 1;
+    return 1e12 / max_abs;
 }
 
 /// Solves the assignment problem with the Hungarian (Kuhn-Munkres) algorithm in O(n³), handling
@@ -90,7 +68,7 @@ pub fn solveAssignmentProblem(
         for (0..n_cols) |j| {
             const base_val = cost_matrix.at(i, j).*;
             const abs_val = @abs(as(f64, base_val));
-            padding_value += @ceil(abs_val * @as(f64, scale_factor));
+            padding_value += @ceil(abs_val * scale_factor);
         }
     }
 
@@ -101,8 +79,8 @@ pub fn solveAssignmentProblem(
                 const base_val = cost_matrix.at(i, j).*;
                 work[i * n + j] = switch (@typeInfo(T)) {
                     .float => blk: {
-                        const val = base_val * @as(T, @floatFromInt(multiplier));
-                        break :blk @round(val * @as(T, @floatFromInt(scale_factor)));
+                        const scaled = as(f64, base_val) * @as(f64, @floatFromInt(multiplier)) * scale_factor;
+                        break :blk @round(scaled);
                     },
                     .int => @as(i64, base_val) * multiplier,
                     else => @compileError("Unsupported type for cost matrix"),
@@ -467,4 +445,24 @@ test "Hungarian algorithm - rectangular matrix" {
     try expectEqual(@as(u32, 2), result.assignments.len);
     // Optimal: row0->col0 (1), row1->col2 (1), total=2
     try expectEqual(@as(f64, 2), result.total_cost);
+}
+
+test "Hungarian algorithm - tiny costs keep relative scale" {
+    const allocator = std.testing.allocator;
+
+    // Costs ~1e-8: the old decimal-place scaling rounded them all to 0 and returned an arbitrary
+    // (diagonal, total 14e-8) assignment. The true optimum is the anti-diagonal at total 10e-8.
+    var cost = try Matrix(f64).init(allocator, 3, 3);
+    defer cost.deinit();
+    const base = [3][3]f64{ .{ 1, 2, 3 }, .{ 2, 4, 6 }, .{ 3, 6, 9 } };
+    for (0..3) |i| for (0..3) |j| {
+        cost.at(i, j).* = base[i][j] * 1e-8;
+    };
+
+    var result = try solveAssignmentProblem(f64, allocator, cost, .min);
+    defer result.deinit();
+    try expectEqual(@as(?u32, 2), result.assignments[0]);
+    try expectEqual(@as(?u32, 1), result.assignments[1]);
+    try expectEqual(@as(?u32, 0), result.assignments[2]);
+    try expectApproxEqAbs(@as(f64, 10e-8), result.total_cost, 1e-15);
 }

@@ -33,7 +33,7 @@ pub fn Result(comptime T: type) type {
 /// or `error.NotFinite` if any entry is NaN or infinite.
 pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Result(T) {
     comptime assert(@typeInfo(T) == .float);
-    assert(a.rows == a.cols);
+    if (a.rows != a.cols) return error.NotSquare;
     const n = a.rows;
 
     // Validate symmetry within a magnitude-relative tolerance: exact-equal entries pass trivially and
@@ -80,6 +80,9 @@ pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Resul
                 if (apq == 0) continue;
                 const theta = 0.5 * (work.at(q, q).* - work.at(p, p).*) / apq;
                 const t = blk: {
+                    // Large |theta|: theta²+1 ≈ theta², so t = 0.5/theta — also avoids the
+                    // theta*theta overflow to ±inf (easy in f32).
+                    if (@abs(theta) > 1.0 / @sqrt(std.math.floatEps(T))) break :blk 0.5 / theta;
                     const sign: T = if (theta < 0) -1 else 1;
                     break :blk sign / (@abs(theta) + @sqrt(theta * theta + 1));
                 };
@@ -224,6 +227,28 @@ test "eigh: rejects a non-symmetric matrix" {
     var a: Matrix(f64) = try .fromSlice(allocator, 2, 2, &.{ 0, 1, 2, 0 });
     defer a.deinit();
     try std.testing.expectError(error.NotSymmetric, eigh(f64, allocator, a));
+}
+
+test "eigh: rejects a non-square matrix" {
+    const allocator = std.testing.allocator;
+    var a: Matrix(f64) = try .fromSlice(allocator, 2, 3, &.{ 1, 0, 0, 0, 1, 0 });
+    defer a.deinit();
+    try std.testing.expectError(error.NotSquare, eigh(f64, allocator, a));
+}
+
+test "eigh: huge Jacobi theta (tiny off-diagonal) stays finite and correct" {
+    const allocator = std.testing.allocator;
+    // theta = 0.5*(2-1)/1e-20 ≈ 5e19; squaring that overflows f32 to +inf. The large-theta branch
+    // must keep t (and the eigenvalues) finite. The off-diagonal is negligible, so λ ≈ 1, 2.
+    const off: f32 = 1e-20;
+    var a: Matrix(f32) = try .fromSlice(allocator, 2, 2, &.{ 1, off, off, 2 });
+    defer a.deinit();
+    var eig = try eigh(f32, allocator, a);
+    defer eig.deinit();
+    try std.testing.expect(std.math.isFinite(eig.values.at(0, 0).*));
+    try std.testing.expect(std.math.isFinite(eig.values.at(1, 0).*));
+    try expectApproxEqAbs(@as(f32, 1), eig.values.at(0, 0).*, 1e-5);
+    try expectApproxEqAbs(@as(f32, 2), eig.values.at(1, 0).*, 1e-5);
 }
 
 test "eigh: rejects non-finite entries instead of returning NaN eigenvalues" {
