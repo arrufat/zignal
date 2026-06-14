@@ -64,13 +64,13 @@ pub const GlobalOptimizer = struct {
     sign: f64, // +1 for .max, -1 for .min (internal always maximizes)
     pure_random_probability: f64,
     num_random_samples: usize,
-    solver_epsilon: f64,
+    trust_region_eps: f64,
     max_concurrency: usize,
 
-    // Parallel-path state (used only when max_concurrency > 1): one in-flight "slot" per worker,
-    // active between dispatch and record. Concurrent asks impute a nearest-neighbor value for active
-    // slots so they don't collapse onto one point; `pending_*` packs them for `evaluateWithPending`.
-    // All slots stay inactive on the sequential path, so `ask` behaves exactly as before.
+    // Parallel-path state, allocated only when max_concurrency > 1 (empty slices otherwise): one
+    // in-flight "slot" per worker, active between dispatch and record. Concurrent asks impute a
+    // nearest-neighbor value for active slots so they don't collapse onto one point; `pending_*` packs
+    // them for `evaluateWithPending`. Empty on the sequential path, so `ask` scans nothing.
     // The `_x` arrays are flat row-major `max_concurrency * dims` (point i at `[i*dims..][0..dims]`);
     // every other array holds one entry per slot (`max_concurrency`).
     outstanding_x: []f64,
@@ -92,10 +92,12 @@ pub const GlobalOptimizer = struct {
     pub const Options = struct {
         policy: OptimizationPolicy,
         seed: u64 = 0,
-        relative_noise_magnitude: f64 = UpperBound.Options.default.relative_noise_magnitude,
+        /// Configures the Lipschitz upper-bound surrogate (noise model + its QP solver tolerance).
+        upper_bound: UpperBound.Options = .default,
         pure_random_probability: f64 = 0.02,
         num_random_samples: usize = 5000,
-        solver_epsilon: f64 = 0.0,
+        /// Minimum trust-region model-predicted improvement required to take an exploit step.
+        trust_region_eps: f64 = 0.0,
         /// Maximum number of objective evaluations in flight at once. The default 1 is the plain
         /// sequential algorithm; values > 1 enable a rolling worker pool in `optimize` (which needs a
         /// pooled `Io` to actually run in parallel, and a thread-safe objective).
@@ -166,26 +168,26 @@ pub const GlobalOptimizer = struct {
         const scratch = try allocator.alloc(f64, dims);
         errdefer allocator.free(scratch);
 
+        // Allocate the parallel-path slots only when there is parallelism; the sequential path
+        // leaves them empty (freeing a zero-length slice in deinit is a no-op).
         const mc = @max(@as(usize, 1), options.max_concurrency);
-        const outstanding_x = try allocator.alloc(f64, mc * dims);
+        const outstanding_x: []f64 = if (mc > 1) try allocator.alloc(f64, mc * dims) else &.{};
         errdefer allocator.free(outstanding_x);
-        const outstanding_y = try allocator.alloc(f64, mc);
+        const outstanding_y: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
         errdefer allocator.free(outstanding_y);
-        const outstanding_predicted = try allocator.alloc(f64, mc);
+        const outstanding_predicted: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
         errdefer allocator.free(outstanding_predicted);
-        const outstanding_move = try allocator.alloc(Move, mc);
+        const outstanding_move: []Move = if (mc > 1) try allocator.alloc(Move, mc) else &.{};
         errdefer allocator.free(outstanding_move);
-        const outstanding_active = try allocator.alloc(bool, mc);
+        const outstanding_active: []bool = if (mc > 1) try allocator.alloc(bool, mc) else &.{};
         errdefer allocator.free(outstanding_active);
         @memset(outstanding_active, false);
-        const pending_x = try allocator.alloc(f64, mc * dims);
+        const pending_x: []f64 = if (mc > 1) try allocator.alloc(f64, mc * dims) else &.{};
         errdefer allocator.free(pending_x);
-        const pending_y = try allocator.alloc(f64, mc);
+        const pending_y: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
         errdefer allocator.free(pending_y);
 
-        const upper_bound: UpperBound = try .init(allocator, dims, .{
-            .relative_noise_magnitude = options.relative_noise_magnitude,
-        });
+        const upper_bound: UpperBound = try .init(allocator, dims, options.upper_bound);
 
         return .{
             .allocator = allocator,
@@ -202,7 +204,7 @@ pub const GlobalOptimizer = struct {
             .sign = if (options.policy == .max) 1 else -1,
             .pure_random_probability = options.pure_random_probability,
             .num_random_samples = options.num_random_samples,
-            .solver_epsilon = options.solver_epsilon,
+            .trust_region_eps = options.trust_region_eps,
             .max_concurrency = mc,
             .outstanding_x = outstanding_x,
             .outstanding_y = outstanding_y,
@@ -405,7 +407,7 @@ pub const GlobalOptimizer = struct {
         // Exploit: local quadratic trust-region step (skipped if one is already in flight).
         if (self.do_trust_region_step and !tr_outstanding and real_n > dims + 1) {
             const predicted = try self.pickTrustRegion();
-            if (predicted > self.solver_epsilon) {
+            if (predicted > self.trust_region_eps) {
                 self.do_trust_region_step = false;
                 return .{ .move = .exploit, .predicted = predicted };
             }
