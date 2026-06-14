@@ -76,6 +76,7 @@ pub const GlobalOptimizer = struct {
     outstanding_x: []f64,
     outstanding_y: []f64,
     outstanding_predicted: []f64,
+    outstanding_anchor: []f64,
     outstanding_move: []Move,
     outstanding_active: []bool,
     pending_x: []f64,
@@ -163,6 +164,8 @@ pub const GlobalOptimizer = struct {
 
         const best_x = try allocator.alloc(f64, dims);
         errdefer allocator.free(best_x);
+        // best() reads best_x unconditionally; keep it defined for a zero-budget run.
+        @memset(best_x, 0);
         const last_x = try allocator.alloc(f64, dims);
         errdefer allocator.free(last_x);
         const scratch = try allocator.alloc(f64, dims);
@@ -177,6 +180,8 @@ pub const GlobalOptimizer = struct {
         errdefer allocator.free(outstanding_y);
         const outstanding_predicted: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
         errdefer allocator.free(outstanding_predicted);
+        const outstanding_anchor: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
+        errdefer allocator.free(outstanding_anchor);
         const outstanding_move: []Move = if (mc > 1) try allocator.alloc(Move, mc) else &.{};
         errdefer allocator.free(outstanding_move);
         const outstanding_active: []bool = if (mc > 1) try allocator.alloc(bool, mc) else &.{};
@@ -209,6 +214,7 @@ pub const GlobalOptimizer = struct {
             .outstanding_x = outstanding_x,
             .outstanding_y = outstanding_y,
             .outstanding_predicted = outstanding_predicted,
+            .outstanding_anchor = outstanding_anchor,
             .outstanding_move = outstanding_move,
             .outstanding_active = outstanding_active,
             .pending_x = pending_x,
@@ -224,6 +230,7 @@ pub const GlobalOptimizer = struct {
         self.allocator.free(self.outstanding_x);
         self.allocator.free(self.outstanding_y);
         self.allocator.free(self.outstanding_predicted);
+        self.allocator.free(self.outstanding_anchor);
         self.allocator.free(self.outstanding_move);
         self.allocator.free(self.outstanding_active);
         self.allocator.free(self.pending_x);
@@ -240,14 +247,14 @@ pub const GlobalOptimizer = struct {
     pub fn addEvaluation(self: *GlobalOptimizer, eval: Evaluation) !void {
         if (eval.x.len != self.variables.len) return GlobalError.DimensionMismatch;
         // A warm-start point is a seed, not a trust-region step → treat it like an `.init` move.
-        try self.record(eval.x, self.sign * eval.y, .init, 0);
+        try self.record(eval.x, self.sign * eval.y, .init, 0, 0);
     }
 
     /// Perform one ask+evaluate+tell iteration and return what happened.
     pub fn step(self: *GlobalOptimizer, objective: anytype) !Step {
         const a = try self.ask();
         const y_raw = callObjective(objective, self.last_x);
-        try self.record(self.last_x, self.sign * y_raw, a.move, a.predicted);
+        try self.record(self.last_x, self.sign * y_raw, a.move, a.predicted, a.anchor);
         self.evals += 1;
         return .{
             .point = .{ .x = self.last_x, .y = y_raw },
@@ -308,6 +315,7 @@ pub const GlobalOptimizer = struct {
                     opt.outstanding_y[slot] = opt.upper_bound.nearestY(xslot);
                     opt.outstanding_move[slot] = a.move;
                     opt.outstanding_predicted[slot] = a.predicted;
+                    opt.outstanding_anchor[slot] = a.anchor;
                     opt.outstanding_active[slot] = true;
                     sh.dispatched += 1;
                     sh.mutex.unlock(w_io);
@@ -316,7 +324,7 @@ pub const GlobalOptimizer = struct {
 
                     sh.mutex.lockUncancelable(w_io);
                     opt.outstanding_active[slot] = false;
-                    opt.record(xslot, opt.sign * y_raw, opt.outstanding_move[slot], opt.outstanding_predicted[slot]) catch |e| {
+                    opt.record(xslot, opt.sign * y_raw, opt.outstanding_move[slot], opt.outstanding_predicted[slot], opt.outstanding_anchor[slot]) catch |e| {
                         sh.err = e;
                         sh.mutex.unlock(w_io);
                         return;
@@ -347,6 +355,8 @@ pub const GlobalOptimizer = struct {
     const Ask = struct {
         move: Move,
         predicted: f64 = 0,
+        // best_y captured at plan time; rho's reference for radius adaptation.
+        anchor: f64 = 0,
     };
 
     // Patience/target stop bookkeeping, shared by both `optimize` paths.
@@ -409,7 +419,7 @@ pub const GlobalOptimizer = struct {
             const predicted = try self.pickTrustRegion();
             if (predicted > self.trust_region_eps) {
                 self.do_trust_region_step = false;
-                return .{ .move = .exploit, .predicted = predicted };
+                return .{ .move = .exploit, .predicted = predicted, .anchor = self.best_y orelse 0 };
             }
         }
 
@@ -432,18 +442,18 @@ pub const GlobalOptimizer = struct {
         y_internal: f64,
         move: Move,
         predicted: f64,
+        anchor: f64,
     ) !void {
         try self.upper_bound.add(x, y_internal);
 
-        // self.best_y is still the pre-evaluation best here (updated below), i.e. the TR anchor.
+        // rho measures the step against the best at the time it was planned (`anchor`), not the
+        // live best_y — concurrent workers may have improved best_y since this step's `ask`.
         if (move == .exploit and predicted != 0) {
-            if (self.best_y) |anchor| {
-                const rho = (y_internal - anchor) / @abs(predicted);
-                if (rho < 0.25) {
-                    self.radius *= 0.5;
-                } else if (rho > 0.75) {
-                    self.radius *= 2;
-                }
+            const rho = (y_internal - anchor) / @abs(predicted);
+            if (rho < 0.25) {
+                self.radius *= 0.5;
+            } else if (rho > 0.75) {
+                self.radius *= 2;
             }
         }
 

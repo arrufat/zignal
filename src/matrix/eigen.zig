@@ -29,7 +29,8 @@ pub fn Result(comptime T: type) type {
 /// Eigendecomposition of the symmetric n×n matrix `a` via cyclic Jacobi rotations. Eigenvalues are
 /// returned ascending, with `vectors`' columns the matching unit eigenvectors. The caller owns the
 /// returned matrices. Returns `error.NotSymmetric` if `a` is not symmetric within a magnitude-relative
-/// tolerance (a general non-symmetric eigendecomposition, with its complex spectrum, is out of scope).
+/// tolerance (a general non-symmetric eigendecomposition, with its complex spectrum, is out of scope),
+/// or `error.NotFinite` if any entry is NaN or infinite.
 pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Result(T) {
     comptime assert(@typeInfo(T) == .float);
     assert(a.rows == a.cols);
@@ -40,7 +41,12 @@ pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Resul
     // but a genuinely non-symmetric matrix is rejected rather than silently mis-decomposed.
     {
         var max_abs: T = 0;
-        for (a.items) |x| max_abs = @max(max_abs, @abs(x));
+        for (a.items) |x| {
+            // NaN/Inf pass the relative symmetry check below (every NaN comparison is false), so
+            // reject them here rather than return silent NaN eigenvalues.
+            if (!std.math.isFinite(x)) return error.NotFinite;
+            max_abs = @max(max_abs, @abs(x));
+        }
         const tol = max_abs * @sqrt(std.math.floatEps(T));
         for (0..n) |i| for (i + 1..n) |j| {
             if (@abs(a.at(i, j).* - a.at(j, i).*) > tol) return error.NotSymmetric;
@@ -218,6 +224,19 @@ test "eigh: rejects a non-symmetric matrix" {
     var a: Matrix(f64) = try .fromSlice(allocator, 2, 2, &.{ 0, 1, 2, 0 });
     defer a.deinit();
     try std.testing.expectError(error.NotSymmetric, eigh(f64, allocator, a));
+}
+
+test "eigh: rejects non-finite entries instead of returning NaN eigenvalues" {
+    const allocator = std.testing.allocator;
+    const nan = std.math.nan(f64);
+    // Symmetric layout, but the non-finite entry must be rejected before it yields NaN eigenvalues.
+    var a: Matrix(f64) = try .fromSlice(allocator, 2, 2, &.{ nan, 1, 1, 2 });
+    defer a.deinit();
+    try std.testing.expectError(error.NotFinite, eigh(f64, allocator, a));
+
+    var b: Matrix(f64) = try .fromSlice(allocator, 2, 2, &.{ std.math.inf(f64), 0, 0, 1 });
+    defer b.deinit();
+    try std.testing.expectError(error.NotFinite, eigh(f64, allocator, b));
 }
 
 test "eigh: reconstructs A = V diag(λ) Vᵀ" {

@@ -201,12 +201,11 @@ pub fn solveTrustRegionSubproblem(
 
     const min_eig = eig.values.at(0, 0).*;
     const min_eig_idx: usize = 0;
-    var max_abs_eig: f64 = 0;
-    for (0..n) |i| max_abs_eig = @max(max_abs_eig, @abs(eig.values.at(i, 0).*));
 
-    // ev <- reciprocal of (eigenvalue - min_eig), with near-zero entries zeroed.
+    // ev <- reciprocal of (eigenvalue - min_eig), with near-zero entries zeroed. The tolerance is
+    // relative to the shifted spread (max - min, values are ascending), matching dlib.
     const ev = tmp;
-    const zero_tol = max_abs_eig * std.math.floatEps(f64);
+    const zero_tol = (eig.values.at(n - 1, 0).* - min_eig) * std.math.floatEps(f64);
     for (0..n) |i| {
         const shifted = eig.values.at(i, 0).* - min_eig;
         ev[i] = if (shifted > zero_tol) 1.0 / shifted else 0;
@@ -300,7 +299,10 @@ pub fn solveTrustRegionSubproblemBounded(
         p_out[idx[most]] = bounded_value;
 
         const new_cur = cur - 1;
-        if (new_cur == 0) break;
+        if (new_cur == 0) {
+            cur = 0; // all variables locked to a bound; skip the writeback below
+            break;
+        }
 
         // Build the reduced problem excluding compact index `most`.
         const nb = try a.alloc(f64, new_cur * new_cur);
@@ -580,6 +582,23 @@ test "trust region bounded: box clips a variable" {
     try expectApproxEqAbs(@as(f64, 0.3), p[0], 1e-6);
     try std.testing.expect(p[1] >= -1 and p[1] <= 1);
     try std.testing.expect(norm(&p) <= 1.0 + 1e-6);
+}
+
+test "trust region bounded: active set empties (every variable locks to a bound)" {
+    // Both coords are pushed past their upper bound, so the active set locks every variable.
+    // Regression: the empty-active-set exit used to overwrite the last lock with a stale value.
+    const b = [_]f64{ 1, 0, 0, 1 };
+    const g = [_]f64{ -10, -10 };
+    const lower = [_]f64{ -1, -1 };
+    const upper = [_]f64{ 0.3, 0.3 };
+    var p: [2]f64 = undefined;
+    try solveTrustRegionSubproblemBounded(std.testing.allocator, &b, &g, 2, 1.0, &lower, &upper, &p, .{ .eps = 1e-7 });
+    // Every coordinate must respect the box; before the fix p[1] came back at ~0.95 (outside it).
+    try std.testing.expect(p[0] >= -1 and p[0] <= 0.3 + 1e-9);
+    try std.testing.expect(p[1] >= -1 and p[1] <= 0.3 + 1e-9);
+    // Both are driven to the upper bound.
+    try expectApproxEqAbs(@as(f64, 0.3), p[0], 1e-6);
+    try expectApproxEqAbs(@as(f64, 0.3), p[1], 1e-6);
 }
 
 test "fitQuadratic: exact recovery (overdetermined, 2D)" {
