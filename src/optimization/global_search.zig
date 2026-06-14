@@ -1,7 +1,9 @@
 //! Derivative-free, bound-constrained global optimization: MaxLIPO + Trust Region.
 //!
-//! Port of dlib's `find_min_global`/`find_max_global` (`global_optimization/`). The optimizer
-//! alternates between two moves:
+//! The MaxLIPO+TR method is due to Davis King (dlib's `find_min_global`/`find_max_global`; see his
+//! "A Global Optimization Algorithm Worth Using"), combining the LIPO method of Malherbe & Vayatis
+//! (2017) with a trust-region quadratic refinement. This is a port of that dlib implementation; the
+//! optimizer alternates between two moves:
 //!   - **explore** (MaxLIPO): sample the point that maximizes a piecewise Lipschitz upper bound
 //!     (`lipschitz.UpperBound`) — global, finds the basin of the optimum.
 //!   - **exploit** (trust region): fit a local quadratic to the nearest evaluated points and jump
