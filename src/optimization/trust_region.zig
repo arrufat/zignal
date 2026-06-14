@@ -291,9 +291,12 @@ pub fn solveTrustRegionSubproblem(
         ev[i] = if (shifted > zero_tol) 1.0 / shifted else 0;
     }
 
-    // p_hard = V * diag(ev) * V^T * g
-    const p_hard = m[0..n]; // reuse scratch
-    const vt_g = m[n .. 2 * n];
+    // p_hard = V * diag(ev) * V^T * g. Needs 2*n contiguous slots (p_hard + vt_g); the `m` Newton
+    // scratch is only n*n, which is < 2*n when n == 1, so use a dedicated buffer here.
+    const hard = try allocator.alloc(f64, 2 * n);
+    defer allocator.free(hard);
+    const p_hard = hard[0..n];
+    const vt_g = hard[n .. 2 * n];
     for (0..n) |j| {
         var s: f64 = 0;
         for (0..n) |k| s += eig.vectors[k * n + j] * g[k]; // (V^T g)_j
@@ -645,6 +648,18 @@ test "trust region: boundary solution" {
     try expectApproxEqAbs(@as(f64, 1.0), norm(&p), 1e-4);
     try expectApproxEqAbs(@as(f64, 1.0), p[0], 1e-3);
     try expectApproxEqAbs(@as(f64, 0.0), p[1], 1e-3);
+}
+
+test "trust region: n==1 hard case (negative curvature, ~zero gradient)" {
+    // A 1-D subproblem with non-positive curvature and a ~zero gradient takes the eigen-decomposition
+    // ("hard case") fallback. Regression: that path reuses scratch as two length-n views (p_hard and
+    // vt_g), needing 2*n slots, which exceeds the n*n Newton scratch when n == 1. minimize
+    // 0.5*(-1)*p^2 over |p| <= 1 -> the optimum sits on the boundary (|p| == radius).
+    const b = [_]f64{-1};
+    const g = [_]f64{0};
+    var p: [1]f64 = undefined;
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1, 1.0, &p, .{});
+    try expectApproxEqAbs(@as(f64, 1.0), @abs(p[0]), 1e-9);
 }
 
 test "trust region bounded: box clips a variable" {
