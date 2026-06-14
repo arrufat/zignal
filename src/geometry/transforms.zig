@@ -71,7 +71,7 @@ pub fn SimilarityTransform(comptime T: type) type {
             }
             sigma_from /= num_points;
             cov = cov.scale(1.0 / num_points);
-            const det_cov = cov.determinant();
+            const det_cov = cov.det();
             const result = cov.svd(.{ .with_v = true, .mode = .skinny_u });
             if (result.converged != 0) {
                 return error.NotConverged;
@@ -90,8 +90,8 @@ pub fn SimilarityTransform(comptime T: type) type {
             const u = &result.u;
             const d: SMatrix(T, 2, 2) = .init(.{ .{ result.s.at(0, 0).*, 0 }, .{ 0, result.s.at(1, 0).* } });
             const v = &result.v;
-            const det_u = u.determinant();
-            const det_v = v.determinant();
+            const det_u = u.det();
+            const det_v = v.det();
             var s: SMatrix(T, cov.rows, cov.cols) = .identity();
             if (det_cov < 0 or (det_cov == 0 and det_u * det_v < 0)) {
                 if (d.at(1, 1).* < d.at(0, 0).*) {
@@ -169,7 +169,7 @@ pub fn AffineTransform(comptime T: type) type {
             }
             // Compute the pseudo-inverse so we can support additional correspondences
             var effective_rank: u32 = 0;
-            var pinv = try p.pseudoInverse(.{ .effective_rank = &effective_rank });
+            var pinv = try p.pinv(.{ .effective_rank = &effective_rank });
             defer pinv.deinit();
             if (effective_rank < 3) {
                 return error.RankDeficient;
@@ -231,8 +231,8 @@ pub fn ProjectiveTransform(comptime T: type) type {
         }
 
         /// Returns the inverse of the current projective transform.
-        pub fn inverse(self: Self) ?Self {
-            return if (self.matrix.inverse()) |inv| .{ .matrix = inv } else null;
+        pub fn inv(self: Self) ?Self {
+            return if (self.matrix.inv()) |m| .{ .matrix = m } else null;
         }
 
         /// Finds the best projective transform that maps between the two given sets of points.
@@ -413,7 +413,7 @@ test "projection4" {
         try std.testing.expectApproxEqRel(p.y(), t.y(), tol);
     }
 
-    const m_inv = transform.inverse().?;
+    const m_inv = transform.inv().?;
     const t_inv: ProjectiveTransform(T) = try .init(to_points, from_points);
     for (from_points) |f| {
         var fp = t_inv.project(transform.project(f));

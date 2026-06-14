@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Features
+- **Global Optimization**: Added a derivative-free, bound-constrained global optimizer (MaxLIPO + Trust Region) — `GlobalOptimizer` and `findGlobalOptimum` in `src/optimization/`, supporting mixed integer/continuous search spaces and optional parallel objective evaluation through `Io`.
+- **Symmetric Eigendecomposition**: Added `Matrix.eigh`, a cyclic-Jacobi eigendecomposition of symmetric matrices that recovers *signed* eigenvalues (handles indefinite matrices, unlike SVD), plus a `Matrix.diagonal` constructor that builds a diagonal matrix from a vector (dlib's `diagm`).
 - **BMP Codec** (#348): Native Zig BMP reader and writer with no third-party dependencies.
   - Decoder covers BITMAPCOREHEADER (OS/2 v1) / BITMAPINFOHEADER / V4 / V5 (with v2/v3 tolerated as INFOHEADER variants), 1/4/8/16/24/32 bpp, BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS / BI_RLE4 / BI_RLE8 compressions, and both bottom-up and top-down row order.
   - Encoder writes 24bpp BI_RGB for `Image(Rgb)`, 32bpp BI_BITFIELDS with canonical RGBA masks for `Image(Rgba)`, and optional 8bpp linear-gray indexed for `Image(u8)` (via `EncodeOptions.use_palette_for_grayscale`).
@@ -20,6 +22,10 @@
 
 ### Improvements
 - **Single-Threaded Build Robustness**: Sixel's palette LUT cache skips its atomic spinlock under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding`).
+
+### Changed
+- **Matrix methods renamed to conventional short names** (breaking): `inverse` → `inv`, `determinant` → `det`, `pseudoInverse` → `pinv`, `cholesky` → `chol`, and the element-wise (Hadamard) product `times` → `hadamard` (in-place `timesBy` → `hadamardBy`). `ProjectiveTransform.inverse` → `inv`. Applies across `Matrix`, `SMatrix`, `Chain`, and the Python bindings.
+- **`RunningStats` now takes a config argument** (breaking): `RunningStats(T)` → `RunningStats(T, config)`, where `RunningStatsConfig` (`.all` / `.variance` / `.summary`) selects which quantities are tracked. Use `.all` for the previous behavior.
 
 ## [0.10.0] - 2026-04-15
 

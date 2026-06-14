@@ -523,3 +523,190 @@ input[type="radio"] {
     padding: 15px;
   }
 }
+
+/* Global optimization demo */
+#optimizer-layout {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 10px;
+}
+
+#optimizer-controls {
+  flex: 1 1 360px;
+  min-width: 300px;
+  max-width: 460px;
+}
+
+#optimizer-controls fieldset {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  margin: 0 0 16px 0;
+  padding: 12px;
+  background: #fff;
+}
+
+#optimizer-controls legend {
+  font-weight: bold;
+  color: #333;
+  padding: 0 6px;
+}
+
+#optimizer-controls label {
+  display: block;
+  margin-bottom: 6px;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+#optimizer-controls .param-grid label {
+  font-weight: 600;
+  color: #555;
+}
+
+#preset {
+  margin-bottom: 12px;
+}
+
+#fn-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.35;
+  resize: vertical;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+#optimizer-controls input[type="number"],
+#optimizer-controls select {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+#bounds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+#bounds-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #555;
+  padding: 2px 4px;
+}
+
+#bounds-table td {
+  padding: 2px 4px;
+}
+
+#bounds-table td.idx {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.opt-error {
+  color: #bf616a;
+  font-size: 0.85rem;
+  min-height: 1em;
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+.opt-buttons {
+  text-align: center;
+}
+
+#optimizer-viz {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+#opt-canvas {
+  width: 480px;
+  max-width: 90vw;
+  height: auto;
+  border: 2px solid #333;
+  background: #fff;
+  cursor: default;
+}
+
+#opt-expected {
+  font-family: monospace;
+  color: #555;
+  font-size: 0.85rem;
+  margin-top: 10px;
+}
+
+#opt-results {
+  font-family: monospace;
+  color: #333;
+  margin-top: 12px;
+  text-align: left;
+  display: inline-block;
+  min-width: 280px;
+  line-height: 1.5;
+}
+
+#opt-results .best-line {
+  font-weight: bold;
+}
+
+.opt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 8px;
+}
+
+.opt-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+/* Own legend class instead of the shared `.legend` so the global `.legend span` pill rule does not
+   corrupt the move-color swatches. */
+.opt-legend {
+  text-align: center;
+  margin: 10px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+/* Small secondary buttons (add/remove variable). They keep `copy-button` to opt out of the big-blue
+   `button:not(.copy-button)` rule; this class supplies the actual styling without touching other
+   demos' copy buttons. */
+.opt-small-btn {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  background: #f8f8f8;
+  color: #333;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 0;
+  margin: 0;
+}
+
+.opt-small-btn:hover {
+  background: #eee;
+}
+
+.opt-small-btn:disabled {
+  background: #eee;
+  color: #aaa;
+  cursor: not-allowed;
+}

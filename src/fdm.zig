@@ -314,7 +314,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
 ///     try fdm.update(); // Modifies img in-place
 /// }
 /// ```
-fn populationVariance(stats: RunningStats(f64)) f64 {
+fn populationVariance(stats: RunningStats(f64, .variance)) f64 {
     const n_samples = stats.currentN();
     if (n_samples <= 1) return 0;
     const n_f = @as(f64, @floatFromInt(n_samples));
@@ -553,7 +553,7 @@ test "FDM grayscale target applied to color source" {
     }
 
     // Pre-compute target statistics (on 0-255 scale).
-    var target_stats: RunningStats(f64) = .init();
+    var target_stats: RunningStats(f64, .variance) = .init();
     for (target_img.data) |pixel| {
         target_stats.add(@as(f64, pixel.r));
     }
@@ -566,7 +566,7 @@ test "FDM grayscale target applied to color source" {
     try fdm.match(source_img, target_img);
 
     // Result image should be grayscale and match target statistics within tolerance.
-    var result_stats: RunningStats(f64) = .init();
+    var result_stats: RunningStats(f64, .variance) = .init();
     for (source_img.data) |pixel| {
         try expectEqual(pixel.r, pixel.g);
         try expectEqual(pixel.g, pixel.b);

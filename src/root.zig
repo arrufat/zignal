@@ -123,7 +123,10 @@ pub const MatchStats = features.MatchStats;
 
 // Optimization algorithms
 pub const optimization = @import("optimization.zig");
+pub const GlobalOptimizer = optimization.GlobalOptimizer;
+pub const findGlobalOptimum = optimization.findGlobalOptimum;
 
 // Statistics module
 const stats = @import("stats.zig");
 pub const RunningStats = stats.RunningStats;
+pub const RunningStatsConfig = stats.RunningStatsConfig;

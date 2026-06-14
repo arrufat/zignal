@@ -669,7 +669,7 @@ fn op_rsub_scalar(s: f64, a: *Matrix(f64)) MatrixResult {
     return negated.offset(s);
 }
 fn op_mul(a: *Matrix(f64), b: *Matrix(f64)) MatrixResult {
-    return a.times(b.*);
+    return a.hadamard(b.*);
 }
 fn op_mul_scalar(a: *Matrix(f64), s: f64) MatrixResult {
     return a.scale(s);
@@ -774,7 +774,7 @@ fn inplace_op_sub_scalar(a: *Matrix(f64), s: f64) MatrixError!void {
     return a.offsetBy(-s);
 }
 fn inplace_op_mul(a: *Matrix(f64), b: *Matrix(f64)) MatrixError!void {
-    return a.timesBy(b.*);
+    return a.hadamardBy(b.*);
 }
 fn inplace_op_mul_scalar(a: *Matrix(f64), s: f64) MatrixError!void {
     return a.scaleBy(s);
@@ -957,7 +957,7 @@ const matrix_inverse_doc =
     \\Compute the matrix inverse.
     \\
     \\## Returns
-    \\Matrix: The inverse matrix such that A @ A.inverse() ≈ I
+    \\Matrix: The inverse matrix such that A @ A.inv() ≈ I
     \\
     \\## Raises
     \\ValueError: If matrix is not square or is singular
@@ -965,7 +965,7 @@ const matrix_inverse_doc =
     \\## Examples
     \\```python
     \\m = Matrix([[2, 0], [0, 2]])
-    \\inv = m.inverse()  # [[0.5, 0], [0, 0.5]]
+    \\inv = m.inv()  # [[0.5, 0], [0, 0.5]]
     \\```
 ;
 
@@ -973,7 +973,7 @@ fn matrix_inverse(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.P
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
-    const result_matrix = ptr.inverse();
+    const result_matrix = ptr.inv();
     return matrixToObject(result_matrix);
 }
 
@@ -1264,7 +1264,7 @@ fn matrix_determinant_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
         return null;
     }
 
-    const result = ptr.determinant() catch {
+    const result = ptr.det() catch {
         python.setMemoryError("determinant computation");
         return null;
     };
@@ -1732,12 +1732,12 @@ fn matrix_pinv_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
 
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
-    const options = Matrix(f64).PseudoInverseOptions{
+    const options = Matrix(f64).PinvOptions{
         .tolerance = params.tolerance,
         .effective_rank = null,
     };
 
-    const result_matrix = ptr.pseudoInverse(options);
+    const result_matrix = ptr.pinv(options);
     return matrixToObject(result_matrix);
 }
 
@@ -2078,7 +2078,7 @@ pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
         .returns = "Matrix",
     },
     .{
-        .name = "inverse",
+        .name = "inv",
         .meth = @ptrCast(&matrix_inverse),
         .flags = c.METH_NOARGS,
         .doc = matrix_inverse_doc,
@@ -2158,7 +2158,7 @@ pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
         .returns = "Matrix",
     },
     .{
-        .name = "determinant",
+        .name = "det",
         .meth = @ptrCast(&matrix_determinant_method),
         .flags = c.METH_NOARGS,
         .doc = matrix_determinant_doc,

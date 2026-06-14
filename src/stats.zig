@@ -11,11 +11,28 @@ const testing = std.testing;
 
 const Matrix = @import("matrix.zig").Matrix;
 
-/// Running statistics for streaming data.
-/// Computes mean, variance, skewness, and kurtosis in a single pass.
-/// Uses Welford's algorithm for numerical stability.
-/// Inspired by dlib's running_stats implementation.
-pub fn RunningStats(comptime T: type) type {
+/// Selects which quantities `RunningStats` tracks. Opt out of moments/extrema you don't need to
+/// skip the corresponding per-sample work; mean/variance/stdDev are always available.
+pub const RunningStatsConfig = struct {
+    /// Track 3rd/4th central moments (required for `skewness`, `exKurtosis`, `combine`).
+    higher_moments: bool,
+    /// Track running min/max (required for `min`, `max`, `combine`).
+    extrema: bool,
+
+    /// Track everything: mean, variance, skewness, kurtosis, and extrema.
+    pub const all: RunningStatsConfig = .{ .higher_moments = true, .extrema = true };
+    /// Track only what mean/variance/stdDev need — the cheapest per-sample update.
+    /// Usage: `RunningStats(f64, .variance)`.
+    pub const variance: RunningStatsConfig = .{ .higher_moments = false, .extrema = false };
+    /// Track mean/variance/stdDev plus running min/max, but not the higher moments.
+    pub const summary: RunningStatsConfig = .{ .higher_moments = false, .extrema = true };
+};
+
+/// Running statistics for streaming data using Welford's algorithm for numerical stability.
+/// `config` selects which quantities are tracked — pass a preset such as `.all` or `.variance`
+/// (see `RunningStatsConfig`). mean/variance/stdDev are always available. Inspired by dlib's
+/// running_stats.
+pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type {
     comptime assert(@typeInfo(T) == .float);
 
     return struct {
@@ -31,12 +48,12 @@ pub fn RunningStats(comptime T: type) type {
         m1: T,
         /// Second moment
         m2: T,
-        /// Third moment
+        /// Third moment (only updated when `config.higher_moments`)
         m3: T,
-        /// Fourth moment
+        /// Fourth moment (only updated when `config.higher_moments`)
         m4: T,
 
-        // Extrema
+        // Extrema (only updated when `config.extrema`)
         min_val: T,
         max_val: T,
 
@@ -65,23 +82,26 @@ pub fn RunningStats(comptime T: type) type {
             const n1 = n + 1;
             const delta = val - self.m1;
             const delta_n = delta / n1;
-            const delta_n2 = delta_n * delta_n;
             const term1 = delta * delta_n * n;
 
-            // Update moments using Welford's algorithm
+            // Higher moments use the pre-update m2/m3, so update them first when tracked.
+            if (config.higher_moments) {
+                const delta_n2 = delta_n * delta_n;
+                self.m4 += term1 * delta_n2 * (n1 * n1 - 3 * n1 + 3) +
+                    6 * delta_n2 * self.m2 - 4 * delta_n * self.m3;
+                self.m3 += term1 * delta_n * (n1 - 2) - 3 * delta_n * self.m2;
+            }
             self.m1 += delta_n;
-            self.m4 += term1 * delta_n2 * (n1 * n1 - 3 * n1 + 3) +
-                6 * delta_n2 * self.m2 - 4 * delta_n * self.m3;
-            self.m3 += term1 * delta_n * (n1 - 2) - 3 * delta_n * self.m2;
             self.m2 += term1;
 
             // Update simple sums
             self.sum += val;
             self.n += 1;
 
-            // Update extrema
-            self.min_val = @min(self.min_val, val);
-            self.max_val = @max(self.max_val, val);
+            if (config.extrema) {
+                self.min_val = @min(self.min_val, val);
+                self.max_val = @max(self.max_val, val);
+            }
         }
 
         /// Get the current number of samples
@@ -113,6 +133,7 @@ pub fn RunningStats(comptime T: type) type {
 
         /// Compute the unbiased sample skewness (requires n > 2)
         pub fn skewness(self: Self) T {
+            if (!config.higher_moments) @compileError("skewness requires RunningStatsConfig.higher_moments = true");
             if (self.n <= 2) return 0;
 
             const variance_val = self.variance();
@@ -126,6 +147,7 @@ pub fn RunningStats(comptime T: type) type {
 
         /// Compute the excess kurtosis (requires n > 3)
         pub fn exKurtosis(self: Self) T {
+            if (!config.higher_moments) @compileError("exKurtosis requires RunningStatsConfig.higher_moments = true");
             if (self.n <= 3) return 0;
 
             const variance_val = self.variance();
@@ -143,12 +165,14 @@ pub fn RunningStats(comptime T: type) type {
 
         /// Get the minimum value seen so far
         pub fn min(self: Self) T {
+            if (!config.extrema) @compileError("min requires RunningStatsConfig.extrema = true");
             if (self.n == 0) return 0;
             return self.min_val;
         }
 
         /// Get the maximum value seen so far
         pub fn max(self: Self) T {
+            if (!config.extrema) @compileError("max requires RunningStatsConfig.extrema = true");
             if (self.n == 0) return 0;
             return self.max_val;
         }
@@ -162,6 +186,8 @@ pub fn RunningStats(comptime T: type) type {
 
         /// Combine two RunningStats objects
         pub fn combine(self: Self, other: Self) Self {
+            if (!config.higher_moments or !config.extrema)
+                @compileError("combine requires RunningStatsConfig.higher_moments and .extrema = true");
             if (self.n == 0) return other;
             if (other.n == 0) return self;
 
@@ -300,7 +326,7 @@ pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
 // ============================================================================
 
 test "RunningStats: basic operations" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Test with known values
     stats.add(2.0);
@@ -323,7 +349,7 @@ test "RunningStats: basic operations" {
 }
 
 test "RunningStats: skewness and kurtosis" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Normal-like distribution
     const values = [_]f64{ 1, 2, 2, 3, 3, 3, 4, 4, 5 };
@@ -339,9 +365,9 @@ test "RunningStats: skewness and kurtosis" {
 }
 
 test "RunningStats: combine" {
-    var stats1: RunningStats(f64) = .init();
-    var stats2: RunningStats(f64) = .init();
-    var combined_direct: RunningStats(f64) = .init();
+    var stats1: RunningStats(f64, .all) = .init();
+    var stats2: RunningStats(f64, .all) = .init();
+    var combined_direct: RunningStats(f64, .all) = .init();
 
     // Add to first stats
     stats1.add(1.0);
@@ -371,7 +397,7 @@ test "RunningStats: combine" {
 }
 
 test "RunningStats: edge cases" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Empty stats
     try testing.expectEqual(@as(usize, 0), stats.currentN());
@@ -407,7 +433,7 @@ test "RunningStats: edge cases" {
 }
 
 test "RunningStats: normal distribution approximation" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Generate standard normal data using Zig's built-in normal random generator
     var prng = std.Random.DefaultPrng.init(42); // Fixed seed for deterministic test
@@ -428,7 +454,7 @@ test "RunningStats: normal distribution approximation" {
 }
 
 test "RunningStats: skewed distribution" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Generate right-skewed data using Zig's exponential random generator
     var prng = std.Random.DefaultPrng.init(123); // Fixed seed for deterministic test
@@ -448,7 +474,7 @@ test "RunningStats: skewed distribution" {
 }
 
 test "RunningStats: scaling/z-score" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Add values with known mean and std
     stats.add(10.0);
@@ -468,7 +494,7 @@ test "RunningStats: scaling/z-score" {
 }
 
 test "RunningStats: large values for numerical stability" {
-    var stats: RunningStats(f64) = .init();
+    var stats: RunningStats(f64, .all) = .init();
 
     // Add large values to test numerical stability
     stats.add(1e10);

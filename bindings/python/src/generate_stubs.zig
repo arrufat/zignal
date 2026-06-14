@@ -395,7 +395,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         \\from __future__ import annotations
         \\
         \\from enum import IntEnum
-        \\from typing import Iterable, Literal, TypeAlias
+        \\from typing import Callable, Iterable, Literal, TypeAlias
         \\
         \\import numpy as np
         \\from numpy.typing import NDArray
@@ -722,6 +722,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    AffineTransform as AffineTransform,
         \\    ProjectiveTransform as ProjectiveTransform,
         \\    solve_assignment_problem as solve_assignment_problem,
+        \\    optimize as optimize,
         \\    # Type aliases
         \\    Point as Point,
         \\    Size as Size,

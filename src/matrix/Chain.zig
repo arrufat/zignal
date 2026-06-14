@@ -145,8 +145,8 @@ pub fn Chain(comptime T: type) type {
         }
 
         /// Element-wise multiplication (Hadamard product).
-        pub fn times(self: *Self, other: Matrix(T)) *Self {
-            return self.dispatch("times", .{other});
+        pub fn hadamard(self: *Self, other: Matrix(T)) *Self {
+            return self.dispatch("hadamard", .{other});
         }
 
         /// Scale all elements by a scalar.
@@ -219,18 +219,18 @@ pub fn Chain(comptime T: type) type {
         }
 
         /// Matrix inverse.
-        pub fn inverse(self: *Self) *Self {
-            return self.dispatch("inverse", .{});
+        pub fn inv(self: *Self) *Self {
+            return self.dispatch("inv", .{});
         }
 
         /// Moore-Penrose pseudo-inverse.
-        pub fn pseudoInverse(self: *Self, options: Matrix(T).PseudoInverseOptions) *Self {
-            return self.dispatch("pseudoInverse", .{options});
+        pub fn pinv(self: *Self, options: Matrix(T).PinvOptions) *Self {
+            return self.dispatch("pinv", .{options});
         }
 
         /// Cholesky decomposition (lower triangular L such that A = L · L^T).
-        pub fn cholesky(self: *Self) *Self {
-            return self.dispatch("cholesky", .{});
+        pub fn chol(self: *Self) *Self {
+            return self.dispatch("chol", .{});
         }
 
         /// Extract a submatrix.
