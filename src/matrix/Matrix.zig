@@ -19,7 +19,7 @@
 //! ```zig
 //! var p = matrix.chain();
 //! defer p.deinit();
-//! const result = try p.transpose().dot(other).inverse().toOwned();
+//! const result = try p.transpose().dot(other).inv().toOwned();
 //! defer result.deinit();
 //! ```
 //!
@@ -28,8 +28,8 @@
 //!
 //! ## Available Operations
 //!
-//! - Element-wise: `add()`, `sub()`, `times()`, `scale()`, `offset()`, `pow()`
-//! - Matrix operations: `dot()`, `transpose()`, `inverse()`
+//! - Element-wise: `add()`, `sub()`, `hadamard()`, `scale()`, `offset()`, `pow()`
+//! - Matrix operations: `dot()`, `transpose()`, `inv()`
 //! - Special products: `gram()`, `covariance()`
 //! - Advanced: `gemm()` (general matrix multiply), `apply()` (custom functions)
 //! - Extraction: `row()`, `col()`, `subMatrix()`
@@ -45,6 +45,7 @@ const meta = @import("../meta.zig");
 const formatting = @import("formatting.zig");
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_module = @import("svd.zig");
+const eigen_module = @import("eigen.zig");
 const Chain = @import("Chain.zig").Chain;
 
 /// Matrix-specific errors
@@ -57,6 +58,7 @@ pub const MatrixError = error{
     NotConverged,
     InvalidArgument,
     NotPositiveDefinite,
+    NotSymmetric,
 };
 
 /// Recommended alignment for SIMD operations (64 bytes covers AVX-512)
@@ -68,6 +70,7 @@ pub fn Matrix(comptime T: type) type {
         pub const SvdMode = svd_module.Mode;
         pub const SvdOptions = svd_module.Options;
         pub const SvdResult = svd_module.Result;
+        pub const EighResult = eigen_module.Result;
 
         pub const Permutation = struct {
             pub const Mode = enum { row, column };
@@ -109,7 +112,7 @@ pub fn Matrix(comptime T: type) type {
         cols: u32,
         allocator: std.mem.Allocator,
 
-        pub const PseudoInverseOptions = struct {
+        pub const PinvOptions = struct {
             /// Optional absolute tolerance used to discard very small singular values.
             /// When null, a tolerance derived from the largest singular value is used.
             tolerance: ?T = null,
@@ -200,6 +203,15 @@ pub fn Matrix(comptime T: type) type {
             for (0..@min(rows, cols)) |i| {
                 result.at(i, i).* = 1;
             }
+            return result;
+        }
+
+        /// Returns a square diagonal matrix with `values` on the main diagonal (dlib's `diagm`).
+        /// The result is `values.len × values.len`.
+        pub fn diagonal(allocator: std.mem.Allocator, values: []const T) !Self {
+            const n: u32 = @intCast(values.len);
+            var result = try initAll(allocator, n, n, 0);
+            for (values, 0..) |value, i| result.at(i, i).* = value;
             return result;
         }
 
@@ -313,7 +325,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Perform element-wise multiplication
-        pub fn times(self: Self, other: Self) MatrixError!Self {
+        pub fn hadamard(self: Self, other: Self) MatrixError!Self {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
@@ -325,7 +337,7 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Perform element-wise multiplication (in-place)
-        pub fn timesBy(self: *Self, other: Self) MatrixError!void {
+        pub fn hadamardBy(self: *Self, other: Self) MatrixError!void {
             if (self.rows != other.rows or self.cols != other.cols) {
                 return error.DimensionMismatch;
             }
@@ -341,44 +353,53 @@ pub fn Matrix(comptime T: type) type {
 
         /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
         /// and Gauss-Jordan elimination for larger matrices
-        pub fn inverse(self: Self) MatrixError!Self {
+        pub fn inv(self: Self) MatrixError!Self {
             if (self.rows != self.cols) return error.NotSquare;
 
             const n = self.rows;
 
             // Use analytical formulas for small matrices (more efficient)
             if (n <= 3) {
-                const det = try self.determinant();
-
-                if (@abs(det) < std.math.floatEps(T)) {
-                    return error.Singular;
-                }
-
-                var inv: Matrix(T) = try .init(self.allocator, n, n);
-
                 switch (n) {
-                    1 => inv.at(0, 0).* = 1 / det,
+                    1 => {
+                        const d = self.at(0, 0).*;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
+                        ans.at(0, 0).* = 1 / d;
+                        return ans;
+                    },
                     2 => {
-                        inv.at(0, 0).* = self.at(1, 1).* / det;
-                        inv.at(0, 1).* = -self.at(0, 1).* / det;
-                        inv.at(1, 0).* = -self.at(1, 0).* / det;
-                        inv.at(1, 1).* = self.at(0, 0).* / det;
+                        const d = self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
+                        ans.at(0, 0).* = self.at(1, 1).* / d;
+                        ans.at(0, 1).* = -self.at(0, 1).* / d;
+                        ans.at(1, 0).* = -self.at(1, 0).* / d;
+                        ans.at(1, 1).* = self.at(0, 0).* / d;
+                        return ans;
                     },
                     3 => {
-                        inv.at(0, 0).* = (self.at(1, 1).* * self.at(2, 2).* - self.at(1, 2).* * self.at(2, 1).*) / det;
-                        inv.at(0, 1).* = (self.at(0, 2).* * self.at(2, 1).* - self.at(0, 1).* * self.at(2, 2).*) / det;
-                        inv.at(0, 2).* = (self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*) / det;
-                        inv.at(1, 0).* = (self.at(1, 2).* * self.at(2, 0).* - self.at(1, 0).* * self.at(2, 2).*) / det;
-                        inv.at(1, 1).* = (self.at(0, 0).* * self.at(2, 2).* - self.at(0, 2).* * self.at(2, 0).*) / det;
-                        inv.at(1, 2).* = (self.at(0, 2).* * self.at(1, 0).* - self.at(0, 0).* * self.at(1, 2).*) / det;
-                        inv.at(2, 0).* = (self.at(1, 0).* * self.at(2, 1).* - self.at(1, 1).* * self.at(2, 0).*) / det;
-                        inv.at(2, 1).* = (self.at(0, 1).* * self.at(2, 0).* - self.at(0, 0).* * self.at(2, 1).*) / det;
-                        inv.at(2, 2).* = (self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*) / det;
+                        const c00 = self.at(1, 1).* * self.at(2, 2).* - self.at(1, 2).* * self.at(2, 1).*;
+                        const c01 = self.at(0, 2).* * self.at(2, 1).* - self.at(0, 1).* * self.at(2, 2).*;
+                        const c02 = self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*;
+
+                        const d = self.at(0, 0).* * c00 + self.at(1, 0).* * c01 + self.at(2, 0).* * c02;
+                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+
+                        var ans: Matrix(T) = try .init(self.allocator, n, n);
+                        ans.at(0, 0).* = c00 / d;
+                        ans.at(0, 1).* = c01 / d;
+                        ans.at(0, 2).* = c02 / d;
+                        ans.at(1, 0).* = (self.at(1, 2).* * self.at(2, 0).* - self.at(1, 0).* * self.at(2, 2).*) / d;
+                        ans.at(1, 1).* = (self.at(0, 0).* * self.at(2, 2).* - self.at(0, 2).* * self.at(2, 0).*) / d;
+                        ans.at(1, 2).* = (self.at(0, 2).* * self.at(1, 0).* - self.at(0, 0).* * self.at(1, 2).*) / d;
+                        ans.at(2, 0).* = (self.at(1, 0).* * self.at(2, 1).* - self.at(1, 1).* * self.at(2, 0).*) / d;
+                        ans.at(2, 1).* = (self.at(0, 1).* * self.at(2, 0).* - self.at(0, 0).* * self.at(2, 1).*) / d;
+                        ans.at(2, 2).* = (self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*) / d;
+                        return ans;
                     },
                     else => unreachable,
                 }
-
-                return inv;
             } else {
                 // Use Gauss-Jordan elimination for larger matrices
                 return self.inverseGaussJordan();
@@ -389,23 +410,23 @@ pub fn Matrix(comptime T: type) type {
         /// Works for rectangular matrices and gracefully handles rank deficiency
         /// by discarding singular values below the provided tolerance. The optional
         /// `effective_rank` pointer receives the number of singular values kept.
-        pub fn pseudoInverse(self: Self, options: PseudoInverseOptions) MatrixError!Self {
+        pub fn pinv(self: Self, options: PinvOptions) MatrixError!Self {
             if (self.rows == 0 or self.cols == 0) return error.DimensionMismatch;
 
             if (self.rows >= self.cols) {
-                return self.pseudoInverseTall(options);
+                return self.pinvTall(options);
             }
 
             var transposed = try self.transpose();
             defer transposed.deinit();
 
-            var pinv_transposed = try transposed.pseudoInverseTall(options);
+            var pinv_transposed = try transposed.pinvTall(options);
             defer pinv_transposed.deinit();
 
             return pinv_transposed.transpose();
         }
 
-        fn pseudoInverseTall(self: Self, options: PseudoInverseOptions) MatrixError!Self {
+        fn pinvTall(self: Self, options: PinvOptions) MatrixError!Self {
             std.debug.assert(self.rows >= self.cols);
 
             const allocator = self.allocator;
@@ -516,15 +537,15 @@ pub fn Matrix(comptime T: type) type {
             }
 
             // Extract inverse from right half of augmented matrix
-            var inv: Matrix(T) = try .init(self.allocator, n, n);
+            var ans: Matrix(T) = try .init(self.allocator, n, n);
 
             for (0..n) |i| {
                 for (0..n) |j| {
-                    inv.at(i, j).* = augmented.at(i, n + j).*;
+                    ans.at(i, j).* = augmented.at(i, n + j).*;
                 }
             }
 
-            return inv;
+            return ans;
         }
 
         /// Extract a submatrix - changes dimensions
@@ -1213,8 +1234,8 @@ pub fn Matrix(comptime T: type) type {
 
         /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
         /// Returns L such that A = L * L^T where L is lower triangular.
-        pub fn cholesky(self: Self) MatrixError!Self {
-            ensureFloat("cholesky");
+        pub fn chol(self: Self) MatrixError!Self {
+            ensureFloat("chol");
             if (self.rows != self.cols) return error.NotSquare;
             const n = self.rows;
             var l: Matrix(T) = try .init(self.allocator, n, n);
@@ -1239,7 +1260,7 @@ pub fn Matrix(comptime T: type) type {
 
         /// Computes the determinant of the matrix using analytical formulas for small matrices
         /// and LU decomposition for larger matrices
-        pub fn determinant(self: Self) !T {
+        pub fn det(self: Self) !T {
             comptime assert(@typeInfo(T) == .float);
             if (self.rows != self.cols) return error.NotSquare;
             if (self.rows == 0) return error.DimensionMismatch;
@@ -1263,9 +1284,9 @@ pub fn Matrix(comptime T: type) type {
                     defer lu_result.deinit();
 
                     // det(A) = sign * product of diagonal elements of U
-                    var det = lu_result.sign;
-                    for (0..n) |i| det *= lu_result.u.at(i, i).*;
-                    break :blk det;
+                    var d = lu_result.sign;
+                    for (0..n) |i| d *= lu_result.u.at(i, i).*;
+                    break :blk d;
                 },
             };
         }
@@ -1474,6 +1495,18 @@ pub fn Matrix(comptime T: type) type {
             return svd_module.svd(T, allocator, self, options);
         }
 
+        /// Symmetric (Hermitian) eigendecomposition A = V · diag(λ) · Vᵀ via cyclic Jacobi rotations.
+        /// Returns eigenvalues as an n×1 column in ascending order and `vectors` whose column j is
+        /// the unit eigenvector corresponding to the j-th eigenvalue. Unlike `svd`, this recovers
+        /// signed eigenvalues, so it handles indefinite matrices. The matrix must be square; it is
+        /// validated to be symmetric (within a magnitude-relative tolerance) and otherwise returns
+        /// `error.NotSymmetric`. A general non-symmetric `eig` (complex spectrum) is not provided.
+        pub fn eigh(self: Self, allocator: std.mem.Allocator) !EighResult(T) {
+            comptime assert(@typeInfo(T) == .float);
+            if (self.rows != self.cols) return error.NotSquare;
+            return eigen_module.eigh(T, allocator, self);
+        }
+
         /// Default formatting (scientific notation)
         pub fn format(self: Self, writer: *Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
@@ -1509,6 +1542,20 @@ test "Matrix as" {
     }
 }
 
+test "Matrix diagonal" {
+    const allocator = std.testing.allocator;
+    var d: Matrix(f64) = try .diagonal(allocator, &.{ 2, -3, 5 });
+    defer d.deinit();
+    try expectEqual(@as(u32, 3), d.rows);
+    try expectEqual(@as(u32, 3), d.cols);
+    for (0..3) |i| {
+        for (0..3) |j| {
+            const expected: f64 = if (i == j) (&[_]f64{ 2, -3, 5 })[i] else 0;
+            try expectEqual(expected, d.at(i, j).*);
+        }
+    }
+}
+
 // Tests for dynamic Matrix functionality
 test "matrix surfaces errors at the source op" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1523,7 +1570,7 @@ test "matrix surfaces errors at the source op" {
     singular.at(1, 1).* = 4;
 
     // Singular inverse surfaces error directly — no deferred state.
-    try expectError(MatrixError.Singular, singular.inverse());
+    try expectError(MatrixError.Singular, singular.inv());
 
     // Dimension mismatch surfaces from the failing op directly.
     var a: Matrix(f64) = try .initAll(alloc, 2, 3, 1.0);
@@ -1532,7 +1579,7 @@ test "matrix surfaces errors at the source op" {
     defer b.deinit();
     try expectError(MatrixError.DimensionMismatch, a.add(b));
     try expectError(MatrixError.DimensionMismatch, a.sub(b));
-    try expectError(MatrixError.DimensionMismatch, a.times(b));
+    try expectError(MatrixError.DimensionMismatch, a.hadamard(b));
 
     // Chains short-circuit at the failing step and free intermediates.
     var p = a.chain();
@@ -1649,7 +1696,7 @@ test "Matrix(T).By operations (in-place)" {
     try a.scaleBy(2.0);
     try std.testing.expectEqual(@as(f64, 20.0), a.at(0, 0).*);
 
-    try a.timesBy(b);
+    try a.hadamardBy(b);
     try std.testing.expectEqual(@as(f64, 100.0), a.at(0, 0).*);
 
     try a.offsetBy(1.0);

@@ -127,7 +127,7 @@ test "Matrix dimension errors surface at the failing op" {
 
     try std.testing.expectError(error.DimensionMismatch, a.add(b));
     try std.testing.expectError(error.DimensionMismatch, a.sub(b));
-    try std.testing.expectError(error.DimensionMismatch, a.times(b));
+    try std.testing.expectError(error.DimensionMismatch, a.hadamard(b));
 }
 
 test "Matrix offset and pow" {
