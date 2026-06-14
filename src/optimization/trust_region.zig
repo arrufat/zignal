@@ -200,7 +200,6 @@ pub fn solveTrustRegionSubproblem(
     defer eig.deinit();
 
     const min_eig = eig.values.at(0, 0).*;
-    const min_eig_idx: usize = 0;
 
     // ev <- reciprocal of (eigenvalue - min_eig), with near-zero entries zeroed. The tolerance is
     // relative to the shifted spread (max - min, values are ascending), matching dlib.
@@ -231,7 +230,7 @@ pub fn solveTrustRegionSubproblem(
     const p_hard_norm = norm(p_hard);
     if (p_hard_norm < radius and p_hard_norm >= norm(p)) {
         const tau = @sqrt(@max(0.0, radius * radius - p_hard_norm * p_hard_norm));
-        for (0..n) |row| p[row] = p_hard[row] + tau * eig.vectors.at(row, min_eig_idx).*;
+        for (0..n) |row| p[row] = p_hard[row] + tau * eig.vectors.at(row, 0).*;
     }
 }
 

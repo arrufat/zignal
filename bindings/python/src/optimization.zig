@@ -481,11 +481,10 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
 
     // Drive the ask-tell loop here (instead of opt.optimize) so a Python exception in the objective
     // aborts immediately — opt.optimize would keep running expensive search steps to the budget
-    // before surfacing the error. Stop semantics mirror GlobalOptimizer.shouldStop.
+    // before surfacing the error. The target/patience decision reuses GlobalOptimizer.shouldStop.
     var ctx = PyObjective{ .callable = params.objective.? };
-    const target_internal: ?f64 = if (target_opt) |t| opt.sign * t else null;
-    var prev_best: ?f64 = opt.best_y;
-    var since_improve: usize = 0;
+    const stop: zignal.GlobalOptimizer.StopOptions = .{ .max_evals = max_evals, .target = target_opt, .patience = patience_opt };
+    var stop_state: zignal.GlobalOptimizer.StopState = .{ .prev_best = opt.best_y };
     while (opt.evals < max_evals) {
         const step_res = opt.step(&ctx);
         if (ctx.failed) {
@@ -496,19 +495,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
             mapGlobalError(err);
             return null;
         };
-        const cur = opt.best_y.?;
-        if (target_internal) |t| {
-            if (cur >= t) break;
-        }
-        if (patience_opt) |pat| {
-            if (prev_best == null or cur > prev_best.?) {
-                prev_best = cur;
-                since_improve = 0;
-            } else {
-                since_improve += 1;
-                if (since_improve >= pat) break;
-            }
-        }
+        if (opt.shouldStop(stop, opt.best_y.?, &stop_state)) break;
     }
 
     // Return (best_x, best_y) as a plain tuple. PyTuple_Pack increfs its args, so drop our refs.

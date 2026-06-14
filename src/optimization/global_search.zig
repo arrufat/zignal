@@ -359,11 +359,12 @@ pub const GlobalOptimizer = struct {
         anchor: f64 = 0,
     };
 
-    // Patience/target stop bookkeeping, shared by both `optimize` paths.
-    const StopState = struct { prev_best: ?f64, since_improve: usize = 0 };
+    // Patience/target stop bookkeeping, shared by both `optimize` paths and the bindings' hand-driven
+    // loop. Seed `prev_best` with the current `best_y` before the loop.
+    pub const StopState = struct { prev_best: ?f64, since_improve: usize = 0 };
 
     /// Whether `cur` (the internal-sign best) trips `stop`'s target or patience, updating `state`.
-    fn shouldStop(self: *const GlobalOptimizer, stop: StopOptions, cur: f64, state: *StopState) bool {
+    pub fn shouldStop(self: *const GlobalOptimizer, stop: StopOptions, cur: f64, state: *StopState) bool {
         if (stop.target) |t| {
             if (cur >= self.sign * t) return true;
         }

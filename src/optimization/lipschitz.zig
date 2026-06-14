@@ -97,20 +97,25 @@ pub const UpperBound = struct {
         if (self.npoints >= 2) try self.learnParams();
     }
 
+    /// The bound a single point `(xi, y)` contributes at `x`: `y + sqrt(max(0, base + Σ slopes·d²))`.
+    /// `base` is the point's noise offset for stored points, or 0 for imputed in-flight ones.
+    fn pointBound(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64) f64 {
+        var s = base;
+        for (0..self.dims) |k| {
+            const d = x[k] - xi[k];
+            s += self.slopes[k] * d * d;
+        }
+        return y + @sqrt(@max(0.0, s));
+    }
+
     /// Evaluate the upper bound at x. Requires at least one point (with a single point the bound is
     /// simply that point's value, since the slopes are still zero).
     pub fn evaluate(self: *const UpperBound, x: []const f64) f64 {
         var ub: f64 = std.math.inf(f64);
         const dims = self.dims;
         for (0..self.npoints) |i| {
-            var s = self.offsets[i];
             const xi = self.xs[i * dims ..][0..dims];
-            for (0..dims) |k| {
-                const d = x[k] - xi[k];
-                s += self.slopes[k] * d * d;
-            }
-            const local = self.ys[i] + @sqrt(@max(0.0, s));
-            ub = @min(ub, local);
+            ub = @min(ub, self.pointBound(x, xi, self.ys[i], self.offsets[i]));
         }
         return ub;
     }
@@ -152,13 +157,7 @@ pub const UpperBound = struct {
         const dims = self.dims;
         for (0..npending) |p| {
             const xp = pending_xs[p * dims ..][0..dims];
-            var s: f64 = 0;
-            for (0..dims) |k| {
-                const d = x[k] - xp[k];
-                s += self.slopes[k] * d * d;
-            }
-            const local = pending_ys[p] + @sqrt(@max(0.0, s));
-            ub = @min(ub, local);
+            ub = @min(ub, self.pointBound(x, xp, pending_ys[p], 0));
         }
         return ub;
     }
