@@ -272,6 +272,7 @@ return s;
         tr.remove();
         renumber();
         invalidateSession();
+        drawPreview();
       }
     });
     boundsBody.appendChild(tr);
@@ -492,9 +493,11 @@ return s;
     drawSamplePoints(function (p) {
       return toPixel(p.x[0], p.x[1]);
     });
-    const bx = new Float64Array(wasm.memory.buffer, wasm.get_best_x(), dims);
-    const bp = toPixel(bx[0], bx[1]);
-    drawCrosshair(bp[0], bp[1]);
+    if (wasm && points.length > 0) {
+      const bx = new Float64Array(wasm.memory.buffer, wasm.get_best_x(), dims);
+      const bp = toPixel(bx[0], bx[1]);
+      drawCrosshair(bp[0], bp[1]);
+    }
   }
 
   function drawConvergence() {
@@ -604,9 +607,11 @@ return s;
     drawSamplePoints(function (p) {
       return isFinite(p.y) ? [xToPx(p.x[0]), yToPx(p.y)] : null;
     });
-    const bx = new Float64Array(wasm.memory.buffer, wasm.get_best_x(), dims);
-    const by = wasm.get_best_y();
-    if (isFinite(by)) drawCrosshair(xToPx(bx[0]), yToPx(by));
+    if (wasm && points.length > 0) {
+      const bx = new Float64Array(wasm.memory.buffer, wasm.get_best_x(), dims);
+      const by = wasm.get_best_y();
+      if (isFinite(by)) drawCrosshair(xToPx(bx[0]), yToPx(by));
+    }
     ctx.fillStyle = "#333";
     ctx.font = "12px monospace";
     ctx.fillText("f(x)", pad + 4, pad - 6);
@@ -706,6 +711,42 @@ return s;
     rafId = requestAnimationFrame(function () { tick(perFrame); });
   }
 
+  function tryCompileAndValidate() {
+    let compiled;
+    let parsed;
+    try {
+      compiled = new Function("x", fnInput.value);
+    } catch (e) {
+      fnError.textContent = "Could not compile function: " + e.message;
+      return null;
+    }
+    try {
+      parsed = readBounds();
+    } catch (e) {
+      fnError.textContent = e.message;
+      return null;
+    }
+
+    // Validate the objective once at the box center before committing.
+    const center = parsed.bounds.map(function (b) { return (b[0] + b[1]) / 2; });
+    try {
+      const y0 = compiled(center);
+      if (typeof y0 !== "number" || !isFinite(y0)) {
+        throw new Error("returned " + y0 + " at the center (expected a finite number)");
+      }
+    } catch (e) {
+      fnError.textContent = "Objective error: " + e.message;
+      return null;
+    }
+
+    return {
+      compiled: compiled,
+      bounds: parsed.bounds,
+      ints: parsed.ints,
+      dims: parsed.bounds.length
+    };
+  }
+
   // Compile + validate the objective and bounds, (re)initialize the optimizer, and reset the run
   // state for a fresh session. Returns false (and shows the error) on any invalid input.
   function prepareRun() {
@@ -716,42 +757,17 @@ return s;
     legendEl.textContent = "";
     clearCanvas();
 
-    let compiled;
-    let parsed;
-    try {
-      compiled = new Function("x", fnInput.value);
-    } catch (e) {
-      fnError.textContent = "Could not compile function: " + e.message;
-      return false;
-    }
-    try {
-      parsed = readBounds();
-    } catch (e) {
-      fnError.textContent = e.message;
-      return false;
-    }
+    const info = tryCompileAndValidate();
+    if (!info) return false;
 
-    objectiveFn = compiled;
-    bounds = parsed.bounds;
-    dims = bounds.length;
+    objectiveFn = info.compiled;
+    bounds = info.bounds;
+    dims = info.dims;
     maxEvals = Math.max(1, parseInt(maxEvalsInput.value, 10) || 1);
     const seed = Math.max(0, parseInt(seedInput.value, 10) || 0);
     const samples = Math.max(1, parseInt(samplesInput.value, 10) || 1);
 
-    // Validate the objective once at the box center before committing.
-    evalError = null;
-    const center = bounds.map(function (b) { return (b[0] + b[1]) / 2; });
-    try {
-      const y0 = objectiveFn(center);
-      if (typeof y0 !== "number" || !isFinite(y0)) {
-        throw new Error("returned " + y0 + " at the center (expected a finite number)");
-      }
-    } catch (e) {
-      fnError.textContent = "Objective error: " + e.message;
-      return false;
-    }
-
-    const code = wasmInit(bounds, parsed.ints, parseInt(policySel.value, 10), seed, samples);
+    const code = wasmInit(bounds, info.ints, parseInt(policySel.value, 10), seed, samples);
     if (code !== 0) {
       fnError.textContent = initErrorMessage(code);
       return false;
@@ -770,6 +786,39 @@ return s;
     surfaceBuilt = false;
     renderLegend();
     return true;
+  }
+
+  function drawPreview() {
+    if (running) return;
+
+    points = [];
+    bestHistory = [];
+    evalsDone = 0;
+    prepared = false;
+    surfaceBuilt = false;
+
+    fnError.textContent = "";
+    resultsEl.innerHTML = "";
+    if (wasm) {
+      statusEl.textContent = "Ready.";
+    }
+
+    const info = tryCompileAndValidate();
+    if (!info) {
+      clearCanvas();
+      return;
+    }
+
+    objectiveFn = info.compiled;
+    bounds = info.bounds;
+    dims = info.dims;
+    view =
+      dims === 2 ? { xlo: bounds[0][0], xhi: bounds[0][1], ylo: bounds[1][0], yhi: bounds[1][1] }
+      : dims === 1 ? { xlo: bounds[0][0], xhi: bounds[0][1] }
+      : null;
+
+    renderLegend();
+    ensureSurface();
   }
 
   // Build + draw the static background (heatmap / curve / blank) once per session.
@@ -846,6 +895,7 @@ return s;
     presetSel.addEventListener("change", function () {
       if (presetSel.value !== "custom") applyPreset(parseInt(presetSel.value, 10));
       invalidateSession();
+      drawPreview();
     });
     // Hand-editing the objective no longer matches a named preset.
     fnInput.addEventListener("input", function () {
@@ -853,21 +903,28 @@ return s;
       expectedEl.textContent = "";
       invalidateSession();
     });
+    fnInput.addEventListener("change", function () {
+      drawPreview();
+    });
     // Any settings or bounds edit starts a fresh session on the next Optimize/Step.
     [policySel, maxEvalsInput, seedInput, samplesInput].forEach(function (el) {
       el.addEventListener("change", invalidateSession);
     });
     boundsBody.addEventListener("input", invalidateSession);
-    boundsBody.addEventListener("change", invalidateSession);
+    boundsBody.addEventListener("change", function () {
+      invalidateSession();
+      drawPreview();
+    });
     presetSel.value = "0";
     applyPreset(0);
+    drawPreview();
     addVarBtn.addEventListener("click", function () {
       addVariable(-5, 5, false);
       invalidateSession();
+      drawPreview();
     });
     runBtn.addEventListener("click", onOptimize);
     stepBtn.addEventListener("click", onStep);
-    clearCanvas();
   }
 
   WebAssembly.instantiateStreaming(wasm_promise, {
