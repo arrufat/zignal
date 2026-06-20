@@ -24,7 +24,6 @@ const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
 const interpolation_module = @import("interpolation.zig");
 const border_mode_module = @import("border_mode.zig");
-const threshold_mode_module = @import("threshold_mode.zig");
 const optimization_module = @import("optimization.zig");
 const transforms_module = @import("transforms.zig");
 const running_stats_module = @import("running_stats.zig");
@@ -484,9 +483,9 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     try generateEnumFromMetadata(&stub, .{
         .name = "ThresholdMode",
         .base = "IntEnum",
-        .doc = threshold_mode_module.threshold_mode_doc,
+        .doc = image_module.threshold_mode_doc,
         .zig_type = zignal.FloodFillOptions.ThresholdMode,
-        .value_docs = &threshold_mode_module.threshold_mode_values,
+        .value_docs = &image_module.threshold_mode_values,
     });
 
     // Generate DrawMode enum

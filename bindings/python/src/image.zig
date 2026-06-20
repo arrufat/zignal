@@ -849,6 +849,18 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
     }
 }
 
+pub const threshold_mode_doc =
+    \\Reference value used when deciding whether a candidate pixel joins the fill.
+    \\
+    \\- `SEED`: Compare each candidate against the seed pixel (default).
+    \\- `NEIGHBOR`: Compare each candidate against the neighbor it spread from.
+;
+
+pub const threshold_mode_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "SEED", .doc = "Compare against the seed pixel" },
+    .{ .name = "NEIGHBOR", .doc = "Compare against the neighbor pixel" },
+};
+
 // Aggregate method metadata from all sub-modules
 pub const image_methods_metadata = blk: {
     // ========================================================================
@@ -972,7 +984,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&core.image_flood_fill),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = core.image_flood_fill_doc,
-            .params = "self, row: int, col: int, fill_value: Color, threshold: float = 0.0, connectivity: int = 4, mode: ThresholdMode = ThresholdMode.FIXED",
+            .params = "self, row: int, col: int, fill_value: Color, threshold: float = 0.0, connectivity: int = 4, mode: ThresholdMode = ThresholdMode.SEED",
             .returns = "None",
         },
     };

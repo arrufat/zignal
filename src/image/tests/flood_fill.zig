@@ -56,12 +56,12 @@ test "flood fill relative threshold modes" {
     const allocator = std.testing.allocator;
 
     // Create a 1x5 gradient image: [0, 1, 2, 3, 4]
-    // Under fixed (threshold=1.0, seed=0):
+    // Under seed (threshold=1.0, seed=0):
     // - neighbor 1 (value 1): diff to seed 0 is 1.0 <= 1.0 (fills)
     // - neighbor 2 (value 2): diff to seed 0 is 2.0 > 1.0 (does not fill)
     // Results: [9, 9, 2, 3, 4]
     //
-    // Under floating (threshold=1.0, seed=0):
+    // Under neighbor (threshold=1.0, seed=0):
     // - neighbor 1 (value 1): diff to parent 0 is 1.0 <= 1.0 (fills)
     // - neighbor 2 (value 2): diff to parent 1 is 1.0 <= 1.0 (fills)
     // - neighbor 3 (value 3): diff to parent 2 is 1.0 <= 1.0 (fills)
@@ -78,7 +78,7 @@ test "flood fill relative threshold modes" {
     defer img_parent.deinit(allocator);
 
     // Test seed relative
-    try img_seed.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .fixed });
+    try img_seed.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .seed });
     try expectEqual(@as(u8, 9), img_seed.at(0, 0).*);
     try expectEqual(@as(u8, 9), img_seed.at(0, 1).*);
     try expectEqual(@as(u8, 2), img_seed.at(0, 2).*);
@@ -86,7 +86,7 @@ test "flood fill relative threshold modes" {
     try expectEqual(@as(u8, 4), img_seed.at(0, 4).*);
 
     // Test parent relative
-    try img_parent.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .floating });
+    try img_parent.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .neighbor });
     try expectEqual(@as(u8, 9), img_parent.at(0, 0).*);
     try expectEqual(@as(u8, 9), img_parent.at(0, 1).*);
     try expectEqual(@as(u8, 9), img_parent.at(0, 2).*);

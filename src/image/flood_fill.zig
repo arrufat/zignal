@@ -9,18 +9,18 @@ pub const FloodFillOptions = struct {
     };
 
     pub const ThresholdMode = enum {
-        /// Compare each candidate against the seed pixel (OpenCV "fixed range").
-        fixed,
-        /// Compare each candidate against the neighbor it spread from (OpenCV "floating range").
-        floating,
+        /// Compare each candidate against the seed pixel.
+        seed,
+        /// Compare each candidate against the neighbor it spread from.
+        neighbor,
     };
 
-    /// Maximum color/intensity distance for a neighbor to be filled.
+    /// Maximum color distance for a neighbor to be filled.
     threshold: f64 = 0,
     /// Neighborhood used when expanding the region.
     connectivity: Connectivity = .four,
-    /// Whether neighbors are compared against the seed or their parent pixel.
-    mode: ThresholdMode = .fixed,
+    /// Reference pixel each candidate is compared against.
+    mode: ThresholdMode = .seed,
 
     pub const default: FloodFillOptions = .{};
 };
@@ -75,8 +75,7 @@ pub fn floodFill(
     var stack = std.ArrayList(Coord).empty;
     defer stack.deinit(allocator);
 
-    // Note: The visited tracking array is densely packed using `cols`, whereas the
-    // image representation uses `stride` for row padding/alignment.
+    // `visited` is densely packed (indexed by `cols`); the image may use a larger `stride`.
     var visited = try allocator.alloc(bool, @as(usize, image.rows) * image.cols);
     defer allocator.free(visited);
     @memset(visited, false);
@@ -118,8 +117,8 @@ pub fn floodFill(
         image.at(curr.r, curr.c).* = fill_value;
 
         const compare_val = switch (options.mode) {
-            .fixed => seed_val,
-            .floating => orig_val,
+            .seed => seed_val,
+            .neighbor => orig_val,
         };
 
         for (neighbor_offsets[0..neighbor_count]) |off| {

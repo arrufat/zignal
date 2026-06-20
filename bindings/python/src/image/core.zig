@@ -1036,13 +1036,13 @@ pub const image_flood_fill_doc =
     \\- `threshold` (float, optional): Maximum color distance/difference to continue the fill. Default: 0.0.
     \\- `connectivity` (int, optional): Neighborhood connectivity, either 4 or 8. Default: 4.
     \\- `mode` (ThresholdMode, optional): Whether candidates are compared against the seed
-    \\  (`ThresholdMode.FIXED`, default) or the neighbor they spread from (`ThresholdMode.FLOATING`).
+    \\  (`ThresholdMode.SEED`, default) or the neighbor they spread from (`ThresholdMode.NEIGHBOR`).
     \\
     \\## Examples
     \\```python
     \\img = Image(100, 100, dtype=Rgb)
     \\img.flood_fill(50, 50, (255, 0, 0), threshold=10.0, connectivity=8)
-    \\img.flood_fill(50, 50, (255, 0, 0), threshold=10.0, mode=ThresholdMode.FLOATING)
+    \\img.flood_fill(50, 50, (255, 0, 0), threshold=10.0, mode=ThresholdMode.NEIGHBOR)
     \\```
 ;
 
@@ -1073,7 +1073,7 @@ pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         },
     };
 
-    var mode = zignal.FloodFillOptions.ThresholdMode.fixed;
+    var mode = zignal.FloodFillOptions.ThresholdMode.seed;
     if (params.mode) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("mode must be a ThresholdMode enum", .{});

@@ -632,17 +632,17 @@ class TestImage:
             diag.flood_fill(1, 1, 9, connectivity=5)
 
         # Mode: gradient [0,1,2,3,4] with threshold 1.0
-        # FIXED compares to the seed (0) -> stops after value 1
         grad = zignal.Image(1, 5, dtype=zignal.Gray)
         for col in range(5):
             grad[0, col] = col
 
-        grad_fixed = grad.copy()
-        grad_fixed.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.FIXED)
-        assert grad_fixed[0, 1] == 9
-        assert grad_fixed[0, 2] == 2  # 2 vs seed 0 exceeds threshold
+        # SEED compares to the seed (0): stops once the difference exceeds the threshold
+        grad_seed = grad.copy()
+        grad_seed.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.SEED)
+        assert grad_seed[0, 1] == 9
+        assert grad_seed[0, 2] == 2
 
-        # FLOATING compares to the neighbor -> walks the whole gradient
-        grad_floating = grad.copy()
-        grad_floating.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.FLOATING)
-        assert grad_floating[0, 4] == 9
+        # NEIGHBOR compares to the neighbor: walks the whole gradient
+        grad_neighbor = grad.copy()
+        grad_neighbor.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.NEIGHBOR)
+        assert grad_neighbor[0, 4] == 9
