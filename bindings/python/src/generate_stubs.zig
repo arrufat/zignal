@@ -479,6 +479,15 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .value_docs = &border_mode_module.border_mode_values,
     });
 
+    // Generate ThresholdMode enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "ThresholdMode",
+        .base = "IntEnum",
+        .doc = image_module.threshold_mode_doc,
+        .zig_type = zignal.FloodFillOptions.ThresholdMode,
+        .value_docs = &image_module.threshold_mode_values,
+    });
+
     // Generate DrawMode enum
     try generateEnumFromMetadata(&stub, .{
         .name = "DrawMode",
@@ -709,7 +718,9 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Canvas as Canvas,
         \\    Interpolation as Interpolation,
         \\    Blending as Blending,
+        \\    BorderMode as BorderMode,
         \\    DrawMode as DrawMode,
+        \\    ThresholdMode as ThresholdMode,
         \\    MotionBlur as MotionBlur,
         \\    Colormap as Colormap,
         \\    OptimizationPolicy as OptimizationPolicy,
