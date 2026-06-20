@@ -22,20 +22,20 @@ pub fn psnr(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
             const idx_b = row_offset_b + c;
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    const diff = getScalarValue(T, image_a.data[idx_a]) - getScalarValue(T, image_b.data[idx_b]);
+                    const diff = meta.as(f64, image_a.data[idx_a]) - meta.as(f64, image_b.data[idx_b]);
                     mse += diff * diff;
                     component_count += 1;
                 },
                 .@"struct" => {
                     inline for (comptime meta.structFields(T)) |field| {
-                        const diff = getScalarValue(field.type, @field(image_a.data[idx_a], field.name)) - getScalarValue(field.type, @field(image_b.data[idx_b], field.name));
+                        const diff = meta.as(f64, @field(image_a.data[idx_a], field.name)) - meta.as(f64, @field(image_b.data[idx_b], field.name));
                         mse += diff * diff;
                         component_count += 1;
                     }
                 },
                 .array => |arr_info| {
                     for (0..arr_info.len) |i| {
-                        const diff = getScalarValue(arr_info.child, image_a.data[idx_a][i]) - getScalarValue(arr_info.child, image_b.data[idx_b][i]);
+                        const diff = meta.as(f64, image_a.data[idx_a][i]) - meta.as(f64, image_b.data[idx_b][i]);
                         mse += diff * diff;
                         component_count += 1;
                     }
@@ -127,15 +127,15 @@ pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f
             const idx_b = row_offset_b + c;
             switch (@typeInfo(T)) {
                 .int, .float => {
-                    const diff = @abs(getScalarValue(T, image_a.data[idx_a]) - getScalarValue(T, image_b.data[idx_b]));
+                    const diff = @abs(meta.as(f64, image_a.data[idx_a]) - meta.as(f64, image_b.data[idx_b]));
                     total_abs += diff;
                     component_count += 1;
                 },
                 .@"struct" => {
                     inline for (comptime meta.structFields(T)) |field| {
                         const diff = @abs(
-                            getScalarValue(field.type, @field(image_a.data[idx_a], field.name)) -
-                                getScalarValue(field.type, @field(image_b.data[idx_b], field.name)),
+                            meta.as(f64, @field(image_a.data[idx_a], field.name)) -
+                                meta.as(f64, @field(image_b.data[idx_b], field.name)),
                         );
                         total_abs += diff;
                         component_count += 1;
@@ -144,8 +144,8 @@ pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f
                 .array => |arr_info| {
                     for (0..arr_info.len) |i| {
                         const diff = @abs(
-                            getScalarValue(arr_info.child, image_a.data[idx_a][i]) -
-                                getScalarValue(arr_info.child, image_b.data[idx_b][i]),
+                            meta.as(f64, image_a.data[idx_a][i]) -
+                                meta.as(f64, image_b.data[idx_b][i]),
                         );
                         total_abs += diff;
                         component_count += 1;
@@ -185,17 +185,9 @@ inline fn componentMaxValue(comptime T: type) f64 {
     };
 }
 
-inline fn getScalarValue(comptime ScalarType: type, value: ScalarType) f64 {
-    return switch (@typeInfo(ScalarType)) {
-        .int => @floatFromInt(value),
-        .float => @floatCast(value),
-        else => 0.0,
-    };
-}
-
 inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
     switch (@typeInfo(PixelType)) {
-        .int, .float => return getScalarValue(PixelType, pixel),
+        .int, .float => return meta.as(f64, pixel),
         .@"struct" => {
             if (comptime meta.isRgb(PixelType)) {
                 const max_val = componentMaxValue(PixelType);
@@ -204,7 +196,7 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
             var sum: f64 = 0.0;
             var count: usize = 0;
             inline for (comptime meta.structFields(PixelType)) |field| {
-                sum += getScalarValue(field.type, @field(pixel, field.name));
+                sum += meta.as(f64, @field(pixel, field.name));
                 count += 1;
             }
             return sum / @as(f64, @floatFromInt(count));
@@ -219,7 +211,7 @@ inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
             }
             var sum: f64 = 0.0;
             inline for (0..info.len) |i| {
-                sum += getScalarValue(info.child, pixel[i]);
+                sum += meta.as(f64, pixel[i]);
             }
             return sum / @as(f64, @floatFromInt(info.len));
         },
