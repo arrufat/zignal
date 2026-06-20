@@ -102,6 +102,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .type = zignal.Blending, .doc = blending.blending_doc },
         .{ .type = zignal.Interpolation, .doc = interpolation.interpolation_doc },
         .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc },
+        .{ .type = zignal.FloodFillOptions.ThresholdMode, .doc = image.threshold_mode_doc },
         .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc },
     };
 

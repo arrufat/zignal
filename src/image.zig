@@ -56,6 +56,7 @@ pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 pub const Colormap = @import("image/colormaps.zig").Colormap;
 const Blending = @import("blending.zig").Blending;
+pub const FloodFillOptions = @import("image/flood_fill.zig").FloodFillOptions;
 
 /// Assigns `sample` into `dest`, applying blending when requested and converting
 /// between color spaces as needed. `dest` must be a pointer to the pixel to
@@ -823,6 +824,20 @@ pub fn Image(comptime T: type) type {
             return Enhancement(T).equalize(self);
         }
 
+        /// Fills a contiguous region of pixels starting from `start_row` and `start_col`
+        /// that have a similar color/intensity (within `options.threshold` distance) to either
+        /// the seed pixel or the parent pixel, replacing them with `fill_value`.
+        pub fn floodFill(
+            self: Self,
+            allocator: Allocator,
+            start_row: u32,
+            start_col: u32,
+            fill_value: T,
+            options: FloodFillOptions,
+        ) !void {
+            return @import("image/flood_fill.zig").floodFill(T, self, allocator, start_row, start_col, fill_value, options);
+        }
+
         /// Computes Otsu's threshold and produces a binary image.
         /// Returns the threshold value that maximizes between-class variance.
         /// The output image must be pre-allocated with the same dimensions as the input.
@@ -1256,4 +1271,5 @@ test {
     _ = @import("image/hough.zig");
     _ = @import("image/colormaps.zig");
     _ = @import("image/border.zig");
+    _ = @import("image/tests/flood_fill.zig");
 }
