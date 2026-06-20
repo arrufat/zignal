@@ -24,6 +24,7 @@ const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
 const interpolation_module = @import("interpolation.zig");
 const border_mode_module = @import("border_mode.zig");
+const threshold_mode_module = @import("threshold_mode.zig");
 const optimization_module = @import("optimization.zig");
 const transforms_module = @import("transforms.zig");
 const running_stats_module = @import("running_stats.zig");
@@ -479,6 +480,15 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .value_docs = &border_mode_module.border_mode_values,
     });
 
+    // Generate ThresholdMode enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "ThresholdMode",
+        .base = "IntEnum",
+        .doc = threshold_mode_module.threshold_mode_doc,
+        .zig_type = zignal.FloodFillOptions.ThresholdMode,
+        .value_docs = &threshold_mode_module.threshold_mode_values,
+    });
+
     // Generate DrawMode enum
     try generateEnumFromMetadata(&stub, .{
         .name = "DrawMode",
@@ -709,7 +719,9 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Canvas as Canvas,
         \\    Interpolation as Interpolation,
         \\    Blending as Blending,
+        \\    BorderMode as BorderMode,
         \\    DrawMode as DrawMode,
+        \\    ThresholdMode as ThresholdMode,
         \\    MotionBlur as MotionBlur,
         \\    Colormap as Colormap,
         \\    OptimizationPolicy as OptimizationPolicy,

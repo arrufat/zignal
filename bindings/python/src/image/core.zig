@@ -16,6 +16,7 @@ const getImageType = @import("../image.zig").getImageType;
 const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const python = @import("../python.zig");
+const enum_utils = @import("../enum_utils.zig");
 const ctx = python.ctx;
 const allocator = ctx.allocator;
 const c = python.c;
@@ -1018,6 +1019,85 @@ pub fn image_set_border(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
             } else {
                 img.setBorder(r, std.mem.zeroes(T));
             }
+            return python.none();
+        }
+    }.apply);
+}
+
+pub const image_flood_fill_doc =
+    \\Fills a contiguous region of pixels starting from (row, col) in-place
+    \\that have a similar color/intensity (within threshold distance) to the
+    \\seed pixel, replacing them with fill_value.
+    \\
+    \\## Parameters
+    \\- `row` (int): Starting row coordinate (seed).
+    \\- `col` (int): Starting col coordinate (seed).
+    \\- `fill_value`: Color to fill with. Can be a tuple, integer, or color object.
+    \\- `threshold` (float, optional): Maximum color distance/difference to continue the fill. Default: 0.0.
+    \\- `connectivity` (int, optional): Neighborhood connectivity, either 4 or 8. Default: 4.
+    \\- `mode` (ThresholdMode, optional): Whether candidates are compared against the seed
+    \\  (`ThresholdMode.FIXED`, default) or the neighbor they spread from (`ThresholdMode.FLOATING`).
+    \\
+    \\## Examples
+    \\```python
+    \\img = Image(100, 100, dtype=Rgb)
+    \\img.flood_fill(50, 50, (255, 0, 0), threshold=10.0, connectivity=8)
+    \\img.flood_fill(50, 50, (255, 0, 0), threshold=10.0, mode=ThresholdMode.FLOATING)
+    \\```
+;
+
+pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
+    const Params = struct {
+        row: c_long,
+        col: c_long,
+        fill_value: ?*c.PyObject,
+        threshold: f64 = 0.0,
+        connectivity: c_long = 4,
+        mode: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const start_row = python.validateNonNegative(u32, params.row, "row") catch return null;
+    const start_col = python.validateNonNegative(u32, params.col, "col") catch return null;
+
+    const connectivity: zignal.FloodFillOptions.Connectivity = switch (params.connectivity) {
+        4 => .four,
+        8 => .eight,
+        else => {
+            python.setValueError("connectivity must be 4 or 8", .{});
+            return null;
+        },
+    };
+
+    var mode = zignal.FloodFillOptions.ThresholdMode.fixed;
+    if (params.mode) |obj| {
+        if (obj == c.Py_None()) {
+            python.setValueError("mode must be a ThresholdMode enum", .{});
+            return null;
+        }
+        mode = enum_utils.pyToEnum(zignal.FloodFillOptions.ThresholdMode, obj) catch return null;
+    }
+
+    const opts = zignal.FloodFillOptions{ .threshold = params.threshold, .connectivity = connectivity, .mode = mode };
+
+    return self.py_image.?.dispatch(.{ start_row, start_col, params.fill_value, opts }, struct {
+        fn apply(img: anytype, row: u32, col: u32, fv_obj: ?*c.PyObject, options: zignal.FloodFillOptions) ?*c.PyObject {
+            const T = @TypeOf(img.data[0]);
+            const fill_val = parseColorTo(T, fv_obj) catch return null;
+            img.floodFill(allocator, row, col, fill_val, options) catch |err| {
+                if (err == error.OutOfBounds) {
+                    python.setValueError("Start coordinates out of bounds", .{});
+                } else if (err == error.OutOfMemory) {
+                    python.setMemoryError("flood fill stack allocation");
+                } else {
+                    python.setValueError("Flood fill failed", .{});
+                }
+                return null;
+            };
             return python.none();
         }
     }.apply);

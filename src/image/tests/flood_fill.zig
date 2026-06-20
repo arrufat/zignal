@@ -56,12 +56,12 @@ test "flood fill relative threshold modes" {
     const allocator = std.testing.allocator;
 
     // Create a 1x5 gradient image: [0, 1, 2, 3, 4]
-    // Under seed_relative (threshold=1.0, seed=0):
+    // Under fixed (threshold=1.0, seed=0):
     // - neighbor 1 (value 1): diff to seed 0 is 1.0 <= 1.0 (fills)
     // - neighbor 2 (value 2): diff to seed 0 is 2.0 > 1.0 (does not fill)
     // Results: [9, 9, 2, 3, 4]
     //
-    // Under parent_relative (threshold=1.0, seed=0):
+    // Under floating (threshold=1.0, seed=0):
     // - neighbor 1 (value 1): diff to parent 0 is 1.0 <= 1.0 (fills)
     // - neighbor 2 (value 2): diff to parent 1 is 1.0 <= 1.0 (fills)
     // - neighbor 3 (value 3): diff to parent 2 is 1.0 <= 1.0 (fills)
@@ -78,7 +78,7 @@ test "flood fill relative threshold modes" {
     defer img_parent.deinit(allocator);
 
     // Test seed relative
-    try img_seed.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .seed_relative });
+    try img_seed.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .fixed });
     try expectEqual(@as(u8, 9), img_seed.at(0, 0).*);
     try expectEqual(@as(u8, 9), img_seed.at(0, 1).*);
     try expectEqual(@as(u8, 2), img_seed.at(0, 2).*);
@@ -86,7 +86,7 @@ test "flood fill relative threshold modes" {
     try expectEqual(@as(u8, 4), img_seed.at(0, 4).*);
 
     // Test parent relative
-    try img_parent.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .parent_relative });
+    try img_parent.floodFill(allocator, 0, 0, 9, .{ .threshold = 1.0, .mode = .floating });
     try expectEqual(@as(u8, 9), img_parent.at(0, 0).*);
     try expectEqual(@as(u8, 9), img_parent.at(0, 1).*);
     try expectEqual(@as(u8, 9), img_parent.at(0, 2).*);
@@ -123,32 +123,6 @@ test "flood fill RGB color images" {
     try expectEqual(fill_val, img_8.at(0, 0).*);
     try expectEqual(fill_val, img_8.at(0, 1).*);
     try expectEqual(fill_val, img_8.at(0, 2).*);
-}
-
-test "flood fill perceptual color images" {
-    const allocator = std.testing.allocator;
-
-    var img = try Image(Rgb).init(allocator, 1, 2);
-    defer img.deinit(allocator);
-
-    img.at(0, 0).* = .{ .r = 100, .g = 100, .b = 100 };
-    img.at(0, 1).* = .{ .r = 100, .g = 100, .b = 105 }; // Small difference
-
-    const fill_val = Rgb{ .r = 255, .g = 0, .b = 0 };
-
-    // With a low threshold (0.001), it should NOT fill index 1
-    var img_low = try img.dupe(allocator);
-    defer img_low.deinit(allocator);
-    try img_low.floodFill(allocator, 0, 0, fill_val, .{ .threshold = 0.001, .metric = .perceptual });
-    try expectEqual(fill_val, img_low.at(0, 0).*);
-    try expectEqual(Rgb{ .r = 100, .g = 100, .b = 105 }, img_low.at(0, 1).*);
-
-    // With a higher threshold (0.05), it SHOULD fill index 1
-    var img_high = try img.dupe(allocator);
-    defer img_high.deinit(allocator);
-    try img_high.floodFill(allocator, 0, 0, fill_val, .{ .threshold = 0.05, .metric = .perceptual });
-    try expectEqual(fill_val, img_high.at(0, 0).*);
-    try expectEqual(fill_val, img_high.at(0, 1).*);
 }
 
 test "flood fill error bounds" {

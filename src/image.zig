@@ -56,9 +56,6 @@ pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 pub const Colormap = @import("image/colormaps.zig").Colormap;
 const Blending = @import("blending.zig").Blending;
-pub const Connectivity = @import("image/flood_fill.zig").Connectivity;
-pub const ThresholdMode = @import("image/flood_fill.zig").ThresholdMode;
-pub const DistanceMetric = @import("image/flood_fill.zig").DistanceMetric;
 pub const FloodFillOptions = @import("image/flood_fill.zig").FloodFillOptions;
 
 /// Assigns `sample` into `dest`, applying blending when requested and converting
@@ -830,10 +827,6 @@ pub fn Image(comptime T: type) type {
         /// Fills a contiguous region of pixels starting from `start_row` and `start_col`
         /// that have a similar color/intensity (within `options.threshold` distance) to either
         /// the seed pixel or the parent pixel, replacing them with `fill_value`.
-        ///
-        /// `options.metric` controls how color distance is calculated:
-        /// - `.euclidean`: Fast channel-wise Euclidean distance.
-        /// - `.perceptual`: Perceptually uniform color distance calculated in Oklab space.
         pub fn floodFill(
             self: Self,
             allocator: Allocator,

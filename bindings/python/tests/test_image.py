@@ -581,3 +581,68 @@ class TestImage:
         # Check a pixel outside the view to make sure it's untouched
         outside_item = dst_view_img[0, 0].item()
         assert (outside_item.r, outside_item.g, outside_item.b) == (0, 0, 0)
+
+    def test_flood_fill(self):
+        # Create a simple 5x5 image
+        img = zignal.Image(5, 5, 0, dtype=zignal.Gray)
+        # Set some pixels to 5
+        img[2, 2] = 5
+        img[2, 1] = 5
+        img[2, 3] = 5
+        img[1, 2] = 5
+        img[3, 2] = 5
+
+        # Check default four connectivity in-place flood fill
+        img.flood_fill(2, 2, 9, threshold=0.0)
+        assert img[2, 2] == 9
+        assert img[2, 1] == 9
+        assert img[0, 0] == 0
+
+        # Test error bounds checking
+        with pytest.raises(ValueError):
+            img.flood_fill(5, 5, 9)
+
+        # Test RGB color flood fill with a threshold
+        img_rgb = zignal.Image(1, 3, dtype=zignal.Rgb)
+        img_rgb[0, 0] = (100, 100, 100)
+        img_rgb[0, 1] = (100, 100, 103)  # distance 3 from seed
+        img_rgb[0, 2] = (100, 100, 107)  # distance 7 from seed
+
+        # threshold 4.0 fills index 1 but not index 2
+        img_thresh = img_rgb.copy()
+        img_thresh.flood_fill(0, 0, (255, 0, 0), threshold=4.0)
+        assert img_thresh[0, 1].item().r == 255
+        assert img_thresh[0, 2].item().b == 107
+
+        # Connectivity: a pixel only diagonally connected fills under 8 but not 4
+        diag = zignal.Image(3, 3, 0, dtype=zignal.Gray)
+        diag[0, 0] = 5
+        diag[1, 1] = 5
+
+        diag4 = diag.copy()
+        diag4.flood_fill(1, 1, 9, connectivity=4)
+        assert diag4[0, 0] == 5  # only diagonal neighbor, not filled
+
+        diag8 = diag.copy()
+        diag8.flood_fill(1, 1, 9, connectivity=8)
+        assert diag8[0, 0] == 9  # reached via diagonal
+
+        # Invalid connectivity is rejected
+        with pytest.raises(ValueError, match="connectivity must be 4 or 8"):
+            diag.flood_fill(1, 1, 9, connectivity=5)
+
+        # Mode: gradient [0,1,2,3,4] with threshold 1.0
+        # FIXED compares to the seed (0) -> stops after value 1
+        grad = zignal.Image(1, 5, dtype=zignal.Gray)
+        for col in range(5):
+            grad[0, col] = col
+
+        grad_fixed = grad.copy()
+        grad_fixed.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.FIXED)
+        assert grad_fixed[0, 1] == 9
+        assert grad_fixed[0, 2] == 2  # 2 vs seed 0 exceeds threshold
+
+        # FLOATING compares to the neighbor -> walks the whole gradient
+        grad_floating = grad.copy()
+        grad_floating.flood_fill(0, 0, 9, threshold=1.0, mode=zignal.ThresholdMode.FLOATING)
+        assert grad_floating[0, 4] == 9

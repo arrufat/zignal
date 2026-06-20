@@ -14,6 +14,7 @@ const matrix = @import("matrix.zig");
 const motion_blur = @import("motion_blur.zig");
 const interpolation = @import("interpolation.zig");
 const border_mode = @import("border_mode.zig");
+const threshold_mode = @import("threshold_mode.zig");
 const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
@@ -102,6 +103,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .type = zignal.Blending, .doc = blending.blending_doc },
         .{ .type = zignal.Interpolation, .doc = interpolation.interpolation_doc },
         .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc },
+        .{ .type = zignal.FloodFillOptions.ThresholdMode, .doc = threshold_mode.threshold_mode_doc },
         .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc },
     };
 

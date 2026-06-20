@@ -2,70 +2,38 @@ const std = @import("std");
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 
-pub const Connectivity = enum {
-    four,
-    eight,
-};
-
-pub const ThresholdMode = enum {
-    seed_relative,
-    parent_relative,
-};
-
-pub const DistanceMetric = enum {
-    /// Faster, direct channel-by-channel Euclidean distance.
-    euclidean,
-    /// Perceptually uniform color distance in Oklab space.
-    perceptual,
-};
-
 pub const FloodFillOptions = struct {
+    pub const Connectivity = enum(u8) {
+        four = 4,
+        eight = 8,
+    };
+
+    pub const ThresholdMode = enum {
+        /// Compare each candidate against the seed pixel (OpenCV "fixed range").
+        fixed,
+        /// Compare each candidate against the neighbor it spread from (OpenCV "floating range").
+        floating,
+    };
+
     /// Maximum color/intensity distance for a neighbor to be filled.
     threshold: f64 = 0,
     /// Neighborhood used when expanding the region.
     connectivity: Connectivity = .four,
     /// Whether neighbors are compared against the seed or their parent pixel.
-    mode: ThresholdMode = .seed_relative,
-    /// How color distance is measured.
-    metric: DistanceMetric = .euclidean,
+    mode: ThresholdMode = .fixed,
 
     pub const default: FloodFillOptions = .{};
 };
 
-inline fn getScalarValue(comptime ScalarType: type, value: ScalarType) f64 {
-    return switch (@typeInfo(ScalarType)) {
-        .int => @floatFromInt(value),
-        .float => value,
-        else => @compileError("Unsupported scalar type: " ++ @typeName(ScalarType)),
-    };
-}
-
-fn pixelDistance(comptime T: type, p1: T, p2: T, metric: DistanceMetric) f64 {
-    const color = @import("../color.zig");
-    if (comptime color.isColor(T)) {
-        if (metric == .perceptual) {
-            const OklabF32 = color.Oklab(f32);
-            const o1 = color.convertColor(OklabF32, p1);
-            const o2 = color.convertColor(OklabF32, p2);
-            const dl = @as(f64, o1.l) - o2.l;
-            const da = @as(f64, o1.a) - o2.a;
-            const db = @as(f64, o1.b) - o2.b;
-            return @sqrt(dl * dl + da * da + db * db);
-        }
-    }
-
+fn pixelDistance(comptime T: type, p1: T, p2: T) f64 {
     switch (@typeInfo(T)) {
         .int, .float => {
-            const val1 = getScalarValue(T, p1);
-            const val2 = getScalarValue(T, p2);
-            return @abs(val1 - val2);
+            return @abs(meta.as(f64, p1) - meta.as(f64, p2));
         },
         .@"struct" => {
             var sum_sq: f64 = 0.0;
             inline for (comptime meta.structFields(T)) |field| {
-                const val1 = getScalarValue(field.type, @field(p1, field.name));
-                const val2 = getScalarValue(field.type, @field(p2, field.name));
-                const diff = val1 - val2;
+                const diff = meta.as(f64, @field(p1, field.name)) - meta.as(f64, @field(p2, field.name));
                 sum_sq += diff * diff;
             }
             return @sqrt(sum_sq);
@@ -73,9 +41,7 @@ fn pixelDistance(comptime T: type, p1: T, p2: T, metric: DistanceMetric) f64 {
         .array => |arr_info| {
             var sum_sq: f64 = 0.0;
             for (0..arr_info.len) |i| {
-                const val1 = getScalarValue(arr_info.child, p1[i]);
-                const val2 = getScalarValue(arr_info.child, p2[i]);
-                const diff = val1 - val2;
+                const diff = meta.as(f64, p1[i]) - meta.as(f64, p2[i]);
                 sum_sq += diff * diff;
             }
             return @sqrt(sum_sq);
@@ -99,12 +65,6 @@ pub fn floodFill(
     fill_value: T,
     options: FloodFillOptions,
 ) !void {
-    if (options.metric == .perceptual) {
-        if (comptime !@import("../color.zig").isColor(T)) {
-            @compileError("Perceptual distance metric is only supported for color pixel types.");
-        }
-    }
-
     if (start_row >= image.rows or start_col >= image.cols) {
         return error.OutOfBounds;
     }
@@ -131,11 +91,11 @@ pub fn floodFill(
         allocator: std.mem.Allocator,
         options: FloodFillOptions,
 
-        fn check(ctx: @This(), nr: u32, nc: u32, comp: T) !void {
+        fn check(ctx: *const @This(), nr: u32, nc: u32, comp: T) !void {
             const idx = @as(usize, nr) * ctx.image.cols + nc;
             if (!ctx.visited[idx]) {
                 const val = ctx.image.at(nr, nc).*;
-                if (pixelDistance(T, val, comp, ctx.options.metric) <= ctx.options.threshold) {
+                if (pixelDistance(T, val, comp) <= ctx.options.threshold) {
                     ctx.visited[idx] = true;
                     try ctx.stack.append(ctx.allocator, .{ .r = nr, .c = nc });
                 }
@@ -150,15 +110,16 @@ pub fn floodFill(
         .options = options,
     };
 
-    const neighbor_count: usize = if (options.connectivity == .eight) 8 else 4;
+    // Connectivity tag values are the neighbor counts (four = 4, eight = 8).
+    const neighbor_count: usize = @intFromEnum(options.connectivity);
 
     while (stack.pop()) |curr| {
         const orig_val = image.at(curr.r, curr.c).*;
         image.at(curr.r, curr.c).* = fill_value;
 
         const compare_val = switch (options.mode) {
-            .seed_relative => seed_val,
-            .parent_relative => orig_val,
+            .fixed => seed_val,
+            .floating => orig_val,
         };
 
         for (neighbor_offsets[0..neighbor_count]) |off| {

@@ -967,6 +967,14 @@ pub const image_methods_metadata = blk: {
             .params = "self, other: Image",
             .returns = "float",
         },
+        .{
+            .name = "flood_fill",
+            .meth = @ptrCast(&core.image_flood_fill),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = core.image_flood_fill_doc,
+            .params = "self, row: int, col: int, fill_value: Color, threshold: float = 0.0, connectivity: int = 4, mode: ThresholdMode = ThresholdMode.FIXED",
+            .returns = "None",
+        },
     };
 
     // ========================================================================
