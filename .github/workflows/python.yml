@@ -50,24 +50,19 @@ jobs:
         cd bindings/python
         uv sync --all-extras --dev
 
-    - name: Configure Python paths (Windows)
-      if: runner.os == 'Windows'
-      shell: bash
-      # zig build python-stubs runs zig directly (not through setup.py), so it
-      # doesn't get the env vars that setup.py sets for the wheel build. On
-      # Windows there's no pkg-config fallback, so without these the
-      # translate-c step fails to find Python.
-      run: |
-        PY_INC=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
-        PY_LIBS=$(python -c "import sysconfig; from pathlib import Path; print(Path(sysconfig.get_path('stdlib')).parent / 'libs')")
-        PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
-        echo "PYTHON_INCLUDE_DIR=$PY_INC" >> "$GITHUB_ENV"
-        echo "PYTHON_LIBS_DIR=$PY_LIBS" >> "$GITHUB_ENV"
-        echo "PYTHON_LIB_NAME=python${PY_VER}.lib" >> "$GITHUB_ENV"
-
     - name: Generate Python type stubs
       shell: bash
-      run: zig build python-stubs
+      # `zig build python-stubs` runs zig directly (not through setup.py), so pass the interpreter's
+      # paths as -D options to match the active Python (Windows has no pkg-config fallback).
+      run: |
+        PY_INC=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
+        ARGS="-Dpython-include-dir=$PY_INC"
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          PY_LIBS=$(python -c "import sysconfig; from pathlib import Path; print(Path(sysconfig.get_path('stdlib')).parent / 'libs')")
+          PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          ARGS="$ARGS -Dpython-libs-dir=$PY_LIBS -Dpython-lib-name=python${PY_VER}.lib"
+        fi
+        zig build python-stubs $ARGS
 
     - name: Build and Repair Wheel
       shell: bash

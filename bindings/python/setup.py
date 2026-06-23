@@ -43,32 +43,31 @@ class ZigBuildExt(build_ext):
         if not isinstance(ext, ZigExtension):
             return super().build_extension(ext)
 
-        env = {**os.environ, "PYTHON_INCLUDE_DIR": sysconfig.get_path("include")}
+        # Pass the interpreter's paths as -D options (not env vars): Zig keys its configure cache on
+        # build.zig + -D args, so env vars can be silently ignored when a cached graph is reused.
+        env = dict(os.environ)
+        py_opts = {"python-include-dir": sysconfig.get_path("include")}
 
         if sys.platform == "win32":
             libs = Path(sysconfig.get_path("stdlib")).parent / "libs"
             if libs.exists():
-                env.update(
-                    {
-                        "PYTHON_LIBS_DIR": str(libs),
-                        "PYTHON_LIB_NAME": f"python{sys.version_info.major}{sys.version_info.minor}.lib",
-                    }
-                )
+                py_opts["python-libs-dir"] = str(libs)
+                py_opts["python-lib-name"] = f"python{sys.version_info.major}{sys.version_info.minor}.lib"
         else:
             if (libdir := sysconfig.get_config_var("LIBDIR")) and Path(libdir).exists():
-                env["PYTHON_LIBS_DIR"] = libdir
+                py_opts["python-libs-dir"] = libdir
                 if sys.platform == "linux":
                     env["LD_LIBRARY_PATH"] = libdir
 
             if sys.platform == "darwin":
-                env["PYTHON_LIB_NAME"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
+                py_opts["python-lib-name"] = f"python{sys.version_info.major}.{sys.version_info.minor}"
             else:
                 libname = os.path.basename(
                     sysconfig.get_config_var("LDLIBRARY")
                     or sysconfig.get_config_var("LIBRARY")
                     or f"python{sys.version_info.major}.{sys.version_info.minor}"
                 )
-                env["PYTHON_LIB_NAME"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
+                py_opts["python-lib-name"] = re.sub(r"^lib|(\.so|\.a|\.dylib).*$", "", libname)
 
         cmd = [
             "zig",
@@ -79,6 +78,7 @@ class ZigBuildExt(build_ext):
         ]
         if ext.target != "native":
             cmd.append(f"-Dtarget={ext.target}")
+        cmd += [f"-D{key}={value}" for key, value in py_opts.items()]
 
         print(f"Building Zig extension: {' '.join(cmd)}")
         subprocess.check_call(cmd, cwd=PROJECT_ROOT, env=env)

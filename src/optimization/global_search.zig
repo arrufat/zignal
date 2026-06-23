@@ -69,20 +69,30 @@ pub const GlobalOptimizer = struct {
     trust_region_eps: f64,
     max_concurrency: usize,
 
-    // Parallel-path state, allocated only when max_concurrency > 1 (empty slices otherwise): one
-    // in-flight "slot" per worker, active between dispatch and record. Concurrent asks impute a
-    // nearest-neighbor value for active slots so they don't collapse onto one point; `pending_*` packs
-    // them for `evaluateWithPending`. Empty on the sequential path, so `ask` scans nothing.
-    // The `_x` arrays are flat row-major `max_concurrency * dims` (point i at `[i*dims..][0..dims]`);
-    // every other array holds one entry per slot (`max_concurrency`).
-    outstanding_x: []f64,
-    outstanding_y: []f64,
-    outstanding_predicted: []f64,
-    outstanding_anchor: []f64,
-    outstanding_move: []Move,
-    outstanding_active: []bool,
-    pending_x: []f64,
-    pending_y: []f64,
+    pool: ?WorkerPool,
+    arena: std.heap.ArenaAllocator,
+
+    pub const WorkerPool = struct {
+        outstanding_x: []f64,
+        outstanding_y: []f64,
+        outstanding_predicted: []f64,
+        outstanding_anchor: []f64,
+        outstanding_move: []Move,
+        outstanding_active: []bool,
+        scratch_pending_x: []f64,
+        scratch_pending_y: []f64,
+
+        pub fn deinit(self: *WorkerPool, allocator: Allocator) void {
+            allocator.free(self.outstanding_x);
+            allocator.free(self.outstanding_y);
+            allocator.free(self.outstanding_predicted);
+            allocator.free(self.outstanding_anchor);
+            allocator.free(self.outstanding_move);
+            allocator.free(self.outstanding_active);
+            allocator.free(self.scratch_pending_x);
+            allocator.free(self.scratch_pending_y);
+        }
+    };
 
     /// One optimization variable: its inclusive box bounds and whether it is integer-valued. Define
     /// the search space by passing a `[]const Variable` (one per variable) to `init`/`findGlobalOptimum`.
@@ -173,26 +183,38 @@ pub const GlobalOptimizer = struct {
         const scratch = try allocator.alloc(f64, dims);
         errdefer allocator.free(scratch);
 
-        // Allocate the parallel-path slots only when there is parallelism; the sequential path
-        // leaves them empty (freeing a zero-length slice in deinit is a no-op).
         const mc = @max(@as(usize, 1), options.max_concurrency);
-        const outstanding_x: []f64 = if (mc > 1) try allocator.alloc(f64, mc * dims) else &.{};
-        errdefer allocator.free(outstanding_x);
-        const outstanding_y: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
-        errdefer allocator.free(outstanding_y);
-        const outstanding_predicted: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
-        errdefer allocator.free(outstanding_predicted);
-        const outstanding_anchor: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
-        errdefer allocator.free(outstanding_anchor);
-        const outstanding_move: []Move = if (mc > 1) try allocator.alloc(Move, mc) else &.{};
-        errdefer allocator.free(outstanding_move);
-        const outstanding_active: []bool = if (mc > 1) try allocator.alloc(bool, mc) else &.{};
-        errdefer allocator.free(outstanding_active);
-        @memset(outstanding_active, false);
-        const pending_x: []f64 = if (mc > 1) try allocator.alloc(f64, mc * dims) else &.{};
-        errdefer allocator.free(pending_x);
-        const pending_y: []f64 = if (mc > 1) try allocator.alloc(f64, mc) else &.{};
-        errdefer allocator.free(pending_y);
+        var pool: ?WorkerPool = null;
+        if (mc > 1) {
+            const outstanding_x = try allocator.alloc(f64, mc * dims);
+            errdefer allocator.free(outstanding_x);
+            const outstanding_y = try allocator.alloc(f64, mc);
+            errdefer allocator.free(outstanding_y);
+            const outstanding_predicted = try allocator.alloc(f64, mc);
+            errdefer allocator.free(outstanding_predicted);
+            const outstanding_anchor = try allocator.alloc(f64, mc);
+            errdefer allocator.free(outstanding_anchor);
+            const outstanding_move = try allocator.alloc(Move, mc);
+            errdefer allocator.free(outstanding_move);
+            const outstanding_active = try allocator.alloc(bool, mc);
+            errdefer allocator.free(outstanding_active);
+            @memset(outstanding_active, false);
+            const pending_x = try allocator.alloc(f64, mc * dims);
+            errdefer allocator.free(pending_x);
+            const pending_y = try allocator.alloc(f64, mc);
+            errdefer allocator.free(pending_y);
+
+            pool = .{
+                .outstanding_x = outstanding_x,
+                .outstanding_y = outstanding_y,
+                .outstanding_predicted = outstanding_predicted,
+                .outstanding_anchor = outstanding_anchor,
+                .outstanding_move = outstanding_move,
+                .outstanding_active = outstanding_active,
+                .scratch_pending_x = pending_x,
+                .scratch_pending_y = pending_y,
+            };
+        }
 
         const upper_bound: UpperBound = try .init(allocator, dims, options.upper_bound);
 
@@ -213,14 +235,8 @@ pub const GlobalOptimizer = struct {
             .num_random_samples = options.num_random_samples,
             .trust_region_eps = options.trust_region_eps,
             .max_concurrency = mc,
-            .outstanding_x = outstanding_x,
-            .outstanding_y = outstanding_y,
-            .outstanding_predicted = outstanding_predicted,
-            .outstanding_anchor = outstanding_anchor,
-            .outstanding_move = outstanding_move,
-            .outstanding_active = outstanding_active,
-            .pending_x = pending_x,
-            .pending_y = pending_y,
+            .pool = pool,
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
@@ -229,15 +245,9 @@ pub const GlobalOptimizer = struct {
         self.allocator.free(self.best_x);
         self.allocator.free(self.last_x);
         self.allocator.free(self.scratch);
-        self.allocator.free(self.outstanding_x);
-        self.allocator.free(self.outstanding_y);
-        self.allocator.free(self.outstanding_predicted);
-        self.allocator.free(self.outstanding_anchor);
-        self.allocator.free(self.outstanding_move);
-        self.allocator.free(self.outstanding_active);
-        self.allocator.free(self.pending_x);
-        self.allocator.free(self.pending_y);
+        if (self.pool) |*p| p.deinit(self.allocator);
         self.upper_bound.deinit();
+        self.arena.deinit();
     }
 
     pub fn best(self: *const GlobalOptimizer) Evaluation {
@@ -254,7 +264,7 @@ pub const GlobalOptimizer = struct {
 
     /// Perform one ask+evaluate+tell iteration and return what happened.
     pub fn step(self: *GlobalOptimizer, objective: anytype) !Step {
-        const a = try self.ask();
+        const a = try self.ask(self.last_x);
         const y_raw = callObjective(objective, self.last_x);
         try self.record(self.last_x, self.sign * y_raw, a.move, a.predicted, a.anchor);
         self.evals += 1;
@@ -301,32 +311,32 @@ pub const GlobalOptimizer = struct {
         const Worker = struct {
             fn run(opt: *GlobalOptimizer, w_io: Io, obj: ObjArg, sh: *Shared, slot: usize, st: StopOptions) void {
                 const dims = opt.variables.len;
+                const pool = &opt.pool.?;
                 while (true) {
                     sh.mutex.lockUncancelable(w_io);
                     if (sh.stopped or sh.err != null or sh.dispatched >= st.max_evals) {
                         sh.mutex.unlock(w_io);
                         return;
                     }
-                    const a = opt.ask() catch |e| {
+                    const xslot = pool.outstanding_x[slot * dims ..][0..dims];
+                    const a = opt.ask(xslot) catch |e| {
                         sh.err = e;
                         sh.mutex.unlock(w_io);
                         return;
                     };
-                    const xslot = opt.outstanding_x[slot * dims ..][0..dims];
-                    @memcpy(xslot, opt.last_x);
-                    opt.outstanding_y[slot] = opt.upper_bound.nearestY(xslot);
-                    opt.outstanding_move[slot] = a.move;
-                    opt.outstanding_predicted[slot] = a.predicted;
-                    opt.outstanding_anchor[slot] = a.anchor;
-                    opt.outstanding_active[slot] = true;
+                    pool.outstanding_y[slot] = opt.upper_bound.nearestY(xslot);
+                    pool.outstanding_move[slot] = a.move;
+                    pool.outstanding_predicted[slot] = a.predicted;
+                    pool.outstanding_anchor[slot] = a.anchor;
+                    pool.outstanding_active[slot] = true;
                     sh.dispatched += 1;
                     sh.mutex.unlock(w_io);
 
                     const y_raw = callObjective(obj, xslot); // evaluated without the lock held
 
                     sh.mutex.lockUncancelable(w_io);
-                    opt.outstanding_active[slot] = false;
-                    opt.record(xslot, opt.sign * y_raw, opt.outstanding_move[slot], opt.outstanding_predicted[slot], opt.outstanding_anchor[slot]) catch |e| {
+                    pool.outstanding_active[slot] = false;
+                    opt.record(xslot, opt.sign * y_raw, pool.outstanding_move[slot], pool.outstanding_predicted[slot], pool.outstanding_anchor[slot]) catch |e| {
                         sh.err = e;
                         sh.mutex.unlock(w_io);
                         return;
@@ -370,70 +380,66 @@ pub const GlobalOptimizer = struct {
         if (stop.target) |t| {
             if (cur >= self.sign * t) return true;
         }
-        if (stop.patience) |pat| {
-            if (state.prev_best == null or cur > state.prev_best.?) {
-                state.prev_best = cur;
-                state.since_improve = 0;
-            } else {
-                state.since_improve += 1;
-                if (state.since_improve >= pat) return true;
-            }
+        const pat = stop.patience orelse return false;
+        if (state.prev_best == null or cur > state.prev_best.?) {
+            state.prev_best = cur;
+            state.since_improve = 0;
+            return false;
         }
-        return false;
+        state.since_improve += 1;
+        return state.since_improve >= pat;
     }
 
-    /// Choose the next point to evaluate, writing it into `self.last_x`. Port of `get_next_x`.
+    /// Choose the next point to evaluate, writing it into `x_out`. Port of `get_next_x`.
     ///
     /// In-flight ("pending") points from concurrent workers count towards the init budget and the
     /// one-trust-region-at-a-time rule, and lower the surrogate near themselves so two asks don't pick
     /// the same spot. With none in flight (the sequential path) this is the original behavior.
-    fn ask(self: *GlobalOptimizer) !Ask {
+    fn ask(self: *GlobalOptimizer, x_out: []f64) !Ask {
         const dims = self.variables.len;
 
-        // Pack the active in-flight points into `pending_*` and note any outstanding trust-region step.
         var npending: usize = 0;
         var tr_outstanding = false;
-        for (0..self.outstanding_active.len) |j| {
-            if (!self.outstanding_active[j]) continue;
-            @memcpy(self.pending_x[npending * dims ..][0..dims], self.outstanding_x[j * dims ..][0..dims]);
-            self.pending_y[npending] = self.outstanding_y[j];
-            if (self.outstanding_move[j] == .exploit) tr_outstanding = true;
-            npending += 1;
+        if (self.pool) |*pool| {
+            for (0..pool.outstanding_active.len) |j| {
+                if (!pool.outstanding_active[j]) continue;
+                @memcpy(pool.scratch_pending_x[npending * dims ..][0..dims], pool.outstanding_x[j * dims ..][0..dims]);
+                pool.scratch_pending_y[npending] = pool.outstanding_y[j];
+                if (pool.outstanding_move[j] == .exploit) tr_outstanding = true;
+                npending += 1;
+            }
         }
 
         const real_n = self.upper_bound.numPoints();
         const init_budget = @max(@as(usize, 3), dims);
 
-        // Initial design: box center first, then random until the budget is filled. Pending points
-        // count, so concurrent workers don't all flood the box with init samples.
         if (real_n + npending < init_budget) {
-            if (real_n + npending == 0) self.centerVector(self.last_x) else self.randomVector(self.last_x);
+            if (real_n + npending == 0) self.centerVector(x_out) else self.randomVector(x_out);
             return .{ .move = .init };
         }
 
-        // No recorded points yet (only in-flight ones): nothing to fit or bound against, so go random.
         if (real_n == 0) {
-            self.randomVector(self.last_x);
+            self.randomVector(x_out);
             return .{ .move = .random };
         }
 
-        // Exploit: local quadratic trust-region step (skipped if one is already in flight).
         if (self.do_trust_region_step and !tr_outstanding and real_n > dims + 1) {
-            const predicted = try self.pickTrustRegion();
+            const predicted = try self.pickTrustRegion(x_out);
             if (predicted > self.trust_region_eps) {
                 self.do_trust_region_step = false;
                 return .{ .move = .exploit, .predicted = predicted, .anchor = self.best_y orelse 0 };
             }
         }
 
-        // Explore: maximize the Lipschitz upper bound (with a small pure-random probability).
         self.do_trust_region_step = true;
         if (self.prng.random().float(f64) >= self.pure_random_probability) {
-            if (self.pickMaxUpperBound(self.pending_x, self.pending_y, npending)) {
+            const pending_x: []const f64 = if (self.pool) |*pool| pool.scratch_pending_x[0 .. npending * dims] else &.{};
+            const pending_y: []const f64 = if (self.pool) |*pool| pool.scratch_pending_y[0..npending] else &.{};
+            if (self.pickMaxUpperBound(pending_x, pending_y, x_out)) {
                 return .{ .move = .explore };
             }
         }
-        self.randomVector(self.last_x);
+        self.randomVector(x_out);
         return .{ .move = .random };
     }
 
@@ -449,8 +455,6 @@ pub const GlobalOptimizer = struct {
     ) !void {
         try self.upper_bound.add(x, y_internal);
 
-        // rho measures the step against the best at the time it was planned (`anchor`), not the
-        // live best_y — concurrent workers may have improved best_y since this step's `ask`.
         if (move == .exploit and predicted != 0) {
             const rho = (y_internal - anchor) / @abs(predicted);
             if (rho < 0.25) {
@@ -461,9 +465,7 @@ pub const GlobalOptimizer = struct {
         }
 
         if (self.best_y == null or y_internal > self.best_y.?) {
-            // A non-trust-region jump that lands far from the previous best resets the radius so
-            // the next trust-region step re-sizes itself around the new region.
-            if (move != .exploit and self.best_y != null and dist(x, self.best_x) > self.radius * 1.001) {
+            if (move != .exploit and self.best_y != null and tr.dist(x, self.best_x) > self.radius * 1.001) {
                 self.radius = 0;
             }
             @memcpy(self.best_x, x);
@@ -471,12 +473,11 @@ pub const GlobalOptimizer = struct {
         }
     }
 
-    /// Random search for the point maximizing the upper bound; writes the best into `self.last_x`.
+    /// Random search for the point maximizing the upper bound; writes the best into `x_out`.
     /// Returns whether that point's bound exceeds the best observed value (i.e. it's worth exploring).
-    /// `pending_x`/`pending_y` are the `npending` in-flight points whose imputed values tighten the
-    /// bound near themselves (0 in the sequential case). Port of `pick_next_sample_as_max_upper_bound`.
-    fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, npending: usize) bool {
-        // Hoist the SoA columns and RNG handle out of the (num_random_samples-iteration) loop.
+    /// `pending_x`/`pending_y` are the in-flight points whose imputed values tighten the
+    /// bound near themselves. Port of `pick_next_sample_as_max_upper_bound`.
+    fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, x_out: []f64) bool {
         const s = self.variables.slice();
         const lower = s.items(.lower);
         const upper = s.items(.upper);
@@ -487,27 +488,25 @@ pub const GlobalOptimizer = struct {
         var rounds: usize = 0;
         while (rounds < self.num_random_samples) : (rounds += 1) {
             sampleInBox(self.scratch, lower, upper, is_integer, r);
-            const b = self.upper_bound.evaluateWithPending(self.scratch, pending_x, pending_y, npending);
+            const b = self.upper_bound.evaluateWithPending(self.scratch, pending_x, pending_y);
             if (b > best_ub) {
                 best_ub = b;
-                @memcpy(self.last_x, self.scratch);
+                @memcpy(x_out, self.scratch);
             }
         }
-        // self.best_y is the running max of all observed (internal) values == dlib's max ub point y;
-        // explore only runs after the initial design, so it is always set here.
         return best_ub > self.best_y.?;
     }
 
     /// Fit a local quadratic around the best point and solve the bounded trust-region subproblem.
-    /// Writes the candidate into `self.last_x`; returns predicted improvement. Port of
+    /// Writes the candidate into `x_out`; returns predicted improvement. Port of
     /// `pick_next_sample_using_trust_region` + `find_max_quadraticly_interpolated_vector`.
-    fn pickTrustRegion(self: *GlobalOptimizer) !f64 {
+    fn pickTrustRegion(self: *GlobalOptimizer, x_out: []f64) !f64 {
         const vars = self.variables.slice();
         const dims = vars.len;
         const lower = vars.items(.lower);
         const upper = vars.items(.upper);
         const is_integer = vars.items(.is_integer);
-        @memcpy(self.last_x, self.best_x);
+        @memcpy(x_out, self.best_x);
 
         // Active (continuous) dimensions only — integer variables are held at the best value.
         var da: usize = 0;
@@ -516,9 +515,8 @@ pub const GlobalOptimizer = struct {
         }
         if (da == 0) return 0;
 
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        const a = arena.allocator();
+        defer _ = self.arena.reset(.retain_capacity);
+        const a = self.arena.allocator();
 
         const active = try a.alloc(usize, da);
         {
@@ -535,10 +533,10 @@ pub const GlobalOptimizer = struct {
         const k_full = (da + 1) * (da + 2) / 2;
         const big = @min(n, k_full);
 
-        // N nearest neighbors of best_x (full-space distance).
+        // N nearest neighbors of best_x (full-space distance squared).
         const DistIdx = struct { d: f64, idx: usize };
         const dists = try a.alloc(DistIdx, n);
-        for (0..n) |i| dists[i] = .{ .d = dist(self.best_x, self.upper_bound.pointX(i)), .idx = i };
+        for (0..n) |i| dists[i] = .{ .d = tr.distSq(self.best_x, self.upper_bound.pointX(i)), .idx = i };
         std.mem.sort(DistIdx, dists, {}, struct {
             fn lt(_: void, p: DistIdx, q: DistIdx) bool {
                 return p.d < q.d;
@@ -574,7 +572,7 @@ pub const GlobalOptimizer = struct {
         // Fit Q(p) = 0.5 pᵀHp + gᵀp + c to the shifted points.
         const h = try a.alloc(f64, da * da);
         const g = try a.alloc(f64, da);
-        _ = try tr.fitQuadratic(a, xbuf, da, big, ybuf, h, g);
+        _ = try tr.fitQuadratic(a, xbuf, ybuf, h, g);
 
         // Maximize Q in the box-bounded trust region: minimize 0.5 pᵀ(-H)p + (-g)ᵀp.
         const bneg = try a.alloc(f64, da * da);
@@ -588,10 +586,10 @@ pub const GlobalOptimizer = struct {
             hi_rel[i] = upper[active[i]] - anchor[i];
         }
         const p = try a.alloc(f64, da);
-        try tr.solveTrustRegionSubproblemBounded(a, bneg, gneg, da, self.radius, lo_rel, hi_rel, p, .{});
+        try tr.solveTrustRegionSubproblemBounded(a, bneg, gneg, self.radius, lo_rel, hi_rel, p, .{});
 
         // Never move more than the radius (guards against inaccurate sub-problem solves).
-        const pn = norm(p);
+        const pn = tr.norm(p);
         if (pn >= self.radius and pn > 0) {
             const scale = self.radius / pn;
             for (0..da) |i| p[i] *= scale;
@@ -607,7 +605,7 @@ pub const GlobalOptimizer = struct {
         // Reinsert active dims into the full candidate (integer dims keep best_x's value).
         for (0..da) |i| {
             const v = anchor[i] + p[i];
-            self.last_x[active[i]] = std.math.clamp(v, lower[active[i]], upper[active[i]]);
+            x_out[active[i]] = std.math.clamp(v, lower[active[i]], upper[active[i]]);
         }
         return predicted;
     }
@@ -634,21 +632,6 @@ fn sampleInBox(buf: []f64, lower: []const f64, upper: []const f64, is_integer: [
         if (is_int) x = std.math.clamp(@round(x), lo, hi);
         v.* = x;
     }
-}
-
-fn dist(a: []const f64, b: []const f64) f64 {
-    var s: f64 = 0;
-    for (a, b) |x, y| {
-        const d = x - y;
-        s += d * d;
-    }
-    return @sqrt(s);
-}
-
-fn norm(a: []const f64) f64 {
-    var s: f64 = 0;
-    for (a) |x| s += x * x;
-    return @sqrt(s);
 }
 
 // ---------------------------------------------------------------------------------------
