@@ -123,6 +123,7 @@ pub fn build(b: *Build) void {
     // Python bindings
     const py_bindings_step = b.step("python-bindings", "Build the python bindings");
     const os_tag = target.result.os.tag;
+    const py_paths: PythonPaths = .fromOptions(b);
 
     const py_module = b.addLibrary(.{
         .name = "zignal",
@@ -135,7 +136,7 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, py_module, target, optimize, "python3");
+    linkPython(b, py_module, target, optimize, "python3", py_paths);
 
     const extension = switch (os_tag) {
         .windows => ".pyd",
@@ -143,14 +144,8 @@ pub fn build(b: *Build) void {
         else => ".so",
     };
 
-    // Python type stub generation.
-    //
-    // `python-stubs` is its own step rather than a hard dependency of
-    // `python-bindings`. The runtime extension can build and run tests without
-    // regenerating stubs — handy when iterating on the bindings. Run
-    // `zig build python-stubs` explicitly to (re)generate the .pyi files. The
-    // CI wheel build invokes it before `python -m build --wheel` so wheels
-    // still ship type stubs.
+    // `python-stubs` is its own step, not a dependency of `python-bindings`, so the extension can
+    // build and run tests without regenerating .pyi files.
     const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
     const stub_generator = b.addExecutable(.{
         .name = "python_stubs",
@@ -161,9 +156,8 @@ pub fn build(b: *Build) void {
             .imports = &.{.{ .name = "zignal", .module = zignal }},
         }),
     });
-    linkPython(b, stub_generator, target, optimize, "python3-embed");
+    linkPython(b, stub_generator, target, optimize, "python3-embed", py_paths);
 
-    // Run stub generator in the python bindings directory
     const run_stub_generator = b.addRunArtifact(stub_generator);
     run_stub_generator.cwd = b.path("bindings/python/zignal");
     python_stubs_step.dependOn(&run_stub_generator.step);
@@ -175,9 +169,6 @@ pub fn build(b: *Build) void {
     const install_cli = b.addInstallArtifact(exe, .{});
     py_bindings_step.dependOn(&install_cli.step);
 
-    // python-bindings only depends on the runtime extension. Stub regeneration
-    // is its own `python-stubs` step (see comment at the stub_generator
-    // declaration above for context).
     py_bindings_step.dependOn(&install_py_module.step);
 
     // Also copy the built extension into the source package directory for local development
@@ -185,12 +176,16 @@ pub fn build(b: *Build) void {
     const wf = b.addWriteFiles();
     _ = wf.addCopyFile(py_module.getEmittedBin(), b.fmt("{s}/_zignal{s}", .{ pkg_dir, extension }));
 
-    // Copy CLI tool to python package
     const cli_ext = if (os_tag == .windows) ".exe" else "";
     const cli_name = b.fmt("zignal{s}", .{cli_ext});
     _ = wf.addCopyFile(exe.getEmittedBin(), b.fmt("{s}/{s}", .{ pkg_dir, cli_name }));
 
     py_bindings_step.dependOn(&wf.step);
+
+    // Convenience umbrella: build the extension and (re)generate stubs in one go.
+    const python_step = b.step("python", "Build the Python bindings and type stubs");
+    python_step.dependOn(py_bindings_step);
+    python_step.dependOn(python_stubs_step);
 }
 
 const Build = blk: {
@@ -247,18 +242,10 @@ fn runCapture(b: *std.Build, argv: []const []const u8) ?[]const u8 {
     return if (trimmed.len == 0) null else trimmed;
 }
 
-/// Run `python -c <snippet>` and return its trimmed stdout, or null on failure.
-/// Used to discover Python paths on Windows, where there is no pkg-config.
+/// Run `python -c <snippet>` (honoring `$PYTHON`) and return its trimmed stdout, or null on failure.
 fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
     const exe = b.graph.environ_map.get("PYTHON") orelse "python";
     return runCapture(b, &.{ exe, "-c", snippet });
-}
-
-/// Resolve a Python build value from the named env var, falling back to a
-/// `python -c <snippet>` query on Windows (where there is no pkg-config).
-/// Returns null when neither source yields a value.
-fn envOrPython(b: *Build, is_windows: bool, env_name: []const u8, snippet: []const u8) ?[]const u8 {
-    return b.graph.environ_map.get(env_name) orelse if (is_windows) pythonValue(b, snippet) else null;
 }
 
 /// Run a git command in the repo root and return its trimmed stdout, or null on
@@ -272,18 +259,34 @@ fn runGit(b: *std.Build, args: []const []const u8) ?[]const u8 {
     return runCapture(b, full_args.items);
 }
 
-/// Translate Python.h via the build system, import it as `c`, and wire up
-/// linking against libpython where required (embedding executables always,
-/// extension modules only on Windows). `python_lib` is the default
-/// pkg-config/system library name ("python3" for extension modules,
-/// "python3-embed" for embedding executables) and can be overridden with
-/// `PYTHON_LIB_NAME`.
+/// Python paths from `-D` options. setup.py passes these so the values become part of Zig's
+/// configure-cache key — env vars are not, so a cached graph would silently ignore them.
+const PythonPaths = struct {
+    include_dir: ?[]const u8,
+    libs_dir: ?[]const u8,
+    lib_name: ?[]const u8,
+
+    fn fromOptions(b: *Build) PythonPaths {
+        return .{
+            // Option, else autodetect from the active interpreter — resolved once here, not per linkPython call.
+            .include_dir = b.option([]const u8, "python-include-dir", "Python headers dir (else autodetected)") orelse
+                pythonValue(b, "import sysconfig;print(sysconfig.get_path('include'),end='')"),
+            .libs_dir = b.option([]const u8, "python-libs-dir", "Python import-library dir (Windows)"),
+            .lib_name = b.option([]const u8, "python-lib-name", "libpython name to link"),
+        };
+    }
+};
+
+/// Translate Python.h and import it as `c`, linking libpython where required (embedding executables
+/// always, extension modules only on Windows). `python_lib` is the default pkg-config name
+/// ("python3" / "python3-embed").
 fn linkPython(
     b: *Build,
     artifact: *Build.Step.Compile,
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     python_lib: []const u8,
+    py: PythonPaths,
 ) void {
     const root = artifact.root_module;
     const os_tag = target.result.os.tag;
@@ -294,13 +297,13 @@ fn linkPython(
         .target = target,
         .optimize = optimize,
     });
-    // On Windows the interpreter supplies the include path (no pkg-config);
-    // translate-c only needs `-I`, it never links libpython.
-    if (envOrPython(b, is_windows, "PYTHON_INCLUDE_DIR", "import sysconfig;print(sysconfig.get_path('include'),end='')")) |python_include| {
-        validatePath(python_include, "PYTHON_INCLUDE_DIR");
-        tc.addIncludePath(.{ .cwd_relative = python_include });
+    // `py.include_dir` is the option or the autodetected interpreter include; if neither resolved,
+    // fall back to pkg-config's ambient `python3` (last resort, may be a different Python).
+    if (py.include_dir) |inc| {
+        validatePath(inc, "python-include-dir");
+        tc.addIncludePath(.{ .cwd_relative = inc });
     } else if (is_windows) {
-        @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
+        @panic("Could not determine the Python include directory; pass -Dpython-include-dir=.");
     } else {
         tc.linkSystemLibrary(python_lib, .{});
     }
@@ -308,25 +311,21 @@ fn linkPython(
 
     root.link_libc = true;
 
-    // Extension modules must not link libpython: their Python symbols bind to
-    // the loading interpreter (`-undefined dynamic_lookup` on Mach-O).
-    // Windows is the exception: extensions there must link pythonXY.lib.
+    // Extension modules don't link libpython — symbols bind to the loading interpreter
+    // (`-undefined dynamic_lookup` on Mach-O). Windows is the exception: link pythonXY.lib.
     if (artifact.isDynamicLibrary() and !is_windows) {
         artifact.linker_allow_shlib_undefined = true;
         return;
     }
 
-    // On Windows the env vars below are normally set by setup.py / CI; fall back
-    // to the interpreter so `zig build python-stubs` also works standalone.
-    if (envOrPython(b, is_windows, "PYTHON_LIBS_DIR", "import sysconfig;from pathlib import Path;p=Path(sysconfig.get_path('stdlib')).parent/'libs';print(p if p.exists() else '',end='')")) |dir| {
-        validatePath(dir, "PYTHON_LIBS_DIR");
+    if (py.libs_dir) |dir| {
+        validatePath(dir, "python-libs-dir");
         root.addLibraryPath(.{ .cwd_relative = dir });
     }
 
-    const env_lib_name = envOrPython(b, is_windows, "PYTHON_LIB_NAME", "import sys;print(f'python{sys.version_info.major}{sys.version_info.minor}.lib',end='')");
-    const lib_name = if (env_lib_name) |name| blk: {
-        validateLibName(name, "PYTHON_LIB_NAME");
-        // On Windows, strip the .lib extension
+    const lib_name = if (py.lib_name) |name| blk: {
+        validateLibName(name, "python-lib-name");
+        // On Windows, strip the .lib extension pkg-config-style names don't carry.
         if (is_windows and std.mem.endsWith(u8, name, ".lib")) {
             break :blk name[0 .. name.len - ".lib".len];
         }
@@ -337,16 +336,16 @@ fn linkPython(
     if (os_tag == .macos) root.addRPathSpecial("@loader_path");
 }
 
-fn validatePath(path: []const u8, env_name: []const u8) void {
+fn validatePath(path: []const u8, opt_name: []const u8) void {
     if (!std.fs.path.isAbsolute(path)) {
-        std.debug.panic("Invalid path in {s}: '{s}'. An absolute path is required.", .{ env_name, path });
+        std.debug.panic("Invalid path in {s}: '{s}'. An absolute path is required.", .{ opt_name, path });
     }
 }
 
-fn validateLibName(name: []const u8, env_name: []const u8) void {
+fn validateLibName(name: []const u8, opt_name: []const u8) void {
     for (name) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-' and c != '.') {
-            std.debug.panic("Invalid character in {s}: '{c}'. Only alphanumeric, _, -, and . are allowed.", .{ env_name, c });
+            std.debug.panic("Invalid character in {s}: '{c}'. Only alphanumeric, _, -, and . are allowed.", .{ opt_name, c });
         }
     }
 }
