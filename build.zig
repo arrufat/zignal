@@ -294,11 +294,13 @@ fn linkPython(
         .target = target,
         .optimize = optimize,
     });
-    // On Windows the interpreter supplies the include path (no pkg-config);
-    // translate-c only needs `-I`, it never links libpython.
-    if (envOrPython(b, is_windows, "PYTHON_INCLUDE_DIR", "import sysconfig;print(sysconfig.get_path('include'),end='')")) |python_include| {
-        validatePath(python_include, "PYTHON_INCLUDE_DIR");
-        tc.addIncludePath(.{ .cwd_relative = python_include });
+    // Resolve `-I` from the active interpreter on every platform; pkg-config's ambient `python3` can
+    // point at a different Python than the one we're building for, so it's only a last resort.
+    const python_include = b.graph.environ_map.get("PYTHON_INCLUDE_DIR") orelse
+        pythonValue(b, "import sysconfig;print(sysconfig.get_path('include'),end='')");
+    if (python_include) |inc| {
+        validatePath(inc, "PYTHON_INCLUDE_DIR");
+        tc.addIncludePath(.{ .cwd_relative = inc });
     } else if (is_windows) {
         @panic("Could not determine the Python include directory; set PYTHON_INCLUDE_DIR.");
     } else {
