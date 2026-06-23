@@ -17,6 +17,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const VarStats = @import("../stats.zig").RunningStats(f64, .variance);
+const tr = @import("trust_region.zig");
 
 pub const UpperBound = struct {
     allocator: Allocator,
@@ -25,11 +26,18 @@ pub const UpperBound = struct {
     solver_eps: f64,
 
     npoints: usize = 0,
-    xs: []f64 = &.{}, // flat npoints*dims, row-major (point i at xs[i*dims ..][0..dims])
+    capacity: usize = 0,
+    xs: []f64 = &.{}, // flat capacity*dims, row-major (point i at xs[i*dims ..][0..dims])
     ys: []f64 = &.{},
 
     slopes: []f64, // length dims (>= 0)
-    offsets: []f64 = &.{}, // length npoints (>= 0)
+    offsets: []f64 = &.{}, // length capacity (>= 0)
+
+    x_stats: []VarStats = &.{},
+    x_stats_prev: []VarStats = &.{}, // scratch for the add() rollback snapshot
+    y_stats: VarStats = .init(),
+
+    arena: std.heap.ArenaAllocator,
 
     // QP dual variables, persisted across refits to warm-start the dual coordinate descent. Indexed
     // by the n-independent pair index j*(j-1)/2 + i, so an entry keeps referring to the same pair as
@@ -50,12 +58,19 @@ pub const UpperBound = struct {
     pub fn init(allocator: Allocator, dims: usize, options: Options) !UpperBound {
         const slopes = try allocator.alloc(f64, dims);
         @memset(slopes, 0);
+        const x_stats = try allocator.alloc(VarStats, dims);
+        for (x_stats) |*s| s.* = .init();
+        const x_stats_prev = try allocator.alloc(VarStats, dims);
         return .{
             .allocator = allocator,
             .dims = dims,
             .relative_noise_magnitude = options.relative_noise_magnitude,
             .solver_eps = options.solver_eps,
             .slopes = slopes,
+            .x_stats = x_stats,
+            .x_stats_prev = x_stats_prev,
+            .y_stats = .init(),
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
@@ -65,6 +80,9 @@ pub const UpperBound = struct {
         self.allocator.free(self.slopes);
         self.allocator.free(self.offsets);
         self.allocator.free(self.alpha);
+        self.allocator.free(self.x_stats);
+        self.allocator.free(self.x_stats_prev);
+        self.arena.deinit();
     }
 
     pub fn numPoints(self: *const UpperBound) usize {
@@ -83,27 +101,45 @@ pub const UpperBound = struct {
     pub fn add(self: *UpperBound, x: []const f64, y: f64) !void {
         std.debug.assert(x.len == self.dims);
         const n = self.npoints;
-        self.xs = try self.allocator.realloc(self.xs, (n + 1) * self.dims);
+        if (n >= self.capacity) {
+            const new_cap = if (self.capacity == 0) 8 else self.capacity * 2;
+            self.xs = try self.allocator.realloc(self.xs, new_cap * self.dims);
+            self.ys = try self.allocator.realloc(self.ys, new_cap);
+            self.offsets = try self.allocator.realloc(self.offsets, new_cap);
+            self.capacity = new_cap;
+        }
         @memcpy(self.xs[n * self.dims ..][0..self.dims], x);
-        self.ys = try self.allocator.realloc(self.ys, n + 1);
         self.ys[n] = y;
-        // Keep offsets sized to the point count so evaluate() is always in-bounds; the new entry
-        // starts at zero and is overwritten by learnParams once there are >= 2 points.
-        self.offsets = try self.allocator.realloc(self.offsets, n + 1);
         self.offsets[n] = 0;
         self.npoints = n + 1;
-        // A failed refit must not leave npoints ahead of the fitted parameters.
+        // A failed refit must not leave npoints or the running stats ahead of the fitted parameters.
         errdefer self.npoints = n;
+
+        const y_stats_prev = self.y_stats;
+        @memcpy(self.x_stats_prev, self.x_stats);
+        errdefer {
+            self.y_stats = y_stats_prev;
+            @memcpy(self.x_stats, self.x_stats_prev);
+        }
+
+        for (0..self.dims) |k| self.x_stats[k].add(x[k]);
+        self.y_stats.add(y);
+
         if (self.npoints >= 2) try self.learnParams();
     }
 
     /// The bound a single point `(xi, y)` contributes at `x`: `y + sqrt(max(0, base + Σ slopes·d²))`.
     /// `base` is the point's noise offset for stored points, or 0 for imputed in-flight ones.
-    fn pointBound(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64) f64 {
+    fn pointBound(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64, current_best: f64) f64 {
         var s = base;
+        if (y >= current_best) return y;
+        const diff_limit = current_best - y;
+        const s_limit = diff_limit * diff_limit;
+
         for (0..self.dims) |k| {
             const d = x[k] - xi[k];
             s += self.slopes[k] * d * d;
+            if (s >= s_limit) return current_best;
         }
         return y + @sqrt(@max(0.0, s));
     }
@@ -115,7 +151,7 @@ pub const UpperBound = struct {
         const dims = self.dims;
         for (0..self.npoints) |i| {
             const xi = self.xs[i * dims ..][0..dims];
-            ub = @min(ub, self.pointBound(x, xi, self.ys[i], self.offsets[i]));
+            ub = @min(ub, self.pointBound(x, xi, self.ys[i], self.offsets[i], ub));
         }
         return ub;
     }
@@ -129,11 +165,7 @@ pub const UpperBound = struct {
         var best_y: f64 = 0;
         for (0..self.npoints) |i| {
             const xi = self.xs[i * dims ..][0..dims];
-            var s: f64 = 0;
-            for (0..dims) |k| {
-                const d = x[k] - xi[k];
-                s += d * d;
-            }
+            const s = tr.distSq(x, xi);
             if (s < best_d) {
                 best_d = s;
                 best_y = self.ys[i];
@@ -142,7 +174,7 @@ pub const UpperBound = struct {
         return best_y;
     }
 
-    /// Like `evaluate`, but also lowers the bound near `npending` in-flight points (point p at
+    /// Like `evaluate`, but also lowers the bound near in-flight points (point p at
     /// `pending_xs[p*dims..][0..dims]`, provisional value `pending_ys[p]`), reusing the current slopes
     /// with a zero offset (no refit). The cheap read-only analogue of dlib's
     /// `build_upper_bound_with_all_function_evals`.
@@ -151,41 +183,30 @@ pub const UpperBound = struct {
         x: []const f64,
         pending_xs: []const f64,
         pending_ys: []const f64,
-        npending: usize,
     ) f64 {
         var ub = self.evaluate(x);
         const dims = self.dims;
+        const npending = pending_ys.len;
         for (0..npending) |p| {
             const xp = pending_xs[p * dims ..][0..dims];
-            ub = @min(ub, self.pointBound(x, xp, pending_ys[p], 0));
+            ub = @min(ub, self.pointBound(x, xp, pending_ys[p], 0, ub));
         }
         return ub;
     }
 
-    /// Fit `slopes` and `offsets` via the dual-coordinate-descent QP described in the file header.
     fn learnParams(self: *UpperBound) !void {
-        const n = self.npoints;
         const dims = self.dims;
 
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        const a = arena.allocator();
+        defer _ = self.arena.reset(.retain_capacity);
+        const a = self.arena.allocator();
 
         // --- normalization (matches dlib: scale x by per-dim stddev, y by stddev) ---
-        const x_stats = try a.alloc(VarStats, dims);
-        for (x_stats) |*s| s.* = .init();
-        var y_stats: VarStats = .init();
-        for (0..n) |i| {
-            for (0..dims) |k| x_stats[k].add(self.xs[i * dims + k]);
-            y_stats.add(self.ys[i]);
-        }
-
-        const y_std = y_stats.stdDev();
+        const y_std = self.y_stats.stdDev();
         const yscale: f64 = if (y_std > 0) 1.0 / y_std else 1.0;
 
         const xscale = try a.alloc(f64, dims);
         for (0..dims) |k| {
-            const x_std = x_stats[k].stdDev();
+            const x_std = self.x_stats[k].stdDev();
             xscale[k] = if (x_std > 0) 1.0 / (x_std * yscale) else 0;
         }
 
