@@ -18,14 +18,27 @@ const Matrix = @import("../matrix.zig").Matrix;
 // Small vector helpers (on []f64)
 // ---------------------------------------------------------------------------------------
 
-fn dot(a: []const f64, b: []const f64) f64 {
+pub fn dot(a: []const f64, b: []const f64) f64 {
     var s: f64 = 0;
     for (a, b) |x, y| s += x * y;
     return s;
 }
 
-fn norm(a: []const f64) f64 {
+pub fn norm(a: []const f64) f64 {
     return @sqrt(dot(a, a));
+}
+
+pub fn distSq(a: []const f64, b: []const f64) f64 {
+    var s: f64 = 0;
+    for (a, b) |x, y| {
+        const d = x - y;
+        s += d * d;
+    }
+    return s;
+}
+
+pub fn dist(a: []const f64, b: []const f64) f64 {
+    return @sqrt(distSq(a, b));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -52,7 +65,8 @@ fn cholInPlace(a: []f64, n: usize) bool {
 }
 
 /// Solve L*y = b (forward substitution), L lower-triangular (only lower triangle of `l` read).
-fn solveLower(l: []const f64, n: usize, b: []const f64, y: []f64) void {
+pub fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
+    const n = y.len;
     for (0..n) |i| {
         var s = b[i];
         for (0..i) |k| s -= l[i * n + k] * y[k];
@@ -61,7 +75,8 @@ fn solveLower(l: []const f64, n: usize, b: []const f64, y: []f64) void {
 }
 
 /// Solve L^T*x = y (back substitution), L lower-triangular (L^T is upper).
-fn solveLowerT(l: []const f64, n: usize, y: []const f64, x: []f64) void {
+pub fn solveLowerT(l: []const f64, y: []const f64, x: []f64) void {
+    const n = x.len;
     var i: usize = n;
     while (i > 0) {
         i -= 1;
@@ -93,11 +108,11 @@ pub fn solveTrustRegionSubproblem(
     allocator: Allocator,
     b: []const f64,
     g: []const f64,
-    n: usize,
     radius: f64,
     p: []f64,
     options: TrustRegionOptions,
 ) !void {
+    const n = g.len;
     const eps = options.eps;
     const max_iter = options.max_iter;
     @memset(p, 0);
@@ -150,11 +165,11 @@ pub fn solveTrustRegionSubproblem(
         // Solve (L L^T) p = -g.
         const neg_g = tmp; // reuse: first store -g
         for (0..n) |k| neg_g[k] = -g[k];
-        solveLower(m, n, neg_g, p); // p = q = L^-1 (-g)
+        solveLower(m, neg_g, p); // p = q = L^-1 (-g)
         const q_norm = norm(p);
         // copy q out, then back-solve in place
         @memcpy(tmp, p);
-        solveLowerT(m, n, tmp, p);
+        solveLowerT(m, tmp, p);
         const p_norm = norm(p);
 
         const target_met = if (lambda == 0) p_norm < radius else @abs(p_norm - radius) / radius < eps;
@@ -172,7 +187,8 @@ pub fn solveTrustRegionSubproblem(
         }
 
         const old_lambda = lambda;
-        lambda = lambda + std.math.pow(f64, q_norm / p_norm, 2) * (p_norm - radius) / radius;
+        const ratio = q_norm / p_norm;
+        lambda = lambda + ratio * ratio * (p_norm - radius) / radius;
 
         const gap = (lambda_max - lambda_min) * 0.01;
         lambda = std.math.clamp(lambda, lambda_min + gap, lambda_max - gap);
@@ -245,19 +261,20 @@ pub fn solveTrustRegionSubproblemBounded(
     allocator: Allocator,
     b: []const f64,
     g: []const f64,
-    n: usize,
     radius: f64,
     lower: []const f64,
     upper: []const f64,
     p_out: []f64,
     options: TrustRegionOptions,
 ) !void {
-    try solveTrustRegionSubproblem(allocator, b, g, n, radius, p_out, options);
+    try solveTrustRegionSubproblem(allocator, b, g, radius, p_out, options);
     if (!boundsViolated(p_out, lower, upper)) return;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const a = arena.allocator();
+
+    const n = g.len;
 
     // Compact (reduced) problem over the still-free variables. idx maps compact -> original.
     var cur = n;
@@ -347,7 +364,7 @@ pub fn solveTrustRegionSubproblemBounded(
         pp = npp;
         cur = new_cur;
 
-        try solveTrustRegionSubproblem(a, bb, gg, cur, radius_cur, pp, options);
+        try solveTrustRegionSubproblem(a, bb, gg, radius_cur, pp, options);
     }
 
     // Write back the remaining free variables.
@@ -367,75 +384,135 @@ pub fn solveTrustRegionSubproblemBounded(
 pub fn fitQuadratic(
     allocator: Allocator,
     x: []const f64,
-    dims: usize,
-    m: usize,
     y: []const f64,
     h: []f64,
     g: []f64,
 ) !f64 {
+    const m = y.len;
+    std.debug.assert(m > 0);
+    const dims = x.len / m;
     const k_full = (dims + 1) * (dims + 2) / 2;
     if (m >= k_full) {
-        return fitQuadraticMse(allocator, x, dims, m, y, h, g);
+        return fitQuadraticMse(allocator, x, y, h, g);
     }
-    return fitQuadraticInterp(allocator, x, dims, m, y, h, g);
+    return fitQuadraticInterp(allocator, x, y, h, g);
+}
+
+/// Monomial features of point `j` (column-major `x`, point i at `x[r*m+i]`) into `out[0..k]`:
+/// `[ x_0..x_{dims-1}, 1, 0.5·x_r² (r==r2) | x_r·x_r2 (r<r2) ]`.
+fn quadFeatures(x: []const f64, m: usize, dims: usize, j: usize, out: []f64) void {
+    for (0..dims) |r| out[r] = x[r * m + j];
+    out[dims] = 1.0;
+    var col: usize = dims + 1;
+    for (0..dims) |r| {
+        for (r..dims) |r2| {
+            var val = x[r * m + j] * x[r2 * m + j];
+            if (r == r2) val *= 0.5;
+            out[col] = val;
+            col += 1;
+        }
+    }
 }
 
 fn fitQuadraticMse(
     allocator: Allocator,
     x: []const f64,
-    dims: usize,
-    m: usize,
     y: []const f64,
     h: []f64,
     g: []f64,
 ) !f64 {
+    const m = y.len;
+    const dims = x.len / m;
     const k = (dims + 1) * (dims + 2) / 2;
 
-    // Wt is m x k: row j holds the monomial features of point j:
-    //   [ x_0..x_{dims-1}, 1, 0.5*x_r*x_r (r==r2) or x_r*x_r2 (r<r2) ].
+    const a = try allocator.alloc(f64, k * k);
+    defer allocator.free(a);
+    @memset(a, 0);
+
+    const b = try allocator.alloc(f64, k);
+    defer allocator.free(b);
+    @memset(b, 0);
+
+    const z = try allocator.alloc(f64, k);
+    defer allocator.free(z);
+
+    const w = try allocator.alloc(f64, k);
+    defer allocator.free(w);
+
+    for (0..m) |j| {
+        quadFeatures(x, m, dims, j, w);
+        for (0..k) |r1| {
+            b[r1] += w[r1] * y[j];
+            for (0..k) |r2| {
+                a[r1 * k + r2] += w[r1] * w[r2];
+            }
+        }
+    }
+
+    // Cholesky on the normal equations is fast but squares the condition number, so take it only when
+    // WᵀW is positive definite and well-conditioned. The pivots left on L's diagonal give
+    // cond(WᵀW) ≈ (max/min)²; a ratio past max_cond_ratio (cond ≳ 1e8) loses too much precision.
+    if (cholInPlace(a, k)) {
+        const max_cond_ratio = 1e4;
+        var min_piv: f64 = std.math.floatMax(f64);
+        var max_piv: f64 = 0;
+        for (0..k) |i| {
+            const piv = a[i * k + i];
+            min_piv = @min(min_piv, piv);
+            max_piv = @max(max_piv, piv);
+        }
+        if (max_piv <= max_cond_ratio * min_piv) {
+            solveLower(a, b, z);
+            solveLowerT(a, z, z);
+
+            const c = z[dims];
+            for (0..dims) |r| g[r] = z[r];
+            var wr: usize = dims + 1;
+            for (0..dims) |r| {
+                for (r..dims) |r2| {
+                    const val = z[wr];
+                    h[r * dims + r2] = val;
+                    h[r2 * dims + r] = val;
+                    wr += 1;
+                }
+            }
+            return c;
+        }
+    }
+
+    // Robust fallback: SVD pseudo-inverse (rank-deficient or ill-conditioned WᵀW).
     var wt: Matrix(f64) = try .initAll(allocator, @intCast(m), @intCast(k), 0);
     defer wt.deinit();
     for (0..m) |j| {
-        for (0..dims) |r| wt.at(j, r).* = x[r * m + j];
-        wt.at(j, dims).* = 1;
-        var col: usize = dims + 1;
-        for (0..dims) |r| {
-            for (r..dims) |r2| {
-                var v = x[r * m + j] * x[r2 * m + j];
-                if (r == r2) v *= 0.5;
-                wt.at(j, @intCast(col)).* = v;
-                col += 1;
-            }
-        }
+        quadFeatures(x, m, dims, j, w);
+        for (0..k) |col| wt.at(j, @intCast(col)).* = w[col];
     }
 
     var ycol: Matrix(f64) = try .init(allocator, @intCast(m), 1);
     defer ycol.deinit();
     for (0..m) |j| ycol.at(j, 0).* = y[j];
 
-    var pinv = try wt.pinv(.{}); // k x m
+    var pinv = try wt.pinv(.{});
     defer pinv.deinit();
-    var z = try pinv.dot(ycol); // k x 1
-    defer z.deinit();
+    var z_mat = try pinv.dot(ycol);
+    defer z_mat.deinit();
 
-    return unpackQuadratic(z, dims, h, g);
+    return unpackQuadratic(z_mat, dims, h, g);
 }
 
 fn fitQuadraticInterp(
     allocator: Allocator,
     x: []const f64,
-    dims: usize,
-    m: usize,
     y: []const f64,
     h: []f64,
     g: []f64,
 ) !f64 {
-    // Block KKT system (Powell NEWUOA eqns 3.9-3.12), size (m+dims+1).
+    const m = y.len;
+    const dims = x.len / m;
     const n = m + dims + 1;
     var w: Matrix(f64) = try .initAll(allocator, @intCast(n), @intCast(n), 0);
     defer w.deinit();
 
-    // Top-left m x m: 0.5 * (X^T X)^2 (elementwise square of the Gram matrix).
     for (0..m) |i| {
         for (0..m) |j| {
             var gram: f64 = 0;
@@ -443,12 +520,10 @@ fn fitQuadraticInterp(
             w.at(i, j).* = 0.5 * gram * gram;
         }
     }
-    // Ones coupling row/column.
     for (0..m) |i| {
         w.at(i, @intCast(m)).* = 1;
         w.at(@intCast(m), i).* = 1;
     }
-    // X^T (top-right) and X (bottom-left).
     for (0..m) |i| {
         for (0..dims) |d| {
             w.at(i, @intCast(m + 1 + d)).* = x[d * m + i];
@@ -462,10 +537,9 @@ fn fitQuadraticInterp(
 
     var pinv = try w.pinv(.{});
     defer pinv.deinit();
-    var z = try pinv.dot(rcol); // n x 1
+    var z = try pinv.dot(rcol);
     defer z.deinit();
 
-    // lambda = z[0..m], c = z[m], g = z[m+1 .. m+dims], H = X diag(lambda) X^T.
     const c = z.at(m, 0).*;
     for (0..dims) |d| g[d] = z.at(@intCast(m + 1 + d), 0).*;
     for (0..dims) |a| {
@@ -515,8 +589,8 @@ test "cholInPlace + solve" {
     const b = [_]f64{ 10, 8 };
     var y: [2]f64 = undefined;
     var x: [2]f64 = undefined;
-    solveLower(&a, 2, &b, &y);
-    solveLowerT(&a, 2, &y, &x);
+    solveLower(&a, &b, &y);
+    solveLowerT(&a, &y, &x);
     // Verify A_orig * x ≈ b
     const ax0 = 4 * x[0] + 2 * x[1];
     const ax1 = 2 * x[0] + 3 * x[1];
@@ -529,7 +603,7 @@ test "trust region: interior solution" {
     const b = [_]f64{ 1, 0, 0, 1 };
     const g = [_]f64{ -0.5, 0 };
     var p: [2]f64 = undefined;
-    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 2, 10.0, &p, .{ .eps = 1e-6 });
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 10.0, &p, .{ .eps = 1e-6 });
     try expectApproxEqAbs(@as(f64, 0.5), p[0], 1e-6);
     try expectApproxEqAbs(@as(f64, 0.0), p[1], 1e-6);
 }
@@ -539,7 +613,7 @@ test "trust region: boundary solution" {
     const b = [_]f64{ 1, 0, 0, 1 };
     const g = [_]f64{ -10, 0 };
     var p: [2]f64 = undefined;
-    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 2, 1.0, &p, .{ .eps = 1e-7 });
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1.0, &p, .{ .eps = 1e-7 });
     try expectApproxEqAbs(@as(f64, 1.0), norm(&p), 1e-4);
     try expectApproxEqAbs(@as(f64, 1.0), p[0], 1e-3);
     try expectApproxEqAbs(@as(f64, 0.0), p[1], 1e-3);
@@ -553,7 +627,7 @@ test "trust region: n==1 hard case (negative curvature, ~zero gradient)" {
     const b = [_]f64{-1};
     const g = [_]f64{0};
     var p: [1]f64 = undefined;
-    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1, 1.0, &p, .{});
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1.0, &p, .{});
     try expectApproxEqAbs(@as(f64, 1.0), @abs(p[0]), 1e-9);
 }
 
@@ -564,7 +638,7 @@ test "trust region: n==2 hard case follows the min eigenvector of an indefinite 
     const b = [_]f64{ 1, 2, 2, 1 };
     const g = [_]f64{ 0, 0 };
     var p: [2]f64 = undefined;
-    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 2, 1.0, &p, .{});
+    try solveTrustRegionSubproblem(std.testing.allocator, &b, &g, 1.0, &p, .{});
     // The step rides the trust-region boundary along the min eigenvector [1,-1]/sqrt2.
     try expectApproxEqAbs(@as(f64, 1.0), norm(&p), 1e-9);
     try expectApproxEqAbs(@abs(p[0]), @abs(p[1]), 1e-9);
@@ -578,7 +652,7 @@ test "trust region bounded: box clips a variable" {
     const lower = [_]f64{ -1, -1 };
     const upper = [_]f64{ 0.3, 1 };
     var p: [2]f64 = undefined;
-    try solveTrustRegionSubproblemBounded(std.testing.allocator, &b, &g, 2, 1.0, &lower, &upper, &p, .{ .eps = 1e-7 });
+    try solveTrustRegionSubproblemBounded(std.testing.allocator, &b, &g, 1.0, &lower, &upper, &p, .{ .eps = 1e-7 });
     try expectApproxEqAbs(@as(f64, 0.3), p[0], 1e-6);
     try std.testing.expect(p[1] >= -1 and p[1] <= 1);
     try std.testing.expect(norm(&p) <= 1.0 + 1e-6);
@@ -592,7 +666,7 @@ test "trust region bounded: active set empties (every variable locks to a bound)
     const lower = [_]f64{ -1, -1 };
     const upper = [_]f64{ 0.3, 0.3 };
     var p: [2]f64 = undefined;
-    try solveTrustRegionSubproblemBounded(std.testing.allocator, &b, &g, 2, 1.0, &lower, &upper, &p, .{ .eps = 1e-7 });
+    try solveTrustRegionSubproblemBounded(std.testing.allocator, &b, &g, 1.0, &lower, &upper, &p, .{ .eps = 1e-7 });
     // Every coordinate must respect the box; before the fix p[1] came back at ~0.95 (outside it).
     try std.testing.expect(p[0] >= -1 and p[0] <= 0.3 + 1e-9);
     try std.testing.expect(p[1] >= -1 and p[1] <= 0.3 + 1e-9);
@@ -624,11 +698,54 @@ test "fitQuadratic: exact recovery (overdetermined, 2D)" {
 
     var h: [dims * dims]f64 = undefined;
     var g: [dims]f64 = undefined;
-    const c = try fitQuadratic(std.testing.allocator, &xbuf, dims, m, &ybuf, &h, &g);
+    const c = try fitQuadratic(std.testing.allocator, &xbuf, &ybuf, &h, &g);
 
     try expectApproxEqAbs(c_true, c, 1e-6);
     for (0..dims) |i| try expectApproxEqAbs(g_true[i], g[i], 1e-6);
     for (0..dims * dims) |i| try expectApproxEqAbs(h_true[i], h[i], 1e-6);
+}
+
+test "fitQuadratic: high-dimensional MSE fit (k > 128)" {
+    // Regression: the MSE path once used a fixed 128-element feature buffer, so dims >= 15
+    // (k = (dims+1)(dims+2)/2 = 136 here) crashed. A diagonal quadratic must still recover exactly.
+    const allocator = std.testing.allocator;
+    const dims = 15;
+    const k = (dims + 1) * (dims + 2) / 2; // 136
+
+    var h_true: [dims * dims]f64 = @splat(0);
+    var g_true: [dims]f64 = undefined;
+    for (0..dims) |i| {
+        h_true[i * dims + i] = @floatFromInt(i + 1);
+        g_true[i] = @as(f64, @floatFromInt(i)) - 7.0;
+    }
+    const c_true: f64 = 2.5;
+
+    // Overdetermined (m > k) to take the MSE branch; vary one coordinate per sample plus the origin.
+    const m = 2 * k + 1;
+    const xbuf = try allocator.alloc(f64, dims * m);
+    defer allocator.free(xbuf);
+    const ybuf = try allocator.alloc(f64, m);
+    defer allocator.free(ybuf);
+    @memset(xbuf, 0);
+
+    var pt: [dims]f64 = @splat(0);
+    ybuf[0] = evalQuad(&h_true, &g_true, c_true, dims, &pt);
+    for (1..m) |j| {
+        const d = j % dims;
+        const v: f64 = @floatFromInt((j / dims) + 1);
+        pt = @splat(0);
+        pt[d] = if (j % 2 == 0) v else -v;
+        for (0..dims) |i| xbuf[i * m + j] = pt[i];
+        ybuf[j] = evalQuad(&h_true, &g_true, c_true, dims, &pt);
+    }
+
+    var h: [dims * dims]f64 = undefined;
+    var g: [dims]f64 = undefined;
+    const c = try fitQuadratic(allocator, xbuf, ybuf, &h, &g);
+
+    try expectApproxEqAbs(c_true, c, 1e-6);
+    for (0..dims) |i| try expectApproxEqAbs(g_true[i], g[i], 1e-6);
+    for (0..dims) |i| try expectApproxEqAbs(h_true[i * dims + i], h[i * dims + i], 1e-6);
 }
 
 test "fitQuadratic: interpolation path reproduces sample values" {
@@ -648,7 +765,7 @@ test "fitQuadratic: interpolation path reproduces sample values" {
     }
     var h: [dims * dims]f64 = undefined;
     var g: [dims]f64 = undefined;
-    const c = try fitQuadratic(std.testing.allocator, &xbuf, dims, m, &ybuf, &h, &g);
+    const c = try fitQuadratic(std.testing.allocator, &xbuf, &ybuf, &h, &g);
 
     // The fit need not equal the true quadratic (under-determined), but must interpolate the points.
     for (pts, 0..) |pt, j| {

@@ -42,39 +42,54 @@ pub fn solveAssignmentProblem(
     const n_cols = cost_matrix.cols;
     const n = @max(n_rows, n_cols);
 
+    if (n == 0) return .{
+        .assignments = try allocator.alloc(?u32, n_rows),
+        .total_cost = 0,
+        .allocator = allocator,
+    };
+
     var scale_factor: f64 = 1.0;
     var padding_value: i64 = 1;
 
-    // Combine scaling and padding scans into a single pass
     if (@typeInfo(T) == .float) {
         var max_abs: f64 = 0;
         var sum_abs: f64 = 0;
-        for (0..n_rows) |i| {
-            for (0..n_cols) |j| {
-                const val = @abs(as(f64, cost_matrix.at(i, j).*));
-                max_abs = @max(max_abs, val);
-                sum_abs += val;
-            }
+        for (cost_matrix.items) |val_raw| {
+            const val = @abs(as(f64, val_raw));
+            max_abs = @max(max_abs, val);
+            sum_abs += val;
         }
         if (max_abs > 0) {
-            scale_factor = 1e12 / max_abs;
+            // Scale floats to integers (~12 significant digits), but cap the total well under i64 max
+            // so accumulated u/v potentials and padding_value can't overflow. `+ 1` guards num_elements == 0.
+            const precision_range = 1e12;
+            const max_total = 4e18;
+            const num_elements: f64 = @floatFromInt(n_rows * n_cols);
+            scale_factor = @min(precision_range, max_total / (num_elements + 1.0)) / max_abs;
         }
         padding_value = @as(i64, @intFromFloat(@ceil(sum_abs * scale_factor))) + 1;
     } else {
         var sum_abs: u64 = 0;
-        for (0..n_rows) |i| {
-            for (0..n_cols) |j| {
-                sum_abs += @abs(@as(i64, cost_matrix.at(i, j).*));
-            }
+        for (cost_matrix.items) |val_raw| {
+            sum_abs += @abs(@as(i64, val_raw));
         }
         padding_value = @intCast(sum_abs + 1);
     }
 
-    // Create square working matrix - pad with large values
-    var work = try allocator.alloc(i64, n * n);
-    defer allocator.free(work);
+    var arena: std.heap.ArenaAllocator = .init(allocator);
+    defer arena.deinit();
+    const aa = arena.allocator();
 
-    // Initialize work matrix - convert all types to i64 with appropriate scaling for floats
+    const work = try aa.alloc(i64, n * n);
+    const u = try aa.alloc(i64, n);
+    const v = try aa.alloc(i64, n);
+    const slack = try aa.alloc(i64, n);
+    const row_assignment = try aa.alloc(?u32, n);
+    const col_assignment = try aa.alloc(?u32, n);
+    const slack_col = try aa.alloc(u32, n);
+    const row_covered = try aa.alloc(bool, n);
+    const col_covered = try aa.alloc(bool, n);
+
     for (0..n) |i| {
         for (0..n) |j| {
             if (i < n_rows and j < n_cols) {
@@ -92,16 +107,11 @@ pub fn solveAssignmentProblem(
             }
         }
     }
-
-    // Step 1: Row reduction - subtract row minimum from each row
     for (0..n) |i| {
-        // Find minimum value in this row
-        var min_val: i64 = work[i * n];
+        var min_val = work[i * n];
         for (0..n) |j| {
             min_val = @min(min_val, work[i * n + j]);
         }
-
-        // Subtract minimum from all cells in the row
         if (min_val != 0) {
             for (0..n) |j| {
                 work[i * n + j] -= min_val;
@@ -109,158 +119,66 @@ pub fn solveAssignmentProblem(
         }
     }
 
-    // Step 2: Column reduction - subtract column minimum from each column
-    for (0..n) |j| {
-        // Find minimum value in this column
-        var min_val: i64 = work[j];
-        for (0..n) |i| {
-            min_val = @min(min_val, work[i * n + j]);
-        }
-
-        // Subtract minimum from all cells in the column
-        if (min_val != 0) {
-            for (0..n) |i| {
-                work[i * n + j] -= min_val;
-            }
-        }
-    }
-
-    // Arrays for tracking assignments and coverings
-    var row_assignment = try allocator.alloc(?u32, n);
-    defer allocator.free(row_assignment);
-    var col_assignment = try allocator.alloc(?u32, n);
-    defer allocator.free(col_assignment);
-    const row_covered = try allocator.alloc(bool, n);
-    defer allocator.free(row_covered);
-    const col_covered = try allocator.alloc(bool, n);
-    defer allocator.free(col_covered);
-
-    // Track primed column index for each row (replaces the O(n^2) primed matrix)
-    var row_primed = try allocator.alloc(?u32, n);
-    defer allocator.free(row_primed);
-    @memset(row_primed, null);
-
-    // Pre-allocated path buffer for constructAugmentingPath
-    const path = try allocator.alloc(PathNode, 2 * n);
-    defer allocator.free(path);
-
-    // Initialize assignments
+    @memset(u, 0);
+    @memset(v, 0);
     @memset(row_assignment, null);
     @memset(col_assignment, null);
 
-    // Step 1: Find initial zeros and create stars (assignments)
-    for (0..n) |i| {
-        for (0..n) |j| {
-            if (work[i * n + j] == 0 and row_assignment[i] == null and col_assignment[j] == null) {
-                row_assignment[i] = @intCast(j);
-                col_assignment[j] = @intCast(i);
-            }
-        }
-    }
-
-    // Main loop with safety counter
-    var iterations: u32 = 0;
-    const max_iterations = n * n * 10; // Reasonable upper bound
-
-    while (countAssignments(row_assignment) < n and iterations < max_iterations) {
-        iterations += 1;
-
-        // Step 2: Cover columns containing starred zeros
+    for (0..n) |r_start| {
         @memset(row_covered, false);
         @memset(col_covered, false);
+        @memset(slack, std.math.maxInt(i64));
 
-        for (0..n) |i| {
-            if (row_assignment[i]) |col| {
-                col_covered[col] = true;
-            }
-        }
+        var r = r_start;
+        var c_min: usize = 0;
 
-        // Check if all columns are covered (optimal assignment found)
-        var covered_count: u32 = 0;
-        for (col_covered) |covered| {
-            if (covered) covered_count += 1;
-        }
-        if (covered_count >= n) break;
-
-        // Step 3: Keep finding uncovered zeros until we construct a path or need to modify matrix
         while (true) {
-            // Find uncovered zero
-            var found_zero = false;
-            var zero_row: u32 = 0;
-            var zero_col: u32 = 0;
+            row_covered[r] = true;
+            var delta: i64 = std.math.maxInt(i64);
 
-            search: for (0..n) |i| {
-                if (!row_covered[i]) {
-                    for (0..n) |j| {
-                        if (!col_covered[j]) {
-                            if (work[i * n + j] == 0) {
-                                zero_row = @intCast(i);
-                                zero_col = @intCast(j);
-                                found_zero = true;
-                                break :search;
-                            }
-                        }
+            for (0..n) |c| {
+                if (!col_covered[c]) {
+                    const val = work[r * n + c] - u[r] - v[c];
+                    if (val < slack[c]) {
+                        slack[c] = val;
+                        slack_col[c] = @intCast(r);
+                    }
+                    if (slack[c] < delta) {
+                        delta = slack[c];
+                        c_min = c;
                     }
                 }
             }
 
-            if (found_zero) {
-                // Prime the zero
-                row_primed[zero_row] = zero_col;
-
-                // Check if there's a starred zero in the same row (O(1) lookup via row_assignment)
-                const star_col = row_assignment[zero_row];
-
-                if (star_col) |col| {
-                    // Cover this row and uncover the star's column
-                    row_covered[zero_row] = true;
-                    col_covered[col] = false;
-                    // Continue loop to find next uncovered zero
-                } else {
-                    // No starred zero in row, construct augmenting path
-                    constructAugmentingPath(row_primed, zero_row, zero_col, row_assignment, col_assignment, path);
-
-                    // Clear primes and break to restart from step 2
-                    @memset(row_primed, null);
-                    break;
-                }
-            } else {
-                // Step 4: No uncovered zeros, modify matrix
-                var min_uncovered: ?i64 = null;
-
-                // Find minimum uncovered value
-                var found_uncovered = false;
+            if (delta > 0) {
                 for (0..n) |i| {
-                    if (!row_covered[i]) {
-                        for (0..n) |j| {
-                            if (!col_covered[j]) {
-                                if (!found_uncovered) {
-                                    min_uncovered = work[i * n + j];
-                                    found_uncovered = true;
-                                } else {
-                                    min_uncovered = @min(min_uncovered.?, work[i * n + j]);
-                                }
-                            }
-                        }
+                    if (row_covered[i]) u[i] += delta;
+                }
+                for (0..n) |j| {
+                    if (col_covered[j]) {
+                        v[j] -= delta;
+                    } else {
+                        slack[j] -= delta;
                     }
                 }
+            }
 
-                if (!found_uncovered) break; // No valid solution
+            col_covered[c_min] = true;
 
-                // Add to covered rows, subtract from uncovered columns
-                if (min_uncovered) |min| {
-                    for (0..n) |i| {
-                        for (0..n) |j| {
-                            if (row_covered[i]) {
-                                work[i * n + j] += min;
-                            }
-                            if (!col_covered[j]) {
-                                work[i * n + j] -= min;
-                            }
-                        }
-                    }
+            const match_r = col_assignment[c_min];
+            if (match_r == null) {
+                var curr_c = c_min;
+                while (true) {
+                    const parent_r = slack_col[curr_c];
+                    const prev_c = row_assignment[parent_r];
+                    col_assignment[curr_c] = parent_r;
+                    row_assignment[parent_r] = @intCast(curr_c);
+                    if (prev_c == null) break;
+                    curr_c = prev_c.?;
                 }
-                break; // Break inner while loop after modifying matrix
+                break;
+            } else {
+                r = match_r.?;
             }
         }
     }
@@ -290,65 +208,6 @@ pub fn solveAssignmentProblem(
     };
 }
 
-fn countAssignments(assignments: []const ?u32) u32 {
-    var count: u32 = 0;
-    for (assignments) |a| {
-        if (a != null) count += 1;
-    }
-    return count;
-}
-
-const PathNode = struct { row: u32, col: u32 };
-
-fn constructAugmentingPath(
-    row_primed: []const ?u32,
-    start_row: u32,
-    start_col: u32,
-    row_assignment: []?u32,
-    col_assignment: []?u32,
-    path: []PathNode,
-) void {
-    // Build augmenting path: alternating primed and starred zeros
-    var path_len: u32 = 0;
-
-    path[path_len] = .{ .row = start_row, .col = start_col };
-    path_len += 1;
-
-    var current_col = start_col;
-    while (true) {
-        // Find starred zero in current column (O(1) lookup via col_assignment)
-        const star_row = col_assignment[current_col];
-
-        if (star_row) |r| {
-            // Add starred zero to path
-            path[path_len] = .{ .row = r, .col = current_col };
-            path_len += 1;
-
-            // Find primed zero in this row (O(1) lookup via row_primed)
-            if (row_primed[r]) |c| {
-                // Add primed zero to path
-                path[path_len] = .{ .row = r, .col = c };
-                path_len += 1;
-                current_col = c;
-            } else {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-
-    // Flip the path: star even indices (primed), update assignments directly in O(path_len)
-    for (0..path_len) |i| {
-        if (i % 2 == 0) {
-            const r = path[i].row;
-            const c = path[i].col;
-            row_assignment[r] = c;
-            col_assignment[c] = r;
-        }
-    }
-}
-
 // Tests
 test "Hungarian algorithm - simple 3x3" {
     const allocator = std.testing.allocator;
@@ -373,19 +232,12 @@ test "Hungarian algorithm - integer matrix" {
     const allocator = std.testing.allocator;
 
     // Test with integer cost matrix
-    var cost = try Matrix(i32).init(allocator, 3, 3);
+    var cost: Matrix(i32) = try .fromSlice(allocator, 3, 3, &.{
+        10, 20, 30,
+        15, 25, 35,
+        20, 30, 40,
+    });
     defer cost.deinit();
-
-    // Simple integer costs
-    cost.at(0, 0).* = 10;
-    cost.at(0, 1).* = 20;
-    cost.at(0, 2).* = 30;
-    cost.at(1, 0).* = 15;
-    cost.at(1, 1).* = 25;
-    cost.at(1, 2).* = 35;
-    cost.at(2, 0).* = 20;
-    cost.at(2, 1).* = 30;
-    cost.at(2, 2).* = 40;
 
     var result = try solveAssignmentProblem(i32, allocator, cost, .min);
     defer result.deinit();
@@ -406,7 +258,7 @@ test "Hungarian algorithm - rectangular matrix" {
     const allocator = std.testing.allocator;
 
     // 2x3 cost matrix
-    var cost = try Matrix(f32).init(allocator, 2, 3);
+    var cost: Matrix(f32) = try .init(allocator, 2, 3);
     defer cost.deinit();
 
     cost.at(0, 0).* = 1;
@@ -429,7 +281,7 @@ test "Hungarian algorithm - tiny costs keep relative scale" {
 
     // Costs ~1e-8: the old decimal-place scaling rounded them all to 0 and returned an arbitrary
     // (diagonal, total 14e-8) assignment. The true optimum is the anti-diagonal at total 10e-8.
-    var cost = try Matrix(f64).init(allocator, 3, 3);
+    var cost: Matrix(f64) = try .init(allocator, 3, 3);
     defer cost.deinit();
     const base = [3][3]f64{ .{ 1, 2, 3 }, .{ 2, 4, 6 }, .{ 3, 6, 9 } };
     for (0..3) |i| for (0..3) |j| {
@@ -459,7 +311,7 @@ fn bruteForceAssignment(cost: Matrix(i32), n: usize, row: usize, used: *[8]bool,
 
 test "Hungarian algorithm - matches brute force on random square matrices" {
     const allocator = std.testing.allocator;
-    var prng = std.Random.DefaultPrng.init(0xA55E7);
+    var prng: std.Random.DefaultPrng = .init(0xA55E7);
     const rand = prng.random();
     for (1..7) |n| {
         var trial: usize = 0;
@@ -481,4 +333,17 @@ test "Hungarian algorithm - matches brute force on random square matrices" {
             }
         }
     }
+}
+
+test "Hungarian algorithm - empty matrix" {
+    const allocator = std.testing.allocator;
+
+    var cost: Matrix(f32) = try .init(allocator, 0, 0);
+    defer cost.deinit();
+
+    var result = try solveAssignmentProblem(f32, allocator, cost, .min);
+    defer result.deinit();
+
+    try expectEqual(@as(usize, 0), result.assignments.len);
+    try expectEqual(@as(f64, 0), result.total_cost);
 }
