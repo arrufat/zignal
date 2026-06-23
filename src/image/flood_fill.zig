@@ -52,7 +52,7 @@ fn pixelDistance(comptime T: type, p1: T, p2: T) f64 {
 
 // Neighbor offsets in row/col order; the first four are 4-connectivity, all eight are 8-connectivity.
 const neighbor_offsets = [_][2]i2{
-    .{ -1, 0 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 1 },
+    .{ -1, 0 },  .{ 1, 0 },  .{ 0, -1 }, .{ 0, 1 },
     .{ -1, -1 }, .{ -1, 1 }, .{ 1, -1 }, .{ 1, 1 },
 };
 
