@@ -14,6 +14,7 @@ pub const edges = @import("cli/edges.zig");
 pub const fdm = @import("cli/fdm.zig");
 pub const info = @import("cli/info.zig");
 pub const metrics = @import("cli/metrics.zig");
+pub const qr = @import("cli/qr.zig");
 pub const resize = @import("cli/resize.zig");
 pub const tile = @import("cli/tile.zig");
 pub const version = @import("cli/version.zig");

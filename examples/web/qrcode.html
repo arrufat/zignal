@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QR Code</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <style>
+      .qr-layout {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 20px;
+        padding: 0 10px;
+        margin-bottom: 20px;
+      }
+      .qr-card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+        padding: 20px;
+        width: min(480px, 100%);
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .qr-card h3 {
+        margin: 0;
+        color: #333;
+        font-size: 1.1rem;
+      }
+      .scan-stage {
+        position: relative;
+      }
+      .scan-stage canvas {
+        display: block;
+        width: 100%;
+        max-width: none;
+        height: auto;
+        border: 2px dashed #bbb;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .scan-stage canvas.live {
+        border: 2px solid #333;
+        cursor: default;
+      }
+      #scan-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: #888;
+        text-align: center;
+        font-size: 0.95rem;
+        pointer-events: none;
+      }
+      #scan-placeholder .icon {
+        opacity: 0.7;
+      }
+      .qr-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      /* Scoped as .qr-card .qr-button to outrank the shared stylesheet's
+         button:not(.copy-button) rule, so <button> and <a> render alike. */
+      .qr-card .qr-button {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 10px 18px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        min-height: 44px;
+        font-size: 1rem;
+        font-family: inherit;
+        line-height: 1.2;
+        touch-action: manipulation;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .qr-card .qr-button:hover {
+        background: #0056b3;
+      }
+      .qr-card .qr-button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .qr-card .qr-button.secondary {
+        background: #e9ecef;
+        color: #333;
+      }
+      .qr-card .qr-button.secondary:hover {
+        background: #d6dade;
+      }
+      .qr-status {
+        color: #666;
+        font-size: 0.85rem;
+      }
+      .result-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: stretch;
+      }
+      #decoded {
+        flex: 1 1 100%;
+        font-family: monospace;
+        font-size: 0.9rem;
+        color: #333;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 10px 12px;
+        min-height: 1.3em;
+        word-break: break-all;
+        white-space: pre-wrap;
+      }
+      #decoded.empty {
+        color: #999;
+        font-family: inherit;
+      }
+      .encode-row {
+        display: flex;
+        gap: 8px;
+      }
+      #encode-text {
+        flex: 1;
+        min-width: 0;
+        width: auto;
+        padding: 10px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        /* 16px minimum so mobile browsers don't zoom in on focus. */
+        font-size: 16px;
+      }
+      #ec-level {
+        padding: 10px 8px;
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        background: white;
+        font-size: 16px;
+      }
+      .qr-stage {
+        display: flex;
+        justify-content: center;
+      }
+      .qr-stage canvas {
+        width: 100%;
+        max-width: 296px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        cursor: default;
+        image-rendering: pixelated;
+      }
+      @media (max-width: 600px) {
+        .qr-layout {
+          gap: 12px;
+          padding: 0;
+        }
+        .qr-card {
+          padding: 14px;
+          border-radius: 8px;
+        }
+        .qr-card .qr-button {
+          flex: 1 1 auto;
+        }
+        .qr-status {
+          flex-basis: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>QR Code</h1>
+      <p>Scan QR codes with the camera or from an image, and generate your own</p>
+    </div>
+
+    <div class="qr-layout">
+      <section class="qr-card">
+        <h3>Scan</h3>
+        <div class="scan-stage">
+          <video id="video" width="1" height="1" style="display:none"></video>
+          <canvas id="scan-canvas" width="640" height="480"></canvas>
+          <div id="scan-placeholder">
+            <svg class="icon" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              <circle cx="12" cy="13" r="3.5"/>
+            </svg>
+            <span>Start the camera,<br>or click / drop an image here</span>
+          </div>
+        </div>
+        <div class="qr-actions">
+          <button id="camera-button" class="qr-button">Start camera</button>
+          <span id="scan-status" class="qr-status"></span>
+        </div>
+        <div class="result-row">
+          <output id="decoded" class="empty">nothing decoded yet</output>
+          <button id="copy-button" class="qr-button secondary" style="display:none">Copy</button>
+          <a id="open-link" class="qr-button secondary" target="_blank" rel="noopener" style="display:none">Open</a>
+        </div>
+      </section>
+
+      <section class="qr-card">
+        <h3>Generate</h3>
+        <div class="encode-row">
+          <input type="text" id="encode-text" placeholder="Text to encode" value="https://github.com/arrufat/zignal">
+          <select id="ec-level" title="Error correction level">
+            <option value="0">L (7%)</option>
+            <option value="1" selected>M (15%)</option>
+            <option value="2">Q (25%)</option>
+            <option value="3">H (30%)</option>
+          </select>
+        </div>
+        <div class="qr-stage">
+          <canvas id="canvas-qr" width="296" height="296"></canvas>
+        </div>
+        <div class="qr-actions">
+          <button id="encode-button" class="qr-button">Encode</button>
+          <button id="download-button" class="qr-button secondary">Download PNG</button>
+          <span id="encode-status" class="qr-status"></span>
+        </div>
+      </section>
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="./qrcode.js"></script>
+  </body>
+</html>
