@@ -6,6 +6,7 @@
 pub const SMatrix = @import("matrix/SMatrix.zig").SMatrix;
 pub const Matrix = @import("matrix/Matrix.zig").Matrix;
 pub const MatrixError = @import("matrix/Matrix.zig").MatrixError;
+pub const cholesky = @import("matrix/Matrix.zig").cholesky;
 pub const Chain = @import("matrix/Chain.zig").Chain;
 
 test {
