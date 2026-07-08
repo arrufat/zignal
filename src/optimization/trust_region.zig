@@ -4,40 +4,23 @@
 //! Nocedal & Wright Algorithm 4.3) and `global_function_search.cpp` (`fit_quadratic_to_points`).
 //!
 //! Everything operates on f64 with small, dense, row-major matrices stored as flat slices, which
-//! suits the low-dimensional sub-problems that arise here. Heavy decompositions reuse zignal's
-//! `Matrix` (pseudo-inverse for the quadratic fit, `eigh` for the trust-region hard case);
-//! the rest is self-contained.
+//! suits the low-dimensional sub-problems that arise here. Decompositions reuse zignal's matrix
+//! module (the in-place Cholesky kernel, pseudo-inverse for the quadratic fit, `eigh` for the
+//! trust-region hard case); the rest is self-contained.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
-const Matrix = @import("../matrix.zig").Matrix;
+const matrix = @import("../matrix.zig");
+const Matrix = matrix.Matrix;
+const cholesky = matrix.cholesky;
 const vec = @import("vec.zig");
 const norm = vec.norm;
 
 // ---------------------------------------------------------------------------------------
 // Dense linear-algebra helpers (row-major n*n in []f64)
 // ---------------------------------------------------------------------------------------
-
-/// In-place Cholesky factorization. `a` is an n*n row-major symmetric matrix; on success its
-/// lower triangle is overwritten with L such that A = L*L^T. Returns false if A is not positive
-/// definite (the partial result is then meaningless).
-fn cholInPlace(a: []f64, n: usize) bool {
-    for (0..n) |j| {
-        var sum = a[j * n + j];
-        for (0..j) |k| sum -= a[j * n + k] * a[j * n + k];
-        if (sum <= 0) return false;
-        const ljj = @sqrt(sum);
-        a[j * n + j] = ljj;
-        for (j + 1..n) |i| {
-            var s = a[i * n + j];
-            for (0..j) |k| s -= a[i * n + k] * a[j * n + k];
-            a[i * n + j] = s / ljj;
-        }
-    }
-    return true;
-}
 
 /// Solve L*y = b (forward substitution), L lower-triangular (only lower triangle of `l` read).
 fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
@@ -128,7 +111,7 @@ pub fn solveTrustRegionSubproblem(
         @memcpy(m, b[0 .. n * n]);
         for (0..n) |d| m[d * n + d] += lambda;
 
-        if (!cholInPlace(m, n)) {
+        if (!cholesky(f64, m, n)) {
             // Cholesky doesn't exist: B + lambda*I not positive definite.
             if (g_norm <= numeric_eps) break; // go to eigen-decomposition path
             lambda_min = lambda;
@@ -412,7 +395,7 @@ fn fitQuadraticMse(
     const w = try allocator.alloc(f64, k);
     defer allocator.free(w);
 
-    // Only the lower triangle of A = WᵀW is accumulated — cholInPlace reads nothing else.
+    // Only the lower triangle of A = WᵀW is accumulated — cholesky reads nothing else.
     for (0..m) |j| {
         quadFeatures(x, m, dims, j, w);
         for (0..k) |r1| {
@@ -426,7 +409,7 @@ fn fitQuadraticMse(
     // Cholesky on the normal equations is fast but squares the condition number, so take it only when
     // WᵀW is positive definite and well-conditioned. The pivots left on L's diagonal give
     // cond(WᵀW) ≈ (max/min)²; a ratio past max_cond_ratio (cond ≳ 1e8) loses too much precision.
-    if (cholInPlace(a, k)) {
+    if (cholesky(f64, a, k)) {
         const max_cond_ratio = 1e4;
         var min_piv: f64 = std.math.floatMax(f64);
         var max_piv: f64 = 0;
@@ -545,10 +528,10 @@ pub fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const 
 // Tests
 // ---------------------------------------------------------------------------------------
 
-test "cholInPlace + solve" {
+test "cholesky + solve" {
     // A = [[4,2],[2,3]] (SPD), solve A x = b with b = [10, 8] -> x = [...]
     var a = [_]f64{ 4, 2, 2, 3 };
-    try std.testing.expect(cholInPlace(&a, 2));
+    try std.testing.expect(cholesky(f64, &a, 2));
     const b = [_]f64{ 10, 8 };
     var y: [2]f64 = undefined;
     var x: [2]f64 = undefined;
