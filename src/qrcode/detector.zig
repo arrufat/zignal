@@ -1,7 +1,9 @@
 //! QR code detector: locates a symbol in a grayscale image and decodes it.
-//! Handles photographs — perspective distortion, uneven lighting, moderate
-//! blur — as well as clean generated images, in any of the four rotations,
-//! mirrored or not. Supported down to roughly 2 pixels per module.
+//! Pipeline: binarize (adaptive mean, Otsu retry) -> find the three finder
+//! patterns by 1:1:3:1:1 run scanning -> label the corner triple -> resolve
+//! a fourth correspondence (bottom-right alignment pattern, parallelogram
+//! fallback) -> sample module centers through the exact homography -> hand
+//! the grid to the decoder. See qrcode.zig for the supported input range.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -94,8 +96,11 @@ fn detectAndDecode(allocator: Allocator, binary: Image(u8)) !?DecodeResult {
             // Version 1 has no alignment pattern.
             if (fourth.is_alignment and version < 2) continue;
             const transform = buildTransform(triple, dim, fourth) orelse continue;
-            if (!sampleGrid(binary, transform, dim, grid)) continue;
+            // A wrong version or fourth correspondence fails the timing check
+            // on the four candidate lines for ~2% of the full sampling cost.
+            if (!sampleTimingLines(binary, transform, dim, grid)) continue;
             if (!timingOk(grid, dim)) continue;
+            if (!sampleGrid(binary, transform, dim, grid)) continue;
             // The symbol's own version information beats the geometric estimate.
             if (version >= 7) {
                 if (decoder.readVersion(grid, dim)) |hint| {
@@ -103,7 +108,9 @@ fn detectAndDecode(allocator: Allocator, binary: Image(u8)) !?DecodeResult {
                 }
             }
             if (decoder.decodeModules(allocator, version, grid)) |result| {
-                return result;
+                var found = result;
+                found.corners = symbolCorners(transform, dim);
+                return found;
             } else |err| {
                 if (err == error.OutOfMemory) return error.OutOfMemory;
             }
@@ -113,9 +120,7 @@ fn detectAndDecode(allocator: Allocator, binary: Image(u8)) !?DecodeResult {
 }
 
 fn appendCandidate(candidates: []u8, count: *usize, version: u8) void {
-    for (candidates[0..count.*]) |existing| {
-        if (existing == version) return;
-    }
+    if (std.mem.indexOfScalar(u8, candidates[0..count.*], version) != null) return;
     if (count.* < candidates.len) {
         candidates[count.*] = version;
         count.* += 1;
@@ -190,11 +195,11 @@ fn traceRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: i64, d_co
     var state: usize = 0;
     var r = start_row;
     var c = start_col;
-    while (r >= 0 and r < binary.rows and c >= 0 and c < binary.cols) : ({
+    while (binary.atOrNull(r, c)) |pixel| : ({
         r += d_row;
         c += d_col;
     }) {
-        const dark = isDark(binary, @intCast(r), @intCast(c));
+        const dark = pixel.* == 0;
         if (dark != (state != 1)) {
             if (state == 2) break;
             state += 1;
@@ -213,6 +218,12 @@ const Cross = struct {
     total: usize,
     /// Pixels covered by the forward trace (from the base pixel's successor).
     forward: usize,
+
+    /// Refined center: the pattern's exclusive far edge minus half its extent.
+    fn center(self: Cross, base: usize) f32 {
+        return @as(f32, @floatFromInt(base + 1 + self.forward)) -
+            @as(f32, @floatFromInt(self.total)) / 2.0;
+    }
 };
 
 /// Traces the five finder runs through (row, col) along (d_row, d_col):
@@ -234,15 +245,12 @@ fn confirmCandidate(binary: Image(u8), row: usize, col: usize) ?FinderPattern {
     if (col >= binary.cols or !isDark(binary, row, col)) return null;
 
     const vertical = crossCheck(binary, @intCast(row), @intCast(col), 1, 0, cross_tolerance) orelse return null;
-    // The pattern's exclusive bottom edge minus half its extent.
-    const center_row = @as(f32, @floatFromInt(row + 1 + vertical.forward)) -
-        @as(f32, @floatFromInt(vertical.total)) / 2.0;
+    const center_row = vertical.center(row);
 
     const crow: i64 = @intFromFloat(center_row);
     if (!isDark(binary, @intCast(crow), col)) return null;
     const horizontal = crossCheck(binary, crow, @intCast(col), 0, 1, cross_tolerance) orelse return null;
-    const center_col = @as(f32, @floatFromInt(col + 1 + horizontal.forward)) -
-        @as(f32, @floatFromInt(horizontal.total)) / 2.0;
+    const center_col = horizontal.center(col);
 
     // Loose diagonal check to reject finder-like data noise.
     const ccol: i64 = @intFromFloat(center_col);
@@ -381,7 +389,7 @@ fn buildTransform(triple: FinderTriple, dim: u16, fourth: Fourth) ?ProjectiveTra
         .init(.{ triple.bottom_left.center.x(), triple.bottom_left.center.y() }),
         .init(.{ fourth.center.x(), fourth.center.y() }),
     };
-    return ProjectiveTransform(f64).initExact(from, to);
+    return ProjectiveTransform(f64).init(&from, &to) catch null;
 }
 
 /// Collects fourth-correspondence candidates: alignment pattern hits around
@@ -400,7 +408,6 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
         const prediction = tl.add(per_module.scale(steps));
         const ms = triple.moduleSize();
 
-        var found: [4]Fourth = undefined;
         var found_d2: [4]f32 = undefined;
         var found_count: usize = 0;
         // Strong perspective drifts the true pattern up to ~0.2 modules per
@@ -421,10 +428,9 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
                 if (!isDark(binary, py, px)) continue;
                 const candidate = checkAlignment(binary, py, px, ms) orelse continue;
                 const d2 = candidate.center.distanceSquared(prediction);
-                insertNearest(&found, &found_d2, &found_count, candidate, d2, ms);
+                insertNearest(buf[0..4], &found_d2, &found_count, candidate, d2, ms);
             }
         }
-        @memcpy(buf[0..found_count], found[0..found_count]);
         count = found_count;
     }
     buf[count] = .{
@@ -470,11 +476,11 @@ fn traceAlignmentRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: 
     var state: usize = 0;
     var r = start_row;
     var c = start_col;
-    while (r >= 0 and r < binary.rows and c >= 0 and c < binary.cols) : ({
+    while (binary.atOrNull(r, c)) |pixel| : ({
         r += d_row;
         c += d_col;
     }) {
-        const dark = isDark(binary, @intCast(r), @intCast(c));
+        const dark = pixel.* == 0;
         if (dark != (state != 1)) {
             state += 1;
             // Re-examine this pixel as part of the next run.
@@ -489,86 +495,117 @@ fn traceAlignmentRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: 
     return null;
 }
 
+/// True when len is within 60% of one expected module.
+fn nearModule(len: usize, expected: f32) bool {
+    return @abs(@as(f32, @floatFromInt(len)) - expected) <= expected * 0.6;
+}
+
+const AlignmentAxis = struct {
+    center: f32,
+    /// Width of the central dark run.
+    extent: usize,
+};
+
+/// Checks the alignment signature along one axis through the base pixel —
+/// central dark run and both light flanks near one module — and refines the
+/// center from the run extents.
+fn alignmentAxis(binary: Image(u8), row: i64, col: i64, d_row: i64, d_col: i64, ms: f32, limit: usize) ?AlignmentAxis {
+    const back = traceAlignmentRuns(binary, row, col, -d_row, -d_col, limit) orelse return null;
+    if (!nearModule(back[1], ms)) return null;
+    const fwd = traceAlignmentRuns(binary, row + d_row, col + d_col, d_row, d_col, limit) orelse return null;
+    if (!nearModule(back[0] + fwd[0], ms) or !nearModule(fwd[1], ms)) return null;
+    // The dark run spans [base - back[0] + 1, base + fwd[0]] inclusive.
+    const base: f32 = @floatFromInt(if (d_col != 0) col else row);
+    const center = base + (@as(f32, @floatFromInt(fwd[0])) - @as(f32, @floatFromInt(back[0]))) / 2 + 1;
+    return .{ .center = center, .extent = back[0] + fwd[0] };
+}
+
 /// Verifies the 1:1:1 dark-light-dark alignment signature on both axes
 /// through (row, col) and refines the center from the run extents.
 fn checkAlignment(binary: Image(u8), row: usize, col: usize, ms: f32) ?Fourth {
-    const near = struct {
-        fn near(len: usize, expected: f32) bool {
-            return @abs(@as(f32, @floatFromInt(len)) - expected) <= expected * 0.6;
-        }
-    }.near;
     // No run of a passing candidate can exceed 1.6 modules.
     const limit: usize = @intFromFloat(ms * 1.6 + 1);
 
-    const left = traceAlignmentRuns(binary, @intCast(row), @intCast(col), 0, -1, limit) orelse return null;
-    if (!near(left[1], ms)) return null;
-    const right = traceAlignmentRuns(binary, @intCast(row), @as(i64, @intCast(col)) + 1, 0, 1, limit) orelse return null;
-    if (!near(left[0] + right[0], ms) or !near(right[1], ms)) return null;
-    // The dark run spans [col - left[0] + 1, col + right[0]] inclusive.
-    const center_col = @as(f32, @floatFromInt(col)) +
-        (@as(f32, @floatFromInt(right[0])) - @as(f32, @floatFromInt(left[0]))) / 2 + 1;
-
-    const ccol: usize = @intFromFloat(center_col);
+    const horizontal = alignmentAxis(binary, @intCast(row), @intCast(col), 0, 1, ms, limit) orelse return null;
+    const ccol: usize = @intFromFloat(horizontal.center);
     if (ccol >= binary.cols or !isDark(binary, row, ccol)) return null;
-    const up = traceAlignmentRuns(binary, @intCast(row), @intCast(ccol), -1, 0, limit) orelse return null;
-    if (!near(up[1], ms)) return null;
-    const down = traceAlignmentRuns(binary, @as(i64, @intCast(row)) + 1, @intCast(ccol), 1, 0, limit) orelse return null;
-    if (!near(up[0] + down[0], ms) or !near(down[1], ms)) return null;
-    const center_row = @as(f32, @floatFromInt(row)) +
-        (@as(f32, @floatFromInt(down[0])) - @as(f32, @floatFromInt(up[0]))) / 2 + 1;
+    const vertical = alignmentAxis(binary, @intCast(row), @intCast(ccol), 1, 0, ms, limit) orelse return null;
 
     // Ring probes at the local scale: the diagonals at one module out sit in
     // the light ring, at two modules out on the dark ring corners. Isolated
     // dark data modules pass the axis checks but rarely this.
-    const local_ms = @as(f32, @floatFromInt(left[0] + right[0] + up[0] + down[0])) / 2;
+    const local_ms = @as(f32, @floatFromInt(horizontal.extent + vertical.extent)) / 2;
+    const bounds = binary.getRectangle().as(f32);
     for ([4][2]f32{ .{ 1, 1 }, .{ 1, -1 }, .{ -1, 1 }, .{ -1, -1 } }) |diag| {
         for ([2]struct { scale: f32, dark: bool }{
             .{ .scale = 1, .dark = false },
             .{ .scale = 2, .dark = true },
         }) |probe| {
-            const pr = center_row + diag[0] * probe.scale * local_ms;
-            const pc = center_col + diag[1] * probe.scale * local_ms;
-            if (pr < 0 or pc < 0) return null;
-            const pri: usize = @intFromFloat(pr);
-            const pci: usize = @intFromFloat(pc);
-            if (pri >= binary.rows or pci >= binary.cols) return null;
-            if (isDark(binary, pri, pci) != probe.dark) return null;
+            const pr = vertical.center + diag[0] * probe.scale * local_ms;
+            const pc = horizontal.center + diag[1] * probe.scale * local_ms;
+            if (!bounds.contains(.init(.{ pc, pr }))) return null;
+            if (isDark(binary, @intFromFloat(pr), @intFromFloat(pc)) != probe.dark) return null;
         }
     }
 
-    return .{ .center = .init(.{ center_col, center_row }), .is_alignment = true };
+    return .{ .center = .init(.{ horizontal.center, vertical.center }), .is_alignment = true };
 }
 
-/// Projects each module center through the homography and reads the
-/// binarized pixel with a 3-of-5 plus-shaped vote. Returns false if a module
-/// center falls outside the image.
-fn sampleGrid(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, out: []u8) bool {
+/// Projects one module center through the homography and reads a 3-of-5
+/// plus-shaped vote of the binarized pixels; null when the center leaves the
+/// image (off-center votes outside count as light).
+fn sampleModule(binary: Image(u8), transform: ProjectiveTransform(f64), row: usize, col: usize) ?u8 {
     const offsets = [5][2]f64{ .{ 0, 0 }, .{ 0.25, 0 }, .{ -0.25, 0 }, .{ 0, 0.25 }, .{ 0, -0.25 } };
+    const bounds = binary.getRectangle().as(f64);
+    var votes: u32 = 0;
+    for (offsets, 0..) |offset, k| {
+        // Stop once the vote is decided either way.
+        if (votes >= 3 or votes + (offsets.len - k) < 3) break;
+        const p = transform.project(.init(.{
+            @as(f64, @floatFromInt(col)) + 0.5 + offset[0],
+            @as(f64, @floatFromInt(row)) + 0.5 + offset[1],
+        }));
+        if (!bounds.contains(p)) {
+            if (k == 0) return null;
+            continue;
+        }
+        if (isDark(binary, @intFromFloat(p.y()), @intFromFloat(p.x()))) votes += 1;
+    }
+    return @intFromBool(votes >= 3);
+}
+
+/// Samples every module center. Returns false if a center leaves the image.
+fn sampleGrid(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, out: []u8) bool {
     for (0..dim) |row| {
         for (0..dim) |col| {
-            var votes: u32 = 0;
-            for (offsets, 0..) |offset, k| {
-                // Stop once the vote is decided either way.
-                if (votes >= 3 or votes + (offsets.len - k) < 3) break;
-                const p = transform.project(.init(.{
-                    @as(f64, @floatFromInt(col)) + 0.5 + offset[0],
-                    @as(f64, @floatFromInt(row)) + 0.5 + offset[1],
-                }));
-                const in_bounds = p.x() >= 0 and p.y() >= 0 and
-                    p.x() < @as(f64, @floatFromInt(binary.cols)) and
-                    p.y() < @as(f64, @floatFromInt(binary.rows));
-                if (!in_bounds) {
-                    if (k == 0) return false;
-                    continue; // off-center votes outside the image count as light
-                }
-                const px: usize = @intFromFloat(p.x());
-                const py: usize = @intFromFloat(p.y());
-                if (isDark(binary, py, px)) votes += 1;
-            }
-            out[row * dim + col] = @intFromBool(votes >= 3);
+            out[row * dim + col] = sampleModule(binary, transform, row, col) orelse return false;
         }
     }
     return true;
+}
+
+/// Samples only the four candidate timing lines that timingOk checks.
+fn sampleTimingLines(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, out: []u8) bool {
+    for ([2]usize{ 6, dim - 7 }) |line| {
+        for (8..dim - 8) |i| {
+            out[line * dim + i] = sampleModule(binary, transform, line, i) orelse return false;
+            out[i * dim + line] = sampleModule(binary, transform, i, line) orelse return false;
+        }
+    }
+    return true;
+}
+
+/// The image-space corners of the symbol under the accepted homography, in
+/// sampled-grid order: top-left, top-right, bottom-left, bottom-right.
+fn symbolCorners(transform: ProjectiveTransform(f64), dim: u16) [4]Point(2, f32) {
+    const d: f64 = @floatFromInt(dim);
+    const module_corners = [4][2]f64{ .{ 0, 0 }, .{ d, 0 }, .{ 0, d }, .{ d, d } };
+    var corners: [4]Point(2, f32) = undefined;
+    for (module_corners, 0..) |corner, i| {
+        const p = transform.project(.init(.{ corner[0], corner[1] }));
+        corners[i] = .init(.{ @as(f32, @floatCast(p.x())), @as(f32, @floatCast(p.y())) });
+    }
+    return corners;
 }
 
 /// Orientation-agnostic timing check: the two timing lines land on row 6 or
@@ -625,7 +662,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
     for (opts.corners, 0..) |corner, i| {
         destination[i] = .init(.{ corner[0], corner[1] });
     }
-    const transform = ProjectiveTransform(f64).initExact(destination, source) orelse return error.DegenerateCorners;
+    const transform = ProjectiveTransform(f64).init(&destination, &source) catch return error.DegenerateCorners;
     const t32 = transform.as(f32);
     clean.warp(out, t32, .bilinear);
     // warp's mirror border tiles reflected copies of the source across the
@@ -689,7 +726,15 @@ test "image roundtrip across module sizes and quiet zones" {
             .quiet_zone = c.quiet_zone,
         });
         defer image.deinit(allocator);
-        try expectDecodes(allocator, image, "https://github.com/arrufat/zignal");
+        var result = (try decode(allocator, image)) orelse return error.TestUnexpectedResult;
+        defer result.deinit(allocator);
+        try std.testing.expectEqualSlices(u8, "https://github.com/arrufat/zignal", result.data);
+        // The symbol's top-left corner sits at the quiet zone edge.
+        const origin: f32 = @floatFromInt(c.quiet_zone * c.module_size);
+        const tolerance: f32 = @floatFromInt(c.module_size);
+        const corners = result.corners orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(origin, corners[0].x(), tolerance);
+        try std.testing.expectApproxEqAbs(origin, corners[0].y(), tolerance);
     }
 }
 

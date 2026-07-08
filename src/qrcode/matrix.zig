@@ -71,13 +71,10 @@ pub const BitMatrix = struct {
 
         // Alignment patterns, skipping the three finder corners.
         const positions = tables.alignmentPositions(self.version);
+        const last = positions.len -| 1;
         for (positions, 0..) |row, i| {
             for (positions, 0..) |col, j| {
-                const first = 0;
-                const last = positions.len - 1;
-                if ((i == first and j == first) or
-                    (i == first and j == last) or
-                    (i == last and j == first)) continue;
+                if ((i == 0 and (j == 0 or j == last)) or (i == last and j == 0)) continue;
                 self.placeAlignment(row, col);
             }
         }

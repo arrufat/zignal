@@ -5,6 +5,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
+const Point = @import("../geometry/Point.zig").Point;
 const encoder = @import("encoder.zig");
 const matrix_mod = @import("matrix.zig");
 const BitMatrix = matrix_mod.BitMatrix;
@@ -20,6 +21,10 @@ pub const DecodeResult = struct {
     mask: u3,
     /// Codewords repaired by Reed-Solomon error correction.
     corrected_errors: u32,
+    /// Image-space corners of the symbol (top-left, top-right, bottom-left,
+    /// bottom-right of the sampled grid). Set by the image detector; null
+    /// when decoding raw modules directly.
+    corners: ?[4]Point(2, f32) = null,
 
     pub fn deinit(self: *DecodeResult, allocator: Allocator) void {
         allocator.free(self.data);
@@ -55,20 +60,26 @@ pub fn decodeMatrix(allocator: Allocator, m: *BitMatrix) !DecodeResult {
 
 const Format = struct { level: tables.EcLevel, mask: u3 };
 
+/// Updates the running best match of raw against a table of valid codewords,
+/// measured in Hamming distance. Both BCH-protected info fields (format and
+/// version) decode by closest match under a shared distance-3 threshold.
+fn matchClosest(comptime T: type, raw: T, table: []const T, best_distance: *u32, best_index: *?usize) void {
+    for (table, 0..) |codeword, index| {
+        const distance = @popCount(raw ^ codeword);
+        if (distance < best_distance.*) {
+            best_distance.* = distance;
+            best_index.* = index;
+        }
+    }
+}
+
 /// Reads both format information copies and returns the closest valid
 /// codeword, tolerating up to 3 bit errors (the code has distance 7).
 fn readFormat(m: *const BitMatrix) ?Format {
     var best_distance: u32 = 4;
-    var best_index: ?u5 = null;
+    var best_index: ?usize = null;
     for (0..2) |copy| {
-        const raw = m.readFormatInfo(@intCast(copy));
-        for (tables.format_info, 0..) |codeword, index| {
-            const distance = @popCount(raw ^ codeword);
-            if (distance < best_distance) {
-                best_distance = distance;
-                best_index = @intCast(index);
-            }
-        }
+        matchClosest(u15, m.readFormatInfo(@intCast(copy)), &tables.format_info, &best_distance, &best_index);
     }
     const index = best_index orelse return null;
     return .{
@@ -135,7 +146,7 @@ fn fillModules(m: *BitMatrix, modules: []const u8, orientation: u3) void {
 /// distance 8).
 pub fn readVersion(modules: []const u8, dim: u16) ?u8 {
     var best_distance: u32 = 4;
-    var best_version: ?u8 = null;
+    var best_index: ?usize = null;
     for (0..8) |orientation| {
         var codeword: u18 = 0;
         for (0..6) |i| {
@@ -144,15 +155,10 @@ pub fn readVersion(modules: []const u8, dim: u16) ?u8 {
                 codeword |= @as(u18, bit) << @intCast(3 * i + j);
             }
         }
-        for (tables.version_info, 0..) |valid, index| {
-            const dist = @popCount(codeword ^ valid);
-            if (dist < best_distance) {
-                best_distance = dist;
-                best_version = @intCast(index + 7);
-            }
-        }
+        matchClosest(u18, codeword, &tables.version_info, &best_distance, &best_index);
     }
-    return best_version;
+    const index = best_index orelse return null;
+    return @intCast(index + 7);
 }
 
 /// Tries to decode raw sampled modules in every axis-aligned orientation.
@@ -281,16 +287,10 @@ test "readVersion through all orientations" {
     const allocator = std.testing.allocator;
     var m = try encoder.encode(allocator, "VERSION INFO", .{ .version = 9 });
     defer m.deinit(allocator);
-    const dim: usize = m.dim;
-    const transformed = try allocator.alloc(u8, dim * dim);
-    defer allocator.free(transformed);
+    var transformed = try BitMatrix.init(allocator, m.version);
+    defer transformed.deinit(allocator);
     for (0..8) |orientation| {
-        for (0..dim) |row| {
-            for (0..dim) |col| {
-                transformed[row * dim + col] =
-                    orientedModule(m.modules, dim, @intCast(orientation), row, col);
-            }
-        }
-        try std.testing.expectEqual(@as(?u8, 9), readVersion(transformed, m.dim));
+        fillModules(&transformed, m.modules, @intCast(orientation));
+        try std.testing.expectEqual(@as(?u8, 9), readVersion(transformed.modules, m.dim));
     }
 }

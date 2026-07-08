@@ -235,15 +235,15 @@ pub fn ProjectiveTransform(comptime T: type) type {
             return if (self.matrix.inv()) |m| .{ .matrix = m } else null;
         }
 
-        /// Finds the exact projective transform mapping the four from_points
-        /// to the four to_points, or null when the correspondences are
-        /// degenerate. Four correspondences determine the transform exactly;
-        /// prefer this over `find` for that case, since the least-squares
-        /// path loses precision to its unnormalized normal equations.
-        pub fn initExact(from_points: [4]Point(2, T), to_points: [4]Point(2, T)) ?Self {
+        /// The exact four-correspondence solve backing `find`; null when the
+        /// correspondences are degenerate. Solving by Gauss-Jordan keeps the
+        /// full input precision, which the least-squares path loses to its
+        /// unnormalized normal equations.
+        fn initExact(from_points: [4]Point(2, T), to_points: [4]Point(2, T)) ?Self {
             // Unknowns h00..h21 with h22 fixed to 1; two equations per
             // correspondence.
             var a: [8][9]T = undefined;
+            var max_entry: T = 0;
             for (from_points, to_points, 0..) |f, t, i| {
                 const x = f.x();
                 const y = f.y();
@@ -251,14 +251,19 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 const v = t.y();
                 a[2 * i] = .{ x, y, 1, 0, 0, 0, -u * x, -u * y, u };
                 a[2 * i + 1] = .{ 0, 0, 0, x, y, 1, -v * x, -v * y, v };
+                for (a[2 * i][0..8]) |entry| max_entry = @max(max_entry, @abs(entry));
+                for (a[2 * i + 1][0..8]) |entry| max_entry = @max(max_entry, @abs(entry));
             }
+            if (max_entry == 0) return null;
+            // Degeneracy threshold relative to the system's scale.
+            const tolerance = max_entry * std.math.floatEps(T) * 100;
             // Gauss-Jordan with partial pivoting.
             for (0..8) |col| {
                 var pivot = col;
                 for (col + 1..8) |row| {
                     if (@abs(a[row][col]) > @abs(a[pivot][col])) pivot = row;
                 }
-                if (@abs(a[pivot][col]) < 1e-9) return null;
+                if (@abs(a[pivot][col]) < tolerance) return null;
                 std.mem.swap([9]T, &a[col], &a[pivot]);
                 for (0..8) |row| {
                     if (row == col) continue;
@@ -279,12 +284,18 @@ pub fn ProjectiveTransform(comptime T: type) type {
         /// Finds the best projective transform that maps between the two given sets of points.
         /// Returns `error.NotConverged` when the SVD fails to converge or `error.RankDeficient`
         /// when the system does not have enough rank to define a projective transform.
-        /// For exactly four correspondences, `initExact` is more precise.
+        /// Exactly four correspondences are solved exactly rather than by least squares.
         pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
             if (Point(2, T).areAllCollinear(from_points) or Point(2, T).areAllCollinear(to_points)) {
                 return error.RankDeficient;
+            }
+            if (from_points.len == 4) {
+                // Four correspondences determine the transform exactly; the
+                // least-squares path below would only add numerical error.
+                self.* = initExact(from_points[0..4].*, to_points[0..4].*) orelse return error.RankDeficient;
+                return;
             }
             var accum: SMatrix(T, 9, 9) = .initAll(0);
             var b: SMatrix(T, 2, 9) = .initAll(0);
@@ -439,14 +450,17 @@ test "projection4" {
         .init(.{ 488.08315277, 272.79547691 }),
     };
     const transform: ProjectiveTransform(T) = try .init(from_points, to_points);
+    // Reference solution from dlib; a homography is defined up to scale, so
+    // normalize before comparing entries.
     const matrix: SMatrix(T, 3, 3) = .init(.{
         .{ -5.9291612941280800e-03, 7.0341614664190845e-03, -8.9922894648198459e-01 },
         .{ -2.8361695646354147e-03, 2.9060176209597761e-03, -4.3735741833190661e-01 },
         .{ -1.0156215756801098e-05, 1.3270311721030187e-05, -2.1603199531972065e-03 },
     });
-    for (0..transform.matrix.rows) |r| {
-        for (0..transform.matrix.cols) |c| {
-            try std.testing.expectApproxEqAbs(transform.matrix.at(r, c).*, matrix.at(r, c).*, 1e-3);
+    const scaled = transform.matrix.scale(matrix.at(2, 2).* / transform.matrix.at(2, 2).*);
+    for (0..scaled.rows) |r| {
+        for (0..scaled.cols) |c| {
+            try std.testing.expectApproxEqAbs(scaled.at(r, c).*, matrix.at(r, c).*, 1e-3);
         }
     }
     for (from_points, to_points) |f, t| {
@@ -510,20 +524,20 @@ test "projection8" {
     }
 }
 
-test "projective initExact maps corners exactly and inverts" {
+test "projective init solves four correspondences exactly" {
     const source = [4]Point(2, f64){
         .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }), .init(.{ 100, 100 }),
     };
     const destination = [4]Point(2, f64){
         .init(.{ 50, 20 }), .init(.{ 150, 40 }), .init(.{ 30, 120 }), .init(.{ 130, 140 }),
     };
-    const forward = ProjectiveTransform(f64).initExact(source, destination).?;
+    const forward: ProjectiveTransform(f64) = try .init(&source, &destination);
     for (source, destination) |s, d| {
         const p = forward.project(s);
         try std.testing.expectApproxEqAbs(d.x(), p.x(), 1e-9);
         try std.testing.expectApproxEqAbs(d.y(), p.y(), 1e-9);
     }
-    const backward = ProjectiveTransform(f64).initExact(destination, source).?;
+    const backward: ProjectiveTransform(f64) = try .init(&destination, &source);
     const roundtrip = backward.project(forward.project(.init(.{ 33, 71 })));
     try std.testing.expectApproxEqAbs(@as(f64, 33), roundtrip.x(), 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, 71), roundtrip.y(), 1e-9);
@@ -532,5 +546,5 @@ test "projective initExact maps corners exactly and inverts" {
     const collinear = [4]Point(2, f64){
         .init(.{ 0, 0 }), .init(.{ 1, 1 }), .init(.{ 2, 2 }), .init(.{ 3, 3 }),
     };
-    try std.testing.expectEqual(@as(?ProjectiveTransform(f64), null), ProjectiveTransform(f64).initExact(collinear, destination));
+    try std.testing.expectError(error.RankDeficient, ProjectiveTransform(f64).init(&collinear, &destination));
 }

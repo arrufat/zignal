@@ -85,17 +85,17 @@ pub fn decode(codeword: []u8, ecc_len: usize) !usize {
         for (1..num_errors + 1) |i| discrepancy ^= gf.mul(lambda[i], synd[iter - i]);
         if (discrepancy == 0) {
             shift += 1;
-        } else if (2 * num_errors <= iter) {
-            const tmp = lambda;
-            const coef = gf.div(discrepancy, prev_discrepancy);
-            for (shift..max_ecc_len + 1) |i| lambda[i] ^= gf.mul(coef, prev[i - shift]);
+            continue;
+        }
+        const tmp = lambda;
+        const coef = gf.div(discrepancy, prev_discrepancy);
+        for (shift..max_ecc_len + 1) |i| lambda[i] ^= gf.mul(coef, prev[i - shift]);
+        if (2 * num_errors <= iter) {
             prev = tmp;
             prev_discrepancy = discrepancy;
             num_errors = iter + 1 - num_errors;
             shift = 1;
         } else {
-            const coef = gf.div(discrepancy, prev_discrepancy);
-            for (shift..max_ecc_len + 1) |i| lambda[i] ^= gf.mul(coef, prev[i - shift]);
             shift += 1;
         }
     }
@@ -107,7 +107,7 @@ pub fn decode(codeword: []u8, ecc_len: usize) !usize {
     var count: usize = 0;
     for (0..n) |k| {
         const power = n - 1 - k;
-        const x_inv = gf.expAlpha(gf.order - power % gf.order);
+        const x_inv = gf.inv(gf.expAlpha(power));
         if (gf.polyEval(lambda[0 .. num_errors + 1], x_inv) == 0) {
             if (count == num_errors) return error.TooManyErrors;
             positions[count] = k;
@@ -124,18 +124,14 @@ pub fn decode(codeword: []u8, ecc_len: usize) !usize {
             omega[j] ^= gf.mul(lambda[i], synd[j - i]);
         }
     }
+    // lambda'(x) in characteristic 2 keeps only the odd-degree terms.
+    var deriv: [max_ecc_len]u8 = @splat(0);
+    var odd: usize = 1;
+    while (odd <= num_errors) : (odd += 2) deriv[odd - 1] = lambda[odd];
     for (positions[0..count]) |k| {
-        const power = (n - 1 - k) % gf.order;
-        const x = gf.expAlpha(power);
-        const x_inv = gf.expAlpha(gf.order - power);
-        // lambda'(x) in characteristic 2 keeps only the odd-degree terms.
-        var denom: u8 = 0;
-        var i: usize = 1;
-        while (i <= num_errors) : (i += 2) {
-            var term = lambda[i];
-            for (0..i - 1) |_| term = gf.mul(term, x_inv);
-            denom ^= term;
-        }
+        const x = gf.expAlpha(n - 1 - k);
+        const x_inv = gf.inv(x);
+        const denom = gf.polyEval(deriv[0..num_errors], x_inv);
         if (denom == 0) return error.TooManyErrors;
         codeword[k] ^= gf.mul(x, gf.div(gf.polyEval(omega[0..ecc_len], x_inv), denom));
     }

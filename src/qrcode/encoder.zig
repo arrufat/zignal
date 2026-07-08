@@ -17,9 +17,10 @@ pub const EncodeOptions = struct {
     version: ?u8 = null,
     /// Mask pattern; null selects the best-scoring one.
     mask: ?u3 = null,
-    /// Pixels per module when rendering to an image.
+    /// Pixels per module; used only when rendering via encodeImage.
     module_size: u32 = 8,
-    /// Light border around the symbol, in modules. The spec requires 4.
+    /// Light border around the symbol, in modules (the spec requires 4);
+    /// used only when rendering via encodeImage.
     quiet_zone: u32 = 4,
 
     pub const default: EncodeOptions = .{};
