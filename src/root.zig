@@ -88,6 +88,9 @@ pub const jpeg = codecs.jpeg;
 pub const bmp = codecs.bmp;
 pub const gif = codecs.gif;
 
+// QR code encoding and decoding
+pub const qrcode = @import("qrcode.zig");
+
 const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
