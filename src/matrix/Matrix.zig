@@ -64,6 +64,26 @@ pub const MatrixError = error{
 /// Recommended alignment for SIMD operations (64 bytes covers AVX-512)
 const simd_alignment = 64;
 
+/// In-place Cholesky factorization of an n*n row-major symmetric matrix stored in a flat slice.
+/// Reads only the lower triangle of `a`; on success overwrites it with L such that A = L*L^T (the
+/// strict upper triangle is left untouched). Returns false if A is not positive definite (the
+/// partial result is then meaningless).
+pub fn cholesky(comptime T: type, a: []T, n: usize) bool {
+    for (0..n) |j| {
+        var sum = a[j * n + j];
+        for (0..j) |k| sum -= a[j * n + k] * a[j * n + k];
+        if (sum <= 0) return false;
+        const ljj = @sqrt(sum);
+        a[j * n + j] = ljj;
+        for (j + 1..n) |i| {
+            var s = a[i * n + j];
+            for (0..j) |k| s -= a[i * n + k] * a[j * n + k];
+            a[i * n + j] = s / ljj;
+        }
+    }
+    return true;
+}
+
 /// Matrix with runtime dimensions using flat array storage
 pub fn Matrix(comptime T: type) type {
     return struct {
@@ -1238,22 +1258,12 @@ pub fn Matrix(comptime T: type) type {
             ensureFloat("chol");
             if (self.rows != self.cols) return error.NotSquare;
             const n = self.rows;
-            var l: Matrix(T) = try .init(self.allocator, n, n);
+            var l = try self.dupe(self.allocator);
             errdefer l.deinit();
-            @memset(l.items, 0);
+            if (!cholesky(T, l.items, n)) return error.NotPositiveDefinite;
+            // The kernel leaves A's values in the strict upper triangle; L must be clean.
             for (0..n) |i| {
-                for (0..i + 1) |j| {
-                    var accum: T = 0;
-                    for (0..j) |k| accum += l.at(i, k).* * l.at(j, k).*;
-                    if (i == j) {
-                        const val = self.at(i, i).* - accum;
-                        if (val <= 0) return error.NotPositiveDefinite;
-                        l.at(i, i).* = @sqrt(val);
-                    } else {
-                        const val = self.at(i, j).* - accum;
-                        l.at(i, j).* = val / l.at(j, j).*;
-                    }
-                }
+                for (i + 1..n) |j| l.at(i, j).* = 0;
             }
             return l;
         }
@@ -1292,11 +1302,16 @@ pub fn Matrix(comptime T: type) type {
         }
 
         pub const QrResult = struct {
-            q: Matrix(T), // Orthogonal matrix (m×n)
-            r: Matrix(T), // Upper triangular matrix (n×n)
-            perm: Permutation, // Permutation P such that AP = QR
-            rank: u32, // Numerical rank of the matrix
-            col_norms: []T, // Final column norms after pivoting (diagnostic)
+            /// Orthogonal matrix (m×n)
+            q: Matrix(T),
+            /// Upper triangular matrix (n×n)
+            r: Matrix(T),
+            /// Permutation P such that AP = QR
+            perm: Permutation,
+            /// Numerical rank of the matrix
+            rank: u32,
+            /// Final column norms after pivoting (diagnostic)
+            col_norms: []T,
             allocator: std.mem.Allocator,
 
             pub fn deinit(self: *@This()) void {
