@@ -9,6 +9,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const ProjectiveTransform = @import("../geometry.zig").ProjectiveTransform;
+const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const Image = @import("../image.zig").Image;
 const decoder = @import("decoder.zig");
@@ -21,6 +22,26 @@ const scan_tolerance = 0.5;
 const cross_tolerance = 0.7;
 /// The diagonal check only guards against dense-data false positives.
 const diag_tolerance = 0.8;
+/// Row scans subsample by 3 above this many rows; the full-resolution retry
+/// covers only the skipped rows.
+const coarse_scan_min_rows = 300;
+/// Adaptive threshold: window radius as a fraction of the short image side,
+/// its floor, and the brightness offset below the local mean.
+const adaptive_radius_divisor = 16;
+const adaptive_radius_min = 8;
+const adaptive_offset = 4;
+/// Finder triples are rejected when the module sizes disagree by more than
+/// this factor, the side lengths differ by more than this fraction, the
+/// corner angle strays from 90 degrees beyond this |cos|, or a side is
+/// shorter than this many modules.
+const max_module_size_ratio = 1.6;
+const max_side_imbalance = 0.35;
+const max_corner_cos = 0.35;
+const min_side_modules = 10;
+/// Alignment runs must be within this fraction of one module, and no run of
+/// a passing candidate can exceed this many modules.
+const alignment_run_tolerance = 0.6;
+const alignment_run_limit = 1.6;
 
 /// Locates a QR code in a grayscale image (clean or photographed) and decodes
 /// it. Returns null when no decodable QR code is found. Caller owns result.data.
@@ -30,31 +51,41 @@ pub fn decode(allocator: Allocator, image: Image(u8)) !?DecodeResult {
     var binary = try Image(u8).initLike(allocator, image);
     defer binary.deinit(allocator);
 
+    // Module scratch sized for the largest version, shared by both passes.
+    const max_dim: usize = tables.dimension(tables.max_version);
+    const modules = try allocator.alloc(u8, max_dim * max_dim);
+    defer allocator.free(modules);
+
     // Adaptive thresholding handles the uneven lighting of photos; Otsu is
     // the retry because large flat regions (clean images, big modules) can
     // hollow out under a local mean.
     for (0..2) |pass| {
         if (pass == 0) {
-            const radius = @max(@min(image.rows, image.cols) / 16, 8);
-            image.thresholdAdaptiveMean(binary, allocator, radius, 4) catch |err| switch (err) {
+            const radius = @max(@min(image.rows, image.cols) / adaptive_radius_divisor, adaptive_radius_min);
+            image.thresholdAdaptiveMean(binary, allocator, radius, adaptive_offset) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => continue,
             };
         } else {
             _ = image.thresholdOtsu(binary, allocator) catch continue;
         }
-        if (try detectAndDecode(allocator, binary)) |result| return result;
+        if (try detectAndDecode(allocator, binary, modules)) |result| return result;
     }
     return null;
 }
 
-fn detectAndDecode(allocator: Allocator, binary: Image(u8)) !?DecodeResult {
+fn detectAndDecode(allocator: Allocator, binary: Image(u8), modules: []u8) !?DecodeResult {
     var finders_buf: [64]FinderPattern = undefined;
-    const row_step: usize = if (binary.rows > 300) 3 else 1;
-    var finders = findFinderPatterns(binary, row_step, &finders_buf);
-    if (finders.len < 3 and row_step > 1) {
-        finders = findFinderPatterns(binary, 1, &finders_buf);
+    var finder_count: usize = 0;
+    const row_step: usize = if (binary.rows > coarse_scan_min_rows) 3 else 1;
+    findFinderPatterns(binary, 0, row_step, &finders_buf, &finder_count);
+    if (finder_count < 3 and row_step > 1) {
+        // Full-resolution retry over only the rows the coarse pass skipped,
+        // merging into the candidates found so far.
+        findFinderPatterns(binary, 1, row_step, &finders_buf, &finder_count);
+        findFinderPatterns(binary, 2, row_step, &finders_buf, &finder_count);
     }
+    var finders: []FinderPattern = finders_buf[0..finder_count];
     if (finders.len < 3) return null;
     // A real finder is re-detected on several scan rows; data-region false
     // positives usually confirm once. Drop single-hit candidates when enough
@@ -75,10 +106,6 @@ fn detectAndDecode(allocator: Allocator, binary: Image(u8)) !?DecodeResult {
     appendCandidate(&candidates, &count, estimate);
     if (estimate > tables.min_version) appendCandidate(&candidates, &count, estimate - 1);
     if (estimate < tables.max_version) appendCandidate(&candidates, &count, estimate + 1);
-
-    const max_dim: usize = tables.dimension(tables.max_version);
-    const modules = try allocator.alloc(u8, max_dim * max_dim);
-    defer allocator.free(modules);
 
     // The alignment pattern's image-space position does not depend on the
     // assumed version, so search once (sized by the largest initial
@@ -138,11 +165,11 @@ const FinderPattern = struct {
     hits: f32,
 };
 
-/// Scans rows for the 1:1:3:1:1 finder ratio and cross-checks each candidate
-/// on both axes and the diagonal. Duplicate detections are merged.
-fn findFinderPatterns(binary: Image(u8), row_step: usize, buf: []FinderPattern) []FinderPattern {
-    var count: usize = 0;
-    var row: usize = 0;
+/// Scans rows row_start, row_start + row_step, ... for the 1:1:3:1:1 finder
+/// ratio and cross-checks each candidate on both axes and the diagonal.
+/// Detections are merged into buf[0..count], which may hold prior results.
+fn findFinderPatterns(binary: Image(u8), row_start: usize, row_step: usize, buf: []FinderPattern, count: *usize) void {
+    var row: usize = row_start;
     while (row < binary.rows) : (row += row_step) {
         var runs: [5]usize = @splat(0);
         var run_value = isDark(binary, row, 0);
@@ -162,14 +189,13 @@ fn findFinderPatterns(binary: Image(u8), row_step: usize, buf: []FinderPattern) 
             if (run_value and checkRatio(runs, scan_tolerance)) {
                 const mid_start = col - runs[4] - runs[3] - runs[2];
                 if (confirmCandidate(binary, row, mid_start + runs[2] / 2)) |pattern| {
-                    addCandidate(buf, &count, pattern);
+                    addCandidate(buf, count, pattern);
                 }
             }
             run_value = value;
             run_len = 1;
         }
     }
-    return buf[0..count];
 }
 
 fn checkRatio(runs: [5]usize, tolerance: f32) bool {
@@ -189,8 +215,11 @@ fn checkRatio(runs: [5]usize, tolerance: f32) bool {
 
 /// Traces the dark-light-dark run sequence starting at (start_row, start_col)
 /// and stepping by (d_row, d_col). Returns the run lengths from the starting
-/// (dark) run outward, or null if the outer runs are missing.
-fn traceRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: i64, d_col: i64) ?[3]usize {
+/// (dark) run outward, or null if the outer runs are missing. A non-null
+/// limit gives up once a run exceeds it (it could no longer pass the ratio
+/// checks) and returns as soon as the outer dark run is confirmed, bounding
+/// the cost of alignment probes that land in large dark regions.
+fn traceRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: i64, d_col: i64, limit: ?usize) ?[3]usize {
     var runs: [3]usize = @splat(0);
     var state: usize = 0;
     var r = start_row;
@@ -209,6 +238,10 @@ fn traceRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: i64, d_co
             continue;
         }
         runs[state] += 1;
+        if (limit) |max_run| {
+            if (state == 2) return runs;
+            if (runs[state] > max_run) return null;
+        }
     }
     if (runs[1] == 0 or runs[2] == 0) return null;
     return runs;
@@ -230,8 +263,8 @@ const Cross = struct {
 /// backward from the base pixel and forward from its successor, splicing the
 /// two dark-light-dark halves into the 1:1:3:1:1 window.
 fn crossCheck(binary: Image(u8), row: i64, col: i64, d_row: i64, d_col: i64, tolerance: f32) ?Cross {
-    const back = traceRuns(binary, row, col, -d_row, -d_col) orelse return null;
-    const fwd = traceRuns(binary, row + d_row, col + d_col, d_row, d_col) orelse return null;
+    const back = traceRuns(binary, row, col, -d_row, -d_col, null) orelse return null;
+    const fwd = traceRuns(binary, row + d_row, col + d_col, d_row, d_col, null) orelse return null;
     const runs: [5]usize = .{ back[2], back[1], back[0] + fwd[0], fwd[1], fwd[2] };
     if (!checkRatio(runs, tolerance)) return null;
     var total: usize = 0;
@@ -305,7 +338,7 @@ fn pickFinderTriple(finders: []const FinderPattern) ?FinderTriple {
             for (finders[j + 1 ..]) |c| {
                 const ms_max = @max(a.module_size, @max(b.module_size, c.module_size));
                 const ms_min = @min(a.module_size, @min(b.module_size, c.module_size));
-                if (ms_max > 1.6 * ms_min) continue;
+                if (ms_max > max_module_size_ratio * ms_min) continue;
                 const ms = (a.module_size + b.module_size + c.module_size) / 3;
 
                 // The top-left corner is opposite the longest side.
@@ -329,11 +362,11 @@ fn pickFinderTriple(finders: []const FinderPattern) ?FinderTriple {
                 const v2 = m2.center.sub(corner.center);
                 const len1 = v1.norm();
                 const len2 = v2.norm();
-                if (@min(len1, len2) < 10 * ms) continue;
+                if (@min(len1, len2) < min_side_modules * ms) continue;
                 const imbalance = @abs(len1 - len2) / @max(len1, len2);
-                if (imbalance > 0.35) continue;
+                if (imbalance > max_side_imbalance) continue;
                 const cos = v1.dot(v2) / (len1 * len2);
-                if (@abs(cos) > 0.35) continue;
+                if (@abs(cos) > max_corner_cos) continue;
 
                 // With x = col and y = row (y down), module space has
                 // cross(TL->TR, TL->BL) > 0; a mirrored photo picks the
@@ -384,10 +417,10 @@ fn buildTransform(triple: FinderTriple, dim: u16, fourth: Fourth) ?ProjectiveTra
         .init(.{ module, module }),
     };
     const to: [4]Point(2, f64) = .{
-        .init(.{ triple.top_left.center.x(), triple.top_left.center.y() }),
-        .init(.{ triple.top_right.center.x(), triple.top_right.center.y() }),
-        .init(.{ triple.bottom_left.center.x(), triple.bottom_left.center.y() }),
-        .init(.{ fourth.center.x(), fourth.center.y() }),
+        triple.top_left.center.as(f64),
+        triple.top_right.center.as(f64),
+        triple.bottom_left.center.as(f64),
+        fourth.center.as(f64),
     };
     return ProjectiveTransform(f64).init(&from, &to) catch null;
 }
@@ -408,7 +441,7 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
         const prediction = tl.add(per_module.scale(steps));
         const ms = triple.moduleSize();
 
-        var found_d2: [4]f32 = undefined;
+        var found: [4]ScoredFourth = undefined;
         var found_count: usize = 0;
         // Strong perspective drifts the true pattern up to ~0.2 modules per
         // extrapolated module; false hits inside the window are harmless
@@ -428,9 +461,10 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
                 if (!isDark(binary, py, px)) continue;
                 const candidate = checkAlignment(binary, py, px, ms) orelse continue;
                 const d2 = candidate.center.distanceSquared(prediction);
-                insertNearest(buf[0..4], &found_d2, &found_count, candidate, d2, ms);
+                insertNearest(&found, &found_count, .{ .fourth = candidate, .d2 = d2 }, ms);
             }
         }
+        for (found[0..found_count], 0..) |scored, i| buf[i] = scored.fourth;
         count = found_count;
     }
     buf[count] = .{
@@ -441,63 +475,31 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
     return buf[0..count];
 }
 
+/// An alignment candidate with its squared distance to the affine prediction.
+const ScoredFourth = struct { fourth: Fourth, d2: f32 };
+
 /// Keeps the candidates nearest to the prediction, merging re-detections of
 /// the same pattern (within one module) to the nearer measurement.
-fn insertNearest(found: *[4]Fourth, found_d2: *[4]f32, found_count: *usize, candidate: Fourth, d2: f32, ms: f32) void {
-    for (found[0..found_count.*], found_d2[0..found_count.*]) |*existing, *existing_d2| {
-        const diff = existing.center.sub(candidate.center);
+fn insertNearest(found: *[4]ScoredFourth, count: *usize, candidate: ScoredFourth, ms: f32) void {
+    for (found[0..count.*]) |*existing| {
+        const diff = existing.fourth.center.sub(candidate.fourth.center);
         if (@abs(diff.x()) < ms and @abs(diff.y()) < ms) {
-            if (d2 < existing_d2.*) {
-                existing.* = candidate;
-                existing_d2.* = d2;
-            }
+            if (candidate.d2 < existing.d2) existing.* = candidate;
             return;
         }
     }
-    var at = found_count.*;
-    while (at > 0 and d2 < found_d2[at - 1]) at -= 1;
+    var at = count.*;
+    while (at > 0 and candidate.d2 < found[at - 1].d2) at -= 1;
     if (at >= found.len) return;
-    var back = @min(found_count.*, found.len - 1);
-    while (back > at) : (back -= 1) {
-        found[back] = found[back - 1];
-        found_d2[back] = found_d2[back - 1];
-    }
+    var back = @min(count.*, found.len - 1);
+    while (back > at) : (back -= 1) found[back] = found[back - 1];
     found[at] = candidate;
-    found_d2[at] = d2;
-    if (found_count.* < found.len) found_count.* += 1;
+    if (count.* < found.len) count.* += 1;
 }
 
-/// traceRuns specialized for alignment probes: gives up once a run exceeds
-/// limit (it could no longer pass the ratio checks) and returns as soon as
-/// the outer dark run is confirmed, bounding the cost of probes that land in
-/// large dark regions.
-fn traceAlignmentRuns(binary: Image(u8), start_row: i64, start_col: i64, d_row: i64, d_col: i64, limit: usize) ?[3]usize {
-    var runs: [3]usize = @splat(0);
-    var state: usize = 0;
-    var r = start_row;
-    var c = start_col;
-    while (binary.atOrNull(r, c)) |pixel| : ({
-        r += d_row;
-        c += d_col;
-    }) {
-        const dark = pixel.* == 0;
-        if (dark != (state != 1)) {
-            state += 1;
-            // Re-examine this pixel as part of the next run.
-            r -= d_row;
-            c -= d_col;
-            continue;
-        }
-        runs[state] += 1;
-        if (state == 2) return runs;
-        if (runs[state] > limit) return null;
-    }
-    return null;
-}
-
-/// True when len is within 60% of one expected module.
+/// True when len is within alignment_run_tolerance of one expected module.
 fn nearModule(len: usize, expected: f32) bool {
-    return @abs(@as(f32, @floatFromInt(len)) - expected) <= expected * 0.6;
+    return @abs(@as(f32, @floatFromInt(len)) - expected) <= expected * alignment_run_tolerance;
 }
 
 const AlignmentAxis = struct {
@@ -510,9 +512,9 @@ const AlignmentAxis = struct {
 /// central dark run and both light flanks near one module — and refines the
 /// center from the run extents.
 fn alignmentAxis(binary: Image(u8), row: i64, col: i64, d_row: i64, d_col: i64, ms: f32, limit: usize) ?AlignmentAxis {
-    const back = traceAlignmentRuns(binary, row, col, -d_row, -d_col, limit) orelse return null;
+    const back = traceRuns(binary, row, col, -d_row, -d_col, limit) orelse return null;
     if (!nearModule(back[1], ms)) return null;
-    const fwd = traceAlignmentRuns(binary, row + d_row, col + d_col, d_row, d_col, limit) orelse return null;
+    const fwd = traceRuns(binary, row + d_row, col + d_col, d_row, d_col, limit) orelse return null;
     if (!nearModule(back[0] + fwd[0], ms) or !nearModule(fwd[1], ms)) return null;
     // The dark run spans [base - back[0] + 1, base + fwd[0]] inclusive.
     const base: f32 = @floatFromInt(if (d_col != 0) col else row);
@@ -523,8 +525,7 @@ fn alignmentAxis(binary: Image(u8), row: i64, col: i64, d_row: i64, d_col: i64, 
 /// Verifies the 1:1:1 dark-light-dark alignment signature on both axes
 /// through (row, col) and refines the center from the run extents.
 fn checkAlignment(binary: Image(u8), row: usize, col: usize, ms: f32) ?Fourth {
-    // No run of a passing candidate can exceed 1.6 modules.
-    const limit: usize = @intFromFloat(ms * 1.6 + 1);
+    const limit: usize = @intFromFloat(ms * alignment_run_limit + 1);
 
     const horizontal = alignmentAxis(binary, @intCast(row), @intCast(col), 0, 1, ms, limit) orelse return null;
     const ccol: usize = @intFromFloat(horizontal.center);
@@ -554,9 +555,8 @@ fn checkAlignment(binary: Image(u8), row: usize, col: usize, ms: f32) ?Fourth {
 /// Projects one module center through the homography and reads a 3-of-5
 /// plus-shaped vote of the binarized pixels; null when the center leaves the
 /// image (off-center votes outside count as light).
-fn sampleModule(binary: Image(u8), transform: ProjectiveTransform(f64), row: usize, col: usize) ?u8 {
+fn sampleModule(binary: Image(u8), transform: ProjectiveTransform(f64), bounds: Rectangle(f64), row: usize, col: usize) ?u8 {
     const offsets = [5][2]f64{ .{ 0, 0 }, .{ 0.25, 0 }, .{ -0.25, 0 }, .{ 0, 0.25 }, .{ 0, -0.25 } };
-    const bounds = binary.getRectangle().as(f64);
     var votes: u32 = 0;
     for (offsets, 0..) |offset, k| {
         // Stop once the vote is decided either way.
@@ -576,9 +576,10 @@ fn sampleModule(binary: Image(u8), transform: ProjectiveTransform(f64), row: usi
 
 /// Samples every module center. Returns false if a center leaves the image.
 fn sampleGrid(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, out: []u8) bool {
+    const bounds = binary.getRectangle().as(f64);
     for (0..dim) |row| {
         for (0..dim) |col| {
-            out[row * dim + col] = sampleModule(binary, transform, row, col) orelse return false;
+            out[row * dim + col] = sampleModule(binary, transform, bounds, row, col) orelse return false;
         }
     }
     return true;
@@ -586,10 +587,11 @@ fn sampleGrid(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, 
 
 /// Samples only the four candidate timing lines that timingOk checks.
 fn sampleTimingLines(binary: Image(u8), transform: ProjectiveTransform(f64), dim: u16, out: []u8) bool {
+    const bounds = binary.getRectangle().as(f64);
     for ([2]usize{ 6, dim - 7 }) |line| {
         for (8..dim - 8) |i| {
-            out[line * dim + i] = sampleModule(binary, transform, line, i) orelse return false;
-            out[i * dim + line] = sampleModule(binary, transform, i, line) orelse return false;
+            out[line * dim + i] = sampleModule(binary, transform, bounds, line, i) orelse return false;
+            out[i * dim + line] = sampleModule(binary, transform, bounds, i, line) orelse return false;
         }
     }
     return true;
@@ -602,8 +604,7 @@ fn symbolCorners(transform: ProjectiveTransform(f64), dim: u16) [4]Point(2, f32)
     const module_corners = [4][2]f64{ .{ 0, 0 }, .{ d, 0 }, .{ 0, d }, .{ d, d } };
     var corners: [4]Point(2, f32) = undefined;
     for (module_corners, 0..) |corner, i| {
-        const p = transform.project(.init(.{ corner[0], corner[1] }));
-        corners[i] = .init(.{ @as(f32, @floatCast(p.x())), @as(f32, @floatCast(p.y())) });
+        corners[i] = transform.project(.init(corner)).as(f32);
     }
     return corners;
 }

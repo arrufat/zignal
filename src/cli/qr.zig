@@ -54,15 +54,15 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 }
 
 fn parseEcLevel(name: ?[]const u8) !qrcode.EcLevel {
-    const value = name orelse return .medium;
+    const value = name orelse return qrcode.EncodeOptions.default.ec_level;
     if (value.len == 1) {
-        return switch (std.ascii.toLower(value[0])) {
-            'l' => .low,
-            'm' => .medium,
-            'q' => .quartile,
-            'h' => .high,
-            else => error.InvalidArguments,
-        };
+        switch (std.ascii.toLower(value[0])) {
+            'l' => return .low,
+            'm' => return .medium,
+            'q' => return .quartile,
+            'h' => return .high,
+            else => {},
+        }
     }
     return common.parseEnum(qrcode.EcLevel, value) orelse {
         std.log.err("invalid --ec-level '{s}': expected l, m, q or h", .{value});
@@ -76,12 +76,13 @@ fn encode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
         return error.InvalidArguments;
     }
     const to_file = options.output != null;
+    const defaults = qrcode.EncodeOptions.default;
     var image = try qrcode.encodeImage(gpa, positionals[0], .{
         .ec_level = try parseEcLevel(options.ec_level),
         .version = options.symbol_version,
         // In the terminal, one pixel per module maps to one character cell.
-        .module_size = if (to_file) options.module_size orelse 8 else 1,
-        .quiet_zone = options.quiet_zone orelse 4,
+        .module_size = if (to_file) options.module_size orelse defaults.module_size else 1,
+        .quiet_zone = options.quiet_zone orelse defaults.quiet_zone,
     });
     defer image.deinit(gpa);
 

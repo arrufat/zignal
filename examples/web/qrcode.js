@@ -26,6 +26,8 @@
   let wasm_exports = null;
   const text_decoder = new TextDecoder();
   const text_encoder = new TextEncoder();
+  // Scratch canvas for the 1-pixel-per-module blit in encode().
+  const small = document.createElement("canvas");
 
   let rgbaPtr = null;
   let rgbaSize = 0;
@@ -61,6 +63,7 @@
 
   function ensureFrameBuffer(size) {
     if (size !== rgbaSize) {
+      if (rgbaPtr !== null) wasm_exports.free(rgbaPtr, rgbaSize);
       rgbaPtr = wasm_exports.alloc(size) >>> 0;
       rgbaSize = size;
     }
@@ -136,7 +139,6 @@
     }
     // Blit the 1-pixel-per-module image and scale it up without smoothing.
     const image = new ImageData(new Uint8ClampedArray(wasm_exports.memory.buffer, qrPtr, side * side * 4), side, side);
-    const small = document.createElement("canvas");
     small.width = side;
     small.height = side;
     small.getContext("2d").putImageData(image, 0, 0);

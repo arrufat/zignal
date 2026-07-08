@@ -85,14 +85,6 @@ fn qr_decode_result_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return python.create(slice);
 }
 
-fn qr_decode_result_get_data(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = python.safeCast(QrDecodeResultObject, self_obj);
-    const obj = self.data orelse return python.none();
-    c.Py_IncRef(obj);
-    return obj;
-}
-
 fn qr_decode_result_get_text(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(QrDecodeResultObject, self_obj);
@@ -103,41 +95,13 @@ fn qr_decode_result_get_text(self_obj: ?*c.PyObject, closure: ?*anyopaque) callc
     return c.PyUnicode_DecodeUTF8(ptr, size, "replace");
 }
 
-fn qr_decode_result_get_version(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(self.version);
-}
-
-fn qr_decode_result_get_ec_level(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(self.ec_level);
-}
-
-fn qr_decode_result_get_corrected_errors(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(self.corrected_errors);
-}
-
-fn qr_decode_result_get_corners(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
-    _ = closure;
-    const self = python.safeCast(QrDecodeResultObject, self_obj);
-    const obj = self.corners orelse return python.none();
+/// Converter for getterOptionalPtr fields that hold an owned Python object.
+fn increfObject(obj: *c.PyObject) ?*c.PyObject {
     c.Py_IncRef(obj);
     return obj;
 }
 
-var qr_decode_result_getset = [_]c.PyGetSetDef{
-    .{ .name = "data", .get = qr_decode_result_get_data, .set = null, .doc = "Decoded payload as bytes", .closure = null },
-    .{ .name = "text", .get = qr_decode_result_get_text, .set = null, .doc = "Decoded payload as text (UTF-8, invalid bytes replaced)", .closure = null },
-    .{ .name = "version", .get = qr_decode_result_get_version, .set = null, .doc = "QR version (1-40)", .closure = null },
-    .{ .name = "ec_level", .get = qr_decode_result_get_ec_level, .set = null, .doc = "Error correction level (comparable to EcLevel)", .closure = null },
-    .{ .name = "corrected_errors", .get = qr_decode_result_get_corrected_errors, .set = null, .doc = "Codewords repaired by error correction", .closure = null },
-    .{ .name = "corners", .get = qr_decode_result_get_corners, .set = null, .doc = "Symbol corners as (x, y) tuples (TL, TR, BL, BR), or None", .closure = null },
-    .{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
-};
+var qr_decode_result_getset = python.toPyGetSetDefArray(&qr_decode_result_properties_metadata);
 
 pub var QrDecodeResultType = python.buildTypeObject(.{
     .name = "zignal.QrDecodeResult",
@@ -151,12 +115,12 @@ pub var QrDecodeResultType = python.buildTypeObject(.{
 });
 
 pub const qr_decode_result_properties_metadata = [_]python.PropertyWithMetadata{
-    .{ .name = "data", .get = @ptrCast(&qr_decode_result_get_data), .set = null, .doc = "Decoded payload as bytes", .type = "bytes" },
+    .{ .name = "data", .get = python.getterOptionalPtr(QrDecodeResultObject, "data", increfObject), .set = null, .doc = "Decoded payload as bytes", .type = "bytes" },
     .{ .name = "text", .get = @ptrCast(&qr_decode_result_get_text), .set = null, .doc = "Decoded payload as text (UTF-8, invalid bytes replaced)", .type = "str" },
-    .{ .name = "version", .get = @ptrCast(&qr_decode_result_get_version), .set = null, .doc = "QR version (1-40)", .type = "int" },
-    .{ .name = "ec_level", .get = @ptrCast(&qr_decode_result_get_ec_level), .set = null, .doc = "Error correction level (comparable to EcLevel)", .type = "int" },
-    .{ .name = "corrected_errors", .get = @ptrCast(&qr_decode_result_get_corrected_errors), .set = null, .doc = "Codewords repaired by error correction", .type = "int" },
-    .{ .name = "corners", .get = @ptrCast(&qr_decode_result_get_corners), .set = null, .doc = "Symbol corners as (x, y) tuples (TL, TR, BL, BR), or None", .type = "list[tuple[float, float]] | None" },
+    .{ .name = "version", .get = python.getterForField(QrDecodeResultObject, "version"), .set = null, .doc = "QR version (1-40)", .type = "int" },
+    .{ .name = "ec_level", .get = python.getterForField(QrDecodeResultObject, "ec_level"), .set = null, .doc = "Error correction level (comparable to EcLevel)", .type = "int" },
+    .{ .name = "corrected_errors", .get = python.getterForField(QrDecodeResultObject, "corrected_errors"), .set = null, .doc = "Codewords repaired by error correction", .type = "int" },
+    .{ .name = "corners", .get = python.getterOptionalPtr(QrDecodeResultObject, "corners", increfObject), .set = null, .doc = "Symbol corners as (x, y) tuples (TL, TR, BL, BR), or None", .type = "list[tuple[float, float]] | None" },
 };
 
 // ============================================================================
@@ -193,8 +157,8 @@ fn qrcode_encode(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         data: ?*c.PyObject,
         ec_level: ?*c.PyObject = null,
         version: ?*c.PyObject = null,
-        module_size: c_long = 8,
-        quiet_zone: c_long = 4,
+        module_size: c_long = qrcode.EncodeOptions.default.module_size,
+        quiet_zone: c_long = qrcode.EncodeOptions.default.quiet_zone,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -215,7 +179,7 @@ fn qrcode_encode(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         return null;
     }
 
-    var ec_level: qrcode.EcLevel = .medium;
+    var ec_level = qrcode.EncodeOptions.default.ec_level;
     if (params.ec_level != null and params.ec_level != c.Py_None()) {
         ec_level = enum_utils.pyToEnum(qrcode.EcLevel, params.ec_level.?) catch return null;
     }
@@ -314,22 +278,14 @@ fn qrcode_decode(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         return null;
     };
     if (result.corners) |corners| {
-        const list = c.PyList_New(corners.len) orelse {
+        obj.corners = python.listFromSliceCustom(zignal.Point(2, f32), &corners, struct {
+            fn toPythonTuple(corner: zignal.Point(2, f32), _: usize) ?*c.PyObject {
+                return python.create(corner);
+            }
+        }.toPythonTuple) orelse {
             c.Py_DecRef(py_obj);
             return null;
         };
-        for (corners, 0..) |corner, i| {
-            const pair = c.Py_BuildValue("(dd)", @as(f64, corner.x()), @as(f64, corner.y())) orelse {
-                c.Py_DecRef(list);
-                c.Py_DecRef(py_obj);
-                return null;
-            };
-            // PyList_SetItem steals the reference.
-            _ = c.PyList_SetItem(list, @intCast(i), pair);
-        }
-        obj.corners = list;
-    } else {
-        obj.corners = python.none();
     }
     return py_obj;
 }

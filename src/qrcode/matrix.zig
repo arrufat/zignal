@@ -341,8 +341,7 @@ pub fn maskBit(mask: u3, row: usize, col: usize) bool {
 /// Shared by placeData and extractCodewords so the encoder and decoder can
 /// never disagree on the traversal.
 pub const DataIterator = struct {
-    dim: i32,
-    is_function: []const u8,
+    m: *const BitMatrix,
     col: i32,
     row: i32,
     upward: bool,
@@ -350,8 +349,7 @@ pub const DataIterator = struct {
 
     pub fn init(matrix: *const BitMatrix) DataIterator {
         return .{
-            .dim = matrix.dim,
-            .is_function = matrix.is_function,
+            .m = matrix,
             .col = matrix.dim - 1,
             .row = matrix.dim - 1,
             .upward = true,
@@ -364,7 +362,7 @@ pub const DataIterator = struct {
             const row: usize = @intCast(self.row);
             const col: usize = @intCast(if (self.right) self.col else self.col - 1);
             self.advance();
-            if (self.is_function[row * @as(usize, @intCast(self.dim)) + col] == 0) {
+            if (self.m.is_function[row * self.m.dim + col] == 0) {
                 return .{ .row = @intCast(row), .col = @intCast(col) };
             }
         }
@@ -380,7 +378,7 @@ pub const DataIterator = struct {
         if (self.upward) {
             if (self.row == 0) self.nextColumnPair() else self.row -= 1;
         } else {
-            if (self.row == self.dim - 1) self.nextColumnPair() else self.row += 1;
+            if (self.row == self.m.dim - 1) self.nextColumnPair() else self.row += 1;
         }
     }
 

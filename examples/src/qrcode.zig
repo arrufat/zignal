@@ -56,9 +56,7 @@ pub export fn qr_encode(
 
     const size = @as(usize, image.rows) * image.cols;
     if (size > out_capacity) return -1;
-    for (image.data, out_ptr[0..size]) |gray, *pixel| {
-        pixel.* = .{ .r = gray, .g = gray, .b = gray, .a = 255 };
-    }
+    image.convertInto(Rgba, .initFromSlice(image.rows, image.cols, out_ptr[0..size]));
     return @intCast(image.rows);
 }
 
@@ -67,20 +65,17 @@ pub export fn qr_encode(
 /// (top-left, top-right, bottom-left, bottom-right). Returns the text length,
 /// 0 when no code is found, or -1 on error / insufficient out_capacity.
 pub export fn qr_decode(
-    rgba_ptr: [*]const Rgba,
+    rgba_ptr: [*]Rgba,
     rows: u32,
     cols: u32,
     out_ptr: [*]u8,
     out_capacity: usize,
     corners_ptr: [*]f32,
 ) i32 {
-    var gray = Image(u8).init(allocator, rows, cols) catch return -1;
-    defer gray.deinit(allocator);
     const size = @as(usize, rows) * cols;
-    for (rgba_ptr[0..size], gray.data) |pixel, *out| {
-        // Rec. 601 integer luma.
-        out.* = @intCast((77 * @as(u32, pixel.r) + 150 * @as(u32, pixel.g) + 29 * @as(u32, pixel.b)) >> 8);
-    }
+    const rgba: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
+    var gray = rgba.convert(allocator, u8) catch return -1;
+    defer gray.deinit(allocator);
 
     var result = (qrcode.decode(allocator, gray) catch |err| {
         std.log.err("qr_decode: {s}", .{@errorName(err)});

@@ -243,7 +243,6 @@ pub fn ProjectiveTransform(comptime T: type) type {
             // Unknowns h00..h21 with h22 fixed to 1; two equations per
             // correspondence.
             var a: [8][9]T = undefined;
-            var max_entry: T = 0;
             for (from_points, to_points, 0..) |f, t, i| {
                 const x = f.x();
                 const y = f.y();
@@ -251,8 +250,10 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 const v = t.y();
                 a[2 * i] = .{ x, y, 1, 0, 0, 0, -u * x, -u * y, u };
                 a[2 * i + 1] = .{ 0, 0, 0, x, y, 1, -v * x, -v * y, v };
-                for (a[2 * i][0..8]) |entry| max_entry = @max(max_entry, @abs(entry));
-                for (a[2 * i + 1][0..8]) |entry| max_entry = @max(max_entry, @abs(entry));
+            }
+            var max_entry: T = 0;
+            for (a) |row| {
+                for (row[0..8]) |entry| max_entry = @max(max_entry, @abs(entry));
             }
             if (max_entry == 0) return null;
             // Degeneracy threshold relative to the system's scale.
