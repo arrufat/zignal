@@ -235,9 +235,51 @@ pub fn ProjectiveTransform(comptime T: type) type {
             return if (self.matrix.inv()) |m| .{ .matrix = m } else null;
         }
 
+        /// Finds the exact projective transform mapping the four from_points
+        /// to the four to_points, or null when the correspondences are
+        /// degenerate. Four correspondences determine the transform exactly;
+        /// prefer this over `find` for that case, since the least-squares
+        /// path loses precision to its unnormalized normal equations.
+        pub fn initExact(from_points: [4]Point(2, T), to_points: [4]Point(2, T)) ?Self {
+            // Unknowns h00..h21 with h22 fixed to 1; two equations per
+            // correspondence.
+            var a: [8][9]T = undefined;
+            for (from_points, to_points, 0..) |f, t, i| {
+                const x = f.x();
+                const y = f.y();
+                const u = t.x();
+                const v = t.y();
+                a[2 * i] = .{ x, y, 1, 0, 0, 0, -u * x, -u * y, u };
+                a[2 * i + 1] = .{ 0, 0, 0, x, y, 1, -v * x, -v * y, v };
+            }
+            // Gauss-Jordan with partial pivoting.
+            for (0..8) |col| {
+                var pivot = col;
+                for (col + 1..8) |row| {
+                    if (@abs(a[row][col]) > @abs(a[pivot][col])) pivot = row;
+                }
+                if (@abs(a[pivot][col]) < 1e-9) return null;
+                std.mem.swap([9]T, &a[col], &a[pivot]);
+                for (0..8) |row| {
+                    if (row == col) continue;
+                    const factor = a[row][col] / a[col][col];
+                    if (factor == 0) continue;
+                    for (col..9) |k| a[row][k] -= factor * a[col][k];
+                }
+            }
+            var h: [8]T = undefined;
+            for (0..8) |i| h[i] = a[i][8] / a[i][i];
+            return .{ .matrix = .init(.{
+                .{ h[0], h[1], h[2] },
+                .{ h[3], h[4], h[5] },
+                .{ h[6], h[7], 1 },
+            }) };
+        }
+
         /// Finds the best projective transform that maps between the two given sets of points.
         /// Returns `error.NotConverged` when the SVD fails to converge or `error.RankDeficient`
         /// when the system does not have enough rank to define a projective transform.
+        /// For exactly four correspondences, `initExact` is more precise.
         pub fn find(self: *Self, from_points: []const Point(2, T), to_points: []const Point(2, T)) !void {
             assert(from_points.len >= 4);
             assert(from_points.len == to_points.len);
@@ -466,4 +508,29 @@ test "projection8" {
         try std.testing.expectApproxEqRel(p.x(), to_points[i].x(), 1e-2);
         try std.testing.expectApproxEqRel(p.y(), to_points[i].y(), 1e-2);
     }
+}
+
+test "projective initExact maps corners exactly and inverts" {
+    const source = [4]Point(2, f64){
+        .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }), .init(.{ 100, 100 }),
+    };
+    const destination = [4]Point(2, f64){
+        .init(.{ 50, 20 }), .init(.{ 150, 40 }), .init(.{ 30, 120 }), .init(.{ 130, 140 }),
+    };
+    const forward = ProjectiveTransform(f64).initExact(source, destination).?;
+    for (source, destination) |s, d| {
+        const p = forward.project(s);
+        try std.testing.expectApproxEqAbs(d.x(), p.x(), 1e-9);
+        try std.testing.expectApproxEqAbs(d.y(), p.y(), 1e-9);
+    }
+    const backward = ProjectiveTransform(f64).initExact(destination, source).?;
+    const roundtrip = backward.project(forward.project(.init(.{ 33, 71 })));
+    try std.testing.expectApproxEqAbs(@as(f64, 33), roundtrip.x(), 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 71), roundtrip.y(), 1e-9);
+
+    // Collinear correspondences are degenerate.
+    const collinear = [4]Point(2, f64){
+        .init(.{ 0, 0 }), .init(.{ 1, 1 }), .init(.{ 2, 2 }), .init(.{ 3, 3 }),
+    };
+    try std.testing.expectEqual(@as(?ProjectiveTransform(f64), null), ProjectiveTransform(f64).initExact(collinear, destination));
 }
