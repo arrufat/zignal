@@ -731,7 +731,7 @@ test "image roundtrip across module sizes and quiet zones" {
         .{ .module_size = 8, .quiet_zone = 0 },
     };
     for (cases) |c| {
-        var image = try encoder.encodeImage(allocator, "https://github.com/arrufat/zignal", .{
+        var image = try encoder.encode(allocator, "https://github.com/arrufat/zignal", .{
             .module_size = c.module_size,
             .quiet_zone = c.quiet_zone,
         });
@@ -751,7 +751,7 @@ test "image roundtrip across module sizes and quiet zones" {
 test "decode accepts color images" {
     const Rgba = @import("../color.zig").Rgba(u8);
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "COLOR INPUT", .{ .module_size = 4 });
+    var clean = try encoder.encode(allocator, "COLOR INPUT", .{ .module_size = 4 });
     defer clean.deinit(allocator);
     var rgba = try clean.convert(allocator, Rgba);
     defer rgba.deinit(allocator);
@@ -778,7 +778,7 @@ test "decode returns null on blank and noise images" {
 
 test "decode rotated 30 degrees" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "ROTATED THIRTY", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "ROTATED THIRTY", .{ .module_size = 6 });
     defer clean.deinit(allocator);
 
     // Rotate the source square around the canvas center.
@@ -814,7 +814,7 @@ test "decode under perspective distortion" {
         .{ .data = "PERSPECTIVE VERSION SEVEN WITH LONGER PAYLOAD FOR SIZE", .version = 7 },
     };
     for (payloads) |payload| {
-        var clean = try encoder.encodeImage(allocator, payload.data, .{
+        var clean = try encoder.encode(allocator, payload.data, .{
             .module_size = 8,
             .version = payload.version,
         });
@@ -838,7 +838,7 @@ test "decode under perspective distortion" {
 
 test "decode mirrored perspective" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "MIRRORED", .{ .module_size = 8, .version = 2 });
+    var clean = try encoder.encode(allocator, "MIRRORED", .{ .module_size = 8, .version = 2 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     // Swap left and right destination corners to mirror the symbol.
@@ -858,7 +858,7 @@ test "decode mirrored perspective" {
 
 test "decode under uneven lighting" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "UNEVEN LIGHTING", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "UNEVEN LIGHTING", .{ .module_size = 6 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     // Straight-on, but with a strong brightness ramp plus perlin shading:
@@ -881,7 +881,7 @@ test "decode under uneven lighting" {
 
 test "decode under blur and noise" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "BLUR AND NOISE", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "BLUR AND NOISE", .{ .module_size = 6 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     var photo = try photoSimulate(allocator, clean, .{
@@ -904,7 +904,7 @@ test "decode combined photo distortions" {
     const allocator = std.testing.allocator;
     const versions = [_]?u8{ 1, 4, 10 }; // v1 exercises the parallelogram fallback
     for (versions) |version| {
-        var clean = try encoder.encodeImage(allocator, "COMBINED PHOTO", .{
+        var clean = try encoder.encode(allocator, "COMBINED PHOTO", .{
             .module_size = 8,
             .version = version,
         });
@@ -934,7 +934,7 @@ test "decode combined photo distortions" {
 
 test "decode version 40 at three pixels per module" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "V40 SUBPIXEL BUDGET CANARY", .{
+    var clean = try encoder.encode(allocator, "V40 SUBPIXEL BUDGET CANARY", .{
         .module_size = 3,
         .version = 40,
     });
@@ -982,13 +982,13 @@ test "alignment pattern search on a rendered symbol" {
     const allocator = std.testing.allocator;
     const ms = 6;
     const qz = 4;
-    var image = try encoder.encodeImage(allocator, "ALIGNMENT", .{
+    var image = try encoder.encode(allocator, "ALIGNMENT", .{
         .module_size = ms,
         .quiet_zone = qz,
         .version = 2,
     });
     defer image.deinit(allocator);
-    // encodeImage emits 0/255, which is already binarized.
+    // encode emits 0/255, which is already binarized.
     const center = struct {
         fn center(module: f32) f32 {
             return (qz + module) * ms;

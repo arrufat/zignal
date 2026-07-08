@@ -77,7 +77,7 @@ fn encode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
     }
     const to_file = options.output != null;
     const defaults = qrcode.EncodeOptions.default;
-    var image = try qrcode.encodeImage(gpa, positionals[0], .{
+    var image = try qrcode.encode(gpa, positionals[0], .{
         .ec_level = try parseEcLevel(options.ec_level),
         .version = options.symbol_version,
         // In the terminal, one pixel per module maps to one character cell.

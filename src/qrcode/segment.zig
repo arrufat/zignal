@@ -40,7 +40,7 @@ pub fn detectMode(data: []const u8) Mode {
 
 /// Number of bits the data occupies in a mode, excluding the mode indicator
 /// and character count field.
-pub fn dataBits(mode: Mode, len: usize) usize {
+fn dataBits(mode: Mode, len: usize) usize {
     const numeric_extra = [3]usize{ 0, 4, 7 };
     return switch (mode) {
         .numeric => 10 * (len / 3) + numeric_extra[len % 3],
@@ -65,7 +65,7 @@ pub fn fitVersion(mode: Mode, level: tables.EcLevel, len: usize) !u8 {
 }
 
 /// Appends bits most significant first to a byte list.
-pub const BitWriter = struct {
+const BitWriter = struct {
     bytes: std.ArrayList(u8) = .empty,
     bit_len: usize = 0,
 
@@ -86,7 +86,7 @@ pub const BitWriter = struct {
 };
 
 /// Reads bits most significant first from a byte slice.
-pub const BitReader = struct {
+const BitReader = struct {
     bytes: []const u8,
     pos: usize = 0,
 

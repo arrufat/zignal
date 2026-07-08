@@ -43,11 +43,11 @@ pub const BitMatrix = struct {
         return @intCast(self.modules[row * self.dim + col]);
     }
 
-    pub fn set(self: *BitMatrix, row: usize, col: usize, value: u1) void {
+    fn set(self: *BitMatrix, row: usize, col: usize, value: u1) void {
         self.modules[row * self.dim + col] = value;
     }
 
-    pub fn isFunction(self: BitMatrix, row: usize, col: usize) bool {
+    fn isFunction(self: BitMatrix, row: usize, col: usize) bool {
         return self.is_function[row * self.dim + col] != 0;
     }
 
@@ -323,7 +323,7 @@ pub const BitMatrix = struct {
 };
 
 /// The mask predicate: true means the module at (row, col) is inverted.
-pub fn maskBit(mask: u3, row: usize, col: usize) bool {
+fn maskBit(mask: u3, row: usize, col: usize) bool {
     return switch (mask) {
         0 => (row + col) % 2 == 0,
         1 => row % 2 == 0,
@@ -340,7 +340,7 @@ pub fn maskBit(mask: u3, row: usize, col: usize) bool {
 /// column pairs right to left, alternating up and down, skipping column 6.
 /// Shared by placeData and extractCodewords so the encoder and decoder can
 /// never disagree on the traversal.
-pub const DataIterator = struct {
+const DataIterator = struct {
     m: *const BitMatrix,
     col: i32,
     row: i32,

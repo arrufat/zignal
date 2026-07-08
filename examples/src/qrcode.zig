@@ -42,7 +42,7 @@ pub export fn qr_encode(
     out_ptr: [*]Rgba,
     out_capacity: usize,
 ) i32 {
-    var image = qrcode.encodeImage(allocator, text_ptr[0..text_len], .{
+    var image = qrcode.encode(allocator, text_ptr[0..text_len], .{
         .ec_level = @enumFromInt(@min(ec_level, 3)),
         .module_size = 1,
     }) catch |err| switch (err) {
