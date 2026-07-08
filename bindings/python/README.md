@@ -16,6 +16,7 @@ Zero-dependency image processing primitives written in Zig and packaged for Pyth
 | **Geometry** | Rectangle algebra, convex hulls, similarity/affine/projective transforms |
 | **Terminal Output** | SGR, Braille, Sixel, and Kitty renderers with automatic format negotiation |
 | **Numerics** | Matrices with rich linear algebra, PCA, optimization (Hungarian assignment + MaxLIPO+TR global optimizer), running statistics |
+| **QR Codes** | Encode text/bytes to QR images and decode them back, including from photos (perspective, uneven lighting, rotation) |
 
 All functionality is implemented in Zig with no runtime dependencies, making the wheel lightweight and easy to vendor.
 
