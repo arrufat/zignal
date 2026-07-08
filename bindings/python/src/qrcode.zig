@@ -106,19 +106,19 @@ fn qr_decode_result_get_text(self_obj: ?*c.PyObject, closure: ?*anyopaque) callc
 fn qr_decode_result_get_version(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(@as(c_long, self.version));
+    return python.create(self.version);
 }
 
 fn qr_decode_result_get_ec_level(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(@as(c_long, self.ec_level));
+    return python.create(self.ec_level);
 }
 
 fn qr_decode_result_get_corrected_errors(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(QrDecodeResultObject, self_obj);
-    return python.create(@as(c_long, self.corrected_errors));
+    return python.create(self.corrected_errors);
 }
 
 fn qr_decode_result_get_corners(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
