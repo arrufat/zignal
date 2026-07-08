@@ -89,7 +89,7 @@ pub fn main() !void {
     std.debug.print("== Rosenbrock (global minimum at (1, 1)) ==\n", .{});
     {
         const variables = [_]Variable{ .{ .lower = -5, .upper = 5 }, .{ .lower = -5, .upper = 5 } };
-        var res = try findGlobalOptimum(io, gpa, rosen, &variables, 150, .min_default);
+        var res = try findGlobalOptimum(io, gpa, rosen, &variables, .{ .max_evals = 150 }, .min_default);
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});
@@ -110,7 +110,7 @@ pub fn main() !void {
         // `max_concurrency > 1` evaluates several candidates at once on the thread pool above. These
         // toy objectives are too cheap to show a wall-clock win, but a costly thread-safe objective
         // would scale across cores.
-        var res = try findGlobalOptimum(io, gpa, beLikeTarget, &variables, 200, .{ .policy = .min, .max_concurrency = 4 });
+        var res = try findGlobalOptimum(io, gpa, beLikeTarget, &variables, .{ .max_evals = 200 }, .{ .policy = .min, .max_concurrency = 4 });
         defer res.deinit(gpa);
         printVec("  solution x = ", res.x);
         std.debug.print("  solution y = {d:.6}\n\n", .{res.y});

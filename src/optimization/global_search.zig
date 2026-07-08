@@ -22,6 +22,7 @@ const Io = std.Io;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const tr = @import("trust_region.zig");
+const vec = @import("vec.zig");
 const UpperBound = @import("lipschitz.zig").UpperBound;
 const OptimizationPolicy = @import("../optimization.zig").OptimizationPolicy;
 
@@ -72,22 +73,18 @@ pub const GlobalOptimizer = struct {
     pool: ?WorkerPool,
     arena: std.heap.ArenaAllocator,
 
-    pub const WorkerPool = struct {
+    const WorkerPool = struct {
         outstanding_x: []f64,
         outstanding_y: []f64,
-        outstanding_predicted: []f64,
-        outstanding_anchor: []f64,
-        outstanding_move: []Move,
+        outstanding_ask: []Ask,
         outstanding_active: []bool,
         scratch_pending_x: []f64,
         scratch_pending_y: []f64,
 
-        pub fn deinit(self: *WorkerPool, allocator: Allocator) void {
+        fn deinit(self: *WorkerPool, allocator: Allocator) void {
             allocator.free(self.outstanding_x);
             allocator.free(self.outstanding_y);
-            allocator.free(self.outstanding_predicted);
-            allocator.free(self.outstanding_anchor);
-            allocator.free(self.outstanding_move);
+            allocator.free(self.outstanding_ask);
             allocator.free(self.outstanding_active);
             allocator.free(self.scratch_pending_x);
             allocator.free(self.scratch_pending_y);
@@ -183,19 +180,15 @@ pub const GlobalOptimizer = struct {
         const scratch = try allocator.alloc(f64, dims);
         errdefer allocator.free(scratch);
 
-        const mc = @max(@as(usize, 1), options.max_concurrency);
+        const mc = @max(1, options.max_concurrency);
         var pool: ?WorkerPool = null;
         if (mc > 1) {
             const outstanding_x = try allocator.alloc(f64, mc * dims);
             errdefer allocator.free(outstanding_x);
             const outstanding_y = try allocator.alloc(f64, mc);
             errdefer allocator.free(outstanding_y);
-            const outstanding_predicted = try allocator.alloc(f64, mc);
-            errdefer allocator.free(outstanding_predicted);
-            const outstanding_anchor = try allocator.alloc(f64, mc);
-            errdefer allocator.free(outstanding_anchor);
-            const outstanding_move = try allocator.alloc(Move, mc);
-            errdefer allocator.free(outstanding_move);
+            const outstanding_ask = try allocator.alloc(Ask, mc);
+            errdefer allocator.free(outstanding_ask);
             const outstanding_active = try allocator.alloc(bool, mc);
             errdefer allocator.free(outstanding_active);
             @memset(outstanding_active, false);
@@ -207,9 +200,7 @@ pub const GlobalOptimizer = struct {
             pool = .{
                 .outstanding_x = outstanding_x,
                 .outstanding_y = outstanding_y,
-                .outstanding_predicted = outstanding_predicted,
-                .outstanding_anchor = outstanding_anchor,
-                .outstanding_move = outstanding_move,
+                .outstanding_ask = outstanding_ask,
                 .outstanding_active = outstanding_active,
                 .scratch_pending_x = pending_x,
                 .scratch_pending_y = pending_y,
@@ -259,15 +250,14 @@ pub const GlobalOptimizer = struct {
     pub fn addEvaluation(self: *GlobalOptimizer, eval: Evaluation) !void {
         if (eval.x.len != self.variables.len) return GlobalError.DimensionMismatch;
         // A warm-start point is a seed, not a trust-region step → treat it like an `.init` move.
-        try self.record(eval.x, self.sign * eval.y, .init, 0, 0);
+        try self.record(eval.x, self.sign * eval.y, .{ .move = .init });
     }
 
     /// Perform one ask+evaluate+tell iteration and return what happened.
     pub fn step(self: *GlobalOptimizer, objective: anytype) !Step {
         const a = try self.ask(self.last_x);
         const y_raw = callObjective(objective, self.last_x);
-        try self.record(self.last_x, self.sign * y_raw, a.move, a.predicted, a.anchor);
-        self.evals += 1;
+        try self.tell(self.last_x, y_raw, a);
         return .{
             .point = .{ .x = self.last_x, .y = y_raw },
             .move = a.move,
@@ -325,9 +315,7 @@ pub const GlobalOptimizer = struct {
                         return;
                     };
                     pool.outstanding_y[slot] = opt.upper_bound.nearestY(xslot);
-                    pool.outstanding_move[slot] = a.move;
-                    pool.outstanding_predicted[slot] = a.predicted;
-                    pool.outstanding_anchor[slot] = a.anchor;
+                    pool.outstanding_ask[slot] = a;
                     pool.outstanding_active[slot] = true;
                     sh.dispatched += 1;
                     sh.mutex.unlock(w_io);
@@ -336,12 +324,11 @@ pub const GlobalOptimizer = struct {
 
                     sh.mutex.lockUncancelable(w_io);
                     pool.outstanding_active[slot] = false;
-                    opt.record(xslot, opt.sign * y_raw, pool.outstanding_move[slot], pool.outstanding_predicted[slot], pool.outstanding_anchor[slot]) catch |e| {
+                    opt.tell(xslot, y_raw, pool.outstanding_ask[slot]) catch |e| {
                         sh.err = e;
                         sh.mutex.unlock(w_io);
                         return;
                     };
-                    opt.evals += 1;
                     if (opt.shouldStop(st, opt.best_y.?, &sh.state)) sh.stopped = true;
                     sh.mutex.unlock(w_io);
                 }
@@ -400,18 +387,22 @@ pub const GlobalOptimizer = struct {
 
         var npending: usize = 0;
         var tr_outstanding = false;
+        var pending_x: []const f64 = &.{};
+        var pending_y: []const f64 = &.{};
         if (self.pool) |*pool| {
-            for (0..pool.outstanding_active.len) |j| {
-                if (!pool.outstanding_active[j]) continue;
+            for (pool.outstanding_active, 0..) |is_active, j| {
+                if (!is_active) continue;
                 @memcpy(pool.scratch_pending_x[npending * dims ..][0..dims], pool.outstanding_x[j * dims ..][0..dims]);
                 pool.scratch_pending_y[npending] = pool.outstanding_y[j];
-                if (pool.outstanding_move[j] == .exploit) tr_outstanding = true;
+                if (pool.outstanding_ask[j].move == .exploit) tr_outstanding = true;
                 npending += 1;
             }
+            pending_x = pool.scratch_pending_x[0 .. npending * dims];
+            pending_y = pool.scratch_pending_y[0..npending];
         }
 
         const real_n = self.upper_bound.numPoints();
-        const init_budget = @max(@as(usize, 3), dims);
+        const init_budget = @max(3, dims);
 
         if (real_n + npending < init_budget) {
             if (real_n + npending == 0) self.centerVector(x_out) else self.randomVector(x_out);
@@ -433,8 +424,6 @@ pub const GlobalOptimizer = struct {
 
         self.do_trust_region_step = true;
         if (self.prng.random().float(f64) >= self.pure_random_probability) {
-            const pending_x: []const f64 = if (self.pool) |*pool| pool.scratch_pending_x[0 .. npending * dims] else &.{};
-            const pending_y: []const f64 = if (self.pool) |*pool| pool.scratch_pending_y[0..npending] else &.{};
             if (self.pickMaxUpperBound(pending_x, pending_y, x_out)) {
                 return .{ .move = .explore };
             }
@@ -443,20 +432,20 @@ pub const GlobalOptimizer = struct {
         return .{ .move = .random };
     }
 
-    /// Tell: incorporate an evaluated point produced by `move`, adapt the trust-region radius,
+    /// Complete one ask-tell transaction: incorporate the raw (caller-sign) objective value for a
+    /// point produced by `ask` and count the evaluation. Shared by `step()` and the pooled workers.
+    fn tell(self: *GlobalOptimizer, x: []const f64, y_raw: f64, a: Ask) !void {
+        try self.record(x, self.sign * y_raw, a);
+        self.evals += 1;
+    }
+
+    /// Tell: incorporate an evaluated point produced by `a.move`, adapt the trust-region radius,
     /// update the best. Only `.exploit` evaluations drive the radius adaptation.
-    fn record(
-        self: *GlobalOptimizer,
-        x: []const f64,
-        y_internal: f64,
-        move: Move,
-        predicted: f64,
-        anchor: f64,
-    ) !void {
+    fn record(self: *GlobalOptimizer, x: []const f64, y_internal: f64, a: Ask) !void {
         try self.upper_bound.add(x, y_internal);
 
-        if (move == .exploit and predicted != 0) {
-            const rho = (y_internal - anchor) / @abs(predicted);
+        if (a.move == .exploit and a.predicted != 0) {
+            const rho = (y_internal - a.anchor) / @abs(a.predicted);
             if (rho < 0.25) {
                 self.radius *= 0.5;
             } else if (rho > 0.75) {
@@ -465,7 +454,7 @@ pub const GlobalOptimizer = struct {
         }
 
         if (self.best_y == null or y_internal > self.best_y.?) {
-            if (move != .exploit and self.best_y != null and tr.dist(x, self.best_x) > self.radius * 1.001) {
+            if (a.move != .exploit and self.best_y != null and vec.dist(x, self.best_x) > self.radius * 1.001) {
                 self.radius = 0;
             }
             @memcpy(self.best_x, x);
@@ -508,26 +497,19 @@ pub const GlobalOptimizer = struct {
         const is_integer = vars.items(.is_integer);
         @memcpy(x_out, self.best_x);
 
-        // Active (continuous) dimensions only — integer variables are held at the best value.
-        var da: usize = 0;
-        for (0..dims) |k| {
-            if (!is_integer[k]) da += 1;
-        }
-        if (da == 0) return 0;
-
         defer _ = self.arena.reset(.retain_capacity);
         const a = self.arena.allocator();
 
-        const active = try a.alloc(usize, da);
-        {
-            var j: usize = 0;
-            for (0..dims) |k| {
-                if (!is_integer[k]) {
-                    active[j] = k;
-                    j += 1;
-                }
+        // Active (continuous) dimensions only — integer variables are held at the best value.
+        const active = try a.alloc(usize, dims);
+        var da: usize = 0;
+        for (0..dims) |k| {
+            if (!is_integer[k]) {
+                active[da] = k;
+                da += 1;
             }
         }
+        if (da == 0) return 0;
 
         const n = self.upper_bound.numPoints();
         const k_full = (da + 1) * (da + 2) / 2;
@@ -536,7 +518,7 @@ pub const GlobalOptimizer = struct {
         // N nearest neighbors of best_x (full-space distance squared).
         const DistIdx = struct { d: f64, idx: usize };
         const dists = try a.alloc(DistIdx, n);
-        for (0..n) |i| dists[i] = .{ .d = tr.distSq(self.best_x, self.upper_bound.pointX(i)), .idx = i };
+        for (0..n) |i| dists[i] = .{ .d = vec.distSq(self.best_x, self.upper_bound.pointX(i)), .idx = i };
         std.mem.sort(DistIdx, dists, {}, struct {
             fn lt(_: void, p: DistIdx, q: DistIdx) bool {
                 return p.d < q.d;
@@ -589,18 +571,14 @@ pub const GlobalOptimizer = struct {
         try tr.solveTrustRegionSubproblemBounded(a, bneg, gneg, self.radius, lo_rel, hi_rel, p, .{});
 
         // Never move more than the radius (guards against inaccurate sub-problem solves).
-        const pn = tr.norm(p);
-        if (pn >= self.radius and pn > 0) {
+        const pn = vec.norm(p);
+        if (pn >= self.radius) {
             const scale = self.radius / pn;
             for (0..da) |i| p[i] *= scale;
         }
 
         // predicted improvement of the model = Q(p) - Q(0).
-        var predicted: f64 = 0;
-        for (0..da) |i| {
-            predicted += g[i] * p[i];
-            for (0..da) |jj| predicted += 0.5 * p[i] * h[i * da + jj] * p[jj];
-        }
+        const predicted = tr.evalQuad(h, g, 0, da, p);
 
         // Reinsert active dims into the full candidate (integer dims keep best_x's value).
         for (0..da) |i| {
@@ -638,22 +616,22 @@ fn sampleInBox(buf: []f64, lower: []const f64, upper: []const f64, is_integer: [
 // One-shot convenience wrapper
 // ---------------------------------------------------------------------------------------
 
-/// Optimize `objective` over the given `variables` (one `Variable` per dimension) using up to `max_evals`
-/// function evaluations. `io` runs the evaluations (single-threaded inline, or parallel on a pooled
-/// `Io` when `options.max_concurrency > 1`). `options` is the same `GlobalOptimizer.Options` the struct
-/// API takes — pass `.min_default` or `.max_default` (or a full literal). The returned `Evaluation`
-/// owns its `x`; free it via `result.deinit(allocator)`.
+/// Optimize `objective` over the given `variables` (one `Variable` per dimension) until `stop` is
+/// hit (e.g. `.{ .max_evals = 100 }`). `io` runs the evaluations (single-threaded inline, or parallel
+/// on a pooled `Io` when `options.max_concurrency > 1`). `options` is the same `GlobalOptimizer.Options`
+/// the struct API takes — pass `.min_default` or `.max_default` (or a full literal). The returned
+/// `Evaluation` owns its `x`; free it via `result.deinit(allocator)`.
 pub fn findGlobalOptimum(
     io: Io,
     allocator: Allocator,
     objective: anytype,
     variables: []const GlobalOptimizer.Variable,
-    max_evals: usize,
+    stop: GlobalOptimizer.StopOptions,
     options: GlobalOptimizer.Options,
 ) !GlobalOptimizer.Evaluation {
     var opt = try GlobalOptimizer.init(allocator, variables, options);
     defer opt.deinit();
-    const b = try opt.optimize(io, objective, .{ .max_evals = max_evals });
+    const b = try opt.optimize(io, objective, stop);
     const x = try allocator.dupe(f64, b.x);
     return .{ .x = x, .y = b.y };
 }
@@ -685,7 +663,7 @@ test "findGlobalOptimum: shifted bowl (maximize)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const variables = box2(-2, 2);
-    var res = try findGlobalOptimum(io, allocator, negShiftedBowl, &variables, 80, .max_default);
+    var res = try findGlobalOptimum(io, allocator, negShiftedBowl, &variables, .{ .max_evals = 80 }, .max_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
@@ -696,7 +674,7 @@ test "findGlobalOptimum: shifted bowl (minimize)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const variables = box2(-2, 2);
-    var res = try findGlobalOptimum(io, allocator, shiftedBowl, &variables, 80, .min_default);
+    var res = try findGlobalOptimum(io, allocator, shiftedBowl, &variables, .{ .max_evals = 80 }, .min_default);
     defer res.deinit(allocator);
     try expectApproxEqAbs(@as(f64, 0.3), res.x[0], 1e-2);
     try expectApproxEqAbs(@as(f64, -0.4), res.x[1], 1e-2);
