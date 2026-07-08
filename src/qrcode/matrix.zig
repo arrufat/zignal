@@ -347,7 +347,7 @@ const DataIterator = struct {
     upward: bool,
     right: bool,
 
-    pub fn init(matrix: *const BitMatrix) DataIterator {
+    fn init(matrix: *const BitMatrix) DataIterator {
         return .{
             .m = matrix,
             .col = matrix.dim - 1,
@@ -357,7 +357,7 @@ const DataIterator = struct {
         };
     }
 
-    pub fn next(self: *DataIterator) ?Position {
+    fn next(self: *DataIterator) ?Position {
         while (self.col > 0) {
             const row: usize = @intCast(self.row);
             const col: usize = @intCast(if (self.right) self.col else self.col - 1);

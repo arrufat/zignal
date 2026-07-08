@@ -69,11 +69,11 @@ const BitWriter = struct {
     bytes: std.ArrayList(u8) = .empty,
     bit_len: usize = 0,
 
-    pub fn deinit(self: *BitWriter, allocator: Allocator) void {
+    fn deinit(self: *BitWriter, allocator: Allocator) void {
         self.bytes.deinit(allocator);
     }
 
-    pub fn writeBits(self: *BitWriter, allocator: Allocator, value: u32, count: u5) !void {
+    fn writeBits(self: *BitWriter, allocator: Allocator, value: u32, count: u5) !void {
         var i = count;
         while (i > 0) {
             i -= 1;
@@ -90,11 +90,11 @@ const BitReader = struct {
     bytes: []const u8,
     pos: usize = 0,
 
-    pub fn remaining(self: BitReader) usize {
+    fn remaining(self: BitReader) usize {
         return self.bytes.len * 8 - self.pos;
     }
 
-    pub fn readBits(self: *BitReader, count: u5) !u32 {
+    fn readBits(self: *BitReader, count: u5) !u32 {
         if (count > self.remaining()) return error.UnexpectedEndOfData;
         var value: u32 = 0;
         for (0..count) |_| {
