@@ -77,7 +77,7 @@ fn encode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
     }
     const to_file = options.output != null;
     const defaults = qrcode.EncodeOptions.default;
-    var image = try qrcode.encodeImage(gpa, positionals[0], .{
+    var image = try qrcode.encode(gpa, positionals[0], .{
         .ec_level = try parseEcLevel(options.ec_level),
         .version = options.symbol_version,
         // In the terminal, one pixel per module maps to one character cell.
@@ -115,10 +115,8 @@ fn decode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
 fn decodeImage(io: Io, writer: *Io.Writer, gpa: Allocator, path: []const u8, is_batch: bool) !void {
     var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
     defer image.deinit(gpa);
-    var gray = try image.convert(gpa, u8);
-    defer gray.deinit(gpa);
 
-    var result = (try qrcode.decode(gpa, gray)) orelse return error.NoQrCodeFound;
+    var result = (try qrcode.decode(gpa, image)) orelse return error.NoQrCodeFound;
     defer result.deinit(gpa);
     std.log.info("{s}: version {d}, level {t}, {d} corrected codewords", .{
         path, result.version, result.ec_level, result.corrected_errors,

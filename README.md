@@ -8,7 +8,7 @@ Zignal is a zero-dependency image processing library inspired by [dlib](https://
 ## Features
 
 - **Core Math:** Matrices (`SMatrix`, `Matrix`, SVD), PCA, ND Geometry (SIMD Points, affine/projective transforms, convex hull), Statistics, Optimization.
-- **Computer Vision:** Feature detection and matching (FAST, ORB), Edge detection (Shen-Castan), Hough Transform, Feature Distribution Matching (style transfer).
+- **Computer Vision:** Feature detection and matching (FAST, ORB), Edge detection (Shen-Castan), Hough Transform, QR code encoding and decoding, Feature Distribution Matching (style transfer).
 - **Image Processing:** Spatial transforms (resize, crop, rotate), morphology, convolution filters (blur, sharpen), thresholding, advanced Color Spaces (Lab, Oklab, Oklch, Xyb, Lms, etc.), Perlin noise generation.
 - **I/O & Graphics:** Pure-Zig PNG/JPEG codecs, Canvas API (antialiasing, Bézier curves), Bitmap/PCF Fonts, Colormaps, Terminal graphics (Kitty/Sixel).
 - **Platform Support:** Native Zig, first-class Python bindings, and WASM compilation for the web.
@@ -68,6 +68,7 @@ zig-out/bin/zignal <command> [options]
 - `resize` - Resize images with various filters
 - `tile` - Combine multiple images into a grid
 - `fdm` - Apply style transfer (Feature Distribution Matching)
+- `qr` - Encode text as QR codes or decode them from images
 - `info` - Show image metadata
 
 ## Examples
@@ -85,6 +86,7 @@ zig-out/bin/zignal <command> [options]
 - [Hough transform animation](https://arrufat.github.io/zignal/examples/hough-animation.html) - Real-time visualization of line detection
 - [Metrics analyzer](https://arrufat.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
 - [Global optimization](https://arrufat.github.io/zignal/examples/global-optimization.html) - Type a JavaScript function and watch the MaxLIPO+TR optimizer search for its optimum
+- [QR code](https://arrufat.github.io/zignal/examples/qrcode.html) - Encode text into QR codes and decode them from your camera or images
 
 
 ## Sponsors

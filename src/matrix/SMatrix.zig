@@ -722,6 +722,44 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
             return ans;
         }
 
+        /// Solves the linear system self * x = b by Gauss-Jordan elimination
+        /// with partial pivoting. Returns null when the system is singular
+        /// relative to its scale.
+        pub fn solve(self: Self, b: SMatrix(T, rows, 1)) ?SMatrix(T, rows, 1) {
+            comptime assert(@typeInfo(T) == .float);
+            comptime assert(rows == cols);
+            // Augmented [A | b].
+            var a: [rows][cols + 1]T = undefined;
+            var max_entry: T = 0;
+            for (0..rows) |r| {
+                for (0..cols) |c| {
+                    a[r][c] = self.items[r][c];
+                    max_entry = @max(max_entry, @abs(a[r][c]));
+                }
+                a[r][cols] = b.items[r][0];
+            }
+            if (max_entry == 0) return null;
+            // Degeneracy threshold relative to the system's scale.
+            const tolerance = max_entry * std.math.floatEps(T) * 100;
+            for (0..rows) |c| {
+                var pivot = c;
+                for (c + 1..rows) |r| {
+                    if (@abs(a[r][c]) > @abs(a[pivot][c])) pivot = r;
+                }
+                if (@abs(a[pivot][c]) < tolerance) return null;
+                std.mem.swap([cols + 1]T, &a[c], &a[pivot]);
+                for (0..rows) |r| {
+                    if (r == c) continue;
+                    const factor = a[r][c] / a[c][c];
+                    if (factor == 0) continue;
+                    for (c..cols + 1) |k| a[r][k] -= factor * a[c][k];
+                }
+            }
+            var x: SMatrix(T, rows, 1) = undefined;
+            for (0..rows) |i| x.items[i][0] = a[i][cols] / a[i][i];
+            return x;
+        }
+
         /// Computes the Cholesky decomposition of a symmetric positive-definite matrix.
         /// Returns L such that A = L * L^T where L is lower triangular.
         pub fn chol(self: Self) !SMatrix(T, rows, cols) {
@@ -934,6 +972,29 @@ test "SMatrix inverse" {
     b_i.at(2, 1).* = -1.0 / 3.0;
     b_i.at(2, 2).* = 1.0 / 12.0;
     try expectEqualDeep(b.inv().?, b_i);
+}
+
+test "SMatrix solve" {
+    // A well-conditioned 4x4 system with a known solution.
+    const a: SMatrix(f64, 4, 4) = .init(.{
+        .{ 4, 1, 0, 2 },
+        .{ 1, 5, 1, 0 },
+        .{ 0, 1, 6, 1 },
+        .{ 2, 0, 1, 7 },
+    });
+    const expected: SMatrix(f64, 4, 1) = .init(.{ .{1}, .{-2}, .{3}, .{-4} });
+    const b = a.dot(expected);
+    const x = a.solve(b) orelse return error.TestUnexpectedResult;
+    for (0..4) |i| {
+        try expectApproxEqAbs(expected.items[i][0], x.items[i][0], 1e-12);
+    }
+
+    // Singular systems (dependent rows, all zeros) return null.
+    const singular: SMatrix(f64, 2, 2) = .init(.{ .{ 1, 2 }, .{ 2, 4 } });
+    const rhs: SMatrix(f64, 2, 1) = .init(.{ .{1}, .{2} });
+    try expectEqual(@as(?SMatrix(f64, 2, 1), null), singular.solve(rhs));
+    const zero: SMatrix(f64, 2, 2) = .initAll(0);
+    try expectEqual(@as(?SMatrix(f64, 2, 1), null), zero.solve(rhs));
 }
 
 test "SMatrix row and column extraction" {
