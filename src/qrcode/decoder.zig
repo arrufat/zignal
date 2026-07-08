@@ -35,7 +35,7 @@ pub const DecodeResult = struct {
 /// Decodes a sampled module matrix in place (the matrix is unmasked during
 /// decoding). The matrix must have been created with BitMatrix.init so its
 /// function map matches its version.
-pub fn decodeMatrix(allocator: Allocator, m: *BitMatrix) !DecodeResult {
+fn decodeMatrix(allocator: Allocator, m: *BitMatrix) !DecodeResult {
     const format = readFormat(m) orelse return error.InvalidFormat;
     m.applyMask(format.mask);
 
@@ -207,7 +207,7 @@ test "matrix roundtrip across versions, levels, and modes" {
                     };
                 }
 
-                var m = try encoder.encode(allocator, data, .{ .ec_level = level, .version = version });
+                var m = try encoder.encodeMatrix(allocator, data, .{ .ec_level = level, .version = version });
                 defer m.deinit(allocator);
                 var result = try decodeMatrix(allocator, &m);
                 defer result.deinit(allocator);
@@ -228,7 +228,7 @@ test "decoding survives codeword damage up to capacity" {
     // Version 5-Q exercises the two-group block structure. Consecutive
     // interleaved codewords belong to different blocks, so corrupting the
     // first num_blocks * t codewords damages exactly t per block.
-    var m = try encoder.encode(allocator, "DAMAGE RESISTANCE TEST 123", .{
+    var m = try encoder.encodeMatrix(allocator, "DAMAGE RESISTANCE TEST 123", .{
         .ec_level = .quartile,
         .version = 5,
     });
@@ -253,7 +253,7 @@ test "decoding survives codeword damage up to capacity" {
 
 test "format info damage up to 3 bits is corrected" {
     const allocator = std.testing.allocator;
-    var m = try encoder.encode(allocator, "FORMAT DAMAGE", .{ .ec_level = .high });
+    var m = try encoder.encodeMatrix(allocator, "FORMAT DAMAGE", .{ .ec_level = .high });
     defer m.deinit(allocator);
     // Corrupt 3 bits of the first format copy.
     for ([_]matrix_mod.Position{
@@ -270,7 +270,7 @@ test "format info damage up to 3 bits is corrected" {
 
 test "decodeModules recovers every orientation" {
     const allocator = std.testing.allocator;
-    var m = try encoder.encode(allocator, "ORIENTATION", .{});
+    var m = try encoder.encodeMatrix(allocator, "ORIENTATION", .{});
     defer m.deinit(allocator);
 
     var transformed = try BitMatrix.init(allocator, m.version);
@@ -285,7 +285,7 @@ test "decodeModules recovers every orientation" {
 
 test "readVersion through all orientations" {
     const allocator = std.testing.allocator;
-    var m = try encoder.encode(allocator, "VERSION INFO", .{ .version = 9 });
+    var m = try encoder.encodeMatrix(allocator, "VERSION INFO", .{ .version = 9 });
     defer m.deinit(allocator);
     var transformed = try BitMatrix.init(allocator, m.version);
     defer transformed.deinit(allocator);

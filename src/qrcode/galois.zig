@@ -4,7 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 /// Number of non-zero field elements.
-pub const order = 255;
+const order = 255;
 
 const tables = blk: {
     @setEvalBranchQuota(10_000);

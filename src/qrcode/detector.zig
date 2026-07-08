@@ -43,9 +43,18 @@ const min_side_modules = 10;
 const alignment_run_tolerance = 0.6;
 const alignment_run_limit = 1.6;
 
-/// Locates a QR code in a grayscale image (clean or photographed) and decodes
-/// it. Returns null when no decodable QR code is found. Caller owns result.data.
-pub fn decode(allocator: Allocator, image: Image(u8)) !?DecodeResult {
+/// Locates a QR code in an image (clean or photographed) and decodes it.
+/// Accepts an Image of any pixel type; color images are converted to
+/// grayscale internally. Returns null when no decodable QR code is found.
+/// Caller owns result.data.
+pub fn decode(allocator: Allocator, image: anytype) !?DecodeResult {
+    if (@TypeOf(image) == Image(u8)) return decodeGray(allocator, image);
+    var gray = try image.convert(allocator, u8);
+    defer gray.deinit(allocator);
+    return decodeGray(allocator, gray);
+}
+
+fn decodeGray(allocator: Allocator, image: Image(u8)) !?DecodeResult {
     if (image.rows < 21 or image.cols < 21) return null;
 
     var binary = try Image(u8).initLike(allocator, image);
@@ -722,7 +731,7 @@ test "image roundtrip across module sizes and quiet zones" {
         .{ .module_size = 8, .quiet_zone = 0 },
     };
     for (cases) |c| {
-        var image = try encoder.encodeImage(allocator, "https://github.com/arrufat/zignal", .{
+        var image = try encoder.encode(allocator, "https://github.com/arrufat/zignal", .{
             .module_size = c.module_size,
             .quiet_zone = c.quiet_zone,
         });
@@ -737,6 +746,18 @@ test "image roundtrip across module sizes and quiet zones" {
         try std.testing.expectApproxEqAbs(origin, corners[0].x(), tolerance);
         try std.testing.expectApproxEqAbs(origin, corners[0].y(), tolerance);
     }
+}
+
+test "decode accepts color images" {
+    const Rgba = @import("../color.zig").Rgba(u8);
+    const allocator = std.testing.allocator;
+    var clean = try encoder.encode(allocator, "COLOR INPUT", .{ .module_size = 4 });
+    defer clean.deinit(allocator);
+    var rgba = try clean.convert(allocator, Rgba);
+    defer rgba.deinit(allocator);
+    var result = (try decode(allocator, rgba)) orelse return error.TestUnexpectedResult;
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, "COLOR INPUT", result.data);
 }
 
 test "decode returns null on blank and noise images" {
@@ -757,7 +778,7 @@ test "decode returns null on blank and noise images" {
 
 test "decode rotated 30 degrees" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "ROTATED THIRTY", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "ROTATED THIRTY", .{ .module_size = 6 });
     defer clean.deinit(allocator);
 
     // Rotate the source square around the canvas center.
@@ -793,7 +814,7 @@ test "decode under perspective distortion" {
         .{ .data = "PERSPECTIVE VERSION SEVEN WITH LONGER PAYLOAD FOR SIZE", .version = 7 },
     };
     for (payloads) |payload| {
-        var clean = try encoder.encodeImage(allocator, payload.data, .{
+        var clean = try encoder.encode(allocator, payload.data, .{
             .module_size = 8,
             .version = payload.version,
         });
@@ -817,7 +838,7 @@ test "decode under perspective distortion" {
 
 test "decode mirrored perspective" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "MIRRORED", .{ .module_size = 8, .version = 2 });
+    var clean = try encoder.encode(allocator, "MIRRORED", .{ .module_size = 8, .version = 2 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     // Swap left and right destination corners to mirror the symbol.
@@ -837,7 +858,7 @@ test "decode mirrored perspective" {
 
 test "decode under uneven lighting" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "UNEVEN LIGHTING", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "UNEVEN LIGHTING", .{ .module_size = 6 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     // Straight-on, but with a strong brightness ramp plus perlin shading:
@@ -860,7 +881,7 @@ test "decode under uneven lighting" {
 
 test "decode under blur and noise" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "BLUR AND NOISE", .{ .module_size = 6 });
+    var clean = try encoder.encode(allocator, "BLUR AND NOISE", .{ .module_size = 6 });
     defer clean.deinit(allocator);
     const side: f32 = @floatFromInt(clean.cols);
     var photo = try photoSimulate(allocator, clean, .{
@@ -883,7 +904,7 @@ test "decode combined photo distortions" {
     const allocator = std.testing.allocator;
     const versions = [_]?u8{ 1, 4, 10 }; // v1 exercises the parallelogram fallback
     for (versions) |version| {
-        var clean = try encoder.encodeImage(allocator, "COMBINED PHOTO", .{
+        var clean = try encoder.encode(allocator, "COMBINED PHOTO", .{
             .module_size = 8,
             .version = version,
         });
@@ -913,7 +934,7 @@ test "decode combined photo distortions" {
 
 test "decode version 40 at three pixels per module" {
     const allocator = std.testing.allocator;
-    var clean = try encoder.encodeImage(allocator, "V40 SUBPIXEL BUDGET CANARY", .{
+    var clean = try encoder.encode(allocator, "V40 SUBPIXEL BUDGET CANARY", .{
         .module_size = 3,
         .version = 40,
     });
@@ -961,13 +982,13 @@ test "alignment pattern search on a rendered symbol" {
     const allocator = std.testing.allocator;
     const ms = 6;
     const qz = 4;
-    var image = try encoder.encodeImage(allocator, "ALIGNMENT", .{
+    var image = try encoder.encode(allocator, "ALIGNMENT", .{
         .module_size = ms,
         .quiet_zone = qz,
         .version = 2,
     });
     defer image.deinit(allocator);
-    // encodeImage emits 0/255, which is already binarized.
+    // encode emits 0/255, which is already binarized.
     const center = struct {
         fn center(module: f32) f32 {
             return (qz + module) * ms;

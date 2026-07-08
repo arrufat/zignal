@@ -17,17 +17,17 @@ pub const EncodeOptions = struct {
     version: ?u8 = null,
     /// Mask pattern; null selects the best-scoring one.
     mask: ?u3 = null,
-    /// Pixels per module; used only when rendering via encodeImage.
+    /// Pixels per module; used only when rendering via encode.
     module_size: u32 = 8,
     /// Light border around the symbol, in modules (the spec requires 4);
-    /// used only when rendering via encodeImage.
+    /// used only when rendering via encode.
     quiet_zone: u32 = 4,
 
     pub const default: EncodeOptions = .{};
 };
 
 /// Encodes data into a QR module matrix. Caller owns the returned matrix.
-pub fn encode(allocator: Allocator, data: []const u8, options: EncodeOptions) !BitMatrix {
+pub fn encodeMatrix(allocator: Allocator, data: []const u8, options: EncodeOptions) !BitMatrix {
     const mode = segment.detectMode(data);
     const level = options.ec_level;
     const version = options.version orelse try segment.fitVersion(mode, level, data.len);
@@ -95,7 +95,7 @@ fn interleave(allocator: Allocator, data: []const u8, blocks: tables.EcBlocks) !
 }
 
 /// Renders a module matrix as a grayscale image (dark modules are 0).
-pub fn toImage(allocator: Allocator, m: BitMatrix, module_size: u32, quiet_zone: u32) !Image(u8) {
+fn toImage(allocator: Allocator, m: BitMatrix, module_size: u32, quiet_zone: u32) !Image(u8) {
     if (module_size == 0) return error.InvalidModuleSize;
     const size = (@as(u32, m.dim) + 2 * quiet_zone) * module_size;
     var image = try Image(u8).init(allocator, size, size);
@@ -115,8 +115,8 @@ pub fn toImage(allocator: Allocator, m: BitMatrix, module_size: u32, quiet_zone:
 }
 
 /// Encodes data straight to a grayscale image. Caller owns the image.
-pub fn encodeImage(allocator: Allocator, data: []const u8, options: EncodeOptions) !Image(u8) {
-    var m = try encode(allocator, data, options);
+pub fn encode(allocator: Allocator, data: []const u8, options: EncodeOptions) !Image(u8) {
+    var m = try encodeMatrix(allocator, data, options);
     defer m.deinit(allocator);
     return toImage(allocator, m, options.module_size, options.quiet_zone);
 }
@@ -148,15 +148,15 @@ test "interleaving order with two groups" {
     try std.testing.expectEqual(@as(u8, 61), data_part[data_len - 1]); // last of block 4
 }
 
-test "encode produces a valid version 1 matrix" {
-    var m = try encode(std.testing.allocator, "HELLO WORLD", .{ .ec_level = .quartile });
+test "encodeMatrix produces a valid version 1 matrix" {
+    var m = try encodeMatrix(std.testing.allocator, "HELLO WORLD", .{ .ec_level = .quartile });
     defer m.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u8, 1), m.version);
     try std.testing.expectEqual(@as(u16, 21), m.dim);
 }
 
-test "encodeImage dimensions" {
-    var image = try encodeImage(std.testing.allocator, "hello", .{ .module_size = 2, .quiet_zone = 4 });
+test "encode dimensions" {
+    var image = try encode(std.testing.allocator, "hello", .{ .module_size = 2, .quiet_zone = 4 });
     defer image.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u32, (21 + 8) * 2), image.rows);
     try std.testing.expectEqual(image.rows, image.cols);

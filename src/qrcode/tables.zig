@@ -12,7 +12,7 @@ pub const EcLevel = enum(u2) {
     high,
 
     /// The two-bit indicator used in the format information.
-    pub fn formatBits(self: EcLevel) u2 {
+    fn formatBits(self: EcLevel) u2 {
         return switch (self) {
             .low => 0b01,
             .medium => 0b00,
@@ -49,7 +49,7 @@ pub const EcBlocks = struct {
     group1_data: u8,
     group2_blocks: u8,
 
-    pub fn group2Data(self: EcBlocks) u8 {
+    fn group2Data(self: EcBlocks) u8 {
         return self.group1_data + 1;
     }
 

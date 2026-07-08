@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 const gf = @import("galois.zig");
 
 /// Maximum number of error correction codewords per block in a QR code.
-pub const max_ecc_len = 30;
+const max_ecc_len = 30;
 
 /// Generator polynomials for every degree up to max_ecc_len, highest-degree
 /// coefficient first (monic, so [degree][0] == 1). Each row multiplies the

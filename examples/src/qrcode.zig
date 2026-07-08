@@ -42,7 +42,7 @@ pub export fn qr_encode(
     out_ptr: [*]Rgba,
     out_capacity: usize,
 ) i32 {
-    var image = qrcode.encodeImage(allocator, text_ptr[0..text_len], .{
+    var image = qrcode.encode(allocator, text_ptr[0..text_len], .{
         .ec_level = @enumFromInt(@min(ec_level, 3)),
         .module_size = 1,
     }) catch |err| switch (err) {
@@ -74,10 +74,8 @@ pub export fn qr_decode(
 ) i32 {
     const size = @as(usize, rows) * cols;
     const rgba: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0..size]);
-    var gray = rgba.convert(allocator, u8) catch return -1;
-    defer gray.deinit(allocator);
 
-    var result = (qrcode.decode(allocator, gray) catch |err| {
+    var result = (qrcode.decode(allocator, rgba) catch |err| {
         std.log.err("qr_decode: {s}", .{@errorName(err)});
         return -1;
     }) orelse return 0;
