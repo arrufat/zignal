@@ -64,10 +64,10 @@ pub fn solveAssignmentProblem(
             // so accumulated u/v potentials and padding_value can't overflow. `+ 1` guards num_elements == 0.
             const precision_range = 1e12;
             const max_total = 4e18;
-            const num_elements: f64 = @floatFromInt(n_rows * n_cols);
+            const num_elements: f64 = n_rows * n_cols;
             scale_factor = @min(precision_range, max_total / (num_elements + 1.0)) / max_abs;
         }
-        padding_value = @as(i64, @intFromFloat(@ceil(sum_abs * scale_factor))) + 1;
+        padding_value = @as(i64, @ceil(sum_abs * scale_factor)) + 1;
     } else {
         var sum_abs: u64 = 0;
         for (cost_matrix.items) |val_raw| {
@@ -90,15 +90,13 @@ pub fn solveAssignmentProblem(
     const row_covered = try aa.alloc(bool, n);
     const col_covered = try aa.alloc(bool, n);
 
+    const sign: f64 = @floatFromInt(multiplier);
     for (0..n) |i| {
         for (0..n) |j| {
             if (i < n_rows and j < n_cols) {
                 const base_val = cost_matrix.at(i, j).*;
                 work[i * n + j] = switch (@typeInfo(T)) {
-                    .float => blk: {
-                        const scaled = as(f64, base_val) * @as(f64, @floatFromInt(multiplier)) * scale_factor;
-                        break :blk @round(scaled);
-                    },
+                    .float => @round(as(f64, base_val) * sign * scale_factor),
                     .int => @as(i64, base_val) * multiplier,
                     else => @compileError("Unsupported type for cost matrix"),
                 };
@@ -108,10 +106,7 @@ pub fn solveAssignmentProblem(
         }
     }
     for (0..n) |i| {
-        var min_val = work[i * n];
-        for (0..n) |j| {
-            min_val = @min(min_val, work[i * n + j]);
-        }
+        const min_val = std.mem.min(i64, work[i * n ..][0..n]);
         if (min_val != 0) {
             for (0..n) |j| {
                 work[i * n + j] -= min_val;
@@ -187,21 +182,15 @@ pub fn solveAssignmentProblem(
     var total_cost: f64 = 0;
     var result_assignments = try allocator.alloc(?u32, n_rows);
     for (0..n_rows) |i| {
-        if (row_assignment[i]) |col| {
-            if (col < n_cols) {
-                result_assignments[i] = col;
-                // Use original cost matrix values (not the multiplied work matrix)
-                const cost_val = cost_matrix.at(i, col).*;
-                total_cost += as(f64, cost_val);
-            } else {
-                result_assignments[i] = null;
-            }
-        } else {
-            result_assignments[i] = null;
-        }
+        result_assignments[i] = null;
+        if (row_assignment[i]) |col| if (col < n_cols) {
+            result_assignments[i] = col;
+            // Use original cost matrix values (not the multiplied work matrix)
+            total_cost += as(f64, cost_matrix.at(i, col).*);
+        };
     }
 
-    return Assignment{
+    return .{
         .assignments = result_assignments,
         .total_cost = total_cost,
         .allocator = allocator,
