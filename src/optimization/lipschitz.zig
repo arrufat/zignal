@@ -17,7 +17,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const VarStats = @import("../stats.zig").RunningStats(f64, .variance);
-const tr = @import("trust_region.zig");
+const vec = @import("vec.zig");
 
 pub const UpperBound = struct {
     allocator: Allocator,
@@ -25,13 +25,11 @@ pub const UpperBound = struct {
     relative_noise_magnitude: f64,
     solver_eps: f64,
 
-    npoints: usize = 0,
-    capacity: usize = 0,
-    xs: []f64 = &.{}, // flat capacity*dims, row-major (point i at xs[i*dims ..][0..dims])
-    ys: []f64 = &.{},
+    xs: std.ArrayList(f64) = .empty, // flat n*dims, row-major (point i at xs.items[i*dims ..][0..dims])
+    ys: std.ArrayList(f64) = .empty,
 
     slopes: []f64, // length dims (>= 0)
-    offsets: []f64 = &.{}, // length capacity (>= 0)
+    offsets: std.ArrayList(f64) = .empty, // length n (>= 0)
 
     x_stats: []VarStats = &.{},
     x_stats_prev: []VarStats = &.{}, // scratch for the add() rollback snapshot
@@ -42,7 +40,7 @@ pub const UpperBound = struct {
     // QP dual variables, persisted across refits to warm-start the dual coordinate descent. Indexed
     // by the n-independent pair index j*(j-1)/2 + i, so an entry keeps referring to the same pair as
     // points accumulate (new pairs only ever append at the tail).
-    alpha: []f64 = &.{},
+    alpha: std.ArrayList(f64) = .empty,
     /// DCD sweeps the last refit needed (diagnostic; stays small thanks to warm-starting).
     last_sweeps: usize = 0,
 
@@ -69,51 +67,45 @@ pub const UpperBound = struct {
             .slopes = slopes,
             .x_stats = x_stats,
             .x_stats_prev = x_stats_prev,
-            .y_stats = .init(),
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
     pub fn deinit(self: *UpperBound) void {
-        self.allocator.free(self.xs);
-        self.allocator.free(self.ys);
+        self.xs.deinit(self.allocator);
+        self.ys.deinit(self.allocator);
         self.allocator.free(self.slopes);
-        self.allocator.free(self.offsets);
-        self.allocator.free(self.alpha);
+        self.offsets.deinit(self.allocator);
+        self.alpha.deinit(self.allocator);
         self.allocator.free(self.x_stats);
         self.allocator.free(self.x_stats_prev);
         self.arena.deinit();
     }
 
     pub fn numPoints(self: *const UpperBound) usize {
-        return self.npoints;
+        return self.ys.items.len;
     }
 
     pub fn pointX(self: *const UpperBound, i: usize) []const f64 {
-        return self.xs[i * self.dims ..][0..self.dims];
+        return self.xs.items[i * self.dims ..][0..self.dims];
     }
 
     pub fn pointY(self: *const UpperBound, i: usize) f64 {
-        return self.ys[i];
+        return self.ys.items[i];
     }
 
     /// Append an observed point and refit the surrogate (once there are >= 2 points).
     pub fn add(self: *UpperBound, x: []const f64, y: f64) !void {
         std.debug.assert(x.len == self.dims);
-        const n = self.npoints;
-        if (n >= self.capacity) {
-            const new_cap = if (self.capacity == 0) 8 else self.capacity * 2;
-            self.xs = try self.allocator.realloc(self.xs, new_cap * self.dims);
-            self.ys = try self.allocator.realloc(self.ys, new_cap);
-            self.offsets = try self.allocator.realloc(self.offsets, new_cap);
-            self.capacity = new_cap;
-        }
-        @memcpy(self.xs[n * self.dims ..][0..self.dims], x);
-        self.ys[n] = y;
-        self.offsets[n] = 0;
-        self.npoints = n + 1;
-        // A failed refit must not leave npoints or the running stats ahead of the fitted parameters.
-        errdefer self.npoints = n;
+        const n = self.numPoints();
+        try self.xs.appendSlice(self.allocator, x);
+        // A failed append or refit must not leave the point set or the running stats ahead of the
+        // fitted parameters.
+        errdefer self.xs.shrinkRetainingCapacity(n * self.dims);
+        try self.ys.append(self.allocator, y);
+        errdefer self.ys.shrinkRetainingCapacity(n);
+        try self.offsets.append(self.allocator, 0);
+        errdefer self.offsets.shrinkRetainingCapacity(n);
 
         const y_stats_prev = self.y_stats;
         @memcpy(self.x_stats_prev, self.x_stats);
@@ -125,33 +117,31 @@ pub const UpperBound = struct {
         for (0..self.dims) |k| self.x_stats[k].add(x[k]);
         self.y_stats.add(y);
 
-        if (self.npoints >= 2) try self.learnParams();
+        if (self.numPoints() >= 2) try self.learnParams();
     }
 
-    /// The bound a single point `(xi, y)` contributes at `x`: `y + sqrt(max(0, base + Σ slopes·d²))`.
+    /// The bound a single point `(xi, y)` contributes at `x`: `y + sqrt(base + Σ slopes·d²)`.
     /// `base` is the point's noise offset for stored points, or 0 for imputed in-flight ones.
     fn pointBound(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64, current_best: f64) f64 {
-        var s = base;
         if (y >= current_best) return y;
         const diff_limit = current_best - y;
         const s_limit = diff_limit * diff_limit;
 
+        var s = base;
         for (0..self.dims) |k| {
             const d = x[k] - xi[k];
             s += self.slopes[k] * d * d;
             if (s >= s_limit) return current_best;
         }
-        return y + @sqrt(@max(0.0, s));
+        return y + @sqrt(s);
     }
 
     /// Evaluate the upper bound at x. Requires at least one point (with a single point the bound is
     /// simply that point's value, since the slopes are still zero).
     pub fn evaluate(self: *const UpperBound, x: []const f64) f64 {
         var ub: f64 = std.math.inf(f64);
-        const dims = self.dims;
-        for (0..self.npoints) |i| {
-            const xi = self.xs[i * dims ..][0..dims];
-            ub = @min(ub, self.pointBound(x, xi, self.ys[i], self.offsets[i], ub));
+        for (0..self.numPoints()) |i| {
+            ub = @min(ub, self.pointBound(x, self.pointX(i), self.pointY(i), self.offsets.items[i], ub));
         }
         return ub;
     }
@@ -160,15 +150,13 @@ pub const UpperBound = struct {
     /// value for an in-flight ("pending") point so concurrent asks don't collapse onto it. Returns 0
     /// when there are no points yet.
     pub fn nearestY(self: *const UpperBound, x: []const f64) f64 {
-        const dims = self.dims;
         var best_d: f64 = std.math.inf(f64);
         var best_y: f64 = 0;
-        for (0..self.npoints) |i| {
-            const xi = self.xs[i * dims ..][0..dims];
-            const s = tr.distSq(x, xi);
+        for (0..self.numPoints()) |i| {
+            const s = vec.distSq(x, self.pointX(i));
             if (s < best_d) {
                 best_d = s;
-                best_y = self.ys[i];
+                best_y = self.pointY(i);
             }
         }
         return best_y;
@@ -195,7 +183,9 @@ pub const UpperBound = struct {
     }
 
     fn learnParams(self: *UpperBound) !void {
+        const n = self.numPoints();
         const dims = self.dims;
+        const rnm = self.relative_noise_magnitude;
 
         defer _ = self.arena.reset(.retain_capacity);
         const a = self.arena.allocator();
@@ -209,14 +199,6 @@ pub const UpperBound = struct {
             const x_std = self.x_stats[k].stdDev();
             xscale[k] = if (x_std > 0) 1.0 / (x_std * yscale) else 0;
         }
-
-        try self.solveAndStore(a, xscale, yscale);
-    }
-
-    fn solveAndStore(self: *UpperBound, a: Allocator, xscale: []const f64, yscale: f64) !void {
-        const n = self.npoints;
-        const dims = self.dims;
-        const rnm = self.relative_noise_magnitude;
 
         const npairs = n * (n - 1) / 2;
         // Sparse constraints: dmat[p][k] = (dx_k * xscale_k * yscale)^2; one noise term at
@@ -233,13 +215,13 @@ pub const UpperBound = struct {
             for (0..j) |i| {
                 var q: f64 = 0;
                 for (0..dims) |k| {
-                    const dx = (self.xs[i * dims + k] - self.xs[j * dims + k]) * xscale[k] * yscale;
+                    const dx = (self.xs.items[i * dims + k] - self.xs.items[j * dims + k]) * xscale[k] * yscale;
                     const dk = dx * dx;
                     dmat[p * dims + k] = dk;
                     q += dk * dk;
                 }
-                noise_idx[p] = if (self.ys[i] > self.ys[j]) j else i;
-                const diff = (self.ys[i] - self.ys[j]) * yscale;
+                noise_idx[p] = if (self.ys.items[i] > self.ys.items[j]) j else i;
+                const diff = (self.ys.items[i] - self.ys.items[j]) * yscale;
                 cvec[p] = diff * diff;
                 qnn[p] = q + rnm * rnm;
                 p += 1;
@@ -247,10 +229,10 @@ pub const UpperBound = struct {
         }
 
         // Warm-start: keep dual variables for pre-existing pairs, zero only the newly appended tail.
-        const old_len = self.alpha.len;
-        self.alpha = try self.allocator.realloc(self.alpha, npairs);
-        if (npairs > old_len) @memset(self.alpha[old_len..], 0);
-        const alpha = self.alpha;
+        const old_len = self.alpha.items.len;
+        try self.alpha.resize(self.allocator, npairs);
+        @memset(self.alpha.items[old_len..], 0);
+        const alpha = self.alpha.items;
 
         // --- dual coordinate descent: max_{alpha>=0} sum alpha*c - 0.5||u||^2, u = sum alpha*a ---
         // Rebuild u under the current normalization from the (warm) dual variables.
@@ -293,7 +275,7 @@ pub const UpperBound = struct {
 
         // --- recover slopes/offsets in original space (offsets already sized to n by add) ---
         for (0..dims) |k| self.slopes[k] = u[k] * xscale[k] * xscale[k];
-        for (0..n) |i| self.offsets[i] = u[dims + i] * rnm;
+        for (0..n) |i| self.offsets.items[i] = u[dims + i] * rnm;
     }
 };
 

@@ -13,33 +13,8 @@ const Allocator = std.mem.Allocator;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const Matrix = @import("../matrix.zig").Matrix;
-
-// ---------------------------------------------------------------------------------------
-// Small vector helpers (on []f64)
-// ---------------------------------------------------------------------------------------
-
-pub fn dot(a: []const f64, b: []const f64) f64 {
-    var s: f64 = 0;
-    for (a, b) |x, y| s += x * y;
-    return s;
-}
-
-pub fn norm(a: []const f64) f64 {
-    return @sqrt(dot(a, a));
-}
-
-pub fn distSq(a: []const f64, b: []const f64) f64 {
-    var s: f64 = 0;
-    for (a, b) |x, y| {
-        const d = x - y;
-        s += d * d;
-    }
-    return s;
-}
-
-pub fn dist(a: []const f64, b: []const f64) f64 {
-    return @sqrt(distSq(a, b));
-}
+const vec = @import("vec.zig");
+const norm = vec.norm;
 
 // ---------------------------------------------------------------------------------------
 // Dense linear-algebra helpers (row-major n*n in []f64)
@@ -65,7 +40,7 @@ fn cholInPlace(a: []f64, n: usize) bool {
 }
 
 /// Solve L*y = b (forward substitution), L lower-triangular (only lower triangle of `l` read).
-pub fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
+fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
     const n = y.len;
     for (0..n) |i| {
         var s = b[i];
@@ -74,8 +49,8 @@ pub fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
     }
 }
 
-/// Solve L^T*x = y (back substitution), L lower-triangular (L^T is upper).
-pub fn solveLowerT(l: []const f64, y: []const f64, x: []f64) void {
+/// Solve L^T*x = y (back substitution), L lower-triangular (L^T is upper). Safe in place (x = y).
+fn solveLowerT(l: []const f64, y: []const f64, x: []f64) void {
     const n = x.len;
     var i: usize = n;
     while (i > 0) {
@@ -98,7 +73,7 @@ pub const TrustRegionOptions = struct {
     /// Max Newton iterations before falling back to the eigenvalue "hard case".
     max_iter: usize = 500,
 
-    pub const default: TrustRegionOptions = .{ .eps = 1e-3, .max_iter = 500 };
+    pub const default: TrustRegionOptions = .{};
 };
 
 /// Solve   minimize  0.5*p^T B p + g^T p   subject to ||p|| <= radius.
@@ -135,7 +110,7 @@ pub fn solveTrustRegionSubproblem(
     const g_norm = norm(g);
 
     var lambda_min: f64 = 0;
-    var lambda_max: f64 = std.math.clamp(g_norm / radius - bb_min_eig, 0, std.math.floatMax(f64));
+    var lambda_max: f64 = @max(g_norm / radius - bb_min_eig, 0);
 
     // Minimum is at 0.
     if (g_norm < numeric_eps and bb_min_eig > numeric_eps) return;
@@ -167,9 +142,7 @@ pub fn solveTrustRegionSubproblem(
         for (0..n) |k| neg_g[k] = -g[k];
         solveLower(m, neg_g, p); // p = q = L^-1 (-g)
         const q_norm = norm(p);
-        // copy q out, then back-solve in place
-        @memcpy(tmp, p);
-        solveLowerT(m, tmp, p);
+        solveLowerT(m, p, p);
         const p_norm = norm(p);
 
         const target_met = if (lambda == 0) p_norm < radius else @abs(p_norm - radius) / radius < eps;
@@ -439,11 +412,12 @@ fn fitQuadraticMse(
     const w = try allocator.alloc(f64, k);
     defer allocator.free(w);
 
+    // Only the lower triangle of A = WᵀW is accumulated — cholInPlace reads nothing else.
     for (0..m) |j| {
         quadFeatures(x, m, dims, j, w);
         for (0..k) |r1| {
             b[r1] += w[r1] * y[j];
-            for (0..k) |r2| {
+            for (0..r1 + 1) |r2| {
                 a[r1 * k + r2] += w[r1] * w[r2];
             }
         }
@@ -464,19 +438,7 @@ fn fitQuadraticMse(
         if (max_piv <= max_cond_ratio * min_piv) {
             solveLower(a, b, z);
             solveLowerT(a, z, z);
-
-            const c = z[dims];
-            for (0..dims) |r| g[r] = z[r];
-            var wr: usize = dims + 1;
-            for (0..dims) |r| {
-                for (r..dims) |r2| {
-                    const val = z[wr];
-                    h[r * dims + r2] = val;
-                    h[r2 * dims + r] = val;
-                    wr += 1;
-                }
-            }
-            return c;
+            return unpackQuadratic(z, dims, h, g);
         }
     }
 
@@ -485,7 +447,7 @@ fn fitQuadraticMse(
     defer wt.deinit();
     for (0..m) |j| {
         quadFeatures(x, m, dims, j, w);
-        for (0..k) |col| wt.at(j, @intCast(col)).* = w[col];
+        for (0..k) |col| wt.at(j, col).* = w[col];
     }
 
     var ycol: Matrix(f64) = try .init(allocator, @intCast(m), 1);
@@ -497,7 +459,7 @@ fn fitQuadraticMse(
     var z_mat = try pinv.dot(ycol);
     defer z_mat.deinit();
 
-    return unpackQuadratic(z_mat, dims, h, g);
+    return unpackQuadratic(z_mat.items, dims, h, g);
 }
 
 fn fitQuadraticInterp(
@@ -521,13 +483,13 @@ fn fitQuadraticInterp(
         }
     }
     for (0..m) |i| {
-        w.at(i, @intCast(m)).* = 1;
-        w.at(@intCast(m), i).* = 1;
+        w.at(i, m).* = 1;
+        w.at(m, i).* = 1;
     }
     for (0..m) |i| {
         for (0..dims) |d| {
-            w.at(i, @intCast(m + 1 + d)).* = x[d * m + i];
-            w.at(@intCast(m + 1 + d), i).* = x[d * m + i];
+            w.at(i, m + 1 + d).* = x[d * m + i];
+            w.at(m + 1 + d, i).* = x[d * m + i];
         }
     }
 
@@ -541,7 +503,7 @@ fn fitQuadraticInterp(
     defer z.deinit();
 
     const c = z.at(m, 0).*;
-    for (0..dims) |d| g[d] = z.at(@intCast(m + 1 + d), 0).*;
+    for (0..dims) |d| g[d] = z.at(m + 1 + d, 0).*;
     for (0..dims) |a| {
         for (0..dims) |bcol| {
             var s: f64 = 0;
@@ -554,13 +516,13 @@ fn fitQuadraticInterp(
 
 /// Extract c, g, and symmetric H from the MSE solution vector z (layout: g[0..dims], c at dims,
 /// then upper-triangular H entries row-major).
-fn unpackQuadratic(z: Matrix(f64), dims: usize, h: []f64, g: []f64) f64 {
-    const c = z.at(dims, 0).*;
-    for (0..dims) |r| g[r] = z.at(r, 0).*;
+fn unpackQuadratic(z: []const f64, dims: usize, h: []f64, g: []f64) f64 {
+    const c = z[dims];
+    for (0..dims) |r| g[r] = z[r];
     var wr: usize = dims + 1;
     for (0..dims) |r| {
         for (r..dims) |r2| {
-            const v = z.at(@intCast(wr), 0).*;
+            const v = z[wr];
             h[r * dims + r2] = v;
             h[r2 * dims + r] = v;
             wr += 1;
@@ -569,11 +531,8 @@ fn unpackQuadratic(z: Matrix(f64), dims: usize, h: []f64, g: []f64) f64 {
     return c;
 }
 
-// ---------------------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------------------
-
-fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const f64) f64 {
+/// Evaluate Q(x) = 0.5*x^T H x + g^T x + c (the model form fit by `fitQuadratic`).
+pub fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const f64) f64 {
     var q: f64 = c;
     for (0..dims) |i| {
         q += g[i] * x[i];
@@ -581,6 +540,10 @@ fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const f64)
     }
     return q;
 }
+
+// ---------------------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------------------
 
 test "cholInPlace + solve" {
     // A = [[4,2],[2,3]] (SPD), solve A x = b with b = [10, 8] -> x = [...]
