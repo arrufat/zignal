@@ -40,7 +40,7 @@ pub fn detectMode(data: []const u8) Mode {
 
 /// Number of bits the data occupies in a mode, excluding the mode indicator
 /// and character count field.
-pub fn dataBits(mode: Mode, len: usize) usize {
+fn dataBits(mode: Mode, len: usize) usize {
     const numeric_extra = [3]usize{ 0, 4, 7 };
     return switch (mode) {
         .numeric => 10 * (len / 3) + numeric_extra[len % 3],
@@ -65,15 +65,15 @@ pub fn fitVersion(mode: Mode, level: tables.EcLevel, len: usize) !u8 {
 }
 
 /// Appends bits most significant first to a byte list.
-pub const BitWriter = struct {
+const BitWriter = struct {
     bytes: std.ArrayList(u8) = .empty,
     bit_len: usize = 0,
 
-    pub fn deinit(self: *BitWriter, allocator: Allocator) void {
+    fn deinit(self: *BitWriter, allocator: Allocator) void {
         self.bytes.deinit(allocator);
     }
 
-    pub fn writeBits(self: *BitWriter, allocator: Allocator, value: u32, count: u5) !void {
+    fn writeBits(self: *BitWriter, allocator: Allocator, value: u32, count: u5) !void {
         var i = count;
         while (i > 0) {
             i -= 1;
@@ -86,15 +86,15 @@ pub const BitWriter = struct {
 };
 
 /// Reads bits most significant first from a byte slice.
-pub const BitReader = struct {
+const BitReader = struct {
     bytes: []const u8,
     pos: usize = 0,
 
-    pub fn remaining(self: BitReader) usize {
+    fn remaining(self: BitReader) usize {
         return self.bytes.len * 8 - self.pos;
     }
 
-    pub fn readBits(self: *BitReader, count: u5) !u32 {
+    fn readBits(self: *BitReader, count: u5) !u32 {
         if (count > self.remaining()) return error.UnexpectedEndOfData;
         var value: u32 = 0;
         for (0..count) |_| {
