@@ -43,9 +43,18 @@ const min_side_modules = 10;
 const alignment_run_tolerance = 0.6;
 const alignment_run_limit = 1.6;
 
-/// Locates a QR code in a grayscale image (clean or photographed) and decodes
-/// it. Returns null when no decodable QR code is found. Caller owns result.data.
-pub fn decode(allocator: Allocator, image: Image(u8)) !?DecodeResult {
+/// Locates a QR code in an image (clean or photographed) and decodes it.
+/// Accepts an Image of any pixel type; color images are converted to
+/// grayscale internally. Returns null when no decodable QR code is found.
+/// Caller owns result.data.
+pub fn decode(allocator: Allocator, image: anytype) !?DecodeResult {
+    if (@TypeOf(image) == Image(u8)) return decodeGray(allocator, image);
+    var gray = try image.convert(allocator, u8);
+    defer gray.deinit(allocator);
+    return decodeGray(allocator, gray);
+}
+
+fn decodeGray(allocator: Allocator, image: Image(u8)) !?DecodeResult {
     if (image.rows < 21 or image.cols < 21) return null;
 
     var binary = try Image(u8).initLike(allocator, image);
@@ -737,6 +746,18 @@ test "image roundtrip across module sizes and quiet zones" {
         try std.testing.expectApproxEqAbs(origin, corners[0].x(), tolerance);
         try std.testing.expectApproxEqAbs(origin, corners[0].y(), tolerance);
     }
+}
+
+test "decode accepts color images" {
+    const Rgba = @import("../color.zig").Rgba(u8);
+    const allocator = std.testing.allocator;
+    var clean = try encoder.encodeImage(allocator, "COLOR INPUT", .{ .module_size = 4 });
+    defer clean.deinit(allocator);
+    var rgba = try clean.convert(allocator, Rgba);
+    defer rgba.deinit(allocator);
+    var result = (try decode(allocator, rgba)) orelse return error.TestUnexpectedResult;
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, "COLOR INPUT", result.data);
 }
 
 test "decode returns null on blank and noise images" {

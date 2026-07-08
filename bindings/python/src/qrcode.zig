@@ -245,21 +245,9 @@ fn qrcode_decode(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         return null;
     };
 
-    // Decode on grayscale; color variants are converted into a temporary.
-    var converted: ?zignal.Image(u8) = null;
-    defer if (converted) |*gray| gray.deinit(allocator);
-    const gray: zignal.Image(u8) = switch (pimg.data) {
-        .gray => |gray| gray,
-        inline .rgb, .rgba => |color_img| blk: {
-            converted = color_img.convert(allocator, u8) catch {
-                _ = c.PyErr_NoMemory();
-                return null;
-            };
-            break :blk converted.?;
-        },
-    };
-
-    var result = (qrcode.decode(allocator, gray) catch |err| {
+    var result = (switch (pimg.data) {
+        inline else => |img| qrcode.decode(allocator, img),
+    } catch |err| {
         python.setZigError(err);
         return null;
     }) orelse return python.none();

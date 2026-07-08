@@ -254,14 +254,10 @@ pub fn ProjectiveTransform(comptime T: type) type {
                 var a: SMatrix(T, 8, 8) = undefined;
                 var b: SMatrix(T, 8, 1) = undefined;
                 for (from_points, to_points, 0..) |f, t, i| {
-                    const x = f.x();
-                    const y = f.y();
-                    const u = t.x();
-                    const v = t.y();
-                    a.items[2 * i] = .{ x, y, 1, 0, 0, 0, -u * x, -u * y };
-                    a.items[2 * i + 1] = .{ 0, 0, 0, x, y, 1, -v * x, -v * y };
-                    b.items[2 * i][0] = u;
-                    b.items[2 * i + 1][0] = v;
+                    a.items[2 * i] = .{ f.x(), f.y(), 1, 0, 0, 0, -t.x() * f.x(), -t.x() * f.y() };
+                    a.items[2 * i + 1] = .{ 0, 0, 0, f.x(), f.y(), 1, -t.y() * f.x(), -t.y() * f.y() };
+                    b.items[2 * i][0] = t.x();
+                    b.items[2 * i + 1][0] = t.y();
                 }
                 const h = a.solve(b) orelse return error.RankDeficient;
                 self.matrix = .init(.{
