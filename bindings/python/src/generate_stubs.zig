@@ -22,6 +22,7 @@ const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
 const bitmap_font_module = @import("bitmap_font.zig");
 const blending_module = @import("blending.zig");
+const qrcode_module = @import("qrcode.zig");
 const interpolation_module = @import("interpolation.zig");
 const border_mode_module = @import("border_mode.zig");
 const optimization_module = @import("optimization.zig");
@@ -470,6 +471,15 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .value_docs = &blending_module.blending_values,
     });
 
+    // Generate EcLevel enum
+    try generateEnumFromMetadata(&stub, .{
+        .name = "EcLevel",
+        .base = "IntEnum",
+        .doc = qrcode_module.ec_level_doc,
+        .zig_type = zignal.qrcode.EcLevel,
+        .value_docs = &qrcode_module.ec_level_values,
+    });
+
     // Generate BorderMode enum
     try generateEnumFromMetadata(&stub, .{
         .name = "BorderMode",
@@ -546,6 +556,18 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .doc = assignment_doc,
         .methods = &[_]stub_metadata.MethodInfo{},
         .properties = &assignment_properties,
+        .bases = &.{},
+        .special_methods = null,
+    });
+
+    // Generate QrDecodeResult class from metadata
+    const qr_decode_result_properties = stub_metadata.extractPropertyInfo(&qrcode_module.qr_decode_result_properties_metadata);
+    const qr_result_doc = std.mem.span(qrcode_module.QrDecodeResultType.tp_doc);
+    try generateClassFromMetadata(&stub, .{
+        .name = "QrDecodeResult",
+        .doc = qr_result_doc,
+        .methods = &[_]stub_metadata.MethodInfo{},
+        .properties = &qr_decode_result_properties,
         .bases = &.{},
         .special_methods = null,
     });
@@ -725,6 +747,8 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Colormap as Colormap,
         \\    OptimizationPolicy as OptimizationPolicy,
         \\    Assignment as Assignment,
+        \\    EcLevel as EcLevel,
+        \\    QrDecodeResult as QrDecodeResult,
         \\    FeatureDistributionMatching as FeatureDistributionMatching,
         \\    PCA as PCA,
         \\    RunningStats as RunningStats,
@@ -734,6 +758,8 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    ProjectiveTransform as ProjectiveTransform,
         \\    solve_assignment_problem as solve_assignment_problem,
         \\    optimize as optimize,
+        \\    qrcode_encode as qrcode_encode,
+        \\    qrcode_decode as qrcode_decode,
         \\    # Type aliases
         \\    Point as Point,
         \\    Size as Size,

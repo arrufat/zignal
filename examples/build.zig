@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) void {
         "contrast_enhancement",
         "hough_animation",
         "global_optimization",
+        "qrcode",
     };
 
     // List of additional examples to build as executables

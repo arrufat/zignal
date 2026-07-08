@@ -17,6 +17,7 @@ const border_mode = @import("border_mode.zig");
 const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
+const qrcode = @import("qrcode.zig");
 const running_stats = @import("running_stats.zig");
 const perlin = @import("perlin.zig");
 const python = @import("python.zig");
@@ -41,7 +42,7 @@ var zignal_module = c.PyModuleDef{
 };
 
 // Module function metadata - combines functions from various modules
-pub const module_functions_metadata = optimization.module_functions_metadata ++ perlin.perlin_functions_metadata;
+pub const module_functions_metadata = optimization.module_functions_metadata ++ perlin.perlin_functions_metadata ++ qrcode.qrcode_functions_metadata;
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = python.functionsToPyMethodDefArray(&module_functions_metadata);
@@ -76,6 +77,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .name = "PCA", .ty = @ptrCast(&pca.PCAType) },
         .{ .name = "FeatureDistributionMatching", .ty = @ptrCast(&fdm.FeatureDistributionMatchingType) },
         .{ .name = "Assignment", .ty = @ptrCast(&optimization.AssignmentType) },
+        .{ .name = "QrDecodeResult", .ty = @ptrCast(&qrcode.QrDecodeResultType) },
         .{ .name = "PixelIterator", .ty = @ptrCast(&pixel_iterator.PixelIteratorType) },
         .{ .name = "RunningStats", .ty = @ptrCast(&running_stats.RunningStatsType) },
     };
@@ -104,6 +106,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc },
         .{ .type = zignal.FloodFillOptions.ThresholdMode, .doc = image.threshold_mode_doc },
         .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc },
+        .{ .type = zignal.qrcode.EcLevel, .doc = qrcode.ec_level_doc },
     };
 
     inline for (enum_registrations) |reg| {
