@@ -95,5 +95,12 @@ Special thanks to **[B Factory, Inc](https://www.bfactory.ai/)**, the **Founding
 I originally developed this library internally for [Ameli](https://ameli.co.kr/)'s virtual makeup try-on system,
 and B Factory graciously transferred ownership to the community to ensure its long-term maintenance and growth.
 
-<br></br>
-[![Star History Chart](https://api.star-history.com/svg?repos=arrufat/zignal&type=Date)](https://www.star-history.com/#arrufat/zignal&Date)
+## Star History
+
+<a href="https://www.star-history.com/?type=date&repos=arrufat%2Fzignal">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=arrufat/zignal&type=date&theme=dark&legend=top-left&sealed_token=mrDU-4e_6lnlpXw5h8vK9rHyQgFuQfV6l1IPzXRzzTKwqmWrL77iYYoBkTBMZ7uSTfqkazS9hK3y6gSAaa9pLFMzORK3PjjC9A4pcRipvC49UtXf8_J5XSa2rAcuF7FeS53-HoNoXJsyv-4mBhoW7LPoS2ED93sdnA1r-7EfUfPXrKCJBBsZFJ1yEurR" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=arrufat/zignal&type=date&legend=top-left&sealed_token=mrDU-4e_6lnlpXw5h8vK9rHyQgFuQfV6l1IPzXRzzTKwqmWrL77iYYoBkTBMZ7uSTfqkazS9hK3y6gSAaa9pLFMzORK3PjjC9A4pcRipvC49UtXf8_J5XSa2rAcuF7FeS53-HoNoXJsyv-4mBhoW7LPoS2ED93sdnA1r-7EfUfPXrKCJBBsZFJ1yEurR" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=arrufat/zignal&type=date&legend=top-left&sealed_token=mrDU-4e_6lnlpXw5h8vK9rHyQgFuQfV6l1IPzXRzzTKwqmWrL77iYYoBkTBMZ7uSTfqkazS9hK3y6gSAaa9pLFMzORK3PjjC9A4pcRipvC49UtXf8_J5XSa2rAcuF7FeS53-HoNoXJsyv-4mBhoW7LPoS2ED93sdnA1r-7EfUfPXrKCJBBsZFJ1yEurR" />
+ </picture>
+</a>
