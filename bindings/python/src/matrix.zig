@@ -1009,6 +1009,48 @@ fn matrix_dot_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     return matrix_matmul(self_obj, params.other);
 }
 
+const matrix_solve_doc =
+    \\Solve the linear system ``A @ x = b`` for ``x``.
+    \\
+    \\Uses LU factorization with partial pivoting, which is faster and more
+    \\numerically stable than forming ``A.inv() @ b``. The right-hand side may
+    \\carry several columns, each solved independently.
+    \\
+    \\## Parameters
+    \\- `b` (Matrix): Right-hand side with as many rows as this matrix and one or more columns.
+    \\
+    \\## Returns
+    \\Matrix: The solution ``x``, with the same shape as ``b``.
+    \\
+    \\## Raises
+    \\ValueError: If this matrix is not square, ``b``'s rows do not match, or the matrix is singular.
+    \\
+    \\## Examples
+    \\```python
+    \\a = Matrix([[2, 1], [1, 3]])
+    \\b = Matrix([[3], [5]])
+    \\x = a.solve(b)  # a @ x ≈ b
+    \\```
+;
+
+fn matrix_solve_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
+
+    const Params = struct {
+        b: ?*c.PyObject,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    if (c.PyObject_IsInstance(params.b, @ptrCast(&MatrixType)) != 1) {
+        python.setTypeError("Matrix", params.b);
+        return null;
+    }
+
+    const b_ptr = python.unwrap(MatrixObject, "matrix_ptr", params.b, "Matrix") orelse return null;
+    return matrixToObject(ptr.solve(b_ptr.*));
+}
+
 const matrix_sum_doc =
     \\Sum of all matrix elements.
     \\
@@ -2091,6 +2133,14 @@ pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = matrix_dot_doc,
         .params = "self, other: Matrix",
+        .returns = "Matrix",
+    },
+    .{
+        .name = "solve",
+        .meth = @ptrCast(&matrix_solve_method),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = matrix_solve_doc,
+        .params = "self, b: Matrix",
         .returns = "Matrix",
     },
     .{

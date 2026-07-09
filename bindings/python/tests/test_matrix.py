@@ -302,3 +302,38 @@ def test_sum_rows_cols():
     assert cols_sum.shape == (2, 1)
     assert cols_sum[0, 0] == pytest.approx(6.0)
     assert cols_sum[1, 0] == pytest.approx(15.0)
+
+
+def test_solve():
+    """Solve A @ x = b, single and multiple right-hand sides."""
+    a = zignal.Matrix([[2, 1, 1], [4, 3, 3], [8, 7, 9]])
+    b = zignal.Matrix([[7], [19], [49]])
+
+    x = a.solve(b)
+    assert x.shape == (3, 1)
+    expected = np.linalg.solve(a.to_numpy(), b.to_numpy())
+    np.testing.assert_allclose(x.to_numpy(), expected, atol=1e-10)
+
+    # Multiple right-hand sides: RHS = I recovers the inverse.
+    identity = zignal.Matrix.identity(3, 3)
+    inv = a.solve(identity)
+    np.testing.assert_allclose(inv.to_numpy(), np.linalg.inv(a.to_numpy()), atol=1e-10)
+
+
+def test_solve_errors():
+    """solve() rejects non-square, singular, and mismatched systems."""
+    singular = zignal.Matrix([[1, 2], [2, 4]])
+    b = zignal.Matrix([[1], [2]])
+    with pytest.raises(ValueError):
+        singular.solve(b)
+
+    non_square = zignal.Matrix([[1, 2, 3], [4, 5, 6]])
+    with pytest.raises(ValueError):
+        non_square.solve(zignal.Matrix([[1], [2]]))
+
+    good = zignal.Matrix([[1, 2], [3, 4]])
+    with pytest.raises(ValueError):
+        good.solve(zignal.Matrix([[1], [2], [3]]))
+
+    with pytest.raises(TypeError):
+        good.solve([[1], [2]])
