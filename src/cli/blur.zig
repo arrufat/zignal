@@ -10,8 +10,8 @@ const display = @import("display.zig");
 const displayCanvas = display.displayCanvas;
 const resolveDisplayFormat = display.resolveDisplayFormat;
 
-const Args = struct {
-    type: ?[]const u8 = null,
+pub const Args = struct {
+    type: ?BlurType = null,
     output: ?[]const u8 = null,
     display: bool = false,
 
@@ -29,12 +29,12 @@ const Args = struct {
     // Display options
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .type = .{ .help = "Blur type: " ++ common.joinFieldNames(BlurType) ++ " (default: gaussian)", .metavar = "name" },
-        .output = .{ .help = "Output file or directory path", .metavar = "path" },
-        .display = .{ .help = "Display the result in the terminal (default if no output)" },
+        .output = .{ .help = "Output file or directory path", .metavar = "path", .short = 'o' },
+        .display = .{ .help = "Display the result in the terminal (default if no output)", .short = 'd' },
         .radius = .{ .help = "Radius for box/median blur (default: 1)", .metavar = "int" },
         .sigma = .{ .help = "Sigma for Gaussian blur (default: 1.0)", .metavar = "float" },
         .angle = .{ .help = "Angle in degrees for linear motion blur (default: 0)", .metavar = "deg" },
@@ -74,14 +74,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    var blur_type: BlurType = .gaussian;
-    if (parsed.options.type) |t| {
-        blur_type = common.parseEnum(BlurType, t) orelse {
-            std.log.err("unknown blur type: {s}", .{t});
-            return error.InvalidArguments;
-        };
-    }
-
     const is_batch = parsed.positionals.len > 1;
     var target: ?common.OutputTarget = null;
     if (parsed.options.output) |out_arg| {
@@ -91,30 +83,20 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const should_display = parsed.options.display or target == null;
 
     for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, should_display, blur_type, parsed.options) catch |err| {
+        processImage(io, writer, gpa, input_path, target, should_display, parsed.options) catch |err| {
             std.log.err("failed to blur '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
         };
     }
 }
 
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    target: ?common.OutputTarget,
-    should_display: bool,
-    blur_type: BlurType,
-    options: Args,
-) !void {
-    std.log.debug("loading {s}...", .{input_path});
-
-    var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
-    defer img.deinit(gpa);
+/// Blur `img` according to `options`, returning a freshly allocated image the
+/// caller owns. Shared by the standalone command and the `pipeline` command.
+pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
+    const blur_type = options.type orelse .gaussian;
 
     var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, img.rows, img.cols);
-    defer out.deinit(gpa);
+    errdefer out.deinit(gpa);
 
     std.log.info("applying {s} blur...", .{@tagName(blur_type)});
 
@@ -193,6 +175,25 @@ fn processImage(
     }
 
     timer.logElapsed("blur");
+    return out;
+}
+
+fn processImage(
+    io: Io,
+    writer: *Io.Writer,
+    gpa: Allocator,
+    input_path: []const u8,
+    target: ?common.OutputTarget,
+    should_display: bool,
+    options: Args,
+) !void {
+    std.log.debug("loading {s}...", .{input_path});
+
+    var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
+    defer img.deinit(gpa);
+
+    var out = try apply(io, gpa, img, options);
+    defer out.deinit(gpa);
 
     if (target) |tgt| {
         const resolved = try tgt.resolveOutputPath(gpa, input_path);
@@ -203,7 +204,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const format = try resolveDisplayFormat(options.protocol, options.width, options.height);
+        const format = resolveDisplayFormat(options.protocol, options.width, options.height);
         try displayCanvas(io, writer, out, format);
     }
 }
