@@ -18,6 +18,7 @@
   const maxEvalsInput = document.getElementById("max-evals");
   const seedInput = document.getElementById("seed");
   const samplesInput = document.getElementById("samples");
+  const colormapSel = document.getElementById("colormap");
   const animateChk = document.getElementById("animate");
   const runBtn = document.getElementById("run-button");
   const stepBtn = document.getElementById("step-button");
@@ -190,25 +191,15 @@ return s;
   const MOVE_COLORS = ["#ffffff", "#9aa0a6", "#22b3c9", "#ff7043"];
   const BEST_COLOR = "#ff2d95";
 
-  // viridis colormap, 9 anchor stops, linearly interpolated.
-  const VIRIDIS = [
-    [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142],
-    [31, 158, 137], [53, 183, 121], [110, 206, 88], [253, 231, 37],
-  ];
+  // 256-entry RGB LUT from zignal's `colormap_lut` export; null until WASM loads (id matches <select>).
+  let colormapId = 2; // turbo (matches the default <option>)
+  let colormapLut = null;
 
-  function viridis(t) {
-    t = Math.max(0, Math.min(1, t));
-    const n = VIRIDIS.length - 1;
-    const f = t * n;
-    const i = Math.min(n - 1, Math.floor(f));
-    const a = f - i;
-    const c0 = VIRIDIS[i];
-    const c1 = VIRIDIS[i + 1];
-    return [
-      Math.round(c0[0] + (c1[0] - c0[0]) * a),
-      Math.round(c0[1] + (c1[1] - c0[1]) * a),
-      Math.round(c0[2] + (c1[2] - c0[2]) * a),
-    ];
+  function loadColormapLut() {
+    if (!wasm) return;
+    const ptr = wasm.colormap_lut(colormapId);
+    // Copy: the view aliases WASM memory, which the next call reuses (and which can move on growth).
+    colormapLut = new Uint8Array(wasm.memory.buffer, ptr, 256 * 3).slice();
   }
 
   // ---- run state ----
@@ -226,8 +217,10 @@ return s;
   let rafId = 0;
   let points = []; // { x:[..], y, move } for every evaluated point
   let bestHistory = []; // best-y-so-far per eval (convergence plot)
-  let heatmap = null; // ImageData background for 2-D problems
-  let heatmapKey = null; // cache key (fn source + bounds + size) so identical re-runs skip rebuild
+  let heatmap = null; // colored ImageData background for 2-D problems
+  let heatmapKey = null; // fn + bounds + size + colormap: recolor only when this changes
+  let heatField = null; // { vals, min, max } sampled objective, independent of the colormap
+  let heatFieldKey = null; // fn + bounds + size: resample the objective only when this changes
   let curve = null; // { ys, min, max, pad } sampled function for 1-D problems
   let curveKey = null;
   let view = null; // { xlo, xhi, ylo, yhi } pixel <-> world mapping
@@ -445,27 +438,42 @@ return s;
   function buildHeatmap() {
     const W = canvas.width;
     const H = canvas.height;
-    const key = fnInput.value + "|" + view.xlo + "," + view.xhi + "," + view.ylo + "," + view.yhi + "|" + W + "x" + H;
-    if (heatmap && heatmapKey === key) return; // unchanged function + bounds -> reuse the surface
-    const sx = view.xhi - view.xlo;
-    const sy = view.yhi - view.ylo;
-    const field = sampleField(W * H, 2, function (p, pt) {
-      const i = p % W;
-      pt[0] = view.xlo + ((i + 0.5) / W) * sx;
-      pt[1] = view.ylo + (1 - ((p - i) / W + 0.5) / H) * sy;
-    });
-    const range = field.max > field.min ? field.max - field.min : 1;
+    const fkey = fnInput.value + "|" + view.xlo + "," + view.xhi + "," + view.ylo + "," + view.yhi + "|" + W + "x" + H;
+    // Cache the sampled objective (the expensive, colormap-independent part) so a switch only recolors.
+    if (!heatField || heatFieldKey !== fkey) {
+      const sx = view.xhi - view.xlo;
+      const sy = view.yhi - view.ylo;
+      heatField = sampleField(W * H, 2, function (p, pt) {
+        const i = p % W;
+        pt[0] = view.xlo + ((i + 0.5) / W) * sx;
+        pt[1] = view.ylo + (1 - ((p - i) / W + 0.5) / H) * sy;
+      });
+      heatFieldKey = fkey;
+      heatmap = null; // field changed -> force a recolor
+    }
+    const hkey = fkey + "|cm" + colormapId;
+    if (heatmap && heatmapKey === hkey) return;
+    const range = heatField.max > heatField.min ? heatField.max - heatField.min : 1;
+    const lut = colormapLut;
     const img = ctx.createImageData(W, H);
+    const data = img.data;
     for (let p = 0; p < W * H; p++) {
-      const v = field.vals[p];
-      const rgb = isFinite(v) ? viridis((v - field.min) / range) : [210, 210, 210];
-      img.data[p * 4] = rgb[0];
-      img.data[p * 4 + 1] = rgb[1];
-      img.data[p * 4 + 2] = rgb[2];
-      img.data[p * 4 + 3] = 255;
+      const v = heatField.vals[p];
+      const o = p * 4;
+      if (!isFinite(v)) {
+        data[o] = data[o + 1] = data[o + 2] = 210;
+      } else if (lut) {
+        const i = Math.round(((v - heatField.min) / range) * 255) * 3;
+        data[o] = lut[i];
+        data[o + 1] = lut[i + 1];
+        data[o + 2] = lut[i + 2];
+      } else {
+        data[o] = data[o + 1] = data[o + 2] = Math.round(40 + ((v - heatField.min) / range) * 180);
+      }
+      data[o + 3] = 255;
     }
     heatmap = img;
-    heatmapKey = key;
+    heatmapKey = hkey;
   }
 
   function drawCrosshair(px, py) {
@@ -923,6 +931,16 @@ return s;
       invalidateSession();
       drawPreview();
     });
+    // Changing the colormap only recolors the 2-D surface (the cached field is reused, not resampled).
+    colormapSel.addEventListener("change", function () {
+      colormapId = parseInt(colormapSel.value, 10);
+      loadColormapLut();
+      surfaceBuilt = false;
+      if (dims === 2 && view) {
+        ensureSurface();
+        draw();
+      }
+    });
     runBtn.addEventListener("click", onOptimize);
     stepBtn.addEventListener("click", onStep);
   }
@@ -941,6 +959,14 @@ return s;
     wasm = obj.instance.exports;
     window.wasm = obj;
     console.log("wasm loaded");
+    loadColormapLut();
+    // Recolor the init() preview (built with the grayscale fallback) now that the real LUT is loaded.
+    if (dims === 2 && view) {
+      heatmap = null;
+      surfaceBuilt = false;
+      ensureSurface();
+      draw();
+    }
     runBtn.disabled = false;
     stepBtn.disabled = false;
     statusEl.textContent = "Ready.";

@@ -14,6 +14,7 @@ const ColormapVariant = enum(u8) {
     heat,
     turbo,
     viridis,
+    inferno,
 };
 
 // ============================================================================
@@ -65,12 +66,7 @@ fn colormap_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = python.safeCast(ColormapObject, self_obj);
     var buf: [256]u8 = undefined;
 
-    const type_name = switch (self.map_type) {
-        .jet => "jet",
-        .heat => "heat",
-        .turbo => "turbo",
-        .viridis => "viridis",
-    };
+    const type_name = @tagName(self.map_type);
 
     var min_str: [32]u8 = undefined;
     var max_str: [32]u8 = undefined;
@@ -163,19 +159,17 @@ fn colormap_viridis(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return create_colormap(type_obj, .viridis, args, kwds);
 }
 
+fn colormap_inferno(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    return create_colormap(type_obj, .inferno, args, kwds);
+}
+
 // ============================================================================
 // Property Getters
 // ============================================================================
 fn get_type(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
     _ = closure;
     const self = python.safeCast(ColormapObject, self_obj);
-    const type_str = switch (self.map_type) {
-        .jet => "jet",
-        .heat => "heat",
-        .turbo => "turbo",
-        .viridis => "viridis",
-    };
-    return python.create(type_str);
+    return python.create(@tagName(self.map_type));
 }
 
 fn get_min(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -212,6 +206,7 @@ pub const colormap_doc =
     \\- `Colormap.heat(min=None, max=None)` - Heat map (black->red->yellow->white)
     \\- `Colormap.turbo(min=None, max=None)` - Improved smooth rainbow
     \\- `Colormap.viridis(min=None, max=None)` - Perceptually uniform (purple->green->yellow)
+    \\- `Colormap.inferno(min=None, max=None)` - Perceptually uniform (black->purple->orange->yellow)
     \\
     \\If `min` or `max` are not provided, they will be automatically calculated from the image content.
     \\
@@ -254,6 +249,12 @@ var colormap_methods = [_]c.PyMethodDef{
         .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_STATIC,
         .ml_doc = "Create viridis colormap configuration.\n\nArgs:\n    min: Minimum value (optional)\n    max: Maximum value (optional)",
     },
+    .{
+        .ml_name = "inferno",
+        .ml_meth = @ptrCast(&colormap_inferno),
+        .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS | c.METH_STATIC,
+        .ml_doc = "Create inferno colormap configuration.\n\nArgs:\n    min: Minimum value (optional)\n    max: Maximum value (optional)",
+    },
     .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
 };
 
@@ -281,7 +282,7 @@ pub const colormap_properties_metadata = [_]python.PropertyWithMetadata{
         .get = get_type,
         .set = null,
         .doc = "Type of colormap",
-        .type = "Literal['jet', 'heat', 'turbo', 'viridis']",
+        .type = "Literal['jet', 'heat', 'turbo', 'viridis', 'inferno']",
     },
     .{
         .name = "min",
@@ -324,6 +325,12 @@ pub const colormap_methods_metadata = [_]stub_metadata.MethodInfo{
         .returns = "Colormap",
         .doc = "Create viridis colormap configuration.",
     },
+    .{
+        .name = "inferno",
+        .params = "min: float | None = None, max: float | None = None",
+        .returns = "Colormap",
+        .doc = "Create inferno colormap configuration.",
+    },
 };
 
 pub const colormap_special_methods_metadata = [_]stub_metadata.MethodInfo{
@@ -359,9 +366,6 @@ pub fn toZigColormap(obj: *ColormapObject) zignal.Colormap {
     };
 
     return switch (obj.map_type) {
-        .jet => .{ .jet = range },
-        .heat => .{ .heat = range },
-        .turbo => .{ .turbo = range },
-        .viridis => .{ .viridis = range },
+        inline else => |tag| @unionInit(zignal.Colormap, @tagName(tag), range),
     };
 }
