@@ -16,10 +16,14 @@ pub const protocol_names: []const u8 = common.joinFieldNames(zignal.DisplayForma
 /// that supports terminal display.
 pub const protocol_help: []const u8 = "Display protocol: " ++ protocol_names;
 
+/// The tag enum of `zignal.DisplayFormat` — usable directly as a CLI/ZON option
+/// field, since the tag names double as the accepted protocol names.
+pub const ProtocolTag = std.meta.Tag(zignal.DisplayFormat);
+
 const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?ProtocolTag = null,
 
     pub const meta = .{
         .width = .{ .help = "Target width in pixels", .metavar = "N" },
@@ -45,7 +49,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    const display_fmt = try resolveDisplayFormat(
+    const display_fmt = resolveDisplayFormat(
         parsed.options.protocol,
         parsed.options.width,
         parsed.options.height,
@@ -67,27 +71,15 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 }
 
 pub fn resolveDisplayFormat(
-    protocol_name: ?[]const u8,
+    protocol: ?ProtocolTag,
     width: ?u32,
     height: ?u32,
-) !zignal.DisplayFormat {
-    var protocol: zignal.DisplayFormat = .{ .auto = .default };
-    if (protocol_name) |p| {
-        protocol = parseProtocol(p) catch |err| {
-            std.log.err("unknown protocol type: {s}", .{p});
-            return err;
-        };
-    }
-    applyOptions(&protocol, width, height);
-    return protocol;
-}
-
-pub fn parseProtocol(name: []const u8) !zignal.DisplayFormat {
-    const Tag = std.meta.Tag(zignal.DisplayFormat);
-    const tag = std.meta.stringToEnum(Tag, name) orelse return error.InvalidArguments;
-    return switch (tag) {
+) zignal.DisplayFormat {
+    var format: zignal.DisplayFormat = switch (protocol orelse .auto) {
         inline else => |t| @unionInit(zignal.DisplayFormat, @tagName(t), .default),
     };
+    applyOptions(&format, width, height);
+    return format;
 }
 
 pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {

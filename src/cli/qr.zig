@@ -20,7 +20,7 @@ const Args = struct {
         .symbol_version = .{ .help = "Force the QR version 1-40 (default: smallest that fits)", .metavar = "1-40" },
         .module_size = .{ .help = "Pixels per module when saving an image (default 8)", .metavar = "pixels" },
         .quiet_zone = .{ .help = "Light border around the symbol in modules (default 4)", .metavar = "modules" },
-        .output = .{ .help = "Save the encoded QR as an image instead of printing it", .metavar = "path" },
+        .output = .{ .help = "Save the encoded QR as an image instead of printing it", .metavar = "path", .short = 'o' },
     };
 };
 

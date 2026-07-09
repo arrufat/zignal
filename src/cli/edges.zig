@@ -8,8 +8,8 @@ const args = @import("args.zig");
 const common = @import("common.zig");
 const display = @import("display.zig");
 
-const Args = struct {
-    filter: ?[]const u8 = null,
+pub const Args = struct {
+    filter: ?Algo = null,
     output: ?[]const u8 = null,
     display: bool = false,
 
@@ -23,12 +23,12 @@ const Args = struct {
     // Display options
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .filter = .{ .help = "Filter: " ++ common.joinFieldNames(Algo) ++ " (default: sobel)", .metavar = "name" },
-        .output = .{ .help = "Output file path (default: display only)", .metavar = "path" },
-        .display = .{ .help = "Display the result in the terminal (default if no output)" },
+        .output = .{ .help = "Output file path (default: display only)", .metavar = "path", .short = 'o' },
+        .display = .{ .help = "Display the result in the terminal (default if no output)", .short = 'd' },
         .sigma = .{ .help = "Canny sigma (def: 1.0) or Shen-Castan smoothing (def: 0.9)", .metavar = "float" },
         .low = .{ .help = "Canny low thresh (def: 50) or Shen-Castan low_rel (def: 0.5)", .metavar = "float" },
         .high = .{ .help = "Canny high thresh (def: 100) or Shen-Castan high_ratio (def: 0.99)", .metavar = "float" },
@@ -63,14 +63,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    var algo: Algo = .sobel;
-    if (parsed.options.filter) |f| {
-        algo = common.parseEnum(Algo, f) orelse {
-            std.log.err("unknown filter: {s}", .{f});
-            return error.InvalidArguments;
-        };
-    }
-
     const is_batch = parsed.positionals.len > 1;
     var target: ?common.OutputTarget = null;
 
@@ -81,43 +73,32 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const should_display = parsed.options.display or target == null;
 
     for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, should_display, algo, parsed.options) catch |err| {
+        processImage(io, writer, gpa, input_path, target, should_display, parsed.options) catch |err| {
             std.log.err("failed to process image '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
         };
     }
 }
 
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    target: ?common.OutputTarget,
-    should_display: bool,
-    algo: Algo,
-    options: Args,
-) !void {
-    std.log.debug("loading image: {s}", .{input_path});
-    var img = try zignal.Image(u8).load(io, gpa, input_path);
-    defer img.deinit(gpa);
-
-    var out_img = try zignal.Image(u8).init(gpa, img.rows, img.cols);
-    defer out_img.deinit(gpa);
+/// Run the selected edge detector on a grayscale image into a caller-allocated
+/// `out`. Shared by the standalone command (which stays on the u8 fast path) and
+/// the `apply` wrapper used by the `pipeline` command.
+pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Image(u8), options: Args) !void {
+    const algo = options.filter orelse .sobel;
 
     std.log.debug("applying {s} edge detection...", .{@tagName(algo)});
     const timer = common.Timer.begin(io);
 
     switch (algo) {
         .sobel => {
-            try img.sobel(out_img, gpa);
+            try img.sobel(out, gpa);
         },
         .canny => {
             const sigma = options.sigma orelse 1.0;
             const low = options.low orelse 50.0;
             const high = options.high orelse 100.0;
             std.log.debug("canny params: sigma={d:.2}, low={d:.2}, high={d:.2}", .{ sigma, low, high });
-            try img.canny(out_img, gpa, sigma, low, high);
+            try img.canny(out, gpa, sigma, low, high);
         },
         .shen_castan => {
             const opts = zignal.ShenCastan{
@@ -130,11 +111,44 @@ fn processImage(
             std.log.debug("shen_castan params: smooth={d:.2}, window={d}, high_ratio={d:.2}, low_rel={d:.2}, nms={}", .{
                 opts.smooth, opts.window_size, opts.high_ratio, opts.low_rel, opts.use_nms,
             });
-            try img.shenCastan(out_img, gpa, opts);
+            try img.shenCastan(out, gpa, opts);
         },
     }
 
     timer.logElapsed("edge detection");
+}
+
+/// Pipeline-facing wrapper: detect edges on an RGBA image by bridging through
+/// grayscale, returning a freshly allocated RGBA image the caller owns.
+pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
+    var gray = try img.convert(gpa, u8);
+    defer gray.deinit(gpa);
+
+    var edges_gray: zignal.Image(u8) = try .init(gpa, gray.rows, gray.cols);
+    defer edges_gray.deinit(gpa);
+
+    try applyGray(io, gpa, gray, edges_gray, options);
+
+    return edges_gray.convert(gpa, zignal.Rgba(u8));
+}
+
+fn processImage(
+    io: Io,
+    writer: *Io.Writer,
+    gpa: Allocator,
+    input_path: []const u8,
+    target: ?common.OutputTarget,
+    should_display: bool,
+    options: Args,
+) !void {
+    std.log.debug("loading image: {s}", .{input_path});
+    var img = try zignal.Image(u8).load(io, gpa, input_path);
+    defer img.deinit(gpa);
+
+    var out_img = try zignal.Image(u8).init(gpa, img.rows, img.cols);
+    defer out_img.deinit(gpa);
+
+    try applyGray(io, gpa, img, out_img, options);
 
     if (target) |tgt| {
         const resolved = try tgt.resolveOutputPath(gpa, input_path);
@@ -145,7 +159,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height);
+        const format = display.resolveDisplayFormat(options.protocol, options.width, options.height);
         try display.displayCanvas(io, writer, out_img, format);
     }
 }
