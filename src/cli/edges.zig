@@ -70,11 +70,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         target = try common.resolveOutputTarget(io, out_path, is_batch);
     }
 
-    const should_display = parsed.options.display or target == null;
+    const display_format = display.displayFormatFor(parsed.options, target);
 
     var failed = false;
     for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, should_display, parsed.options) catch |err| {
+        processImage(io, writer, gpa, input_path, target, parsed.options, display_format) catch |err| {
             std.log.err("failed to process image '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
             failed = true;
@@ -141,8 +141,8 @@ fn processImage(
     gpa: Allocator,
     input_path: []const u8,
     target: ?common.OutputTarget,
-    should_display: bool,
     options: Args,
+    display_format: ?zignal.DisplayFormat,
 ) !void {
     std.log.debug("loading image: {s}", .{input_path});
     var img = try zignal.Image(u8).load(io, gpa, input_path);
@@ -153,16 +153,5 @@ fn processImage(
 
     try applyGray(io, gpa, img, out_img, options);
 
-    if (target) |tgt| {
-        const resolved = try tgt.resolveOutputPath(gpa, input_path);
-        defer resolved.deinit(gpa);
-
-        std.log.info("saving result to {s}...", .{resolved.path});
-        try out_img.save(io, gpa, resolved.path);
-    }
-
-    if (should_display) {
-        const format = display.resolveDisplayFormat(options.protocol, options.width, options.height);
-        try display.displayCanvas(io, writer, out_img, format);
-    }
+    try display.emit(io, writer, gpa, out_img, input_path, target, display_format);
 }

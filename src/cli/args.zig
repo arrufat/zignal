@@ -203,6 +203,14 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
     };
 }
 
+fn kebabName(comptime name: []const u8) [name.len]u8 {
+    var res: [name.len]u8 = undefined;
+    for (name, 0..) |c, i| {
+        res[i] = if (c == '_') '-' else c;
+    }
+    return res;
+}
+
 /// Generates a formatted help message at compile-time based on the struct T.
 /// T can optionally contain a `meta` declaration of type `struct { [field_name]: OptionConfig }`.
 pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime description: []const u8) []const u8 {
@@ -229,13 +237,7 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
         else
             "value";
 
-        const flag_name_fmt = comptime blk: {
-            var res: [field.name.len]u8 = undefined;
-            for (field.name, 0..) |c, i| {
-                res[i] = if (c == '_') '-' else c;
-            }
-            break :blk res;
-        };
+        const flag_name_fmt = comptime kebabName(field.name);
 
         const short_arr = comptime shortPrefix(T, field.name);
 
@@ -262,13 +264,7 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
 
         const is_bool = PayloadType(field.type) == bool;
 
-        const flag_name_fmt = comptime blk: {
-            var res: [field.name.len]u8 = undefined;
-            for (field.name, 0..) |c, i| {
-                res[i] = if (c == '_') '-' else c;
-            }
-            break :blk res;
-        };
+        const flag_name_fmt = comptime kebabName(field.name);
 
         const short_arr = comptime shortPrefix(T, field.name);
 

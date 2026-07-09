@@ -91,11 +91,10 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const bytes = Io.Dir.cwd().readFileAlloc(io, recipe_path, arena, .limited(max_recipe_bytes)) catch |err| {
+    const source = Io.Dir.cwd().readFileAllocOptions(io, recipe_path, arena, .limited(max_recipe_bytes), .of(u8), 0) catch |err| {
         std.log.err("failed to read recipe '{s}': {t}", .{ recipe_path, err });
         return error.InvalidArguments;
     };
-    const source = try arena.dupeSentinel(u8, bytes, 0);
 
     var diag: std.zon.parse.Diagnostics = .{};
     const recipe = std.zon.parse.fromSliceAlloc(Recipe, arena, source, &diag, .{ .free_on_error = false }) catch |err| switch (err) {
@@ -105,6 +104,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         },
         else => |e| return e,
     };
+
+    // Validate recipe steps before loading any images
+    for (recipe.steps) |step| {
+        switch (step) {
+            .resize => |cfg| try cfg.validate(),
+            else => {},
+        }
+    }
 
     if (recipe.steps.len == 0) {
         std.log.warn("recipe '{s}' has no steps; output will equal input", .{recipe_path});
@@ -130,11 +137,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         target = try common.resolveOutputTarget(io, out, is_batch);
     }
 
-    const should_display = parsed.options.display or target == null;
+    const display_format = display.displayFormatFor(parsed.options, target);
 
     var failed = false;
     for (inputs) |input_path| {
-        processImage(io, writer, gpa, input_path, recipe.steps, target, should_display, parsed.options) catch |err| {
+        processImage(io, writer, gpa, input_path, recipe.steps, target, display_format) catch |err| {
             std.log.err("failed to process '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
             failed = true;
@@ -150,8 +157,7 @@ fn processImage(
     input_path: []const u8,
     steps: []const Step,
     target: ?common.OutputTarget,
-    should_display: bool,
-    options: Args,
+    display_format: ?zignal.DisplayFormat,
 ) !void {
     std.log.debug("loading {s}...", .{input_path});
 
@@ -169,15 +175,5 @@ fn processImage(
         current = next;
     }
 
-    if (target) |tgt| {
-        const resolved = try tgt.resolveOutputPath(gpa, input_path);
-        defer resolved.deinit(gpa);
-        std.log.info("saving to {s}...", .{resolved.path});
-        try current.save(io, gpa, resolved.path);
-    }
-
-    if (should_display) {
-        const format = display.resolveDisplayFormat(options.protocol, options.width, options.height);
-        try display.displayCanvas(io, writer, current, format);
-    }
+    try display.emit(io, writer, gpa, current, input_path, target, display_format);
 }

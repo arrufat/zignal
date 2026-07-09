@@ -7,6 +7,8 @@ const zignal = @import("zignal");
 const args = @import("args.zig");
 const common = @import("common.zig");
 
+const display = @import("display.zig");
+
 pub const Args = struct {
     scale: ?f32 = null,
     width: ?u32 = null,
@@ -21,6 +23,17 @@ pub const Args = struct {
         .filter = .{ .help = "Interpolation filter (" ++ common.joinFieldNames(zignal.Interpolation) ++ ")", .metavar = "name" },
         .output = .{ .help = "Output file or directory path (mandatory)", .metavar = "path", .short = 'o' },
     };
+
+    pub fn validate(self: Args) !void {
+        if (self.scale != null and (self.width != null or self.height != null)) {
+            std.log.err("cannot specify both scale and width/height", .{});
+            return error.InvalidArguments;
+        }
+        if (self.scale == null and self.width == null and self.height == null) {
+            std.log.err("must specify at least one of scale, width, or height", .{});
+            return error.InvalidArguments;
+        }
+    }
 };
 
 pub const description = "Resize an image using various interpolation methods.";
@@ -40,6 +53,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
+    try parsed.options.validate();
+
     const output_arg = parsed.options.output orelse {
         std.log.err("missing mandatory option: --output <file_or_dir>", .{});
         return error.InvalidArguments;
@@ -50,7 +65,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     var failed = false;
     for (parsed.positionals) |input_path| {
-        processImage(io, gpa, input_path, target, is_batch, parsed.options) catch |err| {
+        processImage(io, writer, gpa, input_path, target, is_batch, parsed.options) catch |err| {
             std.log.err("failed to resize '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
             failed = true;
@@ -67,14 +82,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
         return error.InvalidDimensions;
     }
 
-    if (options.scale != null and (options.width != null or options.height != null)) {
-        std.log.err("cannot specify both scale and width/height", .{});
-        return error.InvalidArguments;
-    }
-    if (options.scale == null and options.width == null and options.height == null) {
-        std.log.err("must specify at least one of scale, width, or height", .{});
-        return error.InvalidArguments;
-    }
+    try options.validate();
 
     const filter = common.resolveFilter(options.filter);
     const dims = try computeTargetDimensions(img, options);
@@ -93,6 +101,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
 
 fn processImage(
     io: Io,
+    writer: *Io.Writer,
     gpa: Allocator,
     input_path: []const u8,
     target: common.OutputTarget,
@@ -101,17 +110,13 @@ fn processImage(
 ) !void {
     std.log.debug("{s} {s}...", .{ if (is_batch) "processing" else "loading", input_path });
 
-    const resolved = try target.resolveOutputPath(gpa, input_path);
-    defer resolved.deinit(gpa);
-
     var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
     defer img.deinit(gpa);
 
     var out = try apply(io, gpa, img, options);
     defer out.deinit(gpa);
 
-    std.log.info("saving to {s}...", .{resolved.path});
-    try out.save(io, gpa, resolved.path);
+    try display.emit(io, writer, gpa, out, input_path, target, null);
 }
 
 const Dimensions = struct { width: u32, height: u32 };
