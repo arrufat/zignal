@@ -48,12 +48,15 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const is_batch = parsed.positionals.len > 1;
     const target = try common.resolveOutputTarget(io, output_arg, is_batch);
 
+    var failed = false;
     for (parsed.positionals) |input_path| {
         processImage(io, gpa, input_path, target, is_batch, parsed.options) catch |err| {
             std.log.err("failed to resize '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
+            failed = true;
         };
     }
+    if (failed) return error.BatchIncomplete;
 }
 
 /// Resize `img` according to `options`, returning a freshly allocated image the

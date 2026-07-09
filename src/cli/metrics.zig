@@ -39,12 +39,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     var ref_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, ref_path);
     defer ref_img.deinit(gpa);
 
+    var failed = false;
     for (targets) |path| {
         try writer.print("\nComparing: {s}\n", .{path});
 
         std.log.debug("loading target image: {s}", .{path});
         var img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("failed to load image '{s}': {t}", .{ path, err });
+            failed = true;
             continue;
         };
         defer img.deinit(gpa);
@@ -53,6 +55,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             std.log.err("dimension mismatch for {s}: reference {d}x{d} vs target {d}x{d}", .{
                 path, ref_img.cols, ref_img.rows, img.cols, img.rows,
             });
+            failed = true;
             continue;
         }
 
@@ -77,4 +80,5 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         try writer.flush();
     }
+    if (failed) return error.BatchIncomplete;
 }

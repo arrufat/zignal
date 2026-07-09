@@ -37,6 +37,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
 
     var read_buffer: [4096]u8 = undefined;
+    var failed = false;
 
     for (parsed.positionals) |image_path| {
         if (parsed.positionals.len > 1) {
@@ -147,6 +148,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         if (result) |_| {} else |err| {
             std.log.err("failed to get info for '{s}': {t}", .{ image_path, err });
+            failed = true;
         }
 
         if (parsed.positionals.len > 1) {
@@ -154,4 +156,5 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         }
     }
     try writer.flush();
+    if (failed) return error.BatchIncomplete;
 }
