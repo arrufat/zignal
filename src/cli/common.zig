@@ -70,24 +70,21 @@ pub fn resolveOutputTarget(
     };
 }
 
-/// Resolves the user's `--filter` string (if any) into an interpolation method.
-/// Defaults to bilinear.
-pub fn resolveFilter(name: ?[]const u8) !zignal.Interpolation {
-    const n = name orelse {
+/// The tag enum of `zignal.Interpolation` — usable directly as a CLI/ZON option
+/// field, since the tag names double as the accepted filter names.
+pub const InterpolationTag = @typeInfo(zignal.Interpolation).@"union".tag_type.?;
+
+/// Expands a selected interpolation tag into a full `Interpolation` value,
+/// defaulting to bilinear when unset. The `mitchell` payload uses `.default`.
+pub fn resolveFilter(tag: ?InterpolationTag) zignal.Interpolation {
+    const t = tag orelse {
         std.log.debug("using default filter: bilinear", .{});
         return .bilinear;
     };
-    std.log.debug("resolving filter: {s}", .{n});
-
-    const Tag = @typeInfo(zignal.Interpolation).@"union".tag_type.?;
-    const tag = parseEnum(Tag, n) orelse {
-        std.log.err("unknown filter type: {s}", .{n});
-        return error.InvalidArguments;
-    };
-    return switch (tag) {
+    return switch (t) {
         // The only variant with a payload — every other variant is bare.
         .mitchell => .{ .mitchell = .default },
-        inline else => |t| @unionInit(zignal.Interpolation, @tagName(t), {}),
+        inline else => |x| @unionInit(zignal.Interpolation, @tagName(x), {}),
     };
 }
 

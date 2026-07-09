@@ -16,14 +16,14 @@ const Args = struct {
     display: bool = false,
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
-        .output = .{ .help = "Path to save the difference image", .metavar = "path" },
+        .output = .{ .help = "Path to save the difference image", .metavar = "path", .short = 'o' },
         .scale = .{ .help = "Scale factor for difference visibility (default: 1.0)", .metavar = "float" },
         .threshold = .{ .help = "Ignore differences smaller than this value (0-255)", .metavar = "int" },
         .binary = .{ .help = "Produce a binary output (white for difference, black for match)" },
-        .display = .{ .help = "Display the result in the terminal (default if no output file)" },
+        .display = .{ .help = "Display the result in the terminal (default if no output file)", .short = 'd' },
         .width = .{ .help = "Width of each sub-image for display", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image for display", .metavar = "N" },
         .protocol = .{ .help = display.protocol_help, .metavar = "p" },
@@ -119,7 +119,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         );
         defer canvas.deinit(gpa);
 
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }
