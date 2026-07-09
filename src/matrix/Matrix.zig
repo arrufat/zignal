@@ -426,6 +426,20 @@ pub fn Matrix(comptime T: type) type {
             }
         }
 
+        /// Solves the linear system A*x = b for x, where A is this square matrix
+        /// and b is an n-row right-hand side with one or more columns. Uses LU
+        /// factorization with partial pivoting; prefer this over `inv().dot(b)`,
+        /// which is both slower and less numerically stable. To solve against
+        /// several right-hand sides, factor once with `lu()` and reuse
+        /// `LuResult.solve`. Returns error.Singular when A is singular.
+        pub fn solve(self: Self, b: Self) MatrixError!Self {
+            if (self.rows != self.cols) return error.NotSquare;
+            if (b.rows != self.rows) return error.DimensionMismatch;
+            var lu_result = try self.lu();
+            defer lu_result.deinit();
+            return lu_result.solve(b);
+        }
+
         /// Computes the Moore-Penrose pseudoinverse using an SVD-based algorithm.
         /// Works for rectangular matrices and gracefully handles rank deficiency
         /// by discarding singular values below the provided tolerance. The optional
@@ -1155,6 +1169,46 @@ pub fn Matrix(comptime T: type) type {
             /// Returns the permutation as a matrix P such that PA = LU.
             pub fn permutationMatrix(self: *const @This()) !Matrix(T) {
                 return self.p.toMatrix(.row);
+            }
+
+            /// Solves A*x = b for x, reusing this factorization. `b` may have
+            /// several columns, each solved independently. Returns error.Singular
+            /// when U has a (near-)zero pivot on its diagonal.
+            pub fn solve(self: *const @This(), b: Matrix(T)) MatrixError!Matrix(T) {
+                const n = self.u.rows;
+                if (b.rows != n) return error.DimensionMismatch;
+                const k = b.cols;
+
+                // x holds P*b, then y, then the solution, each overwriting the last.
+                var x: Matrix(T) = try .init(self.l.allocator, n, k);
+                errdefer x.deinit();
+                for (0..n) |i| {
+                    const src = self.p.indices[i];
+                    for (0..k) |c| x.at(i, c).* = b.at(src, c).*;
+                }
+
+                // Forward substitution: L*y = P*b (L is unit lower triangular).
+                for (0..n) |i| {
+                    for (0..i) |j| {
+                        const l_ij = self.l.at(i, j).*;
+                        for (0..k) |c| x.at(i, c).* -= l_ij * x.at(j, c).*;
+                    }
+                }
+
+                // Back substitution: U*x = y.
+                var i = n;
+                while (i > 0) {
+                    i -= 1;
+                    const pivot = self.u.at(i, i).*;
+                    if (@abs(pivot) < std.math.floatEps(T)) return error.Singular;
+                    for (i + 1..n) |j| {
+                        const u_ij = self.u.at(i, j).*;
+                        for (0..k) |c| x.at(i, c).* -= u_ij * x.at(j, c).*;
+                    }
+                    for (0..k) |c| x.at(i, c).* /= pivot;
+                }
+
+                return x;
             }
         };
 
