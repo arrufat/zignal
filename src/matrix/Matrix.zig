@@ -1195,12 +1195,21 @@ pub fn Matrix(comptime T: type) type {
                     }
                 }
 
+                // Degeneracy threshold relative to U's scale, so near-singular
+                // pivots are caught even when the matrix carries large entries.
+                var u_max: T = 0;
+                for (0..n) |r| {
+                    for (r..n) |c| u_max = @max(u_max, @abs(self.u.at(r, c).*));
+                }
+                if (u_max == 0) return error.Singular;
+                const tolerance = u_max * std.math.floatEps(T) * 100;
+
                 // Back substitution: U*x = y.
                 var i = n;
                 while (i > 0) {
                     i -= 1;
                     const pivot = self.u.at(i, i).*;
-                    if (@abs(pivot) < std.math.floatEps(T)) return error.Singular;
+                    if (@abs(pivot) < tolerance) return error.Singular;
                     for (i + 1..n) |j| {
                         const u_ij = self.u.at(i, j).*;
                         for (0..k) |c| x.at(i, c).* -= u_ij * x.at(j, c).*;
