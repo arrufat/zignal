@@ -19,6 +19,9 @@ def test_colormap_factories():
     c4 = Colormap.viridis()
     assert c4.type == "viridis"
 
+    c5 = Colormap.inferno()
+    assert c5.type == "inferno"
+
 
 def test_colormap_params():
     # Test with custom ranges

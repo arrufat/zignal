@@ -1198,10 +1198,7 @@ pub fn Image(comptime T: type) type {
             var max_val: f64 = 0;
 
             const range_opts = switch (map) {
-                .jet => |r| r,
-                .heat => |r| r,
-                .turbo => |r| r,
-                .viridis => |r| r,
+                inline else => |r| r,
             };
 
             if (range_opts.min == null or range_opts.max == null) {
@@ -1240,10 +1237,7 @@ pub fn Image(comptime T: type) type {
                 for (0..self.cols) |c| {
                     const val = if (comptime meta.isScalar(T)) meta.as(f64, self.at(r, c).*) else convertColor(f64, self.at(r, c).*);
                     const color = switch (map) {
-                        .jet => colormaps.jet(val, min_val, max_val),
-                        .heat => colormaps.heat(val, min_val, max_val),
-                        .turbo => colormaps.turbo(val, min_val, max_val),
-                        .viridis => colormaps.viridis(val, min_val, max_val),
+                        inline else => |_, tag| @field(colormaps, @tagName(tag))(val, min_val, max_val),
                     };
                     out.at(r, c).* = color;
                 }

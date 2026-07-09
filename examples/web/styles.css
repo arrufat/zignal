@@ -262,6 +262,14 @@ canvas:hover {
   color: #333;
 }
 
+/* Here the checkbox sits inside the label on its own line, so drop the inline left offset and add
+   spacing above to separate it from the settings grid. */
+#optimizer-controls .checkbox-inline-label {
+  display: block;
+  margin-left: 0;
+  margin-top: 14px;
+}
+
 #stats {
   text-align: center;
   margin: 20px 0;

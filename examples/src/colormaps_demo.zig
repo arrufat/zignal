@@ -40,6 +40,7 @@ pub fn main() !void {
         .{ .name = "colormap_heat.png", .map = .{ .heat = .{} } },
         .{ .name = "colormap_turbo.png", .map = .{ .turbo = .{} } },
         .{ .name = "colormap_viridis.png", .map = .{ .viridis = .{} } },
+        .{ .name = "colormap_inferno.png", .map = .{ .inferno = .{} } },
     };
 
     for (maps) |entry| {
@@ -48,5 +49,5 @@ pub fn main() !void {
         try colored.save(io, allocator, entry.name);
     }
 
-    std.debug.print("Done! Generated 4 images.\n", .{});
+    std.debug.print("Done! Generated {d} images.\n", .{maps.len});
 }
